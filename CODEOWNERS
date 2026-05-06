@@ -1,0 +1,16 @@
+# Default owner for everything
+* @CatalinSerafimescu
+
+# ABI surface — requires explicit sign-off
+include/fix/c_api.h @CatalinSerafimescu
+bindings/python/fixpp.i @CatalinSerafimescu
+
+# Constitution and architecture — Opus-drafted, user-approved
+.specify/constitution.md @CatalinSerafimescu
+.specify/architecture.md @CatalinSerafimescu
+
+# CI configuration
+.github/ @CatalinSerafimescu
+
+# Conan profiles — toolchain changes need care
+conan/ @CatalinSerafimescu

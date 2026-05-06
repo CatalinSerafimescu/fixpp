@@ -1,0 +1,82 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+*.cmake.user
+
+# Conan
+.conan/
+conan_cache/
+CMakeUserPresets.json
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Executables
+*.exe
+*.out
+
+# Coverage
+*.profraw
+*.profdata
+*.gcno
+*.gcda
+lcov.info
+coverage/
+
+# Sanitizer logs
+*.asan
+*.ubsan
+*.tsan
+
+# Editor / IDE
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docview
+.vs/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Docs build
+docs/_build/
+docs/book/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+dist/
+*.egg-info/
+.pytest_cache/
+
+# SWIG generated
+*_wrap.cxx
+*_wrap.cpp
+
+# Fuzz corpora (large, stored separately)
+fuzz/corpus/
+fuzz/artifacts/
+
+# Benchmark baseline overrides (must be committed deliberately)
+bench/baselines/*.local.json
+
+# Research content must never land here (enforced by CI guardrail too)
+research/
+decisions/
+book/
+*-decisions.md

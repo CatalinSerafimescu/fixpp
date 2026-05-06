@@ -1,0 +1,30 @@
+name: Reject research content
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  check-no-research:
+    name: No research/decision content in fixpp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect forbidden paths
+        run: |
+          # Files that belong in the Antreprenoriat research repo, never here.
+          FORBIDDEN=$(git diff --name-only ${{ github.event.before || 'HEAD~1' }} HEAD 2>/dev/null || git ls-files)
+          MATCHES=$(echo "$FORBIDDEN" | grep -E \
+            '^research/|^decisions/|^book/|.*-decisions\.md$|^opus_plan\.md$|^SYNTHESIS\.md$' \
+            || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::Research/decision content detected in fixpp. These files must stay in the Antreprenoriat repo:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "Clean — no research content found."
