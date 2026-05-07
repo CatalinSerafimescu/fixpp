@@ -10,8 +10,8 @@
 
 1. **`fixpp` is a modern C++23 implementation of the FIX protocol.** Session layer + application layer for FIX 4.0 through 5.0SP2 + FIXT.1.1. v1.0 ships 100% of the official spec for those versions; FIX Latest, FIXP, SBE, FAST, SOFH, JSON, GPB, and FIX MMT are post-1.0 milestones (Article XVIII).
 2. **Primary distribution: in-process C++23 library** (static `.a`/`.lib` or shared `.so`/`.dll`). The C ABI is *adjacent* — it exists for non-C++ consumers, language bindings, and the out-of-process service mode, not as the primary surface.
-3. **The Master Feature Catalogue** (`research/G19-fix-fpml-iso20022/research/feature-catalogue.md`) is the single coverage tracker. v1.0 cannot ship until every `OFFICIAL` row is `done` or explicitly `dropped` with user-signed rationale.
-4. **No silent omissions.** Every normative section of every supported FIX spec must produce at least one catalogue row, traceable through `research/spec/coverage-index.md`.
+3. **The Master Feature Catalogue** (`spec/feature-catalogue.md` in this repo) is the single coverage tracker. v1.0 cannot ship until every `OFFICIAL` row is `done` or explicitly `dropped` with user-signed rationale.
+4. **No silent omissions.** Every normative section of every supported FIX spec must produce at least one catalogue row, traceable through `spec/coverage-index.md`.
 
 ---
 
@@ -25,7 +25,7 @@
 3. **Platforms:**
    - **Linux is the primary development environment.** Day-to-day work, sanitizers, fuzzing, perf profiling, and e-book authoring all run on Linux.
    - **Windows** builds run **manual / on-demand / nightly via Tier 2 CI** (Article IX), not on every PR.
-4. **No compiler-version pinning** for HALO and other optimizations (SYNTHESIS §3.2 Q6). The codebase tolerates HALO not firing on a given compiler revision; PMR fallback paths handle the gap.
+4. **No compiler-version pinning** for HALO (Heap Allocation eLision Optimization — the compiler eliding a coroutine's heap frame when its lifetime is bounded by the caller) and other optimizations (SYNTHESIS §3.2 Q6). The codebase tolerates HALO not firing on a given compiler revision; PMR fallback paths handle the gap.
 
 ---
 
@@ -61,7 +61,7 @@
 2. **E-book** (`book/` in the parent repo): CC-BY-SA 4.0.
 3. **No LGPL dependencies.** Viral linkage is incompatible with the dual-license model.
 4. **Vendored algorithm code** (e.g., `fixpp::sync::async_mutex` lifted from avast/asio-mutex BSL-1.0) carries upstream attribution at the file level; license compatibility is verified at vendoring time.
-5. **Public repo from day one.** README contains the disclaimer **"⚠️ Work in progress — sandbox project — NOT for production use."** The disclaimer must remain visible until publishing is unblocked (Article IV §5).
+5. **Public repo from day one.** The README contains the disclaimer **"Work in progress — sandbox project — NOT for production use."** at the top of the file. The disclaimer must remain visible until publishing is unblocked (Article IV §5).
 
 ---
 
@@ -70,8 +70,8 @@
 1. Every normative FIX spec section produces **at least one** `OFFICIAL` row in the catalogue (`feature-catalogue.md`).
 2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. Vague refs (`§4`, "FIX spec") are a CI-linting failure.
 3. Rows backed by design decisions instead of spec sections carry `[impl] description` or `[constitution] description` and are explicitly noted in `coverage-index.md` as design choices, not spec gaps.
-4. **Bidirectional traceability:** `research/spec/coverage-index.md` maps every spec section → catalogue rows. Every new OFFICIAL row added after Phase 1.6 must have a coverage-index entry **before** it lands.
-5. Every `/specify` artifact (Phase 4) must include a **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the coverage index that inform the spec.
+4. **Bidirectional traceability:** `spec/coverage-index.md` maps every spec section → catalogue rows. Every new OFFICIAL row must have a coverage-index entry **before** it lands.
+5. Every `/specify` artifact must include a **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the coverage index that inform the spec.
 6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs.
 
 ---
@@ -82,9 +82,9 @@
 2. **Python tests: pytest** against the SWIG bindings.
 3. **TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation. Implementation without a preceding failing test is a Gate B blocker.
 4. **No code without a test.** Untested code on `main` is a constitution violation; Codex Gate B prompts for it explicitly.
-5. **Conformance corpus:** `tests/conformance/` holds the official FIX session test cases (TC-001..TC-017) as executable scenarios. Every PR must pass them in CI.
+5. **Conformance corpus:** `tests/conformance/` holds the official FIX session-layer test cases (TC-001..TC-017, sourced from the **FIX Session Layer Test Cases** specification — `FIX-TC` in the coverage index) as executable scenarios. Every PR must pass them in CI.
 6. **Interop:** v1.0 includes at least one interop test against an independent FIX implementation (QuickFIX) covering Logon → NewOrderSingle → ExecutionReport → Logout.
-7. **Fuzzing (Phase 4 `wire/` onward):** libFuzzer corpus run ≥10 minutes on every PR; longer overnight runs on `main`. New parser-touching code without a fuzz harness is a Gate B blocker.
+7. **Fuzzing (parser-touching modules):** libFuzzer corpus run ≥10 minutes on every PR; longer overnight runs on `main`. New parser-touching code without a fuzz harness is a Gate B blocker.
 
 ---
 
@@ -98,7 +98,7 @@
    - Session throughput: parity-or-better with QuickFIX on identical hardware (messages/sec, end-to-end).
    - Latency: end-to-end session round-trip p50 and p99 measured and reported in `bench/REPORT.md`; no specific number is constitutional, but regressions vs the v1.0 baseline are blockers.
 5. **Allocator policy on the hot path:** zero `new`/`delete` between parse and `fromApp` callback. Arena/PMR is the default; deviations require justification in the relevant `/plan`.
-6. **Codex adversarial perf review** (Phase 6) hunts for benchmark hacks, compiler optimization that elides work, and unrealistic data shapes. Findings are blockers.
+6. **Codex adversarial perf review** (v1.0 release-candidate gate) hunts for benchmark hacks, compiler optimization that elides work, and unrealistic data shapes. Findings are blockers.
 
 ---
 
@@ -106,18 +106,18 @@
 
 1. **Coverage thresholds:**
    - **Per-PR:** ≥90% line, ≥80% branch on **touched modules**.
-   - **Global** (from end of Phase 4 onward): ≥90% line.
-   - Linux/Clang uses llvm-cov + llvm-profdata; Windows/MSVC uses OpenCppCoverage.
+   - **Global** (once `wire/` and `session/` modules have shipped): ≥90% line.
+   - Coverage is measured on Linux/Clang only (`llvm-cov` + `llvm-profdata`). Windows/MSVC builds (Tier 2) do not run a coverage step — coverage thresholds are platform-independent, and the only viable Windows tool (`OpenCppCoverage`, last release 2019) cannot reliably measure modern MSVC output.
 2. **Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass.
-3. **Sanitizers — Tier 2 (Windows/MSVC, manual/nightly):** ASan + UBSan run.
+3. **Sanitizers — Tier 2 (Windows/MSVC, manual/nightly):** ASan only. UBSan is not available under MSVC; equivalent UB coverage is provided by Linux/Clang Tier 1 (Article IX §2), since UBSan findings are language-level and platform-independent.
 4. **Static analysis — Tier 1:**
    - `clang-tidy` clean against the project ruleset.
    - `clang-format` check.
    - `cppcheck` clean.
    - `include-what-you-use` clean.
-5. **ABI check (from Phase 5):** C ABI surface is dumped (`abidiff` Linux; structural diff Windows in CI) against the previous tagged ABI. Breaking changes are explicit `MAJOR` bumps; silent breaks are a release-blocker bug.
+5. **ABI check (from the first tagged C ABI release onward):** C ABI surface is dumped (`abidiff` Linux; structural diff Windows in CI) against the previous tagged ABI. Breaking changes are explicit `MAJOR` bumps; silent breaks are a release-blocker bug.
 6. **Two-tier CI** (per `opus_plan.md` Quality Gate):
-   - **Tier 1 — every PR (required to merge):** Linux/Clang Debug+Release, Linux/GCC Release sanity, sanitizers, coverage, perf, static analysis, fuzz (from Phase 4), Python pytest, catalogue consistency check.
+   - **Tier 1 — every PR (required to merge):** Linux/Clang Debug+Release, Linux/GCC Release sanity, sanitizers, coverage, perf, static analysis, fuzz (parser-touching modules), Python pytest, catalogue consistency check.
    - **Tier 2 — Windows + ABI:** manual / nightly / on-demand. Triggered by the `windows` PR label or nightly schedule.
 
 ---
@@ -129,7 +129,7 @@
 3. **Decimal at the C ABI boundary:** PoD `(int64 mantissa, int8 exponent)`. C++ users get full template flexibility via `decimal_traits<T>` (per SYNTHESIS §3.1 Q5); the C ABI picks one shape and freezes it.
 4. **Error reporting at the C ABI:** `fixpp_error_t` is a bounded enum with reserved range and explicit forwards-compatibility rules (per SYNTHESIS §3.5 Q19). Out-of-range values are mapped to a documented "unknown error" code on read; unknown values from old consumers are tolerated by the engine.
 5. **Reentrancy contract** is documented per C ABI symbol (thread-safe / single-thread / requires-session-lock). No undocumented reentrancy.
-6. **ABI-affecting features require:** mandatory `/clarify`, mandatory `/analyze`, mandatory Codex Gate A, mandatory user sign-off on `/plan`.
+6. **ABI-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
 ---
 
@@ -141,7 +141,7 @@
 4. **Application threading default: per-session strand.** Users who say nothing get callbacks serialised per session, never on the I/O thread. Custom executors are opt-in (per SYNTHESIS §3.2 Q6c).
 5. **Hot-path lock policy: per-session policy with hard-coded callsite caps.** Default = mutex. Spin opt-in via session config. Store-write path always uses mutex regardless of policy (SYNTHESIS §3.2 Q8).
 6. **Coroutine frame allocation: HALO-first.** PMR fallback per-awaiter where HALO doesn't fire. No global compiler-version pin (Article II §4).
-7. **Threading/concurrency-affecting features require:** mandatory `/clarify`, mandatory `/analyze`, mandatory Codex Gate A.
+7. **Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
 ---
 
@@ -149,23 +149,34 @@
 
 1. **TLS implementation: OpenSSL on both Linux and Windows.** Schannel is **dropped** (locked decision 2026-05-06).
 2. **Allowed TLS versions: 1.2 and 1.3 only.** TLS 1.0, TLS 1.1, all SSL versions are **prohibited** at compile time.
-3. **Allowed cipher suites:** ECDHE + AES-GCM family. Compile-time allow-list; the engine refuses to load disallowed ciphers (FIXS RC1 alignment).
+3. **Allowed cipher suites are an explicit compile-time allow-list. The engine refuses to load anything outside it (FIXS RC1 alignment).**
+   - **TLS 1.3:** `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` (RFC 8446 §9.1 mandatory + recommended set).
+   - **TLS 1.2:** ECDHE-(RSA\|ECDSA) with AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305; SHA-256 or SHA-384 PRF only.
+   - **Key exchange groups:** X25519, secp256r1, secp384r1.
+   - **Signature algorithms:** ECDSA (P-256, P-384), RSA-PSS (key size ≥ 2048 bits).
+
+   Anything not on these four lists — including TLS 1.3 0-RTT data, static RSA key exchange, CBC-mode suites, SHA-1 signatures, and 1024-bit RSA — is rejected at compile time.
 4. **Banned cryptography:** RC4, DES, 3DES, MD5, DH_anon, NULL ciphers, anonymous key exchange, export-grade ciphers. Enforced at compile time.
-5. **Mutual TLS with leaf-cert pinning** is the v1.0 default for FIXS sessions. CA-only trust requires explicit opt-in.
+5. **`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default.** The profile selects the trust mode:
+   - `mtls_ca` — mutual TLS with CA-chain trust on the peer cert. The recommended starting profile for v1.0 deployments.
+   - `mtls_pinned` — mutual TLS with leaf-cert pinning (FIXS RC1 strict profile). Required for FIXS-conformant deployments.
+   - `one_way_ca` — server-cert TLS only, CA trust; permitted for legacy interop where the counterparty does not present a client cert. Construction emits a compile-time `[[deprecated]]` diagnostic.
+
+   Pinset rotation (multiple valid peer certs per counterparty, FIXS §5) is supported under both `mtls_pinned` and `mtls_ca`.
 6. **Certificate pinset rotation API** is a v1.0 feature (multiple valid peer certs per counterparty, FIXS §5).
 7. **`EncryptMethod(98)` ≠ 0 is rejected.** Application-layer encryption is deprecated since FIX 4.3; encryption lives at TLS only.
 8. **Pluggable `cert_source` interface** with one default impl (file-based PEM/DER) in v1.0; HSM/TPM/cloud-KMS impls are user-side or future bundles (Article XIV).
-9. **Security-affecting features require:** mandatory `/clarify`, mandatory Codex Gate A.
+9. **Security-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
 ---
 
 ## Article XIII — Observability & Logging
 
 1. **OpenTelemetry instrumentation from v1.0.** Traces, metrics, logs all OTLP-exportable. Prometheus + OTLP dual export is the v1.0 minimum.
-2. **Async logging is mandatory.** Synchronous logging on the hot path is a banned pattern (Article XV). The in-process logger is zero-alloc producer, bounded MPSC queue, dedicated drain thread, deferred formatting.
-3. **OTel `trace_id` / `span_id` in every log record.** Pulled from `asio::this_coro` or per-session TLS slot. Correlation works at the observability backend without manual stitching.
+2. **Async logging is mandatory.** Synchronous logging on the hot path is a banned pattern (Article XV). The in-process logger is zero-alloc producer, bounded MPSC queue, dedicated drain thread, deferred formatting. Telemetry and log queues are permitted to use `drop-oldest` under bounded-queue overflow; this exception is scoped strictly to non-business signals (logs, metrics, traces) and never applies to FIX application or session messages (Article XV §15).
+3. **OTel `trace_id` / `span_id` in every log record.** Each `Session` carries a `trace_context` field; logging on the session strand reads it directly. Code paths outside session scope (e.g., listener accept, control-plane handlers) use the `co_await fixpp::current_trace_context` awaitable backed by a strand-stored context (see `architecture.md`). `thread_local` propagation of trace context is **prohibited** — coroutines may resume on a different thread than they suspended on, and a `thread_local` write made before suspension is not guaranteed visible after resume. Correlation must work at the observability backend without manual stitching.
 4. **Same sink interface backs OTel log export and file/stderr sinks.** No double-write paths.
-5. **Bench spike mandatory** for the in-house logger vs `quill` before locking the implementation choice (Phase 2 design `2k`).
+5. **Bench spike mandatory** for the in-house logger vs `quill` before locking the implementation choice.
 
 ---
 
@@ -177,7 +188,7 @@
    - **Cert source** (default: file-based PEM/DER).
    - **Logger sinks** (default: in-process async logger + OTLP exporter).
    - **MessageStore** (default: in-memory; file-based impl also v1.0).
-2. **Interface surfaces are small.** "Small" means: as few methods as possible to express the contract, with stable semantics. Bigger surfaces require explicit design justification.
+2. **Interface surfaces are small.** Each pluggable interface defines **≤5 pure-virtual methods**. Bigger surfaces are permitted only with an explicit design-doc justification (one paragraph naming the necessary methods and why each is irreducible). The justification is reviewed at Gate A.
 3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.
 4. **Plugin discovery is compile-time only in v1.0.** Dynamic plugin loading (`dlopen`) is post-1.0.
 
@@ -201,7 +212,7 @@ The following patterns are **prohibited** in `fixpp` source code. Each is rooted
 12. **LGPL dependencies.** Viral linkage is incompatible with dual licensing.
 13. **Eager codegen with no runtime dictionary path.** Hybrid mandated: codegen for standard fields (D-008), runtime XML loader for custom (D-007 + D-009).
 14. **FAST / SBE / FIXP / SOFH shoehorned into v1.0.** Roadmap-locked to post-1.0 (Article XVIII).
-15. **Application-layer message drops on slow consumer.** Backpressure-aware dispatch; configurable drop-oldest vs block.
+15. **Application-layer message drops on slow consumer.** Backpressure-aware dispatch with two configurable modes: `block` (push back to the producer) or `disconnect-and-recover` (terminate the session and rely on FIX `ResendRequest` semantics on reconnect). `drop-oldest` is **never** permitted on the application or session message path — silent loss desynchronises the sequence-number contract. Telemetry and log queues may use `drop-oldest` under the rules in Article XIII §2.
 16. **Custom XML config format** incompatible with the QuickFIX `[DEFAULT]` / `[SESSION]` CFG format. We accept QuickFIX CFG verbatim; TOML is also accepted; new formats require justification.
 17. **Vendored OSS based on `master`/`main` when a release tag is older.** Read from the last release tag unless `master` represents a justified upstream improvement (SYNTHESIS §2.1).
 18. **Research / decision content** (`research/`, `decisions/`, `book/`) committed into the `fixpp` repo. The `.github/workflows/no-research.yml` guard rejects it.
@@ -219,7 +230,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 5. **`/checklist` output is part of CI evidence.** Checklists tied to NFRs and acceptance criteria become the e-book's "how to verify" appendix.
 6. **`/implement` is one task at a time, TDD red-green-refactor.** Sonnet executes; Opus reviews increments.
 7. **`/simplify` runs on the implementation diff before PR open.** Code-reuse, quality, efficiency findings fixed before review.
-8. **Stuck loop:** 3+ failed iterations on the same red test → escalate to Codex as fallback implementer; if still stuck, AskUserQuestion. Codex's PR review for that task must come from a **fresh** Codex session, not the one that wrote the code (independence between author and reviewer is non-negotiable).
+8. **Stuck loop:** three failed `/implement` invocations on the same red test (each invocation is a fresh-context attempt at one TDD cycle, per §1 and §6) → escalate to Codex as fallback implementer; if still stuck, `AskUserQuestion`. Codex's PR review for that task must come from a **fresh** Codex session, not the one that wrote the code (independence between author and reviewer is non-negotiable).
 
 ---
 
@@ -231,7 +242,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
    - Touches the wire format, parser, or codegen layout.
    - Touches the session FSM, recovery, or message store contract.
    - Touches the security surface (TLS, cert handling, PSK).
-   - Phase 2 design docs (all qualify by default).
+   - Any new design document under `.specify/` (`architecture.md` and sibling design docs) — qualifies by default.
 
    Trivial features (rename a private helper, add a P2 boilerplate row over an existing module) skip Gate A. **When in doubt, run it.** Blockers from Gate A must be resolved or explicitly waived with rationale before `/tasks` runs.
 
@@ -242,6 +253,8 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 4. **User invokes Codex.** Neither Sonnet nor Opus auto-invokes Codex; the gates are user-driven (`codex:codex-rescue` agent or local Codex CLI). The PR description links to the Gate A outcome and the Gate B outcome.
 
 5. **Findings triage:** Opus triages; Sonnet fixes accepted items; user signs off feature completion at `/specify` boundaries and at module close.
+
+6. **CI enforcement.** The `.github/workflows/gate-a.yml` workflow inspects every PR's changed-file set against the Appendix A trigger paths (path globs are owned by the workflow itself, not the constitution). If any trigger path is touched, the workflow blocks merge unless the PR carries either a `gate-a-done` label (Codex Gate A passed) or a `gate-a-waived` label with mandatory rationale in the PR body. Trivial diffs auto-waive: comment-only edits, doc fixes, single-line whitespace, dependency-pin bumps without code changes.
 
 ---
 
@@ -283,13 +296,13 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
    - User signs off.
 3. **`_log.md` records every locked decision** with date and source (which article amendment, which `/specify`, which architecture revision).
 4. **Backwards-incompatible amendments** (banned-pattern additions, perf-budget tightening) require a v-major bump and an entry in `CHANGELOG.md`.
-5. **Cross-cutting hand-off rules** (e.g., "Sonnet asks before every `git push`", "sudo confirmation required") are amendments to this constitution; they live here, not in ad-hoc memory.
+5. **Cross-cutting hand-off rules** (e.g., "Sonnet asks before every `git push`", "sudo confirmation required") are amendments to this constitution; they live here, not in ad-hoc memory or `CLAUDE.md` carve-outs. *No such rules defined as of v0.1; future rules of this shape are added below as numbered sub-clauses (5.a, 5.b, …) under this article via the standard amendment process (§2).*
 
 ---
 
 ## Appendix A — Mandatory triggers reference
 
-For quick lookup, the following features trigger **all four** of: `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
+**This appendix is the canonical mandatory-trigger reference.** Article-level trigger clauses must match it; conflicts are resolved in favour of this table (Article XX). The following features trigger **all four** mandatory controls: `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
 | Trigger | Examples |
 |---|---|
@@ -309,6 +322,6 @@ Trivial features (P2 boilerplate over an existing P0 module, doc-only) skip all 
 
 - **`opus_plan.md`** (parent repo) — phase plan, owns the Codex gate workflow descriptions, owns the Quality Gate Tier 1/Tier 2 split.
 - **`SYNTHESIS.md`** (parent repo) — Phase 1.5 output; the decisions encoded here are sourced from §1, §2, §3, §5.
-- **`coverage-index.md`** (parent repo) — bidirectional spec ↔ catalogue traceability index. Article VI §4 binds `/specify` to it.
-- **`feature-catalogue.md`** (parent repo) — the 100% FIX tracker. Article VI §1 binds it to the spec.
+- **`spec/coverage-index.md`** (this repo) — bidirectional spec ↔ catalogue traceability index. Article VI §4 binds `/specify` to it.
+- **`spec/feature-catalogue.md`** (this repo) — the 100% FIX tracker. Article VI §1 binds it to the spec.
 - **`architecture.md`** (this directory, drafted next) — module layering, public namespaces, design patterns. Implements the rules; this constitution sets them.
