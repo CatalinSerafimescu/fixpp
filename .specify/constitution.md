@@ -8,7 +8,13 @@
 
 ## Article I — Identity & Mission
 
-1. **`fixpp` is a modern C++23 implementation of the FIX protocol.** Session layer + application layer for FIX 4.0 through 5.0SP2 + FIXT.1.1. v1.0 ships 100% of the official spec for those versions; FIX Latest, FIXP, SBE, FAST, SOFH, JSON, GPB, and FIX MMT are post-1.0 milestones (Article XVIII).
+1. **`fixpp` is a modern C++23 implementation of the FIX protocol.** Session layer + application layer for FIX 4.0 through 5.0SP2 + FIXT.1.1. v1.0 ships 100% of the official spec for those versions, with the following codegen-vs-runtime split:
+   - **Codegen scope (per `[2c §1.3]`):** FIX 4.2, FIX 4.4, FIX 5.0 SP2, FIXT.1.1. Typed-message classes, `constexpr` field metadata, per-message validators, `dict::reify` runtime-dispatch all generated under per-version namespaces (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vt11`).
+   - **Runtime-XML scope:** FIX 4.0, FIX 4.1, FIX 4.2, FIX 4.3, FIX 4.4, FIX 5.0, FIX 5.0 SP1, FIX 5.0 SP2, FIXT.1.1. `dict::XmlLoader` accepts QuickFIX-XML for any of these; runtime `Dictionary` works for field/required/group/length-pair lookups; users access fields through the runtime tag-keyed accessor.
+
+   The runtime-XML-only versions (4.0 / 4.1 / 4.3 / 5.0 / 5.0 SP1) ship without a typed-message namespace in v1.0. Per-version codegen for those versions is deferred to post-v1.0 best-effort per Article XVIII §6.
+
+   FIX Latest, FIXP, SBE, FAST, SOFH, JSON, GPB, and FIX MMT are post-1.0 milestones (Article XVIII).
 2. **Primary distribution: in-process C++23 library** (static `.a`/`.lib` or shared `.so`/`.dll`). The C ABI is *adjacent* — it exists for non-C++ consumers, language bindings, and the out-of-process service mode, not as the primary surface.
 3. **The Master Feature Catalogue** (`spec/feature-catalogue.md` in this repo) is the single coverage tracker. v1.0 cannot ship until every `OFFICIAL` row is `done` or explicitly `dropped` with user-signed rationale.
 4. **No silent omissions.** Every normative section of every supported FIX spec must produce at least one catalogue row, traceable through `spec/coverage-index.md`.
@@ -273,6 +279,8 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 3. **Permanently dropped:** FIXML (XML representation; superseded), FIXatdl (UI/display spec, not a wire protocol).
 4. **Roadmap changes are constitution amendments.** Re-ordering, additions, removals all require Article XX.
 5. **No early shipping** of post-1.0 protocols into v1.0 to "get them done." Each shipping target is its own Spec Kit cycle, gated by the same Tier 1 quality bar.
+6. **Post-v1.0 codegen for runtime-XML-only versions.** FIX 4.0, FIX 4.1, FIX 4.3, FIX 5.0, and FIX 5.0 SP1 ship in v1.0 with runtime-XML support only (no per-version codegen namespace). Per-version codegen for these versions is post-v1.0 best-effort, prioritised at the discretion of the maintainer team based on observed downstream demand. The recommended priority order is: FIX 4.3 first (most-used legacy version in the post-v1 backlog), 5.0 SP1 second, 5.0 third, 4.0 / 4.1 last (vanishingly few production deployments). Each version's codegen is its own minor-version Spec Kit cycle, gated by the same Tier 1 quality bar.
+7. **Application-message codegen scope for v1.0.** Application-message rows A-014..A-034 are codegen-deferred to v1.x for the four codegen versions. v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013 plus the M-/P-/C-/R-/N- families per the catalogue. Runtime-XML access to A-014..A-034 via `view.get(uint16_t tag)` ships in v1.0 across all 9 supported FIX versions; typed accessors for those messages land in v1.x. The deferred set comprises (per `feature-catalogue.md` lines 291–311) BusinessMessageReject (A-014, 35=j), DontKnowTrade (A-015, 35=Q), the ListCancel/Execute/Status family (A-019), the SecurityList family (A-025, 35=v/w/x/y), XMLnonFIX (A-034, 35=n), and similar additional order-management variants; A-024 stays dropped as a duplicate per `[SYN §4.4]`.
 
 ---
 

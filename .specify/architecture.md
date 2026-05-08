@@ -203,7 +203,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 **Catalogue rows:**
 
 - **Dictionary itself:** D-001..D-011, OSS-001, OSS-010.
-- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-034 (order-management), M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). Per `[const §XVIII]` the FIX-Latest range A-035..A-065 is post-1.0 and not owned by v1.0 codegen.
+- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-013 (order-management; codegen). A-014..A-034 (additional order-management variants; runtime-XML only in v1.0; codegen deferred to v1.x — see `[const §XVIII.7]`). M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). Per `[const §XVIII]` the FIX-Latest range A-035..A-065 is post-1.0 and not owned by v1.0 codegen.
 - **Drop:** A-024 (catalogue note: duplicate of A-018 — recommend removing per `[SYN §4.4]`).
 
 ### 4.3 `wire`
@@ -404,7 +404,7 @@ The module has two parts with different stability and API status. The split reso
 
 ### 5.6 Configuration shape
 
-- **`SessionConfig` is value-typed and frozen at session open.** No mid-session reconfiguration of: dictionary, security profile, message store, executor, lock policy. Mutating ops (e.g., pinset rotation, dialect overlay swap) go through their own APIs and are explicitly thread-aware.
+- **`SessionConfig` is value-typed and frozen at session open.** No mid-session reconfiguration of: dictionary, security profile, message store, executor, lock policy, dialect overlay. The supported pattern for any of these is close-and-reopen the session. Mutating ops on session-adjacent state that *do* admit mid-session change (e.g., pinset rotation per `[const §XII]`) go through their own APIs and are explicitly thread-aware. **Mid-session dialect-overlay swap is rejected categorically per `[2c §7.2]`** — there is no `Session::swap_dialect_overlay(...)` API in v1.0.
 - **Two intake formats:** QuickFIX `[DEFAULT]` / `[SESSION]` CFG (mandated) and TOML (modern). New formats require justification per `[const §XV.16]`.
 - **`EngineConfig`** sits one level up: shared executors, allocator factories, log/otel providers, the **`Clock` source** (§4.1, §6), and default plugin selections. `SessionConfig` inherits the `Clock` from its `EngineConfig` unless overridden — a test runs against an injected `mock_clock` to step time deterministically through heartbeat windows, SendingTime checks, and scheduled connect/disconnect transitions.
 

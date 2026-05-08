@@ -439,6 +439,14 @@ All gaps identified during Phase 1.6 top-down pass, with resolution.
 
 ---
 
+## Catalogue ID supplemental notes
+
+Notes that supplement specific catalogue rows (`feature-catalogue.md`) without rewriting the row text. These record dispositions that emerged from Phase 2 design decisions and provide the bidirectional-traceability anchor per `[const §VI.4]`.
+
+**D-008 supplemental:** Codegen scope for v1.0 = FIX 4.2, FIX 4.4, FIX 5.0 SP2, FIXT.1.1. Runtime-XML-only scope = FIX 4.0, FIX 4.1, FIX 4.3, FIX 5.0, FIX 5.0 SP1. The row title in `feature-catalogue.md` covers the broader 4.0–5.0 SP2 surface; codegen vs runtime-XML disposition lives here, in the coverage index. Per `[2c §1.3]` and `[2c Appendix A]`. Source: 2c v1.3 sign-off (2026-05-08); see `[2c Appendix D §2]`.
+
+---
+
 ## Post-1.0 Gap Registry
 
 Items that are normative in the spec but explicitly deferred from fixpp v1.0. These do NOT block Phase 2 but must be visible for future planning.
