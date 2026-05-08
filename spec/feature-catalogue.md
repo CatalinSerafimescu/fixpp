@@ -222,6 +222,7 @@
 | NFR-008 | OFFICIAL | nfr | clang-tidy clean, clang-format, include-what-you-use | all | [constitution] | backlog | — | — | — | — |
 | NFR-009 | OFFICIAL | nfr | libFuzzer corpus for wire/ ≥10 min, nightly longer | all | [constitution] | backlog | — | — | — | — |
 | NFR-010 | OFFICIAL | nfr | AGPL-3.0 + commercial dual license | all | [constitution] | backlog | — | — | — | — |
+| NFR-015 | OFFICIAL | nfr | Pluggable Clock interface — `fixpp::core::Clock` (4 pure-virtual: `now`, `steady_now`, `sleep_until`, `cancel_sleeps`) carried by `EngineConfig`; default `system_clock_source` (per-session reusable `steady_timer` slots keyed by `Session*` from `session_arena`); test impl `mock_clock` (pimpl per `[const §XI.3]`); `effective_clock = SessionConfig::clock_override ?: EngineConfig::clock` rule routes heartbeat / SendingTime / S-035 scheduling / session-scoped LOG+OBS records through the per-session clock; engine-scope LOG+OBS records read `EngineConfig::clock` directly with a `clock_scope = engine` discriminator | all | [2d §4.1] / [arch §1.1] | backlog | `.specify/2d-threading.md` v0.4 | — | — | — |
 
 <!-- ═══════════════════════════════════════════════════════════════
      OSS ROWS — populated by Phase 1.2 OSS survey

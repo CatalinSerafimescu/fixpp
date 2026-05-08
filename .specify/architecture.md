@@ -390,7 +390,7 @@ The module has two parts with different stability and API status. The split reso
 
 ### 5.4 Trace context
 
-- **Storage:** `SessionConfig.trace_context_provider`, called once at session open, returns a `fixpp::otel::trace_context` stored on the session strand.
+- **Storage:** `SessionConfig.initial_trace_context` (value-typed `fixpp::otel::trace_context`, replacing v0.1's `std::function`-based `trace_context_provider`) is read once at session open and stored in the session's `fixpp::core::session_local<trace_context>` slot. The slot lives inside the `Session` object — not in `asio::any_io_executor::query` over a type-erased executor, which is not a published storage contract and does not survive `make_strand` / `bind_executor` decoration; nor is it accessed through a typed user-defined property on `asio::any_io_executor` (whose supported property set is fixed and closed and does not forward arbitrary user-defined queries). The awaiter recovers the typed `Session*` by calling the public `session_ptr()` member-function accessor on the project-owned `fixpp::core::session_executor` value-typed wrapper class — uniform across both `threading_mode::per_session_strand` (the wrapper holds an `asio::strand` over the resolved executor) and `threading_mode::direct_executor` (the wrapper holds the user-attested already-serialised executor) modes. See `[2d §4.5] fixpp::session::SessionConfig — session-level frozen-at-open knobs`, `[2d §4.6] fixpp::current_trace_context — session-domain awaitable + session_local<T> storage`, and `[2d §4.8] fixpp::core::session_executor + executor resolution path`.
 - **Access:** `co_await fixpp::current_trace_context` returns the value bound to the current strand; outside session scope, returns the `Engine`-level fallback context `[const §XIII.3]`.
 - **`thread_local` is prohibited.** A coroutine that suspends on thread A may resume on thread B; a `thread_local` write made before suspension is not guaranteed visible after resume. Hence the strand-stored awaitable.
 - **Logs and traces correlate at the backend.** Every `log::Record` carries the trace_id/span_id captured from the awaitable; no manual stitching at the OTel collector.
@@ -597,7 +597,7 @@ Each doc must:
 | 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` |
 | 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 |
 | 6 | TestRequestThreshold / SendingTimeThreshold defaults | session-module spec (Phase 4) | DEFERRED `[SYN §3.2 Q10]` |
-| 7 | Add catalogue row `NFR-015 — pluggable Clock interface` to `feature-catalogue.md` | **2d** (along with threading contract decisions) | TODO — added when 2d lands; tracked here so the spine doesn't claim the row exists yet |
+| 7 | Add catalogue row `NFR-015 — pluggable Clock interface` to `feature-catalogue.md` | **2d** (along with threading contract decisions) | DONE — added in `feature-catalogue.md` by 2d v0.4 sign-off (2026-05-08); coverage-index entry links `[2d §4.1]` and `[arch §1.1]` to NFR-015. |
 
 The remaining `SYNTHESIS §3` items are decided shape-wise at `[const]` and are now operational design tasks owned by 2a–2m; they are not architectural questions.
 
