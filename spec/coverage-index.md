@@ -152,14 +152,14 @@ Section structure sourced from fixtrading.org/standards/fixs-online/ (v1.1 RC1, 
 | §3.1 | Protocol version (TLS 1.2 / 1.3 only; prohibit TLS 1.0/1.1/SSL) | Y | T-006, T-007 | — |
 | §3.2 | Protocol features (compression disabled, renegotiation disabled, session caching) | Y | T-006, T-007 | — |
 | §3.3 | Cipher suites (AES-GCM, CHACHA20, ECDHE; prohibit RC4, DES, anon, MD5) | Y | T-013 | — |
-| §3.4 | Certificate parameters (RSA 2048-bit min, ECDSA 256-bit, X.509, expiration) | Y | T-039 | MISSING → row added (T-039) |
+| §3.4 | Certificate parameters (RSA 2048-bit min, ECDSA 256-bit, X.509, expiration) | Y | T-039 | covered by `[2g §4.5]` verify_peer (cross-cut with 2h per `[2g §7.1]` / `[2g §A.2]`) |
 | §3.5 | PSK properties (32-char min, out-of-band exchange, multiple simultaneous PSKs) | Y | T-012 | — |
 | §3.6 | Application specific TLS (ALPN / SNI hooks) | Y | — | out-of-scope → dropped(post-1.0: ALPN/SNI application TLS) |
 | §4 | Policies and Management | Y | T-011, T-012 | — |
-| §4.1 | Sharing secrets (approved channels: HTTPS, GnuPG, PKCS#12, postal, in-person) | Y | T-040 | MISSING → row added (T-040) |
+| §4.1 | Sharing secrets (approved channels: HTTPS, GnuPG, PKCS#12, postal, in-person) | Y | T-040 | covered by `[2g §4.1]` cert_source::load_credentials + `[2g §4.2]` file_cert_source |
 | §4.2 | Storing secrets (private keys, PSKs, pinned certs) | Y | T-040 | covered by T-040 |
 | §4.3 | Renewing secrets (rotation support; multiple simultaneous during rotation) | Y | T-011 | — |
-| §4.4 | Authorization linked to authentication (auth'd TLS identity ↔ FIX CompID) | Y | T-041 | MISSING → row added (T-041) |
+| §4.4 | Authorization linked to authentication (auth'd TLS identity ↔ FIX CompID) | Y | T-041 | covered by `[2g §4.5]` peer_identity (cross-cut with session-module Phase-4 per `[2g §7.2]` / `[2g §A.2]`) |
 | Appendix A | Cipher Suites (reference table) | N | T-013 | informative |
 | Appendix B | Relevant RFCs | N | — | informative |
 | Appendix C | Known Vulnerabilities | N | — | informative |
