@@ -203,10 +203,11 @@
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| SVC-001 | OFFICIAL | service | gRPC control plane — session create/config/teardown/observability over Unix socket / named pipe | all | [impl] implementation | backlog | — | — | — | — |
+| SVC-001 | OFFICIAL | service | gRPC control plane — session create/config/teardown/observability over Unix socket / named pipe | all | [2j §4.6] / [2j §4.7] | backlog | `.specify/2j-controlplane.md` v0.3 | — | — | — |
 | SVC-002 | OFFICIAL | service | iceoryx2 data plane — zero-copy SHM publish/subscribe for hot-path FIX messages | all | [impl] implementation | backlog | — | — | — | — |
 | SVC-003 | OFFICIAL | service | Data plane opt-in — gRPC-only mode when iceoryx2 unavailable | all | [impl] implementation | backlog | — | — | — | — |
-| SVC-004 | OFFICIAL | service | Service health / observability — gRPC health check + prometheus-compatible metrics | all | [impl] implementation | backlog | — | — | — | — |
+| SVC-004 | OFFICIAL | service | Service health / observability — gRPC health check + prometheus-compatible metrics | all | [2j §4.7] / [2j §4.8] | backlog | `.specify/2j-controlplane.md` v0.3 | — | — | — |
+| SVC-005 | OFFICIAL | service | Pluggable control plane interface — `fixpp::service::ControlPlane` (3 pure-virtual: `start`, `stop`, `health`; ≤5 cap with 2 slots of headroom for v1.x auth-token rotation + RPC re-mapping per [2j §10] Q5); default impl gRPC over Unix socket (Linux) / named pipe (Windows); alternative impls (JSON-over-Unix-socket sample, ...) link without rebuilding the engine via the AGPL-boundary structural rule per `[const §V.1]` / `[arch §8]`; `EngineConfig::control_plane_factory` engine-anchor per `[2j Appendix D §D.2]`; handlers run on the engine executor per `[2d §7.8]`; `CloseSession` RPC consumes `[2h §7.6]` graceful-drain shape; rotation RPCs (`RotatePinset` / `ReloadCertSource`) deferred to v1.x per `[2j §10]` Q1 + Q9 | all | [2j §4.1] / [arch §4.11] | backlog | `.specify/2j-controlplane.md` v0.3 | — | — | — |
 
 ## NFRs (Non-Functional Requirements)
 

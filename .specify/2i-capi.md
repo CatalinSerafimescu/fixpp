@@ -62,7 +62,7 @@
 [600,  699]  FIXPP_ERR_TLS_*        (2g-owned; 15 occupied)
 [700,  799]  FIXPP_ERR_TRANSPORT_*  (2h-owned; 22 occupied)
 [800,  899]  FIXPP_ERR_DECIMAL_*    (2a-owned; 4 occupied — this is intentionally placed AFTER transport because 2a's family was authored first but is small; placement after the larger blocks gives the smaller-domain block more room without renumbering 2b-2h)
-[900,  999]  RESERVED: 2j control plane (FIXPP_ERR_CTRL_*)
+[900,  999]  FIXPP_ERR_CTRL_*       (2j-owned; 2 occupied per [2j §6.6]; assigned at 2j sign-off 2026-05-09)
 [1000, 1099] RESERVED: 2k log + otel (FIXPP_ERR_LOG_*, FIXPP_ERR_OTEL_*)
 [1100, 1199] RESERVED: 2l tap (FIXPP_ERR_TAP_*)
 [1200, 1299] RESERVED: 2m bindings translation (FIXPP_ERR_BINDING_*)
@@ -562,8 +562,16 @@ typedef int32_t fixpp_error_t;
  *  decimal_buffer_too_small reuses code 6.)
  * [802, 899] reserved for 2a growth. */
 
+/* ── Control plane block [900, 999] — 2j-owned per [2j §6.6] (8 variants;
+ *    cancellation triple `control_plane_start_cancelled` /
+ *    `control_plane_stop_cancelled` / `control_plane_stream_cancelled`
+ *    coalesces to FIXPP_ERR_CANCELLED per §4.9; numeric assignments added
+ *    at 2j sign-off (2026-05-09) per [2j App D §D.3]) ───────────────── */
+#define FIXPP_ERR_CTRL_CONFIG              ((fixpp_error_t) 900)
+#define FIXPP_ERR_CTRL_RUNTIME             ((fixpp_error_t) 901)
+/* [902, 999] reserved for 2j growth. */
+
 /* ── Reserved blocks ─────────────────────────────────────────────────── */
-/* [ 900,  999] reserved for 2j control plane (FIXPP_ERR_CTRL_*) */
 /* [1000, 1099] reserved for 2k log + otel (FIXPP_ERR_LOG_*, FIXPP_ERR_OTEL_*) */
 /* [1100, 1199] reserved for 2l tap (FIXPP_ERR_TAP_*) */
 /* [1200, 1299] reserved for 2m bindings translation (FIXPP_ERR_BINDING_*) */

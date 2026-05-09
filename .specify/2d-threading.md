@@ -460,6 +460,24 @@ struct EngineConfig {
     // mutator separate from the frozen-config rule, since the engine-level
     // fallback is observability-shaped, not a session FSM input).
     fixpp::otel::trace_context engine_trace_context {};
+
+    // ── Control plane (engine-anchor; 2j) ────────────────────────────────
+    // Engine-scoped pluggable control-plane per [arch §4.11] / [2j §4.1].
+    // Null permitted — the deployment may run without a control plane;
+    // Engine::open does not reject null. When non-null, Engine::open
+    // invokes factory->make(mr, engine, exec, cfg) once after IO executor
+    // binding; the resulting ControlPlane's lifetime is engine lifetime.
+    // Handler executor: per [2d §7.8] handlers run on EngineConfig::executor
+    // (the engine executor); operators that want isolation pre-wrap that
+    // executor in a strand or sub-executor before passing it to the factory
+    // following the [2d §4.5] executor_override pattern. There is no
+    // separate `control_plane_executor` field (RC#1 close: a separate field
+    // would override [2d §7.8]).
+    // Ownership shape (`unique_ptr`): aligns with the [2e App D §D.1]
+    // `MessageStoreFactory` and [2h App D §D.1] `TransportFactory`
+    // unique-ownership pattern per [arch §5.6]'s frozen-at-open rule.
+    // Added at 2j sign-off (2026-05-09) per [2j App D §D.2].
+    std::unique_ptr<fixpp::service::ControlPlaneFactory> control_plane_factory;
 };
 
 }  // namespace fixpp::core
