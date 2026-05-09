@@ -178,16 +178,16 @@
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| CA-001 | OFFICIAL | c-api | Opaque handle types — FixSession, FixMessage, FixDictionary (no C++ symbols in ABI) | all | [impl] implementation | backlog | — | — | — | — |
-| CA-002 | OFFICIAL | c-api | Error code enum + fixpp_strerror() — all error paths return numeric code | all | [impl] implementation | backlog | — | — | — | — |
-| CA-003 | OFFICIAL | c-api | Thread-safety contract — explicit reentrancy guarantees per function | all | [impl] implementation | backlog | — | — | — | — |
-| CA-004 | OFFICIAL | c-api | Version negotiation — fixpp_version() / ABI version tag in header | all | [impl] implementation | backlog | — | — | — | — |
-| CA-005 | OFFICIAL | c-api | Session lifecycle — fixpp_session_create / connect / disconnect / destroy | all | [impl] implementation | backlog | — | — | — | — |
-| CA-006 | OFFICIAL | c-api | Message send — fixpp_session_send(session, msg) | all | [impl] implementation | backlog | — | — | — | — |
-| CA-007 | OFFICIAL | c-api | Message receive callback — fixpp_session_on_message(session, cb, userdata) | all | [impl] implementation | backlog | — | — | — | — |
-| CA-008 | OFFICIAL | c-api | Field accessor — fixpp_msg_get_string / get_int / get_double by tag | all | [impl] implementation | backlog | — | — | — | — |
-| CA-009 | OFFICIAL | c-api | Field setter — fixpp_msg_set_string / set_int / set_double by tag | all | [impl] implementation | backlog | — | — | — | — |
-| CA-010 | OFFICIAL | c-api | Repeating group accessor — fixpp_msg_get_group / group_get_field | all | [impl] implementation | backlog | — | — | — | — |
+| CA-001 | OFFICIAL | c-api | Opaque handle types — FixSession, FixMessage, FixDictionary (no C++ symbols in ABI) | all | [2i §4.2] Opaque handle types | backlog | — | — | — | — |
+| CA-002 | OFFICIAL | c-api | Error code enum + fixpp_strerror() — all error paths return numeric code | all | [2i §4.3] / [2i §4.4] | backlog | — | — | — | — |
+| CA-003 | OFFICIAL | c-api | Thread-safety contract — explicit reentrancy guarantees per function | all | [2i §4.10] | backlog | — | — | — | — |
+| CA-004 | OFFICIAL | c-api | Version negotiation — fixpp_version() / ABI version tag in header | all | [2i §4.5] | backlog | — | — | — | — |
+| CA-005 | OFFICIAL | c-api | Session lifecycle — fixpp_session_create / connect / disconnect / destroy | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |
+| CA-006 | OFFICIAL | c-api | Message send — fixpp_session_send(session, msg) | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |
+| CA-007 | OFFICIAL | c-api | Message receive callback — fixpp_session_on_message(session, cb, userdata) | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |
+| CA-008 | OFFICIAL | c-api | Field accessor — fixpp_msg_get_string / get_int / get_double by tag | all | [2i §4.6] | backlog | — | — | — | — |
+| CA-009 | OFFICIAL | c-api | Field setter — fixpp_msg_set_string / set_int / set_double by tag | all | [2i §4.7] | backlog | — | — | — | — |
+| CA-010 | OFFICIAL | c-api | Repeating group accessor — fixpp_msg_get_group / group_get_field | all | [2i §4.8] | backlog | — | — | — | — |
 
 ## Python Bindings
 
