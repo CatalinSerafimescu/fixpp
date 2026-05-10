@@ -43,6 +43,7 @@
 | `FIXPP_ERR_TRANSPORT_*` | 2h | 22 | `[2h §6.6]` |
 | `FIXPP_ERR_CAPI_*` (2i-introduced) | 2i | 8 (this doc — §6.5; v0.2 adds `FIXPP_ERR_CAPI_CONFIG_INVALID` per RC#3 close) | §6.5 |
 | `FIXPP_ERR_THREAD_SESSION_*` (lifecycle subset) | 2d (already counted above; rebranded sub-group) | (subset of 2d) | `[2d §6.7]` |
+| `FIXPP_ERR_BINDING_*` (2m-introduced) | 2m | 5 | `[2m §6.7]` |
 
 **Block width.** 100 codes per block (e.g., `FIXPP_ERR_WIRE_*` lives in `[100, 199]`). Worst-current-occupancy is 22 variants (2h transport); 2× growth = 44; 4× growth = 88. A 100-wide block accommodates ≥ 4× the worst current count and ≥ 5× the project median (~10–12 variants per doc). `int32_t` storage gives 2³¹ headroom; we use ≤ 1500 of those across v1.x for a budget of 15 100-wide blocks.
 
@@ -65,7 +66,7 @@
 [900,  999]  FIXPP_ERR_CTRL_*       (2j-owned; 2 occupied per [2j §6.6]; assigned at 2j sign-off 2026-05-09)
 [1000, 1099] RESERVED: 2k log + otel (FIXPP_ERR_LOG_*, FIXPP_ERR_OTEL_*)
 [1100, 1199] RESERVED: 2l tap (FIXPP_ERR_TAP_*)
-[1200, 1299] RESERVED: 2m bindings translation (FIXPP_ERR_BINDING_*)
+[1200, 1299] FIXPP_ERR_BINDING_*  (2m-owned per [2m §6.7]; 5 occupied; assigned at 2m sign-off 2026-05-10)
 [1300, 1399] RESERVED: post-v1.x growth (one of: SOFH, FIX-Latest, SBE, FIXP, FAST per [const §XVIII.2])
 [1400+]      RESERVED: future expansion
 ```
@@ -574,7 +575,15 @@ typedef int32_t fixpp_error_t;
 /* ── Reserved blocks ─────────────────────────────────────────────────── */
 /* [1000, 1099] reserved for 2k log + otel (FIXPP_ERR_LOG_*, FIXPP_ERR_OTEL_*) */
 /* [1100, 1199] reserved for 2l tap (FIXPP_ERR_TAP_*) */
-/* [1200, 1299] reserved for 2m bindings translation (FIXPP_ERR_BINDING_*) */
+
+/* ── Bindings block [1200, 1299] — 2m-owned per [2m §6.7] (5 variants) ── */
+#define FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED   ((fixpp_error_t) 1200)
+#define FIXPP_ERR_BINDING_SUBINTERPRETER           ((fixpp_error_t) 1201)
+#define FIXPP_ERR_BINDING_OBJECT_LIFETIME          ((fixpp_error_t) 1202)
+#define FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH       ((fixpp_error_t) 1203)
+#define FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE ((fixpp_error_t) 1204)
+/* [1205, 1299] reserved for 2m growth. */
+
 /* [1300, 1399] reserved for post-v1.x growth */
 /* [1400+]      reserved for future expansion */
 

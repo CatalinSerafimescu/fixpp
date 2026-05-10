@@ -193,11 +193,11 @@
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| PY-001 | OFFICIAL | python-api | SWIG interface wrapping C ABI — import fixpp, Session, Message classes | all | [impl] implementation | backlog | — | — | — | — |
-| PY-002 | OFFICIAL | python-api | GIL correctness — release GIL during blocking I/O; reacquire in callbacks | all | [impl] implementation | backlog | — | — | — | — |
-| PY-003 | OFFICIAL | python-api | Exception translation — C error codes → Python exceptions | all | [impl] implementation | backlog | — | — | — | — |
-| PY-004 | OFFICIAL | python-api | Ownership / lifetime — Python objects don't outlive native sessions | all | [impl] implementation | backlog | — | — | — | — |
-| PY-005 | OFFICIAL | python-api | pip-installable wheel (Linux x86_64 minimum) via CI | all | [impl] implementation | backlog | — | — | — | — |
+| PY-001 | OFFICIAL | python-api | SWIG interface wrapping C ABI — import fixpp, Session, Message classes | all | [2m §4.1, §4.2–§4.5, §5, §7] | backlog | — | — | — | — |
+| PY-002 | OFFICIAL | python-api | GIL correctness — release GIL during blocking I/O; reacquire in callbacks | all | [2m §6.1, §6.5] | backlog | — | — | — | — |
+| PY-003 | OFFICIAL | python-api | Exception translation — C error codes → Python exceptions | all | [2m §4.6, §6.3, §6.7] | backlog | — | — | — | — |
+| PY-004 | OFFICIAL | python-api | Ownership / lifetime — Python objects don't outlive native sessions | all | [2m §6.2, §6.7] | backlog | — | — | — | — |
+| PY-005 | OFFICIAL | python-api | pip-installable wheel (Linux x86_64 minimum) via CI | all | [2m §1.1, §11] | backlog | — | — | — | — |
 
 ## Service (Daemon/Sidecar)
 
