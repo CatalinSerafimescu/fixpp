@@ -1,0 +1,208 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "_base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "FIXPP_BUILD_TESTS": "ON",
+        "FIXPP_WERROR": "ON"
+      }
+    },
+
+    {
+      "name": "linux-clang-debug",
+      "displayName": "Linux / Clang / Debug",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-debug/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-release",
+      "displayName": "Linux / Clang / Release",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-release/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-asan",
+      "displayName": "Linux / Clang / ASan",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "FIXPP_ENABLE_ASAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-asan/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-ubsan",
+      "displayName": "Linux / Clang / UBSan",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "FIXPP_ENABLE_UBSAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-ubsan/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-tsan",
+      "displayName": "Linux / Clang / TSan",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "FIXPP_ENABLE_TSAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-tsan/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-coverage",
+      "displayName": "Linux / Clang / Coverage",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "FIXPP_ENABLE_COVERAGE": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-coverage/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-gcc-release",
+      "displayName": "Linux / GCC / Release (sanity)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "FIXPP_WERROR": "OFF",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-gcc-release/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows / MSVC / Debug",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-debug/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows / MSVC / Release",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-release/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "windows-msvc-asan",
+      "displayName": "Windows / MSVC / ASan (Tier 2)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-asan/conan_toolchain.cmake"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "linux-clang-debug",    "configurePreset": "linux-clang-debug" },
+    { "name": "linux-clang-release",  "configurePreset": "linux-clang-release" },
+    { "name": "linux-clang-asan",     "configurePreset": "linux-clang-asan" },
+    { "name": "linux-clang-ubsan",    "configurePreset": "linux-clang-ubsan" },
+    { "name": "linux-clang-tsan",     "configurePreset": "linux-clang-tsan" },
+    { "name": "linux-clang-coverage", "configurePreset": "linux-clang-coverage" },
+    { "name": "linux-gcc-release",    "configurePreset": "linux-gcc-release" },
+    { "name": "windows-msvc-debug",   "configurePreset": "windows-msvc-debug" },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release" },
+    { "name": "windows-msvc-asan",    "configurePreset": "windows-msvc-asan" }
+  ],
+
+  "testPresets": [
+    {
+      "name": "linux-clang-debug",
+      "configurePreset": "linux-clang-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-release",
+      "configurePreset": "linux-clang-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-asan",
+      "configurePreset": "linux-clang-asan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-ubsan",
+      "configurePreset": "linux-clang-ubsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-tsan",
+      "configurePreset": "linux-clang-tsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-coverage",
+      "configurePreset": "linux-clang-coverage",
+      "output": { "outputOnFailure": true },
+      "environment": { "LLVM_PROFILE_FILE": "${binary_dir}/default.profraw" }
+    },
+    {
+      "name": "linux-gcc-release",
+      "configurePreset": "linux-gcc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc-asan",
+      "configurePreset": "windows-msvc-asan",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
