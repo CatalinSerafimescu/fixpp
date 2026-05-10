@@ -1,5 +1,4 @@
 from conan import ConanFile
-from conan.tools.cmake import cmake_layout
 
 
 class FixppConan(ConanFile):
@@ -35,6 +34,3 @@ class FixppConan(ConanFile):
         "gtest*:shared": False,
         "benchmark*:shared": False,
     }
-
-    def layout(self):
-        cmake_layout(self)
