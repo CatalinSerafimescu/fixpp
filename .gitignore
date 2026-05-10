@@ -80,3 +80,7 @@ research/
 decisions/
 book/
 *-decisions.md
+
+# Exception: .specify/decisions/ is the library's own Gate A/B outcome store
+# (mirrors the parent repo decisions/ convention but lives inside .specify/)
+!.specify/decisions/
