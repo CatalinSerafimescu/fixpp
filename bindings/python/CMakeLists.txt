@@ -11,6 +11,12 @@ find_package(Python3 REQUIRED COMPONENTS Development.Module)
 set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
 set_property(SOURCE fixpp.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
 
+# Direct SWIG's generated fixpp.py to lib/ so it sits next to _fixpp.so;
+# `import fixpp` then loads the wrapper, which loads _fixpp.so from the
+# same directory. Without this, fixpp.py lands under CMakeFiles/ and
+# PYTHONPATH=lib/ cannot find it.
+set(CMAKE_SWIG_OUTDIR "${CMAKE_BINARY_DIR}/lib")
+
 swig_add_library(fixpp_py
   TYPE MODULE
   LANGUAGE python
