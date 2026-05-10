@@ -262,6 +262,11 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 
 6. **CI enforcement.** The `.github/workflows/gate-a.yml` workflow inspects every PR's changed-file set against the Appendix A trigger paths (path globs are owned by the workflow itself, not the constitution). If any trigger path is touched, the workflow blocks merge unless the PR carries either a `gate-a-done` label (Codex Gate A passed) or a `gate-a-waived` label with mandatory rationale in the PR body. Trivial diffs auto-waive: comment-only edits, doc fixes, single-line whitespace, dependency-pin bumps without code changes.
 
+7. **Local pre-PR build gate (mandatory, all PRs).** Before opening any PR, the contributor MUST run a local Conan install + CMake configure + build + ctest cycle on at least the `linux-clang-debug` preset, and `pytest bindings/python/tests/` if the change touches `bindings/python/`. The PR description must include a one-line confirmation (`local build: green on linux-clang-debug @ <git-sha>`). PRs without that line, or with a known-red local build, are rejected at review.
+   - **Resource gate:** local builds are resource-heavy (Conan fetches + full compile + sanitizer rebuilds). When an AI agent needs to run the local build, it MUST surface an `AskUserQuestion` first; the user approves the build before it runs. The agent never auto-runs `conan install` / `cmake --build` without explicit approval.
+   - **All dev work happens locally.** Contributors do not push speculative commits to remote branches "to see what CI says" as a substitute for local testing. CI is verification of green local work, not a remote test runner.
+   - **Local toolchain target: Clang 22** (matches the user's local install and the Conan profile pin per Article II §2 / Article III §3). CI provisions Clang 22 via `apt.llvm.org` so local==CI.
+
 ---
 
 ## Article XVIII — Roadmap Discipline
