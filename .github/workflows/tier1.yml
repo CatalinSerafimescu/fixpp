@@ -8,9 +8,6 @@ on:
 
 env:
   CONAN_HOME: ~/.conan2
-  # Opt into Node.js 24 for JavaScript actions (e.g. actions/checkout@v5).
-  # Node.js 20 will be forced to 24 on 2026-06-02 and removed on 2026-09-16.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # ── Linux build / test matrix ────────────────────────────────────────────
@@ -30,7 +27,7 @@ jobs:
           - linux-gcc-release
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja
         run: |
@@ -45,7 +42,7 @@ jobs:
             python3-pip \
             pipx
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -69,7 +66,7 @@ jobs:
           EOF
 
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.conan2/p
           key: conan-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
@@ -101,7 +98,7 @@ jobs:
     needs: []  # runs in parallel with matrix
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Clang 22 (apt.llvm.org) + Ninja
         run: |
@@ -113,7 +110,7 @@ jobs:
             python3-pip \
             pipx
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -135,7 +132,7 @@ jobs:
           EOF
 
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.conan2/p
           key: conan-linux-clang-coverage-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-coverage') }}
@@ -179,7 +176,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: build/linux-clang-coverage/coverage.lcov
@@ -191,7 +188,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Clang 22 (apt.llvm.org) + SWIG + Ninja
         run: |
@@ -205,7 +202,7 @@ jobs:
             python3-pip \
             pipx
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -227,7 +224,7 @@ jobs:
           EOF
 
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.conan2/p
           key: conan-linux-clang-debug-py-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-debug') }}
@@ -243,8 +240,11 @@ jobs:
 
       - name: Configure with Python bindings
         run: |
+          # Override the preset's CMAKE_TOOLCHAIN_FILE because this job uses
+          # a -py-suffixed build folder where Conan placed the toolchain.
           cmake --preset linux-clang-debug \
             -DFIXPP_BUILD_PYTHON=ON \
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/linux-clang-debug-py/conan_toolchain.cmake" \
             -B build/linux-clang-debug-py
 
       - name: Build
@@ -261,9 +261,9 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -278,7 +278,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Clang 22 (apt.llvm.org) + Ninja
         run: |
@@ -290,7 +290,7 @@ jobs:
             python3-pip \
             pipx
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -312,7 +312,7 @@ jobs:
           EOF
 
       - name: Cache Conan packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.conan2/p
           key: conan-linux-clang-release-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-release') }}
