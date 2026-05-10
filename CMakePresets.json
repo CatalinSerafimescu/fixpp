@@ -181,8 +181,7 @@
     {
       "name": "linux-clang-coverage",
       "configurePreset": "linux-clang-coverage",
-      "output": { "outputOnFailure": true },
-      "environment": { "LLVM_PROFILE_FILE": "${binary_dir}/default.profraw" }
+      "output": { "outputOnFailure": true }
     },
     {
       "name": "linux-gcc-release",
