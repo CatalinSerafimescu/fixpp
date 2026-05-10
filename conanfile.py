@@ -16,11 +16,13 @@ class FixppConan(ConanFile):
 
     # ── Runtime dependencies ─────────────────────────────────────────────────
     # Phase 3: only smoke tests (gtest) and placeholder bench (benchmark) compile.
-    # Returns in Phase 4: asio/1.30.2, openssl/3.2.1
-    # Returns in Phase 5: grpc/1.62.0, iceoryx2
+    # Pinned at the highest stable versions on Conan Center as of 2026-05-10.
+    # Returns in Phase 4: asio/1.36.0, openssl/3.6.2 (4.x is breaking, not yet on Conan).
+    # Returns in Phase 5: grpc/1.78.1 (1.80 is upstream-only), iceoryx2 via CMake
+    #   FetchContent of v0.8.1 gated on FIXPP_USE_ICEORYX2 (Rust/cargo prereq).
     requires = [
-        "gtest/1.14.0",
-        "benchmark/1.8.3",
+        "gtest/1.17.0",
+        "benchmark/1.9.5",
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────
