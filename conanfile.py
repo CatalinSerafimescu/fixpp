@@ -15,39 +15,23 @@ class FixppConan(ConanFile):
     generators = "CMakeToolchain", "CMakeDeps"
 
     # ── Runtime dependencies ─────────────────────────────────────────────────
+    # Phase 3: only smoke tests (gtest) and placeholder bench (benchmark) compile.
+    # Returns in Phase 4: asio/1.30.2, openssl/3.2.1
+    # Returns in Phase 5: grpc/1.62.0, iceoryx2
     requires = [
-        # Test framework [const §VII.1]
         "gtest/1.14.0",
-        # Benchmarks [const §VIII.1]
         "benchmark/1.8.3",
-        # Async I/O + coroutines [const §XI.1]
-        "asio/1.30.2",
-        # TLS: OpenSSL only per [const §XII.1]
-        "openssl/3.2.1",
-        # gRPC control plane [const §XIV.1]
-        "grpc/1.62.0",
-        # iceoryx2: tracked but not yet packaged in Conan; wired in Phase 5
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────
-    tool_requires = [
-        "cmake/3.28.1",
-        "ninja/1.11.1",
-        # swig only when python bindings are requested
-        # Phase 3 default — always include swig; refined in Phase 5
-        "swig/4.2.1",
-    ]
+    # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
+    # collide with system versions and add resolution time. Restore in Phase 5.
+    tool_requires = []
 
     # ── Default options ──────────────────────────────────────────────────────
     default_options = {
-        "openssl*:shared": False,
-        "grpc*:shared": False,
-        "asio*:shared": False,
         "gtest*:shared": False,
         "benchmark*:shared": False,
-        # Enable position-independent code for shared library builds
-        "openssl*:fPIC": True,
-        "grpc*:fPIC": True,
     }
 
     def layout(self):

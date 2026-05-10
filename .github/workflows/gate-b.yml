@@ -6,7 +6,7 @@ on:
     branches: ["**"]
 
 env:
-  # Opt into Node.js 24 for JavaScript actions (e.g. actions/checkout@v4).
+  # Opt into Node.js 24 for JavaScript actions (e.g. actions/checkout@v5).
   # Node.js 20 will be forced to 24 on 2026-06-02 and removed on 2026-09-16.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
