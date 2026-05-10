@@ -1,0 +1,27 @@
+{
+  "context": {
+    "date": "2026-05-10",
+    "host_name": "placeholder",
+    "executable": "placeholder_bench",
+    "num_cpus": null,
+    "mhz_per_cpu": null,
+    "cpu_scaling_enabled": null,
+    "library_build_type": "release"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Noop",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_Noop",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": null,
+      "real_time": null,
+      "cpu_time": null,
+      "time_unit": "ns"
+    }
+  ]
+}
