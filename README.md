@@ -18,3 +18,4 @@ Early development. No public API yet. Breaking changes happen without notice.
 ## Contributing
 
 Not open for external contributions yet. Check back after v1.0.
+
