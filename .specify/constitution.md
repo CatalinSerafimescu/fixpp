@@ -1,6 +1,6 @@
 # fixpp Constitution
 
-> **Status:** Draft v0.1 — Phase 2, awaiting Codex Gate A review and user approval.
+> **Status:** user-signed-off v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
 > **Authority:** This document is project-wide non-negotiables. Every `/specify`, `/plan`, ADR, and PR must satisfy it. Conflicts are resolved by amending the constitution first (Article XX) — never by silently violating an article.
 > **Citation form:** other documents cite articles as `[const §Roman.arabic]` (e.g., `[const §VIII.3]`).
 

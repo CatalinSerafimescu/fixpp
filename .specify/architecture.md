@@ -1,6 +1,6 @@
 # fixpp Architecture
 
-> **Status:** Draft v0.2 — Phase 2, Codex Gate A round 1 findings converged 2026-05-07; awaiting user sign-off.
+> **Status:** user-signed-off v0.2 (2026-05-10) — Phase 2 Gate A round 1 converged 2026-05-07 (2 P1 / 3 P2 resolved); see `decisions/architecture.md`.
 > **Authority:** Module layering, public namespaces, design patterns. This document operationalises the rules set by `constitution.md`. On conflict, the constitution wins (Article XX); architectural choices that cannot satisfy a constitutional rule trigger an amendment, never a silent override.
 > **Citation form:** other documents cite sections as `[arch §N.m]` (e.g., `[arch §3.2]`). This document cites the constitution as `[const §VIII.3]` and SYNTHESIS as `[SYN §3.1 Q5]`.
 > **Scope rule:** this document fixes the *spine*. Per-subsystem detail (decimal type, parser internals, dictionary codegen, threading contract, store API, awaitable mutex, TLS interfaces, transport interface, C ABI message representation, control-plane interface, observability surface, session-tap API, SWIG binding shape) lives in the sibling design docs `2a`–`2m` listed in §10. Anything *more specific than module-level* in this file is intentionally provisional and may be tightened in those docs.
