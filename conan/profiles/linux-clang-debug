@@ -1,0 +1,18 @@
+# Conan profile: linux-clang-debug
+# Pins are revisited at first CI failure; Clang 18 is the conservative 2026 baseline.
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Debug
+compiler=clang
+compiler.version=18
+compiler.libcxx=libstdc++11
+compiler.cppstd=23
+
+[buildenv]
+CC=clang-18
+CXX=clang++-18
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja

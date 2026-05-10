@@ -1,0 +1,16 @@
+# Conan profile: windows-msvc-release
+# Windows Tier 2 — manual / nightly per [const §II.3].
+# clang-cl is PROHIBITED per [const §II.2]; MSVC only.
+# Pins are revisited at first CI failure; MSVC 194 (VS 2022) is the 2026 baseline.
+
+[settings]
+os=Windows
+arch=x86_64
+build_type=Release
+compiler=msvc
+compiler.version=194
+compiler.runtime=dynamic
+compiler.cppstd=23
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja

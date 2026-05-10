@@ -1,0 +1,24 @@
+# Conan profile: linux-clang-ubsan
+# UBSan build — Linux/Clang only per [const §IX.2]; shared libs for ABI visibility.
+# Pins are revisited at first CI failure; Clang 18 is the conservative 2026 baseline.
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Debug
+compiler=clang
+compiler.version=18
+compiler.libcxx=libstdc++11
+compiler.cppstd=23
+
+[buildenv]
+CC=clang-18
+CXX=clang++-18
+CXXFLAGS=-fsanitize=undefined -fno-omit-frame-pointer
+LDFLAGS=-fsanitize=undefined
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:cxxflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
+tools.build:sharedlinkflags=["-fsanitize=undefined"]
+tools.build:exelinkflags=["-fsanitize=undefined"]
