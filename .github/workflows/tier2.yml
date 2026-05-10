@@ -1,8 +1,11 @@
-name: Tier 2 — Windows CI (nightly / on-demand)
+name: Tier 2 — Windows CI (on-demand only)
+
+# Triggered only by:
+#   - workflow_dispatch (manual run from Actions UI)
+#   - PR labeled `windows`
+# No nightly cron — Tier 2 is on-demand to conserve Windows CI minutes.
 
 on:
-  schedule:
-    - cron: "0 4 * * *"  # nightly at 04:00 UTC
   pull_request:
     branches: ["**"]
     types: [labeled]
@@ -12,7 +15,7 @@ env:
   CONAN_HOME: C:\Users\runneradmin\.conan2
 
 jobs:
-  # Only run on schedule, workflow_dispatch, or PRs labeled 'windows'
+  # Only run on workflow_dispatch or PRs labeled 'windows'
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -21,8 +24,7 @@ jobs:
     steps:
       - id: check
         run: |
-          if [[ "${{ github.event_name }}" == "schedule" ]] || \
-             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
              [[ "${{ contains(github.event.pull_request.labels.*.name, 'windows') }}" == "true" ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
           else

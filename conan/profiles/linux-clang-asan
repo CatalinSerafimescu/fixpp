@@ -1,19 +1,19 @@
 # Conan profile: linux-clang-asan
 # ASan build — shared libs required to surface ABI issues [arch §7.5].
-# Pins are revisited at first CI failure; Clang 18 is the conservative 2026 baseline.
+# Pins are revisited at first CI failure; Clang 22 (matches user's local install; CI provisions via apt.llvm.org).
 
 [settings]
 os=Linux
 arch=x86_64
 build_type=Debug
 compiler=clang
-compiler.version=18
+compiler.version=22
 compiler.libcxx=libstdc++11
 compiler.cppstd=23
 
 [buildenv]
-CC=clang-18
-CXX=clang++-18
+CC=clang-22
+CXX=clang++-22
 CXXFLAGS=-fsanitize=address -fno-omit-frame-pointer
 LDFLAGS=-fsanitize=address
 
