@@ -1,0 +1,128 @@
+name: Gate A — design review enforcement
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+    branches: ["**"]
+
+# Enforces constitution Article XVII §1 / §6.
+#
+# Path globs are owned by THIS workflow, not the constitution. The conservative
+# starting set below blocks any PR that touches include/, src/, codegen/, or a
+# new .specify/*.md design doc unless the PR carries gate-a-done (Codex Gate A
+# passed) or gate-a-waived (with mandatory rationale in the PR body).
+#
+# Auto-waive rules (also from §6):
+#   - Whitespace-only diffs (`git diff -w` empty).
+#   - Pure-doc diffs: every changed file is a .md outside .specify/ or lives
+#     under docs/ / book/ / README.
+#
+# Comment-only and dependency-pin-only diffs are NOT auto-detected (too
+# fragile in shell). For those, the author should set gate-a-waived with a
+# one-line rationale.
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate-a:
+    name: Gate A — design review label check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed files
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "Changed files:"
+          cat /tmp/changed.txt
+
+      - name: Auto-waive — whitespace-only
+        id: ws
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$(git diff -w "$BASE_SHA" "$HEAD_SHA")" ]; then
+            echo "Whitespace-only diff — Gate A auto-waived."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto-waive — pure-doc
+        id: doc
+        if: steps.ws.outputs.skip != 'true'
+        run: |
+          # Doc-shaped: root-level .md, anything under docs/ or book/, README*.
+          # .specify/*.md is NOT a doc-shape match because it is a Gate A
+          # trigger by itself.
+          NON_DOC=$(grep -Ev '^[^/]*\.md$|^docs/|^book/|^README' /tmp/changed.txt || true)
+          SPECIFY_DOCS=$(grep -E '^\.specify/[^/]+\.md$' /tmp/changed.txt || true)
+          if [ -z "$NON_DOC" ] && [ -z "$SPECIFY_DOCS" ]; then
+            echo "Pure-doc diff (no .specify/, no code) — Gate A auto-waived."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check Gate A trigger paths
+        id: triggers
+        if: steps.ws.outputs.skip != 'true' && steps.doc.outputs.skip != 'true'
+        run: |
+          # Trigger paths (constitution Article XVII §1):
+          #   include/      — public C++ API and C ABI headers
+          #   src/          — implementation surfaces (concurrency / parser /
+          #                   session FSM / store / TLS all live here; broad
+          #                   for safety, tighten as the tree lands)
+          #   codegen/      — codegen layout
+          #   .specify/     — any new design document directly under .specify
+          TRIGGER_RE='^(include/|src/|codegen/|\.specify/[^/]+\.md$)'
+          MATCHES=$(grep -E "$TRIGGER_RE" /tmp/changed.txt || true)
+          if [ -z "$MATCHES" ]; then
+            echo "No Gate A trigger paths touched — Gate A does not apply."
+            echo "applies=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Gate A trigger paths touched:"
+            echo "$MATCHES"
+            echo "applies=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Gate A label or waiver rationale
+        if: steps.ws.outputs.skip != 'true' && steps.doc.outputs.skip != 'true' && steps.triggers.outputs.applies == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+
+          if echo "$LABELS" | grep -qx 'gate-a-done'; then
+            echo "Gate A passed — gate-a-done label present."
+            exit 0
+          fi
+
+          if echo "$LABELS" | grep -qx 'gate-a-waived'; then
+            # Require a "## Gate A ..." heading followed by at least one
+            # non-blank rationale line in the PR body.
+            if echo "$BODY" | awk '
+              BEGIN { found = 0; rationale = 0 }
+              /^##+[[:space:]]*[Gg]ate[[:space:]]*[Aa]/ { found = 1; next }
+              found && /[^[:space:]]/ { rationale = 1 }
+              END { exit (rationale ? 0 : 1) }
+            '; then
+              echo "Gate A waived with rationale in PR body."
+              exit 0
+            fi
+            echo "::error::gate-a-waived label is set, but PR body lacks a '## Gate A …' heading followed by rationale."
+            exit 1
+          fi
+
+          echo "::error::Gate A trigger paths touched (see prior step), but neither gate-a-done nor gate-a-waived label is set."
+          echo "::error::Run /gate-a locally and add gate-a-done — or add gate-a-waived with a '## Gate A waiver' section in the PR body."
+          exit 1

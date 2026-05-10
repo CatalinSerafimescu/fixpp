@@ -1,0 +1,105 @@
+name: Gate B — PR review enforcement
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+    branches: ["**"]
+
+# Enforces constitution Article XVII §2 / §6.
+#
+# Gate B is mandatory regardless of feature size — every PR must carry
+# gate-b-done (Codex Gate B passed) or gate-b-waived (with mandatory rationale
+# in the PR body) before merge.
+#
+# Auto-waive rules (mirroring gate-a.yml §6):
+#   - Whitespace-only diffs (`git diff -w` empty).
+#   - Pure-doc diffs: every changed file is a .md outside .specify/ or lives
+#     under docs/ / book/ / README.
+#
+# No path-based trigger filtering — Gate B applies whenever the diff is
+# non-trivial.
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate-b:
+    name: Gate B — PR review label check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed files
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "Changed files:"
+          cat /tmp/changed.txt
+
+      - name: Auto-waive — whitespace-only
+        id: ws
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$(git diff -w "$BASE_SHA" "$HEAD_SHA")" ]; then
+            echo "Whitespace-only diff — Gate B auto-waived."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto-waive — pure-doc
+        id: doc
+        if: steps.ws.outputs.skip != 'true'
+        run: |
+          # Doc-shaped: root-level .md, anything under docs/ or book/, README*.
+          # .specify/*.md is excluded from auto-waive — even though it's
+          # doc-shaped, design-doc-only PRs still benefit from Gate B coverage
+          # (cross-doc consistency, cite integrity per [const §VI.5]).
+          NON_DOC=$(grep -Ev '^[^/]*\.md$|^docs/|^book/|^README' /tmp/changed.txt || true)
+          SPECIFY_DOCS=$(grep -E '^\.specify/[^/]+\.md$' /tmp/changed.txt || true)
+          if [ -z "$NON_DOC" ] && [ -z "$SPECIFY_DOCS" ]; then
+            echo "Pure-doc diff (no .specify/, no code) — Gate B auto-waived."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Gate B label or waiver rationale
+        if: steps.ws.outputs.skip != 'true' && steps.doc.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+
+          if echo "$LABELS" | grep -qx 'gate-b-done'; then
+            echo "Gate B passed — gate-b-done label present."
+            exit 0
+          fi
+
+          if echo "$LABELS" | grep -qx 'gate-b-waived'; then
+            # Require a "## Gate B ..." heading followed by at least one
+            # non-blank rationale line in the PR body.
+            if echo "$BODY" | awk '
+              BEGIN { found = 0; rationale = 0 }
+              /^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/ { found = 1; next }
+              found && /[^[:space:]]/ { rationale = 1 }
+              END { exit (rationale ? 0 : 1) }
+            '; then
+              echo "Gate B waived with rationale in PR body."
+              exit 0
+            fi
+            echo "::error::gate-b-waived label is set, but PR body lacks a '## Gate B …' heading followed by rationale."
+            exit 1
+          fi
+
+          echo "::error::No Gate B label set on PR. Gate B is mandatory per constitution Article XVII §2."
+          echo "::error::Run /gate-b locally and add gate-b-done — or add gate-b-waived with a '## Gate B outcome' section in the PR body."
+          exit 1
