@@ -1,0 +1,43 @@
+repos:
+  # ── General file hygiene ─────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # ── clang-format (Clang 18) ──────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]
+        files: '\.(cpp|hpp|h|cc|cxx)$'
+
+  # ── clang-tidy (manual stage — too slow for every commit; CI always runs) ─
+  - repo: local
+    hooks:
+      - id: clang-tidy
+        name: clang-tidy
+        entry: clang-tidy-18
+        language: system
+        types_or: [c++]
+        files: '\.(cpp|cc|cxx)$'
+        stages: [manual]
+        args:
+          - --config-file=.clang-tidy
+          - -p=build/linux-clang-debug
+
+  # ── CMake build sanity (manual stage — slow) ─────────────────────────────
+  - repo: local
+    hooks:
+      - id: cmake-configure
+        name: CMake configure sanity
+        entry: bash -c 'cmake --preset linux-clang-debug -B build/precommit'
+        language: system
+        pass_filenames: false
+        stages: [manual]

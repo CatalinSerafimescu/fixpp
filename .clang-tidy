@@ -1,0 +1,51 @@
+# .clang-tidy — fixpp clang-tidy configuration
+# Mandated checks: [const §IX.4]
+# Suppressed: fuchsia-* (not relevant), llvm-header-guard (incompatible with #pragma once)
+# Phase 3 default — tighten suppressions as real code lands in Phase 4.
+
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  hicpp-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -fuchsia-*,
+  -llvm-header-guard,
+  -llvm-include-order,
+  -llvm-*,
+  -google-build-using-namespace,
+  -google-readability-todo,
+  -modernize-use-trailing-return-type,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -misc-non-private-member-variables-in-classes,
+  -hicpp-avoid-c-arrays,
+  -cppcoreguidelines-avoid-c-arrays,
+  -readability-identifier-length
+
+# Treat clang-tidy warnings as errors in CI (FIXPP_WERROR + -Werror applies separately)
+WarningsAsErrors: "*"
+
+HeaderFilterRegex: "include/fixpp/.*|include/fix/.*"
+
+CheckOptions:
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: modernize-use-default-member-init.UseAssignment
+    value: "true"
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: "true"

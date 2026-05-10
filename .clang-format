@@ -1,0 +1,16 @@
+BasedOnStyle: Google
+ColumnLimit: 100
+Standard: c++23
+IndentWidth: 4
+AccessModifierOffset: -4
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive
+PointerAlignment: Left
+ReferenceAlignment: Left
+AlignAfterOpenBracket: Align
+BraceWrapping:
+  AfterClass: false
+  AfterFunction: false
+  AfterNamespace: false
+SpaceBeforeCpp11BracedList: false
+ReflowComments: true
