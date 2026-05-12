@@ -173,6 +173,14 @@ public:
     // short-circuit is an implementation choice, not an API shape change.
     // (Research.md D-11; round-1's conditional_t<...> return-type carve was
     // rejected as silent ABI redesign.)
+    //
+    // Requires (per data-model.md §Entity 2 invariant): decimal_traits<U> MUST
+    // be a complete specialization at instantiation point. The implementation
+    // MUST surface a fixpp-authored compile-error (static_assert on the presence
+    // of decimal_traits<U>::from_pod / ::to_pod, OR a C++20 concept constraint
+    // on the template parameter U) when this requirement is unmet — NOT a
+    // confusing "incomplete type" template diagnostic. Mechanism is an
+    // /implement-time choice; the error message must name decimal_traits<U>.
     template <class U>
     static expected_t<decimal>     from(decimal<U> const&) noexcept;
     template <class U>

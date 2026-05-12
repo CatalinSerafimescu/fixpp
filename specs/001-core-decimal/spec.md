@@ -99,7 +99,7 @@ Lifted from 2a §6 and §5; one bullet per testable property. Tests cover each.
 
 ### 4.4 Cross-traits conversion — `decimal<T>::to<U>()`
 - **AC-X1.** For `T ≠ U`, `decimal<T>` → `decimal<U>` funnels through `pod_decimal` (canonical interchange form).
-- **AC-X2.** When the funnel runs (T ≠ U) and the source value is outside the PoD `int64 × 10^[-38..0]` domain → `decimal_precision_loss` (no silent truncation).
+- **AC-X2.** When the funnel runs (T ≠ U) and the source value is outside the PoD `int64 × 10^[-38..0]` domain → `decimal_precision_loss` (no silent truncation). The funnel maps `decimal_overflow` from `decimal_traits<U>::to_pod` to `decimal_precision_loss` on the caller path (per data-model.md §Entity 2 + §Entity 5).
 - **AC-X3.** For `T == U`, `to<U>()` is a compile-time short-circuit via `if constexpr (std::is_same_v<T,U>)` and returns the source unchanged — no funnel, no error, no codegen overhead. Honors round-trip identity unconditionally, including for source values outside the PoD domain.
 
 ### 4.5 C-ABI layout
@@ -114,7 +114,7 @@ Lifted from 2a §6 and §5; one bullet per testable property. Tests cover each.
 ### 4.6 Build-time alias — `FIXPP_DECIMAL_T`
 - **AC-B1.** Default `FIXPP_DECIMAL_T == ::fixpp::core::pod_decimal`; `fixpp::decimal_t == decimal<pod_decimal>`.
 - **AC-B2.** Consumer-supplied `FIXPP_DECIMAL_USER_HEADER` is included before the alias macro is consulted.
-- **AC-B3.** Link-time mismatch test: two TUs built with conflicting `FIXPP_DECIMAL_T` → unresolved-symbol link error via `decimal_alias_sentinel<T>::tag`.
+- **AC-B3.** Link-time mismatch test: two TUs built with conflicting `FIXPP_DECIMAL_T` → unresolved-symbol link error via `decimal_alias_sentinel<T>::tag`. The linker error message contains the substring `decimal_alias_sentinel` (for test-assertion stability — rejects spurious failures from unrelated link errors per tasks.md T025).
 - **AC-B4.** Switching the alias does **not** change `fixpp_decimal_t` C-ABI shape.
 
 ### 4.7 Error model
@@ -138,18 +138,18 @@ Carried verbatim from 2a §2 — re-stated here so `/clarify` does not reopen.
 
 Lifted from 2a §6.5, `[const §VIII.5]`, `[const §IX.4]`, and the project quality gate.
 
-| NFR | Target | Test seam | Tier |
-|---|---|---|---|
-| Allocation on hot path | Zero between parse and `fromApp` | `tools/check_alloc.py` + `mallocnesia` interceptor (Linux) | 1 (Linux); 2 deferred (Windows) |
-| Exceptions on hot path | None between parse and `fromApp` | static (`noexcept` declarations) + ASan/UBSan run | 1 |
-| Parse latency (default traits, x86_64, 5-digit mantissa, warm cache) | ≤ 50 ns median | Google Benchmark regression bar | 1 |
-| Format latency (same workload) | ≤ 30 ns median | Google Benchmark | 1 |
-| Compare latency (same workload) | ≤ 20 ns median | Google Benchmark | 1 |
-| Coverage (lines / branches) | ≥ 90 % / ≥ 80 % on touched files | `linux-clang-coverage` preset | 1 |
-| Sanitizers | ASan + UBSan + TSan clean | Tier 1 matrix | 1 |
-| Fuzz harness | `tests/fuzz/fuzz_decimal_parse.cpp` runs ≥ 10 min in CI, longer nightly | libFuzzer | 1 (smoke); 2 (long) |
-| clang-tidy / IWYU | clean | pre-commit + Tier 1 | 1 |
-| Property oracle (Python `Decimal`) | Agrees on `compare(a,b)` for all generated pairs | dedicated test | 1 (promoted from 2 per 2a §9 seam 8) |
+| NFR | Target | Test seam | Tier | Source |
+|---|---|---|---|---|
+| Allocation on hot path | Zero between parse and `fromApp` | `tools/check_alloc.py` + `mallocnesia` interceptor (Linux) | 1 (Linux); 2 deferred (Windows) | `[const §VIII.5]`, `[const §XV.1]`, Research §D-10 |
+| Exceptions on hot path | None between parse and `fromApp` | static (`noexcept` declarations) + ASan/UBSan run | 1 | `[arch §5.3]`, 2a §6.5 |
+| Parse latency (default traits, x86_64, 5-digit mantissa, warm cache) | ≤ 50 ns median | Google Benchmark regression bar | 1 | 2a §6.5, Research §D-9 |
+| Format latency (same workload) | ≤ 30 ns median | Google Benchmark | 1 | 2a §6.5, Research §D-9 |
+| Compare latency (same workload) | ≤ 20 ns median | Google Benchmark | 1 | 2a §6.5, Research §D-9 |
+| Coverage (lines / branches) | ≥ 90 % / ≥ 80 % on touched files | `linux-clang-coverage` preset | 1 | `[const §IX.1]` |
+| Sanitizers | ASan + UBSan + TSan clean | Tier 1 matrix | 1 | `[const §IX.2]` |
+| Fuzz harness | `tests/fuzz/fuzz_decimal_parse.cpp` runs ≥ 10 min in CI, longer nightly | libFuzzer | 1 (smoke); 2 (long) | `[const §VII.7]` |
+| clang-tidy / IWYU | clean | pre-commit + Tier 1 | 1 | `[const §IX.4]` |
+| Property oracle (Python `Decimal`) | Agrees on `compare(a,b)` for all generated pairs | dedicated test | 1 (promoted from 2a §9 seam 8's Tier 2 default — Python `Decimal` is the canonical arbitrary-precision oracle, so any divergence under our `compare` algorithm is a correctness bug, not a tuning issue) | 2a §9 seam 8, Plan §Seam 8 |
 
 ## 7. Files in scope
 

@@ -62,6 +62,7 @@ All entities and their invariants are inherited from `.specify/2a-decimal.md` v0
 - **No `equal` member** — `decimal<T>::operator==` calls `compare(...) == 0` (avoids two-source-of-truth bug where `equal` and `compare` could be inconsistent).
 - **`noexcept` is a contract requirement** — traits wrapping throwing third-party libraries (e.g., `boost::multiprecision`) MUST trap via `fixpp::core::detail::trap_throw(...)` (helper in `include/fixpp/core/decimal_helpers.hpp`).
 - **Forward-compat:** new required members may only be added in a minor library version under a feature-test macro `FIXPP_DECIMAL_TRAITS_FEATURE_<NAME>`; existing specializations stay compiling.
+- **Specialization required for cross-traits use:** consumers attempting `decimal<T>::from<U>` or `decimal<T>::to<U>` for a `U` without a `decimal_traits<U>` specialization MUST receive a fixpp-authored compile-error — either via `static_assert` on the presence of `decimal_traits<U>::from_pod` / `::to_pod`, or via a C++20 concept constraint on the `from<U>` / `to<U>` template parameter — NOT a confusing "incomplete type" template diagnostic. The implementation chooses the mechanism (`static_assert` vs concept) at `/implement` time; the contract is that the error message names `decimal_traits<U>` explicitly.
 
 ## Entity 3 — `fixpp::core::decimal<T>` (value-typed wrapper)
 
@@ -127,6 +128,15 @@ static_assert(std::is_standard_layout_v<fixpp_decimal_t>);
 - `FIXPP_DECIMAL_INVALID` → `{ INT64_MIN, 0, {0,0,0,0,0,0,0} }` (invalid sentinel).
 
 **Forward-compatibility rule (AC-A4 + AC-A5b):** consumers SHOULD initialize `_reserved` via `FIXPP_DECIMAL_INITIALIZER` or `fixpp_decimal_init()`; the engine tolerates non-zero `_reserved` in v1.0. Any future v1.x semantic for `_reserved` ships as a NEW explicit API, never a silent meaning change for existing consumers (per spec.md `Clarifications` 2026-05-10 line 62).
+
+**Endianness:** v1.0 supports little-endian platforms only (x86_64 Linux primary + x86_64 Windows Tier 2; both are little-endian per `[const §II.3]`). Big-endian portability is post-v1.0; the abidiff golden (`tests/abi/golden/fixpp_decimal_t.abidiff`) is captured on little-endian, and any future big-endian support requires a separate golden + a `FIXPP_C_ABI_BIG_ENDIAN` feature macro. AC-A1..A6's `sizeof`/`offsetof`/`alignof` invariants are byte-order-agnostic at the C level, but the underlying `int64_t mantissa` field's wire-level byte order is platform-endian — cross-endian binary interchange is out of scope for v1.0.
+
+**Future use sketch (non-binding, post-v1.0):** candidate semantics for `_reserved[7]` once `FIXPP_C_ABI_DECIMAL_RESERVED_USED` is defined:
+- byte 9: NaN/Inf indicator (mirrors IEEE-754 quiet/signaling bit)
+- byte 10: alternate-mantissa-encoding flag set (e.g., DPD encoding for `decimal128` parity)
+- bytes 11–15: reserved for further extension
+
+These are non-binding sketches included to give v1.0 consumers a forward signal. The eventual semantic ships as a NEW boundary function (e.g., `fixpp_decimal_parse_v2`) alongside the existing v1.0 API — never as a silent re-interpretation of v1.0 `_reserved` bytes. Consumers built against v1.0 continue to work unchanged when this opt-in lands.
 
 ## Entity 5 — `fixpp::core::error` decimal variants
 
