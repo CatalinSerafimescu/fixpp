@@ -1,163 +1,184 @@
-# data-model.md — 001-core-decimal
+---
+id: 001-core-decimal
+title: Data Model — Decimal entities, invariants, error mapping
+spec_kit_step: /plan Phase 1
+last_updated: 2026-05-12
+status: drafted (round-2 redraft)
+---
 
-> **Phase 1 output for `/speckit-plan`.** Captures the entities, fields, validation rules, relationships, and invariants for the decimal feature. Concrete C++ / C declarations are extracted to [`contracts/`](./contracts/). Full evidence is in `.specify/2a-decimal.md` v0.3.
+# Data Model — 001-core-decimal
 
-## Entity inventory
+All entities and their invariants are inherited from `.specify/2a-decimal.md` v0.3. This document records each entity's fields, validation rules, and state transitions in the canonical `/plan` Phase 1 format. No new entity is introduced at `/plan` time.
 
-| # | Entity | Kind | Owner header | Stability |
-|---|---|---|---|---|
-| 1 | `pod_decimal` | C++ struct (POD) | `include/fixpp/core/decimal.hpp` | Stable v1.0 |
-| 2 | `decimal_traits<T>` | C++ template (compile-time customization point) | `include/fixpp/core/decimal.hpp` | Stable v1.0 |
-| 3 | `decimal<T>` | C++ template (value wrapper) | `include/fixpp/core/decimal.hpp` | Stable v1.0 |
-| 4 | `fixpp_decimal_t` | C struct (PoD, frozen layout) | `include/fix/c_api.h` | **C-ABI v1.0 — frozen** |
-| 5 | `fixpp_error_t` (decimal subset) | C enum subset | `include/fix/c_api.h` | **C-ABI v1.0 — provisional in this PR, ratified by 2i** |
+## Entity 1 — `fixpp::core::pod_decimal` (C++ POD payload)
 
-## 1. `pod_decimal` — default representation
+**Header:** `include/fixpp/core/decimal.hpp` (extract source: `.specify/2a-decimal.md` v0.3 §4.1)
 
-| Field | Type | Notes |
-|---|---|---|
-| `mantissa` | `std::int64_t` | Significand. **`INT64_MIN` is reserved as the invalid sentinel.** |
-| `exponent` | `std::int8_t` | Power of 10. **Canonical domain: `[-38, 0]`.** Outside → `decimal_invalid_input` at the C-ABI boundary and at trait conversion. |
+**Fields:**
 
-- Default-constructed `pod_decimal{}` = `(mantissa=0, exponent=0)` — value `0`.
-- Sentinel: `inline constexpr pod_decimal pod_decimal_invalid = {INT64_MIN, 0}`.
-- **No `operator==`, no `operator<=>`.** Value comparison goes through `decimal<pod_decimal>::compare` (delegates to `decimal_traits<pod_decimal>::compare` per `2a §6.3`). Defaulting equality here would silently field-compare `{1, 0}` and `{10, -1}` as unequal, contradicting the value-equality contract (`AC-C1`).
-- C++-level `sizeof` is implementation-defined and **not asserted** — only the C-ABI mirror `fixpp_decimal_t` (entity 4) carries a frozen layout assertion.
-
-### Validation rules
-
-| Rule | Source | Enforcement |
-|---|---|---|
-| `mantissa != INT64_MIN` for finite values | `2a §4.1` | `from_chars` returns `decimal_overflow` (AC-P8); `to_chars` returns `decimal_invalid_input` (AC-S1) |
-| `exponent ∈ [-38, 0]` for canonical values | `2a §6.3` | `from_chars` returns `decimal_overflow` (AC-P7); `to_chars` returns `decimal_invalid_input` (AC-S3) |
-| Trailing zeros in fractional part preserved | `2a §6.3` | `5.500` → `{5500, -3}` (AC-P5); canonicalization happens at compare time, not at parse |
-
-### State transitions
-
-N/A — `pod_decimal` is a pure-value type. No lifecycle.
-
-## 2. `decimal_traits<T>` — compile-time customization point
-
-The traits primary template is **undefined**; users specialize it. Required member surface (one specialization required per chosen `T`):
-
-| Required member | Kind | Signature (sketch) | Source |
+| Field | Type | Domain | Notes |
 |---|---|---|---|
-| `value_type` | type alias | `using value_type = T;` | `2a §4.2` |
-| `is_lossless_for_fix_float` | static constexpr `bool` | `true` if `T → pod_decimal → T` round-trips for every in-domain value | `2a §7.4` |
-| `max_serialized_bytes` | static constexpr `std::size_t` | upper bound on `to_chars` output (41 for `pod_decimal`) | `2a §6.5`, `spec §4.2` (AC-S5) |
-| `from_chars(span<const byte>, pmr*)` | static `noexcept` | parse FIX FLOAT bytes → `expected<T, decimal_error>` | `2a §6.1` |
-| `to_chars(T const&, span<byte>)` | static `noexcept` | serialize → `expected<size_t, decimal_error>` | `2a §6.2` |
-| `from_pod(pod_decimal)` | static `noexcept` | canonical-interchange convert → `expected<T, decimal_error>` | `2a §6.4` |
-| `to_pod(T const&)` | static `noexcept` | canonical-interchange convert → `expected<pod_decimal, decimal_error>` | `2a §6.4` |
-| `compare(T const&, T const&)` | static `noexcept` | `std::strong_ordering` by **value**, not representation | `2a §6.3` (AC-C1) |
-| `is_finite / is_zero / is_negative` | static `noexcept` | predicates the wire layer relies on | `2a §4.2` |
+| `mantissa` | `std::int64_t` | `[INT64_MIN + 1, INT64_MAX]` for finite values; `INT64_MIN` reserved for invalid sentinel | Significand of `mantissa × 10^exponent`. |
+| `exponent` | `std::int8_t` | `[-38, 0]` for finite values (canonical domain) | Power of 10. Negative exponent = fractional digits. `int8_t` admits `[-128, 127]`; values outside `[-38, 0]` are rejected at the C-ABI boundary (AC-S3 via `_format`; AC-C6 via the `_checked` siblings per research.md D-12 resolved 2026-05-12). |
 
-Specialization shipped in this feature: `decimal_traits<pod_decimal>` only. Users supply specializations for other `T`.
+**Invariants:**
 
-### Validation rules
+- **No `operator==` / `operator<=>` declared.** Field equality (which would say `{1,0} != {10,-1}`) silently contradicts value equality. Comparison goes through `decimal<pod_decimal>` (Entity 3), which delegates to `decimal_traits<pod_decimal>::compare` (canonicalizing per 2a §6.3).
+- **`pod_decimal_invalid` constant** = `{INT64_MIN, 0}` is the invalid sentinel. Total ordering by `compare`: `pod_decimal_invalid` is strictly greater than every finite value, equal only to itself (2a §6.3 step 0).
+- **Default-constructed `pod_decimal{}`** has `mantissa = 0, exponent = 0` — the value `0` (canonical zero), NOT the invalid sentinel. The sentinel is produced only by explicit construction, parse failure, or canonicalization overflow.
 
-- Every specialization MUST be `noexcept` end-to-end on the operations above (`[const §VIII §5]` + `2a §6.5`).
-- `is_lossless_for_fix_float` MUST accurately reflect whether `T` round-trips through `pod_decimal` for every value in the canonical domain. Replay sinks at **2e** / **2j** `static_assert(is_lossless_for_fix_float)` against the persistence target.
-- Any specialization that wraps a 3rd-party type that *can throw* (e.g., `boost::multiprecision::cpp_dec_float` parse) MUST funnel through `fixpp::core::detail::trap_throw` in `decimal_helpers.hpp` to convert the exception into a `decimal_error` (`2a §7.5`).
+**State transitions:** none — `pod_decimal` is an immutable value type. Transitions happen at the **value** layer (parse/format/compare/canonicalize), not at the struct layer.
 
-## 3. `decimal<T>` — value wrapper
+## Entity 2 — `fixpp::core::decimal_traits<T>` (compile-time customization point)
 
-| Member | Kind | Signature (sketch) | Source |
+**Header:** `include/fixpp/core/decimal.hpp` (extract source: `.specify/2a-decimal.md` v0.3 §4.2)
+
+`decimal_traits<T>` is a primary template with no general definition; users specialize per `T`. The library ships exactly one specialization in v1.0: `decimal_traits<pod_decimal>` (in `src/core/decimal.cpp`).
+
+**Required member types and constants:**
+
+| Member | Type | Notes |
+|---|---|---|
+| `value_type` | `T` | Representation type. |
+| `is_lossless_for_fix_float` | `static constexpr bool` | Trait author's promise: every FIX-valid input round-trips through `to_chars` to a byte sequence whose `from_chars` re-parse compares value-equal under `compare` (2a §6.3). `pod_decimal` declares `true`. |
+| `max_serialized_bytes` | `static constexpr std::size_t` | Upper bound on `to_chars` output length. `pod_decimal` declares `41`. |
+
+**Required static member functions (all `noexcept`):**
+
+| Function | Signature | Notes |
+|---|---|---|
+| `from_chars` | `static expected_t<T> from_chars(std::span<const std::byte> src, std::pmr::memory_resource* mr) noexcept;` | Parse FIX FLOAT bytes. `mr` is a required non-null parameter; non-allocating traits ignore it (D-6). |
+| `to_chars` | `static expected_t<std::size_t> to_chars(T const& v, std::span<std::byte> dst) noexcept;` | Serialize. Returns count of bytes written. |
+| `from_pod` | `static expected_t<T> from_pod(pod_decimal) noexcept;` | Convert from canonical PoD form. |
+| `to_pod` | `static expected_t<pod_decimal> to_pod(T const&) noexcept;` | Convert to canonical PoD form. Out-of-domain → `error::decimal_overflow`. |
+| `compare` | `static std::strong_ordering compare(T const&, T const&) noexcept;` | Total ordering by value. |
+| `is_finite` | `static bool is_finite(T const&) noexcept;` | Domain predicate. |
+| `is_zero` | `static bool is_zero(T const&) noexcept;` | Domain predicate. |
+| `is_negative` | `static bool is_negative(T const&) noexcept;` | Domain predicate. |
+
+**Invariants:**
+
+- **PMR required** on `from_chars` (not optional; not overloaded). The wire layer always passes the per-message arena `[arch §5.2]`.
+- **No `equal` member** — `decimal<T>::operator==` calls `compare(...) == 0` (avoids two-source-of-truth bug where `equal` and `compare` could be inconsistent).
+- **`noexcept` is a contract requirement** — traits wrapping throwing third-party libraries (e.g., `boost::multiprecision`) MUST trap via `fixpp::core::detail::trap_throw(...)` (helper in `include/fixpp/core/decimal_helpers.hpp`).
+- **Forward-compat:** new required members may only be added in a minor library version under a feature-test macro `FIXPP_DECIMAL_TRAITS_FEATURE_<NAME>`; existing specializations stay compiling.
+
+## Entity 3 — `fixpp::core::decimal<T>` (value-typed wrapper)
+
+**Header:** `include/fixpp/core/decimal.hpp` (extract source: `.specify/2a-decimal.md` v0.3 §4.3)
+
+**Fields:**
+
+| Field | Type | Visibility | Notes |
 |---|---|---|---|
-| ctor | `constexpr explicit` | `constexpr explicit decimal(T) noexcept` | `2a §4.3` |
-| `to_pod()` | const member | `noexcept → expected<pod_decimal, decimal_error>` | `2a §4.3` |
-| `from_pod(pod_decimal)` | static factory | `noexcept → expected<decimal<T>, decimal_error>` | `2a §4.3` |
-| `to<U>()` | const template member | `T == U`: compile-time short-circuit (returns source unchanged); `T ≠ U`: funnel through `pod_decimal`, returns `expected<decimal<U>, decimal_error>` | `2a §6.4`, `spec §4.4` (AC-X1..X3) |
-| `value()` | const member | `T const&` accessor for trait authors | `2a §4.3` |
+| `value_` | `T` | `private` | The underlying representation (e.g., `pod_decimal`). Default-initialized via `T{}` for the default ctor. |
 
-`fixpp::decimal_t` (the engine-wide alias) is `decimal<FIXPP_DECIMAL_T>`. Default `FIXPP_DECIMAL_T = ::fixpp::core::pod_decimal`.
+**Public surface (all 7 normative members + `decimal_default` alias preserved per 2a §4.3 — see research.md D-13):**
 
-### Cross-traits invariant (AC-X1..X3)
+| Member | Signature | Notes |
+|---|---|---|
+| Default ctor | `constexpr decimal() noexcept = default;` | `value_` default-initializes to `T{}` (zero for `pod_decimal`). |
+| Value ctor | `constexpr explicit decimal(T v) noexcept;` | Wraps an existing `T`. |
+| `value()` | `constexpr T const& value() const noexcept;` | Const-ref access to the wrapped representation. |
+| `parse` | `static expected_t<decimal> parse(std::span<const std::byte> src, std::pmr::memory_resource* mr) noexcept;` | Thin shell over `decimal_traits<T>::from_chars`. |
+| `format` | `expected_t<std::size_t> format(std::span<std::byte> dst) const noexcept;` | Thin shell over `decimal_traits<T>::to_chars`. |
+| `from<U>` | `template<class U> static expected_t<decimal> from(decimal<U> const&) noexcept;` | Cross-traits funnel through PoD. |
+| `to<U>` | `template<class U> expected_t<decimal<U>> to() const noexcept;` | Cross-traits funnel through PoD. **For `T == U`, the implementation short-circuits via `if constexpr` (returns the source unchanged, no funnel, no error)** — see research.md D-11. The return-type shape is uniform `expected_t<decimal<U>>` regardless. |
+| `operator==` | `friend bool operator==(decimal const& a, decimal const& b) noexcept { return traits_type::compare(a.value_, b.value_) == 0; }` | Value equality via `compare`. |
+| `operator<=>` | `friend std::strong_ordering operator<=>(decimal const& a, decimal const& b) noexcept { return traits_type::compare(a.value_, b.value_); }` | Three-way value compare. |
 
-- **AC-X1.** `T ≠ U`: `decimal<T>::to<U>()` always funnels through `pod_decimal`.
-- **AC-X2.** Funnel runs and source is outside the PoD `int64 × 10^[-38..0]` domain → `decimal_precision_loss`. No silent truncation.
-- **AC-X3.** `T == U`: compile-time short-circuit (`if constexpr (std::is_same_v<T, U>)`) returns the source unchanged. **Round-trip identity holds unconditionally**, including for source values outside the PoD domain (because the funnel doesn't run).
+**Namespace-scope alias** (preserved from 2a §4.3 line 169):
 
-## 4. `fixpp_decimal_t` — C-ABI frozen layout
-
-```c
-struct fixpp_decimal_t {
-    int64_t mantissa;       // offset 0, size 8
-    int8_t  exponent;       // offset 8, size 1
-    int8_t  _reserved[7];   // offset 9, size 7  (zero-init recommended; see AC-A4 / AC-A5b)
-};
+```cpp
+using decimal_default = decimal<pod_decimal>;
 ```
 
-| Invariant | Source | Enforcement |
-|---|---|---|
-| `sizeof(fixpp_decimal_t) == 16` | `[const §X §3]`, `2a §5.1` | `static_assert` in `src/capi/decimal_assert.cpp` (AC-A1) |
-| `alignof(fixpp_decimal_t) == 8` | `2a §5.1` | `static_assert` (AC-A1) |
-| `offsetof(mantissa) == 0` | `2a §5.1` | `static_assert` (AC-A2) |
-| `offsetof(exponent) == 8` | `2a §5.1` | `static_assert` (AC-A2) |
-| `offsetof(_reserved) == 9` | `2a §5.1` | `static_assert` (AC-A2) |
-| `is_standard_layout_v<fixpp_decimal_t>` | `2a §5.1` | `static_assert` (AC-A3) |
-| `_reserved` ignored on read in v1.0 | `spec §4.5` (AC-A4) | regression test `tests/capi/decimal_reserved_test.cpp` (seam #10) |
-| `_reserved` zero-init recommended, not required (writers may leave non-zero in v1.0) | `spec §4.5` (AC-A5b), clarification 2026-05-10 | `c_api.h` doc comment + tolerance test |
-| Tagged-release ABI golden | `[const §IX §5]`, `2a §9` (seam #4) | `tests/abi/golden/fixpp_decimal_t.abidiff` (Tier 2) |
+**Invariants:**
 
-### Initializer helpers
+- **Eager parse:** `decimal<T>::parse` consumes the input span; the resulting `decimal<T>` does **not** alias the input buffer. Callers may free or reuse the source bytes immediately.
+- **No arithmetic.** `decimal<T>` has no `+ - * /` operators. Users who need arithmetic specialize traits to a type that provides it (e.g., `boost::multiprecision::cpp_dec_float`).
 
-- `#define FIXPP_DECIMAL_INITIALIZER { 0, 0, {0,0,0,0,0,0,0} }` — C-style aggregate initializer (AC-A5).
-- `void fixpp_decimal_init(fixpp_decimal_t* out)` — runtime helper, zero-inits `_reserved` (AC-A5).
-- `#define FIXPP_DECIMAL_INVALID { INT64_MIN, 0, {0,0,0,0,0,0,0} }` — sentinel constant.
+## Entity 4 — `fixpp_decimal_t` (C-ABI struct)
 
-## 5. `fixpp_error_t` (decimal subset) — C-ABI error codes
+**Header:** `include/fix/c_api/decimal.h` (extract source: `.specify/2a-decimal.md` v0.3 §5.1)
 
-| Code | C-ABI numeric value | Source | Owner |
+**Fields:**
+
+| Field | Type | Offset | Notes |
 |---|---|---|---|
-| `FIXPP_ERR_DECIMAL_INVALID` | provisional, allocated 2026-05-10 (dated comment in `c_api.h`) | `[const §X §4]`, `spec §4.7` | this feature → **2i** ratifies |
-| `FIXPP_ERR_DECIMAL_PRECISION_LOSS` | provisional, allocated 2026-05-10 (dated comment in `c_api.h`) | `[const §X §4]`, `spec §4.7` | this feature → **2i** ratifies |
-| `FIXPP_ERR_BUFFER_TOO_SMALL` | reused generic (existing) | `2i` (Phase 3 skeleton) | **2i** |
+| `mantissa` | `int64_t` | 0 | Significand. |
+| `exponent` | `int8_t` | 8 | Power of 10. |
+| `_reserved` | `int8_t[7]` | 9 | Reserved for future use under `FIXPP_C_ABI_DECIMAL_RESERVED_USED` feature macro. **Ignored on read** in v1.0. |
 
-C++ side codes (not at the C-ABI):
+**Layout invariants (verified by `src/capi/decimal_assert.cpp` — seam #4):**
 
-| C++ code | Maps to C-ABI |
-|---|---|
-| `decimal_invalid_input` | `FIXPP_ERR_DECIMAL_INVALID` |
-| `decimal_overflow` | `FIXPP_ERR_DECIMAL_INVALID` (mantissa- / exponent-domain breach) |
-| `decimal_precision_loss` | `FIXPP_ERR_DECIMAL_PRECISION_LOSS` |
-| `decimal_buffer_too_small` | `FIXPP_ERR_BUFFER_TOO_SMALL` |
-
-### Stability
-
-Per `[const §X §4]`: once a numeric value is published in a tagged C-ABI release (`FIXPP_C_ABI_VERSION_MAJOR == 1`), it never changes meaning. The provisional-then-ratify pattern means this PR's numeric values become permanent at **2i**'s ratification PR, audited via `tools/abi_history/error_codes_v1.txt`.
-
-## Relationships
-
-```text
-                       ┌────────────────────┐
-                       │   pod_decimal      │  ← canonical interchange form (C++)
-                       │  (int64, int8)     │
-                       └─────────▲──────────┘
-                                 │ to_pod / from_pod
-                                 │
-                  ┌──────────────┴────────────────┐
-                  │                               │
-        ┌─────────────────┐              ┌────────────────────┐
-        │  decimal<T>     │  to<U>():    │  fixpp_decimal_t   │
-        │  (engine type,  │  funnel via  │  (C-ABI struct,    │
-        │   default T =   │  pod_decimal │   16-byte frozen)  │
-        │   pod_decimal)  │              └────────────────────┘
-        └─────────────────┘                       ▲
-                  ▲                               │ bytewise mirror
-                  │                               │
-                  │                       boundary fns:
-        decimal_traits<T>                 fixpp_decimal_parse / _format /
-        (compile-time customization)      _compare / _equal / _init
+```cpp
+static_assert(sizeof(fixpp_decimal_t) == 16);
+static_assert(alignof(fixpp_decimal_t) == 8);
+static_assert(offsetof(fixpp_decimal_t, mantissa) == 0);
+static_assert(offsetof(fixpp_decimal_t, exponent) == 8);
+static_assert(offsetof(fixpp_decimal_t, _reserved) == 9);
+static_assert(std::is_standard_layout_v<fixpp_decimal_t>);
 ```
 
-- `decimal<pod_decimal>` ⇄ `pod_decimal` ⇄ `fixpp_decimal_t` is a bytewise mirror plus zero-fill of `_reserved`. The C-ABI struct is the bottom — every traits specialization MUST be able to `to_pod` to it (AC-X1..X2).
-- `fixpp::decimal_t` (the engine-wide alias) and `fixpp_decimal_t` are decoupled: switching the C++ alias via `FIXPP_DECIMAL_T` does **not** change the C-ABI shape (AC-B4). The C-ABI form is canonical and frozen.
+**Macros:**
 
-## Domain invariants (cross-cutting)
+- `FIXPP_DECIMAL_INITIALIZER` → `{ 0, 0, {0,0,0,0,0,0,0} }` (zero `_reserved` for forward-compat).
+- `FIXPP_DECIMAL_INVALID` → `{ INT64_MIN, 0, {0,0,0,0,0,0,0} }` (invalid sentinel).
 
-1. **Value equality.** Two `pod_decimal` values are equal iff `mantissa_a × 10^exponent_a == mantissa_b × 10^exponent_b` mathematically, regardless of representation. (AC-C1)
-2. **Sentinel ordering.** `pod_decimal_invalid` orders strictly greater than every finite value, equal only to itself. (AC-C2)
-3. **Round-trip fidelity for in-domain values.** `parse` ∘ `format` is the identity on the canonical domain (modulo trailing-zero canonicalization noted in AC-S4). Tested in seam #2 (10⁴ generated samples + `[FIX50SP2 §3.3]` example table).
-4. **No silent precision loss.** Cross-traits `T → U` for `T ≠ U` over an out-of-PoD-domain value MUST surface `decimal_precision_loss` — never silently truncate.
-5. **Zero allocation, zero exception** between parse and `fromApp` callback (`[const §VIII §5]`).
+**Forward-compatibility rule (AC-A4 + AC-A5b):** consumers SHOULD initialize `_reserved` via `FIXPP_DECIMAL_INITIALIZER` or `fixpp_decimal_init()`; the engine tolerates non-zero `_reserved` in v1.0. Any future v1.x semantic for `_reserved` ships as a NEW explicit API, never a silent meaning change for existing consumers (per spec.md `Clarifications` 2026-05-10 line 62).
+
+## Entity 5 — `fixpp::core::error` decimal variants
+
+**Header:** `include/fixpp/core/error.hpp` (owned by **2k**; this feature contributes four named variants per 2a §7.4)
+
+**Variants this feature adds:**
+
+| C++ variant | C-ABI mapping | When raised | Remediation class |
+|---|---|---|---|
+| `fixpp::core::error::decimal_invalid_input` | `FIXPP_ERR_DECIMAL_INVALID` | Parse rejected (bad bytes, bare `.5`, empty input, unexpected char, embedded SOH); also `to_chars` on a `pod_decimal` with `exponent` outside `[-38, 0]` or `mantissa == INT64_MIN`. | Bad data — reject the message. |
+| `fixpp::core::error::decimal_overflow` | `FIXPP_ERR_DECIMAL_INVALID` (data error, same code) | Mantissa overflows `int64_t`, required `exponent < -38`, or `mantissa == INT64_MIN` from parse. | Bad data — reject the message; log loudly. |
+| `fixpp::core::error::decimal_precision_loss` | `FIXPP_ERR_DECIMAL_PRECISION_LOSS` | Lossy conversion (cross-traits) where the source value cannot be represented in the destination. | Caller / dictionary bug at conversion site. |
+| `fixpp::core::error::decimal_buffer_too_small` | `FIXPP_ERR_BUFFER_TOO_SMALL` (reused generic) | `to_chars` `dst` too small. | Caller bug — fix allocation. |
+
+**Invariants:**
+
+- **`expected_t<T>` is `std::expected<T, fixpp::core::error>`** per `[arch §4.1]`. Not a local alias; not a separate enum.
+- **C-ABI numeric values** for `FIXPP_ERR_DECIMAL_INVALID` and `FIXPP_ERR_DECIMAL_PRECISION_LOSS` are **provisional, allocated 2026-05-12 in this PR**, marked with a dated comment in `c_api_decimal.h`. **2i** ratifies by re-using the same numeric range in its own PR; any post-ratification change is a Tier 2 ABI breakage `[const §IX.5]`.
+
+## Entity 6 — `fixpp::detail::decimal_alias_sentinel<T>` (link-time guard)
+
+**Header:** `include/fixpp/core/decimal_alias.hpp` (extract source: `.specify/2a-decimal.md` v0.3 §4.4)
+
+**Fields:**
+
+| Member | Signature | Notes |
+|---|---|---|
+| `tag` | `template<class T> struct decimal_alias_sentinel { static char const tag; };` | Declared in the header (referenced by every TU). |
+
+**Companion namespace-scope symbol:**
+
+```cpp
+namespace fixpp::detail {
+inline char const* const fixpp_decimal_alias_lock =
+    &decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
+}
+```
+
+`src/core/decimal.cpp` emits **exactly one** specialization:
+
+```cpp
+template<> char const fixpp::detail::decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag = 0;
+```
+
+**Invariants:**
+
+- A consumer built with a `FIXPP_DECIMAL_T` different from the library's references a specialization the library never defined → unresolved-symbol link error (AC-B3, 2a §4.4).
+- `decimal_alias_sentinel` lives in `fixpp::detail` (NOT `fixpp::core`) per the round-1 finding that "sentinel namespace divergence" was a contract issue.
+
+## Cross-entity invariants
+
+- **Single canonical interchange = `pod_decimal`.** All cross-traits conversion (`from<U>` / `to<U>`) funnels through `pod_decimal`. No direct `T → U` path in v1.0 (spec.md §5 out-of-scope).
+- **Canonical domain everywhere = `mantissa ∈ [INT64_MIN+1, INT64_MAX]`, `exponent ∈ [-38, 0]`.** Anything outside is `decimal_invalid_input` at parse, `decimal_invalid_input` at format pre-check (AC-S3), `decimal_overflow` at trait conversion.
+- **`noexcept` everywhere on the C++ surface** (default-traits case). C-ABI boundary functions are `noexcept`-equivalent (they return `fixpp_error_t` or `int`; never throw).
+- **Zero allocation between parse and `fromApp`** `[const §VIII.5]`. PMR resource may be passed but non-allocating traits (`pod_decimal`) ignore it.

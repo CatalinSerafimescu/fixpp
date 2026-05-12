@@ -1,173 +1,189 @@
-# quickstart.md — 001-core-decimal
+---
+id: 001-core-decimal
+title: Quickstart — Build, test, bench, ABI golden, alias switch
+spec_kit_step: /plan Phase 1
+last_updated: 2026-05-12
+status: drafted (round-2 redraft)
+---
 
-> **Phase 1 output for `/speckit-plan`.** A getting-started for engineers picking up this feature: build, run unit tests, run the bench, verify the ABI golden, and switch the decimal alias for a wider-trait build. Mirrors the surface in [`spec.md`](./spec.md) §4 and the contracts in [`contracts/`](./contracts/).
+# Quickstart — 001-core-decimal
 
-## 0. Prerequisites
+Reproducible recipes for working on the decimal primitive end-to-end. All paths are relative to the `library/` submodule root; all commands assume cwd is the library submodule. Inherited toolchain from Phase 3 (Conan default profile + Clang 22 + Ninja + CMake ≥ 3.28 per `[const §II.1]`, `[const §III.1]`, `[const §III.2]`).
 
-Working tree must already pass the Phase 3 baseline (Tier 1 CI green; library submodule pinned at `6e1edd0` or later on `main`). Per `[const §XVII §7]`, the local toolchain is **Clang 22**, which the user already has installed (matches the Conan profile pin).
+## 1. Build and run the unit tests (default-traits path)
 
-```bash
-# inside the library submodule
-cd research/G19-fix-fpml-iso20022/library
-
-# verify Conan profile is initialized (Phase 3 step — should be a no-op)
-conan profile show linux-clang-debug
-```
-
-## 1. Build (default trait — `pod_decimal`)
-
-> ⚠️ Per `[const §XVII §7]` resource gate: when an AI agent needs to run a local build, it MUST surface an `AskUserQuestion` first. The user approves the build before it runs. Engineers running interactively are unaffected.
+The decimal primitive lives in `core/`; the relevant CMake target is `fixpp_core` for the library and `fixpp_core_tests` for the tests. Tier 1 entry point is the `linux-clang-debug` preset.
 
 ```bash
-# Conan install (debug profile)
-conan install . --profile linux-clang-debug --build=missing -of build/linux-clang-debug
-
-# CMake configure + build
+# Configure once (Phase 3 baseline; first-time only)
+conan install . --build=missing --profile=linux-clang-debug
 cmake --preset linux-clang-debug
-cmake --build --preset linux-clang-debug
 
-# unit tests
-ctest --preset linux-clang-debug --output-on-failure -R 'decimal_'
+# Build + test the decimal slice
+cmake --build --preset linux-clang-debug --target fixpp_core fixpp_core_tests
+ctest --preset linux-clang-debug -R '^decimal_'
 ```
 
-Expected: every `decimal_*_test` passes (parse, format, compare, cross_traits, alias, layout, reserved). The Python oracle test runs separately in step 4.
+Expected: every `decimal_*_test` target (per `plan.md §Project Structure > tests/core/`) is green. Coverage threshold for the touched files is `≥90 % line / ≥80 % branch` per `[const §IX.1]`; measured under the `linux-clang-coverage` preset.
 
-## 2. Run the bench (NFR check)
+## 2. Run all 10 test seams (seam → file map per plan.md)
 
-```bash
-# release-mode build needed for representative numbers
-cmake --preset linux-clang-release
-cmake --build --preset linux-clang-release --target decimal_bench
+Each seam has a dedicated entry point. None of them maps to "the existing `decimal_*_test.cpp`s collectively" — that was the round-1 defect closed here.
 
-# run with a stable CPU pin
-taskset -c 2 ./build/linux-clang-release/bench/core/decimal_bench \
-    --benchmark_min_time=2s --benchmark_repetitions=3
-```
-
-NFR bars (default trait, x86_64, 5-digit mantissa, warm cache; per `spec.md §6` and `2a §10 Q4`):
-
-| Op | Median target | Regression bar |
+| Seam # | Entry point | Command |
 |---|---|---|
-| `parse` | ≤ 50 ns | ±5 % vs `bench/baselines/decimal.json` |
-| `to_chars` | ≤ 30 ns | ±5 % |
-| `compare` | ≤ 20 ns | ±5 % |
+| 1 | `tests/support/mock_decimal_traits.hpp` (header-only; exercised by seams #3 and downstream **2b**) | (no standalone command — exercised by `decimal_cross_traits_test`) |
+| 2 | `tests/core/decimal_roundtrip_property_test.cpp` | `ctest --preset linux-clang-debug -R '^decimal_roundtrip_property_test$'` |
+| 3 | `tests/core/decimal_cross_traits_test.cpp` | `ctest --preset linux-clang-debug -R '^decimal_cross_traits_test$'` |
+| 4 | `tests/abi/golden/fixpp_decimal_t.abidiff` + `src/capi/decimal_assert.cpp` | Tier 2 abidiff (see §3) + compile-time static_asserts (run on every build) |
+| 5 | `bench/core/decimal_bench.cpp` | `cmake --build --preset linux-clang-debug --target decimal_bench && ./build/linux-clang-debug/bench/core/decimal_bench --benchmark_filter=Decimal` |
+| 6 | `tools/check_alloc.py` + `tests/alloc_guard/decimal_alloc_guard_test.cpp` | `python tools/check_alloc.py --target decimal_alloc_guard_test` (wraps `mallocnesia`) |
+| 7 | `tests/fuzz/fuzz_decimal_parse.cpp` | `cmake --build --preset linux-clang-debug --target fuzz_decimal_parse && ./build/linux-clang-debug/tests/fuzz/fuzz_decimal_parse -max_total_time=600` |
+| 8 | `tests/oracle/decimal_compare_oracle_test.py` | `pytest tests/oracle/decimal_compare_oracle_test.py -q` |
+| 9 | `tests/link/decimal_alias_mismatch_test.cmake` | `cmake -S tests/link -B build/link_test && cmake --build build/link_test --target decimal_alias_mismatch_test`. **Expected: link failure with `decimal_alias_sentinel<...>::tag` unresolved.** Suite parser asserts the failure is the expected one (not a stray compile error). |
+| 10 | `tests/core/decimal_reserved_tolerance_test.cpp` | `ctest --preset linux-clang-debug -R '^decimal_reserved_tolerance_test$'` |
 
-If the first `/implement` close lands ≤ 2× the targets, that's a TODO not a blocker per `2a §10 Q4`; the bar may be revised after the first wire-layer integration.
+## 3. Verify the C-ABI layout golden (Tier 2)
 
-## 3. Verify the ABI golden
-
-```bash
-# Tier 2 (manual / nightly) — only run after first /implement close
-./tools/abidiff_golden.sh tests/abi/golden/fixpp_decimal_t.abidiff \
-    build/linux-clang-release/lib/libfixpp.so
-```
-
-Expected: **clean diff**. Any drift is a Tier 2 hard-fail per `2a §9 seam #4`.
-
-## 4. Run the Python `Decimal` oracle (Tier 1, seam #8)
+The `fixpp_decimal_t` shape is frozen for `FIXPP_C_ABI_VERSION_MAJOR == 1` per `[const §X.1]`. The Tier 2 abidiff golden lives at `tests/abi/golden/fixpp_decimal_t.abidiff`. Run on demand (typically nightly or on the `windows` PR label per `[const §IX.6]`):
 
 ```bash
-# Conan-installed manylinux_2_28_x86_64 cp310 wheel (Phase 3 baseline already
-# builds bindings/python/_fixpp.so). The oracle test compares fixpp_decimal_compare
-# against Python's decimal.Decimal on every generated pair.
-pytest bindings/python/tests/test_decimal_oracle.py -v
+# Regenerate the abidiff dump from the currently-built libfixpp_core.so
+abidiff \
+  --leaf-changes-only \
+  --suppressions tests/abi/abidiff.suppr \
+  tests/abi/baseline/libfixpp_core.so \
+  build/linux-clang-release/lib/libfixpp_core.so \
+  > tests/abi/golden/fixpp_decimal_t.abidiff
 ```
 
-The test generates 10⁴ canonical-domain pairs and asserts the C-ABI compare agrees with the Python oracle.
+Drift in this golden is a Tier 2 hard-fail per `[const §IX.5]` — every change must be paired with an explicit MAJOR bump on `FIXPP_C_ABI_VERSION_MAJOR`. The compile-time `static_asserts` in `src/capi/decimal_assert.cpp` catch any layout drift at build time, before abidiff runs.
 
-## 5. Run the fuzz harness (seam #7)
+## 4. Benchmark and verify the latency NFRs
+
+Targets (per spec.md §6 / 2a §6.5, Linux/Clang/x86_64, warm cache, 5-digit mantissa):
+- `parse` ≤ 50 ns median
+- `format` ≤ 30 ns median
+- `compare` ≤ 20 ns median
 
 ```bash
-# Conan profile linux-clang-asan + libFuzzer
-cmake --preset linux-clang-asan
-cmake --build --preset linux-clang-asan --target fuzz_decimal_parse
+cmake --build --preset linux-clang-release --target decimal_bench
+./build/linux-clang-release/bench/core/decimal_bench \
+  --benchmark_filter='^(BM_decimal_(parse|format|compare))$' \
+  --benchmark_repetitions=10 \
+  --benchmark_format=json \
+  --benchmark_out=bench/results/decimal.json
 
-# 10-minute smoke run (Tier 1)
-./build/linux-clang-asan/tests/fuzz/fuzz_decimal_parse \
-    -max_total_time=600 -timeout=10 \
-    tests/fuzz/corpus/decimal/
+# Compare against bench/baselines/decimal_baseline.json (±5 % per [const §VIII.2])
+python tools/bench_compare.py \
+  --baseline bench/baselines/decimal_baseline.json \
+  --current  bench/results/decimal.json
 ```
 
-Expected: no ASan/UBSan finding. Long nightly runs in Tier 2.
-
-## 6. Switch the decimal alias for a wider build (consumer scenario)
-
-Consumers trading at venues that breach `pod_decimal`'s ±9.22 × 10¹⁰ ceiling at 8 fractional digits opt into a wider trait at build time:
+## 5. Sanitizers + property oracle (Tier 1, every PR)
 
 ```bash
-# 1. Provide a header that defines my::decimal128 and a decimal_traits<my::decimal128>
-#    specialization satisfying the surface in contracts/decimal_traits.hpp.
+# ASan + UBSan + TSan — every PR per [const §IX.2]
+ctest --preset linux-clang-asan   -R '^decimal_'
+ctest --preset linux-clang-ubsan  -R '^decimal_'
+ctest --preset linux-clang-tsan   -R '^decimal_'
 
-# 2. Configure with FIXPP_DECIMAL_T overridden + the user header pulled in:
-cmake --preset linux-clang-release \
-    -DFIXPP_DECIMAL_T=my::decimal128 \
-    -DFIXPP_DECIMAL_USER_HEADER='"my_decimal.hpp"'
-cmake --build --preset linux-clang-release
+# Python Decimal property oracle (Tier 1 — promoted from Tier 2 per 2a §9 seam 8)
+pytest tests/oracle/decimal_compare_oracle_test.py -q
 ```
 
-Two correctness checks happen automatically:
+## 6. Swap the engine-wide decimal alias (D-7 build-time customization)
 
-1. **Link-time guard (AC-B3, seam #9).** If two TUs are accidentally built with conflicting `FIXPP_DECIMAL_T`, the `decimal_alias_sentinel<T>::tag` symbol multiply-defines or unresolves at link time. **No silent ABI break.**
-2. **C-ABI invariance (AC-B4).** `fixpp_decimal_t` stays the frozen 16-byte PoD regardless of the C++ alias. Python and C consumers see one shape per build.
+For consumers who need a wider mantissa (`decimal128`, `boost::multiprecision`, custom). The library MUST be rebuilt with the chosen alias — link-time guard catches mismatches per AC-B3.
 
-## 7. Quick API tour (C++)
+1. Author a user-side header that declares the chosen `T` and any `decimal_traits<T>` specialization:
 
-```cpp
-#include <fixpp/core/decimal.hpp>
+   ```cpp
+   // my_project/fixpp_decimal.hpp
+   #include <boost/multiprecision/cpp_dec_float.hpp>
+   namespace my { using decimal128 = boost::multiprecision::cpp_dec_float_50; }
+   namespace fixpp::core {
+       template <> struct decimal_traits<my::decimal128> { /* ... */ };
+   }
+   ```
 
-// Parse FIX FLOAT bytes
-std::pmr::monotonic_buffer_resource arena{4096};
-constexpr auto bytes = std::as_bytes(std::span{"123.45", 6});
-auto v = fixpp::core::decimal_traits<fixpp::core::pod_decimal>
-            ::from_chars(bytes, &arena);
-// v == expected<pod_decimal{12345, -2}, _>
+2. Configure CMake with the user header + alias macro:
 
-// Compare by value (1.50 == 1.5 == 1.500)
-fixpp::decimal_t a{ fixpp::core::pod_decimal{150, -2} };
-fixpp::decimal_t b{ fixpp::core::pod_decimal{15,  -1} };
-auto cmp = fixpp::core::decimal_traits<fixpp::core::pod_decimal>
-            ::compare(a.value(), b.value());
-// cmp == std::strong_ordering::equal
+   ```bash
+   cmake --preset linux-clang-release \
+     -DCMAKE_CXX_FLAGS="\
+       -DFIXPP_DECIMAL_USER_HEADER=\\\"my_project/fixpp_decimal.hpp\\\" \
+       -DFIXPP_DECIMAL_T=my::decimal128"
+   ```
 
-// Cross-traits conversion (T == U: short-circuit; T != U: funnel via pod_decimal)
-auto same = a.to<fixpp::core::pod_decimal>();   // decimal<pod_decimal>, no error possible
-// auto wider = a.to<my::decimal128>();         // expected<decimal<decimal128>, decimal_error>
+   **Shell quoting note:** the inner `"..."` around the header path is required by the C preprocessor (it expands to `#include "my_project/fixpp_decimal.hpp"`). On bash, the escape pattern is `\\\"` (backslash-quote, backslash-quote) — the shell strips one level, leaving `\"` for CMake's `-D`, which strips to `"`. On zsh and Windows pwsh, prefer the explicit-flag-file form (`@flags.txt` with one quoted directive per line) to avoid per-shell quoting drift.
+
+3. Build, test, and verify the link-time guard didn't fire:
+
+   ```bash
+   cmake --build --preset linux-clang-release
+   ctest  --preset linux-clang-release -R '^decimal_alias_test$'
+   ```
+
+4. Verify the C-ABI shape **did not change** (it stays PoD `(int64, int8, int8[7])` per `[const §X.3]` regardless of the C++ alias):
+
+   ```bash
+   abidiff \
+     tests/abi/golden/fixpp_decimal_t.abidiff \
+     <(abidump build/linux-clang-release/lib/libfixpp_core.so)
+   ```
+
+   Expected: identical. The C-ABI is alias-agnostic by design.
+
+## 7. Allocation discipline (Linux)
+
+`tools/check_alloc.py` wraps `mallocnesia` to instrument the parse-format loop. Any allocation between `decimal<T>::parse(...)` and `decimal<T>::format(...)` fails CI per `[const §VIII.5]` and `[const §XV.1]`.
+
+```bash
+# Configure + build the alloc_guard test
+cmake --build --preset linux-clang-debug --target decimal_alloc_guard_test
+
+# Run under mallocnesia interceptor
+python tools/check_alloc.py \
+  --target decimal_alloc_guard_test \
+  --binary build/linux-clang-debug/tests/alloc_guard/decimal_alloc_guard_test \
+  --max-allocs 0
 ```
 
-## 8. Quick API tour (C / Python via SWIG)
+**Windows gap** documented per `[const §IX.6]`: no `mallocnesia` equivalent of comparable fidelity. Windows alloc-discipline coverage is a Tier 2 v1.x deferred item (research.md D-10).
 
-```c
-#include <fix/c_api.h>
+## 8. End-to-end Gate A round 2 dry run
 
-fixpp_decimal_t out;
-fixpp_decimal_init(&out);                         // zero-init _reserved (recommended)
-int rc = fixpp_decimal_parse("123.45", 6, &out);  // 0 on success
+Before submitting to Gate A round 2 (`/gate-a 001-core-decimal`), verify locally:
 
-char buf[64];
-size_t written;
-rc = fixpp_decimal_format(&out, buf, sizeof buf, &written);
+```bash
+# 1. All Tier 1 presets pass
+for preset in linux-clang-debug linux-clang-release linux-clang-asan linux-clang-ubsan linux-clang-tsan linux-clang-coverage; do
+  cmake --build --preset "$preset" --target fixpp_core fixpp_core_tests || exit 1
+  ctest --preset "$preset" -R '^decimal_' || exit 1
+done
 
-fixpp_decimal_t a = { 150, -2, {0,0,0,0,0,0,0} };
-fixpp_decimal_t b = { 15,  -1, {0,0,0,0,0,0,0} };
-int eq;
-rc = fixpp_decimal_equal(&a, &b, &eq);            // eq == 1 (value equality)
+# 2. Static analysis Tier 1 ([const §IX.4])
+clang-tidy --config-file=.clang-tidy include/fixpp/core/decimal*.hpp src/core/decimal.cpp src/capi/decimal*.cpp
+cppcheck --enable=all --suppress=missingIncludeSystem include/fixpp/core/ src/core/ src/capi/
+iwyu_tool.py -p build/linux-clang-debug include/fixpp/core/ src/core/
+
+# 3. Property oracle (Tier 1)
+pytest tests/oracle/decimal_compare_oracle_test.py -q
+
+# 4. Fuzzer smoke (Tier 1 — ≥10 min on the PR, longer overnight on main)
+./build/linux-clang-debug/tests/fuzz/fuzz_decimal_parse -max_total_time=600
+
+# 5. Bench against baselines (Tier 1)
+./build/linux-clang-release/bench/core/decimal_bench --benchmark_format=json > bench/results/decimal.json
+python tools/bench_compare.py --baseline bench/baselines/decimal_baseline.json --current bench/results/decimal.json
 ```
 
-## 9. CI evidence checklist (for PR open)
+Then submit:
 
-Per `[const §XVII §7]`, the PR description must include:
-
+```bash
+# From the parent repo:
+/gate-a 001-core-decimal
 ```
-local build: green on linux-clang-debug @ <git-sha>
-```
 
-Plus the Tier 1 jobs (Linux/Clang Debug+Release, Linux/GCC Release, ASan, UBSan, TSan, Coverage, clang-tidy, IWYU, Python pytest) all green on the PR's last commit. Tier 2 (Windows + abidiff golden) is manual/nightly and not required for the merge.
-
-## References
-
-- Spec: [`spec.md`](./spec.md)
-- Plan: [`plan.md`](./plan.md)
-- Research: [`research.md`](./research.md)
-- Data model: [`data-model.md`](./data-model.md)
-- Contracts: [`contracts/c_api_decimal.h`](./contracts/c_api_decimal.h), [`contracts/decimal_traits.hpp`](./contracts/decimal_traits.hpp)
-- Design doc (full *how*): `.specify/2a-decimal.md` v0.3
+Per `gate-a.md` skill: Codex review → Opus adversarial → up to 2 rewrites. Reviews land at `research/G19-fix-fpml-iso20022/research/reviews/codex_001-core-decimal_gate_a_review.md` (round 2; round-1 was renamed to `..._v1_review.md`).

@@ -1,78 +1,92 @@
-# Implementation Plan: 001-core-decimal — Decimal type
+---
+id: 001-core-decimal
+title: Implementation Plan — Decimal type (`fixpp::core::decimal<T>` + `fixpp_decimal_t` C-ABI)
+module: core/
+phase: 4
+status: drafted
+verdict: TBD
+spec_kit_step: /plan
+gate_a_round: 2 (round 1 verdict 2026-05-10: full bundle redraft — see ../../../research/G19-fix-fpml-iso20022/research/reviews/opus_001-core-decimal_gate_a_v1_adversarial_review.md)
+last_updated: 2026-05-12
+inherits_design: .specify/2a-decimal.md (v0.3, signed off 2026-05-07)
+inherits_spec: specs/001-core-decimal/spec.md (preserved from round 1; carries /clarify Q&A 2026-05-10)
+---
 
-**Branch**: `001-core-decimal` | **Date**: 2026-05-10 | **Spec**: [`spec.md`](./spec.md)
-**Input**: Feature specification from `/specs/001-core-decimal/spec.md` (anchored to `.specify/2a-decimal.md` v0.3, Gate A round-2 converged 2026-05-07)
+# Implementation Plan — 001-core-decimal
+
+**Branch:** `001-core-decimal` | **Date:** 2026-05-12 | **Spec:** [`spec.md`](spec.md)
+**Input:** Feature specification at `specs/001-core-decimal/spec.md`.
+
+> **Round-2 redraft note.** This plan is the round-2 redraft after Gate A round 1 closed with verdict **"full bundle redraft needed"** (see `Gate A` section at bottom). The /plan toolchain artifacts (`plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/`) were regenerated from a literal re-read of `.specify/2a-decimal.md` v0.3. `spec.md` (including the 2026-05-10 `/clarify` Q&A) is preserved verbatim from round 1.
 
 ## Summary
 
-Ship the FIX FLOAT primitive — `fixpp::core::pod_decimal`, `fixpp::core::decimal<T>`, `fixpp::core::decimal_traits<T>`, the `fixpp_decimal_t` C-ABI struct, and the boundary functions (`fixpp_decimal_parse / _format / _compare / _equal / _init`) — as the first feature of the `core/` module. The full *what* is in `spec.md` and the full *how* is locked in `.specify/2a-decimal.md` v0.3; this plan adds only what `/plan` is responsible for: Technical Context, Constitution gate evidence, project layout decision, and Phase 0/Phase 1 artifacts (`research.md`, `data-model.md`, `contracts/`, `quickstart.md`).
+Ship the FIX FLOAT representation primitive — `fixpp::core::pod_decimal`, `fixpp::core::decimal<T>`, `fixpp::core::decimal_traits<T>`, the `fixpp_decimal_t` C-ABI struct, and the five C-ABI boundary functions — as the first feature of the `core/` module. All contracts are literal extracts from `.specify/2a-decimal.md` v0.3 §4.1–§4.4 and §5.1–§5.2; no shape-altering redesign is introduced at `/plan` time. Unblocks the wire layer (**2b**), codegen (**2c**), and the C-ABI surface (**2i**).
 
-The work unblocks **2b** (wire FLOAT-field parser/serializer), **2c** (codegen FLOAT-typed accessors), and **2i** (C-ABI accessor `fixpp_msg_field_decimal`). Per `[const §XVII §1]` and Appendix A, this feature triggers all four mandatory controls: `/clarify` (done), `/analyze` (after `/tasks`), Codex Gate A (on this `/specify` + `/plan`), user `/plan` sign-off.
+Technical approach is locked by 2a v0.3:
+- `pod_decimal = { int64_t mantissa, int8_t exponent ∈ [-38, 0] }`. `INT64_MIN` mantissa is the invalid sentinel.
+- `decimal<T>` is a value-typed wrapper over `T`; `decimal_traits<T>` is the compile-time customization point.
+- C-ABI `fixpp_decimal_t` is a frozen 16-byte standard-layout struct with `_reserved[7]` at offset 9, **ignored on read** in v1.0.
+- Five C-ABI boundary functions, all `noexcept` at the C++ implementation side, with the by-value/`int`-return shapes locked in 2a §5.2.
+- Engine-wide alias selection via `FIXPP_DECIMAL_T` macro + `decimal_alias_sentinel<T>::tag` link-time guard (2a §4.4).
 
 ## Technical Context
 
-**Language/Version**: C++23 (`[const §II §1]` — no fallback; free use of concepts, `std::expected`, `std::pmr`, `noexcept`)
-**Primary Dependencies**: GoogleTest 1.17.0 (`[const §VII §1]`), Google Benchmark 1.9.5 (`[const §VIII §1]`); both already pinned in `conanfile.py` per Phase 3 close. No new third-party dependency in this feature.
-**Storage**: N/A — pure value primitive.
-**Testing**: GoogleTest (C++ unit + property), pytest (Python `Decimal` cross-language oracle, seam #8), libFuzzer (parse fuzz harness, seam #7), `mallocnesia` interceptor (Linux Tier 1 alloc guard, seam #6), `abidiff` (Tier 2 ABI golden, seam #4).
-**Target Platform**: Linux x86_64 — Tier 1 every PR; Windows MSVC — Tier 2 manual/nightly (`[const §IX §6]`).
-**Project Type**: Library — in-process C++23 (`[const §IV §1]`) plus C-ABI adjacent surface (`[const §IV §2]`).
-**Performance Goals** (default traits, x86_64, 5-digit mantissa, warm cache; `spec §6` NFRs):
-- `parse` ≤ 50 ns median
-- `to_chars` ≤ 30 ns median
-- `compare` ≤ 20 ns median
-- `±5%` regression bar vs `bench/baselines/` (`[const §VIII §2]`)
+**Language/Version:** C++23 (`[const §II.1]`). Free use of concepts, ranges, `std::expected`, `std::pmr`, deducing `this`. No fallback to earlier standards.
 
-**Constraints**:
-- Zero allocation between parse and `fromApp` (`[const §VIII §5]` + `[const §XV §1]`); enforced by `mallocnesia` symbol-scoped to `fixpp::*` / `fixpp_*`.
-- Zero exceptions on hot path (`noexcept` declarations + ASan/UBSan in Tier 1).
-- Coverage ≥ 90 % line / 80 % branch on touched files (`[const §IX §1]`).
-- `clang-tidy`, `clang-format`, `cppcheck`, IWYU all clean (`[const §IX §4]`).
+**Primary Dependencies:** GoogleTest 1.17.0, Google Benchmark 1.9.5 (already pinned via Conan from Phase 3 CI), libFuzzer (Clang built-in), `std::pmr` (libc++). No new Conan rows for this feature.
 
-**Scale/Scope**: Public surface is 1 PoD struct + 1 traits-driven template + 6 free C functions. Implementation TU ~500 LOC; tests ≥ 1500 LOC across the 10 test seams (`spec §9`). One Spec-Kit feature directory; one library PR.
+**Storage:** N/A (representation primitive; no persistence).
+
+**Testing:** GoogleTest + GoogleMock (C++); pytest against Python `Decimal` oracle (cross-language seam); libFuzzer for the parse seam; Google Benchmark for the latency seam (`[const §VII.1]`, `[const §VII.2]`, `[const §VII.7]`).
+
+**Target Platform:** Linux primary (Tier 1: Clang 22 Debug + Release + ASan + UBSan + TSan + Coverage; GCC Release sanity). Windows Tier 2 (manual / nightly) per `[const §IX.6]`.
+
+**Project Type:** C++23 library + C-ABI legal-isolation boundary + SWIG Python bindings (`[const §IV.1]`, `[const §IV.2]`, `[const §IV.3]`).
+
+**Performance Goals (Linux/Clang/x86_64, warm cache, 5-digit mantissa workload, default `pod_decimal` traits):**
+- `parse`: ≤ 50 ns median.
+- `format`: ≤ 30 ns median.
+- `compare`: ≤ 20 ns median.
+
+Bench harness `bench/core/decimal_bench.cpp` (seam #5) enforces these as Tier 1 regression bars per `[const §VIII.2]` (±5 % vs `bench/baselines/`).
+
+**Constraints:**
+- Zero allocation between parse and `fromApp` callback (`[const §VIII.5]`). Enforced by seam #6 (`mallocnesia` interceptor on Linux).
+- `noexcept` on every public function of `decimal<T>` and `decimal_traits<pod_decimal>` (`[arch §5.3]`). Throwing third-party traits wrap with `detail::trap_throw`.
+- C-ABI shape frozen for `FIXPP_C_ABI_VERSION_MAJOR == 1` (`[const §X.1]`); abidiff golden under `tests/abi/golden/` gates Tier 2.
+
+**Scale/Scope:** ~9 header files + ~3 source files + 10 named test seams + 1 fuzz harness + 1 bench harness + 1 alloc-guard tool. Roughly ~2500 LOC across implementation and tests; first feature of `core/`.
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design (post-`research.md` + `data-model.md` + `contracts/` write).*
+*GATE: Must pass before Phase 0 research. Re-evaluated post-Phase 1 design.*
 
-### Mandatory triggers (Appendix A)
+All citations below use canonical form `[const §Roman.arabic]` per `constitution.md:5`. Every cite was re-verified against the constitution after Phase 1 (see `Citation verification pass` at the bottom of this file).
 
-This feature triggers **all four** mandatory controls (ABI surface change + new error semantics):
-
-| Control | Status | Evidence |
+| Article cited | Topic | How this feature satisfies it |
 |---|---|---|
-| `/clarify` | ✅ done 2026-05-10 | 5 Q&A recorded under `spec.md §Clarifications — Session 2026-05-10` |
-| `/analyze` | ⏳ pending | runs after `/tasks` (drift check across constitution↔spec↔plan↔tasks) |
-| Codex Gate A | ⏳ pending | runs on combined `/specify` + this `/plan` per `[const §XVII §1]` |
-| User `/plan` sign-off | ⏳ pending | after Gate A; recorded in `phases/phase-4.md` Track Log |
+| `[const §II.1]` | C++23, no earlier fallback | Plan targets C++23 only; uses `std::expected`, `std::pmr`. |
+| `[const §VI.4]`, `[const §VI.5]` | Bidirectional spec traceability + Normative References | Inherits W-009 + FLOAT-typed accessor families from 2a Appendix A (catalogue rows enumerated in `spec.md` front-matter). `spec.md §13` References lists `[FIX50SP2 §3.3]`, `[const §VIII.5]`, `[const §X.1]`, `[const §X.2]`, `[const §X.3]`, `[const §X.4]`, `[arch §4.1]`, `[arch §4.10]`, `[arch §5.3]`, `[arch §5.5]`, `[arch §6]`, `[arch §10]`. |
+| `[const §VII.1]`, `[const §VII.2]`, `[const §VII.3]` | GoogleTest + pytest + TDD | `tasks.md` will be ordered red-green-refactor per test seam; pytest seam (#8) for Python `Decimal` oracle. |
+| `[const §VII.7]` | Fuzzing on parser-touching modules | `tests/fuzz/fuzz_decimal_parse.cpp` (seam #7) on every Tier 1 PR. |
+| `[const §VIII.2]` | ±5 % perf regression budget | Bench harness (seam #5) runs in Tier 1 with `bench/baselines/`. |
+| `[const §VIII.5]` | Zero allocation on hot path | AC-P9 + AC-C4 + seam #6 (`tools/check_alloc.py` + `mallocnesia`). |
+| `[const §IX.1]` | ≥90 % line / ≥80 % branch on touched modules | `linux-clang-coverage` preset measures the new files; Tier 1 gate. |
+| `[const §IX.2]` | Tier 1 sanitizers | ASan + UBSan + TSan presets cover the parse-format loop. |
+| `[const §IX.4]` | Tier 1 static analysis clean | clang-tidy + clang-format + cppcheck + IWYU; pre-commit + Tier 1. |
+| `[const §IX.5]` | abidiff against last tagged ABI | `tests/abi/golden/fixpp_decimal_t.abidiff` snapshot (seam #4). |
+| `[const §X.1]` | C-ABI versioned contract | `FIXPP_C_ABI_VERSION_MAJOR == 1`; struct shape frozen. |
+| `[const §X.2]` | No C++ leakage through C-ABI | Only `extern "C"` declarations in `include/fix/c_api/decimal.h`; CI checks via `nm` / `dumpbin`. |
+| `[const §X.3]` | Decimal at C-ABI is PoD `(int64 mantissa, int8 exponent)` | Literal layout per 2a §5.1; AC-A1 + AC-A2 + AC-A3 layout asserts. |
+| `[const §X.4]` | Bounded `fixpp_error_t` + forwards-compat | Three codes allocated under the 2i numeric range (dated comment in `c_api_decimal.h`); rest deferred to 2i ratification. |
+| `[const §X.5]` | Reentrancy contract per C-ABI symbol | Doc-comment on each of the five boundary fns names thread-safe / single-thread / requires-session-lock posture. |
+| `[const §X.6]` | ABI-affecting features trigger four controls | This feature is `gate_a_required: yes` in spec front-matter; `/clarify` ran 2026-05-10; `/analyze` runs after Gate A round 2 passes. |
+| `[const §XV.1]` | Heap-allocate per message on hot path is banned | Plan honors AC-P9; seam #6 enforces; no `new`/`delete` between parse and format. |
+| `[const §XVII.1]` | Codex Gate A before `/tasks` | This plan is the round-2 redraft submitted to Gate A round 2 (Codex review → Opus adversarial). |
+| `[const §XVII.3]` | Independence between author and reviewer | Opus author (`/plan`) + Codex reviewer (Gate A) are independent agents per `/gate-a` skill. |
 
-### Article-by-article gate
-
-| Article | Verdict | Evidence |
-|---|---|---|
-| **II — Language / compilers / platforms** | ✅ | C++23 only; Linux/Clang Tier 1, Windows/MSVC Tier 2; no compiler-version pin |
-| **III — Build & dependency toolchain** | ✅ | CMake ≥ 3.28 + Ninja + Conan profiles already in tree (Phase 3); no new third-party dep |
-| **IV — Distribution model** | ✅ | Adds C-ABI symbols `fixpp_decimal_*` (decimal slice; rest of C-ABI surface owned by **2i**) |
-| **V — License** | ✅ | All new code AGPL-3.0; no LGPL dep; no new vendoring |
-| **VI — Spec coverage** | ✅ | Inherits W-009 (FLOAT family) per `spec §8` and `2a §11` — **no new catalogue row** (explicit) |
-| **VII — Testing** | ✅ | All 10 test seams (`spec §9`) ship in this PR (clarification Q6 resolved 2026-05-10); fuzz harness present (parser-touching → mandatory per §VII §7); pytest oracle Tier 1-promoted |
-| **VIII — Performance budgets** | ✅ | Bench harness in this PR (`bench/core/decimal_bench.cpp`); ±5 % regression bar; baseline locked at first `/implement` close |
-| **IX — Coverage / sanitizers / static analysis** | ✅ | Tier 1: Linux/Clang Debug+Release, Linux/GCC Release sanity, ASan+UBSan+TSan, coverage, clang-tidy, IWYU, fuzz; Tier 2: abidiff golden |
-| **X — ABI policy** | ✅ | This is the feature **establishing** decimal at the C-ABI boundary per §X §3; `extern "C"` only; `static_assert` on layout (`AC-A1..A6`); error-code numeric block per §X §4 (provisional values, dated comment, ratified by **2i**) |
-| **XI — Concurrency** | ✅ | N/A — pure-value primitive; `noexcept` everywhere; no awaitable, no mutex |
-| **XII — Security** | ✅ | N/A — no TLS / cert / crypto surface |
-| **XIII — Observability** | ✅ | N/A — no logger / OTel surface |
-| **XIV — Pluggable interfaces** | ✅ | `decimal_traits<T>` is a **compile-time** customization point (no pure-virtual surface; `[const §XIV §2]` ≤ 5 method rule does not apply — no runtime polymorphism per `[const §II §1]` and `2a §2`) |
-| **XV — Banned patterns** | ✅ | No heap on hot path (#1); no thread-per-session (#2 N/A); no global lock (#3 N/A); no sync I/O (#4 N/A); no sync logging (#5 N/A); typed accessors via constexpr metadata (#6 — codegen layer 2c); no `std::multimap` (#8); no `std::mutex` in coroutine ctx (#9 N/A); not LGPL (#12); not eager-codegen-only (#13 — runtime path supported via traits) |
-| **XVI — Spec Kit workflow** | ✅ | Following `/specify` → `/clarify` → `/plan` → `/tasks` → `/analyze` → `/checklist` → `/taskstoissues` → `/implement` → `/simplify` → CI → Gate B in clean contexts |
-| **XVII — Codex review gates** | ✅ | Gate A required (§1 — public C++ API + C-ABI); Gate B required for impl PR (§2); local pre-PR build gate (§7) applies — `local build: green on linux-clang-debug @ <git-sha>` line in PR body |
-| **XVIII — Roadmap discipline** | ✅ | v1.0 scope; no early shipping of post-1.0 protocols |
-| **XIX — Documentation** | ✅ | Doxygen on the public surface; quickstart shipped here |
-| **XX — Amendments** | ✅ | None proposed — feature fits inside the existing constitution unmodified |
-
-### Verdict
-
-**Gates pass.** No constitutional violations to track. The Complexity Tracking section is empty.
+**Gates pass ✅** — all cited articles resolve under canonical form to actual constitution text (verified post-Phase-1 pass below). No violations require justification, so `Complexity Tracking` is empty.
 
 ## Project Structure
 
@@ -80,103 +94,148 @@ This feature triggers **all four** mandatory controls (ABI surface change + new 
 
 ```text
 specs/001-core-decimal/
-├── plan.md              # this file
-├── spec.md              # /specify output (already on disk, /clarify-applied)
-├── research.md          # Phase 0 — this run
-├── data-model.md        # Phase 1 — this run
-├── contracts/           # Phase 1 — this run
-│   ├── c_api_decimal.h         # C-ABI extract
-│   └── decimal_traits.hpp      # C++ traits API extract
-├── quickstart.md        # Phase 1 — this run
-└── tasks.md             # Phase 2 — produced by /speckit-tasks (NOT this run)
+├── plan.md              # this file (/speckit-plan output, round-2 redraft 2026-05-12)
+├── spec.md              # preserved verbatim from round 1; carries /clarify Q&A 2026-05-10
+├── research.md          # Phase 0 output (round-2 redraft)
+├── data-model.md        # Phase 1 output (round-2 redraft)
+├── quickstart.md        # Phase 1 output (round-2 redraft)
+├── contracts/
+│   ├── c_api_decimal.h        # Phase 1 — literal extract from 2a §5.1, §5.2
+│   └── decimal_traits.hpp     # Phase 1 — literal extract from 2a §4.1, §4.2, §4.3, §4.4
+└── tasks.md             # Phase 2 output (/speckit-tasks, NOT created by /speckit-plan)
 ```
 
-### Source code (library repository root)
-
-The Phase 3 module skeleton is already in place. This feature populates the decimal-shaped slice of each existing module dir; no new top-level dirs are created.
+### Source Code (library submodule root)
 
 ```text
 include/
-├── fixpp/core/
-│   ├── decimal.hpp                   # NEW — pod_decimal, decimal<T>, decimal_traits<T>
-│   ├── decimal_alias.hpp             # NEW — FIXPP_DECIMAL_T machinery, alias sentinel
-│   └── decimal_helpers.hpp           # NEW — detail::trap_throw helper for trait authors
+├── fixpp/
+│   └── core/
+│       ├── decimal.hpp                  # NEW — pod_decimal, decimal<T>, decimal_traits<T> declarations
+│       ├── decimal_alias.hpp            # NEW — FIXPP_DECIMAL_T plumbing + decimal_alias_sentinel<T>
+│       └── decimal_helpers.hpp          # NEW — detail::trap_throw for throwing-3p traits
 └── fix/
-    └── c_api.h                       # MODIFY — add fixpp_decimal_t + 6 fns + error codes (co-owned with 2i)
+    └── c_api/
+        └── decimal.h                    # NEW — fixpp_decimal_t struct + FIXPP_DECIMAL_INITIALIZER/_INVALID + 5 boundary fns
+                                         #       (carved out of include/fix/c_api.h; included by it; co-owned with 2i)
 
 src/
 ├── core/
-│   └── decimal.cpp                   # NEW — pod_decimal traits impl + alias sentinel def
+│   └── decimal.cpp                      # NEW — pod_decimal traits impl + decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag def
 └── capi/
-    ├── decimal.cpp                   # NEW — fixpp_decimal_* boundary fn impls (co-owned with 2i)
-    └── decimal_assert.cpp            # NEW — layout static_asserts (sizeof, alignof, offsetof)
+    ├── decimal.cpp                      # NEW — fixpp_decimal_* boundary fn impls (co-owned with 2i)
+    └── decimal_assert.cpp               # NEW — sizeof/alignof/offsetof static_asserts (seam #4 anchor)
 
 tests/
 ├── core/
-│   ├── decimal_parse_test.cpp        # NEW — AC-P1..P10
-│   ├── decimal_format_test.cpp       # NEW — AC-S1..S6
-│   ├── decimal_compare_test.cpp      # NEW — AC-C1..C6 + Python oracle property test
-│   ├── decimal_cross_traits_test.cpp # NEW — AC-X1..X3
-│   └── decimal_alias_test.cpp        # NEW — AC-B1..B4 link-time mismatch
-├── capi/
-│   ├── decimal_layout_test.cpp       # NEW — AC-A1..A6 layout regression
-│   └── decimal_reserved_test.cpp     # NEW — AC-A4 _reserved tolerance (seam #10)
+│   ├── decimal_parse_test.cpp                       # NEW — AC-P1..P10 (parse functional ACs)
+│   ├── decimal_format_test.cpp                      # NEW — AC-S1..S6 (serialize functional ACs)
+│   ├── decimal_compare_test.cpp                     # NEW — AC-C1..C6 (compare/equal functional ACs)
+│   ├── decimal_cross_traits_test.cpp                # NEW — AC-X1..X3 (seam #3)
+│   ├── decimal_alias_test.cpp                       # NEW — AC-B1..B4 (build-time alias macro)
+│   ├── decimal_roundtrip_property_test.cpp          # NEW — seam #2 (10⁴ generated + [FIX50SP2 §3.3] table)
+│   ├── decimal_reserved_tolerance_test.cpp          # NEW — seam #10 (AC-A4 _reserved garbage tolerance)
+│   └── decimal_capi_layout_test.cpp                 # NEW — AC-A1..A5b layout assertions (compile + runtime)
+├── support/
+│   └── mock_decimal_traits.hpp                      # NEW — seam #1 (header-only failing-traits helper)
 ├── abi/
 │   └── golden/
-│       └── fixpp_decimal_t.abidiff   # NEW — Tier 2 ABI golden (seam #4)
+│       └── fixpp_decimal_t.abidiff                  # NEW — seam #4 Tier 2 abidiff golden
+├── alloc_guard/
+│   └── decimal_alloc_guard_test.cpp                 # NEW — seam #6 runs parse-format loop under mallocnesia
 ├── fuzz/
-│   └── fuzz_decimal_parse.cpp        # NEW — libFuzzer harness (seam #7)
-└── support/
-    └── mock_decimal_traits.hpp       # NEW — parameterizable failing-traits helper (seam #1)
+│   └── fuzz_decimal_parse.cpp                       # NEW — seam #7 (libFuzzer harness on parse)
+├── oracle/
+│   └── decimal_compare_oracle_test.py               # NEW — seam #8 (Python Decimal property oracle, Tier 1)
+└── link/
+    └── decimal_alias_mismatch_test.cmake            # NEW — seam #9 (two-TU build expected to fail link)
 
 bench/
 └── core/
-    └── decimal_bench.cpp             # NEW — Google Benchmark for §6 NFRs (seam #5)
+    └── decimal_bench.cpp                            # NEW — seam #5 (Google Benchmark parse/format/compare bars)
 
-bindings/python/tests/
-└── test_decimal_oracle.py            # NEW — Python `Decimal` property oracle (seam #8, Tier 1-promoted)
+tools/
+└── check_alloc.py                                   # NEW — seam #6 wraps mallocnesia for the alloc-guard test
 ```
 
-**Structure Decision**: **Existing single-library layout** (Phase 3 skeleton). No new option needed. The core / capi / tests / bench module dirs are already carved; this feature populates the decimal-shaped slice. The Python oracle test lives under `bindings/python/tests/` since pytest harness already runs there (Tier 1).
+**Structure Decision:** single library, no web/mobile/cli split. Follows the established Phase-3 layout (`include/fixpp/core/`, `src/core/`, `src/capi/`, `tests/`, `bench/`). All new paths above are created by this feature; no existing files modified except `include/fix/c_api.h` (which gains an `#include "fix/c_api/decimal.h"` line — coordinated with 2i).
+
+### Test seam → file mapping (10/10 — closes Root Cause #3)
+
+This sub-section is the answer to Opus root cause #3 ("seam→file map partial") from round 1. Every one of the 10 test seams in `spec.md §9` is bound to a named on-disk file. This table also serves as the `/tasks` input — each row becomes a TDD task.
+
+| Seam # | spec.md §9 description | On-disk path(s) | NFR / AC linkage |
+|---|---|---|---|
+| 1 | `mock_decimal_traits<T>` header-only failing-traits | `tests/support/mock_decimal_traits.hpp` | Used by seam #3 and downstream **2b** tests. |
+| 2 | Round-trip property tests — 10⁴ generated samples + `[FIX50SP2 §3.3]` example table | `tests/core/decimal_roundtrip_property_test.cpp` | AC-P5, AC-S2..S4, §6 property test. |
+| 3 | Cross-traits round-trip — value-preserving identity + `decimal_precision_loss` for out-of-domain | `tests/core/decimal_cross_traits_test.cpp` | AC-X1, AC-X2, AC-X3. |
+| 4 | C-ABI layout golden (`abidiff` snapshot — Tier 2 hard-fail) | `tests/abi/golden/fixpp_decimal_t.abidiff` + `src/capi/decimal_assert.cpp` | AC-A1..A6, `[const §IX.5]`. |
+| 5 | Latency regression — `parse` / `format` / `compare` Google Benchmark bars | `bench/core/decimal_bench.cpp` | NFR rows §6 (50 / 30 / 20 ns), `[const §VIII.2]`. |
+| 6 | Allocation guard (Linux) — `mallocnesia` interceptor on parse-format loop | `tools/check_alloc.py` + `tests/alloc_guard/decimal_alloc_guard_test.cpp` | AC-P9, `[const §VIII.5]`, `[const §XV.1]`. |
+| 7 | Fuzzer (libFuzzer) — `fuzz_decimal_parse.cpp` against ASan + UBSan invariants | `tests/fuzz/fuzz_decimal_parse.cpp` | `[const §VII.7]`, `[const §IX.4]`. |
+| 8 | Property oracle (Python `Decimal`) — gates `compare` | `tests/oracle/decimal_compare_oracle_test.py` | AC-C5, Tier 1 promoted per 2a §9 seam #8. |
+| 9 | `FIXPP_DECIMAL_T` link-time mismatch — two-TU build expected to fail link | `tests/link/decimal_alias_mismatch_test.cmake` (CMake harness invoking two `add_executable` calls; CI captures linker error and asserts) | AC-B3, 2a §4.4 sentinel rule. |
+| 10 | `_reserved` byte tolerance — C consumer with garbage `_reserved` parses correctly | `tests/core/decimal_reserved_tolerance_test.cpp` | AC-A4, AC-A5b. |
+
+**Rule:** no seam may map to "the existing `decimal_*_test.cpp`s collectively". Each seam has at least one dedicated named file. Cross-cutting ACs (AC-P*, AC-S*, AC-C*, AC-X*, AC-A*, AC-B*) get their own per-section test files (`decimal_parse_test.cpp`, etc.) under `tests/core/` — these are not "seam files" in the §9 sense but cover the per-AC unit checks.
 
 ## Complexity Tracking
 
-> **No constitutional violations to justify.** Section intentionally empty.
+> No Constitution Check violations. Section intentionally empty.
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| _(none)_ | — | — |
+| — | — | — |
 
-## Phase 0 — Outline & Research
+## Gate A
 
-→ **Output**: [`research.md`](./research.md)
+### Round 1 — 2026-05-10 (closed: full bundle redraft)
 
-The research is largely **inherited** from `.specify/2a-decimal.md` v0.3 (Gate A round-2 converged), which carries the converged decisions for: representation choice (PoD `int64 × 10^[-38..0]`), compare algorithm (digit-string, no `__int128`), cross-traits funnel (through `pod_decimal`), error model (4 C++ codes + 3 C-ABI codes), trait amplification mitigation (one alias per build, link-time sentinel), and the 10 test seams. `research.md` is therefore short — it records each decision once, points back at the design-doc section, and records the disposition of the open questions resolved during `/clarify` (Q5, Q6) plus the still-deferred questions (Q1, Q2, Q3, Q4).
+| Round | Codex P1 | Codex P2 | Codex P3 | Opus post-judging P1 | P2 | P3 | Verdict | Reviews |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 3 | 3 | 1 | 7 | 6 | 5 | **Full bundle redraft needed** (3 root causes) | [codex_v1](../../../research/G19-fix-fpml-iso20022/research/reviews/codex_001-core-decimal_gate_a_v1_review.md), [opus_v1](../../../research/G19-fix-fpml-iso20022/research/reviews/opus_001-core-decimal_gate_a_v1_adversarial_review.md) |
 
-## Phase 1 — Design & Contracts
+Root causes per Opus: (1) `contracts/` extract authored from memory of 2a-decimal.md v0.3 (six independent shape divergences across `_format`, `_compare`, `_equal`, sentinel, `expected_t<T>` rebinding, decimal<T> member surface); (2) the broken two-symbol citation form (Roman numeral and arabic numeral split with a literal space-and-second-`§` instead of the canonical dot) was mass-rewritten in the `/plan` toolchain from canonical `[const §X.Y]`; (3) `plan.md §Project Structure` test-seam→file map partial (seams #2, #6 unfilled). Step D incremental rewrite skipped per user decision 2026-05-12; redraft submitted for round 2.
 
-→ **Outputs**: [`data-model.md`](./data-model.md), [`contracts/`](./contracts/), [`quickstart.md`](./quickstart.md)
+### Round 2 — 2026-05-12 (pending Codex review)
 
-- **`data-model.md`** — the 5 entities (`pod_decimal`, `decimal<T>`, `decimal_traits<T>`, `fixpp_decimal_t`, `decimal_error` / C-ABI subset of `fixpp_error_t`); validation rules from `spec §4`; relationships; canonical-form invariants.
-- **`contracts/`** — two extracts:
-  - `c_api_decimal.h` — the C-ABI declarations the feature adds to `include/fix/c_api.h` (struct, init helpers, 6 boundary fns, 3 error-code provisional values).
-  - `decimal_traits.hpp` — the C++ traits API and `decimal<T>` member surface as the final reviewer-facing contract (mirrors `2a §4.2 / §4.3`).
-- **`quickstart.md`** — getting-started for the feature (build, run unit tests, run the bench, verify the ABI golden, switch the alias for a wider-trait build).
+Redraft applied:
+- Root cause #1: contracts are **literal extracts** from `.specify/2a-decimal.md` v0.3 §4.1–§4.4 and §5.1–§5.2. Each contract block has a `// extract from .specify/2a-decimal.md v0.3 §X` header so lineage is visible. `expected_t<T>` is `fixpp::core::expected_t<T>` per `[arch §4.1]` (alias for `std::expected<T, fixpp::core::error>`); no local `decimal_error` enum. `decimal<T>` keeps every normative member from 2a §4.3 (default ctor, `parse`, `format`, `from<U>`, `to<U>`, friend `operator==` / `operator<=>`, `decimal_default` alias).
+- Root cause #2: all `[const §...]` citations in this round-2 bundle use canonical `[const §Roman.arabic]` form. Verification pass below.
+- Root cause #3: test seam → file mapping table above lists all 10 seams against named paths; seam #2 and #6 now have dedicated files.
+- AC-X3 carve (round-1 P1): contract preserves uniform `expected_t<decimal<U>>` return for `to<U>()` per 2a §4.3 signature; the `if constexpr (std::is_same_v<T,U>)` short-circuit is an **implementation choice** at `/implement` time (per spec.md `Clarifications` 2026-05-10 line 63), not an API shape change. No 2a v0.4 amendment required.
 
-### Agent context update
+**One NEEDS CLARIFICATION surfaced and resolved during round 2 (`/clarify` 2026-05-12):** AC-C6 (spec.md `/clarify` 2026-05-10) requires `fixpp_decimal_compare` / `_equal` to return `FIXPP_ERR_DECIMAL_INVALID` on out-of-domain inputs, but 2a §5.2 freezes their signatures as `int`-direct-return (no error channel). Resolved as **option 1** — add `_compare_checked` / `_equal_checked` siblings that own AC-C6's defensive validation; bare entry points stay 2a §5.2 verbatim. See `spec.md Clarifications` Session 2026-05-12 + `research.md` D-12. Per the round-2 redraft brief: "the round-1 failure mode was silent override; the fix is explicit dissent." This was the dissent; resolved.
 
-The library-side `CLAUDE.md` is updated between `<!-- SPECKIT START -->` and `<!-- SPECKIT END -->` to point at this `plan.md`.
+### Citation verification pass (round 2)
 
-## Re-evaluation post-design
+| Cite | Resolves to | OK |
+|---|---|---|
+| `[const §II.1]` | `constitution.md:26` — "Language standard: C++23." | ✅ |
+| `[const §IV.1]` | `constitution.md:56` — "C++ library is the primary public surface." | ✅ |
+| `[const §IV.2]` | `constitution.md:57` — "C ABI is the legal isolation boundary." | ✅ |
+| `[const §IV.3]` | `constitution.md:58` — "Python bindings ship via SWIG over the C ABI." | ✅ |
+| `[const §VI.4]` | `constitution.md:79` — "Bidirectional traceability." | ✅ |
+| `[const §VI.5]` | `constitution.md:80` — "Normative References section." | ✅ |
+| `[const §VII.1]` | `constitution.md:87` — "GoogleTest + GoogleMock." | ✅ |
+| `[const §VII.2]` | `constitution.md:88` — "pytest against the SWIG bindings." | ✅ |
+| `[const §VII.3]` | `constitution.md:89` — "TDD is mandatory." | ✅ |
+| `[const §VII.7]` | `constitution.md:93` — "Fuzzing — libFuzzer corpus." | ✅ |
+| `[const §VIII.2]` | `constitution.md:100` — "Regression budget: ±5 %." | ✅ |
+| `[const §VIII.5]` | `constitution.md:106` — "Allocator policy on the hot path: zero new/delete." | ✅ |
+| `[const §IX.1]` | `constitution.md:113` — "Coverage thresholds." | ✅ |
+| `[const §IX.2]` | `constitution.md:117` — "Sanitizers — Tier 1." | ✅ |
+| `[const §IX.4]` | `constitution.md:119` — "Static analysis — Tier 1." | ✅ |
+| `[const §IX.5]` | `constitution.md:124` — "ABI check (from the first tagged C ABI release onward)." | ✅ |
+| `[const §IX.6]` | `constitution.md:125` — "Two-tier CI." | ✅ |
+| `[const §X.1]` | `constitution.md:133` — "C ABI is a versioned contract." | ✅ |
+| `[const §X.2]` | `constitution.md:134` — "No C++ symbol leakage through the C ABI." | ✅ |
+| `[const §X.3]` | `constitution.md:135` — "Decimal at the C ABI boundary: PoD." | ✅ |
+| `[const §X.4]` | `constitution.md:136` — "Error reporting at the C ABI." | ✅ |
+| `[const §X.5]` | `constitution.md:137` — "Reentrancy contract." | ✅ |
+| `[const §X.6]` | `constitution.md:138` — "ABI-affecting features trigger all four mandatory controls." | ✅ |
+| `[const §XV.1]` | `constitution.md:207` — "Heap-allocate per message or per field on the hot path." | ✅ |
+| `[const §XVII.1]` | `constitution.md:245` — "Gate A — Design review." | ✅ |
+| `[const §XVII.3]` | `constitution.md:257` — "Independence rule." | ✅ |
 
-After writing `research.md` + `data-model.md` + `contracts/` + `quickstart.md`, the Constitution Check above is re-evaluated for drift. **No drift** — Phase 1 outputs do not introduce any new design choice not already in `2a-decimal.md` v0.3 + `spec.md`; gates remain ✅. Codex Gate A consumes this combined `/specify` + `/plan`.
-
-## References
-
-- Spec: [`spec.md`](./spec.md)
-- Design doc (full *how*): `.specify/2a-decimal.md` v0.3
-- Architecture: `.specify/architecture.md` §4.1, §4.10, §5.3, §5.5, §6, §10
-- Constitution: `.specify/constitution.md` §II §III §IV §V §VI §VII §VIII §IX §X §XV §XVI §XVII §XVIII §XIX §XX + Appendix A
-- Catalogue: `spec/feature-catalogue.md` W-009; FLOAT-typed accessors A/M/P/C/R/N families per `2a` Appendix A
-- Phase doc: `../../../phases/phase-4.md` (parent repo)
-- Codex review procedure: `.specify/codex-review.md`
+All 26 citations in this plan resolve under canonical form. Cross-doc cites (`[arch §4.1]`, `[arch §4.10]`, `[arch §5.3]`, `[FIX50SP2 §3.3]`, `[SYN §3.1 Q5]`) are inherited verbatim from `spec.md §13` References and `.specify/2a-decimal.md` Appendix B.

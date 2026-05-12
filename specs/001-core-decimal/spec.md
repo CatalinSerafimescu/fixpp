@@ -6,7 +6,7 @@ phase: 4
 status: drafted
 verdict: TBD
 spec_kit_step: /specify
-last_updated: 2026-05-10
+last_updated: 2026-05-12
 owner: fixpp::core (C++); fixpp::capi (C-ABI shape co-owned)
 inherits_design: .specify/2a-decimal.md (v0.3, signed off 2026-05-07)
 catalogue_rows: W-009 (FLOAT family); FLOAT-typed accessors of A-001..A-034 / M-001..M-012 / P-001..P-008 / C-001..C-003 / R-001..R-005 / N-001..N-003 (Appendix A of 2a)
@@ -58,9 +58,12 @@ Without this primitive, the wire parser has no FLOAT-field accessor type and cod
 ### Session 2026-05-10
 - Q: Should `mock_decimal_traits<T>` (seam 1) and the Python `Decimal` property oracle (seam 8) ship in this PR or in a follow-up before 2b `/implement`? → A: Same PR — all 10 seams land alongside the primitive.
 - Q: How should this feature handle the C-ABI numeric error codes owned by 2i? → A: Allocate provisional values in this PR (`c_api.h`, dated comment); 2i ratifies by re-using the same numeric range.
-- Q: Should `fixpp_decimal_compare` / `_equal` defensively validate `exponent ∈ [-38, 0]` on inputs received via the C-ABI (symmetric with AC-S3)? → A: Yes — validate on every C entry; out-of-domain returns `FIXPP_ERR_DECIMAL_INVALID`. C++ `compare` stays `noexcept` and assumes canonical domain.
+- Q: Should `fixpp_decimal_compare` / `_equal` defensively validate `exponent ∈ [-38, 0]` on inputs received via the C-ABI (symmetric with AC-S3)? → A: Yes — validate on every C entry; out-of-domain returns `FIXPP_ERR_DECIMAL_INVALID`. C++ `compare` stays `noexcept` and assumes canonical domain. (Mechanism refined 2026-05-12 — see next session.)
 - Q: Must C/Python consumers always zero `_reserved[7]` before passing `fixpp_decimal_t` into the library? → A: Recommended, not required. Doc-comment in `c_api.h` strongly recommends zero-init for forward-compat; library tolerates non-zero in v1.0 (AC-A4). Any future v1.x meaning for `_reserved` is opt-in via a new function, not a silent semantic change.
 - Q: When `T==U` and `T` is wider than PoD, should `decimal<T>::to<U>()` still funnel through `pod_decimal` (per AC-X1) or short-circuit? → A: Compile-time short-circuit via `if constexpr (std::is_same_v<T,U>)` — return source unchanged, no funnel, no error. AC-X1's funnel applies only to `T≠U`.
+
+### Session 2026-05-12
+- Q: AC-C6 names `fixpp_decimal_compare` / `_equal` directly, but `.specify/2a-decimal.md` v0.3 §5.2 freezes their signatures as `int`-direct-return with no error channel — how is AC-C6's "out-of-domain returns `FIXPP_ERR_DECIMAL_INVALID`" carried? → A: **Option 1 — `_checked` siblings.** Add `fixpp_decimal_compare_checked(fixpp_decimal_t a, fixpp_decimal_t b, int* out_ordering) → fixpp_error_t` and `fixpp_decimal_equal_checked(... int* out_equal) → fixpp_error_t` to the C-ABI. The `_checked` overloads own AC-C6's defensive validation; the bare `_compare` / `_equal` stay 2a §5.2 verbatim (`int`-direct-return, by-value, no validation, canonical-domain precondition). C++ engine code (which produces canonical values by construction) calls the bare path; SWIG bindings and future C consumers from untrusted contexts call `_checked`. (Resolves the round-2 redraft NEEDS CLARIFICATION; see `plan.md` Gate A round 2 + `research.md` D-12. Rejected alternatives: option 2 — delete AC-C6's C-ABI clause; option 3 — amend 2a v0.4 with reshaped signatures.)
 
 ## 4. Functional acceptance criteria
 
@@ -92,7 +95,7 @@ Lifted from 2a §6 and §5; one bullet per testable property. Tests cover each.
 - **AC-C3.** Algorithm runs without `__int128` and without overflow (digit-string compare per 2a §6.3).
 - **AC-C4.** O(digits) ≤ 19 iterations; no allocation; `noexcept`.
 - **AC-C5.** Property test: arbitrary-precision oracle (Python `Decimal`) agrees on all generated pairs in canonical domain (Tier 1 gate).
-- **AC-C6.** C-ABI entry points `fixpp_decimal_compare` / `fixpp_decimal_equal` validate `exponent ∈ [-38, 0]` on **every** input (symmetric with AC-S3); out-of-domain returns `FIXPP_ERR_DECIMAL_INVALID`. C++ `compare` remains `noexcept` and assumes canonical domain (callers from inside the engine produce canonical values by construction).
+- **AC-C6.** Defensive validation of `exponent ∈ [-38, 0]` on every C-ABI input (symmetric with AC-S3) is owned by the `_checked` siblings: `fixpp_decimal_compare_checked(fixpp_decimal_t a, fixpp_decimal_t b, int* out_ordering) → fixpp_error_t` and `fixpp_decimal_equal_checked(fixpp_decimal_t a, fixpp_decimal_t b, int* out_equal) → fixpp_error_t`. Out-of-domain → `FIXPP_ERR_DECIMAL_INVALID`; in-domain → `FIXPP_ERR_OK` with the result written to the out-param. The bare `fixpp_decimal_compare` / `fixpp_decimal_equal` stay `.specify/2a-decimal.md` v0.3 §5.2 verbatim (`int`-direct-return, by-value, no validation, **canonical-domain precondition**); they assume the caller has produced canonical values. C++ engine code (which produces canonical values by construction) calls the bare path; SWIG bindings and future C consumers from untrusted contexts call `_checked`. C++ `compare` remains `noexcept` and assumes canonical domain. (Resolution ratified via `/clarify` Session 2026-05-12 — option 1 of `research.md` D-12.)
 
 ### 4.4 Cross-traits conversion — `decimal<T>::to<U>()`
 - **AC-X1.** For `T ≠ U`, `decimal<T>` → `decimal<U>` funnels through `pod_decimal` (canonical interchange form).
@@ -105,7 +108,7 @@ Lifted from 2a §6 and §5; one bullet per testable property. Tests cover each.
 - **AC-A3.** `is_standard_layout_v<fixpp_decimal_t>`.
 - **AC-A4.** `_reserved` ignored on read in v1.0; consumer may leave it uninitialized without breaking parsing (regression guard for "ignore on read" rule).
 - **AC-A5.** `FIXPP_DECIMAL_INITIALIZER` and `fixpp_decimal_init()` zero-init `_reserved` for forward-compat consumers.
-- **AC-A5b.** Writer contract: zero-init of `_reserved` is **recommended, not required**. The `c_api.h` doc-comment strongly recommends consumers use `FIXPP_DECIMAL_INITIALIZER` / `fixpp_decimal_init()`; the library tolerates non-zero `_reserved` in v1.0 (per AC-A4). Any future semantic for `_reserved` ships as a new explicit API, never a silent meaning change for existing consumers.
+- **AC-A5b.** Writer contract: zero-init of `_reserved` is **recommended, not required**. The `include/fix/c_api/decimal.h` doc-comment strongly recommends consumers use `FIXPP_DECIMAL_INITIALIZER` / `fixpp_decimal_init()`; the library tolerates non-zero `_reserved` in v1.0 (per AC-A4). Any future semantic for `_reserved` ships as a new explicit API, never a silent meaning change for existing consumers.
 - **AC-A6.** Tier 2 `abidiff` golden snapshot under `tests/abi/golden/` against tagged ABI release.
 
 ### 4.6 Build-time alias — `FIXPP_DECIMAL_T`
@@ -117,7 +120,7 @@ Lifted from 2a §6 and §5; one bullet per testable property. Tests cover each.
 ### 4.7 Error model
 - C++ codes: `decimal_invalid_input`, `decimal_overflow`, `decimal_precision_loss`, `decimal_buffer_too_small`.
 - C-ABI mapping (`[const §X.4]`): `FIXPP_ERR_DECIMAL_INVALID` (data), `FIXPP_ERR_DECIMAL_PRECISION_LOSS` (semantic), `FIXPP_ERR_BUFFER_TOO_SMALL` (reused generic).
-- **Numeric-range allocation:** this feature's PR defines provisional numeric values for `FIXPP_ERR_DECIMAL_INVALID` / `_PRECISION_LOSS` in `include/fix/c_api.h`, marked with a dated `// allocated 2026-05-10, owned by 2i` comment. **2i** ratifies by re-using the same numeric range in its own PR; any change after ratification is a Tier 2 ABI breakage.
+- **Numeric-range allocation:** this feature's PR defines provisional numeric values for `FIXPP_ERR_DECIMAL_INVALID` / `_PRECISION_LOSS` in `include/fix/c_api/decimal.h` (included by the master `include/fix/c_api.h`), marked with a dated `// allocated 2026-05-12, owned by 2i` comment. **2i** ratifies by re-using the same numeric range in its own PR; any change after ratification is a Tier 2 ABI breakage.
 
 ## 5. Out of scope
 
@@ -169,7 +172,7 @@ Lifted from 2a §6.5, `[const §VIII.5]`, `[const §IX.4]`, and the project qual
 
 ## 8. Inheritance / dependencies
 
-- **Inherits from:** `[const §X.1, X.2, X.3, X.4, VIII.5, IX.4, IX.5, XVII.1]`, `[arch §4.1, §4.10, §5.3, §5.5, §6, §10]`, `[SYN §3.1 Q5]`. All cited inline in 2a Appendix B.
+- **Inherits from:** `[const §X.1]`, `[const §X.2]`, `[const §X.3]`, `[const §X.4]`, `[const §VIII.5]`, `[const §IX.4]`, `[const §IX.5]`, `[const §XVII.1]`, `[arch §4.1]`, `[arch §4.10]`, `[arch §5.3]`, `[arch §5.5]`, `[arch §6]`, `[arch §10]`, `[SYN §3.1 Q5]`. All cited inline in 2a Appendix B.
 - **Blocks:** **2b** (wire FLOAT-field parser/serializer), **2c** (codegen FLOAT-typed accessors), **2i** (C-ABI accessor `fixpp_msg_field_decimal`).
 - **Does not block:** session FSM, message store (decimal trait is parser/codegen-internal once landed), TLS, transport.
 - **Catalogue impact:** none. 2a explicitly does not add a new row (§11) — W-009 covers the FLOAT family; per-message FLOAT accessors are inherited.
@@ -197,7 +200,7 @@ Implementation MUST expose all 10 seams:
 | Q2 | Built-in `decimal_traits<__int128>` specialization. | DEFERRED per 2a §10 Q2 — not in v1.0. |
 | Q3 | Confirm with **2e** that MessageStore records raw FIX frames (replay is decimal-trait-agnostic) and the typed-payload-persistence `static_assert(is_lossless_for_fix_float)` lives at the persistence-write site. | Confirm at **2e**; if inverted, reopen 2a §7.1 *and* this spec's §5 "out of scope" line on replay. |
 | Q4 | Per-architecture latency ceilings (50 / 30 / 20 ns) — right Tier 1 bars or stricter? | Bench spike during `/implement`; revise after first wire-layer integration. |
-| Q5 *(new)* | C-ABI numeric error-code values for `FIXPP_ERR_DECIMAL_INVALID` / `_PRECISION_LOSS`. | RESOLVED 2026-05-10 (`/clarify`) — provisional values defined in this PR's `c_api.h` with dated comment; **2i** ratifies by re-using the same numeric range. |
+| Q5 *(new)* | C-ABI numeric error-code values for `FIXPP_ERR_DECIMAL_INVALID` / `_PRECISION_LOSS`. | RESOLVED 2026-05-10 (`/clarify`) — provisional values defined in this PR's `include/fix/c_api/decimal.h` with dated comment; **2i** ratifies by re-using the same numeric range. |
 | Q6 *(new)* | First-feature scope: do we ship `mock_decimal_traits<T>` and the Python `Decimal` oracle in this PR, or in a follow-up before **2b** `/implement` lands? | RESOLVED 2026-05-10 (`/clarify`) — **same PR**. Both seams land with the primitive. |
 
 ## 11. Risk register
@@ -205,7 +208,7 @@ Implementation MUST expose all 10 seams:
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Latency NFR (50 / 30 / 20 ns) too tight for first implementation pass | M | Land impl + bench together; if NFR misses by ≤ 2×, treat as TODO not blocker (2a §10 Q4 explicitly allows revision). |
-| `_reserved` byte tolerance regression (consumer code that breaks on a non-zero `_reserved`) | L | AC-A4 + AC-A5 + dedicated test; documented in `c_api.h` doc comment. |
+| `_reserved` byte tolerance regression (consumer code that breaks on a non-zero `_reserved`) | L | AC-A4 + AC-A5 + dedicated test; documented in `include/fix/c_api/decimal.h` doc comment. |
 | ABI golden churn during early development | M | Lock golden once first `/implement` lands; treat post-lock changes as Tier 2 hard-fail per 2a §9 seam 4. |
 | Trait-amplification symbol bloat from `decimal<T>` template | L | Mitigated by "one alias per build" (AC-B3 link-time guard); link error caught immediately, not at runtime. |
 | Cross-traits `T → U` narrowing surprises a wider-than-PoD-to-wider-than-PoD consumer | L | Documented in §5 + 2a §6.4; deferred per Q1; error code `decimal_precision_loss` is loud, not silent. |
@@ -226,7 +229,7 @@ This feature is `merged` (per phase-4 state legend) when:
 ## 13. References
 
 - Design doc: [`.specify/2a-decimal.md`](../../.specify/2a-decimal.md) v0.3 (2026-05-07).
-- Constitution: [`.specify/constitution.md`](../../.specify/constitution.md) — §VIII.5, §IX.4, §IX.5, §X.1–X.4, §XVII.1.
+- Constitution: [`.specify/constitution.md`](../../.specify/constitution.md) — §VIII.5, §IX.4, §IX.5, §X.1, §X.2, §X.3, §X.4, §XVII.1.
 - Architecture: [`.specify/architecture.md`](../../.specify/architecture.md) — §4.1, §4.10, §5.3, §5.5, §6, §10.
 - Catalogue: [`spec/feature-catalogue.md`](../../spec/feature-catalogue.md) — W-009; A/M/P/C/R/N FLOAT-field accessors per 2a Appendix A.
 - Phase doc: [`phases/phase-4.md`](../../../phases/phase-4.md) — pipeline, Track Log, sub-file convention.
