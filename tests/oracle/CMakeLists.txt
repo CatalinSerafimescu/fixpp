@@ -6,23 +6,20 @@
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-add_test(
-  NAME decimal_compare_oracle
-  COMMAND ${Python3_EXECUTABLE} -m pytest -xvs
-          "${CMAKE_CURRENT_SOURCE_DIR}/decimal_compare_oracle_test.py"
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
 # Sanitizer-instrumented .so files require the sanitizer runtime to be
-# preloaded before Python ctypes can dlopen them. Rather than hard-code
-# runtime paths, oracle sanitizer builds fall back to the default
-# conftest.py resolution (build/linux-clang-release/lib/libfixpp_capi.so),
-# which is the correct mathematical-oracle reference regardless of preset.
-if(FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN OR FIXPP_ENABLE_TSAN)
-  set_tests_properties(decimal_compare_oracle PROPERTIES
-    LABELS "oracle;tier1"
+# preloaded before Python ctypes can dlopen them — the codebase does not
+# wire LD_PRELOAD plumbing for that. The oracle is a *mathematical*
+# correctness gate (Python `decimal.Decimal` vs `fixpp_decimal_compare`),
+# not a memory-safety gate, so skipping it on sanitizer presets loses no
+# meaningful coverage: it still runs in clang-release, clang-coverage,
+# gcc-release, and the bench job, which all build a non-instrumented .so.
+if(NOT (FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN OR FIXPP_ENABLE_TSAN))
+  add_test(
+    NAME decimal_compare_oracle
+    COMMAND ${Python3_EXECUTABLE} -m pytest -xvs
+            "${CMAKE_CURRENT_SOURCE_DIR}/decimal_compare_oracle_test.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   )
-else()
   set_tests_properties(decimal_compare_oracle PROPERTIES
     ENVIRONMENT "FIXPP_CAPI_LIB=$<TARGET_FILE:fixpp_capi_shared>"
     LABELS "oracle;tier1"
