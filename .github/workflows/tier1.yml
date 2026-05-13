@@ -62,10 +62,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Conan via pipx
+      - name: Install Conan + pytest via pipx
         run: |
           pipx install conan
           conan --version
+          # pytest is required by the decimal_compare_oracle CTest entry
+          # (tests/oracle/decimal_compare_oracle_test.py) which is registered
+          # in every preset, not just the python-bindings build.
+          pip install pytest
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -146,10 +150,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Conan via pipx
+      - name: Install Conan + pytest via pipx
         run: |
           pipx install conan
           conan --version
+          # pytest is required by the decimal_compare_oracle CTest entry
+          # (tests/oracle/decimal_compare_oracle_test.py) which is registered
+          # in every preset, not just the python-bindings build.
+          pip install pytest
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -358,10 +366,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Conan via pipx
+      - name: Install Conan + pytest via pipx
         run: |
           pipx install conan
           conan --version
+          # pytest is required by the decimal_compare_oracle CTest entry
+          # (tests/oracle/decimal_compare_oracle_test.py) which is registered
+          # in every preset, not just the python-bindings build.
+          pip install pytest
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
