@@ -4,6 +4,9 @@ out/
 cmake-build-*/
 *.cmake.user
 
+# CTest scratch (created when ctest runs from the source tree root)
+Testing/
+
 # Conan
 .conan/
 conan_cache/

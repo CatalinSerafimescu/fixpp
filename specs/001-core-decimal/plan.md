@@ -3,11 +3,12 @@ id: 001-core-decimal
 title: Implementation Plan — Decimal type (`fixpp::core::decimal<T>` + `fixpp_decimal_t` C-ABI)
 module: core/
 phase: 4
-status: drafted
-verdict: TBD
+status: gate-b-closed
+verdict: SHIP-AS-IS
 spec_kit_step: /plan
-gate_a_round: 2 (round 1 verdict 2026-05-10: full bundle redraft — see ../../../research/G19-fix-fpml-iso20022/research/reviews/opus_001-core-decimal_gate_a_v1_adversarial_review.md)
-last_updated: 2026-05-12
+gate_a_round: 2+3 (CLOSED 2026-05-12 SHIP-WITH-FIXES — see ../../../research/G19-fix-fpml-iso20022/research/reviews/opus_001-core-decimal_gate_a_v1_adversarial_review.md and the `Gate A` section below)
+gate_b_round: 3 (CLOSED 2026-05-13 SHIP-AS-IS — see `Gate B` section below; full review at .specify/decisions/001-core-decimal-gateb.md, local-only per .gitignore)
+last_updated: 2026-05-13
 inherits_design: .specify/2a-decimal.md (v0.3, signed off 2026-05-07)
 inherits_spec: specs/001-core-decimal/spec.md (preserved from round 1; carries /clarify Q&A 2026-05-10)
 ---
@@ -239,3 +240,51 @@ Redraft applied:
 | `[const §XVII.3]` | `constitution.md:257` — "Independence rule." | ✅ |
 
 All 26 citations in this plan resolve under canonical form. Cross-doc cites (`[arch §4.1]`, `[arch §4.10]`, `[arch §5.3]`, `[FIX50SP2 §3.3]`, `[SYN §3.1 Q5]`) are inherited verbatim from `spec.md §13` References and `.specify/2a-decimal.md` Appendix B.
+
+## Gate B
+
+Gate B procedure: `.specify/codex-review.md` §6 (prompt) and §7 (recording). Independence rule per `[const §XVII.3]`: each round uses a separate Codex session from the implementer. Full review records live at `.specify/decisions/001-core-decimal-gateb.md` (local-only — `.specify/decisions/` is `.gitignore`d per repo policy; the verdicts below are the merge-gating record).
+
+### Round 1 — 2026-05-13 (commit `8befdce`: SHIP-WITH-FIXES)
+
+| P0 | P1 | P2 | P3 | Verdict |
+|----|----|----|----|---------|
+|  0 |  5 |  0 |  0 | **SHIP-WITH-FIXES** |
+
+P1 findings:
+1. `src/core/decimal.cpp:312` — `compare()` step-4 rescaling misordered same-bucket negatives (sign flip applied to signed-mantissa compare).
+2. `include/fixpp/core/decimal.hpp:136` — generic `decimal<T>::parse`/`format` undefined for `T ≠ pod_decimal`.
+3. Direct test coverage missing for `_checked` C-ABI siblings, `is_finite` / `is_zero` / `is_negative`, and `detail::trap_throw`.
+4. `tests/oracle/conftest.py:30` ↔ `src/capi/CMakeLists.txt:5` — Python `Decimal` oracle seam #8 silently skipped (STATIC `fixpp_capi`, fixture expected SHARED).
+5. `tests/core/CMakeLists.txt:14` — alias-mismatch link test (seam #9) never wired into CTest.
+
+### Round 2 — 2026-05-13 (commit `946f49b`: SHIP-WITH-FIXES, 4/5 closed)
+
+| P0 | P1 (new) | P1 (closed) | P2 | P3 | Verdict |
+|----|----------|-------------|----|----|---------|
+|  0 |   1      |     4       |  0 |  0 | **SHIP-WITH-FIXES** |
+
+Round-1 finding #5 status: **PARTIAL**. The negative test wiring landed and the existing CTest entry catches mismatches, but the production guard `fixpp_decimal_alias_lock` in `include/fixpp/core/decimal_alias.hpp:36` remained elidable for a real consumer TU — the address-of-static initializer folds to a known non-null pointer, the weak inline ends up unreferenced, and the linker GCs the COMDAT group along with its relocation against `tag`. The round-1 fix only proved the sentinel mechanism worked when the test TU directly referenced `decimal_alias_sentinel<T>::tag`.
+
+### Round 3 — 2026-05-13 (commit `6ca9441`: SHIP-AS-IS — Gate B CLOSED)
+
+| P0 | P1 (new) | P1 (closed) | P2 | P3 | Verdict |
+|----|----------|-------------|----|----|---------|
+|  0 |   0      |     1       |  0 |  0 | **SHIP-AS-IS** |
+
+Round-2 finding closure: **RESOLVED**. Two reinforcing mechanisms now guard the alias:
+- `fixpp_decimal_alias_lock_value` initialized from the **value** (not address) of `decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag` — cross-TU load that the compiler cannot constant-fold; emits a relocation against `tag` at static-init time.
+- `[[gnu::used]]` (Tier 1 Clang/GCC) forces compiler+linker retention of the weak inline regardless of consumer-side odr-use. Tier 2 (MSVC) ignores the unknown attribute per `[C++17 [dcl.attr.grammar]/6]`; on that target the value-loading initializer alone is the load-bearing mechanism, acceptable per `[const §IX.6]` Tier 2 nightly cadence.
+
+`tests/link/tu_a.cpp` / `tu_b.cpp` now follow the real-consumer pattern (header-only include with no direct `tag` reference). The `decimal_alias_mismatch_link` CTest entry exercises the production guard end-to-end and still fails to link as required for mismatched `FIXPP_DECIMAL_T` (AC-B3). CTest: 84/84 passing on `linux-clang-debug-py`.
+
+### Cumulative tally
+
+| Round | Commit | Verdict | P0 | P1 raised | P1 closed |
+|-------|--------|---------|----|-----------|-----------|
+| 1 | `8befdce` | SHIP-WITH-FIXES | 0 | 5 | — |
+| 2 | `946f49b` | SHIP-WITH-FIXES | 0 | 1 | 4 |
+| 3 | `6ca9441` | **SHIP-AS-IS**   | 0 | 0 | 1 |
+| **Total** | | **CLOSED** | **0** | **6** | **6** |
+
+Test count delta over the fix-loop: **66 → 84** (`+18` direct test entries; the Python `Decimal` oracle additionally runs 10⁴ randomized comparisons per CTest invocation).
