@@ -17,10 +17,12 @@ import sys
 
 def find_mallocnesia() -> str | None:
     """Locate the mallocnesia shared library on the system."""
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
     for candidate in [
-        "/usr/lib/mallocnesia.so",
-        "/usr/local/lib/mallocnesia.so",
         os.environ.get("MALLOCNESIA_PATH", ""),
+        os.path.join(tools_dir, "mallocnesia", "libmallocnesia.so"),
+        "/usr/local/lib/mallocnesia.so",
+        "/usr/lib/mallocnesia.so",
     ]:
         if candidate and os.path.exists(candidate):
             return candidate
