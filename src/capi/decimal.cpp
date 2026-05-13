@@ -92,6 +92,9 @@ fixpp_error_t fixpp_decimal_format(fixpp_decimal_t d, char* dst, size_t dst_cap,
 
 // T035: bare compare — assumes canonical domain (D-4 / 2a §5.2).
 // Routes through from_pod per 2a §5.2; out-of-domain inputs return 0 (sentinel).
+// C-ABI signature frozen at FIXPP_C_ABI_VERSION_MAJOR == 1 [const §X.1]; semantic
+// order is intentional — the lint below is not actionable on a frozen surface.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int fixpp_decimal_compare(fixpp_decimal_t a, fixpp_decimal_t b) {
     auto va = pod_from_cabi(a);
     auto vb = pod_from_cabi(b);
@@ -110,6 +113,9 @@ int fixpp_decimal_compare(fixpp_decimal_t a, fixpp_decimal_t b) {
 
 // T035: bare equal — assumes canonical domain.
 // Routes through from_pod per 2a §5.2; out-of-domain inputs return 0 (not equal).
+// C-ABI signature frozen at FIXPP_C_ABI_VERSION_MAJOR == 1 [const §X.1]; equality
+// is symmetric by definition — the lint below is not actionable on a frozen surface.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int fixpp_decimal_equal(fixpp_decimal_t a, fixpp_decimal_t b) {
     auto va = pod_from_cabi(a);
     auto vb = pod_from_cabi(b);

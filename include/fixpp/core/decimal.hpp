@@ -84,10 +84,9 @@ public:
                 // error::decimal_precision_loss". The source type's to_pod returns
                 // decimal_overflow when the value exceeds the pod_decimal domain; the
                 // wrapper presents this as precision loss to callers.
-                return std::unexpected{
-                    pod.error() == error::decimal_overflow
-                        ? error::decimal_precision_loss
-                        : pod.error()};
+                return std::unexpected{pod.error() == error::decimal_overflow
+                                           ? error::decimal_precision_loss
+                                           : pod.error()};
             }
             auto result = decimal_traits<T>::from_pod(*pod);
             if (!result) {
@@ -109,10 +108,9 @@ public:
             if (!pod) {
                 // Remap decimal_overflow → decimal_precision_loss at the cross-traits
                 // boundary per 2a §6.4.
-                return std::unexpected{
-                    pod.error() == error::decimal_overflow
-                        ? error::decimal_precision_loss
-                        : pod.error()};
+                return std::unexpected{pod.error() == error::decimal_overflow
+                                           ? error::decimal_precision_loss
+                                           : pod.error()};
             }
             auto result = decimal_traits<U>::from_pod(*pod);
             if (!result) {
