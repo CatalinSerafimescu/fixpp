@@ -4,6 +4,7 @@
 
 [![CI: Tier 1](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml/badge.svg?branch=main)](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml)
 [![Coverage](https://codecov.io/gh/CatalinSerafimescu/fixpp/branch/main/graph/badge.svg)](https://codecov.io/gh/CatalinSerafimescu/fixpp)
+[![Docs](https://img.shields.io/badge/docs-fixpp-blue)](https://catalinserafimescu.github.io/fixpp/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial license available](https://img.shields.io/badge/commercial-available-blue)](LICENSE-COMMERCIAL.md)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)](https://en.cppreference.com/w/cpp/23)
