@@ -1,6 +1,6 @@
 {
   "context": {
-    "date": "2026-05-13T16:23:38+03:00",
+    "date": "2026-05-14T00:02:11+03:00",
     "host_name": "WSLUBUNTU24.04",
     "executable": "./build/linux-clang-release/bench/core/decimal_bench",
     "num_cpus": 8,
@@ -33,7 +33,7 @@
         "num_sharing": 8
       }
     ],
-    "load_avg": [1.55664,1.19385,0.844727],
+    "load_avg": [0.949707,0.611328,0.635742],
     "library_version": "v1.9.5",
     "library_build_type": "release",
     "json_schema_version": 1
@@ -48,11 +48,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 67756109,
-      "real_time": 7.7825257645749462e+00,
-      "cpu_time": 8.5025256246636012e+00,
+      "iterations": 92692148,
+      "real_time": 7.4403546889079166e+00,
+      "cpu_time": 7.7311931427028746e+00,
       "time_unit": "ns",
-      "items_per_second": 1.1761211246447311e+08
+      "items_per_second": 1.2934614121545455e+08
     },
     {
       "name": "BM_decimal_format",
@@ -63,11 +63,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 39331718,
-      "real_time": 1.6418450269571192e+01,
-      "cpu_time": 1.7937706051894303e+01,
+      "iterations": 39358723,
+      "real_time": 1.6740600908194409e+01,
+      "cpu_time": 1.7395033065478270e+01,
       "time_unit": "ns",
-      "items_per_second": 5.5748488525063969e+07
+      "items_per_second": 5.7487674569850281e+07
     },
     {
       "name": "BM_decimal_compare",
@@ -78,11 +78,41 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 69513873,
-      "real_time": 9.1768284440121271e+00,
-      "cpu_time": 1.0026250429176917e+01,
+      "iterations": 72720747,
+      "real_time": 9.2108590001422623e+00,
+      "cpu_time": 9.5710684187553845e+00,
       "time_unit": "ns",
-      "items_per_second": 9.9738182989120960e+07
+      "items_per_second": 1.0448154336044747e+08
+    },
+    {
+      "name": "BM_decimal_compare_diff_exp",
+      "family_index": 3,
+      "per_family_instance_index": 0,
+      "run_name": "BM_decimal_compare_diff_exp",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 56580748,
+      "real_time": 1.2414822069890901e+01,
+      "cpu_time": 1.2882529654786468e+01,
+      "time_unit": "ns",
+      "items_per_second": 7.7624505962495714e+07
+    },
+    {
+      "name": "BM_decimal_compare_diff_bucket",
+      "family_index": 4,
+      "per_family_instance_index": 0,
+      "run_name": "BM_decimal_compare_diff_bucket",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 124304476,
+      "real_time": 5.5121497234022110e+00,
+      "cpu_time": 5.7277177935249926e+00,
+      "time_unit": "ns",
+      "items_per_second": 1.7458960724819037e+08
     }
   ]
 }
