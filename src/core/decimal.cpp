@@ -369,12 +369,24 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
 // ── T021: from_pod, to_pod, predicates ──────────────────────────────────────
 
 expected_t<pod_decimal> decimal_traits<pod_decimal>::from_pod(pod_decimal pd) noexcept {
-    // from_pod is identity for pod_decimal; sentinel passes through unchanged
+    // Enforce canonical domain per 2a §4.2: exponent ∈ [-38, 0].
+    // INT64_MIN is the invalid sentinel — reject it too.
+    if (pd.mantissa == INT64_MIN) {
+        return std::unexpected{error::decimal_overflow};
+    }
+    if (pd.exponent < -38 || pd.exponent > 0) {
+        return std::unexpected{error::decimal_overflow};
+    }
     return pd;
 }
 
 expected_t<pod_decimal> decimal_traits<pod_decimal>::to_pod(pod_decimal const& v) noexcept {
+    // Enforce canonical domain per 2a §4.2: exponent ∈ [-38, 0].
+    // INT64_MIN is the invalid sentinel.
     if (v.mantissa == INT64_MIN) {
+        return std::unexpected{error::decimal_overflow};
+    }
+    if (v.exponent < -38 || v.exponent > 0) {
         return std::unexpected{error::decimal_overflow};
     }
     return v;

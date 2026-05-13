@@ -18,11 +18,6 @@ using fixpp::core::pod_decimal;
 
 namespace {
 
-// Convert C-ABI fixpp_decimal_t to pod_decimal (ignores _reserved).
-pod_decimal from_cabi(fixpp_decimal_t d) noexcept {
-    return pod_decimal{.mantissa = d.mantissa, .exponent = d.exponent};
-}
-
 // Map fixpp::core::error to FIXPP_ERR_* codes.
 fixpp_error_t map_error(error e) noexcept {
     switch (e) {
@@ -36,6 +31,13 @@ fixpp_error_t map_error(error e) noexcept {
         default:
             return FIXPP_ERR_UNKNOWN;
     }
+}
+
+// Lift a fixpp_decimal_t into a pod_decimal through the trait boundary per 2a §5.2.
+// Returns an error if the value is out of the canonical domain [-38, 0] per 2a §4.2.
+fixpp::core::expected_t<pod_decimal> pod_from_cabi(fixpp_decimal_t d) noexcept {
+    return decimal_traits<pod_decimal>::from_pod(
+        pod_decimal{.mantissa = d.mantissa, .exponent = d.exponent});
 }
 
 bool in_canonical_domain(fixpp_decimal_t d) noexcept {
@@ -57,20 +59,30 @@ fixpp_error_t fixpp_decimal_parse(const char* src, size_t src_len, fixpp_decimal
     if (!r.has_value()) {
         return map_error(r.error());
     }
-    out->mantissa = r->mantissa;
-    out->exponent = r->exponent;
+    // Route through to_pod to enforce canonical domain per 2a §5.2 / §4.2.
+    auto pod = decimal_traits<pod_decimal>::to_pod(*r);
+    if (!pod.has_value()) {
+        return map_error(pod.error());
+    }
+    out->mantissa = pod->mantissa;
+    out->exponent = pod->exponent;
     std::memset(static_cast<void*>(out->_reserved), 0, sizeof(out->_reserved));  // AC-A5
     return FIXPP_ERR_OK;
 }
 
-// T034: format — applies AC-S3 exponent pre-check; _reserved ignored on read (AC-A4)
+// T034: format — applies AC-S3 exponent pre-check via from_pod per 2a §5.2;
+// _reserved ignored on read (AC-A4)
 fixpp_error_t fixpp_decimal_format(fixpp_decimal_t d, char* dst, size_t dst_cap, size_t* written) {
     if (dst == nullptr || written == nullptr) {
         return FIXPP_ERR_DECIMAL_INVALID;
     }
-    auto v = from_cabi(d);
+    // Route through from_pod to enforce canonical domain per 2a §5.2 / §4.2.
+    auto v = pod_from_cabi(d);
+    if (!v.has_value()) {
+        return map_error(v.error());
+    }
     auto r = decimal_traits<pod_decimal>::to_chars(
-        v, std::span<std::byte>{reinterpret_cast<std::byte*>(dst), dst_cap});
+        *v, std::span<std::byte>{reinterpret_cast<std::byte*>(dst), dst_cap});
     if (!r.has_value()) {
         return map_error(r.error());
     }
@@ -78,9 +90,15 @@ fixpp_error_t fixpp_decimal_format(fixpp_decimal_t d, char* dst, size_t dst_cap,
     return FIXPP_ERR_OK;
 }
 
-// T035: bare compare — assumes canonical domain (no validation per D-4 / 2a §5.2)
+// T035: bare compare — assumes canonical domain (D-4 / 2a §5.2).
+// Routes through from_pod per 2a §5.2; out-of-domain inputs return 0 (sentinel).
 int fixpp_decimal_compare(fixpp_decimal_t a, fixpp_decimal_t b) {
-    auto cmp = decimal_traits<pod_decimal>::compare(from_cabi(a), from_cabi(b));
+    auto va = pod_from_cabi(a);
+    auto vb = pod_from_cabi(b);
+    if (!va.has_value() || !vb.has_value()) {
+        return 0;  // out-of-domain → sentinel compare result
+    }
+    auto cmp = decimal_traits<pod_decimal>::compare(*va, *vb);
     if (cmp == std::strong_ordering::less) {
         return -1;
     }
@@ -90,9 +108,15 @@ int fixpp_decimal_compare(fixpp_decimal_t a, fixpp_decimal_t b) {
     return 0;
 }
 
-// T035: bare equal — assumes canonical domain
+// T035: bare equal — assumes canonical domain.
+// Routes through from_pod per 2a §5.2; out-of-domain inputs return 0 (not equal).
 int fixpp_decimal_equal(fixpp_decimal_t a, fixpp_decimal_t b) {
-    auto cmp = decimal_traits<pod_decimal>::compare(from_cabi(a), from_cabi(b));
+    auto va = pod_from_cabi(a);
+    auto vb = pod_from_cabi(b);
+    if (!va.has_value() || !vb.has_value()) {
+        return 0;  // out-of-domain → not equal
+    }
+    auto cmp = decimal_traits<pod_decimal>::compare(*va, *vb);
     return cmp == std::strong_ordering::equal ? 1 : 0;
 }
 

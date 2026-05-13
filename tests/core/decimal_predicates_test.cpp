@@ -89,3 +89,77 @@ TEST(DecimalTrapThrow, MapsNonStdExceptionToInvalidInput) {
 
 // trap_throw is declared noexcept — exceptions never propagate.
 static_assert(noexcept(trap_throw([] { return 0; })));
+
+// ── from_pod / to_pod canonical-domain enforcement (P1-2 / 2a §4.2) ─────────
+// Both from_pod and to_pod must enforce exponent ∈ [-38, 0].
+// Out-of-domain values → decimal_overflow; in-domain values → identity.
+
+TEST(DecimalToPod, InDomainRoundTrip) {
+    // Representative in-domain values
+    const pod_decimal cases[] = {
+        {1, 0},
+        {12345, -2},
+        {-999, -3},
+        {9223372036854775806LL, -38},
+        {0, 0},
+        {0, -10},
+    };
+    for (auto const& v : cases) {
+        auto r = decimal_traits<pod_decimal>::to_pod(v);
+        ASSERT_TRUE(r.has_value()) << "mantissa=" << v.mantissa << " exp=" << (int)v.exponent;
+        EXPECT_EQ(r->mantissa, v.mantissa);
+        EXPECT_EQ(r->exponent, v.exponent);
+    }
+}
+
+TEST(DecimalToPod, OutOfDomainPositiveExponentReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::to_pod(pod_decimal{1, 1});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}
+
+TEST(DecimalToPod, OutOfDomainBelowMinus38ReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::to_pod(pod_decimal{1, -39});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}
+
+TEST(DecimalToPod, SentinelMantissaReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::to_pod(pod_decimal{INT64_MIN, 0});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}
+
+TEST(DecimalFromPod, InDomainRoundTrip) {
+    const pod_decimal cases[] = {
+        {1, 0},
+        {12345, -2},
+        {-999, -3},
+        {9223372036854775806LL, -38},
+        {0, 0},
+    };
+    for (auto const& v : cases) {
+        auto r = decimal_traits<pod_decimal>::from_pod(v);
+        ASSERT_TRUE(r.has_value()) << "mantissa=" << v.mantissa << " exp=" << (int)v.exponent;
+        EXPECT_EQ(r->mantissa, v.mantissa);
+        EXPECT_EQ(r->exponent, v.exponent);
+    }
+}
+
+TEST(DecimalFromPod, OutOfDomainPositiveExponentReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::from_pod(pod_decimal{1, 1});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}
+
+TEST(DecimalFromPod, OutOfDomainBelowMinus38ReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::from_pod(pod_decimal{1, -39});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}
+
+TEST(DecimalFromPod, SentinelMantissaReturnsOverflow) {
+    auto r = decimal_traits<pod_decimal>::from_pod(pod_decimal{INT64_MIN, 0});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_overflow);
+}

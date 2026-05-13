@@ -58,6 +58,25 @@ TEST(DecimalCAPIErrorPaths, FormatBufferTooSmallCallsMapError) {
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_BUFFER_TOO_SMALL);
 }
 
+// ── fixpp_decimal_format — canonical-domain enforcement (P1-1 + P1-2) ────────
+// Passing a hand-built fixpp_decimal_t with out-of-domain exponent through
+// fixpp_decimal_format must now return FIXPP_ERR_DECIMAL_INVALID because the
+// C-ABI is routed through decimal_traits<pod_decimal>::from_pod() per 2a §5.2.
+
+TEST(DecimalCAPIErrorPaths, FormatPositiveExponentRejected) {
+    fixpp_decimal_t d{1, 1, {}};  // exponent = +1 — out of canonical domain [-38, 0]
+    char buf[64]{};
+    size_t written = 0;
+    EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_DECIMAL_INVALID);
+}
+
+TEST(DecimalCAPIErrorPaths, FormatExponentBelowMinus38Rejected) {
+    fixpp_decimal_t d{1, -39, {}};  // exponent = -39 — out of canonical domain
+    char buf[64]{};
+    size_t written = 0;
+    EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_DECIMAL_INVALID);
+}
+
 // ── fixpp_decimal_init null guard ─────────────────────────────────────────────
 
 TEST(DecimalCAPIErrorPaths, InitNullIsNoop) {
