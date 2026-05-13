@@ -49,6 +49,12 @@ struct decimal_traits<test::mock_pod> {
     // The fail mask is set per test via a thread-local (reset after each test).
     static inline test::mock_fail fail_mask{test::mock_fail::none};
 
+    // Configurable error returned by to_pod when its fail bit is set. Default is
+    // decimal_overflow (the contract-correct error for an out-of-domain pod). Tests
+    // exercising the cross-traits wrapper's "non-overflow passthrough" branch may
+    // override this to verify the ternary's false arm.
+    static inline fixpp::core::error to_pod_error{fixpp::core::error::decimal_overflow};
+
     static expected_t<test::mock_pod> from_chars(std::span<const std::byte> /*src*/,
                                                  std::pmr::memory_resource* /*mr*/) noexcept {
         if (test::has(fail_mask, test::mock_fail::from_chars))
@@ -73,7 +79,7 @@ struct decimal_traits<test::mock_pod> {
 
     static expected_t<pod_decimal> to_pod(test::mock_pod const& v) noexcept {
         if (test::has(fail_mask, test::mock_fail::to_pod))
-            return std::unexpected{error::decimal_overflow};
+            return std::unexpected{to_pod_error};
         return pod_decimal{v.mantissa, v.exponent};
     }
 

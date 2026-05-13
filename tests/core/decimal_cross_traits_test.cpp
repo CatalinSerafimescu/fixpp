@@ -147,3 +147,70 @@ TEST(DecimalCrossTraits, MockTraitsFromPodFail) {
     // Reset
     decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
 }
+
+// AC-X4: from<U>() overflow remap — symmetric to X2 on the from<U>() wrapper.
+// decimal<pod_decimal>::from(decimal<Wide>) where Wide's to_pod returns
+// decimal_overflow must remap to decimal_precision_loss per 2a §6.4.
+TEST(DecimalCrossTraits, X4_FromOverflowRemap) {
+    using Wide = fixpp::core::test::decimal_wide;
+    static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
+    decimal<Wide> wide_val{Wide{TOO_BIG, 0}};
+
+    // from<U>() where U=Wide — Wide's to_pod returns decimal_overflow
+    auto r = decimal<pod_decimal>::from(wide_val);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_precision_loss);
+}
+
+// AC-X5: from<U>() target from_pod failure passes through raw error
+// (the second error branch in decimal<T>::from<U>()).
+TEST(DecimalCrossTraits, X5_FromTargetFromPodFailure) {
+    using Mock = fixpp::core::test::mock_pod;
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::from_pod;
+
+    decimal<pod_decimal> src{pod_decimal{1, 0}};
+    auto r = decimal<Mock>::from(src);  // T=Mock, U=pod_decimal
+    ASSERT_FALSE(r.has_value());
+    // Mock's from_pod fails with decimal_precision_loss; passed through raw
+    // (not via the decimal_overflow ternary remap).
+    EXPECT_EQ(r.error(), error::decimal_precision_loss);
+
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
+}
+
+// AC-X6: to<U>() target from_pod failure passes through raw error
+// (the second error branch in decimal<T>::to<U>()).
+TEST(DecimalCrossTraits, X6_ToTargetFromPodFailure) {
+    using Mock = fixpp::core::test::mock_pod;
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::from_pod;
+
+    decimal<pod_decimal> src{pod_decimal{1, 0}};
+    auto r = src.to<Mock>();  // T=pod_decimal, U=Mock
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_precision_loss);
+
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
+}
+
+// AC-X7: from<U>() and to<U>() pass through non-overflow errors verbatim
+// (the ternary "false" branch — pod.error() != decimal_overflow).
+// This is the documented behavior: only decimal_overflow gets remapped to
+// decimal_precision_loss; other errors propagate unchanged.
+TEST(DecimalCrossTraits, X7_FromNonOverflowErrorPassthrough) {
+    using Mock = fixpp::core::test::mock_pod;
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::to_pod;
+    decimal_traits<Mock>::to_pod_error = error::decimal_invalid_input;  // non-overflow
+
+    decimal<Mock> src{fixpp::core::test::mock_pod{1, 0}};
+    auto r_from = decimal<pod_decimal>::from(src);  // hits from<U>() ternary false arm
+    ASSERT_FALSE(r_from.has_value());
+    EXPECT_EQ(r_from.error(), error::decimal_invalid_input);  // NOT remapped
+
+    auto r_to = src.to<pod_decimal>();  // hits to<U>() ternary false arm
+    ASSERT_FALSE(r_to.has_value());
+    EXPECT_EQ(r_to.error(), error::decimal_invalid_input);  // NOT remapped
+
+    // Reset
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
+    decimal_traits<Mock>::to_pod_error = error::decimal_overflow;
+}
