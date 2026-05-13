@@ -267,6 +267,15 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
    - **All dev work happens locally.** Contributors do not push speculative commits to remote branches "to see what CI says" as a substitute for local testing. CI is verification of green local work, not a remote test runner.
    - **Local toolchain target: Clang 22** (matches the user's local install and the Conan profile pin per Article II §2 / Article III §3). CI provisions Clang 22 via `apt.llvm.org` so local==CI.
 
+8. **Verification gate (`/speckit-verify`) — required after every `/speckit-implement`.** `/speckit-implement` marks `tasks.md` rows `[X]` on agent confidence, not on evidence. "Run X command and verify Y threshold" tasks (sanitizer presets, coverage gate, static analysis, ABI hygiene, allocation discipline, fuzz smoke, bench regression, abidiff golden) routinely get marked complete without ever firing; the first real run then happens in CI on the open PR, which fails late and costs a Gate B round. The `/speckit-verify` command (in `.claude/commands/speckit-verify.md`) is the local Tier-1 mirror that actually executes each polish task serially against artifacts and writes a decision record at `.specify/decisions/<feature>-verify.md`.
+   - **Mandatory after `/speckit-implement`.** A `/speckit-implement` run is not considered complete until `/speckit-verify <feature>` has produced a decision record. The record's verdict is `GREEN` (all PASS or SKIPPED-with-reason), `YELLOW` (every FAIL paired with a `--waive=<task-id>:<rationale>` rationale), or `RED` (at least one unwaived FAIL).
+   - **Label evidence rule.** The CI-enforced `gate-a-done` / `gate-a-waived` labels (§6) and the analogous `gate-b-done` / `gate-b-waived` labels (consumed by the planned `gate-b.yml` workflow) may only be applied with paired evidence:
+     - `gate-{a,b}-done` requires `/speckit-verify` `GREEN` **and** a corresponding Codex convergence record (`.specify/decisions/<feature>-gate{a,b}.md`).
+     - `gate-{a,b}-waived` requires `/speckit-verify` `YELLOW` (or `GREEN` with explicit Codex-side waivers) **and** waiver rationales recorded both in the verify record and the PR body.
+     - Applying gate labels by hand without these records is a constitutional violation — the labels are evidence claims, not status decorations.
+   - **`/gate-b` precondition.** `/gate-b` pre-flight reads `.specify/decisions/<feature>-verify.md` and refuses to start the Codex review loop if absent or `RED`. `YELLOW` is accepted but carries waiver context forward into the Codex brief. This makes the verification gate enforceable without an `extensions.yml` hook: the only way to apply gate labels is through `/gate-b`, and `/gate-b` cannot run without verify evidence.
+   - **Serial preset matrix.** `/speckit-verify` builds the Tier-1 preset matrix one configuration at a time — never in parallel — to keep failures isolable and avoid resource contention with the rest of the contributor's machine.
+
 ---
 
 ## Article XVIII — Roadmap Discipline
