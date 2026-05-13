@@ -37,4 +37,9 @@ if(FIXPP_BUILD_TESTS)
   add_library(fixpp_capi_shared SHARED)
   target_link_libraries(fixpp_capi_shared PUBLIC fixpp_capi_objects)
   set_target_properties(fixpp_capi_shared PROPERTIES OUTPUT_NAME fixpp_capi)
+  # Only export fixpp_* symbols; hide all C++ internals (decimal_traits, etc.)
+  # per [const §X.2]. Version script is more reliable than -fvisibility=hidden
+  # across object libraries with transitive C++ deps.
+  target_link_options(fixpp_capi_shared PRIVATE
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fixpp_capi.map")
 endif()

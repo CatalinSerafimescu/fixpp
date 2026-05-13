@@ -6,7 +6,7 @@
 #include "fixpp/core/decimal.hpp"
 
 #ifdef FIXPP_DECIMAL_USER_HEADER
-#include FIXPP_DECIMAL_USER_HEADER
+#include FIXPP_DECIMAL_USER_HEADER  // cppcheck-suppress preprocessorErrorDirective
 #endif
 
 #ifndef FIXPP_DECIMAL_T
@@ -56,6 +56,5 @@ char const decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
 // existing diagnostic readers; both variables share the same guarantee.
 [[gnu::used]] inline char const fixpp_decimal_alias_lock_value =
     decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
-[[gnu::used]] inline char const* const fixpp_decimal_alias_lock =
-    &fixpp_decimal_alias_lock_value;
+[[gnu::used]] inline char const* const fixpp_decimal_alias_lock = &fixpp_decimal_alias_lock_value;
 }  // namespace fixpp::detail

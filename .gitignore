@@ -18,6 +18,7 @@ CMakeUserPresets.json
 *.a
 *.so
 *.so.*
+!tests/abi/baseline/*.so
 *.dylib
 *.dll
 *.lib

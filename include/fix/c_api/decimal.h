@@ -11,8 +11,10 @@
 #ifndef FIX_C_API_DECIMAL_H
 #define FIX_C_API_DECIMAL_H
 
-#include <stddef.h>
-#include <stdint.h>
+// NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers): C-ABI header; C-style
+// includes are correct for consumers that compile as C (not C++).
+#include <stddef.h>  // NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers)
+#include <stdint.h>  // NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers)
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,11 +24,14 @@ extern "C" {
 typedef int fixpp_error_t;
 
 /* ── Provisional error codes (allocated 2026-05-12, owned by 2i) ─────────── */
+/* C-ABI error codes must be #define, not enum, to remain usable by pure-C consumers.
+   NOLINTBEGIN(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum) */
 #define FIXPP_ERR_OK 0
 #define FIXPP_ERR_UNKNOWN 2
 #define FIXPP_ERR_BUFFER_TOO_SMALL 3
 #define FIXPP_ERR_DECIMAL_INVALID 10        /* provisional 2026-05-12 */
 #define FIXPP_ERR_DECIMAL_PRECISION_LOSS 11 /* provisional 2026-05-12 */
+/* NOLINTEND(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum) */
 
 /* ── §5.1 Layout — frozen for FIXPP_C_ABI_VERSION_MAJOR == 1 [const §X.1] ─── */
 typedef struct fixpp_decimal {
