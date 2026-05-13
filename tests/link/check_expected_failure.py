@@ -14,6 +14,7 @@ Usage:
 import argparse
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,10 +42,19 @@ def main() -> int:
         cleanup = True
 
     try:
+        # tests/link/CMakeLists.txt is reserved for the ctest entry that
+        # registers this checker — pointing `cmake -S` at tests/link would
+        # configure that file instead of the alias-mismatch project. Copy
+        # the .cmake file into a fresh source directory so it is the project.
+        src_dir = pathlib.Path(tmpdir) / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(str(cmake_file), str(src_dir / "CMakeLists.txt"))
+        build_subdir = str(pathlib.Path(tmpdir) / "build")
+
         # Configure
         cfg = subprocess.run(
-            ["cmake", "-S", str(cmake_file.parent),
-             "-B", tmpdir,
+            ["cmake", "-S", str(src_dir),
+             "-B", build_subdir,
              f"-DFIXPP_ROOT={fixpp_root}",
              "-DCMAKE_CXX_STANDARD=23"],
             capture_output=True, text=True
@@ -56,7 +66,7 @@ def main() -> int:
 
         # Build — expected to FAIL
         build = subprocess.run(
-            ["cmake", "--build", tmpdir, "--target", "decimal_alias_mismatch_test"],
+            ["cmake", "--build", build_subdir, "--target", "decimal_alias_mismatch_test"],
             capture_output=True, text=True
         )
         build_output = build.stdout + build.stderr
@@ -76,7 +86,6 @@ def main() -> int:
         return 0
     finally:
         if cleanup:
-            import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 

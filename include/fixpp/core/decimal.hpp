@@ -49,9 +49,21 @@ public:
 
     [[nodiscard]] constexpr T const& value() const noexcept { return value_; }
 
+    // Generic bodies: delegate to traits_type. Defining inline in the primary
+    // template (rather than via per-T explicit specialization) keeps the
+    // alias-swappable API live for any T whose decimal_traits<T> provides
+    // from_chars/to_chars — see 2a-decimal.md §4.3-§4.4 (Gate B P1 #2).
     [[nodiscard]] static expected_t<decimal> parse(std::span<const std::byte> src,
-                                                   std::pmr::memory_resource* mr) noexcept;
-    [[nodiscard]] expected_t<std::size_t> format(std::span<std::byte> dst) const noexcept;
+                                                   std::pmr::memory_resource* mr) noexcept {
+        auto r = traits_type::from_chars(src, mr);
+        if (!r) {
+            return std::unexpected{r.error()};
+        }
+        return decimal{*r};
+    }
+    [[nodiscard]] expected_t<std::size_t> format(std::span<std::byte> dst) const noexcept {
+        return traits_type::to_chars(value_, dst);
+    }
 
     // Cross-traits conversion — funnels through pod_decimal for T≠U (T039/T040).
     // T==U path short-circuits via if constexpr — no funnel, no error (AC-X3, D-11).
@@ -130,23 +142,5 @@ struct decimal_traits<pod_decimal> {
     static bool is_zero(pod_decimal const& v) noexcept;
     static bool is_negative(pod_decimal const& v) noexcept;
 };
-
-// ── decimal<pod_decimal> member body definitions (thin shells) ───────────────
-
-template <>
-inline expected_t<decimal<pod_decimal>> decimal<pod_decimal>::parse(
-    std::span<const std::byte> src, std::pmr::memory_resource* mr) noexcept {
-    auto r = decimal_traits<pod_decimal>::from_chars(src, mr);
-    if (!r) {
-        return std::unexpected{r.error()};
-    }
-    return decimal<pod_decimal>{*r};
-}
-
-template <>
-inline expected_t<std::size_t> decimal<pod_decimal>::format(
-    std::span<std::byte> dst) const noexcept {
-    return decimal_traits<pod_decimal>::to_chars(value_, dst);
-}
 
 }  // namespace fixpp::core

@@ -62,3 +62,69 @@ TEST(DecimalCABILayout, NonZeroReservedTolerated) {
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_OK);
     EXPECT_STREQ(buf, "1");
 }
+
+// ── Gate B P1 #3 — direct coverage for the _checked siblings (AC-C6) ────────
+
+TEST(DecimalCABIChecked, CompareCheckedInDomainReturnsOrdering) {
+    fixpp_decimal_t a{2, -1, {}};   // 0.2
+    fixpp_decimal_t b{1, -1, {}};   // 0.1
+    int ord = 99;
+    EXPECT_EQ(fixpp_decimal_compare_checked(a, b, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, 1);  // 0.2 > 0.1
+
+    EXPECT_EQ(fixpp_decimal_compare_checked(b, a, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, -1);
+
+    EXPECT_EQ(fixpp_decimal_compare_checked(a, a, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, 0);
+}
+
+TEST(DecimalCABIChecked, CompareCheckedRejectsOutOfDomain) {
+    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad_positive_exp{1, 1, {}};
+    fixpp_decimal_t bad_too_negative{1, -39, {}};
+    int ord = 99;
+
+    EXPECT_EQ(fixpp_decimal_compare_checked(bad_positive_exp, good, &ord),
+              FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(ord, 99);  // not written
+
+    EXPECT_EQ(fixpp_decimal_compare_checked(good, bad_too_negative, &ord),
+              FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(ord, 99);
+
+    EXPECT_EQ(fixpp_decimal_compare_checked(bad_positive_exp, bad_too_negative, &ord),
+              FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(ord, 99);
+}
+
+TEST(DecimalCABIChecked, CompareCheckedRejectsNullOut) {
+    fixpp_decimal_t a{1, 0, {}};
+    EXPECT_EQ(fixpp_decimal_compare_checked(a, a, nullptr), FIXPP_ERR_DECIMAL_INVALID);
+}
+
+TEST(DecimalCABIChecked, EqualCheckedInDomain) {
+    fixpp_decimal_t a{10, -1, {}};   // 1.0
+    fixpp_decimal_t b{1, 0, {}};     // 1
+    fixpp_decimal_t c{2, 0, {}};     // 2
+    int eq = 99;
+
+    EXPECT_EQ(fixpp_decimal_equal_checked(a, b, &eq), FIXPP_ERR_OK);
+    EXPECT_EQ(eq, 1);
+
+    EXPECT_EQ(fixpp_decimal_equal_checked(a, c, &eq), FIXPP_ERR_OK);
+    EXPECT_EQ(eq, 0);
+}
+
+TEST(DecimalCABIChecked, EqualCheckedRejectsOutOfDomain) {
+    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad{1, 1, {}};
+    int eq = 99;
+    EXPECT_EQ(fixpp_decimal_equal_checked(good, bad, &eq), FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(eq, 99);
+}
+
+TEST(DecimalCABIChecked, EqualCheckedRejectsNullOut) {
+    fixpp_decimal_t a{1, 0, {}};
+    EXPECT_EQ(fixpp_decimal_equal_checked(a, a, nullptr), FIXPP_ERR_DECIMAL_INVALID);
+}

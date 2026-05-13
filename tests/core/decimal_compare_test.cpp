@@ -77,6 +77,31 @@ TEST(DecimalCompare, BothNegativeCanonical) {
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::equal);
 }
 
+// Gate B P1 #1 regression: same-bucket negatives must order by magnitude,
+// not by raw signed-int comparison of mantissas. Before the fix, step-4
+// rescaling combined with the sign flip produced the wrong ordering when
+// the more-negative operand had a larger absolute mantissa.
+TEST(DecimalCompare, NegativeSameBucketOrdersByMagnitude) {
+    // |a| × 10^-38 with am = INT64_MAX (largest finite negative mantissa)
+    // vs |b| = 1e18 × 10^-38. Both negative, same magnitude bucket (-19).
+    // |a| > |b| ⇒ a < b numerically.
+    pod_decimal a{-INT64_MAX, -38};
+    pod_decimal b{-1000000000000000000LL, -38};
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::less);
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(b, a), std::strong_ordering::greater);
+}
+
+// Companion oracle check: same magnitudes, opposite signs handled correctly.
+TEST(DecimalCompare, SameBucketCrossCheck) {
+    // {2, -1} = 0.2; {19, -2} = 0.19; same magnitude bucket (-1)
+    pod_decimal pos_a{2, -1};
+    pod_decimal pos_b{19, -2};
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pos_a, pos_b), std::strong_ordering::greater);
+    pod_decimal neg_a{-2, -1};
+    pod_decimal neg_b{-19, -2};
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(neg_a, neg_b), std::strong_ordering::less);
+}
+
 // decimal<pod_decimal> operator== and operator<=> rely on compare
 TEST(DecimalCompare, DecimalWrapperOperators) {
     using fixpp::core::decimal;

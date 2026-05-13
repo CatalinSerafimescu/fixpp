@@ -19,6 +19,7 @@ add_executable(fixpp_core_tests
   decimal_roundtrip_property_test.cpp
   decimal_cross_traits_test.cpp
   decimal_alias_test.cpp
+  decimal_predicates_test.cpp
 )
 target_include_directories(fixpp_core_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests/support"

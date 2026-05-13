@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Static libs may be relinked into the SHARED fixpp_capi variant (built for the
+# Python Decimal oracle test, seam #8). Requires PIC on every engine archive.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # ── Project options ──────────────────────────────────────────────────────────
 include(cmake/ProjectOptions.cmake)
 
@@ -77,6 +81,8 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/capi)
   add_subdirectory(tests/service)
   add_subdirectory(tests/alloc_guard)
+  add_subdirectory(tests/oracle)
+  add_subdirectory(tests/link)
 endif()
 
 if(FIXPP_BUILD_FUZZ)

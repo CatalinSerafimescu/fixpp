@@ -303,48 +303,52 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         return a_greater ? std::strong_ordering::greater : std::strong_ordering::less;
     }
 
-    // Step 4: same magnitude — lex-compare digit strings
-    // Align to the same exponent by scaling the one with the larger exponent
-    // (multiply it by 10^delta, capped to avoid overflow — but both fit in int64)
-    // We compare sign * |mantissa| * 10^(exponent - min_exp) for each.
-    // Since magnitudes equal, the digit counts differ by at most (ae - be) shifts.
-    // Simpler: compare normalized mantissas scaled to the lower exponent.
-    const int delta = ae - be;  // may be positive or negative
-    if (delta >= 0) {
-        // scale am by 10^delta
-        std::int64_t scaled = am;
-        for (int i = 0; i < delta; ++i) {
-            if (scaled > INT64_MAX / 10) {
-                // a is bigger in absolute value
-                return a_neg ? std::strong_ordering::less : std::strong_ordering::greater;
-            }
-            scaled *= 10;
+    // Step 4: same magnitude bucket — lexicographic digit-string compare on
+    // absolute mantissas per 2a-decimal.md §6.3, with sign flip applied at
+    // the end. Operates on |mantissa| (signed compare would conflate sign
+    // with magnitude — see Gate B P1 #1: same-bucket negatives misordered).
+    // INT64_MIN already excluded at step 0, so negation is safe.
+    char a_digits[19];
+    char b_digits[19];
+    auto extract_digits = [](std::int64_t m, char buf[19]) -> int {
+        if (m < 0) {
+            m = -m;
         }
-        if (scaled == bm) {
-            return std::strong_ordering::equal;
+        int n = 0;
+        if (m == 0) {
+            return n;
         }
-        bool a_greater = (scaled > bm);
-        if (a_neg) {
-            a_greater = !a_greater;
+        while (m > 0) {
+            buf[n++] = static_cast<char>(m % 10);
+            m /= 10;
         }
-        return a_greater ? std::strong_ordering::greater : std::strong_ordering::less;
-    }
-    // scale bm by 10^(-delta)
-    std::int64_t scaled = bm;
-    for (int i = 0; i < -delta; ++i) {
-        if (scaled > INT64_MAX / 10) {
-            return a_neg ? std::strong_ordering::greater : std::strong_ordering::less;
+        for (int i = 0, j = n - 1; i < j; ++i, --j) {
+            std::swap(buf[i], buf[j]);
         }
-        scaled *= 10;
+        return n;
+    };
+    const int a_n = extract_digits(am, a_digits);
+    const int b_n = extract_digits(bm, b_digits);
+
+    // Shorter string is right-padded with zeros to the longer's length;
+    // this aligns the MSDs (same magnitude bucket invariant) and walks
+    // toward less-significant digits. Max 19 iterations.
+    const int max_n = (a_n > b_n) ? a_n : b_n;
+    std::strong_ordering abs_cmp = std::strong_ordering::equal;
+    for (int i = 0; i < max_n; ++i) {
+        const char da = (i < a_n) ? a_digits[i] : char{0};
+        const char db = (i < b_n) ? b_digits[i] : char{0};
+        if (da != db) {
+            abs_cmp = (da < db) ? std::strong_ordering::less : std::strong_ordering::greater;
+            break;
+        }
     }
-    if (am == scaled) {
-        return std::strong_ordering::equal;
+
+    if (a_neg && abs_cmp != std::strong_ordering::equal) {
+        abs_cmp = (abs_cmp == std::strong_ordering::less) ? std::strong_ordering::greater
+                                                          : std::strong_ordering::less;
     }
-    bool a_greater = (am > scaled);
-    if (a_neg) {
-        a_greater = !a_greater;
-    }
-    return a_greater ? std::strong_ordering::greater : std::strong_ordering::less;
+    return abs_cmp;
 }
 
 // ── T021: from_pod, to_pod, predicates ──────────────────────────────────────
