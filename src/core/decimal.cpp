@@ -303,10 +303,25 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         return a_greater ? std::strong_ordering::greater : std::strong_ordering::less;
     }
 
-    // Step 4: same magnitude bucket — lexicographic digit-string compare on
-    // absolute mantissas per 2a-decimal.md §6.3, with sign flip applied at
-    // the end. Operates on |mantissa| (signed compare would conflate sign
-    // with magnitude — see Gate B P1 #1: same-bucket negatives misordered).
+    // Step 4 fast path: same exponent — direct signed-mantissa compare.
+    // At equal exponent, value = mantissa × 10^ae, and 10^ae > 0, so the
+    // ordering of values is identical to the signed ordering of mantissas
+    // for both signs (and sign mismatch is already filtered at Step 1).
+    // This is the hot path hammered by BM_decimal_compare and most
+    // production traffic; restored after Gate B P1 #1's fix was scoped
+    // too broadly (correctness bug only existed when ae != be).
+    if (ae == be) {
+        if (am == bm) {
+            return std::strong_ordering::equal;
+        }
+        return (am < bm) ? std::strong_ordering::less : std::strong_ordering::greater;
+    }
+
+    // Step 4 slow path: same magnitude bucket but different exponents —
+    // lexicographic digit-string compare on absolute mantissas per
+    // 2a-decimal.md §6.3, with sign flip applied at the end. Operates on
+    // |mantissa| (signed compare would conflate sign with magnitude across
+    // different scales — see Gate B P1 #1: same-bucket negatives misordered).
     // INT64_MIN already excluded at step 0, so negation is safe.
     char a_digits[19];
     char b_digits[19];
