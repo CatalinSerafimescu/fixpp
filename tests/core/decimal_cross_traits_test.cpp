@@ -56,11 +56,17 @@ struct decimal_traits<test::decimal_wide> {
     }
 
     static expected_t<pod_decimal> to_pod(test::decimal_wide const& v) noexcept {
-        // Narrow: fails if out of int64 range
-        static constexpr __int128 INT64_MIN_128 = static_cast<__int128>(INT64_MIN);
+        // Narrow: fails if out of int64 range (not in pod_decimal mantissa domain).
+        // Returns decimal_overflow — the contract-correct error for an out-of-domain pod.
+        // The cross-traits wrapper (decimal::from/to) is responsible for remapping
+        // this to decimal_precision_loss per 2a §6.4.
+        static constexpr __int128 INT64_MIN_128 = static_cast<__int128>(INT64_MIN) + 1;
         static constexpr __int128 INT64_MAX_128 = static_cast<__int128>(INT64_MAX);
-        if (v.mantissa < INT64_MIN_128 + 1 || v.mantissa > INT64_MAX_128)
-            return std::unexpected{error::decimal_precision_loss};
+        if (v.mantissa < INT64_MIN_128 || v.mantissa > INT64_MAX_128)
+            return std::unexpected{error::decimal_overflow};
+        // Also enforce exponent domain per the canonical pod_decimal contract.
+        if (v.exponent < -38 || v.exponent > 0)
+            return std::unexpected{error::decimal_overflow};
         return pod_decimal{static_cast<std::int64_t>(v.mantissa), v.exponent};
     }
 
@@ -79,52 +85,54 @@ struct decimal_traits<test::decimal_wide> {
 }  // namespace fixpp::core
 
 // ── AC-X1: T≠U round-trip funnels through pod_decimal ───────────────────────
-// decimal<pod_decimal>::from<decimal_wide>(src) then .to<pod_decimal>() restores value
-// for in-domain values.
+// decimal<Wide>::to<pod_decimal>() then decimal<pod_decimal>::from<Wide>()
+// restores value for in-domain values. Exercises the wrapper methods end-to-end.
 TEST(DecimalCrossTraits, X1_RoundTripThroughPod) {
     using Wide = fixpp::core::test::decimal_wide;
     // Create a wide decimal with a value that fits in pod_decimal
     decimal<Wide> src{Wide{12345LL, -2}};
 
-    // Convert wide → pod via from<pod_decimal>
-    // Actually, T037 tests decimal<T>::from<U>() — but those bodies are T039/T040 stubs
-    // until US4 implementation. For T037 TDD (red phase), we call the traits directly.
-
-    // Direct traits-level round-trip (seam #3)
-    auto to_pod_r = decimal_traits<Wide>::to_pod(src.value());
+    // Wide → pod via decimal<Wide>::to<pod_decimal>() wrapper
+    auto to_pod_r = src.to<pod_decimal>();
     ASSERT_TRUE(to_pod_r.has_value());
+    EXPECT_EQ(to_pod_r->value().mantissa, 12345);
+    EXPECT_EQ(to_pod_r->value().exponent, -2);
 
-    auto from_pod_r = decimal_traits<pod_decimal>::from_pod(*to_pod_r);
+    // pod → wide via decimal<pod_decimal>::from<Wide>() wrapper (symmetry)
+    auto from_pod_r = decimal<pod_decimal>::from(src);
     ASSERT_TRUE(from_pod_r.has_value());
-
-    // Value should round-trip correctly
-    EXPECT_EQ(from_pod_r->mantissa, 12345);
-    EXPECT_EQ(from_pod_r->exponent, -2);
+    EXPECT_EQ(from_pod_r->value().mantissa, 12345);
+    EXPECT_EQ(from_pod_r->value().exponent, -2);
 }
 
-// AC-X2: out-of-domain narrowing returns decimal_precision_loss
+// AC-X2: out-of-domain narrowing returns decimal_precision_loss (not decimal_overflow)
+// The mock's to_pod returns decimal_overflow for out-of-int64-range values;
+// the wrapper (decimal<Wide>::to<pod_decimal>()) must remap to decimal_precision_loss
+// per 2a §6.4. This test verifies the remap inside the wrapper method.
 TEST(DecimalCrossTraits, X2_NarrowingPrecisionLoss) {
     using Wide = fixpp::core::test::decimal_wide;
-    // A value that overflows int64
+    // A value that overflows int64 — mock to_pod returns decimal_overflow
     static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
-    Wide wide_val{TOO_BIG, 0};
+    decimal<Wide> wide_val{Wide{TOO_BIG, 0}};
 
-    auto r = decimal_traits<Wide>::to_pod(wide_val);
+    auto r = wide_val.to<pod_decimal>();
     ASSERT_FALSE(r.has_value());
+    // Wrapper must remap decimal_overflow → decimal_precision_loss (2a §6.4)
     EXPECT_EQ(r.error(), error::decimal_precision_loss);
 }
 
 // AC-X3: T==U if constexpr short-circuit — no funnel, no error
-// This is a compile-time property; verified by instantiating T==U path.
-// The actual short-circuit is implemented in T039/T040 replacing the stubs.
-// At TDD red phase we verify the traits-level T==U path.
+// decimal<pod_decimal>::to<pod_decimal>() hits the is_same_v<T,U> branch and
+// returns the value directly without going through the pod funnel.
 TEST(DecimalCrossTraits, X3_SameTypeSameValue) {
     pod_decimal v{100, -2};
-    // to_pod on pod_decimal is identity (T==U path)
-    auto r = decimal_traits<pod_decimal>::to_pod(v);
+    decimal<pod_decimal> src{v};
+
+    // Wrapper short-circuit: to<pod_decimal>() on a decimal<pod_decimal>
+    auto r = src.to<pod_decimal>();
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->mantissa, v.mantissa);
-    EXPECT_EQ(r->exponent, v.exponent);
+    EXPECT_EQ(r->value().mantissa, v.mantissa);
+    EXPECT_EQ(r->value().exponent, v.exponent);
 }
 
 // Negative path using mock_decimal_traits (seam #1)
