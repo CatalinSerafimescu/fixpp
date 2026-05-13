@@ -1,0 +1,10 @@
+[book]
+title = "fixpp — FIX feature map"
+authors = ["Catalin Serafimescu"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/CatalinSerafimescu/fixpp"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/CatalinSerafimescu/fixpp/edit/main/{path}"
