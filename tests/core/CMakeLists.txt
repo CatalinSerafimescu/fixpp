@@ -35,6 +35,7 @@ gtest_discover_tests(fixpp_core_tests)
 # Split prevents US1/US2 builds from blocking on US3 header creation (T033)
 add_executable(fixpp_capi_tests
   decimal_capi_layout_test.cpp
+  decimal_capi_error_test.cpp
   decimal_reserved_tolerance_test.cpp
 )
 target_link_libraries(fixpp_capi_tests PRIVATE
