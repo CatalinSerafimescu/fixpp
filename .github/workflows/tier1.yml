@@ -36,6 +36,21 @@ jobs:
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22 all
+          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
+          # but does NOT update the unversioned `clang`/`clang++` alternatives.
+          # CMake presets use unversioned `clang++`, which otherwise resolves
+          # to the runner's system clang (older — missing C++23 std::expected
+          # in libstdc++ headers visible to it). Detect what version actually
+          # got installed (the script silently falls back to an earlier major
+          # when the requested one isn't published for the runner's distro yet)
+          # and register it as the default.
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          echo "Registering clang-$CLANG_VER as default unversioned clang/clang++"
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-$CLANG_VER   100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$CLANG_VER 100
+          clang++ --version
           sudo apt-get install -y --no-install-recommends \
             gcc-13 g++-13 \
             ninja-build \
@@ -105,6 +120,21 @@ jobs:
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22 all
+          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
+          # but does NOT update the unversioned `clang`/`clang++` alternatives.
+          # CMake presets use unversioned `clang++`, which otherwise resolves
+          # to the runner's system clang (older — missing C++23 std::expected
+          # in libstdc++ headers visible to it). Detect what version actually
+          # got installed (the script silently falls back to an earlier major
+          # when the requested one isn't published for the runner's distro yet)
+          # and register it as the default.
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          echo "Registering clang-$CLANG_VER as default unversioned clang/clang++"
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-$CLANG_VER   100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$CLANG_VER 100
+          clang++ --version
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
             python3-pip \
@@ -195,6 +225,21 @@ jobs:
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22 all
+          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
+          # but does NOT update the unversioned `clang`/`clang++` alternatives.
+          # CMake presets use unversioned `clang++`, which otherwise resolves
+          # to the runner's system clang (older — missing C++23 std::expected
+          # in libstdc++ headers visible to it). Detect what version actually
+          # got installed (the script silently falls back to an earlier major
+          # when the requested one isn't published for the runner's distro yet)
+          # and register it as the default.
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          echo "Registering clang-$CLANG_VER as default unversioned clang/clang++"
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-$CLANG_VER   100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$CLANG_VER 100
+          clang++ --version
           sudo apt-get install -y --no-install-recommends \
             swig \
             ninja-build \
@@ -285,6 +330,21 @@ jobs:
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22 all
+          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
+          # but does NOT update the unversioned `clang`/`clang++` alternatives.
+          # CMake presets use unversioned `clang++`, which otherwise resolves
+          # to the runner's system clang (older — missing C++23 std::expected
+          # in libstdc++ headers visible to it). Detect what version actually
+          # got installed (the script silently falls back to an earlier major
+          # when the requested one isn't published for the runner's distro yet)
+          # and register it as the default.
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          echo "Registering clang-$CLANG_VER as default unversioned clang/clang++"
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-$CLANG_VER   100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$CLANG_VER 100
+          clang++ --version
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
             python3-pip \
