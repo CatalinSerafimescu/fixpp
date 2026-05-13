@@ -4,6 +4,8 @@
 
 add_library(fixpp_capi STATIC
   capi.cpp
+  decimal.cpp
+  decimal_assert.cpp
 )
 add_library(fixpp::capi ALIAS fixpp_capi)
 

@@ -1,6 +1,6 @@
 BasedOnStyle: Google
 ColumnLimit: 100
-Standard: c++23
+Standard: c++20
 IndentWidth: 4
 AccessModifierOffset: -4
 IncludeBlocks: Regroup

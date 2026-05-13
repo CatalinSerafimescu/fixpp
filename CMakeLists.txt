@@ -76,6 +76,11 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/tap)
   add_subdirectory(tests/capi)
   add_subdirectory(tests/service)
+  add_subdirectory(tests/alloc_guard)
+endif()
+
+if(FIXPP_BUILD_FUZZ)
+  add_subdirectory(tests/fuzz)
 endif()
 
 # ── CMake package export (fixpp:: namespace per [arch §7.4]) ────────────────

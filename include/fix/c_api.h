@@ -32,6 +32,9 @@ extern "C" {
 #define FIXPP_C_ABI_VERSION_MINOR 1
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
+/* ── Phase 4 decimal boundary functions ─────────────────────────────────── */
+#include "fix/c_api/decimal.h"
+
 /* ── Version accessor ───────────────────────────────────────────────────── */
 /**
  * fixpp_version_string — return the library version as a null-terminated string.

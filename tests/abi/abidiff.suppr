@@ -1,0 +1,14 @@
+# tests/abi/abidiff.suppr
+# Suppression file for abidiff Tier 2 ABI golden check.
+# Scoped to fixpp_decimal_t and the seven C-ABI boundary functions introduced
+# in 001-core-decimal. Prevents unrelated symbol churn from polluting the
+# golden comparison when other parts of the library evolve.
+
+[suppress_type]
+  name = fixpp_decimal_t
+  has_data_member_insertions = no
+  has_data_member_removals = no
+
+[suppress_function]
+  name_regexp = ^fixpp_decimal_(parse|format|compare|compare_checked|equal|equal_checked|init)$
+  allow_added_symbols = yes

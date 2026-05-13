@@ -1,0 +1,19 @@
+# tests/abi/golden/fixpp_decimal_t.abidiff
+# ABI diff golden for fixpp_decimal_t — captured from 001-core-decimal initial landing.
+# Generated via: abidiff --leaf-changes-only --suppressions tests/abi/abidiff.suppr
+#                tests/abi/baseline/libfixpp_capi.a build/linux-clang-release/lib/libfixpp_capi.a
+#
+# The baseline (tests/abi/baseline/libfixpp_capi.a) is the pre-001-core-decimal version
+# (no decimal symbols). This golden captures the new symbols introduced by 001-core-decimal.
+#
+# Any change to fixpp_decimal_t layout or these seven boundary function signatures is a
+# Tier 2 hard-fail requiring a FIXPP_C_ABI_VERSION_MAJOR bump per [const §X.1].
+#
+# To regenerate after an intentional ABI change:
+#   1. Bump FIXPP_C_ABI_VERSION_MAJOR
+#   2. Rebuild release: cmake --build --preset linux-clang-release --target fixpp_capi
+#   3. Copy new library to baseline: cp build/linux-clang-release/lib/libfixpp_capi.a tests/abi/baseline/
+#   4. Run: abidiff --leaf-changes-only --suppressions tests/abi/abidiff.suppr
+#             tests/abi/baseline/libfixpp_capi.a build/linux-clang-release/lib/libfixpp_capi.a
+#           > tests/abi/golden/fixpp_decimal_t.abidiff
+#   5. Commit both the new baseline .a and this updated golden.
