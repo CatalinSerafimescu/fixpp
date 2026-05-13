@@ -13,9 +13,11 @@
 #ifndef FIXPP_C_API_H
 #define FIXPP_C_API_H
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
+// NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers): C-ABI header; C-style
+// includes are correct for consumers that compile as C (not C++).
+#include <stdbool.h>  // NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers)
+#include <stddef.h>   // NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers)
+#include <stdint.h>   // NOLINT(hicpp-deprecated-headers,modernize-deprecated-headers)
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +34,9 @@ extern "C" {
 #define FIXPP_C_ABI_VERSION_MINOR 1
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
+/* ── Phase 4 decimal boundary functions ─────────────────────────────────── */
+#include "fix/c_api/decimal.h"  // NOLINT(misc-include-cleaner): umbrella header
+
 /* ── Version accessor ───────────────────────────────────────────────────── */
 /**
  * fixpp_version_string — return the library version as a null-terminated string.
@@ -42,7 +47,7 @@ extern "C" {
 const char* fixpp_version_string(void);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
 #endif /* FIXPP_C_API_H */

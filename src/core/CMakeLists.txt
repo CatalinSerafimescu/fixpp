@@ -1,12 +1,13 @@
 # src/core/CMakeLists.txt
-# fixpp::core — primitives, PMR allocators, error type, etc. [arch §4.1]
-# INTERFACE library for now; promoted to OBJECT in Phase 4 when real TUs land.
-# Phase 3 default — revisit if core needs compiled translation units sooner.
+# fixpp::core — primitives, PMR allocators, error type, decimal traits [arch §4.1]
+# Promoted from INTERFACE to a compiled library in Phase 4 (001-core-decimal).
 
-add_library(fixpp_core INTERFACE)
+add_library(fixpp_core STATIC
+  decimal.cpp
+)
 add_library(fixpp::core ALIAS fixpp_core)
 
-target_include_directories(fixpp_core INTERFACE
+target_include_directories(fixpp_core PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
 )
 

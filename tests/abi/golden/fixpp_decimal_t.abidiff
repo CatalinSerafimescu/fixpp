@@ -1,0 +1,17 @@
+Leaf changes summary: 7 artifacts changed
+Changed leaf types summary: 0 leaf type changed
+Removed/Changed/Added functions summary: 0 Removed, 0 Changed, 0 Added function
+Removed/Changed/Added variables summary: 0 Removed, 0 Changed, 0 Added variable
+Function symbols changes summary: 0 Removed, 7 Added function symbols not referenced by debug info
+Variable symbols changes summary: 0 Removed, 0 Added variable symbol not referenced by debug info
+
+7 Added function symbols not referenced by debug info:
+
+  [A] fixpp_decimal_compare
+  [A] fixpp_decimal_compare_checked
+  [A] fixpp_decimal_equal
+  [A] fixpp_decimal_equal_checked
+  [A] fixpp_decimal_format
+  [A] fixpp_decimal_init
+  [A] fixpp_decimal_parse
+

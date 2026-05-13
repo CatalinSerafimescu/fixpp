@@ -1,0 +1,88 @@
+{
+  "context": {
+    "date": "2026-05-13T16:23:38+03:00",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "./build/linux-clang-release/bench/core/decimal_bench",
+    "num_cpus": 8,
+    "mhz_per_cpu": 3593,
+    "cpu_scaling_enabled": false,
+    "aslr_enabled": false,
+    "caches": [
+      {
+        "type": "Data",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Instruction",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 2,
+        "size": 524288,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 3,
+        "size": 16777216,
+        "num_sharing": 8
+      }
+    ],
+    "load_avg": [1.55664,1.19385,0.844727],
+    "library_version": "v1.9.5",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_decimal_parse",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_decimal_parse",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 67756109,
+      "real_time": 7.7825257645749462e+00,
+      "cpu_time": 8.5025256246636012e+00,
+      "time_unit": "ns",
+      "items_per_second": 1.1761211246447311e+08
+    },
+    {
+      "name": "BM_decimal_format",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "BM_decimal_format",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 39331718,
+      "real_time": 1.6418450269571192e+01,
+      "cpu_time": 1.7937706051894303e+01,
+      "time_unit": "ns",
+      "items_per_second": 5.5748488525063969e+07
+    },
+    {
+      "name": "BM_decimal_compare",
+      "family_index": 2,
+      "per_family_instance_index": 0,
+      "run_name": "BM_decimal_compare",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 69513873,
+      "real_time": 9.1768284440121271e+00,
+      "cpu_time": 1.0026250429176917e+01,
+      "time_unit": "ns",
+      "items_per_second": 9.9738182989120960e+07
+    }
+  ]
+}

@@ -4,6 +4,9 @@ out/
 cmake-build-*/
 *.cmake.user
 
+# CTest scratch (created when ctest runs from the source tree root)
+Testing/
+
 # Conan
 .conan/
 conan_cache/
@@ -15,6 +18,7 @@ CMakeUserPresets.json
 *.a
 *.so
 *.so.*
+!tests/abi/baseline/*.so
 *.dylib
 *.dll
 *.lib
@@ -81,6 +85,4 @@ decisions/
 book/
 *-decisions.md
 
-# Exception: .specify/decisions/ is the library's own Gate A/B outcome store
-# (mirrors the parent repo decisions/ convention but lives inside .specify/)
-!.specify/decisions/
+.claude
