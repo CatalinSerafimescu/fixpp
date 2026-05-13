@@ -222,6 +222,13 @@ jobs:
           path: build/linux-clang-coverage/coverage.lcov
           if-no-files-found: warn  # SOFT: artifact may not exist yet
 
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: build/linux-clang-coverage/coverage.lcov
+          flags: unittests
+          fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
+
   # ── Python bindings job ──────────────────────────────────────────────────
   python-bindings:
     name: python-bindings
