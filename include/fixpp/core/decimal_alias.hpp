@@ -31,7 +31,31 @@ struct decimal_alias_sentinel {
 // [C++17 [temp.expl.spec]p6]
 template <>
 char const decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
-// Every TU including this header references this symbol; the library's decimal.cpp
-// provides the one definition. A mismatched FIXPP_DECIMAL_T → link error (AC-B3).
-inline char const* const fixpp_decimal_alias_lock = &decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
+
+// Production link-time guard (Gate B round 2 P1 fix). Two reinforcing
+// mechanisms, because either alone is fragile:
+//
+//   1. `fixpp_decimal_alias_lock_value` is initialized from the *value* of
+//      `decimal_alias_sentinel<T>::tag`. Across TUs the compiler cannot
+//      constant-fold this read (the definition lives in src/core/decimal.cpp
+//      only), so it emits a relocation against `tag` that the linker must
+//      resolve. A mismatched FIXPP_DECIMAL_T leaves the relocation
+//      unsatisfied → link error (AC-B3).
+//
+//   2. `[[gnu::used]]` (Clang/GCC, Tier 1) forces the compiler and linker to
+//      retain the weak inline variable even when the consumer TU never
+//      reads it. Without this, the previous `&tag`-into-pointer form was
+//      elidable: the address-of-static folds to a known non-null value,
+//      reads of the pointer fold to `true`, and the weak inline ends up
+//      with no references and gets GC'd by the linker before the
+//      relocation is checked. Tier 2 compilers (MSVC) ignore the unknown
+//      attribute per [C++17 [dcl.attr.grammar]/6]; on those targets the
+//      odr-use of `tag`'s value above is the load-bearing mechanism.
+//
+// `fixpp_decimal_alias_lock` preserves the original pointer type for any
+// existing diagnostic readers; both variables share the same guarantee.
+[[gnu::used]] inline char const fixpp_decimal_alias_lock_value =
+    decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag;
+[[gnu::used]] inline char const* const fixpp_decimal_alias_lock =
+    &fixpp_decimal_alias_lock_value;
 }  // namespace fixpp::detail
