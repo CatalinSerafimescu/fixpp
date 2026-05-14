@@ -85,10 +85,12 @@ Without this primitive, `wire`'s validator has no metadata source, codegen has n
 ### Edge Cases
 
 - **What happens when the same XML is loaded twice into separate `Dictionary` values?** Both must be structurally equal (NFR-002-4 determinism); no global / static state in `XmlLoader`.
+- **What happens when N threads call `load` on the same `XmlLoader` value concurrently?** Safe. `XmlLoader` is a stateless value (no member state, no `static` non-const state, no `thread_local` per `[const §XV]`); two threads sharing one `XmlLoader` instance race on no mutable bytes. Verified by inspection of `contracts/xml_loader.hpp` (empty class body); see research.md D-7 for the rationale. The returned `Dictionary` values are independent and frozen per AC-T1/AC-T2.
 - **What happens when `mr` is null?** `XmlLoader::load(path, nullptr)` — `[2c §6.1.1]` mandates PMR-aware allocation; passing `nullptr` is a **caller precondition violation; debug-asserted; release-undefined** per research.md D-5 and `contracts/xml_loader.hpp` Preconditions. No runtime error channel is owed; the precondition is documented at the API site and the debug `assert` catches it during development.
 - **What happens when XML is well-formed but semantically inconsistent** (e.g., `<message>` references a `<field>` that exists but has the wrong type for its declared usage)? Out of scope for the loader — semantic validation belongs to `wire::Validator`. The loader fails only on structural defects (AC-L2..L8).
 - **What happens during PMR allocation failure mid-load?** Partial state is destroyed; `dict::xml_oom_error` thrown (AC-L9). No leak — verified by ASan + the PMR tracking resource.
 - **What happens when the XML declares a FIX version not in the v1.0 supported nine?** `dict::unknown_version_error` (AC-L4). Tested by feeding `<fix major="6" minor="0">`.
+- **What about narrower XML-grammar defects not enumerated in AC-L5..L8?** Cases such as `<component>` declarations forming a cycle (A → B → A), `<message>` blocks containing no `<field>` rows, `<field number="0">`, and `<fix major="-1">`-style negative version numbers are **not enumerated as named ACs in v1.0**. They default to the loader's natural pugixml-driven behavior plus the existing structural checks — each currently lands in one of AC-L3 (XML malformed), AC-L4 (unknown version for negative majors), AC-L5 (missing/non-numeric `number` for `number="0"` if treated as zero-tag), or AC-L7 (dangling component reference for cycles that flatten to undeclared refs). Sharpening these into named ACs with concrete error-message wording is deferred to follow-up **F4** in §10.
 
 ## Clarifications
 
@@ -127,7 +129,11 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
   - **FIX42**: same five headline messages as FIX44 (subset); components `Instrument` (FIX 4.2 simpler form), no `Parties` (post-4.2 addition).
   - **FIX50SP2**: application headlines `NewOrderSingle`, `ExecutionReport`, `MarketDataRequest`, `MarketDataSnapshotFullRefresh`; component `Instrument` (5.0SP2 form).
   - **FIXT11**: session/admin headlines only — `Logon`, `Logout`, `Heartbeat`, `TestRequest`, `ResendRequest`, `Reject`, `SequenceReset`. **No** application headlines (FIXT is session-transport only).
-- **AC-D7.** Loading FIX44.xml produces correct `NoXxx` delimiter tags on standard repeating groups (`NoPartyIDs` = 453, `NoAllocs` = 78, `NoLegs` = 555). Equivalent per-version delimiter checks for `FIX42`, `FIX50SP2`, `FIXT11` parameterized in `tests/dictionary/dictionary_lookup_test.cpp`.
+- **AC-D7.** Loading the four shipped XMLs produces correct `NoXxx` delimiter tags on standard repeating groups; concrete per-version assertions:
+  - **FIX44** (reference): `NoPartyIDs` = 453, `NoAllocs` = 78, `NoLegs` = 555.
+  - **FIX50SP2**: same three tags present (`NoPartyIDs` = 453, `NoAllocs` = 78, `NoLegs` = 555 — all carried forward from FIX 4.4).
+  - **FIX42**: `NoAllocs` = 78 (`NoPartyIDs` was added in 4.3 and `NoLegs` in 4.4 — neither present in 4.2).
+  - **FIXT11**: session/admin-only vocabulary; the standard header carries `NoHops` = 627; admin messages declare no additional `NoXxx` delimiters. The test parameterization verifies the XML-declared subset rather than enforcing a fixed list.
 - **AC-D8.** Every `Dictionary` public lookup method is `noexcept`.
 
 ### 4.3 FieldRef / ComponentRef / GroupRef shape
@@ -165,7 +171,7 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 
 | NFR | Requirement | How verified |
 |---|---|---|
-| NFR-002-1 | `XmlLoader::load(FIX44.xml, mr)` completes in ≤500 ms wall-clock on a typical developer machine (warm filesystem cache). Loaded once per session, not on the hot path. | Bench harness `bench/dictionary/xml_loader_bench.cpp`; CI bar at 1 s regression gate; user-facing target 500 ms. |
+| NFR-002-1 | `XmlLoader::load(FIX44.xml, mr)` completes in ≤500 ms wall-clock on a typical developer machine (**Linux-native ext4 storage**, warm filesystem cache). Loaded once per session, not on the hot path. **Storage-medium caveat:** WSL2 cross-mount paths under `/mnt/c/...` exhibit ~5–10× higher small-file open latency and may exceed the bar; re-run on a Linux-native path before treating a regression as real (per quickstart.md §4 storage assumption). | Bench harness `bench/dictionary/xml_loader_bench.cpp`; CI bar at 1 s regression gate; user-facing target 500 ms. |
 | NFR-002-2 | Zero allocation against the global `new` for the entire `load*` call when `mr` is provided. | Test seam #2 — `pmr_allocation_tracking_resource`; global counter must read 0. |
 | NFR-002-3 | `Dictionary` is shareable read-only across N threads without locking; no `mutable` state on the lookup path. | Test seam #6 — TSan run with N concurrent readers, 0 reports. |
 | NFR-002-4 | Loader is deterministic: byte-identical XML input produces a `Dictionary` whose `messages()` iteration order and `field_ref()` lookup ordering are byte-stable **across runs on the same machine**. Cross-machine determinism is satisfied **by construction** via the bytewise-lexicographic sorted-storage invariant (research.md D-6: `std::ranges::lexicographical_compare` over `unsigned char` — locale-independent), not via a runtime test (Gate A round 1 P2.5: the within-process seam tests what it can test; a checked-in golden-hash artifact per shipped XML is a future hardening tracked outside this PR). | Test seam #5 — load FIX44.xml twice in one process, hash the iteration order, assert equal (within-process determinism). The bytewise-sort invariant in research.md D-6 plus the static `MsgType` byte content carry the cross-machine claim by construction. |
@@ -234,6 +240,14 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 - **Status:** CLOSED. `research.md` D-1 picks **pugixml 1.14** (MIT) after a 3-candidate evaluation (pugixml / tinyxml2 / libexpat) against `[2c §9]` test seams; ratified via the `conanfile.py:28` `requires("pugixml/1.14")` row added in this PR. No further action — the F3 entry is retained as historical trail for downstream readers; see §11 R1 for the matching risk-register closure.
 - **Source of truth (licence anchor only):** `[const §V.3]` — "no LGPL"; pugixml is MIT, which clears the anchor.
 
+### F4 — Narrow XML-grammar edge-case taxonomy
+
+- **What's deferred:** named ACs for: `<component>` declarations forming a cycle (A→B→A or longer); `<message>` blocks with zero `<field>` rows; `<field number="0">`; `<fix major="-1">` or negative version numbers; per-case error-message wording for diagnostics.
+- **Why:** `/speckit-checklist` pre-Gate-B review (CHK017 in `checklists/pre-gate-b.md`) flagged these as uncovered. Closing them in v1.0 would add ~5 test cases and ~5 spec lines but no new loader capability — every case already lands somewhere in the AC-L3..L8 taxonomy via natural pugixml behavior. Pragmatic deferral over scope creep.
+- **Catalogue rows:** (none — pure quality hardening).
+- **Source of truth:** `tests/dictionary/negative_paths_test.cpp` once the cases are added.
+- **Trigger:** First Gate B reviewer finding flagging a real defect in one of these cases, or first venue report of "weird XML accepted silently". Recorded as a baseline observation now so the absence is visible to downstream reviewers.
+
 ## 11. Risk register
 
 - **R1 — XML parser dependency choice: MITIGATED.** /plan selected **pugixml 1.14** (MIT) per `research.md` D-1 after a 3-candidate evaluation (pugixml / tinyxml2 / libexpat) against `[2c §9]` test seams; /plan added the `conanfile.py:28` `requires("pugixml/1.14")` row in this PR; Gate A round 1 reviewed and confirmed the choice (no P1 raised against pugixml at any round). R1 is retained here as historical trail for downstream readers; see §10 F3 for the matching follow-up closure.
@@ -268,5 +282,5 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 - **A1.** PMR-awareness is mandatory: every `XmlLoader::load*` accepts a `std::pmr::memory_resource*` per `[arch §5.2]` and `[2c §6.1]`. Non-PMR overloads are not in v1.0.
 - **A2.** Field-name lookup (`field_by_name`) is case-sensitive exact match against the XML's `name` attribute (industry default for QuickFIX-format dictionaries). If a venue ships case-variant XML, the caller normalizes upstream.
 - **A3.** `Dictionary` is value-typed and **move-only**; copying is deleted in `contracts/dictionary.hpp` per `[2c §4.3]` (`Dictionary(Dictionary const&) = delete`). Sharing the same loaded dictionary across N sessions/threads at the caller's layer is done either by holding it in a long-lifetime location (engine-level slot) and aliasing it by reference / `std::span` into its accessors, or by wrapping it in `std::shared_ptr<Dictionary>` at the caller's discretion — there is no builtin refcount on the value type itself. (An internal `shared_ptr<const dict_metadata_handle>` lives inside `Dictionary` per `[2c §4.3]` so the metadata block survives `Dictionary` moves; that is an implementation detail, not a user-level sharing surface.)
-- **A4.** The loader is single-pass over the XML — it does not require seeking back to earlier nodes; this is enforceable given QuickFIX-format dictionaries declare `fields` before `messages`.
+- **A4.** The loader performs a **single forward DOM-walk** over the parsed pugixml `xml_document` — it visits each node exactly once in document order and does not require seeking back to earlier nodes; this is enforceable given QuickFIX-format dictionaries declare `fields` before `messages`. (This is a single forward DOM-walk, *not* a streaming SAX pass; the pugixml DOM is fully constructed before the walk begins per research.md D-1.)
 - **A5.** Loader determinism (NFR-002-4) is achieved by sorted storage of `FieldRef[]` (by `MsgType` then `tag`) and `ComponentRef[]` (by name) inside `Dictionary`; iteration order falls out of the storage order without an explicit sort at iterate time.
