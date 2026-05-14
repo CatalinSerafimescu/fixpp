@@ -22,3 +22,5 @@ tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
 tools.build:sharedlinkflags=["-fsanitize=undefined"]
 tools.build:exelinkflags=["-fsanitize=undefined"]
+# See linux-clang-asan for rationale on tools.info.package_id:confs.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]

@@ -22,3 +22,5 @@ LLVM_PROFILE_FILE=default.profraw
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fprofile-instr-generate", "-fcoverage-mapping"]
 tools.build:exelinkflags=["-fprofile-instr-generate"]
+# See linux-clang-asan for rationale on tools.info.package_id:confs.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]

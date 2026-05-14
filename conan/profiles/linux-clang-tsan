@@ -23,3 +23,5 @@ tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=thread"]
 tools.build:sharedlinkflags=["-fsanitize=thread"]
 tools.build:exelinkflags=["-fsanitize=thread"]
+# See linux-clang-asan for rationale on tools.info.package_id:confs.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]
