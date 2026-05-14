@@ -46,7 +46,7 @@ Citation form per research.md "Citation verification pass" — `[const §<Roman>
 **Test seams:**
 
 - Seam #4 (shape static_assert) → `tests/dictionary/ref_shape_test.cpp` re-asserts AC-F1..F5.
-- Seam #8 (round-trip) → `tests/dictionary/round_trip_test.cpp` walks every `(MsgType, tag)` and verifies `field(tag)` ↔ `field(MsgType, tag)` agreement.
+- Seam #8 (round-trip) → `tests/dictionary/round_trip_test.cpp` walks every `(MsgType, tag)` and verifies `field_ref(msg_type, tag)` ↔ `field(msg_type, tag)` (canonical vs descriptive-alias) agreement per AC-D1 / AC-D2 (the spec's AC-D1 was rewritten in Gate A round 1 to canonicalize on `field_ref(msg_type, tag)` — see spec.md round-1 edit).
 
 ## Entity 2 — `fixpp::dict::ComponentRef` (per-component metadata)
 
@@ -112,7 +112,7 @@ Citation form per research.md "Citation verification pass" — `[const §<Roman>
 | FieldRef arrays per MsgType | `std::span<FieldRef const>[]` | PMR-allocated copies of the per-MsgType FieldRef sequences | Sorted by tag ascending per research.md D-6. |
 | ComponentRef array | `std::span<ComponentRef const>` | PMR-allocated; sorted by name | research.md D-6. |
 | GroupRef array | `std::span<GroupRef const>` | PMR-allocated; sorted by `no_tag` ascending | research.md D-6. |
-| MessageEntry list | `std::span<MessageEntry const>` | PMR-allocated; sorted by MsgType lexicographic | Drives AC-D5 iteration. |
+| MessageEntry list | `std::span<MessageEntry const>` | PMR-allocated; sorted by MsgType **bytewise** (`std::ranges::lexicographical_compare` over raw `unsigned char` — locale-independent per research.md D-6 / Gate A round 1 P2.4) | Drives AC-D5 iteration. |
 | Name string pool | `std::pmr::string` or `std::pmr::vector<char>` | PMR-allocated | All `string_view`-returning accessors alias into this pool. |
 | Required-fields-per-MsgType lookup | `std::span<std::uint16_t const>[]` indexed by MsgType | PMR-allocated | Drives `required_fields(msg_type)`. |
 | Tag-by-name index | `std::pmr::flat_map<std::string_view, std::uint16_t>` or sorted-pair array | PMR-allocated | Drives `field_by_name(name)`. |
@@ -129,7 +129,8 @@ Citation form per research.md "Citation verification pass" — `[const §<Roman>
   - `messages()` iteration order is deterministic and stable across loads of the same XML on the same machine and across machines (NFR-002-4 — research.md D-6).
 - **Immutability after construction.** Every public method is `const` and `noexcept` (AC-T1, AC-D8). The metadata block is never mutated after `XmlLoader::load*` returns — the shared_ptr is to `const dict_metadata_handle`.
 - **Move discipline.** Move ctor / move assign are `= default` `noexcept`; the shared_ptr move is no-throw, allocates nothing, touches no atomics. Heap-pinned metadata-handle address survives the move; consumers that aliased the metadata storage (none in this PR; `dict::table_view` is out of scope) remain valid.
-- **Copy is deleted.** A future deep-copy method may be added; not in scope here.
+- **Copy is deleted.** `Dictionary` is move-only per `[2c §4.3]` and `contracts/dictionary.hpp` (matches spec.md §A3 round-1 wording). Caller-side multi-session sharing uses `std::shared_ptr<Dictionary>` at the consumer's discretion, not a builtin refcount on the value type. A future deep-copy method may be added; not in scope here.
+- **Reserved internal slot for F2.** The internal `dict_metadata_handle` layout in `contracts/dictionary.hpp` reserves room for a future `base_keepalive_` slot (a copy of the base `Dictionary`'s `handle_`) per `[2c §4.3]` canonical at `2c-codegen.md:1676`; F2 (DialectOverlay) will add the slot when it lands. This is a private-layout reservation only — no public-API impact and no test seam in this PR.
 - **Thread-safety.** Frozen-after-handoff per `[2c §6.1.1]`: a single `Dictionary` is safe to read concurrently from N threads without external synchronisation (AC-T2).
 
 **State transitions:**
@@ -162,7 +163,7 @@ Failure transitions (during `XmlLoader::load*`, before the `Dictionary` is mater
 
 - malformed XML / dangling component ref / unknown FIX type → throws `dict::xml_parse_error`; no `Dictionary` constructed.
 - version string outside v1.0-supported nine → throws `dict::unknown_version_error`; no `Dictionary` constructed.
-- PMR allocation failure (any byte) → trapped via `core::detail::trap_throw`, re-thrown as `dict::xml_oom_error`; partial state torn down deterministically; no leak (verified by ASan + the PMR tracking resource, seam #2 + seam #9).
+- PMR allocation failure (any byte) → trapped via `core::detail::trap_throw_or_throw<dict::xml_oom_error>` (NEW helper added in this PR per research.md D-3), re-thrown as `dict::xml_oom_error`; partial state torn down deterministically; no leak (verified by ASan + the PMR tracking resource, seam #2 + seam #9).
 
 **Test seams:**
 
@@ -187,10 +188,10 @@ Failure transitions (during `XmlLoader::load*`, before the `Dictionary` is mater
 **Invariants:**
 
 - Stateless. `XmlLoader{}.load(p, mr)` and `XmlLoader{}.load(p, mr)` produce structurally equal `Dictionary` values (NFR-002-4).
-- **No `mut`able / global / static state** (spec.md §3 "Edge Cases" #1). Two threads calling `load` on **separate** `XmlLoader` values is safe; calling on the **same** value is UB per research.md D-7.
+- **No `mut`able / global / static state** (spec.md §3 "Edge Cases" #1). Two threads calling `load` on **separate** `XmlLoader` values is safe; calling `load` from N threads on the **same** `XmlLoader` value is also safe — there is no shared mutable state to race on (research.md D-7, updated in Gate A round 1 P2.3).
 - **`mr != nullptr` is a caller precondition** (research.md D-5). Debug-asserted; release-undefined; not surfaced as a runtime error.
 - **pugixml is an implementation detail** (research.md D-15). Public header does not transitively expose `pugixml.hpp`.
-- **Out of scope per /clarify Q2 → A:** `load_overlay(...)` and `load_overlay_from_string(...)` are absent from this PR's `XmlLoader` (spec.md §10 F2). Future addition is non-breaking ABI per `[arch §9.2]`.
+- **Out of scope per /clarify Q2 → A:** `load_overlay(...)` and `load_overlay_from_string(...)` are absent from this PR's `XmlLoader` (spec.md §10 F2). Future addition is source-compatible by C++ language rule (added member functions can never invalidate existing call sites) and stays within the `[arch §9.3]` "Stable from v1.0" tier. (The earlier draft's `[arch §9.2]` cite for this claim did not resolve — see plan.md `## Gate A` round 1.)
 
 **State transitions:** none (stateless value).
 
@@ -241,6 +242,7 @@ Failure transitions (during `XmlLoader::load*`, before the `Dictionary` is mater
 - The underlying type is `std::uint8_t` for both enums (matches `[2c §4.3]`).
 - `Unknown` is the parse-failure / unset sentinel. `Dictionary::which_session_version()` never returns `Unknown` after a successful `load*` call (the loader either succeeds with a known version or throws `unknown_version_error`).
 - This PR's XML-data shipping subset (per /clarify Q1 → B) covers `session_version::{v42, v44, v50sp2, vt11}` and `application_version::{v42, v44, v50sp2}` (FIXT is session-only). The five F1-deferred values exist in the enum but no XML is checked in for them.
+- **`application_version` is NOT exercised by this PR's loader output (Gate A round 1 P2.2).** The loader sets `which_session_version()` on the produced `Dictionary` and stores nothing about the application version. For a `Dictionary` loaded from `FIXT11.xml` (a session-only vocabulary), no `application_version` value is meaningful — FIXT carries no application messages, and the application-side identity (`DefaultApplVerID(1137)` / `ApplVerID(1128)`) is established at session-handshake time by the future wire/session integration feature, not at XML-load time. The full `version_profile` struct (`[2c §4.3]`) carrying both axes plus a per-message-override bit is deferred to that downstream feature; `application_version` ships as a *value space* here for the loader's version-string parse table (e.g., to recognize "5.0SP2" → `v50sp2`), not as a Dictionary-side `default_appl` slot.
 - **Wire `ApplVerID(1128)` mapping table** lives in `[2c §4.3]`. The mapping is **not** the C++ enum's internal indices (`Unknown=0, v40=1, …, v50sp2=8`); a future parse implementation must use the spec table per `[FIXT §5.1]` / `[FIXT §5.3]` (deferred to the wire/session feature).
 
 **State transitions:** none — enums are immutable value types.
@@ -293,10 +295,10 @@ Every AC-L* acceptance criterion mapped to its exception type and `core::error` 
 | AC-L6 | duplicate `<field number="N">` | `xml_parse_error` | `dict_xml_parse_failed` |
 | AC-L7 | `<message>`/`<group>` references undefined `<component>` | `xml_parse_error` | `dict_xml_parse_failed` |
 | AC-L8 | `<field type="UNKNOWN_TYPE">` outside `[FIX50SP2 §3.3]` | `xml_parse_error` | `dict_xml_parse_failed` |
-| AC-L9 | PMR allocation failure during load | `xml_oom_error` (trapped via `core::detail::trap_throw`) | `dict_xml_oom` |
+| AC-L9 | PMR allocation failure during load | `xml_oom_error` (trapped via `core::detail::trap_throw_or_throw<dict::xml_oom_error>` — new helper added in this PR per research.md D-3) | `dict_xml_oom` |
 | AC-L10 | `load_from_string(xml_text, mr)` equivalent to `load(path, mr)` for the same grammar | (positive path; same errors as L2..L9 apply) | — |
 
-**No exception escapes outside `xml_*_error`.** A `pugi::xml_parse_result.status != status_ok` becomes `xml_parse_error` at the wrapper site. A `std::filesystem` access error becomes `xml_parse_error` at the wrapper site. A PMR `bad_alloc` becomes `xml_oom_error` via `trap_throw`. No `std::runtime_error` (other than our two derived types) and no `std::bad_alloc` (other than `xml_oom_error`) escape `XmlLoader::load*`.
+**No exception escapes outside `xml_*_error`.** A `pugi::xml_parse_result.status != status_ok` becomes `xml_parse_error` at the wrapper site. A `std::filesystem` access error becomes `xml_parse_error` at the wrapper site. A PMR `bad_alloc` becomes `xml_oom_error` via `trap_throw_or_throw<dict::xml_oom_error>` (the new helper added in this PR per research.md D-3). No `std::runtime_error` (other than our two derived types) and no `std::bad_alloc` (other than `xml_oom_error`) escape `XmlLoader::load*`.
 
 ## PMR allocation accounting (NFR-002-2, AC-P1, AC-P2 summary)
 

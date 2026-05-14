@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — all 3 markers resolved by /clarify Session 2026-05-14 (Q1 → B four codegen-target versions; Q2 → A overlay absent; Q3 → A parser deferred to /plan). §10 converted from "Open questions" to "Follow-ups & deferred work" with trigger criteria for each gap (F1/F2/F3).
+- [x] No [NEEDS CLARIFICATION] markers remain — all 3 markers resolved by /clarify Session 2026-05-14 (Q1 → B four codegen-target versions; Q2 → A overlay absent; Q3 → A parser deferred to /plan). §10 converted from "Open questions" to "Follow-ups & deferred work" with trigger criteria for each gap (F1/F2/F3). The Edge-Cases "or document as caller-side UB" fork on null-`mr` was also closed in Gate A round 1 (Codex rescue P2.2 → Opus confirm) — spec §3 Edge Cases now states the ratified debug-asserted / release-undefined policy verbatim, matching research.md D-5 and `contracts/xml_loader.hpp` Preconditions.
 - [x] Requirements are testable and unambiguous — every AC is paired with a concrete test seam (§9) and an observable failure mode.
 - [x] Success criteria are measurable — §6 NFRs each carry a "How verified" cell with a concrete test or bench.
 - [x] Success criteria are technology-agnostic for user-facing outcomes — NFR-002-1 specifies wall-clock target; technology-specific verifications (PMR allocator counting, TSan) sit on the "How verified" side, not the requirement side.

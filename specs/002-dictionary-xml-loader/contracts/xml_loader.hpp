@@ -36,8 +36,10 @@ public:
     // at engine init / session open, where the alternative is
     // `expected_t<Dictionary>` at a call site that reads "throws on bad XML"
     // ergonomically. PMR allocations within `load*` are wrapped in
-    // `fixpp::core::detail::trap_throw` per `[2a §4.2]` and translated to
-    // `dict::xml_oom_error` on PMR failure (`[2c §6.1.1]`).
+    // `fixpp::core::detail::trap_throw_or_throw<dict::xml_oom_error>` (the
+    // new exception-API sibling of `[2a §4.2]`'s `trap_throw` — added in
+    // this PR per research.md D-3 / Gate A round 1 root cause #1) and
+    // translated to `dict::xml_oom_error` on PMR failure (`[2c §6.1.1]`).
     XmlLoader() noexcept = default;
 
     // Load a per-version standard or QuickFIX-XML-format dictionary from a
@@ -84,9 +86,10 @@ public:
     // in this PR. The corresponding declarations from `[2c §4.5]` are
     // intentionally OMITTED here so a future reviewer of `XmlLoader`'s
     // public surface sees the unfinished extension. Adding the two methods
-    // later is non-breaking ABI per `[arch §9.2]` (additive method
-    // addition); no call site in v1.0 depends on the absence of these
-    // methods.
+    // later is source-compatible by C++ language rule (added member
+    // functions can never invalidate existing call sites) and stays within
+    // the `[arch §9.3]` "Stable from v1.0" tier; no call site in v1.0
+    // depends on the absence of these methods.
     //
     // For reference, the deferred declarations are (verbatim from
     // `[2c §4.5]`):
@@ -98,6 +101,12 @@ public:
     //   [[nodiscard]] DialectOverlay
     //   load_overlay_from_string(std::string_view xml_text,
     //                            std::pmr::memory_resource* mr);
+    //
+    // Adding these later is source-compatible by C++ language rule (added
+    // member functions can never invalidate existing call sites) and stays
+    // within the `[arch §9.3]` "Stable from v1.0" tier. (The earlier
+    // draft's `[arch §9.2]` cite for this claim was repaired in Gate A
+    // round 1 per Opus root cause #3.)
     // -------------------------------------------------------------------
 };
 

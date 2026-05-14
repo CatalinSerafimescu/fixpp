@@ -39,7 +39,7 @@ Technical approach is locked by `[2c]` v1.3:
 
 **Storage:** N/A on the hot path; PMR-backed metadata storage owned by `Dictionary` is per-load (research.md data-model §"PMR allocation accounting").
 
-**Testing:** GoogleTest + GoogleMock (C++) for AC-L*, AC-D*, AC-F*, AC-T*, AC-P* per `[const §VII.1]`. No Python pytest seam in this PR (the SWIG bindings for `Dictionary` are owned by **2m**, out of scope per spec §5). No libFuzzer harness in this PR — the design doc's seam #8 (XML fuzzer) is a `wire::*` follow-up because v1.0's `[const §VII.7]` parser-touching fuzz threshold is owned by the wire-layer feature, not the loader; the loader's exception discipline (research.md D-4) plus the AC-L3..L8 negative-path corpus (seam #7) covers the same defensive surface for the loader.
+**Testing:** GoogleTest + GoogleMock (C++) for AC-L*, AC-D*, AC-F*, AC-T*, AC-P* per `[const §VII.1]`. No Python pytest seam in this PR (the SWIG bindings for `Dictionary` are owned by **2m**, out of scope per spec §5). **libFuzzer harness ships in this PR** at `tests/fuzz/fuzz_dict_xml_loader.cpp` per `[2c §9]` seam #8 and `[const §VII.7]`'s "new parser-touching code without a fuzz harness is a Gate B blocker" rule (added in Gate A round 1 per Opus root cause #3 — the earlier draft deferred this and was a constitution-level override masquerading as a `/plan` cut). The harness feeds arbitrary bytes to `XmlLoader::load_from_string`, runs under ASan + UBSan, and integrates with the existing `tests/fuzz/` CMake target shape inherited from 001 (`tests/fuzz/fuzz_decimal_parse.cpp`).
 
 **Target Platform:** Linux primary (Tier 1: Clang 22 Debug + Release + ASan + UBSan + TSan + Coverage; GCC Release sanity). Windows Tier 2 (manual / nightly) per `[const §IX.6]`. No C-ABI surface in this PR (spec §5), so no abidiff golden — `[const §IX.5]` ABI check is N/A here (research.md D-17).
 
@@ -76,10 +76,10 @@ All citations below use canonical form `[const §<Roman>.<arabic>]` per `constit
 | `[const §II.1]` | C++23, no earlier fallback | Plan targets C++23 only; uses `std::pmr`, `std::span`, `std::filesystem`, `std::expected` (indirectly via `core::expected_t`). |
 | `[const §III.2]` | Conan dependency manager | pugixml added as a new Conan row at pinned version (`pugixml/1.14`); per `[const §V.3]`. |
 | `[const §V.1]` | AGPL-3.0 + commercial dual; no LGPL deps | pugixml is MIT — compatible. Headers carry `SPDX-License-Identifier: AGPL-3.0-or-later`. |
-| `[const §V.3]` | LGPL-free + third-party-deps procedure | pugixml is MIT (not LGPL). User sign-off on `/plan` is the third-party admission step; Gate A reviews the choice. |
+| `[const §V.3]` | LGPL-free (licence anchor only) | pugixml is MIT (not LGPL); licence-compatibility per `[const §V.3]` text. The admission *procedure* (user sign-off at /plan + Codex Gate A review) is project convention, not a clause in `[const §V.3]` — cite repaired in Gate A round 1 per Opus root cause #3. |
 | `[const §VI.4]`, `[const §VI.5]` | Bidirectional spec traceability + Normative References | Inherits D-007, D-010, OSS-001 from spec.md front-matter; spec.md §13 References lists `[2c §1.3]`, `[2c §4.1]`, `[2c §4.2]`, `[2c §4.3]`, `[2c §4.5]`, `[2c §6.1.1]`, `[2c §6.7]`, `[2c §9]`, `[FIX44]`, `[FIX50SP2 §3.3]`, `[FIXT §5.1]`, `[arch §4.2]`, `[arch §5.2]`, `[arch §5.3]`, `[arch §10]`, `[const §V.3]`, `[const §X]`, `[const §VIII.5]`, `[const §VII]`, `[const §XVII.1]`, `[const §XVII.8]`, `[const §XVIII.2]`. |
 | `[const §VII.1]`, `[const §VII.3]` | GoogleTest + TDD | `tasks.md` ordered red-green-refactor per seam; every test target is GoogleTest. |
-| `[const §VII.7]` | Fuzzing on parser-touching modules | **Not in scope this PR** — the loader's exception discipline (research.md D-4) plus the AC-L3..L8 negative-path corpus (seam #7) cover the defensive surface; v1.0's full XML fuzz harness `tests/fuzz/fuzz_dict_xml_loader.cpp` (per `[2c §9]` seam #8) lands with the D-009 / `[2c]`-internal overlay-grammar feature, which is the design-doc-canonical first attack-surface entry point. Tracked as a near-term follow-up; **NOT** Gate-B-blocking for this PR — Gate A round 1 reviews the deferral. |
+| `[const §VII.7]` | Fuzzing on parser-touching modules | **In scope this PR** — `tests/fuzz/fuzz_dict_xml_loader.cpp` ships per `[2c §9]` seam #8; feeds arbitrary bytes to `XmlLoader::load_from_string` under ASan + UBSan. The XML parser is the canonical parser-touching surface that `[const §VII.7]` is written for; the earlier draft's deferral was withdrawn in Gate A round 1 per Opus root cause #3. The `load_overlay*` fuzz target (`tests/fuzz/fuzz_dict_overlay_merge.cpp` per `[2c §9]` seam #9) defers with F2 since the overlay surface itself defers. |
 | `[const §VIII.1]`, `[const §VIII.2]` | Google Benchmark + ±5 % perf budget | Bench harness `bench/dictionary/xml_loader_bench.cpp` runs in Tier 1 with `bench/baselines/`. |
 | `[const §VIII.5]` | Zero allocation on hot path | `Dictionary` hot-path accessors allocate nothing (AC-D8); `XmlLoader::load*` is NOT on the hot path (one-shot at engine init). NFR-002-2 enforces zero `operator new` calls during the entire `load*` call. |
 | `[const §IX.1]` | ≥ 90 % line / ≥ 80 % branch on touched modules | `linux-clang-coverage` preset measures `src/dictionary/*` + `include/fixpp/dict/*`; Tier-1 gate. |
@@ -87,7 +87,7 @@ All citations below use canonical form `[const §<Roman>.<arabic>]` per `constit
 | `[const §IX.4]` | Tier-1 static analysis clean | clang-tidy + clang-format + cppcheck + IWYU; pre-commit + Tier-1. |
 | `[const §IX.5]` | abidiff against last tagged ABI | **N/A this PR** — no C-ABI surface added; the C-ABI accessor for `fixpp_dict_t` is owned by 2i (spec §5). Re-validated post-Phase-1; cited only to record the explicit non-applicability. |
 | `[const §IX.6]` | Two-tier CI | Tier 1: every preset matrix from §quickstart §3. Tier 2: Windows manual / nightly per the standard schedule. |
-| `[const §X.4]` | Bounded `fixpp_error_t` + forwards-compat | Three new `fixpp::core::error` variants added (`dict_xml_parse_failed`, `dict_unknown_version`, `dict_xml_oom`) per research.md D-10. C-ABI mapping deferred to 2i; audit-trail file `tools/abi_history/error_codes_v1.txt` updated when 2i lands (not Gate-B-blocking for this PR). |
+| `[const §X.4]` | Bounded `fixpp_error_t` + forwards-compat | Three new `fixpp::core::error` variants added (`dict_xml_parse_failed = 20`, `dict_unknown_version = 21`, `dict_xml_oom = 22`) per research.md D-3 / D-10. C-ABI mapping deferred to 2i; audit-trail file `tools/abi_history/error_codes_v1.txt` updated when 2i lands (waived for this PR per research.md D-10 / Gate A round 1 P2.1 — no C-ABI surface lands here so no `abidiff` check fires; waiver auto-expires at the first commit that adds a C-ABI surface consuming `dict_*` variants). |
 | `[const §XV]` | Banned patterns — `thread_local` | Loader uses no `thread_local`, no global mutable state, no `mutable` member. Verified by inspection + by the existing `tools/` checks. |
 | `[const §XV.12]` | No LGPL deps | pugixml is MIT. |
 | `[const §XVI.3]` | `/clarify` MANDATORY pre-`/plan` (wire format trigger) | Ran 2026-05-14; three questions answered (Q1→B, Q2→A, Q3→A). Recorded in spec.md `Clarifications`. |
@@ -137,9 +137,23 @@ include/
         └── xml_loader.hpp                 # NEW — XmlLoader (load + load_from_string)
 
 include/fixpp/core/
-└── error.hpp                              # MODIFIED — three new enum variants appended
-                                            #   (dict_xml_parse_failed, dict_unknown_version, dict_xml_oom)
-                                            # Additive per [const §X.4] forwards-compat.
+├── error.hpp                              # MODIFIED — three new enum variants appended at unused slots
+                                            #   dict_xml_parse_failed = 20
+                                            #   dict_unknown_version  = 21
+                                            #   dict_xml_oom          = 22
+                                            # Additive per [const §X.4] forwards-compat
+                                            # (research.md D-3 / D-10 — admitted in Gate A round 1 per
+                                            # Opus root cause #1; the earlier "no core/ changes" stance
+                                            # was withdrawn).
+└── decimal_helpers.hpp                    # MODIFIED — adds detail::trap_throw_or_throw<E, F> next to
+                                            # the existing detail::trap_throw<F>. The new helper catches
+                                            # std::bad_alloc and re-throws as E{} (typically
+                                            # dict::xml_oom_error); used by XmlLoader for the AC-L9
+                                            # OOM-translation path per [arch §5.3] / [2c §6.1.1]
+                                            # exception-API carve-out. The existing trap_throw returns
+                                            # expected_t<T> (wrong shape for the exception-API carve-out)
+                                            # and is unchanged. Added in Gate A round 1 per Opus root
+                                            # cause #1 (research.md D-3).
 
 src/
 └── dictionary/
@@ -167,6 +181,16 @@ tests/
 │   ├── oom_injection_test.cpp             # NEW — seam #9 — AC-L9 + AC-P2 translation
 │   └── parser_error_test.cpp              # NEW — seam #10 — AC-L3 translation (pugixml's
                                             #       xml_parse_result → dict::xml_parse_error)
+├── fuzz/
+│   ├── CMakeLists.txt                     # MODIFIED — register fuzz_dict_xml_loader target
+                                            #            next to the existing fuzz_decimal_parse.
+│   └── fuzz_dict_xml_loader.cpp           # NEW — seam #8 of `[2c §9]` — libFuzzer harness:
+                                            #       feeds arbitrary bytes to
+                                            #       XmlLoader::load_from_string under ASan + UBSan
+                                            #       per `[const §VII.7]`. Added in Gate A round 1
+                                            #       per Opus root cause #3 (root cause: earlier
+                                            #       draft's deferral was a constitution-level
+                                            #       override masquerading as a /plan cut).
 └── support/
     ├── pmr_allocation_tracking_resource.hpp   # NEW — reusable PMR resource that counts `new` calls
                                                 #       (seam #2 implementation header; carried as
@@ -192,7 +216,7 @@ dictionaries/
 conanfile.py                               # MODIFIED — requires("pugixml/1.14") added per research.md D-1 / D-15
 ```
 
-**Structure Decision:** single library, no web/mobile/cli split. Follows the Phase-3 layout (`include/fixpp/dict/`, `src/dictionary/`, `tests/dictionary/`, `bench/dictionary/`, `dictionaries/`). The CMake target shape switches from the existing INTERFACE-library placeholder to a STATIC library carrying `xml_loader.cpp` + `dictionary.cpp`; the `INTERFACE_INCLUDE_DIRECTORIES` and `INTERFACE_LINK_LIBRARIES` (`fixpp::core`) discipline from the existing scaffolding is preserved per `[arch §7.3]`. No `core/` header surface changes (research.md D-3); only `include/fixpp/core/error.hpp` gains three additive enum variants.
+**Structure Decision:** single library, no web/mobile/cli split. Follows the Phase-3 layout (`include/fixpp/dict/`, `src/dictionary/`, `tests/dictionary/`, `bench/dictionary/`, `dictionaries/`). The CMake target shape switches from the existing INTERFACE-library placeholder to a STATIC library carrying `xml_loader.cpp` + `dictionary.cpp`; the `INTERFACE_INCLUDE_DIRECTORIES` and `INTERFACE_LINK_LIBRARIES` (`fixpp::core`) discipline from the existing scaffolding is preserved per `[arch §7.3]`. Two `core/` headers are modified additively (research.md D-3, admitted in Gate A round 1 per Opus root cause #1): `core/error.hpp` gains three new enum variants at slots 20–22, and `core/decimal_helpers.hpp` gains a sibling `trap_throw_or_throw<E, F>` template next to the existing `trap_throw<F>`. No new `core/` header files are added.
 
 ### Test seam → file mapping (10/10 — closes spec.md §9)
 
@@ -207,7 +231,7 @@ This sub-section answers the same root-cause class that closed 001-core-decimal 
 | 5 | Determinism oracle — load FIX44.xml twice, hash iteration order | `tests/dictionary/determinism_test.cpp` | NFR-002-4 |
 | 6 | TSan concurrent-reader harness | `tests/dictionary/concurrent_readers_test.cpp` | AC-T1, AC-T2, NFR-002-3 |
 | 7 | Negative-path XML samples — one per AC-L2..L8 / L10 | `tests/dictionary/negative_paths_test.cpp` | AC-L2, AC-L3, AC-L5, AC-L6, AC-L7, AC-L8, AC-L10 |
-| 8 | Round-trip — load FIX44.xml, iterate every `(MsgType, tag)`, look up by both forms | `tests/dictionary/round_trip_test.cpp` | AC-D1, AC-D2, AC-D5 |
+| 8 | Round-trip — load FIX44.xml, iterate every `(MsgType, tag)`, look up by `field_ref(MsgType, tag)` (canonical) AND its AC-D2 `std::optional<FieldRef>` alias `field(MsgType, tag)` | `tests/dictionary/round_trip_test.cpp` | AC-D1, AC-D2, AC-D5 |
 | 9 | Allocator-failure injection — PMR throws `bad_alloc` on Nth allocate | `tests/dictionary/oom_injection_test.cpp` + `tests/support/failing_pmr_resource.hpp` | AC-L9, AC-P2 |
 | 10 | XML-parser-error injection — `pugi::xml_parse_result → dict::xml_parse_error` translation | `tests/dictionary/parser_error_test.cpp` | AC-L3 (translation isolation) |
 
@@ -230,18 +254,33 @@ This sub-section answers the same root-cause class that closed 001-core-decimal 
 
 ## Gate A
 
-### Round 1 — 2026-05-14 (pending Codex review)
+### Round 1 — 2026-05-14 (Codex review + Opus adversarial judge complete; rewrite applied)
 
-Gate A round 1 runs after this plan lands. Both Codex passes per `feedback_gate_a_codex_dual_pass.md` (auto-memory):
+Gate A round 1 ran on bundle SHA `0c5cdfc` with both Codex passes per `feedback_gate_a_codex_dual_pass.md` (auto-memory):
 - **Codex rescue agent** (`/codex:rescue`) — full Phase-4 bundle review.
 - **`/codex:adversarial-review`** — adversarial pass challenging design choices.
 
-Followed by Opus post-judging (P1/P2/P3 triage and verdict). The /gate-a skill is the canonical orchestrator. Expected verdict shapes per the 001 exemplar:
-- **Round 1 converged (P1 ≤ 0, P2 ≤ small):** proceed to `/tasks`.
-- **Full bundle redraft needed:** round-2 redraft of `plan.md` + `research.md` + `data-model.md` + `contracts/` from a literal re-read of `.specify/2c-codegen.md` v1.3; spec.md preserved verbatim (it carries the /clarify Q&A).
-- **Hard reset (Round 3):** rewrite from clean context (rare; per `[const §XVII.1]` resets).
+Followed by Opus post-judging (P1/P2/P3 triage and verdict). Reviews landed under `research/G19-fix-fpml-iso20022/research/reviews/`:
+- Codex rescue: `codex_002-dictionary-xml-loader_gate_a_review.md`
+- Codex adversarial: `codex_002-dictionary-xml-loader_gate_a_adversarial_review.md`
+- Opus adversarial judge: `opus_002-dictionary-xml-loader_gate_a_adversarial_review.md`
 
-Reviews land under `research/G19-fix-fpml-iso20022/research/reviews/` per the 001 convention; full /gate-a decision record at `.specify/decisions/002-dictionary-xml-loader-gatea.md`.
+- Round 1 applied 2026-05-14: Codex rescue P1=3 P2=3 P3=1; Codex adversarial P1=4 P2=7 P3=4; Opus post-judging P1=6 P2=7 P3=4; rewrite addresses root causes #1 (core/ surface admission), #2 (spec↔contract Dictionary coherence), #3 (citation audit + pugixml conanfile + fuzz harness). Reviews: research/reviews/codex_002-dictionary-xml-loader_gate_a_review.md, codex_002-dictionary-xml-loader_gate_a_adversarial_review.md, opus_002-dictionary-xml-loader_gate_a_adversarial_review.md.
+- Round 2 applied 2026-05-14: Codex rescue P1=1 P2=1 P3=2; Codex adversarial P1=1 P2=3 P3=1; Opus post-judging P1=1 P2=1 P3=3; rewrite addresses single root cause "field(uint16_t) cleanup completion" (3 text edits) + standalone P2 (parser-selection wording) + 3 standalone P3s (typo, fuzz binary path, static_assert). Reviews: research/reviews/codex_002-dictionary-xml-loader_gate_a_2_review.md, codex_002-dictionary-xml-loader_gate_a_2_adversarial_review.md, opus_002-dictionary-xml-loader_gate_a_2_adversarial_review.md.
+
+#### Round 1 — disagreements
+
+Three Codex findings that Opus disagreed with; recorded here as kept-as-is decisions with rationale:
+
+- **Codex adversarial P2.2 (transient-DOM accounting at `data-model.md:301`)** — kept as-is. NFR-002-2 ("zero allocation against the global `new` for the entire `load*` call") is honestly worded about the carve-out: pugixml's transient DOM goes through `malloc/free`, not `operator new`, and `data-model.md:313` + `research.md D-16` admit this explicitly. AC-P1 covers output-metadata-only accounting, not peak-parser-memory. Codex's counter-proposal ("add a second seam for peak parser-side bytes") is a reasonable future hardening but is outside the invariant the bundle promises today.
+- **Codex adversarial P3.1 (`.code()` as dead native-side surface at `contracts/error.hpp:46`)** — kept as-is. `research.md D-10` documents a concrete C++ use case (top-level handler routing by `code()` instead of `dynamic_cast`); `data-model.md` Entity 6 repeats it. The accessor is the 2i / C-ABI integration point but already has a today-callable C++ rationale, not just a future-consumer one. Not a defect.
+- **Codex adversarial P3.2 (negative-path file split at `plan.md:162`)** — kept as-is. Per-AC branch accountability is enforced by GoogleTest test-case naming (one `TEST(NegativePaths, ...)` per AC-L*), not by per-file decomposition; coverage is measured at the line/branch level per `[const §IX.1]`. Splitting `negative_paths_test.cpp` into six files would scatter the corpus without quality benefit.
+
+### Round 2 — pending (if any P1 surfaces in re-review of this round-1 rewrite)
+
+If round-1 fixes don't converge, round-2 expands to a full bundle redraft of `plan.md` + `research.md` + `data-model.md` + `contracts/` from a literal re-read of `.specify/2c-codegen.md` v1.3; spec.md preserved verbatim (it carries the /clarify Q&A). Hard reset (Round 3) is rare per `[const §XVII.1]`.
+
+Full /gate-a decision record at `.specify/decisions/002-dictionary-xml-loader-gatea.md`.
 
 ## Gate B
 

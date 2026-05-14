@@ -38,9 +38,22 @@ namespace fixpp::dict {
 //
 // Derived from `std::runtime_error` per `[2c §4.5]` so a top-level
 // `catch (std::exception&)` is sufficient at the engine-init call site.
+//
+// AC-L2 (I/O failure: unreadable / nonexistent path) is intentionally unified
+// under this exception type for v1.0 per research.md D-4. A sibling
+// `dict::xml_io_error` type (separate from `xml_parse_error`) is left as an
+// additive, non-breaking future split — callers catching `xml_parse_error`
+// today will continue to catch the future `xml_io_error` since both derive
+// from `std::runtime_error`. The exception's `what()` carries the underlying
+// `std::filesystem::filesystem_error` message on the AC-L2 path.
+//
+// Constructors are NOT `noexcept`: `std::runtime_error(std::string)` may
+// allocate (it may copy the SSO contents into refcounted message storage);
+// marking the constructor `noexcept` would call `std::terminate` on the
+// (rare) allocation failure rather than letting the OOM propagate.
 class xml_parse_error : public std::runtime_error {
 public:
-    explicit xml_parse_error(std::string message) noexcept
+    explicit xml_parse_error(std::string message)
         : std::runtime_error(std::move(message)) {}
 
     [[nodiscard]] fixpp::core::error code() const noexcept {
@@ -52,10 +65,12 @@ public:
 // `<fix major="..." minor="..." [servicepack="..."]>` header does not resolve
 // to one of the nine v1.0-supported FIX versions per `[2c §1.3]` (AC-L4).
 //
-// Derived from `std::runtime_error` per `[2c §4.5]`.
+// Derived from `std::runtime_error` per `[2c §4.5]`. Constructor is NOT
+// `noexcept` for the same reason as `xml_parse_error`: the `std::string`
+// forwarded into `std::runtime_error` may allocate.
 class unknown_version_error : public std::runtime_error {
 public:
-    explicit unknown_version_error(std::string message) noexcept
+    explicit unknown_version_error(std::string message)
         : std::runtime_error(std::move(message)) {}
 
     [[nodiscard]] fixpp::core::error code() const noexcept {
@@ -65,9 +80,14 @@ public:
 
 // Thrown by `XmlLoader::load(...)` / `load_from_string(...)` when PMR
 // allocation against the caller-supplied `mr` fails inside the load path
-// (AC-L9). The internal `bad_alloc` is trapped via
-// `fixpp::core::detail::trap_throw` per `[2a §4.2]` / `[2c §6.1.1]` and
-// re-thrown as this type.
+// (AC-L9). The internal `bad_alloc` is trapped via the new helper
+// `fixpp::core::detail::trap_throw_or_throw<dict::xml_oom_error>` (sibling
+// of `[2a §4.2]`'s `trap_throw`, added to `<fixpp/core/decimal_helpers.hpp>`
+// in this PR per research.md D-3 / Gate A round 1 root cause #1) and
+// re-thrown as this type. The existing `trap_throw` returns an
+// `expected_t<T>` and is the wrong shape for the exception-API carve-out;
+// the new sibling catches `std::bad_alloc` and throws `E{}` (here
+// `xml_oom_error{}`).
 //
 // Derived from `std::bad_alloc` (NOT `std::runtime_error`) so a caller
 // catching `std::bad_alloc` still gets it; `catch (std::exception&)` paths

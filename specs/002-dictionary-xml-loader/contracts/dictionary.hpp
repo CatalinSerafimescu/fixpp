@@ -47,6 +47,18 @@ namespace detail {
     // `std::pmr::polymorphic_allocator<dict_metadata_handle>` so the
     // shared-control-block deallocator returns memory to the originating
     // PMR resource. Per `[2c §4.3]` / C-R2-P1-1.
+    //
+    // Reserved internal-layout slot for F2 (DialectOverlay, spec.md §10):
+    // `[2c §4.3]` (canonical at `2c-codegen.md:1676`) requires a
+    // `base_keepalive_` slot inside the merged-handle of a
+    // `Dictionary::with_overlay(...)` result — a copy of the base's
+    // `handle_` so the base's metadata lifetime is pinned by the merged
+    // handle. The loader-MVS form here OMITS that slot because
+    // `with_overlay` is deferred to F2. When F2 lands, the slot will be
+    // added to `dict_metadata_handle`'s private layout; this is a
+    // private-implementation change with no public-API impact, but is
+    // flagged here so the F2 author is not surprised by the layout
+    // growth.
     class dict_metadata_handle;
 
     // Loader-MVS form of `dict_metadata_handle_ptr`: a shared_ptr<const>
@@ -141,21 +153,23 @@ public:
     length_pair_data_tag(std::uint16_t length_tag) const noexcept;
 
     // -----------------------------------------------------------------
-    // Spec.md §4.2 descriptive aliases (AC-D1..D5) — thin wrappers over
+    // Spec.md §4.2 descriptive aliases (AC-D2..D5) — thin wrappers over
     // the canonical surface. Both forms ship in v1.0 per research.md D-20.
+    //
+    // The context-free `field(std::uint16_t)` short form was removed in
+    // Gate A round 1 (per Opus root cause #2): one `FieldRef` exists per
+    // `(MsgType, tag)` pair, not per global tag, so a context-free lookup
+    // has no canonical answer (e.g., `OrderID(37)` appears in both
+    // `ExecutionReport` and `OrderCancelRequest` with potentially
+    // different `rule`s per `[2c §4.1]`). AC-D1 was rewritten in spec.md
+    // round 1 to canonicalize on `field_ref(msg_type, tag)` above.
     // -----------------------------------------------------------------
-
-    // AC-D1: `Dictionary::field(uint16_t tag)` — default-message context
-    // lookup. Returns `std::nullopt` if the tag is not declared in any
-    // loaded message. In the loader-MVS form this consults the
-    // global-tag-presence union (the loader populates it once at load
-    // time alongside the per-MsgType FieldRef arrays).
-    [[nodiscard]] std::optional<FieldRef>
-    field(std::uint16_t tag) const noexcept;
 
     // AC-D2: `Dictionary::field(MsgType, uint16_t tag)` — descriptive
     // alias for `field_ref(msg_type, tag)`. Returns `std::nullopt` if
-    // `field_ref(...).rule == field_presence::NotDeclared`.
+    // `field_ref(...).rule == field_presence::NotDeclared`. AC-D1 also
+    // resolves to this overload (the spec's AC-D1 short form is removed;
+    // see spec.md round-1 AC-D1 update).
     [[nodiscard]] std::optional<FieldRef>
     field(std::string_view msg_type,
           std::uint16_t tag) const noexcept;

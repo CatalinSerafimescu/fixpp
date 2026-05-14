@@ -14,7 +14,7 @@ The pugixml dependency is **new in this PR** — first time you build after pull
 
 ## 1. Build and run the unit tests (default-traits path)
 
-The dictionary loader lives in `dictionary/`; the relevant CMake target is `fixpp_dictionary` for the library and the various `dictionary_*_test` executables for the tests. Tier-1 entry point is the `linux-clang-debug` preset.
+The dictionary loader lives in `dictionary/`; the relevant CMake target is `fixpp_dictionary` (the concrete build target) — exported as the alias `fixpp::dictionary` for downstream consumers, per `spec.md §7` and the CMake convention `add_library(fixpp::dictionary ALIAS fixpp_dictionary)`. The `dictionary_*_test` executables are the test binaries. Tier-1 entry point is the `linux-clang-debug` preset.
 
 ```bash
 # Configure once (first time after pulling 002 — Conan fetches pugixml)
@@ -98,6 +98,8 @@ cmake --build --preset linux-clang-release --target xml_loader_bench
 
 Verify the **median load time** for FIX44 ≤ 500 ms (user-facing target per NFR-002-1) and ≤ 1 s for FIX50SP2 (CI regression gate). The first run after a fresh build seeds `bench/baselines/dictionary/xml_loader.json`; subsequent runs diff against it per `[const §VIII.2]` (±5 % regression budget).
 
+> **Storage assumption (Gate A round 1 P3.3).** The 500 ms bar is a **Linux-native ext4** bar — the `dictionaries/` directory and the build output are expected to live on an ext4 path under `$HOME`. WSL2 cross-mount paths under `/mnt/c/...` (Windows-mounted) exhibit ~5–10× higher small-file open latency on the kind of `open` + `mmap` / `fread` patterns the loader does and may exceed the bar; in that case re-run the bench under a Linux-native path before treating a regression as a real-code regression.
+
 ## 5. Run the bench-against-baseline regression diff
 
 After the baseline is seeded (one-time, first green CI run):
@@ -155,6 +157,25 @@ iwyu_tool.py -p build/linux-clang-debug src/dictionary include/fixpp/dict
 
 Expected: all four clean. Local pre-commit hook runs the first two automatically.
 
+## 7b. Run the libFuzzer harness (`[const §VII.7]`)
+
+The XML-loader fuzz harness lives at `tests/fuzz/fuzz_dict_xml_loader.cpp` (NEW in this PR; added in Gate A round 1 per Opus root cause #3). It feeds arbitrary bytes to `XmlLoader::load_from_string` under ASan + UBSan per `[const §VII.7]`'s parser-touching-code rule. Per `[const §VII.7]` the libFuzzer corpus is run ≥10 minutes on every PR.
+
+```bash
+# Build the fuzz target under the asan preset (libFuzzer requires Clang + sanitizer instrumentation)
+conan install . --build=missing --profile=linux-clang-asan
+cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
+cmake --build --preset linux-clang-asan --target fuzz_dict_xml_loader
+
+# Quick smoke run (10 seconds)
+./build/linux-clang-asan/bin/fuzz_dict_xml_loader -max_total_time=10
+
+# CI / pre-PR run (≥ 10 minutes per `[const §VII.7]`)
+./build/linux-clang-asan/bin/fuzz_dict_xml_loader -max_total_time=600
+```
+
+Expected: no ASan / UBSan reports; libFuzzer reports `Done` with `cov:` and `units:` counters greater than zero. Any new crash corpus enters `tests/fuzz/corpus/dict_xml_loader/` (auto-created on first crash).
+
 ## 8. Layer-edge lint (`tools/check_layers.py`)
 
 The only new edge introduced by this feature is `dictionary → core`, which is **already present** in `src/dictionary/CMakeLists.txt` from prior phase scaffolding. Verification:
@@ -211,6 +232,8 @@ After `/speckit-implement` marks every `tasks.md` row `[X]`:
 ```
 
 Runs the Tier-1 preset matrix serially per `[const §XVII.8]` and writes the decision record at `.specify/decisions/002-dictionary-xml-loader-verify.md`. Verdict must be `GREEN` (every check PASS or SKIPPED-with-reason) to apply the `gate-b-done` label per `[const §XVII.8]`. `YELLOW` requires a waiver in both the verify record and the PR body.
+
+> **Expected wall-clock budget (Gate A round 1 P3.4).** Serial `/speckit-verify` runtime on a Tier-1 developer machine (Linux-native ext4, Clang 22, 8+ cores, 16+ GB RAM) is **~20–40 minutes** for this feature. The seven Tier-1 presets (debug, release, asan, ubsan, tsan, coverage, gcc-release) compile the new dictionary slice independently and run ≈10 dictionary test targets each plus the fuzz smoke and bench; contributors should plan accordingly. CI parallelizes the matrix per `[const §IX.6]`.
 
 ## 12. `/gate-a` / `/gate-b` invocation (after verify passes)
 

@@ -85,7 +85,7 @@ Without this primitive, `wire`'s validator has no metadata source, codegen has n
 ### Edge Cases
 
 - **What happens when the same XML is loaded twice into separate `Dictionary` values?** Both must be structurally equal (NFR-002-4 determinism); no global / static state in `XmlLoader`.
-- **What happens when `mr` is null?** `XmlLoader::load(path, nullptr)` — `[2c §6.1.1]` mandates PMR-aware allocation; passing `nullptr` is a precondition violation. Test seam: assert via `trap_throw` to `dict::xml_oom_error`, or document as caller-side UB at /clarify time.
+- **What happens when `mr` is null?** `XmlLoader::load(path, nullptr)` — `[2c §6.1.1]` mandates PMR-aware allocation; passing `nullptr` is a **caller precondition violation; debug-asserted; release-undefined** per research.md D-5 and `contracts/xml_loader.hpp` Preconditions. No runtime error channel is owed; the precondition is documented at the API site and the debug `assert` catches it during development.
 - **What happens when XML is well-formed but semantically inconsistent** (e.g., `<message>` references a `<field>` that exists but has the wrong type for its declared usage)? Out of scope for the loader — semantic validation belongs to `wire::Validator`. The loader fails only on structural defects (AC-L2..L8).
 - **What happens during PMR allocation failure mid-load?** Partial state is destroyed; `dict::xml_oom_error` thrown (AC-L9). No leak — verified by ASan + the PMR tracking resource.
 - **What happens when the XML declares a FIX version not in the v1.0 supported nine?** `dict::unknown_version_error` (AC-L4). Tested by feeding `<fix major="6" minor="0">`.
@@ -96,7 +96,7 @@ Without this primitive, `wire`'s validator has no metadata source, codegen has n
 
 - **Q1: FIX version coverage in this PR?** → **A: Option B** — four codegen-target versions (`FIX42`, `FIX44`, `FIX50SP2`, `FIXT11`) per `[2c §1.3]`. Discharges D-001 (FIX 4.2), D-002 (FIX 4.4), D-003 (FIX 5.0SP2 + FIXT.1.1) in this PR. The loader structurally accepts all nine v1.0-supported versions (AC-L4) — only the XML data and version-specific headline tests for the five runtime-XML-only versions (FIX 4.0/4.1/4.3/5.0/5.0SP1) are deferred. Tracked as follow-up **F1** in §10.
 - **Q2: `XmlLoader::load_overlay*` surface in this PR?** → **A: Option A** — absent. The public `XmlLoader` header ships only `load` / `load_from_string`. The `DialectOverlay` value type, its `[2c §4.4.1]` grammar closure, and the `[2c §6.4]` additive-merge contract all defer to a dedicated D-009 feature. Tracked as follow-up **F2** in §10. **User direction:** clearly mark this gap in §10 so the surface extension is visible for the future feature.
-- **Q3: Third-party XML parser pre-selection?** → **A: Option A** — defer to /plan with a 2–3 candidate evaluation under `[const §V.3]` (third-party-deps procedure, cited if applicable). Codex Gate A reviews the choice. Tracked as follow-up **F3** in §10.
+- **Q3: Third-party XML parser pre-selection?** → **A: Option A** — defer to /plan with a 2–3 candidate evaluation; the user signs off on the choice at /plan and Codex Gate A reviews it. (`[const §V.3]` is the **licence** anchor — "no LGPL deps"; the admission procedure itself is project convention (user sign-off + Gate A), not a constitution clause. Edited in Gate A round 1 per Opus root cause #3.) Tracked as follow-up **F3** in §10.
 
 ## 4. Functional acceptance criteria
 
@@ -112,16 +112,16 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 - **AC-L6.** Loading XML containing duplicate `<field number="N">` definitions throws `dict::xml_parse_error`.
 - **AC-L7.** Loading XML where a `<group>` or `<message>` references a `<component name="X">` not defined in the same file throws `dict::xml_parse_error`.
 - **AC-L8.** Loading XML containing `<field type="UNKNOWN_TYPE">` outside the FIX-type vocabulary per `[FIX50SP2 §3.3]` throws `dict::xml_parse_error`.
-- **AC-L9.** PMR allocation failure during a `load*` call throws `dict::xml_oom_error` (the construction-time analogue, translated from PMR's `std::bad_alloc` via `core::detail::trap_throw` per `[2c §6.1.1]` / `[2a §4.2]`).
+- **AC-L9.** PMR allocation failure during a `load*` call throws `dict::xml_oom_error` (the construction-time analogue, translated from PMR's `std::bad_alloc` via the new `core::detail::trap_throw_or_throw<dict::xml_oom_error>` helper added in this PR per research.md D-3 — sibling of `[2a §4.2]`'s `trap_throw` per `[2c §6.1.1]`).
 - **AC-L10.** `load_from_string(xml_text, mr)` accepts a `std::string_view` containing the same XML grammar as `load(path, mr)` and produces a structurally identical `Dictionary`. Used by AC-L3..L8 negative-path tests.
 
 ### 4.2 Dictionary lookup
 
-- **AC-D1.** `Dictionary::field(uint16_t tag)` returns the `FieldRef` for that tag in the dictionary's default-message context, or `std::nullopt` if undefined.
-- **AC-D2.** `Dictionary::field(MsgType, uint16_t tag)` returns the `FieldRef` for that `(MsgType, tag)` pair, including the message-specific `presence` rule (`Required` / `Optional` / `Conditional` per `[2c §4.1]`).
+- **AC-D1.** `Dictionary::field_ref(std::string_view msg_type, std::uint16_t tag)` is the canonical context-free `(MsgType, tag)` lookup and returns a `FieldRef` (with `rule == field_presence::NotDeclared` if the tag is not part of that MsgType's grammar). One `FieldRef` exists per `(MsgType, tag)` pair, not per global tag, per `[2c §4.1]` (e.g., `OrderID(37)` appears in `ExecutionReport` and `OrderCancelRequest` with potentially different `rule`s); a context-free `field(tag)` short form has no canonical answer and is not part of the v1.0 surface (AC-D2 below is the spec-language alias that wraps `field_ref(msg_type, tag)` in a `std::optional` for the descriptive ergonomics).
+- **AC-D2.** `Dictionary::field(MsgType, uint16_t tag)` returns the `FieldRef` for that `(MsgType, tag)` pair as `std::optional<FieldRef>` (a descriptive wrapper around AC-D1's `field_ref`), including the message-specific `presence` rule (`Required` / `Optional` / `Conditional` per `[2c §4.1]`); `std::nullopt` is returned when `field_ref(...).rule == NotDeclared`.
 - **AC-D3.** `Dictionary::field_by_name(std::string_view name)` returns the tag for a known field name (e.g., `"ClOrdID"` → 11), or `std::nullopt`. Case-sensitive exact match against the XML's `name` attribute (assumption A2).
 - **AC-D4.** `Dictionary::component(std::string_view name)` returns the `ComponentRef`; `Dictionary::group(uint16_t no_xxx_tag)` returns the `GroupRef` keyed by the delimiter tag.
-- **AC-D5.** `Dictionary::messages()` returns an iterable of `(MsgType, message-name)` pairs sorted by MsgType.
+- **AC-D5.** `Dictionary::messages()` returns an iterable of `(MsgType, message-name)` pairs sorted by MsgType bytewise (locale-independent — `std::ranges::lexicographical_compare` over `unsigned char` per research.md D-6).
 - **AC-D6.** For each of the four shipped FIX versions per /clarify Q1 → B (`FIX42`, `FIX44`, `FIX50SP2`, `FIXT11`), loading the corresponding XML produces a `Dictionary` containing that version's headline messages:
   - **FIX44** (canonical reference): `NewOrderSingle` MsgType=`D`, `ExecutionReport` MsgType=`8`, `Logon` MsgType=`A`, `Heartbeat` MsgType=`0`, `Reject` MsgType=`3`; components `Instrument`, `Parties`.
   - **FIX42**: same five headline messages as FIX44 (subset); components `Instrument` (FIX 4.2 simpler form), no `Parties` (post-4.2 addition).
@@ -168,7 +168,7 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 | NFR-002-1 | `XmlLoader::load(FIX44.xml, mr)` completes in ≤500 ms wall-clock on a typical developer machine (warm filesystem cache). Loaded once per session, not on the hot path. | Bench harness `bench/dictionary/xml_loader_bench.cpp`; CI bar at 1 s regression gate; user-facing target 500 ms. |
 | NFR-002-2 | Zero allocation against the global `new` for the entire `load*` call when `mr` is provided. | Test seam #2 — `pmr_allocation_tracking_resource`; global counter must read 0. |
 | NFR-002-3 | `Dictionary` is shareable read-only across N threads without locking; no `mutable` state on the lookup path. | Test seam #6 — TSan run with N concurrent readers, 0 reports. |
-| NFR-002-4 | Loader is deterministic: byte-identical XML input produces a `Dictionary` whose `messages()` iteration order and `field()` lookup ordering are byte-stable across runs and across machines. | Test seam #5 — load FIX44.xml twice in one process, hash the iteration order, assert equal. |
+| NFR-002-4 | Loader is deterministic: byte-identical XML input produces a `Dictionary` whose `messages()` iteration order and `field_ref()` lookup ordering are byte-stable **across runs on the same machine**. Cross-machine determinism is satisfied **by construction** via the bytewise-lexicographic sorted-storage invariant (research.md D-6: `std::ranges::lexicographical_compare` over `unsigned char` — locale-independent), not via a runtime test (Gate A round 1 P2.5: the within-process seam tests what it can test; a checked-in golden-hash artifact per shipped XML is a future hardening tracked outside this PR). | Test seam #5 — load FIX44.xml twice in one process, hash the iteration order, assert equal (within-process determinism). The bytewise-sort invariant in research.md D-6 plus the static `MsgType` byte content carry the cross-machine claim by construction. |
 | NFR-002-5 | All non-AC-L9 errors throw a `dict::xml_*` typed exception derived from `std::runtime_error` (`[2c §4.5]`). No `std::bad_alloc` escapes (AC-P2). Hot-path `Dictionary` APIs are `noexcept` (AC-D8). | Negative-path tests (AC-L2..L10); `noexcept` static-asserts on every `Dictionary` public accessor. |
 | NFR-002-6 | The `dictionary → core` layer edge is the only addition to `tools/check_layers.py`'s allowed-edges map; no `dictionary → wire` or `dictionary → session` edge introduced. | `tools/check_layers.py` clean in CI. |
 
@@ -176,8 +176,8 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 
 > The full files-to-create list is locked at /plan; this section names the bright lines.
 
-- **C++ headers (public):** `include/fixpp/dict/dictionary.hpp`, `include/fixpp/dict/xml_loader.hpp`, `include/fixpp/dict/field_ref.hpp`, `include/fixpp/dict/component_ref.hpp`, `include/fixpp/dict/group_ref.hpp`, `include/fixpp/dict/error.hpp`.
-- **C++ headers (core trivial-fold, if first consumer):** `include/fixpp/core/expected.hpp`, `include/fixpp/core/span.hpp`, `include/fixpp/core/pmr.hpp`, `include/fixpp/core/error.hpp` — per `phases/phase-4/core/README.md`'s "trivial — fold into first consumer" disposition. The exact list is /plan-locked; some may already exist from 001.
+- **C++ headers (public — `dict/`):** `include/fixpp/dict/dictionary.hpp`, `include/fixpp/dict/xml_loader.hpp`, `include/fixpp/dict/field_ref.hpp`, `include/fixpp/dict/component_ref.hpp`, `include/fixpp/dict/group_ref.hpp`, `include/fixpp/dict/version_profile.hpp`, `include/fixpp/dict/error.hpp`. (Seven headers; `version_profile.hpp` ships in this PR per research.md D-14 — it carries the `session_version` / `application_version` enums needed by AC-L4 version-string parsing.)
+- **C++ headers (`core/`, modified additively in this PR per research.md D-3):** `include/fixpp/core/error.hpp` (three new `dict_*` enum variants appended at slots 20–22), `include/fixpp/core/decimal_helpers.hpp` (one new helper template `detail::trap_throw_or_throw<E, F>` added next to the existing `detail::trap_throw<F>` for the exception-API carve-out per `[arch §5.3]`). No new `core/` header files are added; `expected_t<T>` remains declared inline inside `core/error.hpp` (as on `main` after 001).
 - **Implementation:** `src/dictionary/xml_loader.cpp`, `src/dictionary/dictionary.cpp`.
 - **Dictionaries (XML data):** `dictionaries/FIX42.xml`, `dictionaries/FIX44.xml`, `dictionaries/FIX50SP2.xml`, `dictionaries/FIXT11.xml` checked in as data (sourced from upstream QuickFIX repo per OSS-001 reference; commit/hash pinned at /plan). Per /clarify Q1 → B.
 - **Tests:** `tests/dictionary/xml_loader_test.cpp`, `tests/dictionary/dictionary_lookup_test.cpp`, `tests/dictionary/ref_shape_test.cpp`, `tests/dictionary/negative_paths_test.cpp` (AC-L2..L8, L10), `tests/dictionary/concurrent_readers_test.cpp` (TSan, AC-T2), `tests/dictionary/pmr_allocation_test.cpp` (AC-P1, AC-L9).
@@ -188,8 +188,8 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 ## 8. Inheritance / dependencies
 
 - **Inherits design from:** `[2c §4.1]` FieldRef; `[2c §4.2]` ComponentRef / GroupRef; `[2c §4.3]` Dictionary; `[2c §4.5]` XmlLoader; `[2c §6.1.1]` allocation / exception / threading on the hot path; `[2c §6.7]` errors-introduced sub-table; `[2c §9]` test seams. `[arch §4.2]` dictionary module surface; `[arch §5.2]` PMR allocator policy; `[arch §5.3]` error model (construction-time exception carve-out).
-- **Depends on (in-tree):** `fixpp::core::error`, `fixpp::core::expected_t<T>`, `fixpp::core::detail::trap_throw` (per `[2a §4.2]`), `fixpp::core::pmr` aliases. The trivial-fold `core/` primitives ship in this PR alongside the loader (per `phases/phase-4/core/README.md` disposition).
-- **Depends on (third-party):** an XML parsing library — selection belongs to /plan, not /specify. Constraint: must either be exception-light or wrap cleanly through `trap_throw`, and either be header-only or already approved via the third-party-dependency procedure named in the constitution (`[const §V.3]`, cited if applicable).
+- **Depends on (in-tree):** `fixpp::core::error` (extended with three additive `dict_*` variants in this PR — research.md D-3), `fixpp::core::expected_t<T>`, `fixpp::core::detail::trap_throw_or_throw<E, F>` (NEW exception-API helper added in this PR per research.md D-3, sibling of the existing `trap_throw<F>` per `[2a §4.2]`), `std::pmr::memory_resource` (consumed via `<memory_resource>` directly). The `core/` changes are additive (research.md D-3, admitted in Gate A round 1 per Opus root cause #1).
+- **Depends on (third-party):** an XML parsing library — selection belongs to /plan, not /specify. Constraint: must either be exception-light or wrap cleanly through `trap_throw_or_throw`, and must be licence-compatible per `[const §V.3]` (no LGPL). Admission procedure is project convention — user sign-off at /plan + Codex Gate A review of the choice.
 - **Unblocks:** D-008 codegen (consumes `Dictionary`); 2b wire validator (consumes `FieldRef::presence`); session FSM (uses `Dictionary` per `[2c §4.3]`); 2m Python bindings via `dict::table_view` (future feature).
 
 ## 9. Test seams (carried from `[2c §9]`, scoped to this feature)
@@ -201,9 +201,11 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 5. **Determinism oracle** — load FIX44.xml twice in one process, hash the `messages()` iteration order and `field()` lookup output, assert equal (NFR-002-4).
 6. **Concurrent-reader TSan harness** — N reader threads against one `Dictionary` (AC-T2 / NFR-002-3).
 7. **Negative-path XML samples** — one per AC-L2..L8 / L10 stored under `tests/dictionary/fixtures/bad_xml/` (or inline as `load_from_string` arguments).
-8. **Round-trip seam** — load FIX44.xml, iterate every `(MsgType, tag)` pair, look it up by both `field(tag)` and `field(MsgType, tag)`, assert idempotent.
+8. **Round-trip seam** — load FIX44.xml, iterate every `(MsgType, tag)` pair, look it up by `field_ref(MsgType, tag)` (canonical, returns `FieldRef`) and its AC-D2 `std::optional<FieldRef>` alias `field(MsgType, tag)`, assert idempotent.
 9. **Allocator-failure injection** — `pmr::memory_resource` that throws `std::bad_alloc` on the Nth allocate; verify translation to `dict::xml_oom_error` per AC-L9.
 10. **XML-parser-error injection** — crafted XML triggering the underlying parser's error path; verify translation to `dict::xml_parse_error` per AC-L3.
+
+> **Note (Gate A round 1).** The `[2c §9]` design-doc seam #8 (libFuzzer harness `tests/fuzz/fuzz_dict_xml_loader.cpp`) is **shipped** in this PR per `[const §VII.7]`'s "new parser-touching code without a fuzz harness is a Gate B blocker" rule — added in Gate A round 1 per Opus root cause #3 (the earlier draft deferred it; the deferral was a constitution-level override masquerading as a `/plan` cut). It is listed in `plan.md` Project Structure under `tests/fuzz/`; it is independent of the spec-internal seam #8 above (which is the round-trip GoogleTest). The `[2c §9]` seam #9 (`fuzz_dict_overlay_merge.cpp`) defers with F2.
 
 ## 10. Follow-ups & deferred work
 
@@ -224,19 +226,17 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 - **Why:** /clarify Q2 → A — defer to a dedicated D-009 feature that owns `DialectOverlay` end-to-end. Per user direction (2026-05-14), this gap is explicitly named here so any future review of `XmlLoader`'s public surface sees the unfinished extension.
 - **Catalogue rows:** D-009 (custom dictionary extension via overlay), COM-011 (per-session venue-specific FIX dialect).
 - **Source of truth:** `[2c §4.4]`, `[2c §4.5]` (the `load_overlay*` declarations), `[2c §6.4]` (merge contract), `[2c §4.4.1]` (grammar closure).
-- **Public-surface impact:** Extending `XmlLoader` with two new public methods in the future is non-breaking ABI per `[arch §9.2]` versioning (additive). No call site in v1.0 depends on the absence of these methods.
+- **Public-surface impact:** Extending `XmlLoader` with two new public methods in the future is **source-compatible by C++ language rule** (added member functions can never invalidate existing call sites) and **structurally non-breaking** per `[arch §9.3]` "Stable from v1.0" tier (the C++ surface of `dictionary` is in the Stable tier; additive extensions preserve that tier). No call site in v1.0 depends on the absence of these methods. (The `[arch §9.2]` "additive method addition = non-breaking ABI" cite from the earlier draft did not resolve — `[arch §9.2]` covers SemVer macro emission, not C++ ABI additivity; repaired in Gate A round 1 per Opus root cause #3.)
 - **Trigger:** First per-session venue-dialect requirement, or first OSS feature integration that needs to mutate a base dictionary at session-open time.
 
-### F3 — Third-party XML parser selection
+### F3 — Third-party XML parser selection: **CLOSED at /plan**
 
-- **What's deferred:** The XML library choice (libexpat / tinyxml2 / pugixml / rapidxml / other).
-- **Why:** /clarify Q3 → A — /plan evaluates 2–3 candidates against `[2c §9]` test seams.
-- **Source of truth:** `[const §V.3]` third-party-deps procedure (cited if applicable; see §11 R1 for the underlying risk).
-- **Trigger:** /plan phase of this same feature (immediate next step after `/speckit-clarify`).
+- **Status:** CLOSED. `research.md` D-1 picks **pugixml 1.14** (MIT) after a 3-candidate evaluation (pugixml / tinyxml2 / libexpat) against `[2c §9]` test seams; ratified via the `conanfile.py:28` `requires("pugixml/1.14")` row added in this PR. No further action — the F3 entry is retained as historical trail for downstream readers; see §11 R1 for the matching risk-register closure.
+- **Source of truth (licence anchor only):** `[const §V.3]` — "no LGPL"; pugixml is MIT, which clears the anchor.
 
 ## 11. Risk register
 
-- **R1 — XML parser dependency choice.** /plan decision (libexpat? tinyxml2? pugixml? rapidxml?); selection affects compile time, runtime cost, exception-vs-error surface, build complexity. Mitigation: /plan evaluates 2–3 candidates against `[2c §9]` test seams; Codex Gate A reviews the choice.
+- **R1 — XML parser dependency choice: MITIGATED.** /plan selected **pugixml 1.14** (MIT) per `research.md` D-1 after a 3-candidate evaluation (pugixml / tinyxml2 / libexpat) against `[2c §9]` test seams; /plan added the `conanfile.py:28` `requires("pugixml/1.14")` row in this PR; Gate A round 1 reviewed and confirmed the choice (no P1 raised against pugixml at any round). R1 is retained here as historical trail for downstream readers; see §10 F3 for the matching follow-up closure.
 - **R2 — XML source-of-truth (FIX42, FIX44, FIX50SP2, FIXT11).** Multiple QuickFIX-format dictionaries exist (QuickFIX upstream, QuickFIX/N, vendor variants); pick one canonical source per version. Mitigation: lock at /plan to upstream QuickFIX repository commit/hash for all four shipped versions; record the pinned commit in `dictionaries/README.md`.
 - **R3 — `FieldRef` shape drift.** `[2c §4.1]` static_asserts on `sizeof(FieldRef) == 16` etc. ABI-fragile; this feature is the first to materialize the struct. Mitigation: ship `tests/dictionary/ref_shape_test.cpp` per test seam #4 *in the same PR* so any future drift fails CI before merge.
 - **R4 — Performance bar miss.** NFR-002-1 target ≤500 ms FIX44 load; CI regression gate at 1 s. Mitigation: bench harness in scope.
@@ -256,7 +256,7 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 
 ## 13. References
 
-- Constitution: `.specify/constitution.md` — `[const §I.1]` v1.0 surface; `[const §V.3]` third-party-deps procedure (cited for /plan if applicable); `[const §VI]` spec coverage; `[const §VII]` testing; `[const §VIII.5]` zero-allocation hot path (applies to `Dictionary` lookups, not `XmlLoader`); `[const §X]` C-ABI (cited for what is *not* in scope); `[const §XVII.1]` Codex Gate A; `[const §XVII.8]` `/speckit-verify` precondition; `[const §XVIII.2]` post-v1 roadmap (D-011 deferral).
+- Constitution: `.specify/constitution.md` — `[const §I.1]` v1.0 surface; `[const §V.3]` "no LGPL dependencies" (licence anchor for the pugixml admission; the admission *procedure* is project convention — user sign-off + Gate A); `[const §VI]` spec coverage; `[const §VII]` testing; `[const §VIII.5]` zero-allocation hot path (applies to `Dictionary` lookups, not `XmlLoader`); `[const §X]` C-ABI (cited for what is *not* in scope); `[const §XVII.1]` Codex Gate A; `[const §XVII.8]` `/speckit-verify` precondition; `[const §XVIII.2]` post-v1 roadmap (D-011 deferral).
 - Architecture: `.specify/architecture.md` — `[arch §4.2]` `dictionary` module surface; `[arch §5.2]` PMR allocator policy; `[arch §5.3]` error model + construction-time exception carve-out; `[arch §10]` row 2c handoff.
 - Design doc: `.specify/2c-codegen.md` v1.3 — `[2c §1.3]` version coverage; `[2c §4.1]` FieldRef; `[2c §4.2]` ComponentRef / GroupRef; `[2c §4.3]` Dictionary; `[2c §4.4]` DialectOverlay (cited for Q2 boundary); `[2c §4.5]` XmlLoader; `[2c §6.1.1]` allocation / exception / threading on the hot path; `[2c §6.7]` errors-introduced sub-table; `[2c §9]` test seams; `[2c §10]` open questions.
 - Sibling docs: `.specify/2a-decimal.md` — `[2a §4.2]` `core::detail::trap_throw`. `.specify/2b-wire.md` — `[2b §4.3]` `view.get(uint16_t tag)`; `[2b §4.6]` `dictionary_driven_validator`.
@@ -267,6 +267,6 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 
 - **A1.** PMR-awareness is mandatory: every `XmlLoader::load*` accepts a `std::pmr::memory_resource*` per `[arch §5.2]` and `[2c §6.1]`. Non-PMR overloads are not in v1.0.
 - **A2.** Field-name lookup (`field_by_name`) is case-sensitive exact match against the XML's `name` attribute (industry default for QuickFIX-format dictionaries). If a venue ships case-variant XML, the caller normalizes upstream.
-- **A3.** `Dictionary` is value-typed and movable; copies are deep (since metadata is PMR-allocated). Sharing across sessions/threads uses `std::shared_ptr<const Dictionary>` at the caller's layer, *not* a builtin refcount — this is consistent with `[2c §4.3]`'s heap-pinned metadata-handle design.
+- **A3.** `Dictionary` is value-typed and **move-only**; copying is deleted in `contracts/dictionary.hpp` per `[2c §4.3]` (`Dictionary(Dictionary const&) = delete`). Sharing the same loaded dictionary across N sessions/threads at the caller's layer is done either by holding it in a long-lifetime location (engine-level slot) and aliasing it by reference / `std::span` into its accessors, or by wrapping it in `std::shared_ptr<Dictionary>` at the caller's discretion — there is no builtin refcount on the value type itself. (An internal `shared_ptr<const dict_metadata_handle>` lives inside `Dictionary` per `[2c §4.3]` so the metadata block survives `Dictionary` moves; that is an implementation detail, not a user-level sharing surface.)
 - **A4.** The loader is single-pass over the XML — it does not require seeking back to earlier nodes; this is enforceable given QuickFIX-format dictionaries declare `fields` before `messages`.
 - **A5.** Loader determinism (NFR-002-4) is achieved by sorted storage of `FieldRef[]` (by `MsgType` then `tag`) and `ComponentRef[]` (by name) inside `Dictionary`; iteration order falls out of the storage order without an explicit sort at iterate time.
