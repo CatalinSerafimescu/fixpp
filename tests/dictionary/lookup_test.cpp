@@ -1,0 +1,366 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// tests/dictionary/lookup_test.cpp
+//
+// AC-D1..D8 parameterized over four shipped FIX versions (FIX42, FIX44,
+// FIX50SP2, FIXT11). GoogleTest TEST_P fixture; each version is loaded fresh
+// per test via a 4 MiB monotonic_buffer_resource.
+
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/field_ref.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <memory_resource>
+#include <optional>
+#include <set>
+#include <string>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Per-version parameters
+// ---------------------------------------------------------------------------
+
+struct VersionParam {
+    std::string              filename;
+    fixpp::dict::session_version expected_version;
+
+    // AC-D6: message types that MUST appear in messages()
+    std::vector<std::string> required_msg_types;
+
+    // AC-D6 cross-version isolation: msg types that MUST NOT appear
+    std::vector<std::string> forbidden_msg_types;
+
+    // AC-D7: NoXxx tags that MUST have group_first_field() != 0
+    std::vector<std::uint16_t> required_group_no_tags;
+
+    // AC-D3: whether ClOrdID (tag 11) is expected to be declared
+    bool has_clordid;
+
+    // AC-D4 Parties component
+    //   true  → component("Parties").has_value() must be true
+    //   false → component("Parties") must be nullopt
+    //   nullopt → tolerate either (FIXT11)
+    std::optional<bool> parties_expected;
+
+    // AC-D4 Instrument component: all four versions declare it
+    bool has_instrument;
+};
+
+// ---------------------------------------------------------------------------
+// Fixture
+// ---------------------------------------------------------------------------
+
+class DictionaryLookupFixture : public ::testing::TestWithParam<VersionParam> {
+protected:
+    void SetUp() override {
+        // 4 MiB arena; no heap allocations expected during Dictionary::load.
+        buf_.resize(4u * 1024u * 1024u);
+        mr_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
+            buf_.data(), buf_.size());
+
+        auto const xml_path =
+            std::filesystem::path{FIXPP_DICT_DATA_DIR} / GetParam().filename;
+
+        fixpp::dict::XmlLoader loader{};
+        dict_ = std::make_unique<fixpp::dict::Dictionary>(
+            loader.load(xml_path, mr_.get()));
+    }
+
+    fixpp::dict::Dictionary const& dict() const { return *dict_; }
+
+private:
+    std::vector<std::byte>                              buf_;
+    std::unique_ptr<std::pmr::monotonic_buffer_resource> mr_;
+    std::unique_ptr<fixpp::dict::Dictionary>            dict_;
+};
+
+// ---------------------------------------------------------------------------
+// TEST_P: VersionMatches (AC-L4 / which_session_version)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, VersionMatches) {
+    EXPECT_EQ(dict().which_session_version(), GetParam().expected_version);
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: MessagesNonEmptyAndContainsHeadlines (AC-D5 + AC-D6)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, MessagesNonEmptyAndContainsHeadlines) {
+    auto const msgs = dict().messages();
+    ASSERT_FALSE(msgs.empty()) << "messages() must be non-empty";
+
+    std::set<std::string> found;
+    for (auto const& e : msgs) {
+        found.emplace(e.msg_type);
+    }
+
+    for (auto const& required : GetParam().required_msg_types) {
+        EXPECT_TRUE(found.count(required) > 0)
+            << "Expected msg_type '" << required << "' not found in "
+            << GetParam().filename;
+    }
+
+    for (auto const& forbidden : GetParam().forbidden_msg_types) {
+        EXPECT_TRUE(found.count(forbidden) == 0)
+            << "Forbidden msg_type '" << forbidden << "' found in "
+            << GetParam().filename;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: MessagesIsBytewiseSorted (AC-D5)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, MessagesIsBytewiseSorted) {
+    auto const msgs = dict().messages();
+
+    auto bytewise_less = [](fixpp::dict::MessageEntry const& a,
+                            fixpp::dict::MessageEntry const& b) {
+        return std::lexicographical_compare(
+            a.msg_type.begin(), a.msg_type.end(),
+            b.msg_type.begin(), b.msg_type.end(),
+            [](char x, char y) {
+                return static_cast<unsigned char>(x) <
+                       static_cast<unsigned char>(y);
+            });
+    };
+
+    EXPECT_TRUE(std::is_sorted(msgs.begin(), msgs.end(), bytewise_less))
+        << "messages() span is not bytewise-sorted in " << GetParam().filename;
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: FieldByNameClOrdID (AC-D3)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, FieldByNameClOrdID) {
+    if (GetParam().has_clordid) {
+        auto tag = dict().field_by_name("ClOrdID");
+        ASSERT_TRUE(tag.has_value())
+            << "field_by_name(\"ClOrdID\") should return 11 for "
+            << GetParam().filename;
+        EXPECT_EQ(*tag, std::uint16_t{11});
+    }
+
+    // Case-sensitivity: lower-case must always be nullopt
+    auto lower = dict().field_by_name("clordid");
+    EXPECT_FALSE(lower.has_value())
+        << "field_by_name(\"clordid\") must be nullopt (case-sensitive) for "
+        << GetParam().filename;
+
+    // Truly unknown name must be nullopt regardless of version
+    auto unknown = dict().field_by_name("definitely_unknown_xyz_999");
+    EXPECT_FALSE(unknown.has_value())
+        << "Unknown name lookup must return nullopt for "
+        << GetParam().filename;
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: FieldRefAndFieldAgreement (AC-D1 ↔ AC-D2)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, FieldRefAndFieldAgreement) {
+    using fixpp::dict::field_presence;
+
+    // Logon ("A") is present in all four versions.
+    std::string_view const logon_type = "A";
+
+    // Tag 49 (SenderCompID) is a standard header field; declared on every
+    // message in all FIX versions including FIXT11.
+    std::uint16_t const sender_tag = 49;
+
+    auto const fr = dict().field_ref(logon_type, sender_tag);
+
+    if (fr.rule != field_presence::NotDeclared) {
+        // AC-D2: field() must agree
+        auto const opt = dict().field(logon_type, sender_tag);
+        ASSERT_TRUE(opt.has_value())
+            << "field() must have_value() when field_ref().rule != NotDeclared"
+            << " for " << GetParam().filename;
+        EXPECT_EQ(opt->rule, fr.rule)
+            << "field().rule must match field_ref().rule for "
+            << GetParam().filename;
+    }
+
+    // Absent tag: 9999 is never declared in any real dictionary
+    auto const absent_fr = dict().field_ref(logon_type, 9999u);
+    EXPECT_EQ(absent_fr.rule, field_presence::NotDeclared)
+        << "field_ref for absent tag must return NotDeclared for "
+        << GetParam().filename;
+
+    auto const absent_opt = dict().field(logon_type, 9999u);
+    EXPECT_FALSE(absent_opt.has_value())
+        << "field() for absent tag must be nullopt for "
+        << GetParam().filename;
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: ComponentParties (AC-D4 — cross-version isolation)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, ComponentParties) {
+    // All four shipped versions declare the Instrument component.
+    if (GetParam().has_instrument) {
+        EXPECT_TRUE(dict().component("Instrument").has_value())
+            << "Instrument component must be declared in " << GetParam().filename;
+    }
+
+    // Parties: FIX42 predates it (added in 4.3); FIX44/50SP2 carry it;
+    // FIXT11 is tolerated either way (session-only vocab).
+    if (GetParam().parties_expected.has_value()) {
+        bool const expected = *GetParam().parties_expected;
+        bool const actual   = dict().component("Parties").has_value();
+        if (expected) {
+            EXPECT_TRUE(actual)
+                << "Parties component must be declared in " << GetParam().filename;
+        } else {
+            EXPECT_FALSE(actual)
+                << "Parties component must NOT be declared in "
+                << GetParam().filename;
+        }
+    }
+    // nullopt → tolerate either outcome (FIXT11)
+
+    // Unknown component must be nullopt in every version
+    EXPECT_FALSE(dict().component("NonExistentComponent_xyz_999").has_value())
+        << "Unknown component must return nullopt for " << GetParam().filename;
+
+    // group() with dummy no_tag must be nullopt
+    EXPECT_FALSE(dict().group(9999u).has_value())
+        << "group(9999) must return nullopt for " << GetParam().filename;
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: GroupDelimiterTags (AC-D7)
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, GroupDelimiterTags) {
+    for (auto const no_tag : GetParam().required_group_no_tags) {
+        EXPECT_NE(dict().group_first_field(no_tag), std::uint16_t{0})
+            << "group_first_field(" << no_tag << ") must be non-zero in "
+            << GetParam().filename;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TEST_P: CrossVersionIsolation (spec.md §4.2 AC-D6 sub-bullet)
+// ---------------------------------------------------------------------------
+// Already covered by MessagesNonEmptyAndContainsHeadlines via forbidden list,
+// but add explicit named assertions for the two canonical cases.
+
+TEST_P(DictionaryLookupFixture, CrossVersionIsolation) {
+    auto const msgs = dict().messages();
+
+    auto has_msg_type = [&](std::string_view mt) {
+        for (auto const& e : msgs) {
+            if (e.msg_type == mt) return true;
+        }
+        return false;
+    };
+
+    auto const& p = GetParam();
+
+    if (p.expected_version == fixpp::dict::session_version::vt11) {
+        EXPECT_FALSE(has_msg_type("D"))
+            << "FIXT11 must not contain NewOrderSingle (D)";
+    }
+
+    if (p.expected_version == fixpp::dict::session_version::v50sp2) {
+        EXPECT_TRUE(has_msg_type("V"))
+            << "FIX50SP2 must contain MarketDataRequest (V)";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NoexceptDiscipline (AC-D8) — compile-time; one non-parameterized TEST
+// ---------------------------------------------------------------------------
+
+TEST(DictionaryNoexcept, AllPublicAccessorsAreNoexcept) {
+    using D = fixpp::dict::Dictionary const&;
+
+    static_assert(noexcept(std::declval<D>().which_session_version()));
+    static_assert(noexcept(std::declval<D>().field_ref({}, 0u)));
+    static_assert(noexcept(std::declval<D>().required_fields({})));
+    static_assert(noexcept(std::declval<D>().field_valid_for({}, 0u)));
+    static_assert(noexcept(std::declval<D>().group_first_field(0u)));
+    static_assert(noexcept(std::declval<D>().length_pair_data_tag(0u)));
+    static_assert(noexcept(std::declval<D>().field({}, 0u)));
+    static_assert(noexcept(std::declval<D>().field_by_name({})));
+    static_assert(noexcept(std::declval<D>().component({})));
+    static_assert(noexcept(std::declval<D>().group(0u)));
+    static_assert(noexcept(std::declval<D>().messages()));
+
+    SUCCEED(); // All static_asserts above already enforce the property.
+}
+
+// ---------------------------------------------------------------------------
+// INSTANTIATE_TEST_SUITE_P
+// ---------------------------------------------------------------------------
+
+INSTANTIATE_TEST_SUITE_P(
+    FourShippedVersions,
+    DictionaryLookupFixture,
+    ::testing::Values(
+        // ---- FIX 4.2 ----
+        VersionParam{
+            .filename         = "FIX42.xml",
+            .expected_version = fixpp::dict::session_version::v42,
+            .required_msg_types = {"D", "8", "A", "0", "3"},
+            .forbidden_msg_types = {},  // no cross-version assertions for 4.2
+            .required_group_no_tags = {78u},  // NoAllocs (78) present in 4.2
+                                              // NoPartyIDs(453) added in 4.3 — omit
+                                              // NoLegs(555) added in 4.4 — omit
+            .has_clordid     = true,
+            .parties_expected = std::optional<bool>{false},  // pre-4.3
+            .has_instrument  = false,  // FIX 4.2 declares Instrument's fields inline,
+                                       // not as a <component> entry — see dictionaries/FIX42.xml:1602
+        },
+        // ---- FIX 4.4 ----
+        VersionParam{
+            .filename         = "FIX44.xml",
+            .expected_version = fixpp::dict::session_version::v44,
+            .required_msg_types = {"D", "8", "A", "0", "3"},
+            .forbidden_msg_types = {},
+            .required_group_no_tags = {453u, 78u, 555u},  // NoPartyIDs, NoAllocs, NoLegs
+            .has_clordid     = true,
+            .parties_expected = std::optional<bool>{true},
+            .has_instrument  = true,
+        },
+        // ---- FIX 5.0 SP2 ----
+        VersionParam{
+            .filename         = "FIX50SP2.xml",
+            .expected_version = fixpp::dict::session_version::v50sp2,
+            .required_msg_types = {"D", "8", "V", "W"},
+            .forbidden_msg_types = {},
+            .required_group_no_tags = {453u, 78u, 555u},
+            .has_clordid     = true,
+            .parties_expected = std::optional<bool>{true},
+            .has_instrument  = true,
+        },
+        // ---- FIXT 1.1 ----
+        VersionParam{
+            .filename         = "FIXT11.xml",
+            .expected_version = fixpp::dict::session_version::vt11,
+            .required_msg_types = {"A", "5", "0", "1", "2", "3", "4"},
+            .forbidden_msg_types = {"D"},  // no NewOrderSingle in session-only dict
+            .required_group_no_tags = {627u},  // NoHops
+            .has_clordid     = false,  // no application fields in FIXT11
+            .parties_expected = std::nullopt,  // tolerate either
+            .has_instrument  = false,           // session-only; no Instrument
+        }
+    ),
+    [](::testing::TestParamInfo<VersionParam> const& info) {
+        // Strip the ".xml" suffix to produce a clean test-suite suffix.
+        auto name = info.param.filename;
+        if (auto pos = name.rfind('.'); pos != std::string::npos)
+            name.erase(pos);
+        return name;
+    }
+);

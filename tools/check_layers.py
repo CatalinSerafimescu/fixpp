@@ -37,6 +37,15 @@ ALLOWED: dict[str, set[str]] = {
 # Regex to match #include "fixpp/<module>/..." or #include <fixpp/<module>/...>
 INCLUDE_RE = re.compile(r'#\s*include\s+[<"](fixpp/(\w+)/[^>"]*)[>"]')
 
+# Some module directory names differ from their include-path namespace.
+# `dictionary/` ships its public surface under `fixpp/dict/` for ergonomic
+# C++ namespaces (`fixpp::dict`) per `[arch §4.2]` / 002-dictionary-xml-loader.
+# Normalize the include-path name to the architectural module name so the
+# allowed-edge whitelist agrees with the source-layout module.
+INCLUDE_NAMESPACE_ALIASES: dict[str, str] = {
+    "dict": "dictionary",
+}
+
 # Also detect includes of fix/c_api.h (allowed everywhere except in engine internals)
 CAPI_RE = re.compile(r'#\s*include\s+[<"](fix/c_api[^>"]*)[>"]')
 
@@ -72,6 +81,7 @@ def check_file(path: Path, violations: list[str]) -> None:
             if not m:
                 continue
             included_module = m.group(2)
+            included_module = INCLUDE_NAMESPACE_ALIASES.get(included_module, included_module)
             if included_module == module:
                 continue  # self-include is always allowed
             if included_module not in allowed_modules:
