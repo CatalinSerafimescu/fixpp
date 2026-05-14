@@ -146,7 +146,7 @@ Per `tasks.md`-input convention from the 001 exemplar: every row above becomes a
 
 ## D-14: Header surface published in this PR
 
-Eight header files (per spec.md §7), all under `include/fixpp/dict/`:
+Seven header files (per spec.md §7), all under `include/fixpp/dict/`. No separate `dictionary_fwd.hpp` ships in v1.0; all types are header-only with their public declarations co-located with the entity's primary header.
 
 | Header | Source | Status |
 |---|---|---|
@@ -157,7 +157,6 @@ Eight header files (per spec.md §7), all under `include/fixpp/dict/`:
 | `xml_loader.hpp` | literal extract from `[2c §4.5]` — `load` + `load_from_string` only; `load_overlay*` deferred per F2 | NEW |
 | `error.hpp` | exception types (`xml_parse_error`, `unknown_version_error`, `xml_oom_error`) + enum-variant accessors per D-10 | NEW |
 | `version_profile.hpp` | subset of `[2c §4.3]` — just `session_version` and `application_version` enums; full `version_profile` struct + `resolve_application_version` deferred to the wire/session integration feature | NEW |
-| (header-only; no separate `dictionary_fwd.hpp` in v1.0) | — | — |
 
 Three `include/fixpp/core/` changes are admitted in this PR (per D-3 — both additive enum variants in `core/error.hpp` and an additive helper template `trap_throw_or_throw<E,F>` in `core/decimal_helpers.hpp`; no new core/ header files); no `include/fix/c_api/dict_*.h` is added (per spec §5 "C ABI surface for `Dictionary` … not part of this PR").
 

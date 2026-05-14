@@ -137,7 +137,18 @@ Single C++23 library under the **library/** submodule root (`research/G19-fix-fp
 
 ### Tests for User Story 4
 
-- [ ] T029 [US4] Write `tests/dictionary/dictionary_lookup_test.cpp` — GoogleTest TYPED_TEST_P parameterized over `{FIX42, FIX44, FIX50SP2, FIXT11}`; for each version assert AC-D6 headline messages (per spec.md §4.2 AC-D6 sub-bullets), AC-D7 delimiter tags (`NoPartyIDs=453` on FIX44, equivalent per-version delimiters elsewhere), and cross-version isolation (FIXT11 has no `NewOrderSingle`; FIX50SP2 has `MarketDataRequest`). Uses the same `XmlLoader::load` surface — no new implementation required.
+- [ ] T029 [US4] Write `tests/dictionary/dictionary_lookup_test.cpp` — GoogleTest TYPED_TEST_P parameterized over `{FIX42, FIX44, FIX50SP2, FIXT11}`; for each version assert the full AC-D1..D8 surface per spec.md §4.2 + contracts/dictionary.hpp:
+    - **AC-D1** (`field_ref(msg_type, tag)`): for one declared tag per version (e.g., `field_ref("D", 11).rule == Required` on FIX44 NewOrderSingle/ClOrdID) and one absent tag (e.g., `field_ref("D", 9999).rule == NotDeclared`).
+    - **AC-D2** (`field(msg_type, tag)` `std::optional<FieldRef>` alias): same pairs as AC-D1; assert `has_value()` ↔ `rule != NotDeclared`.
+    - **AC-D3** (`field_by_name`): `field_by_name("ClOrdID") == 11` per version that declares it; `field_by_name("definitely_unknown_xyz") == std::nullopt`; case-sensitive (verify `field_by_name("clordid") == std::nullopt` per research.md D-11).
+    - **AC-D4** (`component`/`group`): `component("Instrument").has_value()` per version that declares it (all four shipped versions); `component("Parties").has_value()` on FIX44/50SP2/FIXT11 and `std::nullopt` on FIX42 (per spec.md §4.2 AC-D6 FIX42 sub-bullet); `group(453).has_value()` (NoPartyIDs) on versions that declare it; `group(9999) == std::nullopt`.
+    - **AC-D5** (`messages` iteration): non-empty span; bytewise-sorted msg_type order (assert `std::ranges::is_sorted` over `unsigned char` per research.md D-6).
+    - **AC-D6** (per-version headlines): per spec.md §4.2 AC-D6 sub-bullets — FIX44: D/8/A/0/3; FIX42: same five (subset); FIX50SP2: D/8 + MarketDataRequest + MarketDataSnapshotFullRefresh; FIXT11: A/5/0/1/2/3/4 (admin only, no application headlines).
+    - **AC-D7** (`NoXxx` delimiter tags): FIX44 `group_first_field(453) != 0` (NoPartyIDs), `group_first_field(78) != 0` (NoAllocs), `group_first_field(555) != 0` (NoLegs); per-version equivalents where defined.
+    - **AC-D8** (`noexcept` discipline): compile-time `static_assert(noexcept(std::declval<Dictionary const&>().field_ref({}, 0)))` and equivalents for every public accessor (`field`, `field_by_name`, `component`, `group`, `messages`, `which_session_version`, `required_fields`, `field_valid_for`, `group_first_field`, `length_pair_data_tag`); covers NFR-002-5 second clause.
+    - **Cross-version isolation**: FIXT11 has no `messages()` entry with msg_type=="D"; FIX50SP2 has one with msg_type=="V" (MarketDataRequest).
+
+  Uses the same `XmlLoader::load` surface — no new implementation required.
 
 **Checkpoint**: User Story 4 fully functional. Multi-version coexistence verified across all four shipped versions.
 
@@ -151,7 +162,7 @@ Single C++23 library under the **library/** submodule root (`research/G19-fix-fp
 - [ ] T031 [P] Add `bench/dictionary/xml_loader_bench.cpp` Google Benchmark harness per NFR-002-1 (research.md D-18) — benches `XmlLoader{}.load(FIX44.xml)`, `load(FIX42.xml)`, `load(FIX50SP2.xml)`; median of 100 iterations on warm filesystem cache; create `bench/dictionary/CMakeLists.txt` wiring `xml_loader_bench` into `linux-clang-release` preset.
 - [ ] T032 [P] Verify `tools/check_layers.py` reports clean with only the existing `dictionary → core` edge — no source change expected (research.md D-12 — edge already present from prior Phase-3 scaffolding); document the verification in the PR body to close NFR-002-6.
 - [ ] T033 Seed `bench/baselines/dictionary/xml_loader.json` from the first green `linux-clang-release` bench run; subsequent PRs diff against it via `tools/bench_compare.py --tolerance 0.05` per `[const §VIII.2]`.
-- [ ] T034 Run static-analysis gate per `[const §IX.4]` — `clang-tidy` + `clang-format --dry-run --Werror` + `cppcheck` + `iwyu_tool.py` clean across `src/dictionary/`, `include/fixpp/dict/`, `tests/dictionary/`; fix any findings.
+- [ ] T034 Run static-analysis gate per `[const §IX.4]` — `clang-tidy` + `clang-format --dry-run --Werror` + `cppcheck` + `iwyu_tool.py` clean across `src/dictionary/`, `include/fixpp/dict/`, `tests/dictionary/`; additionally assert the `[const §XV]` banned-pattern rule with `! grep -REn 'thread_local' src/dictionary include/fixpp/dict` (must produce no matches); fix any findings.
 - [ ] T035 Run coverage gate per `[const §IX.1]` under `linux-clang-coverage` preset — verify ≥90 % line and ≥80 % branch coverage on the new files in `src/dictionary/` and `include/fixpp/dict/`; fix any uncovered branch with a targeted test before proceeding.
 - [ ] T036 Run `/speckit-verify 002-dictionary-xml-loader` per `[const §XVII.8]` — produces `.specify/decisions/002-dictionary-xml-loader-verify.md`; verdict must be `GREEN` (every Tier-1 check PASS or SKIPPED-with-reason) to apply `gate-b-done` label; `YELLOW` requires paired waiver in this tasks.md row + PR body.
 - [ ] T037 Run `/gate-b 002-dictionary-xml-loader` per `[const §XVII.2]` — Codex hostile review → Opus triage → Sonnet fixer (≤2 attempts) → Codex fixer (≤2 attempts, fresh context); independence rule per `[const §XVII.3]`; mandatory before merge.
