@@ -25,8 +25,8 @@ enum class error : std::uint8_t {
     // additive at unused slots per `[const §X.4]`. Each exception type in
     // `<fixpp/dict/error.hpp>` carries the matching variant via `code()`.
     dict_xml_parse_failed = 20,
-    dict_unknown_version  = 21,
-    dict_xml_oom          = 22,
+    dict_unknown_version = 21,
+    dict_xml_oom = 22,
 };
 
 template <class T>

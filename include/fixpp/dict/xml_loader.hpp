@@ -19,10 +19,10 @@
 
 #pragma once
 
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/error.hpp>
-
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+// NOLINTNEXTLINE(misc-include-cleaner)
+#include <fixpp/dict/error.hpp>  // re-exported: load*() throws dict::xml_*_error
 #include <memory_resource>
 #include <string_view>
 
@@ -54,18 +54,16 @@ public:
     //     research.md D-5).
     //
     // ACs: AC-L1 / AC-L2..L8 / AC-L9 / AC-P1 / AC-P2.
-    [[nodiscard]] Dictionary
-    load(std::filesystem::path const& xml_path,
-         std::pmr::memory_resource* mr);
+    [[nodiscard]] Dictionary load(std::filesystem::path const& xml_path,
+                                  std::pmr::memory_resource* mr);
 
     // In-process equivalent of `load(path, mr)`. Same exception discipline.
     // Drives the AC-L3..L8 negative-path test suite without on-disk
     // fixtures (spec.md §3.2 user story 2).
     //
     // ACs: AC-L10 (positive path equivalence) + AC-L3..L8 negative paths.
-    [[nodiscard]] Dictionary
-    load_from_string(std::string_view xml_text,
-                     std::pmr::memory_resource* mr);
+    [[nodiscard]] Dictionary load_from_string(std::string_view xml_text,
+                                              std::pmr::memory_resource* mr);
 
     // load_overlay / load_overlay_from_string — DEFERRED to F2 per /clarify
     // Q2 → A (spec.md §10). Adding them later is source-compatible by C++

@@ -20,14 +20,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/group_ref.hpp>
 #include <fixpp/dict/version_profile.hpp>
-
-#include <cstdint>
 #include <memory>
-#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -37,17 +35,16 @@ namespace fixpp::dict {
 class XmlLoader;
 
 namespace detail {
-    // Heap-pinned metadata block. Defined in src/dictionary/dictionary.cpp.
-    // Allocated via `std::allocate_shared` over
-    // `std::pmr::polymorphic_allocator<dict_metadata_handle>` so the
-    // shared-control-block deallocator returns memory to the originating PMR
-    // resource per `[2c §4.3]` / C-R2-P1-1.
-    class dict_metadata_handle;
+// Heap-pinned metadata block. Defined in src/dictionary/dictionary.cpp.
+// Allocated via `std::allocate_shared` over
+// `std::pmr::polymorphic_allocator<dict_metadata_handle>` so the
+// shared-control-block deallocator returns memory to the originating PMR
+// resource per `[2c §4.3]` / C-R2-P1-1.
+class dict_metadata_handle;
 
-    // shared_ptr<const> over the heap-pinned metadata. Move is no-throw and
-    // touches no atomics.
-    using dict_metadata_handle_ptr =
-        std::shared_ptr<dict_metadata_handle const>;
+// shared_ptr<const> over the heap-pinned metadata. Move is no-throw and
+// touches no atomics.
+using dict_metadata_handle_ptr = std::shared_ptr<dict_metadata_handle const>;
 }  // namespace detail
 
 // Per-message entry returned by `Dictionary::messages()`. The string_views
@@ -81,59 +78,47 @@ public:
     // Look up a single field by tag in the *MsgType context*. Returns a
     // composed FieldRef; `rule == NotDeclared` if the tag is not part of
     // this MsgType's grammar. Per AC-D1.
-    [[nodiscard]] FieldRef
-    field_ref(std::string_view msg_type,
-              std::uint16_t tag) const noexcept;
+    [[nodiscard]] FieldRef field_ref(std::string_view msg_type, std::uint16_t tag) const noexcept;
 
     // Required-field set for a given MsgType. Returned span aliases the
     // metadata-handle storage (survives `Dictionary` moves; ends when this
     // `Dictionary` is destroyed).
-    [[nodiscard]] std::span<std::uint16_t const>
-    required_fields(std::string_view msg_type) const noexcept
-        [[clang::lifetimebound]];
+    [[nodiscard]] std::span<std::uint16_t const> required_fields(
+        std::string_view msg_type) const noexcept [[clang::lifetimebound]];
 
     // Is `tag` declared for `msg_type` per the loaded dictionary?
     // Equivalent to `field_ref(msg_type, tag).rule != NotDeclared`.
-    [[nodiscard]] bool
-    field_valid_for(std::string_view msg_type,
-                    std::uint16_t tag) const noexcept;
+    [[nodiscard]] bool field_valid_for(std::string_view msg_type, std::uint16_t tag) const noexcept;
 
     // First-field-of-group rule per `[FIX50SP2 §3]`. Returns 0 if `no_tag`
     // is not a `NoXxx` tag in this dictionary.
-    [[nodiscard]] std::uint16_t
-    group_first_field(std::uint16_t no_tag) const noexcept;
+    [[nodiscard]] std::uint16_t group_first_field(std::uint16_t no_tag) const noexcept;
 
     // Length+Data pair lookup. Returns the paired DATA tag for a
     // LENGTH-typed field, or 0 if `length_tag` is not a paired LENGTH.
-    [[nodiscard]] std::uint16_t
-    length_pair_data_tag(std::uint16_t length_tag) const noexcept;
+    [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept;
 
     // ---- spec.md §4.2 descriptive aliases ----
 
     // AC-D2: descriptive alias for `field_ref(msg_type, tag)`. Returns
     // `std::nullopt` if `field_ref(...).rule == NotDeclared`.
-    [[nodiscard]] std::optional<FieldRef>
-    field(std::string_view msg_type,
-          std::uint16_t tag) const noexcept;
+    [[nodiscard]] std::optional<FieldRef> field(std::string_view msg_type,
+                                                std::uint16_t tag) const noexcept;
 
     // AC-D3: tag-by-name lookup. Case-sensitive exact match against the
     // XML `<field name="...">` attribute per research.md D-11.
-    [[nodiscard]] std::optional<std::uint16_t>
-    field_by_name(std::string_view name) const noexcept;
+    [[nodiscard]] std::optional<std::uint16_t> field_by_name(std::string_view name) const noexcept;
 
     // AC-D4: component lookup by name. `std::nullopt` if not declared.
-    [[nodiscard]] std::optional<ComponentRef>
-    component(std::string_view name) const noexcept;
+    [[nodiscard]] std::optional<ComponentRef> component(std::string_view name) const noexcept;
 
     // AC-D4: group lookup by delimiter tag. `std::nullopt` if not declared.
-    [[nodiscard]] std::optional<GroupRef>
-    group(std::uint16_t no_tag) const noexcept;
+    [[nodiscard]] std::optional<GroupRef> group(std::uint16_t no_tag) const noexcept;
 
     // AC-D5: iterable view of `(MsgType, message-name)` pairs sorted by
     // MsgType bytewise (per research.md D-6 determinism). Returned span
     // aliases the metadata-handle storage.
-    [[nodiscard]] std::span<MessageEntry const>
-    messages() const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] std::span<MessageEntry const> messages() const noexcept [[clang::lifetimebound]];
 
 private:
     friend class XmlLoader;

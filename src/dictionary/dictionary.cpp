@@ -8,15 +8,20 @@
 // `std::pmr::polymorphic_allocator` so the control-block deallocator routes
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
 
-#include "dictionary_internal.hpp"
-
-#include <fixpp/dict/dictionary.hpp>
-
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <ranges>
+#include <fixpp/dict/dictionary.hpp>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
+
+#include "dictionary_internal.hpp"
+#include "fixpp/dict/component_ref.hpp"
+#include "fixpp/dict/field_ref.hpp"
+#include "fixpp/dict/group_ref.hpp"
+#include "fixpp/dict/version_profile.hpp"
 
 namespace fixpp::dict {
 
@@ -24,8 +29,7 @@ namespace fixpp::dict {
 // per research.md D-6 / Gate A round 1 P2.4.
 namespace {
 
-[[nodiscard]] inline int bytewise_compare(std::string_view a,
-                                          std::string_view b) noexcept {
+[[nodiscard]] inline int bytewise_compare(std::string_view a, std::string_view b) noexcept {
     auto const n = std::min(a.size(), b.size());
     for (std::size_t i = 0; i < n; ++i) {
         auto const lhs = static_cast<unsigned char>(a[i]);
@@ -48,11 +52,9 @@ namespace {
 
 namespace detail {
 
-MsgFieldsRun dict_metadata_handle::find_msg_fields(
-    std::string_view msg_type) const noexcept {
+MsgFieldsRun dict_metadata_handle::find_msg_fields(std::string_view msg_type) const noexcept {
     auto const it = std::ranges::lower_bound(
-        messages_, msg_type, {},
-        [](MessageEntry const& m) noexcept { return m.msg_type; });
+        messages_, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
     if (it == messages_.end() || it->msg_type != msg_type) {
         return {};
     }
@@ -60,11 +62,9 @@ MsgFieldsRun dict_metadata_handle::find_msg_fields(
     return per_msg_field_offsets_[idx];
 }
 
-MsgFieldsRun dict_metadata_handle::find_msg_required(
-    std::string_view msg_type) const noexcept {
+MsgFieldsRun dict_metadata_handle::find_msg_required(std::string_view msg_type) const noexcept {
     auto const it = std::ranges::lower_bound(
-        messages_, msg_type, {},
-        [](MessageEntry const& m) noexcept { return m.msg_type; });
+        messages_, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
     if (it == messages_.end() || it->msg_type != msg_type) {
         return {};
     }
@@ -78,11 +78,10 @@ FieldRef dict_metadata_handle::field_ref_impl(std::string_view msg_type,
     if (run.count == 0) {
         return FieldRef{};
     }
-    auto const begin = fields_.data() + run.start;
-    auto const end = begin + run.count;
-    auto const it = std::lower_bound(
-        begin, end, tag,
-        [](FieldRef const& a, std::uint16_t t) noexcept { return a.tag < t; });
+    const auto* const begin = fields_.data() + run.start;
+    const auto* const end = begin + run.count;
+    const auto* const it = std::lower_bound(
+        begin, end, tag, [](FieldRef const& a, std::uint16_t t) noexcept { return a.tag < t; });
     if (it == end || it->tag != tag) {
         return FieldRef{};
     }
@@ -95,15 +94,12 @@ std::span<std::uint16_t const> dict_metadata_handle::required_fields_impl(
     if (run.count == 0) {
         return {};
     }
-    return std::span<std::uint16_t const>{required_fields_pool_.data() + run.start,
-                                          run.count};
+    return std::span<std::uint16_t const>{required_fields_pool_.data() + run.start, run.count};
 }
 
-std::uint16_t dict_metadata_handle::group_first_field_impl(
-    std::uint16_t no_tag) const noexcept {
-    auto const it = std::ranges::lower_bound(
-        groups_, no_tag, {},
-        [](GroupRef const& g) noexcept { return g.no_tag; });
+std::uint16_t dict_metadata_handle::group_first_field_impl(std::uint16_t no_tag) const noexcept {
+    auto const it = std::ranges::lower_bound(groups_, no_tag, {},
+                                             [](GroupRef const& g) noexcept { return g.no_tag; });
     if (it == groups_.end() || it->no_tag != no_tag) {
         return 0;
     }
@@ -125,11 +121,11 @@ std::uint16_t dict_metadata_handle::length_pair_data_tag_impl(
 
 std::optional<std::uint16_t> dict_metadata_handle::field_by_name_impl(
     std::string_view name) const noexcept {
-    auto const it = std::lower_bound(
-        field_by_name_.begin(), field_by_name_.end(), name,
-        [this](FieldNameEntry const& e, std::string_view n) noexcept {
-            return bytewise_compare(name_at(e.name), n) < 0;
-        });
+    // NOLINTNEXTLINE(modernize-use-ranges)
+    auto const it = std::lower_bound(field_by_name_.begin(), field_by_name_.end(), name,
+                                     [this](FieldNameEntry const& e, std::string_view n) noexcept {
+                                         return bytewise_compare(name_at(e.name), n) < 0;
+                                     });
     if (it == field_by_name_.end() || name_at(it->name) != name) {
         return std::nullopt;
     }
@@ -138,22 +134,20 @@ std::optional<std::uint16_t> dict_metadata_handle::field_by_name_impl(
 
 std::optional<ComponentRef> dict_metadata_handle::component_impl(
     std::string_view name) const noexcept {
-    auto const it = std::lower_bound(
-        components_by_name_.begin(), components_by_name_.end(), name,
-        [this](NamedIndex const& e, std::string_view n) noexcept {
-            return bytewise_compare(name_at(e.name), n) < 0;
-        });
+    // NOLINTNEXTLINE(modernize-use-ranges) — asymmetric comparator.
+    auto const it = std::lower_bound(components_by_name_.begin(), components_by_name_.end(), name,
+                                     [this](NamedIndex const& e, std::string_view n) noexcept {
+                                         return bytewise_compare(name_at(e.name), n) < 0;
+                                     });
     if (it == components_by_name_.end() || name_at(it->name) != name) {
         return std::nullopt;
     }
     return components_[it->index];
 }
 
-std::optional<GroupRef> dict_metadata_handle::group_impl(
-    std::uint16_t no_tag) const noexcept {
-    auto const it = std::ranges::lower_bound(
-        groups_, no_tag, {},
-        [](GroupRef const& g) noexcept { return g.no_tag; });
+std::optional<GroupRef> dict_metadata_handle::group_impl(std::uint16_t no_tag) const noexcept {
+    auto const it = std::ranges::lower_bound(groups_, no_tag, {},
+                                             [](GroupRef const& g) noexcept { return g.no_tag; });
     if (it == groups_.end() || it->no_tag != no_tag) {
         return std::nullopt;
     }
@@ -175,19 +169,16 @@ session_version Dictionary::which_session_version() const noexcept {
     return handle_ ? handle_->version_impl() : session_version::Unknown;
 }
 
-FieldRef Dictionary::field_ref(std::string_view msg_type,
-                               std::uint16_t tag) const noexcept {
+FieldRef Dictionary::field_ref(std::string_view msg_type, std::uint16_t tag) const noexcept {
     return handle_ ? handle_->field_ref_impl(msg_type, tag) : FieldRef{};
 }
 
 std::span<std::uint16_t const> Dictionary::required_fields(
     std::string_view msg_type) const noexcept {
-    return handle_ ? handle_->required_fields_impl(msg_type)
-                   : std::span<std::uint16_t const>{};
+    return handle_ ? handle_->required_fields_impl(msg_type) : std::span<std::uint16_t const>{};
 }
 
-bool Dictionary::field_valid_for(std::string_view msg_type,
-                                 std::uint16_t tag) const noexcept {
+bool Dictionary::field_valid_for(std::string_view msg_type, std::uint16_t tag) const noexcept {
     return field_ref(msg_type, tag).rule != field_presence::NotDeclared;
 }
 
@@ -208,13 +199,11 @@ std::optional<FieldRef> Dictionary::field(std::string_view msg_type,
     return fr;
 }
 
-std::optional<std::uint16_t> Dictionary::field_by_name(
-    std::string_view name) const noexcept {
+std::optional<std::uint16_t> Dictionary::field_by_name(std::string_view name) const noexcept {
     return handle_ ? handle_->field_by_name_impl(name) : std::nullopt;
 }
 
-std::optional<ComponentRef> Dictionary::component(
-    std::string_view name) const noexcept {
+std::optional<ComponentRef> Dictionary::component(std::string_view name) const noexcept {
     return handle_ ? handle_->component_impl(name) : std::nullopt;
 }
 

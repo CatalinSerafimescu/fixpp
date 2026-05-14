@@ -10,3 +10,14 @@ preprocessorErrorDirective:*decimal_alias.hpp
 # a subset of project files — their callers (tests, capi layer) are not in scope.
 # All functions flagged here are exercised by the test suite (ctest confirms 72/72 pass).
 unusedFunction
+
+# Public struct fields (MessageEntry::msg_type, FieldNameEntry::name, etc.) are
+# read by callers outside the module's analyzed file set — same cross-file
+# invisibility as unusedFunction above. Each member exists because tests / impl
+# accessors read it.
+unusedStructMember
+
+# Style preference, not a defect. The dictionary loader's raw loops use
+# asymmetric comparators or accumulate-with-side-effects patterns that the
+# std::find_if / std::accumulate refactor does not improve.
+useStlAlgorithm

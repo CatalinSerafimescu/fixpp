@@ -27,14 +27,35 @@ namespace fixpp::dict {
 // `data_type → field_data_type` for `dict::` namespace hygiene per
 // research.md D-14.
 enum class field_data_type : std::uint8_t {
-    Int, Length, SeqNum, NumInGroup, DayOfMonth,
-    Price, Qty, Amt, PriceOffset, Percentage, Float,
-    Char, Boolean,
-    String, MultiCharValue, MultiStringValue,
-    Currency, Exchange, Country, MonthYear,
-    UtcTimestamp, UtcTimeOnly, UtcDateOnly, LocalMktDate, TzTimeOnly, TzTimestamp,
+    Int,
+    Length,
+    SeqNum,
+    NumInGroup,
+    DayOfMonth,
+    Price,
+    Qty,
+    Amt,
+    PriceOffset,
+    Percentage,
+    Float,
+    Char,
+    Boolean,
+    String,
+    MultiCharValue,
+    MultiStringValue,
+    Currency,
+    Exchange,
+    Country,
+    MonthYear,
+    UtcTimestamp,
+    UtcTimeOnly,
+    UtcDateOnly,
+    LocalMktDate,
+    TzTimeOnly,
+    TzTimestamp,
     Language,
-    Data, XmlData,
+    Data,
+    XmlData,
     // Sentinel for dialect-introduced types not in the standard set. In this
     // PR (002-dictionary-xml-loader, /clarify Q2 → A) overlays are out of
     // scope, so `DialectExtension` is reserved but never emitted by
@@ -52,23 +73,23 @@ enum class field_data_type : std::uint8_t {
 // Renamed `presence → field_presence` for `dict::` namespace hygiene per
 // research.md D-14.
 enum class field_presence : std::uint8_t {
-    NotDeclared = 0,    // tag is not part of this MsgType's grammar
-    Optional    = 1,
-    Required    = 2,
-    Conditional = 3,    // codegen-version base only in v1.0; consult
-                        // condition_index
+    NotDeclared = 0,  // tag is not part of this MsgType's grammar
+    Optional = 1,
+    Required = 2,
+    Conditional = 3,  // codegen-version base only in v1.0; consult
+                      // condition_index
 };
 
 struct FieldRef {
-    std::uint16_t   tag;
+    std::uint16_t tag;
     field_data_type type;
-    field_presence  rule;
-    std::uint16_t   condition_index;
-    std::uint16_t   group_no_tag;
-    std::uint16_t   component_index;
-    std::uint16_t   enum_table_index;
-    std::uint16_t   length_pair_data_tag;
-    std::uint16_t   _reserved;
+    field_presence rule;
+    std::uint16_t condition_index;
+    std::uint16_t group_no_tag;
+    std::uint16_t component_index;
+    std::uint16_t enum_table_index;
+    std::uint16_t length_pair_data_tag;
+    std::uint16_t _reserved;
 };
 
 // AC-F1..AC-F4 per spec.md §4.3 — re-asserted here and again in

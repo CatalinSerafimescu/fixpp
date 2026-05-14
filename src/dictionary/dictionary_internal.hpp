@@ -13,13 +13,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/group_ref.hpp>
 #include <fixpp/dict/version_profile.hpp>
-
-#include <cstdint>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -91,19 +90,17 @@ public:
     [[nodiscard]] FieldRef field_ref_impl(std::string_view msg_type,
                                           std::uint16_t tag) const noexcept;
 
-    [[nodiscard]] std::span<std::uint16_t const>
-    required_fields_impl(std::string_view msg_type) const noexcept;
+    [[nodiscard]] std::span<std::uint16_t const> required_fields_impl(
+        std::string_view msg_type) const noexcept;
 
     [[nodiscard]] std::uint16_t group_first_field_impl(std::uint16_t no_tag) const noexcept;
 
-    [[nodiscard]] std::uint16_t
-    length_pair_data_tag_impl(std::uint16_t length_tag) const noexcept;
+    [[nodiscard]] std::uint16_t length_pair_data_tag_impl(std::uint16_t length_tag) const noexcept;
 
-    [[nodiscard]] std::optional<std::uint16_t>
-    field_by_name_impl(std::string_view name) const noexcept;
+    [[nodiscard]] std::optional<std::uint16_t> field_by_name_impl(
+        std::string_view name) const noexcept;
 
-    [[nodiscard]] std::optional<ComponentRef>
-    component_impl(std::string_view name) const noexcept;
+    [[nodiscard]] std::optional<ComponentRef> component_impl(std::string_view name) const noexcept;
 
     [[nodiscard]] std::optional<GroupRef> group_impl(std::uint16_t no_tag) const noexcept;
 

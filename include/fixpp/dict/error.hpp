@@ -18,11 +18,9 @@
 #pragma once
 
 #include <fixpp/core/error.hpp>
-
 #include <new>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 namespace fixpp::dict {
 
@@ -34,9 +32,9 @@ namespace fixpp::dict {
 // Constructor is NOT `noexcept`: `std::runtime_error(std::string)` may allocate.
 class xml_parse_error : public std::runtime_error {
 public:
-    explicit xml_parse_error(std::string message)
-        : std::runtime_error(std::move(message)) {}
+    explicit xml_parse_error(const std::string& message) : std::runtime_error(message) {}
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     [[nodiscard]] fixpp::core::error code() const noexcept {
         return fixpp::core::error::dict_xml_parse_failed;
     }
@@ -47,9 +45,9 @@ public:
 // to one of the nine v1.0-supported FIX versions per `[2c §1.3]` (AC-L4).
 class unknown_version_error : public std::runtime_error {
 public:
-    explicit unknown_version_error(std::string message)
-        : std::runtime_error(std::move(message)) {}
+    explicit unknown_version_error(const std::string& message) : std::runtime_error(message) {}
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) — exception API.
     [[nodiscard]] fixpp::core::error code() const noexcept {
         return fixpp::core::error::dict_unknown_version;
     }
@@ -71,6 +69,7 @@ public:
                "XmlLoader::load*";
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) — exception API.
     [[nodiscard]] fixpp::core::error code() const noexcept {
         return fixpp::core::error::dict_xml_oom;
     }
