@@ -259,6 +259,15 @@ private:
     std::unordered_map<std::uint16_t, std::string> by_tag_;
     std::vector<ComponentDef> components_;
     std::unordered_map<std::string, std::uint16_t> component_index_by_name_;
+    // Reverse parent map: parent_of_[child_name] = enclosing component's 1-based
+    // id (component_index + 1). Populated during collect_components() by walking
+    // each component's XML body for nested <component> references. Used in
+    // finalize() to set ComponentRef::parent_component_id per [2c §4.2]:
+    // "0 if top-level; otherwise the enclosing component's 1-based id".
+    // When a child component is referenced from multiple parents, the first
+    // encountered in declaration order wins (FIX XML is typically acyclic and
+    // single-parent; the tiebreak is documented here for clarity).
+    std::unordered_map<std::string, std::uint16_t> parent_of_;
     std::vector<GroupDef> groups_;
     std::unordered_map<std::uint16_t, std::uint16_t> group_index_by_no_tag_;
     std::vector<MessageDef> messages_;
@@ -378,6 +387,28 @@ void LoaderState::collect_components(pugi::xml_node const& root) {
         components_.push_back({.name = name, .node = c});
         component_index_by_name_.emplace(name, next_id);
         ++next_id;
+    }
+
+    // Build the reverse parent map: for each top-level component P, walk its
+    // XML body for nested <component name="C" /> references and record
+    // parent_of_[C] = index_of(P) + 1 (1-based id, matching the convention
+    // used in ComponentRef::parent_component_id per [2c §4.2]).
+    // Only the first-seen enclosing parent is recorded (FIX XML is acyclic and
+    // typically single-parent; the "first declaration order" tiebreak is
+    // documented on the parent_of_ member comment above).
+    for (auto const& def : components_) {
+        auto const pit = component_index_by_name_.find(def.name);
+        if (pit == component_index_by_name_.end()) {
+            continue;
+        }
+        auto const parent_1based = static_cast<std::uint16_t>(pit->second + 1);
+        for (auto const& child : def.node.children()) {
+            if (std::string_view{child.name()} == "component") {
+                auto const cname = std::string{child.attribute("name").as_string("")};
+                // Only record the first parent encountered (declaration order).
+                parent_of_.emplace(cname, parent_1based);
+            }
+        }
     }
 }
 
@@ -761,18 +792,13 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         h.component_fields_.insert(h.component_fields_.end(),
                                    comp_fields.begin(), comp_fields.end());
 
-        // Derive parent_component_id: scan the component's XML body for the
-        // first nested <component> reference; use index+1 (1-based) or 0 if none.
+        // Derive parent_component_id: look up the pre-built reverse map from
+        // collect_components(). 0 = top-level (no enclosing component); otherwise
+        // the enclosing component's 1-based id per [2c §4.2] / data-model.md
+        // Entity 2 / contracts/component_ref.hpp:27–29.
         std::uint16_t parent_comp_id = 0;
-        for (auto const& child : def.node.children()) {
-            if (std::string_view{child.name()} == "component") {
-                auto const cname = std::string{child.attribute("name").as_string("")};
-                auto const cit = component_index_by_name_.find(cname);
-                if (cit != component_index_by_name_.end()) {
-                    parent_comp_id = static_cast<std::uint16_t>(cit->second + 1);
-                    break;
-                }
-            }
+        if (auto const pit = parent_of_.find(def.name); pit != parent_of_.end()) {
+            parent_comp_id = pit->second;
         }
 
         ComponentRef cr{};

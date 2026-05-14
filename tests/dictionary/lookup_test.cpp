@@ -245,6 +245,32 @@ TEST_P(DictionaryLookupFixture, ComponentParties) {
         }
     }
 
+    // R7 (P1-B): parent_component_id semantics — "0 if top-level; otherwise the
+    // enclosing component's 1-based id" per [2c §4.2] / data-model.md Entity 2.
+    // Tested on FIX44 where SecAltIDGrp is nested inside Instrument's body.
+    if (p.expected_version == fixpp::dict::session_version::v44 ||
+        p.expected_version == fixpp::dict::session_version::v50sp2) {
+        // Instrument is a top-level component — its parent_component_id must be 0.
+        auto const ins = dict().component("Instrument");
+        ASSERT_TRUE(ins.has_value())
+            << "Instrument must be declared in " << p.filename;
+        EXPECT_EQ(ins->parent_component_id, std::uint16_t{0})
+            << "Instrument is top-level; parent_component_id must be 0 in "
+            << p.filename;
+
+        // SecAltIDGrp is referenced inside Instrument's body — its
+        // parent_component_id must equal Instrument's 1-based id
+        // (component_id is 0-based; parent_component_id is 1-based).
+        auto const sag = dict().component("SecAltIDGrp");
+        ASSERT_TRUE(sag.has_value())
+            << "SecAltIDGrp must be declared in " << p.filename;
+        EXPECT_EQ(sag->parent_component_id,
+                  static_cast<std::uint16_t>(ins->component_id + 1u))
+            << "SecAltIDGrp is nested inside Instrument; "
+               "parent_component_id must equal Instrument's 1-based id in "
+            << p.filename;
+    }
+
     // Unknown component must be nullopt in every version
     EXPECT_FALSE(dict().component("NonExistentComponent_xyz_999").has_value())
         << "Unknown component must return nullopt for " << p.filename;
