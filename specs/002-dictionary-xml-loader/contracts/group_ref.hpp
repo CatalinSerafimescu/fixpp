@@ -24,6 +24,12 @@ struct GroupRef {
                                        // group_view::iter() (`[2b §4.7]`).
     std::uint16_t first_field_index;   // index into the per-version FieldRef
                                        // array for the group's field list.
+                                       // RUNTIME-MVS NOTE: under the XmlLoader
+                                       // runtime path, this indexes into the
+                                       // per-group side table returned by
+                                       // Dictionary::group_fields(no_tag), NOT
+                                       // the per-MsgType-concatenated fields_
+                                       // array that field_ref() searches.
     std::uint16_t field_count;
     std::uint16_t parent_group_no_tag; // 0 if not nested; otherwise the
                                        // enclosing group's NoXxx tag

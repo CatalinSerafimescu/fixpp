@@ -200,6 +200,27 @@ public:
     messages() const noexcept [[clang::lifetimebound]];
 
     // -----------------------------------------------------------------
+    // AC-D4 runtime extension — component / group field-list walks
+    // (Gate B round 2 addition, 2026-05-15)
+    // -----------------------------------------------------------------
+
+    // Walk a component's contiguous field list by name. Returns a span over
+    // the per-component FieldRef side table; empty if `name` is not declared
+    // or the component has no fields. Returned span aliases metadata storage.
+    //
+    // NOTE: first_field_index on ComponentRef indexes into THIS side table
+    // (not the per-MsgType-concatenated fields_ array that field_ref() uses).
+    // See spec.md §Clarifications Q4 for the runtime-vs-codegen layout note.
+    [[nodiscard]] std::span<FieldRef const>
+    component_fields(std::string_view name) const noexcept [[clang::lifetimebound]];
+
+    // Walk a group's contiguous field list by NoXxx tag. Returns a span over
+    // the per-group FieldRef side table; empty if `no_tag` is not a declared
+    // group delimiter or the group has no recorded fields.
+    [[nodiscard]] std::span<FieldRef const>
+    group_fields(std::uint16_t no_tag) const noexcept [[clang::lifetimebound]];
+
+    // -----------------------------------------------------------------
     // Construction by `XmlLoader` (friend) — public ctor is not in scope.
     // -----------------------------------------------------------------
 private:

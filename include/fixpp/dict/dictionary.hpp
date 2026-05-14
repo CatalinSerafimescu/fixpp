@@ -122,6 +122,33 @@ public:
     // aliases the metadata-handle storage.
     [[nodiscard]] std::span<MessageEntry const> messages() const noexcept [[clang::lifetimebound]];
 
+    // AC-D4 runtime extension: walk a component's contiguous field list.
+    // Returns a span over the per-component FieldRef side table maintained
+    // by XmlLoader. The span is empty if `name` is not declared or the
+    // component has no fields.
+    //
+    // NOTE on index space: ComponentRef::first_field_index and field_count
+    // index into THIS side table — NOT into the per-MsgType-concatenated
+    // fields_ array that field_ref() searches. The XmlLoader's per-MsgType-
+    // concatenated layout (supporting O(log N) field_ref lookups per [2c
+    // §6.2]) does not produce per-component contiguity, so a dedicated flat
+    // side table is used for component/group field walks (runtime-MVS shape;
+    // codegen-emitted per-version headers use a different layout where
+    // first_field_index indexes the per-version Fields.hpp array directly).
+    [[nodiscard]] std::span<FieldRef const> component_fields(
+        std::string_view name) const noexcept [[clang::lifetimebound]];
+
+    // AC-D4 runtime extension: walk a group's contiguous field list.
+    // Returns a span over the per-group FieldRef side table maintained by
+    // XmlLoader. The span is empty if `no_tag` is not a declared group
+    // delimiter tag or the group has no recorded fields.
+    //
+    // Same index-space note as component_fields() above: GroupRef::
+    // first_field_index indexes into this side table, not the per-MsgType
+    // fields_ array.
+    [[nodiscard]] std::span<FieldRef const> group_fields(
+        std::uint16_t no_tag) const noexcept [[clang::lifetimebound]];
+
 private:
     friend class XmlLoader;
 

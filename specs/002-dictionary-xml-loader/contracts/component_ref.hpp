@@ -22,7 +22,15 @@ struct ComponentRef {
                                        // pool (constexpr std::string_view;
                                        // for diagnostics).
     std::uint16_t first_field_index;   // index into the per-version FieldRef
-                                       // array.
+                                       // array. RUNTIME-MVS NOTE: under the
+                                       // XmlLoader runtime path, this indexes
+                                       // into the per-component side table
+                                       // returned by Dictionary::component_fields(name),
+                                       // NOT the per-MsgType-concatenated fields_
+                                       // array that field_ref() searches. The
+                                       // codegen-emitted per-version layout
+                                       // uses a single global FieldRef array
+                                       // where components have contiguous slices.
     std::uint16_t field_count;         // number of fields in this component.
     std::uint16_t parent_component_id; // 0 if top-level; otherwise the
                                        // enclosing component (components

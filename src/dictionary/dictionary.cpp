@@ -243,4 +243,19 @@ std::span<MessageEntry const> Dictionary::messages() const noexcept {
     return handle_ ? handle_->messages_impl() : std::span<MessageEntry const>{};
 }
 
+std::span<FieldRef const> Dictionary::component_fields(std::string_view name) const noexcept {
+    if (!handle_) {
+        return {};
+    }
+    auto const cr = handle_->component_impl(name);
+    if (!cr) {
+        return {};
+    }
+    return handle_->component_fields_impl(cr->component_id);
+}
+
+std::span<FieldRef const> Dictionary::group_fields(std::uint16_t no_tag) const noexcept {
+    return handle_ ? handle_->group_fields_impl(no_tag) : std::span<FieldRef const>{};
+}
+
 }  // namespace fixpp::dict

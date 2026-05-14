@@ -288,6 +288,33 @@ TEST_P(DictionaryLookupFixture, ComponentParties) {
         EXPECT_GT(gr->field_count, std::uint16_t{0})
             << "group(" << no_tag << ") field_count must be > 0 in " << p.filename;
     }
+
+    // R6 (P1-A / F1.1): component_fields() must be reachable and consistent.
+    // The side table exposed by component_fields(name) must match the
+    // field_count advertised on the ComponentRef per [2c §4.2] / spec.md Q4.
+    if (p.has_instrument) {
+        auto const inst = dict().component("Instrument");
+        ASSERT_TRUE(inst.has_value())
+            << "Instrument component must be declared in " << p.filename;
+        auto const span = dict().component_fields("Instrument");
+        EXPECT_EQ(span.size(), static_cast<std::size_t>(inst->field_count))
+            << "component_fields(\"Instrument\").size() must equal "
+               "Instrument.field_count in " << p.filename;
+        EXPECT_FALSE(span.empty())
+            << "component_fields(\"Instrument\") must not be empty in "
+            << p.filename;
+        // First field of Instrument in FIX44/FIX50SP2 is Symbol (tag 55).
+        if (!span.empty()) {
+            EXPECT_EQ(span[0].tag, std::uint16_t{55})
+                << "component_fields(\"Instrument\")[0].tag must be Symbol(55) in "
+                << p.filename;
+        }
+    }
+
+    // component_fields() on an unknown name must return empty span.
+    EXPECT_TRUE(dict().component_fields("NonExistentComponent_xyz_999").empty())
+        << "component_fields() for unknown name must return empty span in "
+        << p.filename;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +327,25 @@ TEST_P(DictionaryLookupFixture, GroupDelimiterTags) {
             << "group_first_field(" << no_tag << ") must be non-zero in "
             << GetParam().filename;
     }
+
+    // R6 (P1-A / F1.2): group_fields() side table must be reachable and
+    // consistent with the field_count on the GroupRef per [2c §4.2] / spec.md Q4.
+    for (auto const no_tag : GetParam().required_group_no_tags) {
+        auto const gr = dict().group(no_tag);
+        ASSERT_TRUE(gr.has_value())
+            << "group(" << no_tag << ") must be declared in " << GetParam().filename;
+        auto const span = dict().group_fields(no_tag);
+        EXPECT_EQ(span.size(), static_cast<std::size_t>(gr->field_count))
+            << "group_fields(" << no_tag << ").size() must equal "
+               "group.field_count in " << GetParam().filename;
+        EXPECT_FALSE(span.empty())
+            << "group_fields(" << no_tag << ") must not be empty in "
+            << GetParam().filename;
+    }
+
+    // group_fields() on a non-existent no_tag must return empty span.
+    EXPECT_TRUE(dict().group_fields(9999u).empty())
+        << "group_fields(9999) must return empty span in " << GetParam().filename;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +467,9 @@ TEST(DictionaryNoexcept, AllPublicAccessorsAreNoexcept) {
     static_assert(noexcept(std::declval<D>().component({})));
     static_assert(noexcept(std::declval<D>().group(0u)));
     static_assert(noexcept(std::declval<D>().messages()));
+    // R6: new component_fields / group_fields accessors must be noexcept.
+    static_assert(noexcept(std::declval<D>().component_fields({})));
+    static_assert(noexcept(std::declval<D>().group_fields(0u)));
 
     SUCCEED(); // All static_asserts above already enforce the property.
 }
