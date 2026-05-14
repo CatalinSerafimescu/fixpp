@@ -85,6 +85,10 @@ TEST_F(OomInjection, MidAllocateFailsBecomesXmlOomError) {
     } catch (fixpp::dict::xml_oom_error const& e) {
         // AC-L9: correct typed exception.
         EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_oom);
+        // what() — overridden message identifying the loader allocation site.
+        EXPECT_NE(std::string_view{e.what()}.find("xml_oom_error"),
+                  std::string_view::npos)
+            << "what() must identify the typed exception, got: " << e.what();
     } catch (std::bad_alloc const&) {
         // AC-P2 violation — raw std::bad_alloc must not escape.
         FAIL() << "std::bad_alloc escaped at call #10 — AC-P2 violation";

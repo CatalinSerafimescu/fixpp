@@ -279,6 +279,59 @@ TEST_P(DictionaryLookupFixture, CrossVersionIsolation) {
 }
 
 // ---------------------------------------------------------------------------
+// TEST_P: RequiredFieldsAndLengthPairs (covers Dictionary::required_fields()
+// + Dictionary::length_pair_data_tag(); both were uncovered before T035).
+// ---------------------------------------------------------------------------
+
+TEST_P(DictionaryLookupFixture, RequiredFieldsAndLengthPairs) {
+    auto const& p = GetParam();
+
+    // Call required_fields("A") on every version (exercises find_msg_required
+    // + the required-pool offset path including the empty-run branch). The
+    // specific required-field set differs by version: pre-FIXT (4.2/4.4)
+    // and FIXT11 carry session fields (49/56) on Logon; the FIX 5.0SP2
+    // application overlay leaves Logon required-free because session fields
+    // moved to FIXT — see [FIX50SP2 §6].
+    auto const logon_required = dict().required_fields("A");
+
+    if (p.expected_version != fixpp::dict::session_version::v50sp2) {
+        bool has_sender = false;
+        bool has_target = false;
+        for (auto const tag : logon_required) {
+            if (tag == 49u) has_sender = true;
+            if (tag == 56u) has_target = true;
+        }
+        EXPECT_TRUE(has_sender)
+            << "Logon required_fields() must contain SenderCompID (49) in "
+            << p.filename;
+        EXPECT_TRUE(has_target)
+            << "Logon required_fields() must contain TargetCompID (56) in "
+            << p.filename;
+    }
+
+    // Unknown msg_type → empty span (covers the find_msg_required miss path).
+    auto const unknown = dict().required_fields("definitely_not_a_msg_type");
+    EXPECT_TRUE(unknown.empty())
+        << "required_fields() for unknown msg_type must be empty span in "
+        << p.filename;
+
+    // length_pair_data_tag: RawDataLength (95) is paired with RawData (96) in
+    // every FIX version that declares both. FIXT11 is session-only and may
+    // omit RawData; tolerate that. This covers length_pair_data_tag_impl's
+    // walk-and-match path.
+    auto const raw_data_tag = dict().length_pair_data_tag(95u);
+    if (p.expected_version != fixpp::dict::session_version::vt11) {
+        EXPECT_EQ(raw_data_tag, std::uint16_t{96})
+            << "length_pair_data_tag(95) must return 96 (RawData) in "
+            << p.filename;
+    }
+
+    // Unknown length tag → 0 (covers the no-match path through fields_).
+    EXPECT_EQ(dict().length_pair_data_tag(std::uint16_t{9999}), std::uint16_t{0})
+        << "length_pair_data_tag(9999) must return 0 in " << p.filename;
+}
+
+// ---------------------------------------------------------------------------
 // NoexceptDiscipline (AC-D8) — compile-time; one non-parameterized TEST
 // ---------------------------------------------------------------------------
 

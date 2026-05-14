@@ -101,4 +101,55 @@ TEST(ParserError, NonXmlGarbage) {
     assert_parse_error(kXml);
 }
 
+// ---------------------------------------------------------------------------
+// TC-PE-06..09 — defensive structural checks in `<fix>` header parsing
+// (xml_loader.cpp:269/276/285/293; complements AC-L4 which exercises the
+// resolve_version→Unknown path, not the from_chars-failure path).
+// ---------------------------------------------------------------------------
+
+// TC-PE-06: Root element is not <fix> — must throw xml_parse_error.
+TEST(ParserError, RootElementNotFix) {
+    constexpr std::string_view kXml = "<notfix major='4' minor='4'></notfix>";
+    assert_parse_error(kXml);
+}
+
+// TC-PE-07: <fix> with no major/minor attributes — must throw xml_parse_error.
+TEST(ParserError, FixMissingMajorMinor) {
+    constexpr std::string_view kXml = "<fix><fields/><messages/></fix>";
+    assert_parse_error(kXml);
+}
+
+// TC-PE-08: Non-numeric major — from_chars fails. unknown_version_error,
+// not xml_parse_error, so don't use the assert_parse_error helper.
+TEST(ParserError, NonNumericMajor) {
+    std::array<std::byte, kBufSize> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size(),
+                                           std::pmr::null_memory_resource()};
+    constexpr std::string_view kXml =
+        "<fix major='abc' minor='0'><fields/><messages/></fix>";
+    fixpp::dict::XmlLoader loader{};
+    try {
+        (void)loader.load_from_string(kXml, &mr);
+        FAIL() << "expected dict::unknown_version_error";
+    } catch (fixpp::dict::unknown_version_error const& e) {
+        EXPECT_EQ(e.code(), fixpp::core::error::dict_unknown_version);
+    }
+}
+
+// TC-PE-09: Non-numeric minor — symmetric to TC-PE-08.
+TEST(ParserError, NonNumericMinor) {
+    std::array<std::byte, kBufSize> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size(),
+                                           std::pmr::null_memory_resource()};
+    constexpr std::string_view kXml =
+        "<fix major='4' minor='xyz'><fields/><messages/></fix>";
+    fixpp::dict::XmlLoader loader{};
+    try {
+        (void)loader.load_from_string(kXml, &mr);
+        FAIL() << "expected dict::unknown_version_error";
+    } catch (fixpp::dict::unknown_version_error const& e) {
+        EXPECT_EQ(e.code(), fixpp::core::error::dict_unknown_version);
+    }
+}
+
 }  // namespace
