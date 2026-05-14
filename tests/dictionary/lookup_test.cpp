@@ -356,6 +356,25 @@ TEST_P(DictionaryLookupFixture, RequiredFieldsAndLengthPairs) {
     // Unknown length tag → 0 (covers the no-match path through fields_).
     EXPECT_EQ(dict().length_pair_data_tag(std::uint16_t{9999}), std::uint16_t{0})
         << "length_pair_data_tag(9999) must return 0 in " << p.filename;
+
+    // R2 (F1.3): component-scoped LENGTH/DATA adjacency captured from the
+    // global <fields> declaration order. EncodedLegIssuerLen(618)→
+    // EncodedLegIssuer(619) lives inside the InstrumentLeg component in FIX44;
+    // the old message-only walk never descended into <component> nodes.
+    if (p.expected_version == fixpp::dict::session_version::v44 ||
+        p.expected_version == fixpp::dict::session_version::v50sp2) {
+        EXPECT_EQ(dict().length_pair_data_tag(std::uint16_t{618}), std::uint16_t{619})
+            << "length_pair_data_tag(618) must return 619 (EncodedLegIssuer) in "
+            << p.filename;
+    }
+
+    // R2 (F1.3): XMLDATA-typed pair: SecurityXMLLen(1184)→SecurityXML(1185) in
+    // FIX50SP2 (adjacent in the global <fields> block; XMLDATA type).
+    if (p.expected_version == fixpp::dict::session_version::v50sp2) {
+        EXPECT_EQ(dict().length_pair_data_tag(std::uint16_t{1184}), std::uint16_t{1185})
+            << "length_pair_data_tag(1184) must return 1185 (SecurityXML) in "
+            << p.filename;
+    }
 }
 
 // ---------------------------------------------------------------------------

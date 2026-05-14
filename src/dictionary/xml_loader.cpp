@@ -521,9 +521,53 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
 // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
 void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
-    // Walk every message and trailer/header; whenever a LENGTH-typed field is
-    // immediately followed by a DATA-typed field, mark the LENGTH's
-    // length_pair_data_tag.
+    // Primary detection path (Option B per triage §R2): walk the global
+    // <fields> block in declaration order. Whenever a LENGTH-typed entry is
+    // immediately followed by a DATA- or XMLDATA-typed entry, record the pair.
+    // This is the canonical FIX source per [FIX50SP2 §3.3] and captures
+    // component-internal pairs (e.g., EncodedLegIssuerLen(618)→
+    // EncodedLegIssuer(619) in InstrumentLeg) that were previously missed
+    // because the old per-container walk never descended into <component> nodes.
+    //
+    // Secondary path: walk header, trailer, and every <message> container for
+    // any LENGTH/DATA adjacency NOT present in the global <fields> block
+    // (e.g., inline field reordering in message bodies). In practice the
+    // global-fields path already captures all standard pairs; the secondary
+    // walk retains the original coverage so no existing pair detection regresses.
+    auto const mark_pair = [&](std::uint16_t length_tag, std::uint16_t data_tag) {
+        auto const lit = by_tag_.find(length_tag);
+        if (lit != by_tag_.end()) {
+            auto const nit = by_name_.find(lit->second);
+            if (nit != by_name_.end() && nit->second.length_pair_data_tag == 0) {
+                nit->second.length_pair_data_tag = data_tag;
+            }
+        }
+    };
+
+    // Primary: global <fields> declaration order.
+    {
+        std::uint16_t prev_tag = 0;
+        bool prev_is_length = false;
+        for (auto const& f : root.child("fields").children("field")) {
+            auto const fname = std::string{f.attribute("name").as_string("")};
+            auto const it = by_name_.find(fname);
+            if (it == by_name_.end()) {
+                prev_is_length = false;
+                continue;
+            }
+            auto const& info = it->second;
+            bool const is_data = (info.type == field_data_type::Data ||
+                                  info.type == field_data_type::XmlData);
+            if (prev_is_length && is_data) {
+                mark_pair(prev_tag, info.tag);
+            }
+            prev_tag = info.tag;
+            prev_is_length = (info.type == field_data_type::Length);
+        }
+    }
+
+    // Secondary: per-container walk (header, trailer, messages) for any pairs
+    // only visible in usage context (edge case; retains original coverage).
     auto walk = [&](pugi::xml_node const& container) {
         std::uint16_t prev_tag = 0;
         bool prev_is_length = false;
@@ -535,14 +579,10 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
                 continue;
             }
             auto const& info = it->second;
-            if (prev_is_length && info.type == field_data_type::Data) {
-                auto const lit = by_tag_.find(prev_tag);
-                if (lit != by_tag_.end()) {
-                    auto const nit = by_name_.find(lit->second);
-                    if (nit != by_name_.end()) {
-                        nit->second.length_pair_data_tag = info.tag;
-                    }
-                }
+            bool const is_data = (info.type == field_data_type::Data ||
+                                  info.type == field_data_type::XmlData);
+            if (prev_is_length && is_data) {
+                mark_pair(prev_tag, info.tag);
             }
             prev_tag = info.tag;
             prev_is_length = (info.type == field_data_type::Length);
