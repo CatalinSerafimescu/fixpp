@@ -66,7 +66,9 @@ public:
           per_msg_required_offsets_(mr),
           components_(mr),
           components_by_name_(mr),
+          component_fields_(mr),
           groups_(mr),
+          group_fields_(mr),
           messages_(mr),
           field_by_name_(mr) {}
 
@@ -107,6 +109,16 @@ public:
 
     [[nodiscard]] std::optional<GroupRef> group_impl(std::uint16_t no_tag) const noexcept;
 
+    // Returns the flat FieldRef run for a component (by component_id).
+    // Returns empty span if component_id is out of range or field_count == 0.
+    [[nodiscard]] std::span<FieldRef const> component_fields_impl(
+        std::uint16_t component_id) const noexcept;
+
+    // Returns the flat FieldRef run for a group (by no_tag).
+    // Returns empty span if the group has no fields recorded.
+    [[nodiscard]] std::span<FieldRef const> group_fields_impl(
+        std::uint16_t no_tag) const noexcept;
+
     [[nodiscard]] std::span<MessageEntry const> messages_impl() const noexcept {
         return std::span<MessageEntry const>{messages_};
     }
@@ -138,9 +150,15 @@ public:
     std::pmr::vector<ComponentRef> components_;
     // Component-name → index lookup (sorted bytewise by name).
     std::pmr::vector<NamedIndex> components_by_name_;
+    // Flat FieldRef table for per-component field runs.
+    // ComponentRef::first_field_index / field_count index into this vector.
+    std::pmr::vector<FieldRef> component_fields_;
 
     // Groups (sorted by `no_tag` ascending).
     std::pmr::vector<GroupRef> groups_;
+    // Flat FieldRef table for per-group field runs.
+    // GroupRef::first_field_index / field_count index into this vector.
+    std::pmr::vector<FieldRef> group_fields_;
 
     // Messages (sorted bytewise by `msg_type`).
     std::pmr::vector<MessageEntry> messages_;

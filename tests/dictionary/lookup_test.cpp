@@ -206,35 +206,62 @@ TEST_P(DictionaryLookupFixture, FieldRefAndFieldAgreement) {
 // ---------------------------------------------------------------------------
 
 TEST_P(DictionaryLookupFixture, ComponentParties) {
+    auto const& p = GetParam();
+
     // All four shipped versions declare the Instrument component.
-    if (GetParam().has_instrument) {
-        EXPECT_TRUE(dict().component("Instrument").has_value())
-            << "Instrument component must be declared in " << GetParam().filename;
+    if (p.has_instrument) {
+        auto const inst = dict().component("Instrument");
+        EXPECT_TRUE(inst.has_value())
+            << "Instrument component must be declared in " << p.filename;
+        // R1 (F1.1): payload must be non-zero for declared components.
+        if (inst.has_value()) {
+            EXPECT_GT(inst->field_count, std::uint16_t{0})
+                << "Instrument component field_count must be > 0 in " << p.filename;
+        }
+    } else {
+        // FIX42 and FIXT11: Instrument must NOT be declared (R5 alignment).
+        EXPECT_FALSE(dict().component("Instrument").has_value())
+            << "Instrument component must NOT be declared in " << p.filename;
     }
 
-    // Parties: FIX42 predates it (added in 4.3); FIX44/50SP2 carry it;
-    // FIXT11 is tolerated either way (session-only vocab).
-    if (GetParam().parties_expected.has_value()) {
-        bool const expected = *GetParam().parties_expected;
-        bool const actual   = dict().component("Parties").has_value();
+    // Parties: FIX42 predates it (added in 4.3); FIX44/50SP2 carry it.
+    // FIXT11: no Parties (only HopGrp and MsgTypeGrp — R5 fix: pin to false).
+    if (p.parties_expected.has_value()) {
+        bool const expected = *p.parties_expected;
+        auto const parties = dict().component("Parties");
+        bool const actual  = parties.has_value();
         if (expected) {
             EXPECT_TRUE(actual)
-                << "Parties component must be declared in " << GetParam().filename;
+                << "Parties component must be declared in " << p.filename;
+            // R1 (F1.1): payload check for Parties when declared.
+            if (actual) {
+                EXPECT_GT(parties->field_count, std::uint16_t{0})
+                    << "Parties component field_count must be > 0 in " << p.filename;
+            }
         } else {
             EXPECT_FALSE(actual)
                 << "Parties component must NOT be declared in "
-                << GetParam().filename;
+                << p.filename;
         }
     }
-    // nullopt → tolerate either outcome (FIXT11)
 
     // Unknown component must be nullopt in every version
     EXPECT_FALSE(dict().component("NonExistentComponent_xyz_999").has_value())
-        << "Unknown component must return nullopt for " << GetParam().filename;
+        << "Unknown component must return nullopt for " << p.filename;
 
     // group() with dummy no_tag must be nullopt
     EXPECT_FALSE(dict().group(9999u).has_value())
-        << "group(9999) must return nullopt for " << GetParam().filename;
+        << "group(9999) must return nullopt for " << p.filename;
+
+    // R1 (F1.2): GroupRef payload must be non-zero for declared groups.
+    // Verify field_count on well-known groups in versions that declare them.
+    for (auto const no_tag : p.required_group_no_tags) {
+        auto const gr = dict().group(no_tag);
+        ASSERT_TRUE(gr.has_value())
+            << "group(" << no_tag << ") must be declared in " << p.filename;
+        EXPECT_GT(gr->field_count, std::uint16_t{0})
+            << "group(" << no_tag << ") field_count must be > 0 in " << p.filename;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +432,9 @@ INSTANTIATE_TEST_SUITE_P(
             .forbidden_msg_types = {"D"},  // no NewOrderSingle in session-only dict
             .required_group_no_tags = {627u},  // NoHops
             .has_clordid     = false,  // no application fields in FIXT11
-            .parties_expected = std::nullopt,  // tolerate either
+            // R5 fix: FIXT11 only declares HopGrp and MsgTypeGrp components;
+            // no Parties (verified against dictionaries/FIXT11.xml:104–113).
+            .parties_expected = std::optional<bool>{false},
             .has_instrument  = false,           // session-only; no Instrument
         }
     ),

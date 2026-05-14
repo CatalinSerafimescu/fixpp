@@ -155,6 +155,33 @@ std::optional<GroupRef> dict_metadata_handle::group_impl(std::uint16_t no_tag) c
     return *it;
 }
 
+std::span<FieldRef const> dict_metadata_handle::component_fields_impl(
+    std::uint16_t component_id) const noexcept {
+    if (component_id >= components_.size()) {
+        return {};
+    }
+    auto const& cr = components_[component_id];
+    if (cr.field_count == 0 || cr.first_field_index + cr.field_count > component_fields_.size()) {
+        return {};
+    }
+    return std::span<FieldRef const>{component_fields_.data() + cr.first_field_index,
+                                     cr.field_count};
+}
+
+std::span<FieldRef const> dict_metadata_handle::group_fields_impl(
+    std::uint16_t no_tag) const noexcept {
+    auto const it = std::ranges::lower_bound(groups_, no_tag, {},
+                                             [](GroupRef const& g) noexcept { return g.no_tag; });
+    if (it == groups_.end() || it->no_tag != no_tag) {
+        return {};
+    }
+    auto const& gr = *it;
+    if (gr.field_count == 0 || gr.first_field_index + gr.field_count > group_fields_.size()) {
+        return {};
+    }
+    return std::span<FieldRef const>{group_fields_.data() + gr.first_field_index, gr.field_count};
+}
+
 }  // namespace detail
 
 // ============================================================================

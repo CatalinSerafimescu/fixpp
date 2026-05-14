@@ -207,6 +207,7 @@ struct GroupDef {
     std::uint16_t first_field_index{0};  // patched post-emit
     std::uint16_t field_count{0};
     std::uint16_t parent_group_no_tag{0};
+    pugi::xml_node node;  // the <group> XML node, stored at first-seen time
 };
 
 struct MessageDef {
@@ -506,6 +507,7 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                 gd.no_tag = no_tag;
                 gd.first_field_tag = first_field_tag;
                 gd.parent_group_no_tag = enclosing_group_no_tag;
+                gd.node = child;  // store for group_fields_ expansion in finalize()
                 auto const idx = static_cast<std::uint16_t>(groups_.size());
                 group_index_by_no_tag_.emplace(no_tag, idx);
                 groups_.push_back(gd);
@@ -693,6 +695,10 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     }
 
     // Emit components (PMR ComponentRef array).
+    // For each component, walk its fields via expand_field_list to populate
+    // the per-component flat field table (component_fields_), recording
+    // first_field_index and field_count on each ComponentRef per [2c §4.2] /
+    // data-model.md Entity 2.
     h.components_.reserve(components_.size());
     for (std::size_t i = 0; i < components_.size(); ++i) {
         auto const& def = components_[i];
@@ -700,26 +706,76 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         ns.offset = intern_name_in_pool(h, def.name);
         ns.length = static_cast<std::uint32_t>(def.name.size());
         pending_components.push_back({.slice = ns, .index = static_cast<std::uint16_t>(i)});
+
+        // Expand the component's field list into a scratch vector, then
+        // append to the flat component_fields_ table.
+        std::vector<FieldRef> comp_fields;
+        std::vector<std::uint16_t> comp_required;  // discard — component required-sets unused
+        expand_field_list(def.node, comp_fields, comp_required,
+                          /*enclosing_group_no_tag=*/0,
+                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
+
+        auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
+        auto const cnt = static_cast<std::uint16_t>(
+            std::min<std::size_t>(comp_fields.size(), 65535u));
+        h.component_fields_.insert(h.component_fields_.end(),
+                                   comp_fields.begin(), comp_fields.end());
+
+        // Derive parent_component_id: scan the component's XML body for the
+        // first nested <component> reference; use index+1 (1-based) or 0 if none.
+        std::uint16_t parent_comp_id = 0;
+        for (auto const& child : def.node.children()) {
+            if (std::string_view{child.name()} == "component") {
+                auto const cname = std::string{child.attribute("name").as_string("")};
+                auto const cit = component_index_by_name_.find(cname);
+                if (cit != component_index_by_name_.end()) {
+                    parent_comp_id = static_cast<std::uint16_t>(cit->second + 1);
+                    break;
+                }
+            }
+        }
+
         ComponentRef cr{};
         cr.component_id = static_cast<std::uint16_t>(i);
         cr.name_offset = static_cast<std::uint16_t>(std::min<std::uint32_t>(ns.offset, 65535));
-        cr.first_field_index = 0;
-        cr.field_count = 0;
-        cr.parent_component_id = 0;
+        cr.first_field_index = first_idx;
+        cr.field_count = cnt;
+        cr.parent_component_id = parent_comp_id;
+        cr._reserved = 0;
         h.components_.push_back(cr);
     }
 
     // Emit groups sorted by no_tag.
+    // For each group, walk its fields via expand_field_list to populate the
+    // per-group flat field table (group_fields_), recording first_field_index
+    // and field_count on each GroupRef per [2c §4.2] / data-model.md Entity 3.
     std::ranges::sort(
         groups_, [](GroupDef const& a, GroupDef const& b) noexcept { return a.no_tag < b.no_tag; });
     h.groups_.reserve(groups_.size());
     for (auto const& g : groups_) {
+        std::uint16_t first_idx = 0;
+        std::uint16_t cnt = 0;
+        if (g.node) {
+            // Expand the group's inner fields into the flat group_fields_ table.
+            std::vector<FieldRef> grp_fields;
+            std::vector<std::uint16_t> grp_required;
+            expand_field_list(g.node, grp_fields, grp_required,
+                              /*enclosing_group_no_tag=*/g.no_tag,
+                              /*enclosing_component_index=*/0);
+            first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
+            cnt = static_cast<std::uint16_t>(
+                std::min<std::size_t>(grp_fields.size(), 65535u));
+            h.group_fields_.insert(h.group_fields_.end(),
+                                   grp_fields.begin(), grp_fields.end());
+        }
+
         GroupRef gr{};
         gr.no_tag = g.no_tag;
         gr.first_field_tag = g.first_field_tag;
-        gr.first_field_index = 0;
-        gr.field_count = 0;
+        gr.first_field_index = first_idx;
+        gr.field_count = cnt;
         gr.parent_group_no_tag = g.parent_group_no_tag;
+        gr._reserved = 0;
         h.groups_.push_back(gr);
     }
 
