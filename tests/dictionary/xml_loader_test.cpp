@@ -142,6 +142,72 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     EXPECT_EQ(d_file.length_pair_data_tag(std::uint16_t{95}),
               d_str.length_pair_data_tag(std::uint16_t{95}))
         << "length_pair_data_tag(95) differs between load paths";
+
+    // 8. Full (msg_type, tag) field_ref equality across both load paths.
+    //    Replaces the 3-spot-check comparison (R8 / F2.1 / P2-B): for every
+    //    (msg_type, tag) pair in the file-loaded Dictionary, assert that both
+    //    paths agree on rule, type, group_no_tag, component_index, and
+    //    length_pair_data_tag. Uses the same probe-walk shape as
+    //    round_trip_test.cpp:316-329.
+    for (auto const& m_file : msgs_file) {
+        for (std::uint32_t t = 0; t < 65536u; ++t) {
+            auto const tag     = static_cast<std::uint16_t>(t);
+            auto const fr_file = d_file.field_ref(m_file.msg_type, tag);
+            auto const fr_str  = d_str.field_ref(m_file.msg_type, tag);
+            EXPECT_EQ(fr_file.rule, fr_str.rule)
+                << "field_ref(" << m_file.msg_type << ", " << tag
+                << ").rule mismatch between load paths";
+            if (fr_file.rule != fixpp::dict::field_presence::NotDeclared) {
+                EXPECT_EQ(fr_file.type, fr_str.type)
+                    << "field_ref(" << m_file.msg_type << ", " << tag
+                    << ").type mismatch between load paths";
+                EXPECT_EQ(fr_file.group_no_tag, fr_str.group_no_tag)
+                    << "field_ref(" << m_file.msg_type << ", " << tag
+                    << ").group_no_tag mismatch between load paths";
+                EXPECT_EQ(fr_file.component_index, fr_str.component_index)
+                    << "field_ref(" << m_file.msg_type << ", " << tag
+                    << ").component_index mismatch between load paths";
+                EXPECT_EQ(fr_file.length_pair_data_tag, fr_str.length_pair_data_tag)
+                    << "field_ref(" << m_file.msg_type << ", " << tag
+                    << ").length_pair_data_tag mismatch between load paths";
+            }
+        }
+    }
+
+    // 9. required_fields() equality for every declared msg_type.
+    for (auto const& m : msgs_file) {
+        auto const req_f = d_file.required_fields(m.msg_type);
+        auto const req_s = d_str.required_fields(m.msg_type);
+        ASSERT_EQ(req_f.size(), req_s.size())
+            << "required_fields(" << m.msg_type
+            << ").size() mismatch between load paths";
+        for (std::size_t i = 0; i < req_f.size(); ++i) {
+            EXPECT_EQ(req_f[i], req_s[i])
+                << "required_fields(" << m.msg_type << ")[" << i
+                << "] mismatch between load paths";
+        }
+    }
+
+    // 10. component_fields("Instrument") span equality across both load paths
+    //     (R6-dependent; verifies that load_from_string also populates the
+    //     per-component side table correctly).
+    {
+        auto const span_f = d_file.component_fields("Instrument");
+        auto const span_s = d_str.component_fields("Instrument");
+        ASSERT_EQ(span_f.size(), span_s.size())
+            << "component_fields(\"Instrument\").size() mismatch between load paths";
+        for (std::size_t i = 0; i < span_f.size(); ++i) {
+            EXPECT_EQ(span_f[i].tag, span_s[i].tag)
+                << "component_fields(\"Instrument\")[" << i
+                << "].tag mismatch between load paths";
+            EXPECT_EQ(span_f[i].rule, span_s[i].rule)
+                << "component_fields(\"Instrument\")[" << i
+                << "].rule mismatch between load paths";
+            EXPECT_EQ(span_f[i].type, span_s[i].type)
+                << "component_fields(\"Instrument\")[" << i
+                << "].type mismatch between load paths";
+        }
+    }
 }
 
 TEST(XmlLoaderLoad, StatelessRepeatedLoads) {
