@@ -34,6 +34,7 @@ class xml_parse_error : public std::runtime_error {
 public:
     explicit xml_parse_error(const std::string& message) : std::runtime_error(message) {}
 
+    // cppcheck-suppress unusedFunction  // read by tests; cppcheck doesn't see cross-file callers
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     [[nodiscard]] fixpp::core::error code() const noexcept {
         return fixpp::core::error::dict_xml_parse_failed;
@@ -64,6 +65,7 @@ class xml_oom_error : public std::bad_alloc {
 public:
     xml_oom_error() noexcept = default;
 
+    // cppcheck-suppress unusedFunction  // read by oom_injection_test
     [[nodiscard]] char const* what() const noexcept override {
         return "fixpp::dict::xml_oom_error: PMR allocation failed during "
                "XmlLoader::load*";

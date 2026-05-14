@@ -106,6 +106,7 @@ constexpr FieldTypeEntry kFieldTypeTable[] = {
 
 [[nodiscard]] bool resolve_field_type(std::string_view name, field_data_type& out) noexcept {
     for (auto const& row : kFieldTypeTable) {
+        // cppcheck-suppress useStlAlgorithm  // linear search over a small constexpr table; std::find_if's predicate-wrap isn't a win here
         if (row.xml_name == name) {
             out = row.enum_value;
             return true;
@@ -148,12 +149,14 @@ constexpr VersionEntry kVersionTable[] = {
 
 [[nodiscard]] session_version resolve_version(std::string_view type_attr, int major, int minor,
                                               int servicepack) noexcept {
+    // cppcheck-suppress-begin useStlAlgorithm
     for (auto const& row : kVersionTable) {
         if (row.type_attr == type_attr && std::cmp_equal(row.major, major) &&
             std::cmp_equal(row.minor, minor) && std::cmp_equal(row.servicepack, servicepack)) {
             return row.value;
         }
     }
+    // cppcheck-suppress-end useStlAlgorithm
     return session_version::Unknown;
 }
 
@@ -587,9 +590,11 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // First pass: estimate name pool size.
     std::size_t pool_estimate = 0;
     for (auto const& md : messages_) {
+        // cppcheck-suppress useStlAlgorithm  // two-field accumulation; std::accumulate with binary op + projection is less readable
         pool_estimate += md.msg_type.size() + md.name.size();
     }
     for (auto const& cd : components_) {
+        // cppcheck-suppress useStlAlgorithm  // see comment above
         pool_estimate += cd.name.size();
     }
     for (auto const& [name, info] : by_name_) {

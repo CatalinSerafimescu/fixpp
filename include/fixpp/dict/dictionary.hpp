@@ -50,8 +50,10 @@ using dict_metadata_handle_ptr = std::shared_ptr<dict_metadata_handle const>;
 // Per-message entry returned by `Dictionary::messages()`. The string_views
 // alias the metadata-handle's name-string pool.
 struct MessageEntry {
+    // cppcheck-suppress unusedStructMember  // read by tests via Dictionary::messages()
     std::string_view msg_type;  // FIX MsgType string (e.g., "D" for
                                 // NewOrderSingle).
+    // cppcheck-suppress unusedStructMember  // public surface (data-model.md): diagnostics
     std::string_view name;      // English message name. Diagnostics-only.
 };
 

@@ -112,6 +112,7 @@ std::uint16_t dict_metadata_handle::length_pair_data_tag_impl(
     // the first hit because length_pair_data_tag is a per-tag property not a
     // per-(MsgType,tag) property in v1.0).
     for (auto const& f : fields_) {
+        // cppcheck-suppress useStlAlgorithm  // raw loop chosen for early-exit + readability
         if (f.tag == length_tag && f.length_pair_data_tag != 0) {
             return f.length_pair_data_tag;
         }
