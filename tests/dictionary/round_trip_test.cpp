@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -210,11 +211,16 @@ namespace {
 // Collect all (numeric) tags reachable from a container node, recursively
 // expanding <component> and <group> refs using the global component map and
 // field-name→tag map. Mirrors LoaderState::expand_field_list semantics.
+//
+// `visited` tracks component names already on the current recursion stack to
+// guard against pathological cyclic XML (R9 / P3-A). The shipped FIX fixtures
+// are well-formed acyclic DAGs so this guard is purely defensive.
 // NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design
 void collect_tags(pugi::xml_node const& container,
                   std::set<std::uint16_t>& out,
                   std::unordered_map<std::string, pugi::xml_node> const& comp_map,
-                  std::unordered_map<std::string, std::uint16_t> const& field_tag_map)
+                  std::unordered_map<std::string, std::uint16_t> const& field_tag_map,
+                  std::unordered_set<std::string>& visited)
 {
     for (auto const& child : container.children()) {
         std::string_view const cn{child.name()};
@@ -226,10 +232,15 @@ void collect_tags(pugi::xml_node const& container,
             }
         } else if (cn == "component") {
             std::string const cname{child.attribute("name").as_string("")};
+            // Cycle guard: skip if this component is already on the recursion stack.
+            if (!visited.insert(cname).second) {
+                continue;
+            }
             auto const it = comp_map.find(cname);
             if (it != comp_map.end()) {
-                collect_tags(it->second, out, comp_map, field_tag_map);
+                collect_tags(it->second, out, comp_map, field_tag_map, visited);
             }
+            visited.erase(cname);
         } else if (cn == "group") {
             // Emit the NoXxx field tag.
             std::string const gname{child.attribute("name").as_string("")};
@@ -237,8 +248,9 @@ void collect_tags(pugi::xml_node const& container,
             if (git != field_tag_map.end()) {
                 out.insert(git->second);
             }
-            // Recurse into group body.
-            collect_tags(child, out, comp_map, field_tag_map);
+            // Recurse into group body (groups are inline nodes; no cycle risk
+            // from comp_map lookup, but pass visited through for nested components).
+            collect_tags(child, out, comp_map, field_tag_map, visited);
         }
     }
 }
@@ -291,12 +303,15 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality)
         if (msg_type.empty()) { continue; }
 
         std::set<std::uint16_t> msg_tags;
+        // Per-message visited set: reset for each message so component
+        // sharing across messages is not misdiagnosed as a cycle.
+        std::unordered_set<std::string> visited;
         if (header_node) {
-            collect_tags(header_node, msg_tags, comp_map, field_tag_map);
+            collect_tags(header_node, msg_tags, comp_map, field_tag_map, visited);
         }
-        collect_tags(m, msg_tags, comp_map, field_tag_map);
+        collect_tags(m, msg_tags, comp_map, field_tag_map, visited);
         if (trailer_node) {
-            collect_tags(trailer_node, msg_tags, comp_map, field_tag_map);
+            collect_tags(trailer_node, msg_tags, comp_map, field_tag_map, visited);
         }
 
         for (auto const tag : msg_tags) {
