@@ -7,6 +7,9 @@
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 
+// T028: direct pugixml parse for exact exhaustiveness check.
+#include <pugixml.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -14,8 +17,11 @@
 #include <filesystem>
 #include <memory_resource>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 
 namespace {
 
@@ -188,50 +194,162 @@ TEST(RoundTrip, ExhaustiveWalkVisitsEveryMessage)
 }
 
 // ---------------------------------------------------------------------------
-// T028 — AC-D5 exhaustive-coverage guard (US3 codegen consumer)
+// T028 — AC-D5 exhaustive-coverage seam (tasks.md:126)
 //
-// Counts the distinct `(msg_type, tag)` pairs the Dictionary admits across
-// every message, scanning the full uint16 tag space. The assertions are
-// **lower bounds** chosen well above realistic regression noise so that any
-// silent under-iteration in `messages()` or per-MsgType FieldRef arrays
-// fails the test even before a structural diff lands.
+// Direct-parses FIX44.xml via pugixml to build the *expected* set of
+// (msg_type, tag) pairs by recursively expanding <component>/<group> refs,
+// then walks the loaded Dictionary over messages()×[0..65535] to build the
+// *actual* set, and asserts exact equality per [const §VII.3] / [const §VII.4].
+//
+// Secondary diagnostics (heuristic floors) are kept so a total-count=0
+// regression fails loudly even if the set-equality check somehow fails first.
 // ---------------------------------------------------------------------------
 
-TEST(RoundTrip, ExhaustiveCoverageHasReasonableMinima)
+namespace {
+
+// Collect all (numeric) tags reachable from a container node, recursively
+// expanding <component> and <group> refs using the global component map and
+// field-name→tag map. Mirrors LoaderState::expand_field_list semantics.
+// NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design
+void collect_tags(pugi::xml_node const& container,
+                  std::set<std::uint16_t>& out,
+                  std::unordered_map<std::string, pugi::xml_node> const& comp_map,
+                  std::unordered_map<std::string, std::uint16_t> const& field_tag_map)
 {
+    for (auto const& child : container.children()) {
+        std::string_view const cn{child.name()};
+        if (cn == "field") {
+            std::string const fname{child.attribute("name").as_string("")};
+            auto const it = field_tag_map.find(fname);
+            if (it != field_tag_map.end()) {
+                out.insert(it->second);
+            }
+        } else if (cn == "component") {
+            std::string const cname{child.attribute("name").as_string("")};
+            auto const it = comp_map.find(cname);
+            if (it != comp_map.end()) {
+                collect_tags(it->second, out, comp_map, field_tag_map);
+            }
+        } else if (cn == "group") {
+            // Emit the NoXxx field tag.
+            std::string const gname{child.attribute("name").as_string("")};
+            auto const git = field_tag_map.find(gname);
+            if (git != field_tag_map.end()) {
+                out.insert(git->second);
+            }
+            // Recurse into group body.
+            collect_tags(child, out, comp_map, field_tag_map);
+        }
+    }
+}
+
+}  // namespace
+
+TEST(RoundTrip, ExhaustiveCoverageExactEquality)
+{
+    auto const xml_path =
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+
+    // ---- Step 1: direct pugixml parse to build ground-truth set ----
+    pugi::xml_document doc;
+    auto const result = doc.load_file(xml_path.c_str());
+    ASSERT_TRUE(result) << "pugixml failed to load FIX44.xml: " << result.description();
+
+    auto const fix_root = doc.child("fix");
+    ASSERT_TRUE(fix_root) << "FIX44.xml missing root <fix> element";
+
+    // Build field-name → tag map from the global <fields> block.
+    std::unordered_map<std::string, std::uint16_t> field_tag_map;
+    for (auto const& f : fix_root.child("fields").children("field")) {
+        std::string const name{f.attribute("name").as_string("")};
+        int const tag_i = f.attribute("number").as_int(0);
+        if (!name.empty() && tag_i > 0 && tag_i <= 65535) {
+            field_tag_map.emplace(name, static_cast<std::uint16_t>(tag_i));
+        }
+    }
+
+    // Build component-name → node map from the global <components> block.
+    std::unordered_map<std::string, pugi::xml_node> comp_map;
+    for (auto const& c : fix_root.child("components").children("component")) {
+        std::string const name{c.attribute("name").as_string("")};
+        if (!name.empty()) {
+            comp_map.emplace(name, c);
+        }
+    }
+
+    // Also expose header/trailer as pseudo-components so per-message expansion
+    // can incorporate them (header/trailer fields are inherited by every message
+    // in the XmlLoader implementation).
+    auto const header_node  = fix_root.child("header");
+    auto const trailer_node = fix_root.child("trailer");
+
+    // Build expected set: for each message, collect tags from header + body + trailer.
+    using MsgTagPair = std::pair<std::string, std::uint16_t>;
+    std::set<MsgTagPair> expected_pairs;
+    for (auto const& m : fix_root.child("messages").children("message")) {
+        std::string const msg_type{m.attribute("msgtype").as_string("")};
+        if (msg_type.empty()) { continue; }
+
+        std::set<std::uint16_t> msg_tags;
+        if (header_node) {
+            collect_tags(header_node, msg_tags, comp_map, field_tag_map);
+        }
+        collect_tags(m, msg_tags, comp_map, field_tag_map);
+        if (trailer_node) {
+            collect_tags(trailer_node, msg_tags, comp_map, field_tag_map);
+        }
+
+        for (auto const tag : msg_tags) {
+            expected_pairs.emplace(msg_type, tag);
+        }
+    }
+
+    // ---- Step 2: walk the loaded Dictionary to build actual set ----
     auto d    = load_fix44();
     auto msgs = d.messages();
-
     ASSERT_FALSE(msgs.empty());
 
-    // Per-msg distinct-tag counts.
-    std::size_t total_pairs = 0;
+    std::set<MsgTagPair> actual_pairs;
+    std::size_t total_pairs   = 0;
     std::size_t nos_tag_count = 0;
     std::size_t er_tag_count  = 0;
-    for (auto const& m : msgs) {
+    for (auto const& entry : msgs) {
         std::size_t per_msg = 0;
-        for (std::uint32_t t = 0; t < 65536; ++t) {
-            auto const fr = d.field_ref(m.msg_type, static_cast<std::uint16_t>(t));
+        for (std::uint32_t t = 0; t < 65536u; ++t) {
+            auto const fr = d.field_ref(entry.msg_type, static_cast<std::uint16_t>(t));
             if (fr.rule != fixpp::dict::field_presence::NotDeclared) {
+                actual_pairs.emplace(std::string{entry.msg_type},
+                                     static_cast<std::uint16_t>(t));
                 ++per_msg;
                 ++total_pairs;
             }
         }
-        if (m.msg_type == "D") {
-            nos_tag_count = per_msg;
-        } else if (m.msg_type == "8") {
-            er_tag_count = per_msg;
+        if (entry.msg_type == "D") { nos_tag_count = per_msg; }
+        if (entry.msg_type == "8") { er_tag_count  = per_msg; }
+    }
+
+    // ---- Step 3: exact equality assertion ----
+    EXPECT_EQ(actual_pairs.size(), expected_pairs.size())
+        << "Loaded Dictionary has different (msg_type, tag) pair count than "
+           "direct XML parse of FIX44.xml";
+
+    // Report first mismatch if sizes differ.
+    for (auto const& p : expected_pairs) {
+        if (!actual_pairs.count(p)) {
+            ADD_FAILURE() << "Expected pair missing in Dictionary: "
+                          << "msg_type=\"" << p.first << "\" tag=" << p.second;
+        }
+    }
+    for (auto const& p : actual_pairs) {
+        if (!expected_pairs.count(p)) {
+            ADD_FAILURE() << "Extra pair in Dictionary not in XML: "
+                          << "msg_type=\"" << p.first << "\" tag=" << p.second;
         }
     }
 
-    // FIX44 declares hundreds of distinct tags across its messages; well
-    // above 200 total pairs even with the dedup of header+body+trailer.
+    // ---- Secondary: heuristic floors for loud failure on catastrophic regressions ----
     EXPECT_GT(total_pairs, 200u)
         << "Distinct (msg_type, tag) coverage too low — suspect under-iteration";
-
-    // NewOrderSingle (D) and ExecutionReport (8) are field-heavy headline
-    // messages. Real counts are well above 30 / 50; the bars below are
-    // regression-noise floors.
     EXPECT_GT(nos_tag_count, 30u)
         << "NewOrderSingle has too few declared tags — under-iteration?";
     EXPECT_GT(er_tag_count, 50u)
