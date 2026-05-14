@@ -194,13 +194,17 @@ jobs:
 
       - name: Test (collect profiles)
         env:
-          LLVM_PROFILE_FILE: "${{ github.workspace }}/build/linux-clang-coverage/default.profraw"
-        run: ctest --preset linux-clang-coverage --output-on-failure
+          # %p embeds the PID so each test binary writes its own .profraw file
+          # instead of overwriting a shared one (ctest runs multiple binaries).
+          LLVM_PROFILE_FILE: "${{ github.workspace }}/build/linux-clang-coverage/profiles/default-%p.profraw"
+        run: |
+          mkdir -p build/linux-clang-coverage/profiles
+          ctest --preset linux-clang-coverage --output-on-failure
 
       - name: Merge coverage profiles
         run: |
           llvm-profdata-22 merge -sparse \
-            build/linux-clang-coverage/default.profraw \
+            build/linux-clang-coverage/profiles/*.profraw \
             -o build/linux-clang-coverage/coverage.profdata
         # SOFT: profile may be empty at this phase; do not fail
         continue-on-error: true
@@ -210,7 +214,8 @@ jobs:
           llvm-cov-22 export \
             --format=lcov \
             --instr-profile=build/linux-clang-coverage/coverage.profdata \
-            build/linux-clang-coverage/bin/fixpp_tests \
+            build/linux-clang-coverage/bin/fixpp_core_tests \
+            -object build/linux-clang-coverage/bin/fixpp_capi_tests \
             > build/linux-clang-coverage/coverage.lcov
         # SOFT: no tests yet produce meaningful coverage; do not fail
         continue-on-error: true
@@ -223,7 +228,7 @@ jobs:
           if-no-files-found: warn  # SOFT: artifact may not exist yet
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: build/linux-clang-coverage/coverage.lcov
           flags: unittests
