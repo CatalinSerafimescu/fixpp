@@ -126,9 +126,9 @@ Lifted from `[2c §4.1]`–`[2c §4.5]` and `[2c §6.1.1]`; one bullet per testa
 - **AC-D5.** `Dictionary::messages()` returns an iterable of `(MsgType, message-name)` pairs sorted by MsgType bytewise (locale-independent — `std::ranges::lexicographical_compare` over `unsigned char` per research.md D-6).
 - **AC-D6.** For each of the four shipped FIX versions per /clarify Q1 → B (`FIX42`, `FIX44`, `FIX50SP2`, `FIXT11`), loading the corresponding XML produces a `Dictionary` containing that version's headline messages:
   - **FIX44** (canonical reference): `NewOrderSingle` MsgType=`D`, `ExecutionReport` MsgType=`8`, `Logon` MsgType=`A`, `Heartbeat` MsgType=`0`, `Reject` MsgType=`3`; components `Instrument`, `Parties`.
-  - **FIX42**: same five headline messages as FIX44 (subset); components `Instrument` (FIX 4.2 simpler form), no `Parties` (post-4.2 addition).
+  - **FIX42**: same five headline messages as FIX44 (subset); no `<component>` entries (`dictionaries/FIX42.xml` declares `<components />` — empty; FIX 4.2 inlines `Instrument`'s fields directly in each message body); no `Parties` (post-4.2 addition).
   - **FIX50SP2**: application headlines `NewOrderSingle`, `ExecutionReport`, `MarketDataRequest`, `MarketDataSnapshotFullRefresh`; component `Instrument` (5.0SP2 form).
-  - **FIXT11**: session/admin headlines only — `Logon`, `Logout`, `Heartbeat`, `TestRequest`, `ResendRequest`, `Reject`, `SequenceReset`. **No** application headlines (FIXT is session-transport only).
+  - **FIXT11**: session/admin headlines only — `Logon`, `Logout`, `Heartbeat`, `TestRequest`, `ResendRequest`, `Reject`, `SequenceReset`. **No** application headlines (FIXT is session-transport only). Components declared: `HopGrp` (containing `NoHops`) and `MsgTypeGrp`; no `Parties`, no `Instrument` (session-only vocabulary).
 - **AC-D7.** Loading the four shipped XMLs produces correct `NoXxx` delimiter tags on standard repeating groups; concrete per-version assertions:
   - **FIX44** (reference): `NoPartyIDs` = 453, `NoAllocs` = 78, `NoLegs` = 555.
   - **FIX50SP2**: same three tags present (`NoPartyIDs` = 453, `NoAllocs` = 78, `NoLegs` = 555 — all carried forward from FIX 4.4).
