@@ -66,6 +66,10 @@ if(TARGET fixpp_codegen_generate)
     reify_move_test
     reify_cross_strand_test
     reify_oom_test
+    # T034 [US3]: runtime-dispatch + FIXT cross-vocabulary dispatch shape tests
+    # (seam #15a/#15b/#15c/#10c; AC-D1..D3/D6/D7). Dispatch-consuming TU —
+    # includes the generated _dispatch/ headers (Entity 8 / I-11).
+    reify_dispatch_test
   )
 
   foreach(target IN LISTS FIXPP_REIFY_TESTS)
