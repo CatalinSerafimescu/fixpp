@@ -111,7 +111,7 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 ### Implementation for User Story 2
 
 - [X] T032 [US2] `tools/codegen/fixpp-codegen/emit_reify.cpp` — emit `<vXX>/Reify.hpp`: `owning_<Msg>` class (arena-owned bytes, custom `noexcept` move resetting both caches, lazy `view()` rebuild) + the per-message `template<> struct owning_message_traits<...>` specialisation + `static_assert(std::is_same_v<dict::owning_message_t<Msg>, fixpp::<vXX>::owning_<Msg>>)` (data-model Entity 4; AC-G7a). Makes T028–T031 green (depends on T024)
-- [ ] T033 [US2] Wire `emit_reify` into `main.cpp` + `generate-vXX`; finalize any out-of-line bridge bits in `src/dictionary/reify.cpp` (+ `src/dictionary/CMakeLists.txt`) if needed (D-5 final split). `check_layers.py` `BRIDGE_SOURCE_FILES` exemption applies (depends on T011, T032)
+- [X] T033 [US2] Wire `emit_reify` into `main.cpp` + `generate-vXX`; finalize any out-of-line bridge bits in `src/dictionary/reify.cpp` (+ `src/dictionary/CMakeLists.txt`) if needed (D-5 final split). `check_layers.py` `BRIDGE_SOURCE_FILES` exemption applies (depends on T011, T032)
 
 **Checkpoint**: US1 + US2 both work independently — typed access + arena-owned cross-strand reify.
 
