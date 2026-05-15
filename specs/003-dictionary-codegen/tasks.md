@@ -168,7 +168,7 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Implementation for User Story 5
 
-- [ ] T042 [US5] Generate `specs/003-dictionary-codegen/contracts/golden/{v42,v44,v50sp2,vt11}_Messages.golden.hpp` via `fixpp-codegen` and check them in (the 4-golden anchor, /clarify Q-golden → A; regenerated as a reviewed step on template change). Makes T041 green (depends on T024, T027)
+- [X] T042 [US5] Generate `specs/003-dictionary-codegen/contracts/golden/{v42,v44,v50sp2,vt11}_Messages.golden.hpp` via `fixpp-codegen` and check them in (the 4-golden anchor, /clarify Q-golden → A; regenerated as a reviewed step on template change). Makes T041 green (depends on T024, T027)
 
 **Checkpoint**: US1–US5 work independently — determinism guaranteed and golden-anchored.
 

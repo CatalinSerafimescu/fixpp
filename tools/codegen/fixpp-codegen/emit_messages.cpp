@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -109,12 +110,69 @@ void emit_field_value(TemplateWriter& w, bool ptr) {
     w.line();
 }
 
-// Reconstruct + emit one repeating-group flyweight (nested class). `members`
-// = the fields whose FieldRef::group_no_tag == this group's no_tag, in IR
-// order. Sub-groups (members that are themselves NumInGroup) recurse —
-// defined before the accessor that returns group_view over them.
-void emit_group(TemplateWriter& w, std::vector<FieldIR> const& all,
-                std::uint16_t group_tag, std::string const& cls) {
+// Version-wide member map: FieldRef::group_no_tag (0 == top level) -> the
+// distinct member fields under that group, deduped by tag in first-encounter
+// order over the bytewise-sorted message list. Deduping + emitting each
+// distinct group no_tag ONCE (in fixpp::<ns>::groups) is what tames FIX50SP2:
+// component reuse otherwise re-nests the same subtree per parent per message
+// (a 100 MB combinatorial blow-up). Built inline in emit_messages().
+using MemberMap = std::unordered_map<std::uint16_t, std::vector<FieldIR const*>>;
+
+// Defensive nesting cap: real FIX group nesting is shallow; the cap plus the
+// on-path guard break any pathological edge from component reuse (a dropped
+// edge's group stays field_value-reachable — AC-G6).
+constexpr int kMaxGroupDepth = 16;
+
+std::string group_cls(std::uint16_t no_tag) {
+    return "G_" + std::to_string(no_tag);
+}
+
+// Per-message group plan: each distinct group no_tag is emitted ONCE as a
+// nested class (not re-nested per parent — that is the FIX50SP2 blow-up),
+// in dependency order (a sub-group's class is complete before the parent
+// that returns group_view over it). Cyclic / too-deep edges are dropped
+// (that sub-group stays reachable via field_value — AC-G6); deterministic
+// in message field order.
+struct GroupPlan {
+    std::vector<std::uint16_t> order;  // emit order, deps first
+    std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> kids;  // emittable sub no_tags
+};
+
+void plan_dfs(std::uint16_t g, MemberMap const& mm,
+              std::unordered_set<std::uint16_t>& onpath,
+              std::unordered_set<std::uint16_t>& done, GroupPlan& gp, int depth) {
+    if (done.contains(g)) return;
+    onpath.insert(g);
+    auto const it = mm.find(g);
+    if (it != mm.end()) {
+        for (auto const* f : it->second) {
+            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
+            std::uint16_t const c = f->ref.tag;
+            if (depth + 1 >= kMaxGroupDepth || onpath.contains(c)) continue;
+            plan_dfs(c, mm, onpath, done, gp, depth + 1);
+            gp.kids[g].push_back(c);
+        }
+    }
+    onpath.erase(g);
+    if (done.insert(g).second) gp.order.push_back(g);
+}
+
+FieldIR const* find_member(MemberMap const& mm, std::uint16_t no_tag,
+                           std::uint16_t tag) {
+    auto const it = mm.find(no_tag);
+    if (it == mm.end()) return nullptr;
+    for (auto const* f : it->second) {
+        if (f->ref.tag == tag) return f;
+    }
+    return nullptr;
+}
+
+// Emit one nested repeating-group flyweight class `G_<no_tag>`. Sub-group
+// classes it references (gp.kids[no_tag]) are already defined earlier in
+// gp.order, so referencing them by sibling name is well-formed.
+void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& gp,
+                      std::uint16_t no_tag) {
+    std::string const cls = group_cls(no_tag);
     w.raw("    class ");
     w.raw(cls);
     w.line(" {");
@@ -138,43 +196,32 @@ void emit_group(TemplateWriter& w, std::vector<FieldIR> const& all,
         return base;
     };
 
-    // Sub-groups first (must be defined before their group_view accessor).
-    struct Sub { std::uint16_t tag; std::string cls; std::string acc; };
-    std::vector<Sub> subs;
-    for (auto const& f : all) {
-        if (f.ref.group_no_tag != group_tag) continue;
-        if (f.ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
-        std::string sub_cls =
-            to_identifier(strip_no_prefix(f.name)) + "Group";
-        std::string sub_acc = uniq(to_accessor(strip_no_prefix(f.name)), f.ref.tag);
-        TemplateWriter sw;
-        emit_group(sw, all, f.ref.tag, sub_cls);
-        w.raw(sw.str());
-        subs.push_back({f.ref.tag, std::move(sub_cls), std::move(sub_acc)});
+    auto const it = mm.find(no_tag);
+    if (it != mm.end()) {
+        for (auto const* f : it->second) {
+            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
+            TypeKind const k = kind_of(f->ref.type);
+            if (k == TypeKind::Skip) continue;
+            emit_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k, true);
+        }
     }
-
-    for (auto const& f : all) {
-        if (f.ref.group_no_tag != group_tag) continue;
-        if (f.ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
-        TypeKind const k = kind_of(f.ref.type);
-        if (k == TypeKind::Skip) continue;
-        emit_scalar(w, uniq(to_accessor(f.name), f.ref.tag), f.ref.tag, k, true);
-    }
-    for (auto const& s : subs) {
-        w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
-        w.raw(cls);
-        w.raw("::");
-        w.raw(s.cls);
-        w.raw(">\n    ");
-        w.raw(s.acc);
-        w.raw("() const noexcept [[clang::lifetimebound]]\n    { if (!view_) return {}; return view_->template group<");
-        w.num(s.tag);
-        w.raw(", ");
-        w.raw(cls);
-        w.raw("::");
-        w.raw(s.cls);
-        w.raw(">(); }");
-        w.line();
+    auto const kit = gp.kids.find(no_tag);
+    if (kit != gp.kids.end()) {
+        for (std::uint16_t const c : kit->second) {
+            FieldIR const* d = find_member(mm, no_tag, c);
+            std::string const acc =
+                uniq(to_accessor(strip_no_prefix(d ? d->name : group_cls(c))), c);
+            w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
+            w.raw(group_cls(c));
+            w.raw(">\n    ");
+            w.raw(acc);
+            w.raw("() const noexcept [[clang::lifetimebound]]\n    { if (!view_) return {}; return view_->template group<");
+            w.num(c);
+            w.raw(", ");
+            w.raw(group_cls(c));
+            w.raw(">(); }");
+            w.line();
+        }
     }
     emit_field_value(w, true);
     w.line("    private:");
@@ -215,38 +262,40 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
         return base;
     };
 
-    struct Grp { std::uint16_t tag; std::string cls; std::string acc; };
-    std::vector<Grp> groups;
-    for (auto const& f : m.fields) {
-        if (f.ref.group_no_tag != 0) continue;
-        if (f.ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
-        std::string gcls = to_identifier(strip_no_prefix(f.name)) + "Group";
-        std::string gacc = uniq(to_accessor(strip_no_prefix(f.name)), f.ref.tag);
-        emit_group(w, m.fields, f.ref.tag, gcls);
-        groups.push_back({f.ref.tag, std::move(gcls), std::move(gacc)});
+    // Per-message top-level fields (group_no_tag == 0), deduped by tag.
+    // Repeating groups are NOT re-nested per message — they live once in
+    // the shared fixpp::<ns>::groups namespace (emitted by emit_messages);
+    // the message references groups::G_<no_tag> by qualified name.
+    std::vector<FieldIR const*> top;
+    {
+        std::unordered_set<std::uint16_t> seen;
+        for (auto const& f : m.fields) {
+            if (f.ref.group_no_tag != 0) continue;
+            if (seen.insert(f.ref.tag).second) top.push_back(&f);
+        }
     }
-    if (!groups.empty()) w.line();
+    std::string gq = "::fixpp::";
+    gq += ns;
+    gq += "::groups::";
 
-    for (auto const& f : m.fields) {
-        if (f.ref.group_no_tag != 0) continue;
-        if (f.ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
-        TypeKind const k = kind_of(f.ref.type);
+    for (auto const* f : top) {
+        if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
+        TypeKind const k = kind_of(f->ref.type);
         if (k == TypeKind::Skip) continue;
-        emit_scalar(w, uniq(to_accessor(f.name), f.ref.tag), f.ref.tag, k, false);
+        emit_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k, false);
     }
-    for (auto const& g : groups) {
+    for (auto const* f : top) {
+        if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
         w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
-        w.raw(id);
-        w.raw("::");
-        w.raw(g.cls);
+        w.raw(gq);
+        w.raw(group_cls(f->ref.tag));
         w.raw(">\n    ");
-        w.raw(g.acc);
+        w.raw(uniq(to_accessor(strip_no_prefix(f->name)), f->ref.tag));
         w.raw("() const noexcept [[clang::lifetimebound]]\n    { return view_.template group<");
-        w.num(g.tag);
+        w.num(f->ref.tag);
         w.raw(", ");
-        w.raw(id);
-        w.raw("::");
-        w.raw(g.cls);
+        w.raw(gq);
+        w.raw(group_cls(f->ref.tag));
         w.raw(">(); }");
         w.line();
     }
@@ -289,6 +338,55 @@ std::string emit_messages(VersionIR const& ir) {
     w.line("#include <string_view>");
     w.line("#include <utility>");
     w.line();
+
+    // Version-wide group member map: every distinct group no_tag is emitted
+    // ONCE in fixpp::<ns>::groups (a group reused across N messages was being
+    // re-nested N times — the FIX50SP2 100MB blow-up). Members are the union
+    // (deduped by tag, first-encounter over the bytewise-sorted message list
+    // then field order) so the shared class is consistent and deterministic.
+    MemberMap gmm;
+    {
+        std::unordered_map<std::uint16_t, std::unordered_set<std::uint16_t>> seen;
+        for (auto const& m : ir.messages) {
+            for (auto const& f : m.fields) {
+                std::uint16_t const parent = f.ref.group_no_tag;
+                if (seen[parent].insert(f.ref.tag).second) {
+                    gmm[parent].push_back(&f);
+                }
+            }
+        }
+    }
+    std::vector<std::uint16_t> group_tags;
+    {
+        std::unordered_set<std::uint16_t> gseen;
+        for (auto const& m : ir.messages) {
+            for (auto const& f : m.fields) {
+                if (f.ref.type == fixpp::dict::field_data_type::NumInGroup &&
+                    gseen.insert(f.ref.tag).second) {
+                    group_tags.push_back(f.ref.tag);
+                }
+            }
+        }
+    }
+    GroupPlan gp;
+    {
+        std::unordered_set<std::uint16_t> onpath;
+        std::unordered_set<std::uint16_t> done;
+        for (std::uint16_t const gt : group_tags) {
+            plan_dfs(gt, gmm, onpath, done, gp, 0);
+        }
+    }
+    w.raw("namespace fixpp::");
+    w.raw(ir.ns);
+    w.line("::groups {  // shared repeating-group flyweights (AC-G5/AC-G6)");
+    w.line();
+    for (std::uint16_t const g : gp.order) emit_group_class(w, gmm, gp, g);
+    w.line();
+    w.raw("}  // namespace fixpp::");
+    w.raw(ir.ns);
+    w.line("::groups");
+    w.line();
+
     w.raw("namespace fixpp::");
     w.raw(ir.ns);
     w.line(" {");
