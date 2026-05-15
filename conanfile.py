@@ -19,9 +19,13 @@ class FixppConan(ConanFile):
     # Returns in Phase 4: asio/1.36.0, openssl/3.6.2 (4.x is breaking, not yet on Conan).
     # Returns in Phase 5: grpc/1.78.1 (1.80 is upstream-only), iceoryx2 via CMake
     #   FetchContent of v0.8.1 gated on FIXPP_USE_ICEORYX2 (Rust/cargo prereq).
+    # 002-dictionary-xml-loader adds pugixml/1.14 (MIT) for the XML data-
+    # dictionary loader (research.md D-1 / D-15). Pinned at a tagged release;
+    # user signed off the choice at /plan; Codex Gate A reviews it.
     requires = [
         "gtest/1.17.0",
         "benchmark/1.9.5",
+        "pugixml/1.14",
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────

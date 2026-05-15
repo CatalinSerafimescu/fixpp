@@ -16,9 +16,18 @@ CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fprofile-instr-generate -fcoverage-mapping
 LDFLAGS=-fprofile-instr-generate
-LLVM_PROFILE_FILE=default.profraw
+# Per-binary (%m) + per-PID (%p) profraw — without %m_%p every test process
+# writes to default.profraw and overwrites the previous test's data, so a
+# serial ctest run only preserves the LAST test's coverage. Merging across
+# all test binaries then under-reports coverage by 10-20% on multi-test
+# modules. See /speckit-verify decision record 002-dictionary-xml-loader
+# 2026-05-14 for the original symptom (error.hpp showed 0% line coverage
+# because ref_shape_test was the last to run and never touches exceptions).
+LLVM_PROFILE_FILE=%m_%p.profraw
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fprofile-instr-generate", "-fcoverage-mapping"]
 tools.build:exelinkflags=["-fprofile-instr-generate"]
+# See linux-clang-asan for rationale on tools.info.package_id:confs.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]

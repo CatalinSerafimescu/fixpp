@@ -22,3 +22,10 @@ tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=address", "-fno-omit-frame-pointer"]
 tools.build:sharedlinkflags=["-fsanitize=address"]
 tools.build:exelinkflags=["-fsanitize=address"]
+# Include build-flag conf in package_id so sanitizer-instrumented dependencies
+# (pugixml etc.) get a distinct Conan cache entry per sanitizer profile.
+# Without this, asan/ubsan/tsan/coverage profiles share the same package_id
+# because their [settings] blocks are identical (the differentiation lives in
+# [buildenv]/[conf] only) — whichever profile installs first wins the cache and
+# poisons the others' link step with the wrong sanitizer runtime symbols.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]

@@ -1,12 +1,14 @@
 # cppcheck project-level suppressions
-# Used by: cppcheck --suppressions-list=cppcheck-suppressions.txt
+# Used by: cppcheck --enable=all --inline-suppr --suppressions-list=cppcheck-suppressions.txt
 
-# decimal_alias.hpp uses a computed #include to allow users to override the decimal
-# implementation header. FIXPP_DECIMAL_USER_HEADER is intentionally undefined during
-# static analysis; cppcheck cannot resolve computed includes without -D.
+# Policy: prefer inline `// cppcheck-suppress <id>` comments at the offending
+# site over blanket category suppressions here. Inline comments document the
+# rationale next to the code and make every suppressed finding individually
+# reviewable. Add a categorical entry below only when the same false positive
+# fires across so many sites that inline annotation hurts readability.
+
+# decimal_alias.hpp uses a computed #include to allow users to override the
+# decimal implementation header. FIXPP_DECIMAL_USER_HEADER is intentionally
+# undefined during static analysis; cppcheck cannot resolve computed includes
+# without -D.
 preprocessorErrorDirective:*decimal_alias.hpp
-
-# Template and inline functions in headers appear "unused" when cppcheck analyzes
-# a subset of project files — their callers (tests, capi layer) are not in scope.
-# All functions flagged here are exercised by the test suite (ctest confirms 72/72 pass).
-unusedFunction

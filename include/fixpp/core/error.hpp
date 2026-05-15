@@ -2,6 +2,9 @@
 // include/fixpp/core/error.hpp
 // Engine-wide error enum for fixpp::core. Owned by 2k; this feature (001-core-decimal)
 // contributes the four decimal variants per data-model.md Entity 5.
+// 002-dictionary-xml-loader contributes the three dict_* variants per its
+// research.md D-10. Variant numbering is additive (no renumbering of existing
+// slots) per `[const §X.4]` forwards-compat.
 
 #include <cstdint>
 #include <expected>
@@ -17,6 +20,13 @@ enum class error : std::uint8_t {
     decimal_overflow = 11,
     decimal_precision_loss = 12,
     decimal_buffer_too_small = 13,
+
+    // dict variants — owned by 002-dictionary-xml-loader (research.md D-10);
+    // additive at unused slots per `[const §X.4]`. Each exception type in
+    // `<fixpp/dict/error.hpp>` carries the matching variant via `code()`.
+    dict_xml_parse_failed = 20,
+    dict_unknown_version = 21,
+    dict_xml_oom = 22,
 };
 
 template <class T>
