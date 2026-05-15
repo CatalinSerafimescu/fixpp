@@ -182,11 +182,11 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 6 (write FIRST — must fail)
 
-- [ ] T043 [P] [US6] Add the AC-D5 negative arm to `tests/dictionary/reify_dispatch_test.cpp` — hand-built synthetic `MessageView` with a runtime-XML-only resolved version → default arm returns `dict_reify_unknown_msg_type` (seam #10c; no deferred-XML dependency)
+- [X] T043 [P] [US6] Add the AC-D5 negative arm to `tests/dictionary/reify_dispatch_test.cpp` — hand-built synthetic `MessageView` with a runtime-XML-only resolved version → default arm returns `dict_reify_unknown_msg_type` (seam #10c; no deferred-XML dependency)
 
 ### Implementation for User Story 6
 
-- [ ] T044 [US6] Verify the `emit_dispatch` application-switch fail-loud default arm (T036) satisfies AC-D5 for runtime-XML-only versions; adjust the emitted default case if the synthetic-fixture test exposes a gap
+- [X] T044 [US6] Verify the `emit_dispatch` application-switch fail-loud default arm (T036) satisfies AC-D5 for runtime-XML-only versions; adjust the emitted default case if the synthetic-fixture test exposes a gap
 
 **Checkpoint**: All six user stories independently functional.
 
