@@ -83,14 +83,14 @@ constexpr version_profile kSessionProfile{
 
 TEST(FixtCrossVocabulary, AcD4_Logon_IsFixtAdmin) {
     // [2c §6.3] Frame 1: Logon (MsgType=A) → FIXT admin.
-    // Resolution decision: is_fixt_admin('A') == true.
-    // Resolved: {session_admin, vt11, Unknown}.
-    // R6-blocked: the full dict::reify() path is blocked (get<35>() frozen).
-    // We verify the dispatch_fixt switch handles 'A' without hitting the default.
+    // gate-b/r1 RC#3-B positive oracle: dispatch_fixt on 'A' must return
+    // dict_reify_wire_body_not_ready (not dict_reify_unknown_msg_type).
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, 'A', kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error (not a real handle)";
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "AC-D4 Frame 1 R6 oracle: Logon dispatch must return dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 1: Logon MsgType='A' must NOT hit the default arm (FIXT admin)";
     // 2b-unblock: EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
@@ -112,6 +112,8 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID9_ResolvesToV50sp2) {
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "AC-D4 Frame 2 R6 oracle: v50sp2 NOS dispatch must return dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 2: v50sp2 NewOrderSingle must NOT hit fail-loud default";
     // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);
@@ -132,6 +134,8 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID6_ResolvesToV44Override) {
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "AC-D4 Frame 3 R6 oracle: v44 NOS dispatch must return dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 3: v44 NewOrderSingle must NOT hit fail-loud default";
     // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v44);
@@ -152,6 +156,8 @@ TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "F", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "AC-D4 Frame 4 R6 oracle: v50sp2 OCR dispatch must return dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 4: v50sp2 OrderCancelRequest must NOT hit fail-loud default";
     // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);
@@ -165,6 +171,8 @@ TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
     MV mv;
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, '0', kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "AC-D4 Frame 5 R6 oracle: Heartbeat dispatch must return dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 5: Heartbeat MsgType='0' must NOT hit the default arm";
     // 2b-unblock: EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);

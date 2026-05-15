@@ -94,36 +94,81 @@ static_assert(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seam #15a — 7 FIXT admin MsgTypes. AC-D2.
-// Shape test: each FIXT admin char is handled (doesn't hit the default arm
-// which returns dict_reify_unknown_msg_type). In R6 scope the actual result
-// is still dict_xml_parse_failed (from the from_view stub that allocates via
-// mr but the frozen MV has no bytes — see emit_reify.cpp R6 comment), NOT
-// dict_reify_unknown_msg_type. This distinguishes "hit" from "default arm miss".
+// gate-b/r1 RC#3-B hardening: replace "not-the-default-error" with the EXACT
+// R6 placeholder error code (dict_reify_wire_body_not_ready).
+// This ensures misdispatch cannot stay green — if the dispatch hits the default
+// arm (dict_reify_unknown_msg_type) OR returns success, this test fails.
 //
-// R6-unblock note (2b): the result will change from dict_xml_parse_failed to
-// a successfully constructed owning_message_handle when 2b replaces the wire
-// body and T037 wires the handle into the dispatch return.
+// R6 oracle: dispatch_fixt on an admin MsgType → from_view → wire_body_not_ready.
+//
+// 2b-unblock: when 2b supplies real frame bytes, dispatch_fixt will return a
+// valid owning_message_handle (has_value() == true). At that point:
+//   □ Remove ASSERT_FALSE / EXPECT_EQ error checks.
+//   □ Assert r.has_value() == true.
+//   □ Assert r->version().k == resolved_message_version::kind::session_admin.
+//   □ Assert r->version().session == session_version::vt11.
+//   □ Assert r->msg_type() == the expected MsgType string_view.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ReifyDispatchFixt, SevenAdminMsgTypesAllHit) {
-    // AC-D2 / seam #15a: 7 FIXT.1.1 admin MsgTypes must NOT return
-    // dict_reify_unknown_msg_type (that is the default arm — AC-D5/D7).
-    // In R6 scope they return dict_xml_parse_failed (owning_<Msg>::from_view
-    // R6 stub result per emit_reify.cpp). The key assertion is the error
-    // code is NOT dict_reify_unknown_msg_type.
+    // AC-D2 / seam #15a / gate-b/r1 RC#3-B: 7 FIXT.1.1 admin MsgTypes must
+    // return EXACTLY dict_reify_wire_body_not_ready — not success, and not
+    // dict_reify_unknown_msg_type (that is the default arm / I-11 / AC-D5).
+    // Any change to this error code breaks this oracle, preventing misdispatch
+    // from silently passing.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
     constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
-        // Must NOT be the fail-loud default (dict_reify_unknown_msg_type).
-        ASSERT_FALSE(r.has_value()) << "R6: R6 stub always returns an error, "
-                                       "not a real handle — 2b-unblock.";
+        ASSERT_FALSE(r.has_value())
+            << "AC-D2: dispatch_fixt on admin MsgType '" << mt
+            << "' must not return success under R6 (from_view: wire body not ready)";
+        EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+            << "AC-D2 R6 positive oracle: dispatch_fixt on admin MsgType '" << mt
+            << "' must return dict_reify_wire_body_not_ready (NOT dict_reify_unknown_msg_type "
+               "which would indicate a default-arm hit, NOR dict_xml_parse_failed)";
+        // Redundant guard — belt + suspenders: also assert NOT the default arm.
         EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D2: FIXT admin MsgType '" << mt
-            << "' must NOT hit the fail-loud default arm (I-11)";
+            << "AC-D2: FIXT admin MsgType '" << mt << "' must NOT hit the fail-loud default arm";
     }
 }
+
+// ─── #if R6 behavioural block — activates when 2b lands ─────────────────────
+// 2b-unblock: this block compiles always but the tests skip under R6.
+// Set FIXPP_R6_WIRE_BODY_READY=1 to remove the GTEST_SKIP().
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef FIXPP_R6_WIRE_BODY_READY
+
+TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle_R6Deferred) {
+    // AC-D2 behavioural: parsed-frame → dispatch_fixt → has_value() + version() exact.
+    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
+    // 2b-unblock: remove GTEST_SKIP; assert has_value(), version().k == session_admin,
+    //             version().session == vt11, msg_type() == expected string.
+    GTEST_SKIP() << "R6-deferred (spec §5): full dispatch round-trip awaits 2b wire body";
+}
+
+#else  // FIXPP_R6_WIRE_BODY_READY
+
+TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle) {
+    std::pmr::monotonic_buffer_resource arena;
+    MV mv;
+    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
+    for (char mt : kAdminTypes) {
+        auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
+        ASSERT_TRUE(r.has_value())
+            << "2b: dispatch_fixt on admin MsgType '" << mt << "' must return a valid handle";
+        EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin)
+            << "AC-D2: FIXT admin handle must have kind == session_admin";
+        EXPECT_EQ(r->version().session, session_version::vt11)
+            << "AC-D2: FIXT admin handle must have session == vt11";
+        EXPECT_EQ(r->version().application, application_version::Unknown)
+            << "AC-D2: FIXT admin handle must have application == Unknown";
+    }
+}
+
+#endif  // FIXPP_R6_WIRE_BODY_READY
 
 TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
     // AC-D7 / I-11 / seam #15a: a MsgType not in the 7 admin set returns
@@ -140,24 +185,18 @@ TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seam #15b — application MsgTypes (AC-G12 curated must-include subset).
-// AC-D1 / AC-D3. Each must-include (version, MsgType) must NOT hit the outer
-// default arm. In R6 scope they return a dispatch-switch-internal error
-// (dict_xml_parse_failed from the owning_<Msg>::from_view stub), NOT
-// dict_reify_unknown_msg_type.
+// AC-D1 / AC-D3. gate-b/r1 RC#3-B: replace "not-the-default-error" with the
+// EXACT R6 placeholder error code (dict_reify_wire_body_not_ready).
+// This ensures misdispatch (wrong version/MsgType combo hitting the default
+// arm and returning dict_reify_unknown_msg_type) cannot stay green.
 //
-// R6-unblock note (2b): results change to valid owning_message_handle.
+// R6-unblock (2b): results change to valid owning_message_handle with correct
+// version().application and msg_type() — activate via FIXPP_R6_WIRE_BODY_READY.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
-    // AC-G12 curated must-include subset (seam #15b). Mirrors
-    // must_include_manifest.txt application-version rows:
-    //   v42 NewOrderSingle D
-    //   v44 NewOrderSingle D
-    //   v50sp2 NewOrderSingle D
-    //   v44 ExecutionReport 8
-    //   v50sp2 ExecutionReport 8
-    //   v50sp2 MarketDataSnapshotFullRefresh W
-    //   v50sp2 OrderCancelRequest F
-    //   v44 Logon A   (application, not FIXT admin)
+    // AC-G12 curated must-include subset / gate-b/r1 RC#3-B positive oracle.
+    // Each entry MUST return dict_reify_wire_body_not_ready — not
+    // dict_reify_unknown_msg_type (default arm) and not success.
     struct Case {
         application_version version;
         std::string_view msg_type;
@@ -181,12 +220,60 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
     for (auto const& c : kCases) {
         auto r =
             fixpp::dict::dispatch::dispatch_application(mv, c.msg_type, c.version, profile, &arena);
-        ASSERT_FALSE(r.has_value()) << c.label << ": R6 stub always returns an error — 2b-unblock.";
+        ASSERT_FALSE(r.has_value())
+            << c.label << ": dispatch_application must not return success under R6";
+        EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+            << "AC-D3 R6 positive oracle: " << c.label
+            << " (version=" << static_cast<int>(c.version) << ", MsgType=" << c.msg_type
+            << ") must return dict_reify_wire_body_not_ready "
+               "(not dict_reify_unknown_msg_type which would indicate a default-arm hit)";
+        // Belt + suspenders: also assert NOT the fail-loud outer default arm.
         EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D3 / I-11: " << c.label << " (version=" << static_cast<int>(c.version)
-            << ", MsgType=" << c.msg_type << ") must NOT hit the fail-loud outer default arm";
+            << "AC-D3 / I-11: " << c.label << " must NOT hit the fail-loud outer default arm";
     }
 }
+
+// ─── #if R6 behavioural block — activates when 2b lands ─────────────────────
+#ifndef FIXPP_R6_WIRE_BODY_READY
+
+TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles_R6Deferred) {
+    // AC-D3 behavioural: dispatch_application → has_value() + version() + msg_type() exact.
+    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
+    // 2b-unblock: assert has_value(), version().application == c.version, msg_type() == c.msg_type.
+    GTEST_SKIP() << "R6-deferred (spec §5): full dispatch round-trip awaits 2b wire body";
+}
+
+#else  // FIXPP_R6_WIRE_BODY_READY
+
+TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles) {
+    struct Case {
+        application_version version;
+        std::string_view msg_type;
+        const char* label;
+    };
+    constexpr Case kCases[] = {
+        {application_version::v42, "D", "v42 NewOrderSingle"},
+        {application_version::v44, "D", "v44 NewOrderSingle"},
+        {application_version::v50sp2, "D", "v50sp2 NewOrderSingle"},
+        {application_version::v44, "8", "v44 ExecutionReport"},
+        {application_version::v50sp2, "8", "v50sp2 ExecutionReport"},
+        {application_version::v50sp2, "W", "v50sp2 MarketDataSnapshotFullRefresh"},
+        {application_version::v50sp2, "F", "v50sp2 OrderCancelRequest"},
+        {application_version::v44, "A", "v44 Logon (app, not FIXT admin)"},
+    };
+    std::pmr::monotonic_buffer_resource arena;
+    MV mv;
+    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    for (auto const& c : kCases) {
+        auto r =
+            fixpp::dict::dispatch::dispatch_application(mv, c.msg_type, c.version, profile, &arena);
+        ASSERT_TRUE(r.has_value()) << c.label << ": must return valid handle";
+        EXPECT_EQ(r->version().application, c.version)
+            << c.label << ": handle.version().application must match the dispatched version";
+    }
+}
+
+#endif  // FIXPP_R6_WIRE_BODY_READY
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seam #10c — fail-loud default arm for runtime-XML-only resolved version.

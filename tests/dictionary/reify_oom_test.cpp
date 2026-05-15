@@ -4,29 +4,23 @@
 // AC-R7: PMR-OOM injection → dict_reify_oom; ≤4 PMR allocs; zero-alloc guard
 // for string/int/char + default-trait decimal accessors.
 //
-// Seam #7 — PMR failure injection: a failing_pmr_resource wrapping a live
-// upstream is injected into from_view(src, mr). When the resource fails on
-// call N, from_view must return dict_reify_oom (not propagate std::bad_alloc,
-// not crash, not silently succeed).
+// Seam #7 — PMR failure injection (gate-b/r1 RC#1 F2 fix): from_view now
+// makes 1 PMR allocation under R6 (a pmr::vector<byte>(1, byte{}, mr) that
+// keeps the OOM trap path live — see emit_reify.cpp). When the resource fails
+// on call 1, from_view must return dict_reify_oom (not propagate bad_alloc).
 //
-// Seam #16 — ≤4-alloc budget: count the allocate() calls made by a successful
-// from_view() on a counting-only mr. The count must be ≤4 (Entity 4 budget).
+// Seam #16 — allocation count under R6: from_view makes exactly 1 allocation
+// (the pmr::vector<byte>(1,…) construction) and then returns dict_reify_wire_body_not_ready.
+// The AC-R7 budget is ≤4; 1 ≤ 4. The exact 4-alloc itemisation becomes
+// testable with 2b (deep-copy bytes_ + OffsetTable rebuilds).
 //
 // Zero-alloc guard (mallocnesia scope, AC-T3 / NFR-003-4):
 //   * String/int/char accessors on the flyweight (fixpp::v44::NewOrderSingle)
 //     use dict::decode_field<T>(view.template get<Tag>()) — allocation-free.
 //   * The default pod_decimal trait ignores the passed mr; no allocation.
-//   These are verified by calling the accessors inside a counting mr scope
-//   with count expected to remain 0.
 //
-// R6 note: the frozen wire stub carries no frame bytes. OOM injection still
-// works because from_view allocates bytes_ from mr regardless of frame content
-// (the PMR vector construction uses mr). The ≤4-alloc count covers the bytes_
-// vector allocation at minimum; in R6 form there may be fewer than 4 (the stub
-// allocates bytes_ only, not a real OffsetTable). The AC-R7 contract says ≤4,
-// not exactly 4. The exact 4-alloc itemisation becomes testable with 2b.
-//
-// Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16.
+// Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16;
+//         spec §5 R6 deferral; gate-b/r1 RC#1 F2 (from_view makes alloc).
 #include <gtest/gtest.h>
 
 #include <array>
@@ -36,6 +30,7 @@
 #include <fixpp/dict/field_traits.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
 #include <memory_resource>
+#include <optional>
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>
@@ -83,10 +78,14 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
 
     MV mv;
     auto result = ONOS::from_view(mv, &counter);
-    ASSERT_TRUE(result.has_value()) << "from_view must succeed with a valid arena (seam #16)";
+    // gate-b/r1 RC#1: from_view now allocates (tmp(mr)) then returns
+    // dict_reify_wire_body_not_ready — the R6 placeholder.
+    ASSERT_FALSE(result.has_value()) << "R6: from_view must return dict_reify_wire_body_not_ready";
+    EXPECT_EQ(result.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
+        << "AC-R3 R6 oracle: exact placeholder error code";
 
     EXPECT_LE(counter.count(), std::size_t{4})
-        << "AC-R7: reify_as must use ≤4 PMR allocations per Entity 4 budget";
+        << "AC-R7: from_view must use ≤4 PMR allocations per Entity 4 budget (R6: 1 alloc for tmp(mr))";
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -106,35 +105,50 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
 //       inspection; the test below exercises the no-allocation path only).
 //   (c) The error code slot and distinct-from-stub-error assertions.
 
-TEST(ReifyOomTest, OomTrapPathDoesNotThrowWithZeroAllocs) {
-    // R6: from_view makes 0 allocations (stub MV has no bytes to copy);
-    // the fail_on_call_n=1 resource is never triggered → result is success.
-    // This tests that from_view does NOT throw even with an OOM resource
-    // standing by (the try/catch is inert but well-formed).
+// gate-b/r1 RC#1 F2 fix: from_view now makes exactly 1 PMR allocation
+// (the `tmp(mr)` object construction). fail-on-call-1 therefore DOES fire,
+// the bad_alloc is caught, and from_view returns dict_reify_oom.
+TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
     std::array<std::byte, 1024 * 64> buf{};
     std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
     fixpp::test_support::failing_pmr_resource fail{&upstream, /*fail_on_call_n=*/1};
 
     MV mv;
     bool threw = false;
-    std::optional<bool> success;
+    std::optional<fixpp::core::expected_t<ONOS>> result;
     try {
-        auto result = ONOS::from_view(mv, &fail);
-        success = result.has_value();
+        result = ONOS::from_view(mv, &fail);
     } catch (...) {
         threw = true;
     }
-    EXPECT_FALSE(threw) << "from_view must not propagate std::bad_alloc (trap_throw is wired)";
-    // R6: result is success because 0 allocations were made.
-    ASSERT_TRUE(success.has_value());
-    EXPECT_TRUE(*success) << "R6: from_view succeeds with stub MV (0 allocs, fail never triggered)";
-    // Confirm the failing resource was NOT called.
-    EXPECT_EQ(fail.allocate_calls(), std::size_t{0})
-        << "R6: stub MV causes 0 allocations in from_view";
-    // NOTE (AC-R7 / seam #7): Full OOM injection (fail-on-call-1 → dict_reify_oom)
-    // is R6-blocked. When 2b swaps in the real body, update this test:
-    //   EXPECT_FALSE(result.has_value());
-    //   EXPECT_EQ(result.error(), core::error::dict_reify_oom);
+    EXPECT_FALSE(threw) << "from_view must not propagate std::bad_alloc (trap_throw must catch it)";
+    ASSERT_TRUE(result.has_value()) << "from_view must return (not throw) even under OOM";
+    ASSERT_FALSE(result->has_value()) << "fail-on-call-1: from_view must return an error";
+    EXPECT_EQ(result->error(), fixpp::core::error::dict_reify_oom)
+        << "AC-R7 seam #7: bad_alloc on tmp(mr) must yield dict_reify_oom (not propagate)";
+    EXPECT_GE(fail.allocate_calls(), std::size_t{1})
+        << "The failing resource must have been called at least once";
+}
+
+// No-OOM path: live upstream arena → from_view returns dict_reify_wire_body_not_ready.
+// This confirms that the try/catch doesn't swallow the R6 placeholder return.
+TEST(ReifyOomTest, NoOomYieldsWireBodyNotReady) {
+    std::array<std::byte, 1024 * 64> buf{};
+    std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
+
+    MV mv;
+    bool threw = false;
+    std::optional<fixpp::core::expected_t<ONOS>> result;
+    try {
+        result = ONOS::from_view(mv, &upstream);
+    } catch (...) {
+        threw = true;
+    }
+    EXPECT_FALSE(threw) << "from_view must not throw with a live arena";
+    ASSERT_TRUE(result.has_value()) << "from_view must return (not throw) with a live arena";
+    ASSERT_FALSE(result->has_value()) << "R6: from_view must return an error even with live arena";
+    EXPECT_EQ(result->error(), fixpp::core::error::dict_reify_wire_body_not_ready)
+        << "R6 no-OOM path: must return dict_reify_wire_body_not_ready (not dict_reify_oom)";
 }
 
 // ─────────────────────────────────────────────────────────────────

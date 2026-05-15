@@ -5,24 +5,23 @@
 // AC-R2: owning_<Msg> class exists, is move-only, exposes which()/view()/
 //         field_value() and per-field accessors matching the flyweight.
 // AC-R3: from_view(src, mr) factory exists; returns expected_t<owning_<Msg>>.
-//         R6-blocked: behavioural round-trip (values survive arena reset) cannot
-//         run because the frozen wire stub carries no frame bytes. Compile-time
-//         shape asserted; runtime value assertions deferred to 2b (see comment).
+//         gate-b/r1 RC#3-B hardening: from_view now returns dict_reify_wire_body_not_ready
+//         (NOT success) under R6. Compile-time shape asserted; runtime tests
+//         assert the exact placeholder error code.
 // AC-R6: owning_message_handle shape (move-only, version()/msg_type()/view()/
 //         field_value()/as<Msg>()) tested at compile-time shape level only
 //         (handle is US3 scope; not instantiated here).
 // AC-R8: dict_reify_msg_type_mismatch via get<35>() returning field-absent
 //         (frozen stub) — compile-time error-code identification.
 //
-// R6 scope: Every get<>() on the frozen stub returns
-//   std::unexpected{core::error::dict_xml_parse_failed}
-// (message_view_contract.hpp stub body). Behavioural assertions (real byte
-// values, cross-arena-reset survival, ≤4-alloc budget) are R6-blocked until 2b
-// swaps in the real OffsetTable-backed wire body (spec §11 R6).
+// R6 scope: owning_<Msg>::from_view returns dict_reify_wire_body_not_ready
+// (gate-b/r1 RC#1 F2 fix). Behavioural assertions (real byte values, cross-
+// arena-reset survival, ≤4-alloc budget) are R6-blocked (spec §5 deferral)
+// until 2b swaps in the real OffsetTable-backed wire body.
 //
 // Oracle: specs/003-dictionary-codegen/contracts/reify.hpp +
 //         specs/003-dictionary-codegen/contracts/generated_message.hpp;
-//         data-model Entity 4/6; spec AC-R1..R3/R6/R8.
+//         data-model Entity 4/6; spec AC-R1..R3/R6/R8; spec §5 R6 deferral.
 #include <gtest/gtest.h>
 
 #include <fixpp/core/error.hpp>
@@ -102,26 +101,57 @@ static_assert(std::is_same_v<fixpp::dict::owning_message_t<fixpp::v50sp2::NewOrd
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────
-// AC-R3 — from_view returns a value (R6-scoped: stub MV, all gets field-absent)
+// AC-R3 — from_view R6 positive oracle (gate-b/r1 RC#3-B)
 // ─────────────────────────────────────────────────────────────────
+
+TEST(ReifyTest, FromViewReturnsWireBodyNotReady) {
+    // gate-b/r1 RC#3-B: from_view MUST return dict_reify_wire_body_not_ready
+    // under R6 (not success, not dict_xml_parse_failed). This is the positive
+    // oracle that prevents success-with-no-copy from masking the defect.
+    std::pmr::monotonic_buffer_resource arena;
+    MV mv;
+    auto result = ONOS::from_view(mv, &arena);
+    ASSERT_FALSE(result.has_value())
+        << "AC-R3 R6 oracle: from_view must not return success under R6 "
+           "(wire body not available; spec §5 deferral / gate-b/r1 RC#1 F2)";
+    EXPECT_EQ(result.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
+        << "AC-R3 R6 oracle: from_view must return dict_reify_wire_body_not_ready "
+           "(not dict_xml_parse_failed, not success) until 2b swaps in the wire body";
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AC-R3 / AC-R2 — R6-deferred: view() + field_value() delegation
+// Guarded under FIXPP_R6_WIRE_BODY_READY (spec §5 deferral).
+// ─────────────────────────────────────────────────────────────────
+
+#ifndef FIXPP_R6_WIRE_BODY_READY
+
+TEST(ReifyTest, FromViewReturnsOwning_R6Deferred) {
+    // AC-R3 behavioural: from_view returns a populated owning_<Msg>.
+    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
+    // 2b-unblock: remove GTEST_SKIP; assert has_value() + cl_ord_id() present.
+    GTEST_SKIP() << "R6-deferred (spec §5): from_view behavioural round-trip "
+                    "awaits 2b wire body";
+}
+
+TEST(ReifyTest, ViewAndFieldValueForward_R6Deferred) {
+    // AC-R2 behavioural: view() + field_value() return parsed content.
+    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
+    // 2b-unblock: remove GTEST_SKIP; assert field_value(11) has_value() + cache hit.
+    GTEST_SKIP() << "R6-deferred (spec §5): view/field_value delegation awaits 2b wire body";
+}
+
+#else  // FIXPP_R6_WIRE_BODY_READY
 
 TEST(ReifyTest, FromViewReturnsOwning) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     auto result = ONOS::from_view(mv, &arena);
-    // R6: from_view succeeds (no OOM in this path) and returns an owning_<Msg>.
     ASSERT_TRUE(result.has_value()) << "from_view must succeed with a live arena";
-    // R6: all accessor calls return field-absent (frozen stub carries no data).
-    // Behavioural value round-trip (real values survive arena reset) is
-    // R6-blocked until 2b swaps in the real OffsetTable-backed body (spec §11).
     auto& o = *result;
     auto cl = o.cl_ord_id();
-    EXPECT_FALSE(cl.has_value()) << "R6: stub MV returns field-absent for all get<>()";
+    EXPECT_TRUE(cl.has_value()) << "2b: parsed value present";
 }
-
-// ─────────────────────────────────────────────────────────────────
-// AC-R2 — view() + field_value() delegate through the lazy cache
-// ─────────────────────────────────────────────────────────────────
 
 TEST(ReifyTest, ViewAndFieldValueForward) {
     std::pmr::monotonic_buffer_resource arena;
@@ -130,16 +160,15 @@ TEST(ReifyTest, ViewAndFieldValueForward) {
     ASSERT_TRUE(result.has_value());
     auto& o = *result;
 
-    // view() must return a MV const& (not a dangling reference).
     MV const& v = o.view();
-    // field_value() delegates to view().get(tag).
     auto fv = o.field_value(11);
     static_assert(std::is_same_v<decltype(fv), fixpp::core::expected_t<fixpp::wire::field_view>>);
-    EXPECT_FALSE(fv.has_value());  // R6: field-absent
-    // Second view() call hits the cache.
+    EXPECT_TRUE(fv.has_value());  // 2b: parsed value present
     MV const& v2 = o.view();
     EXPECT_EQ(&v, &v2) << "view() must return the same cached address";
 }
+
+#endif  // FIXPP_R6_WIRE_BODY_READY
 
 // ─────────────────────────────────────────────────────────────────
 // AC-R8 — dict_reify_msg_type_mismatch identification
