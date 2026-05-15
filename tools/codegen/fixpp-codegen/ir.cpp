@@ -60,9 +60,22 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
     }
 
     // Messages — Dictionary::messages() is bytewise-sorted by MsgType
-    // (002 research D-6), so copying preserves determinism (A4 / NFR-003-7).
+    // (002 research D-6), so iteration preserves determinism (A4 / NFR-003-7).
+    // Per message, the RC#5 additive accessors give the full field run +
+    // tag→name (D-24); message_fields() preserves the deterministic
+    // per-MsgType concatenated order.
     for (auto const& m : dict.messages()) {
-        ir.messages.push_back(MessageIR{std::string(m.msg_type), std::string(m.name)});
+        MessageIR msg{std::string(m.msg_type), std::string(m.name), {}};
+        for (fixpp::dict::FieldRef const& fr : dict.message_fields(m.msg_type)) {
+            msg.fields.push_back(FieldIR{
+                fr.tag,
+                std::string(dict.field_name(fr.tag)),
+                fr.type,
+                fr.rule,
+                fr.group_no_tag,
+            });
+        }
+        ir.messages.push_back(std::move(msg));
     }
 
     // Length+Data pairs — ascending tag scan (deterministic order). AC-V4 is

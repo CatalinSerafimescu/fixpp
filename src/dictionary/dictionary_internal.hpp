@@ -123,6 +123,14 @@ public:
         return std::span<MessageEntry const>{messages_};
     }
 
+    // 003-dictionary-codegen (RC#5 — F1 IR data path): the codegen tool needs
+    // the FULL per-message field run (required + optional) and tag→FIX-field-
+    // name, neither of which the runtime-MVS lookup surface exposed. Build-
+    // time codegen-enumeration only; not on any runtime hot path.
+    [[nodiscard]] std::span<FieldRef const> message_fields_impl(
+        std::string_view msg_type) const noexcept;
+    [[nodiscard]] std::string_view field_name_impl(std::uint16_t tag) const noexcept;
+
     [[nodiscard]] session_version version_impl() const noexcept { return version_; }
 
     // ---- Build-time state (populated by XmlLoader) ----

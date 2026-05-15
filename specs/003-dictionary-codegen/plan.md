@@ -138,6 +138,38 @@ This section is the headline output of the 2026-05-15 re-`/plan`. Gate A rounds 
 
 Both `[const §XX]` amendments carry an RC marker (mirroring the 2c v1.4 amendment style). Article XX §2 closing steps — Codex Gate A review on the amendment + user sign-off + `_log.md` entry — are discharged by the **fresh** Codex Gate A on this re-planned bundle, which **CONVERGED at replan-loop round 3** (commit 3824bb5; the amendments were explicitly flagged for it and accepted), plus the user's `/plan` sign-off. `spec.md` is preserved (it carries the /clarify Q&A + Gate A round records); the RC#1/#2/#3 ACs are *added*, the historical Gate A Q&A entries are *annotated with RESOLVED notes*, not rewritten.
 
+## /speckit-implement surfaced — RC#5 (F1 IR data-path gap)
+
+**Surfaced 2026-05-15 during `/speckit-implement` US1 (pre-emitter).** F1
+Candidate A's premise — "the host tool links `fixpp::dictionary` and walks the
+`Dictionary` metadata (one XML truth, no second parser)" — was under-specified:
+the **public** 002 `Dictionary` surface exposes `messages()`,
+`required_fields()`, `field_ref(msg_type, tag)`, `field_by_name(name)→tag`,
+`component/group_fields()` — but **no per-message full field enumeration and
+no tag→name**, both of which the emitters need (`required_fields` is
+required-only; `field_ref` needs a known tag; there is no tag→name). The data
+exists only in the `src/dictionary/` private `dict_metadata_handle`. research
+D-1's "walk the metadata" was never validated against the public API.
+
+**Resolution (user-chosen 2026-05-15): additive codegen-enumeration
+accessors.** 003 additively extends the 002-merged `Dictionary` with two
+source-compatible, build-time read accessors (`[arch §9.3]` stable-from-v1.0;
+`[const §X.4]`-style additive — no existing slot/signature changed):
+
+- `Dictionary::message_fields(std::string_view) -> std::span<FieldRef const>`
+  (full per-message run, required + optional).
+- `Dictionary::field_name(std::uint16_t) -> std::string_view` (tag → FIX name).
+
+Files-in-scope add (003-owned **additive edit to 002-merged** files, the same
+discipline as the RC#1 `version_profile.hpp`/`error.hpp` edits):
+`include/fixpp/dict/dictionary.hpp`, `src/dictionary/dictionary.cpp`,
+`src/dictionary/dictionary_internal.hpp` (handle methods). New AC-G13 (spec
+§4.1), Assumption A7, research D-24. Bound at tasks.md **T055** (the accessors)
+— gates the US1 emitters T023/T024/T025. Reviewed at the next Gate B (this is a
+`/speckit-implement`-surfaced additive API extension, recorded here per the
+analyze/gate-record discipline; no `[const §XX]` amendment needed — additive,
+not a design-doc/constitution change).
+
 ## Project Structure
 
 ### Documentation (this feature)

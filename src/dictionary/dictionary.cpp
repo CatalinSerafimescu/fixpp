@@ -182,6 +182,28 @@ std::span<FieldRef const> dict_metadata_handle::group_fields_impl(
     return std::span<FieldRef const>{group_fields_.data() + gr.first_field_index, gr.field_count};
 }
 
+// 003-dictionary-codegen (RC#5 — F1 IR data path). Build-time codegen-
+// enumeration; not on any runtime hot path.
+std::span<FieldRef const> dict_metadata_handle::message_fields_impl(
+    std::string_view msg_type) const noexcept {
+    MsgFieldsRun const run = find_msg_fields(msg_type);
+    if (run.count == 0 || run.start + run.count > fields_.size()) {
+        return {};
+    }
+    return std::span<FieldRef const>{fields_.data() + run.start, run.count};
+}
+
+std::string_view dict_metadata_handle::field_name_impl(std::uint16_t tag) const noexcept {
+    // field_by_name_ is sorted by name (not tag); a linear scan is fine —
+    // this runs once per tag at codegen time, never on a runtime path.
+    for (auto const& e : field_by_name_) {
+        if (e.tag == tag) {
+            return name_at(e.name);
+        }
+    }
+    return {};
+}
+
 }  // namespace detail
 
 // ============================================================================
@@ -256,6 +278,16 @@ std::span<FieldRef const> Dictionary::component_fields(std::string_view name) co
 
 std::span<FieldRef const> Dictionary::group_fields(std::uint16_t no_tag) const noexcept {
     return handle_ ? handle_->group_fields_impl(no_tag) : std::span<FieldRef const>{};
+}
+
+// 003-dictionary-codegen (RC#5 — F1 IR data path; additive, source-compatible
+// read accessors — [arch §9.3] stable-from-v1.0, [const §X.4]-style).
+std::span<FieldRef const> Dictionary::message_fields(std::string_view msg_type) const noexcept {
+    return handle_ ? handle_->message_fields_impl(msg_type) : std::span<FieldRef const>{};
+}
+
+std::string_view Dictionary::field_name(std::uint16_t tag) const noexcept {
+    return handle_ ? handle_->field_name_impl(tag) : std::string_view{};
 }
 
 }  // namespace fixpp::dict

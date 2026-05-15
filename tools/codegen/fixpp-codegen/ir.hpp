@@ -18,13 +18,25 @@
 #include <string>
 #include <vector>
 
+#include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/version_profile.hpp>
 
 namespace fixpp::codegen {
 
+// One declared field of a message (RC#5 — sourced via the additive
+// Dictionary::message_fields / Dictionary::field_name accessors; D-24).
+struct FieldIR {
+    std::uint16_t                tag{};
+    std::string                  name;   // FIX field name, e.g. "ClOrdID"
+    fixpp::dict::field_data_type type{};
+    fixpp::dict::field_presence  rule{};
+    std::uint16_t                group_no_tag{};  // 0 if not a group delimiter
+};
+
 struct MessageIR {
-    std::string msg_type;  // FIX MsgType (e.g. "D")
-    std::string name;      // English name (diagnostics / NormativeReferences)
+    std::string           msg_type;  // FIX MsgType (e.g. "D")
+    std::string           name;      // English name (diagnostics / NormativeRefs)
+    std::vector<FieldIR>  fields;    // full per-message run (required + optional)
 };
 
 struct LengthPairIR {

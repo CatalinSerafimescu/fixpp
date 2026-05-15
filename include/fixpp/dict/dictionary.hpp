@@ -149,6 +149,25 @@ public:
     [[nodiscard]] std::span<FieldRef const> group_fields(
         std::uint16_t no_tag) const noexcept [[clang::lifetimebound]];
 
+    // 003-dictionary-codegen (RC#5 — F1 IR data path). Additive, source-
+    // compatible read accessors the `fixpp-codegen` host tool consumes to
+    // emit per-version typed messages ([arch §9.3] stable-from-v1.0;
+    // [const §X.4]-style additive — no existing slot/signature changed).
+    // Build-time codegen-enumeration only; NOT a runtime hot path.
+    //
+    // Full per-message field run (required + optional, in the per-MsgType
+    // concatenated `fields_` order — distinct from required_fields(), which
+    // is required-only). Empty span if `msg_type` is not declared. Aliases
+    // the metadata-handle storage (lifetime = this Dictionary).
+    [[nodiscard]] std::span<FieldRef const> message_fields(
+        std::string_view msg_type) const noexcept [[clang::lifetimebound]];
+
+    // FIX field name for `tag` (e.g. 11 → "ClOrdID"), used to emit named
+    // typed accessors. Empty view if `tag` is unknown to this dictionary.
+    // Aliases the metadata-handle name pool (lifetime = this Dictionary).
+    [[nodiscard]] std::string_view field_name(
+        std::uint16_t tag) const noexcept [[clang::lifetimebound]];
+
 private:
     friend class XmlLoader;
 

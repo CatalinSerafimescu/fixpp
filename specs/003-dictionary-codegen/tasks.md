@@ -62,7 +62,9 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 - [X] T015 `tools/codegen/fixpp-codegen/main.cpp` — CLI driver: per-version dispatch into the emitters, build-tree-only output paths (`build/<preset>/_codegen/include/fixpp/...`), never the source tree (AC-C4) (depends on T014)
 - [ ] T016 `CMakeLists.txt` + `cmake/` — the `[2c §7.6]` target graph: configure-time `fixpp::dict::generate-vXX` custom targets (NOT build-time), per-version `INTERFACE` targets carrying `INTERFACE_INCLUDE_DIRECTORIES` into the build tree, `fixpp::dict::{v42,v44,v50sp2,vt11}` + `fixpp::dict::runtime` (AC-C4; `[arch §4.2]`) (depends on T015)
 
-**Checkpoint**: Codegen tool scaffolding builds; RC#1 headers + wire stub + error slots compile and their shape tests (T004–T006) pass. Generated-header emission and per-story work can begin.
+- [X] T055 (RC#5 — `/speckit-implement`-surfaced 2026-05-15) `include/fixpp/dict/dictionary.hpp` + `src/dictionary/dictionary.cpp` + `src/dictionary/dictionary_internal.hpp` — **003-owned additive edit to the 002-merged Dictionary**: `message_fields(std::string_view)→std::span<FieldRef const>` (full per-message run, required+optional) + `field_name(std::uint16_t)→std::string_view` (tag→FIX name). The F1 IR data path the US1 emitters need; the public 002 surface exposed neither (research D-1 "walk the metadata" was unvalidated). Additive/source-compatible (`[arch §9.3]`/`[const §X.4]`-style); build-time codegen-enumeration only. AC-G13; spec §4.1/§7/A7; plan "/speckit-implement surfaced — RC#5"; research D-24. **Gates T023/T024/T025**.
+
+**Checkpoint**: Codegen tool scaffolding builds; RC#1 headers + wire stub + error slots compile and their shape tests (T004–T006) pass; the RC#5 codegen-enumeration accessors (T055) build green. Generated-header emission and per-story work can begin.
 
 ---
 
