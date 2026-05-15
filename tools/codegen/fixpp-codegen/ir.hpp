@@ -25,12 +25,15 @@ namespace fixpp::codegen {
 
 // One declared field of a message (RC#5 — sourced via the additive
 // Dictionary::message_fields / Dictionary::field_name accessors; D-24).
+// Carries the full 002-shipped FieldRef verbatim (16-byte trivially-copyable
+// POD) so emit_fields can emit complete constexpr FieldRef arrays (AC-V1/V6)
+// and emit_messages can reconstruct repeating-group structure from
+// FieldRef::group_no_tag (set by XmlLoader to the enclosing group's no_tag;
+// 0 == top level) + FieldRef::type == NumInGroup (the delimiter). `name` is
+// the FIX field name used to emit the typed accessor identifier.
 struct FieldIR {
-    std::uint16_t                tag{};
-    std::string                  name;   // FIX field name, e.g. "ClOrdID"
-    fixpp::dict::field_data_type type{};
-    fixpp::dict::field_presence  rule{};
-    std::uint16_t                group_no_tag{};  // 0 if not a group delimiter
+    fixpp::dict::FieldRef ref{};
+    std::string           name;  // FIX field name, e.g. "ClOrdID"
 };
 
 struct MessageIR {

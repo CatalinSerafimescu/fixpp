@@ -67,13 +67,7 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
     for (auto const& m : dict.messages()) {
         MessageIR msg{std::string(m.msg_type), std::string(m.name), {}};
         for (fixpp::dict::FieldRef const& fr : dict.message_fields(m.msg_type)) {
-            msg.fields.push_back(FieldIR{
-                fr.tag,
-                std::string(dict.field_name(fr.tag)),
-                fr.type,
-                fr.rule,
-                fr.group_no_tag,
-            });
+            msg.fields.push_back(FieldIR{fr, std::string(dict.field_name(fr.tag))});
         }
         ir.messages.push_back(std::move(msg));
     }
