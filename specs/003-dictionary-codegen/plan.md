@@ -227,8 +227,20 @@ tests/
 │   │   └── conformance_test.cpp          # NEW — seam #1/#15b — parameterised round-trip corpus
 │   ├── typed_accessor_test.cpp           # NEW — AC-G1..G8, AC-G11 — typed field access
 │   ├── msgtype_boundary_test.cpp         # NEW — AC-G9 / AC-G10
-│   ├── flyweight_shape_test.cpp          # NEW — seam #18 — AC-G7 + R6 drift guard + get<1128> well-formed (N-P3-1)
+│   ├── flyweight_shape_test.cpp          # NEW — seam #18 — AC-G7 + AC-G7a (per-message
+│   │                                     #   owning_message_traits<Msg> specialisation pin, RC#1) + R6 drift
+│   │                                     #   guard + get<1128>/get<35> well-formed (N-P3-1/N-P2-2)
 │   ├── determinism_test.cpp              # NEW — seam #1/#2 — NFR-003-7/AC-T1/AC-T2 vs 4 golden headers
+│   ├── codegen_build_graph_test.cmake    # NEW (RC#4) — CTest fixture: asserts the configure-time
+│   │                                     #   build-tree codegen graph (AC-C4). Registered as the
+│   │                                     #   `fixpp::dict::codegen-build-graph-check` CTest target
+│   │                                     #   (a `cmake -P` script test, NOT a GoogleTest C++ TU).
+│   │                                     #   Asserts: (a) build/<preset>/_codegen/include/fixpp/...
+│   │                                     #   exists post-configure; (b) `fixpp::dict::generate-vXX`
+│   │                                     #   is a configure-time custom target (not build-time);
+│   │                                     #   (c) the per-version INTERFACE targets carry
+│   │                                     #   INTERFACE_INCLUDE_DIRECTORIES into the build tree;
+│   │                                     #   (d) nothing written under the source tree.
 │   ├── length_data_table_test.cpp        # NEW — seam #19 — AC-V4 exhaustive vs source XML
 │   └── validator_shape_test.cpp          # NEW — AC-V1..V3, AC-V5, AC-V6
 ├── dictionary/
@@ -295,14 +307,17 @@ Same root-cause class that closed 001/002 Gate A round 1 ("seam→file map parti
 | 15b | `dict::reify` — application MsgTypes (CI = AC-G12 subset; nightly exhaustive) | `tests/dictionary/reify_dispatch_test.cpp` (app arm) | AC-D1, AC-D3, AC-D7 |
 | 15c | `dict_unresolved_application_version` propagation | `tests/dictionary/reify_dispatch_test.cpp` (unresolved arm) | AC-D6 |
 | 16 | `trap_throw` PMR OOM injection (reify_as / reify / owning_<Msg>::from_view → `dict_reify_oom`) | `tests/dictionary/reify_oom_test.cpp` | AC-R7 |
-| 18 | Static-assert typed-flyweight size per message | `tests/codegen/flyweight_shape_test.cpp` | AC-G7 |
+| 18 | Static-assert typed-flyweight size per message + per-message `owning_message_traits<Msg>` specialisation pin (codegen-shape golden, compile-time) | `tests/codegen/flyweight_shape_test.cpp` | AC-G7, AC-G7a |
 | 19 | Length+Data static-table coverage vs source XML + `[FIX50SP2 §3.3]` | `tests/codegen/length_data_table_test.cpp` | AC-V4 |
+| C4 (CMake-graph) | Configure-time, build-tree-only codegen graph (RC#4 — `generate-vXX` is a configure-time target; outputs under `build/<preset>/_codegen/...`; per-version INTERFACE targets carry `INTERFACE_INCLUDE_DIRECTORIES` into the build tree; nothing in the source tree) | `tests/codegen/codegen_build_graph_test.cmake` → CTest target `fixpp::dict::codegen-build-graph-check` | AC-C4, DoD §12 (build-tree/configure-time clause) |
 
 **Cross-cutting per-AC tests** (not "seam files" per §9, but binding one AC family to one file):
 
 | File | ACs covered |
 |---|---|
-| `tests/codegen/typed_accessor_test.cpp` | AC-G1..G8, AC-G11 (typed field access incl. the `price(mr)` v1.4 decimal accessor + AC-G4a default/allocating-trait behaviour) |
+| `tests/codegen/typed_accessor_test.cpp` | AC-G1..G8, AC-G11 (typed field access incl. the `price(mr)` v1.4 decimal accessor + AC-G4a default/allocating-trait behaviour). **AC-G7a** (the per-message `owning_message_traits<Msg>` specialisation pin — the canonical 2c v1.4 §4.8 form, RC#1) is verified by the codegen-shape golden in `flyweight_shape_test.cpp` / seam #18, not here. |
+| `tests/codegen/flyweight_shape_test.cpp` | AC-G7 (sizeof), **AC-G7a** (the per-message `owning_message_traits<Msg>` specialisation pin, compile-time — RC#1), R6 drift guard (`get<1128>()` + `get<35>()` well-formed — N-P3-1/N-P2-2) — seam #18 |
+| `tests/codegen/codegen_build_graph_test.cmake` (CTest target `fixpp::dict::codegen-build-graph-check`) | **AC-C4** (RC#4 — configure-time / build-tree-only / `INTERFACE_INCLUDE_DIRECTORIES` / `generate-vXX` is a configure-time target; DoD §12 build-tree clause). CMake-graph script test, not a GoogleTest C++ TU. |
 | `tests/codegen/msgtype_boundary_test.cpp` | AC-G9 (FIX-Latest filtered + warning), AC-G10 (A-014..A-034 not emitted) |
 | `tests/codegen/validator_shape_test.cpp` | AC-V1, AC-V2, AC-V3, AC-V5, AC-V6 |
 | `tests/codegen/determinism_test.cpp` | NFR-003-7, AC-T1, AC-T2 (byte-identical re-emission vs the 4 golden headers; no source-tree write) |
@@ -311,7 +326,7 @@ Same root-cause class that closed 001/002 Gate A round 1 ("seam→file map parti
 | `tests/dictionary/version_profile_test.cpp` | **AC-VP1..AC-VP6** (RC#1 — version_profile/resolved_message_version structs+static_asserts, `resolve_application_version` free fn, full ApplVerID wire→C++ map, the AC-VP4 negative, `_reserved` discipline, the six locked error slots) |
 | `tests/dictionary/field_traits_test.cpp` | **AC-FT1..AC-FT3** (RC#1 — primary + specialisations + `decode_field`; AC-FT2 negative: `decimal_t` not a `field_traits` specialisation) |
 
-**Rule:** no seam maps to "the existing tests collectively". Each seam has at least one dedicated named file. The 8 cross-cutting files (6 prior + the 2 RC#1 files) supplement the seam files for per-AC verification.
+**Rule:** no seam maps to "the existing tests collectively"; **every AC in §4 (including AC-G7a and AC-C4)** is addressable by at least one dedicated named on-disk file or CTest target. The 11 cross-cutting entries (6 prior + the 2 RC#1 files + the explicit `flyweight_shape_test.cpp` AC-G7a row + the RC#4 `codegen_build_graph_test.cmake` CTest target + the determinism row) supplement the seam files for per-AC verification. The AC-C4 CMake-graph properties (configure-time / `INTERFACE_INCLUDE_DIRECTORIES` / `generate-vXX`) are not C++-seam-testable, so they bind to the dedicated `cmake -P` CTest target rather than a GoogleTest TU — the seam→file completeness rule is satisfied without forcing a CMake-graph property into a C++ test that cannot assert it.
 
 ## Complexity Tracking
 
@@ -348,7 +363,7 @@ RC#2 cannot be closed by any edit to the `specs/003-dictionary-codegen/` bundle:
 
 ### Round 1 — new contract-test / residual-risk items (Opus N-P3-1 / N-P3-2)
 
-- **N-P3-1 (P3):** the R6 drift-guard contract test (folded into `flyweight_shape_test.cpp`) asserts the flyweight member signatures + `sizeof` invariant but does **not** assert `view.template get<1128>()` (the dispatch-path entry `dict::reify` depends on) compiles against the frozen `wire_message_view_contract.hpp` surface. Add a `static_assert`/instantiation in `flyweight_shape_test.cpp` (or `reify_dispatch_test.cpp`) that `view.template get<1128>()` is well-formed against the frozen contract, so a future 2b tag-whitelist constraint fails loud at compile time. Bind at `/tasks` (added to the R6 contract-test task). *(Re-`/plan`: bound in the Project-Structure tree at `flyweight_shape_test.cpp` — "+ get<1128> well-formed (N-P3-1)".)*
+- **N-P3-1 (P3) + N-P2-2 (P2, replan loop round 1):** the R6 drift-guard contract test (folded into `flyweight_shape_test.cpp`) asserts the flyweight member signatures + `sizeof` invariant but does **not** assert `view.template get<1128>()` (the `dict::reify` ApplVerID-resolution entry, AC-D3) **nor** `view.template get<35>()` (the MsgType-peek entry that *both* `reify_as`'s msg-type-mismatch arm (AC-R8) and `reify`'s FIXT/application dispatch (AC-D2) depend on) compile against the frozen `wire_message_view_contract.hpp` surface. **Single fix (Opus N-P2-2):** extend the R6 drift-guard in `flyweight_shape_test.cpp` (or `reify_dispatch_test.cpp`) with a `static_assert`/instantiation that **both** `view.template get<1128>()` *and* `view.template get<35>()` are well-formed against the frozen contract, so a future 2b tag-whitelist constraint fails loud at compile time. Referenced from AC-R8 / AC-D2 / AC-D3. Bind at `/tasks` (added to the R6 contract-test task). *(Re-`/plan` + replan loop round 1: bound in the Project-Structure tree at `flyweight_shape_test.cpp` — "+ get<1128>/get<35> well-formed (N-P3-1/N-P2-2)".)*
 - **N-P3-2 (P3, accepted residual risk):** the determinism golden set anchors only `<vXX>_Messages.golden.hpp` (D-16). `Reify.hpp` (custom move bodies, the most correctness-sensitive artifact, R4) and `_dispatch/*.hpp` (~470 cases, R3) have no golden — a template change perturbing a move body or dispatch-case ordering is byte-stable run-to-run (passes determinism) yet invisible to the reviewed-diff mechanism D-16 sells as the R4/R3 mitigation. **Decision:** deliberate scoping gap accepted for v1.0; residual R4/R3 risk explicitly named here (was previously unstated). Revisit (extend the golden set to one `Reify.hpp` + one `_dispatch` golden) if a move-body/dispatch regression escapes review in practice. **This acceptance is plan-local** — it is recorded *here*, not in spec §11; the spec §11 R3/R4 mitigations stand as written and do not (and need not) restate this golden-coverage residual (corrected Gate A round 2, Codex F-3 / Opus Confirm @ P3 — the earlier "Recorded in spec §11 R3/R4" clause was a false cross-reference and is struck). Not a Gate A blocker.
 
 ### Round 2 — disagreements
@@ -356,6 +371,19 @@ RC#2 cannot be closed by any edit to the `specs/003-dictionary-codegen/` bundle:
 Opus (authoritative adversarial review) **Downgraded Codex round-2 F-2 from P2 to P3** and its fix was **not applied as Codex stated**. Recorded per the independence/disagreement-record discipline:
 
 - **Codex F-2 (P2 → P3, Opus Downgrade).** Codex F-2 objected that `spec.md` §8 "Depends on (in-tree, merged)" folds `core::error`/`expected_t<T>`/`trap_throw_or_throw` into the "002-shipped dictionary surface … all on `main` via PR #66" and demanded the line split into "002-shipped dictionary surface" vs. "**pre-existing** core surface consumed here". **Codex's factual premise is partly false** (independently re-verified against 002's shipped contracts): (1) `core::detail::trap_throw_or_throw` is **net-new in 002 / PR #66** — `specs/002-dictionary-xml-loader/spec.md:190` ("added next to the existing `detail::trap_throw<F>`"), `:201` ("NEW exception-API helper added in this PR"); Codex's claim that it is "not part of the 002-shipped surface" / "pre-existing" is **incorrect**. (2) `core::error`/`expected_t<T>` are 001-origin but were **extended additively by 002** (`002 spec.md:190` — three new `dict_*` variants appended at slots 20–22; `:201` Depends-on lists `core::error` extended in 002), so they genuinely ship/were-re-touched with PR #66. The "all on `main` via PR #66" attribution is therefore **substantively accurate** for every listed symbol. The only true residual is **taxonomic-wording imprecision** (these are *core* surface, not the *dictionary* surface; the `dict_*` variants live in `core::error`, not a `dict::` namespace) with **no downstream effect on any AC, dependency, or `/tasks` input** — hence P3, not P2. **Applied: the minimal taxonomic-wording split only** (spec §8 now separates "002-shipped dictionary surface" from "core surface consumed here", labelling `core::error`/`expected_t` 001-origin-extended-by-002 and `trap_throw_or_throw` net-new-in-002). **NOT applied: Codex's "pre-existing core surface" framing**, because it mis-states `trap_throw_or_throw` (a PR-#66 addition) as pre-existing. Reviews: research/reviews/codex_003-dictionary-codegen_gate_a_2_review.md, research/reviews/opus_003-dictionary-codegen_gate_a_2_adversarial_review.md.
+
+### Replan loop (post re-`/plan`) — round-by-round
+
+- Round 1 applied 2026-05-15: Codex P1=0 P2=4 P3=2; Opus post-judging P1=1 P2=4 P3=4; rewrite addresses root causes #1 (owning_message_t concretisation), #2 (arch §2.4 v0.2→v0.3 sweep), #3 (RC-closure body reconciliation), #4 (AC-C4 CMake-graph test binding). Reviews: research/reviews/codex_003-dictionary-codegen_gate_a_replan_review.md, research/reviews/opus_003-dictionary-codegen_gate_a_replan_adversarial_review.md.
+- Round 2 applied 2026-05-15: Codex P1=1 P2=2 P3=0; Opus post-judging P1=1 P2=3 P3=2; FINAL rewrite (2/2) addresses Root cause #1 (Option A — adopt 2c v1.4 §4.8 owning_message_traits<Msg> verbatim, replacing the invented Msg::owning_type member alias + correcting the false 2c-attribution bundle-wide), Root cause #3 residual (Entity 5 spelling), Root cause #4 (## 13 → Normative References + [const §VI.2] canonicalisation). RC#2 confirmed closed (no edits). Reviews: research/reviews/codex_003-dictionary-codegen_gate_a_replan_2_review.md, research/reviews/opus_003-dictionary-codegen_gate_a_replan_2_adversarial_review.md.
+
+### Replan loop round 2 — disagreements
+
+Codex round-2 P1 secondary prong ('reify.hpp and generated_message.hpp do not pin the alias identically') — Disagree per Opus round-2 review: the two files were internally consistent under the `Msg::owning_type` model; the real defect is the false 2c-attribution + mechanism divergence (Root cause #1), not internal inconsistency. Fixed via Option A (adopt 2c's `owning_message_traits` verbatim), not via re-pinning.
+
+### Replan loop round 1 — disagreements
+
+None. The authoritative Opus adversarial review (`research/reviews/opus_003-dictionary-codegen_gate_a_replan_adversarial_review.md`) ruled **no Codex finding `Disagree`** — it states "No Codex finding is judged Disagree. Codex's RC#1/#2/#3-resolved conclusion is independently confirmed." Every Codex finding was Confirmed or Escalated (Codex P3-1 escalated to P2 and clustered into Root cause #1; Codex P3-2 confirmed at P3 and clustered into Root cause #2). No Codex fix was rejected; nothing to record here.
 
 ### Round 1 — original pre-review notes (superseded by the applied record above)
 
@@ -423,12 +451,13 @@ All citations resolve under canonical form. Cross-doc cites (`[2a §4.2]`, `[2a 
 
 When `/speckit-tasks` runs after the **fresh** Gate A converges, it consumes this plan plus `data-model.md` + `research.md` + `contracts/` to produce `tasks.md`. Pre-binding the per-task shape:
 
-- **One task per row of the "Test seam → file mapping" table** (17 seam rows + **8** cross-cutting AC rows = 25 test-target tasks; the 2 new cross-cutting files are `version_profile_test.cpp`, `field_traits_test.cpp`).
+- **One task per row of the "Test seam → file mapping" table** (17 seam rows + the RC#4 "C4 (CMake-graph)" seam row + **11** cross-cutting AC entries = ~29 test-target tasks; the RC#1 files are `version_profile_test.cpp`, `field_traits_test.cpp`; the RC#4 entry is the `codegen_build_graph_test.cmake` → `fixpp::dict::codegen-build-graph-check` CTest target; `flyweight_shape_test.cpp` is now an explicit cross-cutting row for AC-G7/AC-G7a).
 - **One task per `fixpp-codegen` source file / emitter** (~10: IR, the five emitters, dispatch emitter, normative-refs emitter, templating helper, CLI driver + its `CMakeLists.txt`).
 - **One task per runtime bridge header** (`reify.hpp`, `version_registry.hpp`) + any out-of-line `src/dictionary/*.cpp`.
 - **One task** for the **RC#1 `version_profile.hpp` additive edit** (append the structs + `resolve_application_version` + the ApplVerID wire→C++ map below the unchanged 002 enums) — `contracts/version_profile.hpp` is the shape oracle; AC-VP1..AC-VP6.
 - **One task** for the **RC#1 NET-NEW `field_traits.hpp`** (`field_traits<T>` + specialisations + `decode_field<T>`, `decimal_t` excluded) — `contracts/field_traits.hpp` is the shape oracle; AC-FT1..AC-FT3.
-- **One task** for the vendored frozen `include/fixpp/wire/message_view_contract.hpp` + its drift-guard contract test incl. the N-P3-1 `get<1128>()` well-formed assertion (R6).
+- **One task** for the vendored frozen `include/fixpp/wire/message_view_contract.hpp` + its drift-guard contract test incl. the N-P3-1/N-P2-2 `get<1128>()` **and** `get<35>()` well-formed assertions (R6).
+- **One task** for the RC#4 `tests/codegen/codegen_build_graph_test.cmake` + the `fixpp::dict::codegen-build-graph-check` CTest registration (AC-C4 / DoD §12 build-tree clause).
 - **One task** for the `include/fixpp/core/error.hpp` additive enum edit — six slots LOCKED 23–28 (research.md D-10/D-21).
 - **One task** for the `[2c §7.6]` CMake target graph + the configure-time `fixpp::dict::generate-vXX` custom targets.
 - **One task** for the four golden headers (generated by `fixpp-codegen`, then checked in at `/implement` — not present at Gate A) + the conformance must-include manifest (Gate-A-reviewed).

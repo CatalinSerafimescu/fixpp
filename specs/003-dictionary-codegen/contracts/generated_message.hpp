@@ -17,16 +17,34 @@
                                                   // version_profile/resolve_application_version
                                                   // (003-OWNED additive edit; RC#1 RESOLVED).
 #include <fixpp/wire/message_view_contract.hpp>   // vendored frozen stub (R6); RC#3 RESOLVED via
-                                                  // the arch §2.4 v1.1 dual-compile bridge carve-out.
+                                                  // the arch §2.4 v0.2→v0.3 dual-compile bridge carve-out.
 #include <memory_resource>                        // std::pmr::memory_resource (decimal route, v1.4)
+#include <type_traits>                            // std::is_same_v (AC-G7a owning_message_traits pin)
+#include <fixpp/dict/reify.hpp>                    // dict::owning_message_traits primary template
+                                                  // ([2c §4.8] L1459) — specialised below
 
 namespace fixpp::v50sp2 {  // one namespace per codegen version; vt11 = 7 admin
+
+// Forward-declared so the owning_message_traits<NewOrderSingle> specialisation
+// below is well-formed in the shape oracle. The owning_<Msg> class DEFINITION
+// is emitted into the per-version Reify.hpp (Entity 4, [2c §4.8]); this
+// contract pins only the per-message owning_message_traits specialisation.
+class owning_NewOrderSingle;
 
 class NewOrderSingle {                                            // AC-G1
 public:
     static constexpr std::string_view  msg_type_v = "D";          // AC-G2
     static constexpr application_version version_v =
         application_version::v50sp2;                               // AC-G2
+
+    // AC-G7a / seam #18 — the owning_message_t<Msg> resolvent is the canonical
+    // 2c v1.4 §4.8 (L1456–1464) external-trait form: codegen emits one
+    // `owning_message_traits<Msg>` specialisation per typed message (at
+    // namespace scope, alongside `owning_<Msg>` in the per-version Reify.hpp;
+    // pinned below). This is INHERITED 2c v1.4 text — not a 003-derived /
+    // 2c-underspecified resolvent and not a `Msg::owning_type` member alias.
+    // See the namespace-scope owning_message_traits<NewOrderSingle>
+    // specialisation + AC-G7a static_assert after this class.
 
     explicit NewOrderSingle(                                       // AC-G3
         wire::MessageView<wire::access_mode::Index> const& view
@@ -87,6 +105,28 @@ static_assert(sizeof(NewOrderSingle)
               == sizeof(wire::MessageView<wire::access_mode::Index> const*));
 
 }  // namespace fixpp::v50sp2
+
+// AC-G7a / seam #18 — codegen emits one owning_message_traits<Msg>
+// specialisation per typed message (2c v1.4 §4.8 L1460–1462, verbatim form),
+// at namespace scope alongside owning_<Msg> in the per-version Reify.hpp; the
+// specialisation of the dict-scope primary template appears outside
+// fixpp::v50sp2 (a specialisation must be declared in a namespace enclosing
+// fixpp::dict). The shape oracle pins the NewOrderSingle specialisation; the
+// static_assert below catches a codegen template that omits the specialisation
+// (the alias becomes ill-formed — a COMPILE-TIME shape-oracle failure, like
+// AC-G7's sizeof static_assert, not a runtime golden assertion) or wires it to
+// the wrong owner. dict::owning_message_t<NewOrderSingle> ≡
+// dict::owning_message_traits<NewOrderSingle>::type ≡
+// fixpp::v50sp2::owning_NewOrderSingle (see contracts/reify.hpp:
+// `template<class Msg> using owning_message_t =
+// typename owning_message_traits<Msg>::type;`, 2c v1.4 §4.8 L1463–1464).
+template <>
+struct fixpp::dict::owning_message_traits<fixpp::v50sp2::NewOrderSingle> {
+    using type = fixpp::v50sp2::owning_NewOrderSingle;            // 2c v1.4 §4.8 L1461
+};
+static_assert(std::is_same_v<
+    fixpp::dict::owning_message_t<fixpp::v50sp2::NewOrderSingle>,
+    fixpp::v50sp2::owning_NewOrderSingle>);
 
 // Filtered at emit, NOT partially emitted (spec §A3):
 //  - FIX-Latest A-035..A-065  → build warning, not emitted, no v1.0 flag (AC-G9)

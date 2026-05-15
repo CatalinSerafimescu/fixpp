@@ -13,7 +13,9 @@
                                           // P1-1 / Opus RC#1; spec §8 "Upstream dependency audit").
                                           // Header/contract added at re-/plan, not this pass.
                                           // (Harmonized with contracts/reify.hpp's annotation on
-                                          // the same include — Gate A r2 Opus N-P3-1.)
+                                          // the same include — Gate A r2 Opus N-P3-1; the shared
+                                          // annotation's arch stamp corrected to §2.4 v0.2→v0.3 at
+                                          // the replan loop round 1, Opus N-P3-2 / RC#2.)
 
 namespace fixpp::dict {
 

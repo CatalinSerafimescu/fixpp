@@ -24,7 +24,7 @@
                                                  // frozen R6 stub; see RC#3
                                                  // note in contracts/reify.hpp
                                                  // — same dual-compile bridge
-                                                 // carve-out, arch §2.4 v1.1).
+                                                 // carve-out, arch §2.4 v0.2→v0.3).
 #include <cstdint>
 #include <string_view>
 

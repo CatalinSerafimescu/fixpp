@@ -9,10 +9,10 @@
                                                  // RC#1 RESOLVED at re-/plan 2026-05-15 —
                                                  // contracts/version_profile.hpp pins the 003-owned
                                                  // additive edit (struct + free fn + ApplVerID
-                                                 // wire→C++ map); new ACs AC-VP1..AC-VP5.
+                                                 // wire→C++ map); new ACs AC-VP1..AC-VP6.
 #include <fixpp/wire/message_view_contract.hpp>  // vendored frozen stub (R6 / D-2). RC#3 RESOLVED at
                                                  // re-/plan 2026-05-15: the arch §2.4 carve-out is
-                                                 // broadened (v1.0→v1.1, [const §XX] arch amendment)
+                                                 // broadened (v0.2→v0.3, [const §XX] arch amendment)
                                                  // to cover the dict↔wire BRIDGE surface — the
                                                  // generated fixpp::vXX::* tree PLUS the hand-written
                                                  // reify.hpp + field_traits.hpp + the vendored
@@ -29,18 +29,46 @@ namespace fixpp::dict {
 
 // Per [2c §4.8]. resolved_message_version carries (kind, session, application)
 // per RC#1; FIXT admin → {session_admin, vt11, Unknown}; application → the
-// resolved value (v42/v44/v50sp2).
-struct resolved_message_version;  // exact layout pinned at /tasks vs [2c §4.8]
+// resolved value (v42/v44/v50sp2). Its ONE authoritative definition (the full
+// struct + the sizeof==4 / alignof==1 / trivially-copyable static_asserts that
+// AC-VP1 pins) lives in contracts/version_profile.hpp, included above
+// (#include <fixpp/dict/version_profile.hpp> at line 7). No forward-declare /
+// "pinned at /tasks" deferral here — that would be a false re-opening of a type
+// AC-VP1 already closes (Opus N-P2-4 / RC#3). This contract consumes that one
+// shape; owning_message_handle::version() returns it by value.
 
-// owning_message_t<Msg> — the return-type alias of reify_as<Msg> (Opus N-P2-1:
-// previously used in reify_as / owning_message_handle::as<> / AC-R1 / data-model
-// Entity 6 but NEVER defined; the name-mangling/ADL surface every downstream
-// consumer binds to must be pinned in the contract, not deferred). Canonical
-// 2c §4.8 form: each codegen Reify.hpp emits owning_<Msg> and exposes it as
-// Msg::owning_type, so owning_message_t<v44::NewOrderSingle> ≡
-// v44::owning_NewOrderSingle.
+// owning_message_t<Msg> — the return-type alias of reify_as<Msg> / the
+// owning_message_handle::as<Msg>() return type (Opus N-P2-1: used in reify_as /
+// as<> / AC-R1 / data-model Entity 6; the name-mangling/ADL surface every
+// downstream consumer binds to is pinned in the contract here, not deferred).
+//
+// CANONICAL 2c v1.4 §4.8 FORM — INHERITED 2c TEXT (replan loop round 2 —
+// Opus round-2 / Codex round-2 P1 / Root cause #1, Option A). 2c-codegen.md
+// v1.4 §4.8 (L1456–1464) DEFINES `owning_message_t<Msg>` as
+//   `typename owning_message_traits<Msg>::type`
+// via a per-message EXTERNAL TRAIT specialisation: codegen emits one
+// `owning_<Msg>` class plus one `owning_message_traits<Msg>` specialisation
+// per typed message (alongside it, in the per-version Reify.hpp). 003 inherits
+// this verbatim — it is NOT a 003-derived/2c-underspecified resolvent and NOT
+// a `Msg::owning_type` member alias; the round-1 rewrite's attribution was
+// false against the signed-off design doc and is corrected here. 2c's prose
+// name `owning_<Msg>` (used in Reify.hpp / as<>) is the per-message concrete
+// owner the trait resolves to (`owning_NewOrderSingle`, …); under the trait,
+// `owning_<Msg>` and `owning_message_t<Msg>` denote the SAME type.
+//
+// The primary template is declared so the alias is well-formed in this
+// contract; the per-message specialisation (e.g. owning_message_traits<
+// NewOrderSingle>) is emitted by codegen into the per-version Reify.hpp and is
+// part of the codegen SHAPE ORACLE — contracts/generated_message.hpp pins the
+// NewOrderSingle specialisation and the codegen-shape golden seam #18
+// (tests/codegen/flyweight_shape_test.cpp, AC-G7a) asserts it is present and
+// bound to the correct owner; omission is caught as a COMPILE-TIME shape-oracle
+// failure (the alias becomes ill-formed), not a runtime GoogleTest assertion.
+template <class Msg> struct owning_message_traits;          // 2c v1.4 §4.8 L1459
 template <class Msg>
-using owning_message_t = typename Msg::owning_type;  // AC-R1; [2c §4.8]
+using owning_message_t = typename owning_message_traits<Msg>::type;  // 2c v1.4
+                                                     // §4.8 L1463–1464; AC-R1 /
+                                                     // AC-G7a (inherited 2c text)
 
 // Type-erased owning message (runtime-dispatch return). Move-only. SBO variant
 // may elide the heap allocation below a published size threshold.
@@ -60,9 +88,13 @@ public:
         field_value(std::uint16_t tag) const noexcept [[clang::lifetimebound]];
 
     // nullptr on resolved-version / MsgType mismatch (no UB, no throw) — AC-R6.
+    // Return type is the canonical 2c v1.4 §4.8 owning_message_t<Msg> alias
+    // (`typename owning_message_traits<Msg>::type`; equivalently 2c's prose
+    // owner name `owning_<Msg>` — the trait resolves them to the same type;
+    // Root cause #1, Option A).
     template <class Msg>
     [[nodiscard]] auto as() const noexcept [[clang::lifetimebound]]
-        -> owning_<Msg> const*;
+        -> owning_message_t<Msg> const*;
 
 private:
     struct impl; /* small-variant OR heap polymorphic owner */
@@ -86,7 +118,7 @@ reify_as(wire::MessageView<wire::access_mode::Index> const& view,
 //     contracts/version_profile.hpp) maps to empty sv →
 //     dict::resolve_application_version(profile, value) [003-OWNED free fn,
 //     RC#1 RESOLVED at re-/plan 2026-05-15 — contracts/version_profile.hpp;
-//     AC-VP1..AC-VP5] → {application, profile.session, resolved} via
+//     AC-VP1..AC-VP6] → {application, profile.session, resolved} via
 //     _dispatch/reify_dispatch_application.hpp.
 // Failures: dict_reify_oom, dict_reify_msg_type_mismatch,
 //   dict_unknown_appl_ver_id, dict_unresolved_application_version (NOT a
