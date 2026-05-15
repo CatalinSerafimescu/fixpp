@@ -82,7 +82,9 @@ struct field_traits<bool> {
 template <class T>
 [[nodiscard]] inline core::expected_t<T> decode_field(
     core::expected_t<wire::field_view> fv) noexcept {
-    if (!fv) return std::unexpected{fv.error()};
+    if (!fv) {
+        return std::unexpected{fv.error()};
+    }
     return field_traits<T>::from_field_view(*fv);
 }
 

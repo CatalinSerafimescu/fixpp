@@ -16,8 +16,13 @@
 // variant. Placeholder maps to dict_xml_parse_failed pending the [2c §4.1.3]
 // wire decode-error binding (T024/US1).
 #include <charconv>
+#include <cstdint>
+#include <expected>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/field_traits.hpp>
+#include <fixpp/wire/message_view_contract.hpp>
 #include <string_view>
+#include <system_error>
 
 namespace fixpp::dict {
 
@@ -42,9 +47,8 @@ core::expected_t<std::int32_t> field_traits<std::int32_t>::from_field_view(
     wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     std::int32_t out{};
-    auto const* end = s.data() + s.size();
-    auto [p, ec] = std::from_chars(s.data(), end, out);
-    if (ec != std::errc{} || p != end) {
+    auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
+    if (ec != std::errc{} || p != s.data() + s.size()) {
         return std::unexpected{kDecodeFailed};
     }
     return out;
@@ -54,9 +58,8 @@ core::expected_t<std::int64_t> field_traits<std::int64_t>::from_field_view(
     wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     std::int64_t out{};
-    auto const* end = s.data() + s.size();
-    auto [p, ec] = std::from_chars(s.data(), end, out);
-    if (ec != std::errc{} || p != end) {
+    auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
+    if (ec != std::errc{} || p != s.data() + s.size()) {
         return std::unexpected{kDecodeFailed};
     }
     return out;

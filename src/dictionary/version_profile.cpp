@@ -7,6 +7,8 @@
 // resolution ([2c §4.3:457-501]) so dict::reify (which holds no Dictionary)
 // can run it. Pure; no wire dependency. AC-VP2/AC-VP3/AC-VP4; data-model
 // Entity 10 / I-13.
+#include <expected>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <string_view>
 

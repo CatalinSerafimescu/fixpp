@@ -51,6 +51,8 @@
 // deferred; the compile-time shape (move-only, method signatures) is what
 // T034 tests (AC-R6 is shape-only per reify_test.cpp precedent).
 #include <cstdint>
+#include <expected>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
@@ -82,8 +84,10 @@ namespace {
 // CMake target. Behavioural assertions (handle.version() / handle.msg_type()
 // / handle.as<NOS>()) are R6-blocked per T034 test-comment rationale.
 struct owning_message_handle::impl {
-    resolved_message_version version{resolved_message_version::kind::session_admin,
-                                     session_version::Unknown, application_version::Unknown};
+    resolved_message_version version{.k = resolved_message_version::kind::session_admin,
+                                     .session = session_version::Unknown,
+                                     .application = application_version::Unknown,
+                                     ._reserved = 0};
     // R6: no typed owner stored — dispatch TU wiring deferred (T037 / 2b).
 };
 
@@ -104,9 +108,11 @@ owning_message_handle& owning_message_handle::operator=(owning_message_handle&& 
 owning_message_handle::~owning_message_handle() { delete pimpl_; }
 
 resolved_message_version owning_message_handle::version() const noexcept {
-    if (!pimpl_) {
-        return {resolved_message_version::kind::session_admin, session_version::Unknown,
-                application_version::Unknown};
+    if (pimpl_ == nullptr) {
+        return {.k = resolved_message_version::kind::session_admin,
+                .session = session_version::Unknown,
+                .application = application_version::Unknown,
+                ._reserved = 0};
     }
     return pimpl_->version;
 }

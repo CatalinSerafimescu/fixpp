@@ -77,6 +77,10 @@ BRIDGE_EXEMPT_INCLUDES: set[str] = {
 BRIDGE_SOURCE_FILES: set[str] = {
     "src/dictionary/reify.cpp",            # out-of-line reify bridge (if any; D-5)
     "src/dictionary/version_registry.cpp",  # out-of-line registry bits (if any; D-5)
+    "src/dictionary/field_traits.cpp",     # out-of-line field_traits bridge (RC#1/RC#3; D-5)
+                                            # field_traits.cpp implements from_field_view
+                                            # which takes wire::field_view — uses the vendored
+                                            # frozen stub via message_view_contract.hpp
 }
 
 

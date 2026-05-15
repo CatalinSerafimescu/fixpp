@@ -49,6 +49,8 @@ namespace fixpp::dict {
 template <class Msg>
 struct owning_message_traits;  // 2c v1.4 §4.8 L1459
 template <class Msg>
+// verbatim 2c v1.4 §4.8 inherited text — contract-pinned, see contracts/reify.hpp / AC-G7a
+// NOLINTNEXTLINE(readability-redundant-typename)
 using owning_message_t = typename owning_message_traits<Msg>::type;  // 2c v1.4
                                                                      // §4.8 L1463-1464; AC-R1 /
                                                                      // AC-G7a (inherited 2c text)
@@ -59,7 +61,11 @@ class owning_message_handle {
 public:
     owning_message_handle(owning_message_handle const&) = delete;
     owning_message_handle& operator=(owning_message_handle const&) = delete;
+    // verbatim 2c v1.4 §4.8 inherited text — contract-pinned, see contracts/reify.hpp / AC-G7a
+    // NOLINTNEXTLINE(readability-named-parameter,hicpp-named-parameter)
     owning_message_handle(owning_message_handle&&) noexcept;
+    // verbatim 2c v1.4 §4.8 inherited text — contract-pinned, see contracts/reify.hpp / AC-G7a
+    // NOLINTNEXTLINE(readability-named-parameter,hicpp-named-parameter)
     owning_message_handle& operator=(owning_message_handle&&) noexcept;
     ~owning_message_handle();
 

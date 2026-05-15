@@ -8,6 +8,10 @@
 // v1.0 construction surface the registry holds no Dictionary, so get() always
 // reports dict_no_dictionary_for_application_version — the AC-X2 error,
 // distinct from dict_unknown_appl_ver_id (a wire-string parse failure).
+#include <expected>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
 namespace fixpp::dict {
