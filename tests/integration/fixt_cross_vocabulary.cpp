@@ -190,15 +190,23 @@ TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
     // AC-D4 worked-example full dict::reify() call.
-    // R6-blocked: MsgType read (get<35>()) returns dict_xml_parse_failed.
-    // Test confirms: reify() is callable, returns an error under R6.
+    // R6-blocked: MsgType read (get<35>()) returns dict_xml_parse_failed from
+    // the frozen stub; dict::reify returns that error before reaching dispatch.
+    // gate-b/r1 RC#2: dict::reify's dispatch stubs now return
+    // dict_reify_wire_body_not_ready (those branches are unreachable in R6
+    // because get<35>() always fails first, but the error code is now correct
+    // for when 2b makes them reachable).
+    // The actual R6 return from dict::reify() is dict_xml_parse_failed (from
+    // get<35>()); the test asserts this exact code so misdispatch is detectable.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;  // frozen stub MV
     auto r = fixpp::dict::reify(mv, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: dict::reify() must return an error with frozen stub MV";
-    // R6: error is dict_xml_parse_failed (get<35>() frozen — not the real
-    // dispatch error). 2b-unblock: this test will return a valid handle.
-    (void)r.error();
+    // R6 exact oracle: get<35>() on the frozen stub returns dict_xml_parse_failed.
+    // 2b-unblock: replace this with has_value() assertion and version() checks.
+    EXPECT_EQ(r.error(), error::dict_xml_parse_failed)
+        << "R6: dict::reify() must return dict_xml_parse_failed from frozen get<35>() "
+           "(2b-unblock: returns success with valid handle)";
 
     // The resolution DECISIONS are verified by the pure-function tests above,
     // which are NOT R6-blocked (resolve_application_version is PURE).

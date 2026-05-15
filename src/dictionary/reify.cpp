@@ -185,13 +185,19 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
     // Step 2: FIXT-admin detection (AC-D2 / seam #15a).
     if (mt_sv.size() == 1 && is_fixt_admin(mt_sv.front())) {
         // FIXT admin hit → resolve {session_admin, profile.session, Unknown}.
-        // Dispatch to dispatch::dispatch_fixt() (defined in the build-tree
-        // generated _dispatch/reify_dispatch_fixt.hpp, included by the
-        // dispatch-consuming TU). This .cpp cannot include it.
+        // gate-b/r1 RC#2: this stub must call dispatch::dispatch_fixt(view,
+        // mt_sv.front(), profile, mr) which is defined in the build-tree-generated
+        // _dispatch/reify_dispatch_fixt.hpp. This .cpp cannot #include that header
+        // (shipped source must not depend on build-tree headers — arch §2.4 v0.3 /
+        // NFR-003-8). The full wiring lands when 2b introduces the
+        // fixpp::dict::dispatch CMake target (a generated-aware TU that includes
+        // the _dispatch/ headers and to which dict::reify delegates via a
+        // non-generated bridge header — 2b-unblock).
         // R6: this branch is unreachable (get<35>() always errors above).
-        // 2b-unblock: dispatch_fixt(view, mt_sv.front(), profile, mr) here.
+        // Return the correct R6 placeholder — NOT dict_xml_parse_failed (wrong
+        // layer/module — RC#2 finding F3 correction).
         (void)profile;
-        return std::unexpected{core::error::dict_xml_parse_failed};
+        return std::unexpected{core::error::dict_reify_wire_body_not_ready};
     }
 
     // Step 3: application dispatch (AC-D3 / seam #15b).
@@ -210,12 +216,13 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
         return std::unexpected{app_ver.error()};
     }
 
-    // Dispatch to dispatch::dispatch_application() (in the build-tree generated
-    // _dispatch/reify_dispatch_application.hpp, included by the consumer TU).
+    // gate-b/r1 RC#2: this stub must call dispatch::dispatch_application(view,
+    // mt_sv, *app_ver, profile, mr). Same constraint as above — build-tree headers
+    // not includable here. 2b-unblock: dispatch bridge TU + CMake target wiring.
     // R6: this branch is also unreachable (get<35>() always errors above).
-    // 2b-unblock: dispatch_application(view, mt_sv, *app_ver, profile, mr).
+    // Return the correct R6 placeholder — NOT dict_xml_parse_failed (RC#2 fix).
     (void)app_ver;
-    return std::unexpected{core::error::dict_xml_parse_failed};
+    return std::unexpected{core::error::dict_reify_wire_body_not_ready};
 }
 
 }  // namespace fixpp::dict
