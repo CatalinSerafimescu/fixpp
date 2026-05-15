@@ -7,7 +7,7 @@ last_updated: 2026-05-15
 
 # Quickstart — 003-dictionary-codegen
 
-> **Status (Gate A round 1, 2026-05-15): bundle NOT converged — `blocked_on_replan`.** The commands below are the intended workflow but are **not** runnable as specified until RC#1 (`version_profile`/`resolve_application_version`/`field_traits` are 003-owned new surface, not 002-merged), RC#2 (inherited 2c §4.1.3/§4.7 decimal-decoding defect — 2c reopen required), and RC#3 (open `dict/`→`wire/` layer amendment) are resolved at re-`/plan`. See `plan.md` `## Gate A`. `/tasks` is gated.
+> **Status: re-`/plan` applied 2026-05-15 — RC#1/RC#2/RC#3 RESOLVED in-bundle; awaiting a fresh Codex Gate A.** RC#1 (`version_profile`/`resolve_application_version`/`field_traits` now 003-owned — §4.8, contracts), RC#2 (decimal re-derived from corrected 2c **v1.4**, AC-G4/AC-G4a), RC#3 (dict↔wire bridge via the `arch §2.4` v0.2→v0.3 carve-out amendment). The commands below are the intended workflow; `/tasks` remains gated **only** until the fresh `/gate-a 003-dictionary-codegen` converges (do not run `/speckit-tasks` before then). See `plan.md` `## Re-/plan (RC resolution)` + `## Gate A`.
 
 All commands run with cwd inside the library submodule
 (`research/G19-fix-fpml-iso20022/library`). The agent surfaces an

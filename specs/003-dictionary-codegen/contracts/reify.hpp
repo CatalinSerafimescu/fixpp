@@ -5,15 +5,22 @@
 #pragma once
 #include <fixpp/core/error.hpp>                  // fixpp::core::expected_t, error
 #include <fixpp/dict/version_profile.hpp>        // version_profile + dict::resolve_application_version
-                                                 // — 003-OWNED, NOT 002-shipped: 002 deferred both
-                                                 // (Gate A r1 Codex P1-1 / Opus RC#1; spec §8
-                                                 // "Upstream dependency audit"). Header/contract
-                                                 // added at re-/plan, not this convergence pass.
-#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen stub (R6 / D-2). NOTE: this is a
-                                                 // hand-written dict/ header #include-ing wire/ —
-                                                 // an OPEN layer-amendment item (Codex P1-3 / RC#3),
-                                                 // NOT covered by the arch §2.4 generated-header
-                                                 // carve-out. See spec NFR-003-8 / R6.
+                                                 // — 003-OWNED, NOT 002-shipped: 002 deferred both.
+                                                 // RC#1 RESOLVED at re-/plan 2026-05-15 —
+                                                 // contracts/version_profile.hpp pins the 003-owned
+                                                 // additive edit (struct + free fn + ApplVerID
+                                                 // wire→C++ map); new ACs AC-VP1..AC-VP5.
+#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen stub (R6 / D-2). RC#3 RESOLVED at
+                                                 // re-/plan 2026-05-15: the arch §2.4 carve-out is
+                                                 // broadened (v1.0→v1.1, [const §XX] arch amendment)
+                                                 // to cover the dict↔wire BRIDGE surface — the
+                                                 // generated fixpp::vXX::* tree PLUS the hand-written
+                                                 // reify.hpp + field_traits.hpp + the vendored
+                                                 // wire-contract stub — as a dual-compile bridge
+                                                 // (NOT a cyclic dictionary→wire module edge, which
+                                                 // arch §2.2/§2.3 forbid). check_layers.py is taught
+                                                 // an explicit bridge file-list. See spec NFR-003-8 /
+                                                 // research.md D-12 / plan.md "Re-/plan (RC#3)".
 #include <cstdint>
 #include <memory_resource>
 #include <string_view>
@@ -74,11 +81,12 @@ reify_as(wire::MessageView<wire::access_mode::Index> const& view,
 //  1. peek MsgType(35).
 //  2. FIXT-admin hit → {session_admin, profile.session, Unknown} via
 //     _dispatch/reify_dispatch_fixt.hpp → vt11::owning_<Msg>.
-//  3. miss → read ApplVerID(1128) (dict_field_not_present → empty sv) →
-//     dict::resolve_application_version(profile, value) [003-OWNED free fn —
-//     NOT 002-shipped; 002 deferred it. Gate A r1 Codex P1-1 / Opus RC#1;
-//     spec §8. Contract/header added at re-/plan.] →
-//     {application, profile.session, resolved} via
+//  3. miss → read ApplVerID(1128); the wire-owned field-absent error from
+//     get<1128>() (NOT a 003 slot — cross-feature note in
+//     contracts/version_profile.hpp) maps to empty sv →
+//     dict::resolve_application_version(profile, value) [003-OWNED free fn,
+//     RC#1 RESOLVED at re-/plan 2026-05-15 — contracts/version_profile.hpp;
+//     AC-VP1..AC-VP5] → {application, profile.session, resolved} via
 //     _dispatch/reify_dispatch_application.hpp.
 // Failures: dict_reify_oom, dict_reify_msg_type_mismatch,
 //   dict_unknown_appl_ver_id, dict_unresolved_application_version (NOT a
