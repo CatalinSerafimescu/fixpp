@@ -1,40 +1,21 @@
 # tests/codegen/CMakeLists.txt
 # 003-dictionary-codegen — US1 typed-accessor / shape suites (T017-T022).
 #
-# Build-time codegen into the BUILD TREE only (AC-C4 / AC-T2 — never the
-# source tree). The RC#4 configure-time `generate-vXX` graph + per-version
-# INTERFACE targets + the codegen-build-graph CTest land at T016/T039/T040;
-# this is the minimal test-build wiring so the US1 suites can #include the
-# generated headers. fixpp-codegen is added before the tests block in the
-# top-level CMakeLists, so the target exists here.
+# Generated headers are produced at CMake CONFIGURE time by cmake/Codegen.cmake
+# (T016 — [2c §7.6] configure-time graph, AC-C4 / AC-T2).  The
+# fixpp_codegen_generate target is defined in cmake/Codegen.cmake (no-op at
+# build time; headers already on disk after configure).  This file no longer
+# defines the code-generation custom command — that is the single configure-time
+# mechanism owned by Codegen.cmake.
 
-if(NOT TARGET fixpp-codegen)
-  message(STATUS "tests/codegen: fixpp-codegen not built; skipping US1 suites")
+if(NOT TARGET fixpp_codegen_generate)
+  message(STATUS "tests/codegen: fixpp_codegen_generate not available; skipping US1 suites")
   return()
 endif()
 
 find_package(GTest CONFIG REQUIRED)
 
 set(FIXPP_CODEGEN_OUT "${CMAKE_BINARY_DIR}/_codegen/include")
-set(_xml "${CMAKE_SOURCE_DIR}/dictionaries")
-set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/.codegen.stamp")
-
-add_custom_command(
-  OUTPUT "${_stamp}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_CODEGEN_OUT}/fixpp"
-  COMMAND "$<TARGET_FILE:fixpp-codegen>"
-          --xml "${_xml}/FIX42.xml"    --out "${FIXPP_CODEGEN_OUT}/fixpp"
-          --xml "${_xml}/FIX44.xml"    --out "${FIXPP_CODEGEN_OUT}/fixpp"
-          --xml "${_xml}/FIX50SP2.xml" --out "${FIXPP_CODEGEN_OUT}/fixpp"
-          --xml "${_xml}/FIXT11.xml"   --out "${FIXPP_CODEGEN_OUT}/fixpp"
-  COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
-  DEPENDS fixpp-codegen
-          "${_xml}/FIX42.xml" "${_xml}/FIX44.xml"
-          "${_xml}/FIX50SP2.xml" "${_xml}/FIXT11.xml"
-  COMMENT "fixpp-codegen: generating per-version typed headers (build tree)"
-  VERBATIM
-)
-add_custom_target(fixpp_codegen_generate DEPENDS "${_stamp}")
 
 set(FIXPP_CODEGEN_TESTS
   codegen_typed_accessor_test
