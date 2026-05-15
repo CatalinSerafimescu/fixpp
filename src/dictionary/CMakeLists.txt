@@ -11,6 +11,13 @@ find_package(pugixml CONFIG REQUIRED)
 add_library(fixpp_dictionary STATIC
   xml_loader.cpp
   dictionary.cpp
+  # 003-dictionary-codegen (RC#1): the 003-owned upstream surface bodies.
+  # field_traits.cpp is a bridge file (arch §2.4 v0.3 — #includes the
+  # vendored frozen wire stub header; NOT a cyclic dictionary→wire link
+  # edge; check_layers.py BRIDGE_SOURCE_FILES exemption, T049).
+  version_profile.cpp
+  version_registry.cpp
+  field_traits.cpp
 )
 add_library(fixpp::dictionary ALIAS fixpp_dictionary)
 

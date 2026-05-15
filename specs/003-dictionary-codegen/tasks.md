@@ -33,7 +33,7 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 - [X] T001 Create the source/test/bench directory skeleton: `tools/codegen/fixpp-codegen/`, `tests/codegen/{conformance,}`, `tests/dictionary/`, `tests/integration/`, `bench/codegen/{compile_time_bench,}`, `bench/dictionary/`, `specs/003-dictionary-codegen/contracts/golden/` per plan.md Project Structure
 - [X] T002 [P] Confirm the Conan profile + CMake presets carry NO new dependency row (F1: `fixpp-codegen` links the merged `fixpp::dict`/`pugixml 1.14` transitively) — verify `conan/profiles/linux-clang-debug` and presets per quickstart §1, `[const §III.2]`/`[const §V.3]`
-- [ ] T003 [P] Create `tools/codegen/fixpp-codegen/CMakeLists.txt` — C++23 build-only host executable that links `fixpp::dict`; never linked into the user-facing library (`[const §III.5]`; F1 Candidate A)
+- [X] T003 [P] Create `tools/codegen/fixpp-codegen/CMakeLists.txt` — C++23 build-only host executable that links `fixpp::dict`; never linked into the user-facing library (`[const §III.5]`; F1 Candidate A)
 
 ---
 
@@ -45,9 +45,9 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Foundational tests (write FIRST — must fail before the header/impl tasks below)
 
-- [ ] T004 [P] `tests/dictionary/version_profile_test.cpp` — AC-VP1..AC-VP6: `version_profile`/`resolved_message_version` structs + `static_assert`s, `dict::resolve_application_version` free fn, full `ApplVerID(1128)`→C++ `application_version` wire map (`2c §4.3:486-501`), the AC-VP4 negative (C++ index NOT reused), `_reserved` discipline, the six locked error slots. Oracle: `contracts/version_profile.hpp`
-- [ ] T005 [P] `tests/dictionary/field_traits_test.cpp` — AC-FT1..AC-FT3: primary `field_traits<T>` + string_view/char/int/bool/timestamp/MultiChar-MultiString specialisations + `decode_field<T>`; AC-FT2 negative (`decimal_t` is NOT a `field_traits` specialisation). Oracle: `contracts/field_traits.hpp`
-- [ ] T006 [P] `tests/dictionary/version_registry_test.cpp` — AC-X1..AC-X3 shape-only with an in-test hand-built registry. Oracle: `contracts/version_registry.hpp`
+- [X] T004 [P] `tests/dictionary/version_profile_test.cpp` — AC-VP1..AC-VP6: `version_profile`/`resolved_message_version` structs + `static_assert`s, `dict::resolve_application_version` free fn, full `ApplVerID(1128)`→C++ `application_version` wire map (`2c §4.3:486-501`), the AC-VP4 negative (C++ index NOT reused), `_reserved` discipline, the six locked error slots. Oracle: `contracts/version_profile.hpp`
+- [X] T005 [P] `tests/dictionary/field_traits_test.cpp` — AC-FT1..AC-FT3: primary `field_traits<T>` + string_view/char/int/bool/timestamp/MultiChar-MultiString specialisations + `decode_field<T>`; AC-FT2 negative (`decimal_t` is NOT a `field_traits` specialisation). Oracle: `contracts/field_traits.hpp`
+- [X] T006 [P] `tests/dictionary/version_registry_test.cpp` — AC-X1..AC-X3 shape-only with an in-test hand-built registry. Oracle: `contracts/version_registry.hpp`
 
 ### Foundational implementation
 
@@ -57,9 +57,9 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 - [X] T010 [P] `include/fixpp/wire/message_view_contract.hpp` — NEW, vendored FROZEN R6 stub: exactly the `[2b §4.3]`/`[2b §4.7]` locked surface (`MessageView<Index>::get<Tag>`, `field_view`, `group_view`, `OffsetTable`). Oracle: `contracts/wire_message_view_contract.hpp`; data-model Entity 9. Bridge surface (`arch §2.4` v0.3); 2b replaces the body against this same contract
 - [X] T011 `include/fixpp/dict/reify.hpp` — NEW bridge header: `dict::reify_as` / `dict::reify` / `owning_message_handle` + the `owning_message_traits<Msg>` primary template and the `dict::owning_message_t<Msg> = typename owning_message_traits<Msg>::type` alias (canonical 2c v1.4 §4.8 form). `noexcept` free fn templates; PMR OOM → `dict_reify_oom` via `trap_throw`. Oracle: `contracts/reify.hpp`; data-model Entities 5/6. Bridge header (`arch §2.4` v0.3) (depends on T007–T010)
 - [X] T012 [P] `include/fixpp/dict/version_registry.hpp` — NEW: `dict::version_registry` shape only (concrete value type, `[const §XIV.2]` N/A). Makes T006 green. Oracle: `contracts/version_registry.hpp`; data-model Entity 7
-- [ ] T013 `tools/codegen/fixpp-codegen/template_writer.hpp` — deterministic, locale-independent string-templating layer (sorted, bytewise-stable emission — inherits 002's NFR-003-7 invariant; research.md D-6). Underpins all emitters and the US5 determinism guarantee
-- [ ] T014 `tools/codegen/fixpp-codegen/ir.hpp` + `ir.cpp` — XML→IR: call `XmlLoader::load(dictionaries/<VER>.xml, mr)`; walk `FieldRef`/`ComponentRef`/`GroupRef` arrays + `Dictionary::which_session_version()` (F1 Candidate A — one XML truth, no second parser; research.md D-1) (depends on T013)
-- [ ] T015 `tools/codegen/fixpp-codegen/main.cpp` — CLI driver: per-version dispatch into the emitters, build-tree-only output paths (`build/<preset>/_codegen/include/fixpp/...`), never the source tree (AC-C4) (depends on T014)
+- [X] T013 `tools/codegen/fixpp-codegen/template_writer.hpp` — deterministic, locale-independent string-templating layer (sorted, bytewise-stable emission — inherits 002's NFR-003-7 invariant; research.md D-6). Underpins all emitters and the US5 determinism guarantee
+- [X] T014 `tools/codegen/fixpp-codegen/ir.hpp` + `ir.cpp` — XML→IR: call `XmlLoader::load(dictionaries/<VER>.xml, mr)`; walk `FieldRef`/`ComponentRef`/`GroupRef` arrays + `Dictionary::which_session_version()` (F1 Candidate A — one XML truth, no second parser; research.md D-1) (depends on T013)
+- [X] T015 `tools/codegen/fixpp-codegen/main.cpp` — CLI driver: per-version dispatch into the emitters, build-tree-only output paths (`build/<preset>/_codegen/include/fixpp/...`), never the source tree (AC-C4) (depends on T014)
 - [ ] T016 `CMakeLists.txt` + `cmake/` — the `[2c §7.6]` target graph: configure-time `fixpp::dict::generate-vXX` custom targets (NOT build-time), per-version `INTERFACE` targets carrying `INTERFACE_INCLUDE_DIRECTORIES` into the build tree, `fixpp::dict::{v42,v44,v50sp2,vt11}` + `fixpp::dict::runtime` (AC-C4; `[arch §4.2]`) (depends on T015)
 
 **Checkpoint**: Codegen tool scaffolding builds; RC#1 headers + wire stub + error slots compile and their shape tests (T004–T006) pass. Generated-header emission and per-story work can begin.

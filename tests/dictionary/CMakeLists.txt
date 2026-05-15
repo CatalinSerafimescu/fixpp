@@ -22,6 +22,10 @@ set(FIXPP_DICT_TESTS
   dictionary_parser_error_test
   dictionary_oom_injection_test
   dictionary_lookup_test
+  # 003-dictionary-codegen — Foundational shape tests T004-T006 (RC#1).
+  dictionary_version_profile_test
+  dictionary_field_traits_test
+  dictionary_version_registry_test
 )
 
 foreach(target IN LISTS FIXPP_DICT_TESTS)

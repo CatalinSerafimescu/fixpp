@@ -57,6 +57,17 @@ add_subdirectory(src/tap)
 add_subdirectory(src/capi)
 add_subdirectory(src/service)
 
+# ── Codegen host tool (003-dictionary-codegen, build-only [const §III.5]) ────
+# F1 Candidate A: C++23 host executable reusing the merged fixpp::dictionary
+# runtime (no second XML parser — research.md D-1). Added AFTER src/dictionary
+# so fixpp::dictionary exists. Never installed / never linked into the
+# user-facing library. The full [2c §7.6] target graph + configure-time
+# fixpp::dict::generate-vXX custom targets land with the US1 emitters (T016).
+option(FIXPP_BUILD_CODEGEN_TOOL "Build the fixpp-codegen host tool" ON)
+if(FIXPP_BUILD_CODEGEN_TOOL)
+  add_subdirectory(tools/codegen/fixpp-codegen)
+endif()
+
 # ── Bindings ─────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_PYTHON)
   add_subdirectory(bindings/python)
