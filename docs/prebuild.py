@@ -173,8 +173,20 @@ def _generate_summary(src_dir: Path, spec_ids: list[str]) -> str:
         "# Summary\n",
         "- [Introduction](./intro.md)",
         "- [Feature catalogue](./feature-catalogue.md)",
-        "- [Feature specs]()",
     ]
+
+    # Static hand-authored docs under docs/src/dictionary/ (tracked in git,
+    # not managed by prebuild.py copy logic).
+    dict_dir = src_dir / "dictionary"
+    if dict_dir.is_dir():
+        dict_files = sorted(f for f in dict_dir.iterdir() if f.suffix == ".md")
+        if dict_files:
+            lines.append("- [Dictionary]()")
+            for df in dict_files:
+                label = df.stem.replace("-", " ").replace("_", " ").title()
+                lines.append(f"  - [{label}](./dictionary/{df.name})")
+
+    lines.append("- [Feature specs]()")
 
     for spec_id in sorted(spec_ids):
         spec_dir = src_dir / "specs" / spec_id
