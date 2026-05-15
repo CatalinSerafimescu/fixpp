@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
             cur_out = argv[++i];
         }
         if (!cur_xml.empty() && !cur_out.empty()) {
-            jobs.push_back({cur_xml, cur_out});
+            jobs.push_back({.xml = cur_xml, .out = cur_out});
             cur_xml.clear();
             cur_out.clear();
         }

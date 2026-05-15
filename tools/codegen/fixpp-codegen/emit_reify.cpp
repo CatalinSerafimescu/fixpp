@@ -25,31 +25,34 @@
 // Deterministic LF-only emission over the bytewise-sorted message list
 // (NFR-003-7 / AC-T1). Mirrors app_version_enum() from emit_messages.cpp.
 #include <cstdint>
+#include <fixpp/dict/field_ref.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "emit.hpp"
 #include "gen_util.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {
 
 namespace {
 
-constexpr std::string_view kMV =
-    "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
+constexpr std::string_view kMV = "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
 
 // Mirror of emit_messages.cpp app_version_enum().
 std::string_view app_version_enum(std::string_view ns) {
-    if (ns == "vt11") return "Unknown";
+    if (ns == "vt11") {
+        return "Unknown";
+    }
     return ns;
 }
 
 // Emit one scalar accessor body that delegates through the lazy view().
-void emit_owning_scalar(TemplateWriter& w, std::string_view name,
-                        std::uint16_t tag, TypeKind k) {
+void emit_owning_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, TypeKind k) {
     if (k == TypeKind::Decimal) {
         w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>\n    ");
         w.raw(name);
@@ -69,17 +72,28 @@ void emit_owning_scalar(TemplateWriter& w, std::string_view name,
             ct = "::std::string_view";
             lifetimebound = true;
             break;
-        case TypeKind::Char:   ct = "char"; break;
-        case TypeKind::Bool:   ct = "bool"; break;
-        case TypeKind::Int32:  ct = "::std::int32_t"; break;
-        default:               ct = "::std::string_view"; lifetimebound = true; break;
+        case TypeKind::Char:
+            ct = "char";
+            break;
+        case TypeKind::Bool:
+            ct = "bool";
+            break;
+        case TypeKind::Int32:
+            ct = "::std::int32_t";
+            break;
+        default:
+            ct = "::std::string_view";
+            lifetimebound = true;
+            break;
     }
     w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<");
     w.raw(ct);
     w.raw(">\n    ");
     w.raw(name);
     w.raw("() const noexcept");
-    if (lifetimebound) w.raw(" [[clang::lifetimebound]]");
+    if (lifetimebound) {
+        w.raw(" [[clang::lifetimebound]]");
+    }
     w.raw("\n    { return ::fixpp::dict::decode_field<");
     w.raw(ct);
     w.raw(">(view().template get<");
@@ -89,8 +103,11 @@ void emit_owning_scalar(TemplateWriter& w, std::string_view name,
 }
 
 // Emit one group accessor delegating through view().
-void emit_owning_group(TemplateWriter& w, std::string_view gq,
-                       std::string_view acc, std::uint16_t no_tag) {
+// gq (qualified namespace prefix) and acc (accessor name) are semantically distinct;
+// adjacent string_view params suppressed intentionally.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void emit_owning_group(TemplateWriter& w, std::string_view gq, std::string_view acc,
+                       std::uint16_t no_tag) {
     w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
     w.raw(gq);
     w.raw("G_");
@@ -109,10 +126,9 @@ void emit_owning_group(TemplateWriter& w, std::string_view gq,
 }
 
 // Emit one owning_<Msg> class definition + its out-of-line method bodies.
-void emit_owning_message(TemplateWriter& w, std::string_view ns,
-                         MessageIR const& m) {
-    std::string const id   = to_identifier(m.name);
-    std::string const oid  = "owning_" + id;
+void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
+    std::string const id = to_identifier(m.name);
+    std::string const oid = "owning_" + id;
 
     // Groups namespace prefix.
     std::string gq;
@@ -126,8 +142,12 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns,
     {
         std::unordered_set<std::uint16_t> seen;
         for (auto const& f : m.fields) {
-            if (f.ref.group_no_tag != 0) continue;
-            if (seen.insert(f.ref.tag).second) top.push_back(&f);
+            if (f.ref.group_no_tag != 0) {
+                continue;
+            }
+            if (seen.insert(f.ref.tag).second) {
+                top.push_back(&f);
+            }
         }
     }
 
@@ -148,13 +168,29 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns,
     w.line();
 
     // Delete copy; declare custom noexcept move (NOT =default — I-9/AC-R4).
-    w.raw("    ");  w.raw(oid); w.raw("(");
-    w.raw(oid);     w.line(" const&) = delete;");
-    w.raw("    ");  w.raw(oid); w.raw("& operator=(");
-    w.raw(oid);     w.line(" const&) = delete;");
-    w.raw("    ");  w.raw(oid); w.raw("("); w.raw(oid); w.line(" &&) noexcept;");
-    w.raw("    ");  w.raw(oid); w.raw("& operator=("); w.raw(oid); w.line(" &&) noexcept;");
-    w.raw("    ~"); w.raw(oid); w.line("() = default;");
+    w.raw("    ");
+    w.raw(oid);
+    w.raw("(");
+    w.raw(oid);
+    w.line(" const&) = delete;");
+    w.raw("    ");
+    w.raw(oid);
+    w.raw("& operator=(");
+    w.raw(oid);
+    w.line(" const&) = delete;");
+    w.raw("    ");
+    w.raw(oid);
+    w.raw("(");
+    w.raw(oid);
+    w.line(" &&) noexcept;");
+    w.raw("    ");
+    w.raw(oid);
+    w.raw("& operator=(");
+    w.raw(oid);
+    w.line(" &&) noexcept;");
+    w.raw("    ~");
+    w.raw(oid);
+    w.line("() = default;");
     w.line();
 
     // which() — returns version_v (AC-R2).
@@ -188,23 +224,29 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns,
     {
         std::unordered_set<std::string> used;
         auto uniq = [&](std::string base, std::uint16_t tag) -> std::string {
-            if (used.insert(base).second) return base;
+            if (used.insert(base).second) {
+                return base;
+            }
             base += "_t";
             base += std::to_string(tag);
             used.insert(base);
             return base;
         };
         for (auto const* f : top) {
-            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
+            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+                continue;
+            }
             TypeKind const k = kind_of(f->ref.type);
-            if (k == TypeKind::Skip) continue;
-            emit_owning_scalar(w, uniq(to_accessor(f->name), f->ref.tag),
-                               f->ref.tag, k);
+            if (k == TypeKind::Skip) {
+                continue;
+            }
+            emit_owning_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k);
         }
         for (auto const* f : top) {
-            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
-            std::string const acc =
-                uniq(to_accessor(strip_no_prefix(f->name)), f->ref.tag);
+            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+                continue;
+            }
+            std::string const acc = uniq(to_accessor(strip_no_prefix(f->name)), f->ref.tag);
             emit_owning_group(w, gq, acc, f->ref.tag);
         }
     }
@@ -360,7 +402,7 @@ std::string emit_reify(VersionIR const& ir) {
     w.line("// Outside fixpp::<ns>: a specialisation of fixpp::dict::owning_message_traits");
     w.line("// must be declared in a namespace enclosing fixpp::dict (the global namespace).");
     for (auto const& m : ir.messages) {
-        std::string const id  = to_identifier(m.name);
+        std::string const id = to_identifier(m.name);
         std::string const oid = "owning_" + id;
         w.line();
         w.raw("template <>\nstruct fixpp::dict::owning_message_traits<fixpp::");

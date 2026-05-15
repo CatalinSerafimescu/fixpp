@@ -8,8 +8,14 @@
 // IR (one XML truth — research D-1/D-24). Static storage, zero runtime alloc
 // (I-5); `_reserved` emitted as 0 (AC-V6 / I-7). Deterministic LF-only output
 // over the bytewise-sorted message list (NFR-003-7).
+#include <cstdint>
+#include <fixpp/dict/field_ref.hpp>
+#include <string>
+#include <utility>
+
 #include "emit.hpp"
 #include "gen_util.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {
@@ -67,7 +73,9 @@ std::string emit_fields(VersionIR const& ir) {
         w.raw(id);
         w.raw("_fields[] = {  // MsgType ");
         w.line(m.msg_type);
-        for (auto const& f : m.fields) emit_field_ref(w, f.ref);
+        for (auto const& f : m.fields) {
+            emit_field_ref(w, f.ref);
+        }
         w.line("};");
         w.line();
     }

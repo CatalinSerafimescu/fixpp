@@ -10,8 +10,13 @@
 // constexpr static storage, zero runtime allocation (I-5). std::array is used
 // so a message with no fields / a version with no Length pairs emits a legal
 // zero-size table (no zero-length C array). Deterministic LF-only output.
+#include <cstdint>
+#include <string>
+#include <utility>
+
 #include "emit.hpp"
 #include "gen_util.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {

@@ -24,56 +24,70 @@
 // Per-tag accessors are inline noexcept, NOT constexpr (AC-G11). Deterministic
 // LF-only emission over the bytewise-sorted message list (NFR-003-7).
 #include <cstdint>
+#include <fixpp/dict/field_ref.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "emit.hpp"
 #include "gen_util.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {
 
 namespace {
 
-constexpr std::string_view kView =
-    "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
+constexpr std::string_view kView = "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
 
 std::string_view app_version_enum(std::string_view ns) {
     // vt11 = FIXT.1.1 session layer: application axis Unknown (admin frames
     // resolve {session_admin, vt11, Unknown}); v42/v44/v50sp2 map verbatim.
-    if (ns == "vt11") return "Unknown";
+    if (ns == "vt11") {
+        return "Unknown";
+    }
     return ns;
 }
 
 std::string_view kind_cpp_type(TypeKind k) {
     switch (k) {
-        case TypeKind::String: return "::std::string_view";
-        case TypeKind::Char:   return "char";
-        case TypeKind::Bool:   return "bool";
-        case TypeKind::Int32:  return "::std::int32_t";
-        default:               return "::std::string_view";
+        case TypeKind::String:
+            return "::std::string_view";
+        case TypeKind::Char:
+            return "char";
+        case TypeKind::Bool:
+            return "bool";
+        case TypeKind::Int32:
+            return "::std::int32_t";
+        default:
+            return "::std::string_view";
     }
 }
 
 // One scalar typed accessor. `ptr` selects the access form: a top-level
 // flyweight holds `view_` by reference (direct); a nested group flyweight
 // holds `view_` as a nullable pointer (null-guarded).
-void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag,
-                 TypeKind k, bool ptr) {
+void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, TypeKind k,
+                 bool ptr) {
     if (k == TypeKind::Decimal) {
         w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>\n    ");
         w.raw(name);
         w.raw("(::std::pmr::memory_resource* mr) const noexcept\n    { ");
         if (ptr) {
-            w.raw("if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<");
+            w.raw(
+                "if (!view_) return "
+                "::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = "
+                "view_->template get<");
         } else {
             w.raw("auto fv = view_.template get<");
         }
         w.num(tag);
-        w.raw(">(); if (!fv) return ::std::unexpected{fv.error()};\n      return ::fixpp::decimal_t::parse(fv->bytes(), mr); }");
+        w.raw(
+            ">(); if (!fv) return ::std::unexpected{fv.error()};\n      return "
+            "::fixpp::decimal_t::parse(fv->bytes(), mr); }");
         w.line();
         return;
     }
@@ -83,10 +97,14 @@ void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag,
     w.raw(">\n    ");
     w.raw(name);
     w.raw("() const noexcept");
-    if (k == TypeKind::String) w.raw(" [[clang::lifetimebound]]");
+    if (k == TypeKind::String) {
+        w.raw(" [[clang::lifetimebound]]");
+    }
     w.raw("\n    { ");
     if (ptr) {
-        w.raw("if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};\n      return ::fixpp::dict::decode_field<");
+        w.raw(
+            "if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};\n  "
+            "    return ::fixpp::dict::decode_field<");
         w.raw(ct);
         w.raw(">(view_->template get<");
     } else {
@@ -103,7 +121,9 @@ void emit_field_value(TemplateWriter& w, bool ptr) {
     w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>\n");
     w.raw("    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]\n    { ");
     if (ptr) {
-        w.raw("if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }");
+        w.raw(
+            "if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; "
+            "return view_->get(tag); }");
     } else {
         w.raw("return view_.get(tag); }");
     }
@@ -123,9 +143,7 @@ using MemberMap = std::unordered_map<std::uint16_t, std::vector<FieldIR const*>>
 // edge's group stays field_value-reachable — AC-G6).
 constexpr int kMaxGroupDepth = 16;
 
-std::string group_cls(std::uint16_t no_tag) {
-    return "G_" + std::to_string(no_tag);
-}
+std::string group_cls(std::uint16_t no_tag) { return "G_" + std::to_string(no_tag); }
 
 // Per-message group plan: each distinct group no_tag is emitted ONCE as a
 // nested class (not re-nested per parent — that is the FIX50SP2 blow-up),
@@ -134,35 +152,53 @@ std::string group_cls(std::uint16_t no_tag) {
 // (that sub-group stays reachable via field_value — AC-G6); deterministic
 // in message field order.
 struct GroupPlan {
-    std::vector<std::uint16_t> order;  // emit order, deps first
+    std::vector<std::uint16_t> order;                                    // emit order, deps first
     std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> kids;  // emittable sub no_tags
 };
 
-void plan_dfs(std::uint16_t g, MemberMap const& mm,
-              std::unordered_set<std::uint16_t>& onpath,
+// Deliberate recursive DFS for group dependency ordering.
+// De-recursing risks subtle ordering changes that alter the deterministic group
+// emission order pinned by the 4 golden headers (ctest -R determinism).
+// Recursion depth is bounded by kMaxGroupDepth (16) — stack overflow excluded.
+// NOLINTNEXTLINE(misc-no-recursion)
+void plan_dfs(std::uint16_t g, MemberMap const& mm, std::unordered_set<std::uint16_t>& onpath,
               std::unordered_set<std::uint16_t>& done, GroupPlan& gp, int depth) {
-    if (done.contains(g)) return;
+    if (done.contains(g)) {
+        return;
+    }
     onpath.insert(g);
     auto const it = mm.find(g);
     if (it != mm.end()) {
         for (auto const* f : it->second) {
-            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
+            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+                continue;
+            }
             std::uint16_t const c = f->ref.tag;
-            if (depth + 1 >= kMaxGroupDepth || onpath.contains(c)) continue;
-            plan_dfs(c, mm, onpath, done, gp, depth + 1);
+            if (depth + 1 >= kMaxGroupDepth || onpath.contains(c)) {
+                continue;
+            }
+            plan_dfs(c, mm, onpath, done, gp, depth + 1);  // NOLINT(misc-no-recursion)
             gp.kids[g].push_back(c);
         }
     }
     onpath.erase(g);
-    if (done.insert(g).second) gp.order.push_back(g);
+    if (done.insert(g).second) {
+        gp.order.push_back(g);
+    }
 }
 
-FieldIR const* find_member(MemberMap const& mm, std::uint16_t no_tag,
-                           std::uint16_t tag) {
+// no_tag (parent group key) and tag (member field key) are semantically distinct;
+// adjacent uint16_t params suppressed intentionally.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+FieldIR const* find_member(MemberMap const& mm, std::uint16_t no_tag, std::uint16_t tag) {
     auto const it = mm.find(no_tag);
-    if (it == mm.end()) return nullptr;
+    if (it == mm.end()) {
+        return nullptr;
+    }
     for (auto const* f : it->second) {
-        if (f->ref.tag == tag) return f;
+        if (f->ref.tag == tag) {
+            return f;
+        }
     }
     return nullptr;
 }
@@ -189,7 +225,9 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
 
     std::unordered_set<std::string> used;
     auto uniq = [&](std::string base, std::uint16_t tag) {
-        if (used.insert(base).second) return base;
+        if (used.insert(base).second) {
+            return base;
+        }
         base += "_t";
         base += std::to_string(tag);
         used.insert(base);
@@ -199,9 +237,13 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     auto const it = mm.find(no_tag);
     if (it != mm.end()) {
         for (auto const* f : it->second) {
-            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
+            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+                continue;
+            }
             TypeKind const k = kind_of(f->ref.type);
-            if (k == TypeKind::Skip) continue;
+            if (k == TypeKind::Skip) {
+                continue;
+            }
             emit_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k, true);
         }
     }
@@ -210,12 +252,14 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
         for (std::uint16_t const c : kit->second) {
             FieldIR const* d = find_member(mm, no_tag, c);
             std::string const acc =
-                uniq(to_accessor(strip_no_prefix(d ? d->name : group_cls(c))), c);
+                uniq(to_accessor(strip_no_prefix(d != nullptr ? d->name : group_cls(c))), c);
             w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
             w.raw(group_cls(c));
             w.raw(">\n    ");
             w.raw(acc);
-            w.raw("() const noexcept [[clang::lifetimebound]]\n    { if (!view_) return {}; return view_->template group<");
+            w.raw(
+                "() const noexcept [[clang::lifetimebound]]\n    { if (!view_) return {}; return "
+                "view_->template group<");
             w.num(c);
             w.raw(", ");
             w.raw(group_cls(c));
@@ -255,7 +299,9 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
 
     std::unordered_set<std::string> used;
     auto uniq = [&](std::string base, std::uint16_t tag) {
-        if (used.insert(base).second) return base;
+        if (used.insert(base).second) {
+            return base;
+        }
         base += "_t";
         base += std::to_string(tag);
         used.insert(base);
@@ -270,8 +316,12 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
     {
         std::unordered_set<std::uint16_t> seen;
         for (auto const& f : m.fields) {
-            if (f.ref.group_no_tag != 0) continue;
-            if (seen.insert(f.ref.tag).second) top.push_back(&f);
+            if (f.ref.group_no_tag != 0) {
+                continue;
+            }
+            if (seen.insert(f.ref.tag).second) {
+                top.push_back(&f);
+            }
         }
     }
     std::string gq = "::fixpp::";
@@ -279,13 +329,19 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
     gq += "::groups::";
 
     for (auto const* f : top) {
-        if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) continue;
+        if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+            continue;
+        }
         TypeKind const k = kind_of(f->ref.type);
-        if (k == TypeKind::Skip) continue;
+        if (k == TypeKind::Skip) {
+            continue;
+        }
         emit_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k, false);
     }
     for (auto const* f : top) {
-        if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) continue;
+        if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+            continue;
+        }
         w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
         w.raw(gq);
         w.raw(group_cls(f->ref.tag));
@@ -380,7 +436,9 @@ std::string emit_messages(VersionIR const& ir) {
     w.raw(ir.ns);
     w.line("::groups {  // shared repeating-group flyweights (AC-G5/AC-G6)");
     w.line();
-    for (std::uint16_t const g : gp.order) emit_group_class(w, gmm, gp, g);
+    for (std::uint16_t const g : gp.order) {
+        emit_group_class(w, gmm, gp, g);
+    }
     w.line();
     w.raw("}  // namespace fixpp::");
     w.raw(ir.ns);
@@ -400,7 +458,9 @@ std::string emit_messages(VersionIR const& ir) {
         w.line(";");
     }
     w.line();
-    for (auto const& m : ir.messages) emit_message(w, ir.ns, m);
+    for (auto const& m : ir.messages) {
+        emit_message(w, ir.ns, m);
+    }
     w.raw("}  // namespace fixpp::");
     w.line(ir.ns);
     return std::move(w).take();

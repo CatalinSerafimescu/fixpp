@@ -15,32 +15,47 @@
 //                    [2c §4.7] template emits (string/char/bool/int/decimal;
 //                    decimal is the PMR route, NOT field_traits — AC-G4/I-16).
 #pragma once
-#include <cctype>
+#include <cstddef>
+#include <fixpp/dict/field_ref.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_set>
-
-#include <fixpp/dict/field_ref.hpp>
 
 namespace fixpp::codegen {
 
 inline bool is_cpp_keyword(std::string_view s) {
     static std::unordered_set<std::string_view> const kw = {
-        "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand",
-        "bitor", "bool", "break", "case", "catch", "char", "char8_t",
-        "char16_t", "char32_t", "class", "compl", "concept", "const",
-        "consteval", "constexpr", "constinit", "const_cast", "continue",
-        "co_await", "co_return", "co_yield", "decltype", "default", "delete",
-        "do", "double", "dynamic_cast", "else", "enum", "explicit", "export",
-        "extern", "false", "float", "for", "friend", "goto", "if", "inline",
-        "int", "long", "mutable", "namespace", "new", "noexcept", "not",
-        "not_eq", "nullptr", "operator", "or", "or_eq", "private",
-        "protected", "public", "register", "reinterpret_cast", "requires",
-        "return", "short", "signed", "sizeof", "static", "static_assert",
-        "static_cast", "struct", "switch", "template", "this", "thread_local",
-        "throw", "true", "try", "typedef", "typeid", "typename", "union",
-        "unsigned", "using", "virtual", "void", "volatile", "wchar_t",
-        "while", "xor", "xor_eq"};
+        "alignas",       "alignof",     "and",
+        "and_eq",        "asm",         "auto",
+        "bitand",        "bitor",       "bool",
+        "break",         "case",        "catch",
+        "char",          "char8_t",     "char16_t",
+        "char32_t",      "class",       "compl",
+        "concept",       "const",       "consteval",
+        "constexpr",     "constinit",   "const_cast",
+        "continue",      "co_await",    "co_return",
+        "co_yield",      "decltype",    "default",
+        "delete",        "do",          "double",
+        "dynamic_cast",  "else",        "enum",
+        "explicit",      "export",      "extern",
+        "false",         "float",       "for",
+        "friend",        "goto",        "if",
+        "inline",        "int",         "long",
+        "mutable",       "namespace",   "new",
+        "noexcept",      "not",         "not_eq",
+        "nullptr",       "operator",    "or",
+        "or_eq",         "private",     "protected",
+        "public",        "register",    "reinterpret_cast",
+        "requires",      "return",      "short",
+        "signed",        "sizeof",      "static",
+        "static_assert", "static_cast", "struct",
+        "switch",        "template",    "this",
+        "thread_local",  "throw",       "true",
+        "try",           "typedef",     "typeid",
+        "typename",      "union",       "unsigned",
+        "using",         "virtual",     "void",
+        "volatile",      "wchar_t",     "while",
+        "xor",           "xor_eq"};
     return kw.contains(s);
 }
 
@@ -54,7 +69,9 @@ inline std::string to_accessor(std::string_view fix_name) {
     for (std::size_t i = 0; i < fix_name.size(); ++i) {
         char const c = fix_name[i];
         if (!is_alnum(c)) {
-            if (!out.empty() && out.back() != '_') out.push_back('_');
+            if (!out.empty() && out.back() != '_') {
+                out.push_back('_');
+            }
             continue;
         }
         if (is_upper(c) && !out.empty() && out.back() != '_') {
@@ -66,13 +83,23 @@ inline std::string to_accessor(std::string_view fix_name) {
         }
         out.push_back(is_upper(c) ? static_cast<char>(c - 'A' + 'a') : c);
     }
-    while (!out.empty() && out.back() == '_') out.pop_back();
+    while (!out.empty() && out.back() == '_') {
+        out.pop_back();
+    }
     std::size_t b = 0;
-    while (b < out.size() && out[b] == '_') ++b;
+    while (b < out.size() && out[b] == '_') {
+        ++b;
+    }
     out.erase(0, b);
-    if (out.empty()) out = "field";
-    if (out[0] >= '0' && out[0] <= '9') out.insert(out.begin(), '_');
-    if (is_cpp_keyword(out)) out.push_back('_');
+    if (out.empty()) {
+        out = "field";
+    }
+    if (out[0] >= '0' && out[0] <= '9') {
+        out.insert(out.begin(), '_');
+    }
+    if (is_cpp_keyword(out)) {
+        out.push_back('_');
+    }
     return out;
 }
 
@@ -80,13 +107,21 @@ inline std::string to_identifier(std::string_view fix_name) {
     std::string out;
     out.reserve(fix_name.size() + 1);
     auto ok = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-               (c >= '0' && c <= '9') || c == '_';
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '_';
     };
-    for (char const c : fix_name) out.push_back(ok(c) ? c : '_');
-    if (out.empty()) out = "Msg";
-    if (out[0] >= '0' && out[0] <= '9') out.insert(out.begin(), '_');
-    if (is_cpp_keyword(out)) out.push_back('_');
+    for (char const c : fix_name) {
+        out.push_back(ok(c) ? c : '_');
+    }
+    if (out.empty()) {
+        out = "Msg";
+    }
+    if (out[0] >= '0' && out[0] <= '9') {
+        out.insert(out.begin(), '_');
+    }
+    if (is_cpp_keyword(out)) {
+        out.push_back('_');
+    }
     return out;
 }
 
@@ -96,8 +131,8 @@ inline std::string to_identifier(std::string_view fix_name) {
 // golden (T042) — exact FIX singularisation ("Leg") is cosmetic and not
 // shape-pinned (the shape oracle pins sizeof + owning_message_traits, AC-G7/G7a).
 inline std::string_view strip_no_prefix(std::string_view fix_name) {
-    if (fix_name.size() > 2 && fix_name[0] == 'N' && fix_name[1] == 'o' &&
-        fix_name[2] >= 'A' && fix_name[2] <= 'Z') {
+    if (fix_name.size() > 2 && fix_name[0] == 'N' && fix_name[1] == 'o' && fix_name[2] >= 'A' &&
+        fix_name[2] <= 'Z') {
         return fix_name.substr(2);
     }
     return fix_name;

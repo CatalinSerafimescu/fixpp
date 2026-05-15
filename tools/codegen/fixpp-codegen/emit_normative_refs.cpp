@@ -9,7 +9,12 @@
 // emitted once + one row per message keyed by (Name, MsgType, [FIXxx]
 // citation token). Deterministic LF-only output over the bytewise-sorted
 // message list (NFR-003-7).
+#include <string>
+#include <string_view>
+#include <utility>
+
 #include "emit.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {
@@ -18,26 +23,36 @@ namespace {
 
 // Version-level normative reference per [const §VI.5] / Appendix B.
 struct SpecRef {
-    std::string_view label;     // "FIX 4.4"
-    std::string_view token;     // "[FIX44]" — the per-message citation token
+    std::string_view label;      // "FIX 4.4"
+    std::string_view token;      // "[FIX44]" — the per-message citation token
     std::string_view normative;  // full normative-reference line
 };
 
 SpecRef spec_ref(std::string_view ns) {
-    if (ns == "v42")
-        return {"FIX 4.2", "[FIX42]",
-                "FIX Protocol Ltd., *Financial Information eXchange Protocol "
-                "(FIX), Version 4.2*."};
-    if (ns == "v44")
-        return {"FIX 4.4", "[FIX44]",
-                "FIX Protocol Ltd., *Financial Information eXchange Protocol "
-                "(FIX), Version 4.4*."};
-    if (ns == "v50sp2")
-        return {"FIX 5.0 SP2", "[FIX50SP2]",
-                "FIX Trading Community, *FIX 5.0 Service Pack 2* (with "
-                "Extension Packs)."};
-    return {"FIXT 1.1", "[FIXT11]",
-            "FIX Trading Community, *FIX Transport (FIXT) 1.1*."};
+    if (ns == "v42") {
+        return {.label = "FIX 4.2",
+                .token = "[FIX42]",
+                .normative =
+                    "FIX Protocol Ltd., *Financial Information eXchange Protocol "
+                    "(FIX), Version 4.2*."};
+    }
+    if (ns == "v44") {
+        return {.label = "FIX 4.4",
+                .token = "[FIX44]",
+                .normative =
+                    "FIX Protocol Ltd., *Financial Information eXchange Protocol "
+                    "(FIX), Version 4.4*."};
+    }
+    if (ns == "v50sp2") {
+        return {.label = "FIX 5.0 SP2",
+                .token = "[FIX50SP2]",
+                .normative =
+                    "FIX Trading Community, *FIX 5.0 Service Pack 2* (with "
+                    "Extension Packs)."};
+    }
+    return {.label = "FIXT 1.1",
+            .token = "[FIXT11]",
+            .normative = "FIX Trading Community, *FIX Transport (FIXT) 1.1*."};
 }
 
 }  // namespace

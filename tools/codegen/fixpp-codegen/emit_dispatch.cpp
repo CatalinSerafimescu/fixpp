@@ -17,13 +17,15 @@
 //
 // Deterministic LF-only output (TemplateWriter + bytewise-sorted message list
 // from build_ir / 002 D-6); idempotent across runs (AC-T1 / NFR-003-7).
-#include <algorithm>
+#include <fixpp/dict/version_profile.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "emit.hpp"
 #include "gen_util.hpp"
+#include "ir.hpp"
 #include "template_writer.hpp"
 
 namespace fixpp::codegen {
@@ -34,19 +36,19 @@ namespace {
 // sorted case ordering in the generated switch — AC-D1 / AC-D2 / seam #15a).
 // MsgType '0'/'1'/'2'/'3'/'4'/'5' are single-char digits; 'A' is alphabetic.
 struct FixtAdmin {
-    char        msg_type;    // single-char wire literal
+    char msg_type;           // single-char wire literal
     const char* class_name;  // owning_<Msg> suffix (without "owning_")
     const char* comment;
 };
 
 constexpr FixtAdmin kFixtAdminTypes[] = {
-    {'0', "Heartbeat",     "Heartbeat"},
-    {'1', "TestRequest",   "TestRequest"},
-    {'2', "ResendRequest", "ResendRequest"},
-    {'3', "Reject",        "Reject"},
-    {'4', "SequenceReset", "SequenceReset"},
-    {'5', "Logout",        "Logout"},
-    {'A', "Logon",         "Logon"},
+    {.msg_type = '0', .class_name = "Heartbeat", .comment = "Heartbeat"},
+    {.msg_type = '1', .class_name = "TestRequest", .comment = "TestRequest"},
+    {.msg_type = '2', .class_name = "ResendRequest", .comment = "ResendRequest"},
+    {.msg_type = '3', .class_name = "Reject", .comment = "Reject"},
+    {.msg_type = '4', .class_name = "SequenceReset", .comment = "SequenceReset"},
+    {.msg_type = '5', .class_name = "Logout", .comment = "Logout"},
+    {.msg_type = 'A', .class_name = "Logon", .comment = "Logon"},
 };
 
 // The three codegen application versions (bytewise-sorted namespace name for
@@ -57,9 +59,9 @@ struct AppVersion {
 };
 
 constexpr AppVersion kAppVersions[] = {
-    {"v42",    fixpp::dict::application_version::v42},
-    {"v44",    fixpp::dict::application_version::v44},
-    {"v50sp2", fixpp::dict::application_version::v50sp2},
+    {.ns = "v42", .av = fixpp::dict::application_version::v42},
+    {.ns = "v44", .av = fixpp::dict::application_version::v44},
+    {.ns = "v50sp2", .av = fixpp::dict::application_version::v50sp2},
 };
 
 }  // namespace
@@ -151,18 +153,21 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
         w.raw("::from_view(");
         w.line("/*view*/MV{}, mr);");
         w.line("            if (!own) return ::std::unexpected{own.error()};");
-        w.raw("            // R6: owning_message_handle wrapping is T037; return the typed owner's");
+        w.raw(
+            "            // R6: owning_message_handle wrapping is T037; return the typed owner's");
         w.line(" error code on success for now.");
         w.line("            // Full handle-wrapping lands with dict::reify implementation (T037).");
         w.line("            (void)own;");
-        w.line("            return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
+        w.line(
+            "            return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
         w.line("        }");
     }
 
     w.line("        default:");
     w.line("            // INVARIANT I-11 (data-model / R3): fail-loud — never misdispatch.");
     w.line("            // Any MsgType not in the 7 FIXT admin set returns this error.");
-    w.line("            return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+    w.line(
+        "            return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
     w.line("    }");
     w.line("}");
     w.line();
@@ -241,7 +246,10 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         // Find the VersionIR for this namespace.
         VersionIR const* ir = nullptr;
         for (auto const& v : all) {
-            if (v.ns == av.ns) { ir = &v; break; }
+            if (v.ns == av.ns) {
+                ir = &v;
+                break;
+            }
         }
 
         w.raw("        case ::fixpp::dict::application_version::");
@@ -251,12 +259,16 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.raw(av.ns);
         w.line(" application messages.");
         w.line("            if (msg_type.size() != 1 && msg_type.empty()) {");
-        w.line("                return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+        w.line(
+            "                return "
+            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
         w.line("            }");
         w.line("            char const mt = msg_type.empty() ? '\\0' : msg_type[0];");
         w.line("            // Multi-char MsgTypes (FIX-Latest extensions) fall to default.");
         w.line("            if (msg_type.size() > 1) {");
-        w.line("                return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+        w.line(
+            "                return "
+            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
         w.line("            }");
         w.line("            switch (mt) {");
 
@@ -264,9 +276,13 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
             // Emit one inner case per message in this version.
             // Messages are bytewise-sorted by msg_type (002 D-6).
             for (auto const& m : ir->messages) {
-                if (m.msg_type.empty()) continue;
+                if (m.msg_type.empty()) {
+                    continue;
+                }
                 // Single-char MsgTypes only (multi-char are FIX-Latest, AC-G9).
-                if (m.msg_type.size() != 1) continue;
+                if (m.msg_type.size() != 1) {
+                    continue;
+                }
                 std::string const id = to_identifier(m.name);
                 w.raw("                case '");
                 w.raw(m.msg_type);
@@ -281,8 +297,11 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
                 w.line("MV{}, mr);");
                 w.line("                    if (!own) return ::std::unexpected{own.error()};");
                 w.line("                    (void)own;");
-                w.line("                    // R6: owning_message_handle wrapping lands with T037.");
-                w.line("                    return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
+                w.line(
+                    "                    // R6: owning_message_handle wrapping lands with T037.");
+                w.line(
+                    "                    return "
+                    "::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
                 w.line("                }");
             }
         }
@@ -292,7 +311,9 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.raw("                    // in ");
         w.raw(av.ns);
         w.line(" (R3 / AC-D7).");
-        w.line("                    return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+        w.line(
+            "                    return "
+            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
         w.line("            }");
         w.line("        }");
     }
@@ -301,7 +322,8 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
     w.line("            // INVARIANT I-11 outer default (I-11 / R3 / AC-D5 / seam #10c):");
     w.line("            // Runtime-XML-only resolved versions (v40/v41/v43/v50/v50sp1/Unknown)");
     w.line("            // have NO codegen-emitted owner — fail-loud, never misdispatch.");
-    w.line("            return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+    w.line(
+        "            return ::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
     w.line("    }");
     w.line("}");
     w.line();
