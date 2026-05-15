@@ -7,7 +7,13 @@
 #pragma once
 #include <fixpp/core/error.hpp>            // expected_t, error
 #include <fixpp/dict/dictionary.hpp>       // Dictionary (002)
-#include <fixpp/dict/version_profile.hpp>  // application_version (002)
+#include <fixpp/dict/version_profile.hpp>  // the `application_version` ENUM is 002-shipped; the
+                                          // `version_profile` STRUCT + this HEADER are 003-OWNED,
+                                          // NOT 002-shipped (002 deferred them — Gate A r1 Codex
+                                          // P1-1 / Opus RC#1; spec §8 "Upstream dependency audit").
+                                          // Header/contract added at re-/plan, not this pass.
+                                          // (Harmonized with contracts/reify.hpp's annotation on
+                                          // the same include — Gate A r2 Opus N-P3-1.)
 
 namespace fixpp::dict {
 

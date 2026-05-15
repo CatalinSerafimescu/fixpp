@@ -8,6 +8,10 @@
 #include <fixpp/core/decimal_alias.hpp>          // fixpp::decimal_t (2a)
 #include <fixpp/core/error.hpp>                   // expected_t
 #include <fixpp/dict/field_traits.hpp>            // dict::field_traits / decode_field (2c §4.1.3)
+                                                  // — 003-OWNED, NOT 002-shipped (002 ships no
+                                                  // field_traits.hpp). Gate A r1 Opus N-P2-2 /
+                                                  // RC#1; header/contract/ACs added at re-/plan.
+                                                  // spec §8 "Upstream dependency audit".
 #include <fixpp/wire/message_view_contract.hpp>   // vendored frozen stub (R6)
 
 namespace fixpp::v50sp2 {  // one namespace per codegen version; vt11 = 7 admin
@@ -32,11 +36,25 @@ public:
     side() const noexcept
     { return dict::decode_field<char>(view_.template get<54>()); }
 
+    // ⚠ INHERITED DESIGN-DOC DEFECT — un-fixable by a 003 bundle edit.
+    // The body below (`fixpp::decimal_t::from_chars(fv->bytes())`) is copied
+    // VERBATIM from signed-off 2c v1.3 (.specify/2c-codegen.md:1040 / :270-271).
+    // That symbol DOES NOT EXIST on the merged 001/2a surface: the only parse
+    // entry points are decimal_traits<T>::from_chars(span, std::pmr::
+    // memory_resource*) (001 decimal_traits.hpp:98-100) and decimal<T>::parse(
+    // span, mr) (:162-163) — PMR MANDATORY; 2a's own Gate A removed the no-PMR
+    // form (:123-128). It is wrong on three axes (type carrier / name / missing
+    // mr) and the flyweight holds no `mr` (sizeof == one pointer, AC-G7).
+    // This is a defect in INHERITED 2c v1.3, not in this bundle — a bundle edit
+    // cannot fix it. Resolution: reopen 2c §4.1.3/§4.7 to the real PMR-taking
+    // entry point, then re-derive AC-G4/AC-G4a/NFR-003-4. The shape is shown
+    // AS-INHERITED (not patched into a fake correct form) per the Gate A rule
+    // for inherited-design defects. See spec AC-G4 + plan.md `## Gate A`.
     [[nodiscard]] inline expected_t<fixpp::decimal_t>
-    price() const noexcept                                         // decimal via [2a §4.2]
+    price() const noexcept   // BLOCKED on 2c §4.1.3/§4.7 reopen (Opus RC#2)
     { auto fv = view_.template get<44>();
       if (!fv) return std::unexpected{fv.error()};
-      return fixpp::decimal_t::from_chars(fv->bytes()); }
+      return fixpp::decimal_t::from_chars(fv->bytes()); }  // ⚠ inherited; symbol absent on 001/2a
 
     [[nodiscard]] inline wire::group_view<NewOrderSingle::Leg>     // AC-G5
     legs() const noexcept [[clang::lifetimebound]]

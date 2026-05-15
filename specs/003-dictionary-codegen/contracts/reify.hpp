@@ -4,8 +4,16 @@
 // at /tasks (research.md D-5). No method is added to wire::MessageView (AC-R1).
 #pragma once
 #include <fixpp/core/error.hpp>                  // fixpp::core::expected_t, error
-#include <fixpp/dict/version_profile.hpp>        // version_profile (002)
-#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen stub (R6 / D-2)
+#include <fixpp/dict/version_profile.hpp>        // version_profile + dict::resolve_application_version
+                                                 // — 003-OWNED, NOT 002-shipped: 002 deferred both
+                                                 // (Gate A r1 Codex P1-1 / Opus RC#1; spec §8
+                                                 // "Upstream dependency audit"). Header/contract
+                                                 // added at re-/plan, not this convergence pass.
+#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen stub (R6 / D-2). NOTE: this is a
+                                                 // hand-written dict/ header #include-ing wire/ —
+                                                 // an OPEN layer-amendment item (Codex P1-3 / RC#3),
+                                                 // NOT covered by the arch §2.4 generated-header
+                                                 // carve-out. See spec NFR-003-8 / R6.
 #include <cstdint>
 #include <memory_resource>
 #include <string_view>
@@ -16,6 +24,16 @@ namespace fixpp::dict {
 // per RC#1; FIXT admin → {session_admin, vt11, Unknown}; application → the
 // resolved value (v42/v44/v50sp2).
 struct resolved_message_version;  // exact layout pinned at /tasks vs [2c §4.8]
+
+// owning_message_t<Msg> — the return-type alias of reify_as<Msg> (Opus N-P2-1:
+// previously used in reify_as / owning_message_handle::as<> / AC-R1 / data-model
+// Entity 6 but NEVER defined; the name-mangling/ADL surface every downstream
+// consumer binds to must be pinned in the contract, not deferred). Canonical
+// 2c §4.8 form: each codegen Reify.hpp emits owning_<Msg> and exposes it as
+// Msg::owning_type, so owning_message_t<v44::NewOrderSingle> ≡
+// v44::owning_NewOrderSingle.
+template <class Msg>
+using owning_message_t = typename Msg::owning_type;  // AC-R1; [2c §4.8]
 
 // Type-erased owning message (runtime-dispatch return). Move-only. SBO variant
 // may elide the heap allocation below a published size threshold.
@@ -57,7 +75,9 @@ reify_as(wire::MessageView<wire::access_mode::Index> const& view,
 //  2. FIXT-admin hit → {session_admin, profile.session, Unknown} via
 //     _dispatch/reify_dispatch_fixt.hpp → vt11::owning_<Msg>.
 //  3. miss → read ApplVerID(1128) (dict_field_not_present → empty sv) →
-//     dict::resolve_application_version(profile, value) [002 free fn] →
+//     dict::resolve_application_version(profile, value) [003-OWNED free fn —
+//     NOT 002-shipped; 002 deferred it. Gate A r1 Codex P1-1 / Opus RC#1;
+//     spec §8. Contract/header added at re-/plan.] →
 //     {application, profile.session, resolved} via
 //     _dispatch/reify_dispatch_application.hpp.
 // Failures: dict_reify_oom, dict_reify_msg_type_mismatch,

@@ -7,6 +7,8 @@ last_updated: 2026-05-15
 
 # Quickstart — 003-dictionary-codegen
 
+> **Status (Gate A round 1, 2026-05-15): bundle NOT converged — `blocked_on_replan`.** The commands below are the intended workflow but are **not** runnable as specified until RC#1 (`version_profile`/`resolve_application_version`/`field_traits` are 003-owned new surface, not 002-merged), RC#2 (inherited 2c §4.1.3/§4.7 decimal-decoding defect — 2c reopen required), and RC#3 (open `dict/`→`wire/` layer amendment) are resolved at re-`/plan`. See `plan.md` `## Gate A`. `/tasks` is gated.
+
 All commands run with cwd inside the library submodule
 (`research/G19-fix-fpml-iso20022/library`). The agent surfaces an
 `AskUserQuestion` before any local Conan/CMake build per `[const §XVII.7]`
@@ -78,9 +80,12 @@ git status --porcelain   # MUST be empty for the source tree after configure
 ```
 
 `determinism_test` regenerates each version's `Messages.hpp` and asserts
-byte-identical output vs the 4 checked-in goldens under
-`specs/003-dictionary-codegen/contracts/golden/`. Regenerating a golden is a
-deliberate, Gate-A-reviewed step on any codegen-template change.
+byte-identical output vs the 4 goldens under
+`specs/003-dictionary-codegen/contracts/golden/`. Those goldens are generated
+codegen output, **checked in at `/implement`** (one `tasks.md` row) — the
+`contracts/golden/` directory does **not** exist in the bundle at Gate A.
+Regenerating a golden is a deliberate, Gate-A-reviewed step on any
+codegen-template change.
 
 ## 6. /speckit-verify (mandatory after /speckit-implement, `[const §XVII.8]`)
 
