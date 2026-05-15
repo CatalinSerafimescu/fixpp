@@ -49,3 +49,48 @@ endforeach()
 # T028: round_trip_test directly parses XML fixtures via pugixml to build the
 # ground-truth (msg_type, tag) pair set for exact exhaustiveness comparison.
 target_link_libraries(dictionary_round_trip_test PRIVATE pugixml::pugixml)
+
+# ── US2 Reify tests (T028-T031) ─────────────────────────────────────────────
+# These tests include generated <vXX>/Reify.hpp (build-tree only, AC-C4).
+# fixpp_codegen_generate is defined in tests/codegen/CMakeLists.txt, which is
+# add_subdirectory'd BEFORE tests/dictionary in the top-level CMakeLists.txt
+# (reordered at T028-T031 — previously dictionary came first).
+# The generated include dir is ${CMAKE_BINARY_DIR}/_codegen/include (mirrors
+# FIXPP_CODEGEN_OUT in tests/codegen/CMakeLists.txt).
+
+if(TARGET fixpp_codegen_generate)
+  set(_REIFY_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+
+  set(FIXPP_REIFY_TESTS
+    reify_test
+    reify_move_test
+    reify_cross_strand_test
+    reify_oom_test
+  )
+
+  foreach(target IN LISTS FIXPP_REIFY_TESTS)
+    add_executable(dictionary_${target} "${target}.cpp")
+    add_dependencies(dictionary_${target} fixpp_codegen_generate)
+    target_link_libraries(dictionary_${target} PRIVATE
+      fixpp_dictionary
+      GTest::gtest
+      GTest::gtest_main
+    )
+    target_include_directories(dictionary_${target} PRIVATE
+      "${_REIFY_CODEGEN_INC}"
+      "${CMAKE_SOURCE_DIR}/tests"
+    )
+    target_compile_definitions(dictionary_${target} PRIVATE
+      "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+    )
+    add_test(NAME dictionary_${target} COMMAND dictionary_${target})
+    set_tests_properties(dictionary_${target} PROPERTIES LABELS dictionary)
+  endforeach()
+
+  # reify_cross_strand_test is a TSan target per [const §IX.2] / AC-R5/AC-T3.
+  set_tests_properties(dictionary_reify_cross_strand_test PROPERTIES
+    LABELS "dictionary;tsan")
+else()
+  message(STATUS
+    "tests/dictionary: fixpp_codegen_generate not available; skipping US2 reify tests")
+endif()

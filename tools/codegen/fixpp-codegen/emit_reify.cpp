@@ -275,6 +275,8 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns,
     // from_view factory.
     // R6: deep-copy unavailable (stub MV has no bytes); allocate via mr so
     // the PMR-OOM trap path (AC-R7 / seam #16) still fires on alloc failure.
+    // trap_throw ([2a §4.2]): catches std::bad_alloc from mr->allocate (via
+    // pmr::vector constructor) and maps to dict_reify_oom (AC-R7).
     w.raw("inline ::fixpp::core::expected_t<");
     w.raw(oid);
     w.line(">");
@@ -285,9 +287,14 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns,
     w.line("    // R6-blocked: frame bytes unavailable from frozen stub (spec §11 R6).");
     w.line("    // Behavioural round-trip (values survive source-arena reset) arrives with 2b.");
     w.line("    // Shape is correct: allocate via mr so the PMR-OOM trap fires (AC-R7).");
-    w.raw("    return ");
+    w.line("    // trap_throw ([2a §4.2]): bad_alloc from pmr::vector → dict_reify_oom.");
+    w.line("    try {");
+    w.raw("        return ");
     w.raw(oid);
     w.line("(mr);");
+    w.line("    } catch (::std::bad_alloc const&) {");
+    w.line("        return ::std::unexpected{::fixpp::core::error::dict_reify_oom};");
+    w.line("    }");
     w.line("}");
     w.line();
 }
@@ -321,6 +328,7 @@ std::string emit_reify(VersionIR const& ir) {
     w.line("#include <cstddef>");
     w.line("#include <cstdint>");
     w.line("#include <memory_resource>");
+    w.line("#include <new>");
     w.line("#include <optional>");
     w.line("#include <string_view>");
     w.line("#include <type_traits>");

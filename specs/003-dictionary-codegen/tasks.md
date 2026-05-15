@@ -103,10 +103,10 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 2 (write FIRST — must fail)
 
-- [ ] T028 [P] [US2] `tests/dictionary/reify_test.cpp` — AC-R1..R3, AC-R6, AC-R8: `reify_as<Msg>` happy path, msg-type-mismatch arm (`get<35>()`), `[[clang::lifetimebound]]` chain
-- [ ] T029 [P] [US2] `tests/dictionary/reify_move_test.cpp` — seam #14, AC-R4: move + lazy view rebuild; `static_assert`s (no reference members, `is_nothrow_move_constructible_v`, move ctor NOT `= default`)
-- [ ] T030 [P] [US2] `tests/dictionary/reify_cross_strand_test.cpp` — seam #12, AC-R5/AC-T3: reify A → move → consume B; original traps post-reset (TSan target — `[const §IX.2]`)
-- [ ] T031 [P] [US2] `tests/dictionary/reify_oom_test.cpp` + `tools/check_alloc.py` driver — seam #7/#16, AC-R7: `trap_throw` PMR-OOM injection → `dict_reify_oom`; ≤4 PMR allocs; `mallocnesia` zero-alloc guard for string/int/char + default-trait decimal
+- [X] T028 [P] [US2] `tests/dictionary/reify_test.cpp` — AC-R1..R3, AC-R6, AC-R8: `reify_as<Msg>` happy path, msg-type-mismatch arm (`get<35>()`), `[[clang::lifetimebound]]` chain
+- [X] T029 [P] [US2] `tests/dictionary/reify_move_test.cpp` — seam #14, AC-R4: move + lazy view rebuild; `static_assert`s (no reference members, `is_nothrow_move_constructible_v`, move ctor NOT `= default`)
+- [X] T030 [P] [US2] `tests/dictionary/reify_cross_strand_test.cpp` — seam #12, AC-R5/AC-T3: reify A → move → consume B; original traps post-reset (TSan target — `[const §IX.2]`)
+- [X] T031 [P] [US2] `tests/dictionary/reify_oom_test.cpp` + `tools/check_alloc.py` driver — seam #7/#16, AC-R7: `trap_throw` PMR-OOM injection → `dict_reify_oom`; ≤4 PMR allocs; `mallocnesia` zero-alloc guard for string/int/char + default-trait decimal
 
 ### Implementation for User Story 2
 
