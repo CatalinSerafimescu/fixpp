@@ -27,6 +27,19 @@ enum class error : std::uint8_t {
     dict_xml_parse_failed = 20,
     dict_unknown_version = 21,
     dict_xml_oom = 22,
+
+    // dict codegen / reify variants — owned by 003-dictionary-codegen
+    // (research.md D-10/D-21; data-model "Error mapping"; spec AC-VP6).
+    // Additive at unused slots 23..28 per `[const §X.4]`; non-renumbering;
+    // existing slots above preserved verbatim. The 2b/wire "field absent"
+    // error from `MessageView::get<1128>()` is 2b-owned, NOT a slot here
+    // (cross-feature note, contracts/version_profile.hpp / spec A6).
+    dict_reify_msg_type_mismatch = 23,
+    dict_reify_unknown_msg_type = 24,
+    dict_reify_oom = 25,
+    dict_unresolved_application_version = 26,
+    dict_unknown_appl_ver_id = 27,
+    dict_no_dictionary_for_application_version = 28,
 };
 
 template <class T>
