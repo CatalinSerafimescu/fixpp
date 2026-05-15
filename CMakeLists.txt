@@ -84,6 +84,10 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/codegen)  # 003-dictionary-codegen US1 suites (T017-T022); before
                                    # tests/dictionary so fixpp_codegen_generate is defined
                                    # when the US2 reify test targets reference it (T028-T031).
+  add_subdirectory(tests/integration)  # 003-dictionary-codegen US3 integration (T035);
+                                       # after tests/codegen so fixpp_codegen_generate is
+                                       # visible (dispatch-consuming TUs need the generated
+                                       # _dispatch/ headers). Before tests/dictionary is fine.
   add_subdirectory(tests/dictionary)
   add_subdirectory(tests/wire)
   add_subdirectory(tests/session)

@@ -125,13 +125,13 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 3 (write FIRST — must fail)
 
-- [ ] T034 [P] [US3] `tests/dictionary/reify_dispatch_test.cpp` — seam #15a/#15b/#15c/#10c, AC-D1..D3/D6/D7: 7 FIXT admin MsgTypes switch, application MsgTypes (AC-G12 CI subset; nightly exhaustive), `dict_unresolved_application_version` propagation (AC-D6), fail-loud default arm
-- [ ] T035 [P] [US3] `tests/integration/fixt_cross_vocabulary.cpp` — seam #10b, AC-D4: the `[2c §6.3]` worked-example byte stream end-to-end
+- [X] T034 [P] [US3] `tests/dictionary/reify_dispatch_test.cpp` — seam #15a/#15b/#15c/#10c, AC-D1..D3/D6/D7: 7 FIXT admin MsgTypes switch, application MsgTypes (AC-G12 CI subset; nightly exhaustive), `dict_unresolved_application_version` propagation (AC-D6), fail-loud default arm
+- [X] T035 [P] [US3] `tests/integration/fixt_cross_vocabulary.cpp` — seam #10b, AC-D4: the `[2c §6.3]` worked-example byte stream end-to-end
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] `tools/codegen/fixpp-codegen/emit_dispatch.cpp` — emit `_dispatch/reify_dispatch_fixt.hpp` (7 FIXT admin MsgTypes) + `_dispatch/reify_dispatch_application.hpp` (~470 (version, MsgType) cases, fail-loud `dict_reify_unknown_msg_type` default) (data-model Entity 8; R3). Makes T034–T035 green (depends on T032)
-- [ ] T037 [US3] Wire `emit_dispatch` into `main.cpp` + `generate-vXX`; `dict::reify` consumes `version_profile`/`resolve_application_version` (T008) + the generated dispatch headers (depends on T011, T036)
+- [X] T036 [US3] `tools/codegen/fixpp-codegen/emit_dispatch.cpp` — emit `_dispatch/reify_dispatch_fixt.hpp` (7 FIXT admin MsgTypes) + `_dispatch/reify_dispatch_application.hpp` (~470 (version, MsgType) cases, fail-loud `dict_reify_unknown_msg_type` default) (data-model Entity 8; R3). Makes T034–T035 green (depends on T032)
+- [X] T037 [US3] Wire `emit_dispatch` into `main.cpp` + `generate-vXX`; `dict::reify` consumes `version_profile`/`resolve_application_version` (T008) + the generated dispatch headers (depends on T011, T036)
 
 **Checkpoint**: US1–US3 work independently — full runtime-dispatch reify + FIXT cross-vocabulary.
 
