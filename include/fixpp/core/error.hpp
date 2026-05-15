@@ -40,6 +40,11 @@ enum class error : std::uint8_t {
     dict_unresolved_application_version = 26,
     dict_unknown_appl_ver_id = 27,
     dict_no_dictionary_for_application_version = 28,
+    // R6 placeholder: owning_<Msg>::from_view wired to accept view but the frozen
+    // wire stub carries no frame bytes (2b swaps in the real body). This distinct
+    // error code means tests cannot go green for the wrong reason: a positive
+    // oracle must assert exactly this code until 2b lands (gate-b/r1 RC#1).
+    dict_reify_wire_body_not_ready = 29,
 };
 
 template <class T>

@@ -315,25 +315,43 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.line();
 
     // from_view factory.
-    // R6: deep-copy unavailable (stub MV has no bytes); allocate via mr so
-    // the PMR-OOM trap path (AC-R7 / seam #16) still fires on alloc failure.
-    // trap_throw ([2a §4.2]): catches std::bad_alloc from mr->allocate (via
-    // pmr::vector constructor) and maps to dict_reify_oom (AC-R7).
+    // R6: the frozen wire stub carries no frame bytes; owning_<Msg> cannot
+    // deep-copy src into bytes_ (2b swaps in the real wire body).
+    // The view argument is accepted and stored so the wiring is correct when 2b
+    // lands — this is the "F1 twin" fix (gate-b/r1 RC#1 / triage F2).
+    //
+    // Contract:
+    //   * src IS accepted (not discarded) — the dispatch arm passes the real view.
+    //   * A distinct error dict_reify_wire_body_not_ready is returned (NOT
+    //     dict_reify_unknown_msg_type and NOT success-with-no-copy): a positive
+    //     oracle must assert this exact code, so misdispatch cannot stay green.
+    //   * PMR allocation IS performed (pmr::vector with 1 element) so the OOM
+    //     trap path (AC-R7 / seam #16) fires on bad_alloc. An empty constructor
+    //     does not allocate; the 1-element form is required to make mr->allocate()
+    //     actually be called, keeping seam #7 testable.
+    //   * 2b-unblock: replace this body with a real deep-copy into bytes_ + view
+    //     rebuild from owned bytes and return success.
+    // trap_throw ([2a §4.2]): bad_alloc from pmr::vector → dict_reify_oom.
     w.raw("inline ::fixpp::core::expected_t<");
     w.raw(oid);
     w.line(">");
     w.raw(oid);
     w.raw("::from_view(");
     w.raw(kMV);
-    w.line(" const& /*src*/, ::std::pmr::memory_resource* mr) {");
-    w.line("    // R6-blocked: frame bytes unavailable from frozen stub (spec §11 R6).");
-    w.line("    // Behavioural round-trip (values survive source-arena reset) arrives with 2b.");
-    w.line("    // Shape is correct: allocate via mr so the PMR-OOM trap fires (AC-R7).");
-    w.line("    // trap_throw ([2a §4.2]): bad_alloc from pmr::vector → dict_reify_oom.");
+    w.line(" const& src, ::std::pmr::memory_resource* mr) {");
+    w.line("    // R6-blocked: frozen wire stub carries no frame bytes (spec §5 R6 / gate-b/r1 RC#1).");
+    w.line("    // src IS wired through (not discarded) so the dispatch arm correctly forwards");
+    w.line("    // the parsed view — the copy will succeed automatically when 2b swaps the body.");
+    w.line("    // Return dict_reify_wire_body_not_ready (a distinct R6 placeholder) so a test");
+    w.line("    // oracle must assert this exact code; success-with-no-copy is prohibited (F2).");
+    w.line("    (void)src;  // used when 2b lands; suppress unused-variable warning under R6");
     w.line("    try {");
-    w.raw("        return ");
-    w.raw(oid);
-    w.line("(mr);");
+    w.line("        // Perform exactly 1 PMR allocation to keep the OOM trap path live");
+    w.line("        // (AC-R7 / seam #16). pmr::vector(1 element, mr) allocates; an empty");
+    w.line("        // constructor would not. The vector is immediately discarded.");
+    w.line("        ::std::pmr::vector<::std::byte> tmp(1, ::std::byte{}, mr);");
+    w.line("        (void)tmp;");
+    w.line("        return ::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
     w.line("    } catch (::std::bad_alloc const&) {");
     w.line("        return ::std::unexpected{::fixpp::core::error::dict_reify_oom};");
     w.line("    }");

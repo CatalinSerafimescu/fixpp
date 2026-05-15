@@ -122,7 +122,7 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("// dict_reify_unknown_msg_type (never silently misdispatches — R3).");
     w.line("[[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::dict::owning_message_handle>");
     w.line("dispatch_fixt(");
-    w.line("    ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& /*view*/,");
+    w.line("    ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view,");
     w.line("    char msg_type,");
     w.line("    ::fixpp::dict::version_profile profile,");
     w.line("    ::std::pmr::memory_resource* mr)");
@@ -134,12 +134,10 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("        profile.session,");
     w.line("        ::fixpp::dict::application_version::Unknown");
     w.line("    };");
-    w.line("    (void)rmv;  // used by owning_message_handle ctor (US3 T037)");
-    w.line("    // R6: owning_message_handle ctor and from_view are not yet wired;");
-    w.line("    // we demonstrate the switch shape compiles and fail-loud default fires.");
-    w.line("    // The factory call (make<Msg>(view, mr)) is stubbed as from_view().");
-    w.line("    using MV = ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>;");
-    w.line("    (void)mr;");
+    w.line("    // rmv is plumbed into the owning_message_handle ctor when 2b lands");
+    w.line("    // (gate-b/r1 RC#1 F1 fix: resolved_message_version is now propagated, not");
+    w.line("    // discarded). Under R6 it is (void)d because the handle is not yet returned.");
+    w.line("    (void)rmv;");
     w.line("    switch (msg_type) {");
 
     for (auto const& fa : kFixtAdminTypes) {
@@ -148,18 +146,19 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
         w.raw("': {  /* ");
         w.raw(fa.comment);
         w.line(" */");
+        w.line("            // gate-b/r1 RC#1 F1: forward the real view (not MV{}) so the");
+        w.line("            // dispatch arm is wire-body-ready when 2b lands.");
+        w.line("            // from_view returns dict_reify_wire_body_not_ready under R6");
+        w.line("            // (frozen stub has no bytes) — propagate that distinct error so");
+        w.line("            // positive oracle tests cannot go green until 2b.");
         w.raw("            auto own = ::fixpp::vt11::owning_");
         w.raw(fa.class_name);
         w.raw("::from_view(");
-        w.line("/*view*/MV{}, mr);");
+        w.line("view, mr);");
         w.line("            if (!own) return ::std::unexpected{own.error()};");
-        w.raw(
-            "            // R6: owning_message_handle wrapping is T037; return the typed owner's");
-        w.line(" error code on success for now.");
-        w.line("            // Full handle-wrapping lands with dict::reify implementation (T037).");
+        w.line("            // 2b-unblock: construct and return owning_message_handle{rmv, own}.");
         w.line("            (void)own;");
-        w.line(
-            "            return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
+        w.line("            return ::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
         w.line("        }");
     }
 
@@ -229,15 +228,16 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
     w.line("// INVARIANT I-11: BOTH default arms are fail-loud (R3 / AC-D7).");
     w.line("[[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::dict::owning_message_handle>");
     w.line("dispatch_application(");
-    w.line("    ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& /*view*/,");
+    w.line("    ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view,");
     w.line("    ::std::string_view msg_type,");
     w.line("    ::fixpp::dict::application_version resolved_application,");
     w.line("    ::fixpp::dict::version_profile profile,");
     w.line("    ::std::pmr::memory_resource* mr)");
     w.line("{");
-    w.line("    using MV = ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>;");
-    w.line("    (void)profile;  // carried in resolved_message_version (T037)");
-    w.line("    (void)mr;");
+    w.line("    // gate-b/r1 RC#1 F1: view is now accepted and forwarded (not discarded).");
+    w.line("    // resolved_message_version is constructed per arm and plumbed into the handle");
+    w.line("    // when 2b lands. Under R6 (void)rmv suppresses unused-variable warnings.");
+    w.line("    (void)profile;  // carried in resolved_message_version per arm (2b-unblock)");
     w.line("    switch (resolved_application) {");
 
     // Emit one outer case per codegen application version.
@@ -258,6 +258,17 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.raw("            // fixpp::");
         w.raw(av.ns);
         w.line(" application messages.");
+        w.line("            // gate-b/r1 RC#1 F1: resolved_message_version for application frames:");
+        w.line("            // {application, profile.session, resolved_application} per AC-D3 / [2c §6.3].");
+        w.raw("            ::fixpp::dict::resolved_message_version const rmv_app{");
+        w.line("");
+        w.line("                ::fixpp::dict::resolved_message_version::kind::application,");
+        w.line("                profile.session,");
+        w.raw("                ::fixpp::dict::application_version::");
+        w.raw(av.ns);
+        w.line("");
+        w.line("            };");
+        w.line("            (void)rmv_app;  // plumbed into handle when 2b lands; suppress warning under R6");
         w.line("            if (msg_type.size() != 1 && msg_type.empty()) {");
         w.line(
             "                return "
@@ -289,19 +300,19 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
                 w.raw("': {  /* ");
                 w.raw(m.name);
                 w.line(" */");
+                w.line("                    // gate-b/r1 RC#1 F1: forward the real view (not MV{}).");
                 w.raw("                    auto own = ::fixpp::");
                 w.raw(av.ns);
                 w.raw("::owning_");
                 w.raw(id);
                 w.raw("::from_view(");
-                w.line("MV{}, mr);");
+                w.line("view, mr);");
                 w.line("                    if (!own) return ::std::unexpected{own.error()};");
+                w.line("                    // 2b-unblock: return owning_message_handle{rmv_app, own}.");
                 w.line("                    (void)own;");
                 w.line(
-                    "                    // R6: owning_message_handle wrapping lands with T037.");
-                w.line(
                     "                    return "
-                    "::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};");
+                    "::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
                 w.line("                }");
             }
         }
