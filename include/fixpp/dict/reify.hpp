@@ -77,6 +77,7 @@ public:
 
 private:
     struct impl; /* small-variant OR heap polymorphic owner */
+    impl* pimpl_ = nullptr;  // R6 stub: heap pimpl; full SBO/polymorphic owner in 2b.
 };
 
 // Typed entry point — caller names Msg at compile time; no dispatch overhead.

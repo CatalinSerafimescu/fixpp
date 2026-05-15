@@ -18,6 +18,10 @@ add_library(fixpp_dictionary STATIC
   version_profile.cpp
   version_registry.cpp
   field_traits.cpp
+  # T037: dict::reify() + owning_message_handle R6 stub bodies ([2c §4.8]).
+  # Bridge file (arch §2.4 v0.3 — #includes the vendored frozen wire stub
+  # header; NOT a cyclic dictionary→wire link edge; BRIDGE_SOURCE_FILES).
+  reify.cpp
 )
 add_library(fixpp::dictionary ALIAS fixpp_dictionary)
 
