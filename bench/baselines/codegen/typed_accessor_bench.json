@@ -1,0 +1,5 @@
+{
+  "comment": "R6-deferred stub baseline — accessor dispatch + error-path overhead only.",
+  "note": "FIXPP_R6_BENCH_DEFERRED: NFR-003-1 ceilings (string/int/char ≤20 ns; price(mr) ≤75 ns; field_value ≤25 ns) cannot be enforced against these stub timings. The frozen wire stub (R6) returns field-absent unconditionally; benchmarks measure null-check + unexpected-return overhead alone. Seed these baselines from the first 2b-green CI run.",
+  "benchmarks": []
+}
