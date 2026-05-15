@@ -109,6 +109,11 @@ This feature unblocks the typed surface every downstream module (`session/`, `ca
 - **Q2: `fixpp-codegen` implementation language/host?** → **A** — deferred to /plan with a 2–3 candidate evaluation (mirrors 002 Q3 → XML-parser-defer). User signs off at /plan; Codex Gate A reviews. Tracked as follow-up **F1** in §10.
 - **Q3: `Validator.hpp` scope?** → **A** — codegen tool **emits** `Validator.hpp` + the Length+Data pair table; this PR **shape/exhaustiveness-tests** them against the source XML (seam #19). *Behavioral* validation (`wire::dictionary_driven_validator` rejecting a bad message) is a downstream wire-layer feature, out of scope here. Validator.hpp is pure codegen output — cheap to emit now, expensive to retrofit later.
 
+### Session 2026-05-15 (/clarify)
+
+- Q: What selection principle governs the ~20-message/version CI conformance subset (seam #1 / #15b)? → A: **Curated must-include** — the CI subset MUST include all P1 headline messages, every message bearing a repeating group, all 7 FIXT.1.1 admin types, the AC-D4 worked-example messages, and msgtype-boundary cases (FIX-Latest / A-014..A-034 filter probes). Pinned as an acceptance criterion (AC-G12); nightly run remains exhaustive; Gate A reviews the must-include list.
+- Q: How many checked-in golden headers anchor the determinism test (NFR-003-7 / R5)? → A: **One per version (4 total)** — a checked-in golden header for each of `v42`/`v44`/`v50sp2`/`vt11`; the determinism test asserts byte-identical re-emission against all four. Regenerated as a deliberate, reviewed step on any codegen-template change.
+
 ## 4. Functional acceptance criteria
 
 Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`, `[2c §7.6]`; one bullet per testable property.
@@ -126,6 +131,7 @@ Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`
 - **AC-G9.** A `<message msgtype="...">` outside the `[2c §1.3]` locked set produces a codegen build-time warning (CI-downgradable to error) and is **not** emitted (no v1.0 FIX-Latest flag).
 - **AC-G10.** A-014..A-034 messages present in source XML are **not** emitted as typed classes in v1.0 (codegen-deferred per `[const §XVIII.7]`); they remain reachable only via 002's runtime `view.get(uint16_t)`.
 - **AC-G11.** Per-tag accessors are `inline noexcept` and **not** `constexpr`; only `msg_type_v`/`version_v` are `constexpr` (N-P2-1).
+- **AC-G12.** The CI conformance subset (seam #1 / #15b) satisfies the **curated must-include** rule: per version it MUST cover every P1 headline message, every message declaring a repeating group, all 7 FIXT.1.1 admin MsgTypes (`0/1/2/3/4/5/A`), every message in the `[2c §6.3]` AC-D4 worked example, and msgtype-boundary probes (a filtered FIX-Latest A-035..A-065 message and a codegen-deferred A-014..A-034 message per AC-G9/AC-G10). The nightly run is exhaustive over the full emitted set; a CI subset missing any must-include class fails the conformance test (the list is a checked-in, Gate-A-reviewed manifest, not an ad-hoc sample).
 
 ### 4.2 `Fields.hpp` / `Validator.hpp` / `NormativeReferences.md` — `[2c §4.2]` / `[2c §1.3]`
 
@@ -200,7 +206,7 @@ Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`
 | NFR-003-4 | Zero allocation on the typed-accessor read path (every accessor delegates to `wire::MessageView::get<Tag>()`, allocation-free Index mode per `[2b §4.3]`). | Allocation guard seam #7; read loop under interceptor reads 0. |
 | NFR-003-5 | Codegen output is `constexpr` static storage — no `new`/`delete` ever (`[const §VIII.5]`); no `thread_local` emitted (`[const §XV]`/`[arch §5.4]`). | Static-storage assertions; `tools/check_layers.py` + grep gate in CI; `Fields.hpp` inspected. |
 | NFR-003-6 | All view-returning accessors carry `[[clang::lifetimebound]]`; all `expected_t<T>`-returning methods carry `[[nodiscard]]` (codegen emits unconditionally). | Codegen-template golden test; static inspection of a sample generated header. |
-| NFR-003-7 | Determinism: byte-identical XML → byte-identical generated headers across runs **and machines** (sorted-emission invariant, locale-independent bytewise compare). | Seam #1/#2 — generate twice, hash, assert equal; checked-in golden header per representative version. |
+| NFR-003-7 | Determinism: byte-identical XML → byte-identical generated headers across runs **and machines** (sorted-emission invariant, locale-independent bytewise compare). | Seam #1/#2 — generate twice, hash, assert equal; **one checked-in golden header per codegen version** (v42/v44/v50sp2/vt11 — 4 total); determinism test asserts byte-identical re-emission against all four; regenerated as a reviewed step on template change. |
 | NFR-003-8 | Layer hygiene: the only new allowed edges are `dictionary → core` (already present from 002) and the codegen tool's host-side deps; no `dictionary → wire`/`session` runtime edge (typed messages *consume* `wire::MessageView` as a compile-time template arg from generated headers — confirm the edge classification at /plan; see R6). | `tools/check_layers.py` clean in CI; edge map reviewed at Gate A. |
 
 ## 7. Files in scope
@@ -226,7 +232,7 @@ Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`
 
 ## 9. Test seams (carried from `[2c §9]`, scoped to this feature)
 
-1. **Conformance corpus** — every codegen version × owned messages round-trip (parse → typed accessors → `reify_as` → re-serialize). CI: representative ~20-msg/version subset; nightly: exhaustive. Runtime-XML-only versions → seam #10c.
+1. **Conformance corpus** — every codegen version × owned messages round-trip (parse → typed accessors → `reify_as` → re-serialize). CI: curated ~20-msg/version must-include subset per **AC-G12** (P1 headline + every group-bearing message + 7 FIXT admin + AC-D4 worked-example + msgtype-boundary probes); nightly: exhaustive. The must-include manifest is checked in and Gate-A-reviewed. Runtime-XML-only versions → seam #10c.
 2. **Compile-time cost regression** — single-version (≤ 3 s) and all-versions (≤ 15 s soft) TU compile bench; per-header expansion size.
 3. **Per-tag accessor latency regression** — `cl_ord_id`/`side`/`order_qty`/`price`/`field_value` (decimal split per N-P2-2).
 5. **Codegen lookup latency regression** — `Dictionary::field_ref`/`field_valid_for`/`required_fields`/`group_first_field`/`length_pair_data_tag`/`resolve_application_version` on the codegen-emitted tables.
@@ -235,7 +241,7 @@ Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`
 10. **Multi-version coexistence** — 10a (multi-session no namespace bleed), 10b (single FIXT.1.1 cross-vocabulary worked example), 10c (runtime-XML-only versions → `dict_reify_unknown_msg_type`).
 12. **`owning_<Msg>` cross-strand handoff** — reify on A, move to B, A's arena reset, B reads correct values; original view traps in debug post-reset.
 14. **`owning_<Msg>` move + lazy view rebuild** — populate cache, move, moved-to rebuilds; source caches `nullopt`; static-asserts (no ref members, nothrow-move, move not `=default`).
-15. **`dict::reify` runtime-dispatch round-trip** — 15a (7 FIXT admin), 15b (4 versions × representative app MsgTypes; ~20/version CI + exhaustive nightly), 15c (`dict_unresolved_application_version` propagation).
+15. **`dict::reify` runtime-dispatch round-trip** — 15a (7 FIXT admin), 15b (4 versions × app MsgTypes; CI = the **AC-G12** curated must-include subset, exhaustive nightly), 15c (`dict_unresolved_application_version` propagation).
 16. **`trap_throw` PMR OOM injection** — `reify_as` / `reify` / `owning_<Msg>::from_view` → `dict_reify_oom`; none terminate.
 18. **Static-assert typed-flyweight size** — `sizeof(Msg) == sizeof(MessageView<Index> const*)` per message.
 19. **Length+Data static-table coverage** — emitted pair table exhaustive vs source XML; cross-checked vs `[FIX50SP2 §3.3]`.
@@ -282,7 +288,7 @@ Lifted from `[2c §4.7]`, `[2c §4.8]`, `[2c §4.9]`, `[2c §6.2]`, `[2c §6.3]`
 - **R2 — Generated-header compile-time blow-up.** ~1.5 MB/all-versions; single-version ≤ 3 s is load-bearing. Mitigation: compile-time bench seam #2 in scope from day one; per-version CMake targets (`[2c §7.6]`) so consumers pay only for what they include; F4 spike.
 - **R3 — Dispatch-switch generation regression (~470 cases).** A missing/wrong case silently misdispatches. Mitigation: seam #15b exhaustive nightly + representative CI; `dict_reify_unknown_msg_type` default arm is fail-loud.
 - **R4 — `owning_<Msg>` lazy-view move correctness.** Defaulted move on `optional` would leave a stale cache aliasing pre-move bytes. Mitigation: custom `noexcept` move mandated (AC-R4); seam #14 incl. static-asserts that the move is not `= default`.
-- **R5 — Codegen determinism / source-tree pollution.** Non-deterministic emission breaks CI diffs; source-tree writes corrupt checkouts. Mitigation: AC-T1/T2; build-tree-only (`[arch §4.2]` step 3); checked-in golden header for a representative version (NFR-003-7).
+- **R5 — Codegen determinism / source-tree pollution.** Non-deterministic emission breaks CI diffs; source-tree writes corrupt checkouts. Mitigation: AC-T1/T2; build-tree-only (`[arch §4.2]` step 3); one checked-in golden header per codegen version (v42/v44/v50sp2/vt11 — 4 total), determinism test asserts byte-identical re-emission against all four (NFR-003-7).
 - **R6 — `wire::MessageView` dependency ordering.** Generated headers depend on the `[2b]` wire surface at compile time, but the wire *feature* is downstream of `dictionary/` in module order. Mitigation: confirm the seam at /plan — the dependency is on the wire *header contract* (`MessageView<Index>::get<Tag>`), which `[2b §4.3]` locks; if the wire headers are not yet present, /plan decides whether codegen targets build behind a `FIXPP_WIRE_PRESENT` guard or the wire header contract is vendored as a stable stub. Flagged for Gate A.
 
 ## 12. Definition of done
