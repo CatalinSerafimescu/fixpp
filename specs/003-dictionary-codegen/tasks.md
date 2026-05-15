@@ -164,7 +164,7 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 5 (write FIRST — must fail)
 
-- [ ] T041 [P] [US5] `tests/codegen/determinism_test.cpp` — NFR-003-7/AC-T1/AC-T2: generate twice, hash, assert equal; assert no source-tree write; byte-identical re-emission vs the four `<vXX>_Messages.golden.hpp`
+- [X] T041 [P] [US5] `tests/codegen/determinism_test.cpp` — NFR-003-7/AC-T1/AC-T2: generate twice, hash, assert equal; assert no source-tree write; byte-identical re-emission vs the four `<vXX>_Messages.golden.hpp`
 
 ### Implementation for User Story 5
 

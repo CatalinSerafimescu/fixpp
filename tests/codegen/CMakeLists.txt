@@ -62,6 +62,30 @@ target_compile_definitions(codegen_conformance_test PRIVATE
 add_test(NAME codegen_conformance_test COMMAND codegen_conformance_test)
 set_tests_properties(codegen_conformance_test PROPERTIES LABELS codegen)
 
+# T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
+#
+# Three assertions:
+#   (1) Run fixpp-codegen twice into separate temp dirs; assert byte-identical.
+#   (2) Assert no source-tree write (mtime/file-count snapshot of dictionaries/).
+#   (3) Assert generated Messages.hpp == checked-in golden for all 4 versions.
+#
+# The binary path is injected at CMake configure time via $<TARGET_FILE:fixpp-codegen>
+# (a generator expression) so it resolves to the correct preset-specific path.
+# add_dependencies ensures the binary is built before the test runs.
+add_executable(codegen_determinism_test determinism_test.cpp)
+add_dependencies(codegen_determinism_test fixpp-codegen)
+target_link_libraries(codegen_determinism_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_determinism_test PRIVATE
+  "FIXPP_CODEGEN_BIN=\"$<TARGET_FILE:fixpp-codegen>\""
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/003-dictionary-codegen/contracts/golden\""
+)
+add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
+set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
+
 # T039: cmake -P build-graph test — fixpp::dict::codegen-build-graph-check
 #
 # AC-C4: asserts that (a) generated headers exist post-configure, (b) generation
