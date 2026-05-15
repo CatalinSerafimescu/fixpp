@@ -73,14 +73,12 @@ int main(int argc, char** argv) {
             write_file(base / "Messages.hpp", fixpp::codegen::emit_messages(ir));
             write_file(base / "Validator.hpp", fixpp::codegen::emit_validator(ir));
             write_file(base / "Reify.hpp", fixpp::codegen::emit_reify(ir));
-            write_file(base / "NormativeReferences.md",
-                       fixpp::codegen::emit_normative_refs(ir));
+            write_file(base / "NormativeReferences.md", fixpp::codegen::emit_normative_refs(ir));
             all.push_back(std::move(ir));
         }
         // Shared dispatch headers -- emitted once over the union ([2c §4.8]).
         std::filesystem::path const disp = jobs.front().out / "_dispatch";
-        write_file(disp / "reify_dispatch_fixt.hpp",
-                   fixpp::codegen::emit_dispatch_fixt(all));
+        write_file(disp / "reify_dispatch_fixt.hpp", fixpp::codegen::emit_dispatch_fixt(all));
         write_file(disp / "reify_dispatch_application.hpp",
                    fixpp::codegen::emit_dispatch_application(all));
     } catch (std::exception const& e) {

@@ -12,8 +12,8 @@
 
 namespace fixpp::dict {
 
-core::expected_t<Dictionary const*>
-version_registry::get(application_version /*v*/) const noexcept {
+core::expected_t<Dictionary const*> version_registry::get(
+    application_version /*v*/) const noexcept {
     return std::unexpected{core::error::dict_no_dictionary_for_application_version};
 }
 

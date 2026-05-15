@@ -27,16 +27,15 @@
 // not exactly 4. The exact 4-alloc itemisation becomes testable with 2b.
 //
 // Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16.
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
-
-#include <gtest/gtest.h>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/field_traits.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>
@@ -45,15 +44,14 @@
 
 namespace {
 
-using MV   = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
-using NOS  = fixpp::v44::NewOrderSingle;
+using NOS = fixpp::v44::NewOrderSingle;
 
 // Counting-only PMR resource: delegates to upstream but tracks allocate calls.
 class counting_pmr_resource final : public std::pmr::memory_resource {
 public:
-    explicit counting_pmr_resource(std::pmr::memory_resource* up) noexcept
-        : upstream_(up) {}
+    explicit counting_pmr_resource(std::pmr::memory_resource* up) noexcept : upstream_(up) {}
 
     [[nodiscard]] std::size_t count() const noexcept { return count_; }
 
@@ -65,8 +63,7 @@ private:
     void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
         upstream_->deallocate(p, bytes, alignment);
     }
-    [[nodiscard]] bool do_is_equal(
-        std::pmr::memory_resource const& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
         return this == &other;
     }
     std::pmr::memory_resource* upstream_;
@@ -86,8 +83,7 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
 
     MV mv;
     auto result = ONOS::from_view(mv, &counter);
-    ASSERT_TRUE(result.has_value())
-        << "from_view must succeed with a valid arena (seam #16)";
+    ASSERT_TRUE(result.has_value()) << "from_view must succeed with a valid arena (seam #16)";
 
     EXPECT_LE(counter.count(), std::size_t{4})
         << "AC-R7: reify_as must use ≤4 PMR allocations per Entity 4 budget";
@@ -128,12 +124,10 @@ TEST(ReifyOomTest, OomTrapPathDoesNotThrowWithZeroAllocs) {
     } catch (...) {
         threw = true;
     }
-    EXPECT_FALSE(threw)
-        << "from_view must not propagate std::bad_alloc (trap_throw is wired)";
+    EXPECT_FALSE(threw) << "from_view must not propagate std::bad_alloc (trap_throw is wired)";
     // R6: result is success because 0 allocations were made.
     ASSERT_TRUE(success.has_value());
-    EXPECT_TRUE(*success)
-        << "R6: from_view succeeds with stub MV (0 allocs, fail never triggered)";
+    EXPECT_TRUE(*success) << "R6: from_view succeeds with stub MV (0 allocs, fail never triggered)";
     // Confirm the failing resource was NOT called.
     EXPECT_EQ(fail.allocate_calls(), std::size_t{0})
         << "R6: stub MV causes 0 allocations in from_view";
@@ -176,8 +170,7 @@ TEST(ReifyOomTest, FlyweightCharAccessorIsZeroAlloc) {
     std::size_t before = counter.count();
     auto sd = nos.side();
     (void)sd;
-    EXPECT_EQ(counter.count(), before)
-        << "NFR-003-4: char accessor side() must not allocate";
+    EXPECT_EQ(counter.count(), before) << "NFR-003-4: char accessor side() must not allocate";
 }
 
 TEST(ReifyOomTest, DecimalAccessorWithDefaultTraitIsZeroAlloc) {

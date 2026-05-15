@@ -10,16 +10,14 @@
 // pins that premise (emitter emits the full locked set, nothing partial)
 // and documents the filter as a forward extension point — a FIX-Latest XML
 // would trip it; the v1.0 dictionaries do not.
-#include <string>
-
 #include <gtest/gtest.h>
 
-#include <memory_resource>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
-
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v50sp2/Messages.hpp>
+#include <memory_resource>
+#include <string>
 
 namespace {
 fixpp::dict::Dictionary load(char const* rel, std::pmr::memory_resource* mr) {
@@ -34,7 +32,7 @@ TEST(CodegenMsgtypeBoundary, LockedSetEmittedNonPartial) {
     ASSERT_FALSE(d.messages().empty());
     bool saw_nos = false;
     for (auto const& m : d.messages()) {
-        EXPECT_FALSE(m.msg_type.empty());          // every emitted msg has a MsgType
+        EXPECT_FALSE(m.msg_type.empty());  // every emitted msg has a MsgType
         if (m.msg_type == "D") saw_nos = true;
     }
     EXPECT_TRUE(saw_nos);  // P1 headline locked-set message present (A3)

@@ -25,24 +25,23 @@
 //
 // Oracle: specs/003-dictionary-codegen/contracts/reify.hpp (AC-R5);
 //         data-model Entity 4 I-10; spec AC-T3.
+#include <gtest/gtest.h>
+
 #include <atomic>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/reify.hpp>
+#include <fixpp/wire/message_view_contract.hpp>
 #include <memory_resource>
 #include <optional>
 #include <thread>
 #include <utility>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/dict/reify.hpp>
-#include <fixpp/wire/message_view_contract.hpp>
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>
 
 namespace {
 
-using MV   = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
 
 }  // namespace
@@ -72,7 +71,8 @@ TEST(ReiifyCrossStrand, MoveAcrossThreadsNoRace) {
     // Strand B: wait, then consume.
     std::thread b([&] {
         // Spin until A publishes (R6 test has no blocking; spin is fine).
-        while (!ready.load(std::memory_order_acquire)) {}
+        while (!ready.load(std::memory_order_acquire)) {
+        }
 
         ONOS& o = *shared;
         // AC-R5: accessor surface usable from B after the move.

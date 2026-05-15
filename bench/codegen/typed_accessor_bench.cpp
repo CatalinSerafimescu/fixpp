@@ -27,10 +27,9 @@
 #include <benchmark/benchmark.h>
 
 #include <cstdint>
-#include <memory_resource>
-
-#include <fixpp/wire/message_view_contract.hpp>
 #include <fixpp/v44/Messages.hpp>
+#include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
 
 namespace {
 

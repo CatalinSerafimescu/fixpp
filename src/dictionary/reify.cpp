@@ -50,11 +50,10 @@
 // variant, as<Msg>() type-checked cast, move semantics with cache reset) is
 // deferred; the compile-time shape (move-only, method signatures) is what
 // T034 tests (AC-R6 is shape-only per reify_test.cpp precedent).
+#include <cstdint>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
-
-#include <cstdint>
 #include <memory_resource>
 #include <string_view>
 
@@ -69,8 +68,7 @@ namespace {
 [[nodiscard]] constexpr bool is_fixt_admin(char mt) noexcept {
     // '0'=Heartbeat '1'=TestRequest '2'=ResendRequest '3'=Reject
     // '4'=SequenceReset '5'=Logout 'A'=Logon
-    return mt == '0' || mt == '1' || mt == '2' || mt == '3' ||
-           mt == '4' || mt == '5' || mt == 'A';
+    return mt == '0' || mt == '1' || mt == '2' || mt == '3' || mt == '4' || mt == '5' || mt == 'A';
 }
 }  // namespace
 
@@ -84,11 +82,8 @@ namespace {
 // CMake target. Behavioural assertions (handle.version() / handle.msg_type()
 // / handle.as<NOS>()) are R6-blocked per T034 test-comment rationale.
 struct owning_message_handle::impl {
-    resolved_message_version version{
-        resolved_message_version::kind::session_admin,
-        session_version::Unknown,
-        application_version::Unknown
-    };
+    resolved_message_version version{resolved_message_version::kind::session_admin,
+                                     session_version::Unknown, application_version::Unknown};
     // R6: no typed owner stored — dispatch TU wiring deferred (T037 / 2b).
 };
 
@@ -97,24 +92,20 @@ owning_message_handle::owning_message_handle(owning_message_handle&& other) noex
     other.pimpl_ = nullptr;
 }
 
-owning_message_handle& owning_message_handle::operator=(
-    owning_message_handle&& other) noexcept {
+owning_message_handle& owning_message_handle::operator=(owning_message_handle&& other) noexcept {
     if (this != &other) {
         delete pimpl_;
-        pimpl_       = other.pimpl_;
+        pimpl_ = other.pimpl_;
         other.pimpl_ = nullptr;
     }
     return *this;
 }
 
-owning_message_handle::~owning_message_handle() {
-    delete pimpl_;
-}
+owning_message_handle::~owning_message_handle() { delete pimpl_; }
 
 resolved_message_version owning_message_handle::version() const noexcept {
     if (!pimpl_) {
-        return {resolved_message_version::kind::session_admin,
-                session_version::Unknown,
+        return {resolved_message_version::kind::session_admin, session_version::Unknown,
                 application_version::Unknown};
     }
     return pimpl_->version;
@@ -125,15 +116,14 @@ std::string_view owning_message_handle::msg_type() const noexcept {
     return {};
 }
 
-wire::MessageView<wire::access_mode::Index> const&
-owning_message_handle::view() const noexcept {
+wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view() const noexcept {
     // R6: no real frame; return a static default-constructed stub MV.
     static wire::MessageView<wire::access_mode::Index> const kEmpty{};
     return kEmpty;
 }
 
-core::expected_t<wire::field_view>
-owning_message_handle::field_value(std::uint16_t tag) const noexcept {
+core::expected_t<wire::field_view> owning_message_handle::field_value(
+    std::uint16_t tag) const noexcept {
     return view().get(tag);
 }
 
@@ -165,10 +155,9 @@ owning_message_handle::field_value(std::uint16_t tag) const noexcept {
 // full wiring (where dict::reify ALSO dispatches), the CMake fixpp::dict::dispatch
 // target is the intended consumer that links both this .cpp and the dispatch TU.
 // In R6 scope the reify stub returns an error to keep tests clean.
-[[nodiscard]] core::expected_t<owning_message_handle>
-reify(wire::MessageView<wire::access_mode::Index> const& view,
-      version_profile profile,
-      std::pmr::memory_resource* mr) noexcept {
+[[nodiscard]] core::expected_t<owning_message_handle> reify(
+    wire::MessageView<wire::access_mode::Index> const& view, version_profile profile,
+    std::pmr::memory_resource* mr) noexcept {
     (void)mr;
 
     // Step 1: peek MsgType(35) (AC-D2 / [2c §4.8]).

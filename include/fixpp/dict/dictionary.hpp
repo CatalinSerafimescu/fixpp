@@ -54,7 +54,7 @@ struct MessageEntry {
     std::string_view msg_type;  // FIX MsgType string (e.g., "D" for
                                 // NewOrderSingle).
     // cppcheck-suppress unusedStructMember  // public surface (data-model.md): diagnostics
-    std::string_view name;      // English message name. Diagnostics-only.
+    std::string_view name;  // English message name. Diagnostics-only.
 };
 
 class Dictionary {
@@ -135,8 +135,8 @@ public:
     // side table is used for component/group field walks (runtime-MVS shape;
     // codegen-emitted per-version headers use a different layout where
     // first_field_index indexes the per-version Fields.hpp array directly).
-    [[nodiscard]] std::span<FieldRef const> component_fields(
-        std::string_view name) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] std::span<FieldRef const> component_fields(std::string_view name) const noexcept
+        [[clang::lifetimebound]];
 
     // AC-D4 runtime extension: walk a group's contiguous field list.
     // Returns a span over the per-group FieldRef side table maintained by
@@ -146,8 +146,8 @@ public:
     // Same index-space note as component_fields() above: GroupRef::
     // first_field_index indexes into this side table, not the per-MsgType
     // fields_ array.
-    [[nodiscard]] std::span<FieldRef const> group_fields(
-        std::uint16_t no_tag) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] std::span<FieldRef const> group_fields(std::uint16_t no_tag) const noexcept
+        [[clang::lifetimebound]];
 
     // 003-dictionary-codegen (RC#5 — F1 IR data path). Additive, source-
     // compatible read accessors the `fixpp-codegen` host tool consumes to
@@ -159,14 +159,14 @@ public:
     // concatenated `fields_` order — distinct from required_fields(), which
     // is required-only). Empty span if `msg_type` is not declared. Aliases
     // the metadata-handle storage (lifetime = this Dictionary).
-    [[nodiscard]] std::span<FieldRef const> message_fields(
-        std::string_view msg_type) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] std::span<FieldRef const> message_fields(std::string_view msg_type) const noexcept
+        [[clang::lifetimebound]];
 
     // FIX field name for `tag` (e.g. 11 → "ClOrdID"), used to emit named
     // typed accessors. Empty view if `tag` is unknown to this dictionary.
     // Aliases the metadata-handle name pool (lifetime = this Dictionary).
-    [[nodiscard]] std::string_view field_name(
-        std::uint16_t tag) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] std::string_view field_name(std::uint16_t tag) const noexcept
+        [[clang::lifetimebound]];
 
 private:
     friend class XmlLoader;

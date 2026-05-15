@@ -5,25 +5,22 @@
 // _reserved zero), AC-V3 (Validator.hpp per-message rule tables), AC-V5
 // (NormativeReferences.md per-message citations). Shape/structure only;
 // behavioural validation is out of scope (spec §5).
+#include <gtest/gtest.h>
+
 #include <array>
+#include <fixpp/dict/field_ref.hpp>
+#include <fixpp/v44/Fields.hpp>
+#include <fixpp/v44/Validator.hpp>
 #include <fstream>
 #include <iterator>
 #include <sstream>
 #include <string>
 #include <type_traits>
 
-#include <gtest/gtest.h>
-
-#include <fixpp/dict/field_ref.hpp>
-
-#include <fixpp/v44/Fields.hpp>
-#include <fixpp/v44/Validator.hpp>
-
 TEST(CodegenValidatorShape, FieldsArrayIsConstexprAndReservedZero) {
     constexpr auto const& fr = fixpp::v44::fields::NewOrderSingle_fields;  // AC-V1
     static_assert(std::size(fr) > 0);
-    static_assert(std::is_same_v<std::remove_cvref_t<decltype(fr[0])>,
-                                 fixpp::dict::FieldRef>);
+    static_assert(std::is_same_v<std::remove_cvref_t<decltype(fr[0])>, fixpp::dict::FieldRef>);
     for (auto const& e : fr) {
         EXPECT_EQ(e._reserved, 0);  // AC-V6 / I-7
     }
@@ -34,13 +31,11 @@ TEST(CodegenValidatorShape, PerMessageRuleTable) {
     static_assert(std::size(rules) > 0);
     EXPECT_GT(rules[0].tag, 0);
     // field_presence is the 002-shipped enum.
-    static_assert(std::is_same_v<decltype(rules[0].rule),
-                                 fixpp::dict::field_presence>);
+    static_assert(std::is_same_v<decltype(rules[0].rule), fixpp::dict::field_presence>);
 }
 
 TEST(CodegenValidatorShape, NormativeReferencesPerMessageCitations) {
-    std::ifstream f(std::string(FIXPP_CODEGEN_INC) +
-                    "/fixpp/v44/NormativeReferences.md");                       // AC-V5
+    std::ifstream f(std::string(FIXPP_CODEGEN_INC) + "/fixpp/v44/NormativeReferences.md");  // AC-V5
     ASSERT_TRUE(f.good());
     std::stringstream ss;
     ss << f.rdbuf();

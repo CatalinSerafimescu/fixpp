@@ -10,19 +10,18 @@
 // (b) the representative must-include classes COMPILE and carry the right
 // msg_type_v across versions (compile-time presence/shape). The nightly
 // exhaustive + behavioural round-trip arrive with 2b.
-#include <fstream>
-#include <map>
-#include <sstream>
-#include <string>
-#include <utility>
-#include <vector>
-
 #include <gtest/gtest.h>
 
 #include <fixpp/v42/Messages.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v50sp2/Messages.hpp>
 #include <fixpp/vt11/Messages.hpp>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -57,8 +56,7 @@ TEST(CodegenConformance, ManifestStructurallyValidAndCovered) {
     int fixt_admin = 0;
     bool nos_v42 = false, nos_v44 = false, nos_v50 = false;
     for (auto const& e : m) {
-        EXPECT_TRUE(e.ver == "v42" || e.ver == "v44" || e.ver == "v50sp2" ||
-                    e.ver == "vt11")
+        EXPECT_TRUE(e.ver == "v42" || e.ver == "v44" || e.ver == "v50sp2" || e.ver == "vt11")
             << e.ver;
         ++per_ver[e.ver];
         if (e.ver == "vt11") ++fixt_admin;
@@ -66,7 +64,7 @@ TEST(CodegenConformance, ManifestStructurallyValidAndCovered) {
         if (e.ident == "NewOrderSingle" && e.ver == "v44") nos_v44 = true;
         if (e.ident == "NewOrderSingle" && e.ver == "v50sp2") nos_v50 = true;
     }
-    EXPECT_GE(fixt_admin, 7);  // 7 FIXT.1.1 admin MsgTypes (AC-G12)
+    EXPECT_GE(fixt_admin, 7);                    // 7 FIXT.1.1 admin MsgTypes (AC-G12)
     EXPECT_TRUE(nos_v42 && nos_v44 && nos_v50);  // P1 headline, all app versions
 }
 

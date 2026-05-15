@@ -17,16 +17,16 @@
 // whitelist edge was rejected (it would form the forbidden wire↔dictionary
 // cycle); see spec NFR-003-8 / plan "Re-/plan (RC#3)".
 #pragma once
-#include <fixpp/core/error.hpp>                  // core::expected_t, core::error
-#include <fixpp/dict/version_profile.hpp>        // version_profile +
-                                                 // resolved_message_version +
-                                                 // dict::resolve_application_version
-                                                 // (003-OWNED, RC#1; the ONE
-                                                 // authoritative shape AC-VP1
-                                                 // pins — consumed here, NOT
-                                                 // re-declared/deferred).
-#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen R6 stub
+#include <fixpp/core/error.hpp>            // core::expected_t, core::error
+#include <fixpp/dict/version_profile.hpp>  // version_profile +
+                                           // resolved_message_version +
+                                           // dict::resolve_application_version
+                                           // (003-OWNED, RC#1; the ONE
+                                           // authoritative shape AC-VP1
+                                           // pins — consumed here, NOT
+                                           // re-declared/deferred).
 #include <cstdint>
+#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen R6 stub
 #include <memory_resource>
 #include <string_view>
 
@@ -46,37 +46,37 @@ namespace fixpp::dict {
 // (contracts/generated_message.hpp + seam #18 flyweight_shape_test.cpp,
 // AC-G7a) — a template that omits it is caught as a COMPILE-TIME shape-oracle
 // failure (the alias becomes ill-formed), not a runtime assertion.
-template <class Msg> struct owning_message_traits;          // 2c v1.4 §4.8 L1459
+template <class Msg>
+struct owning_message_traits;  // 2c v1.4 §4.8 L1459
 template <class Msg>
 using owning_message_t = typename owning_message_traits<Msg>::type;  // 2c v1.4
-                                                     // §4.8 L1463-1464; AC-R1 /
-                                                     // AC-G7a (inherited 2c text)
+                                                                     // §4.8 L1463-1464; AC-R1 /
+                                                                     // AC-G7a (inherited 2c text)
 
 // Type-erased owning message (runtime-dispatch return). Move-only. SBO variant
 // may elide the heap allocation below a published size threshold (Entity 5).
 class owning_message_handle {
 public:
-    owning_message_handle(owning_message_handle const&)            = delete;
+    owning_message_handle(owning_message_handle const&) = delete;
     owning_message_handle& operator=(owning_message_handle const&) = delete;
     owning_message_handle(owning_message_handle&&) noexcept;
     owning_message_handle& operator=(owning_message_handle&&) noexcept;
     ~owning_message_handle();
 
-    [[nodiscard]] resolved_message_version version() const noexcept;          // AC-R6
+    [[nodiscard]] resolved_message_version version() const noexcept;  // AC-R6
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]];
-    [[nodiscard]] wire::MessageView<wire::access_mode::Index> const&
-        view() const noexcept [[clang::lifetimebound]];
-    [[nodiscard]] core::expected_t<wire::field_view>
-        field_value(std::uint16_t tag) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] wire::MessageView<wire::access_mode::Index> const& view() const noexcept
+        [[clang::lifetimebound]];
+    [[nodiscard]] core::expected_t<wire::field_view> field_value(std::uint16_t tag) const noexcept
+        [[clang::lifetimebound]];
 
     // nullptr on resolved-version / MsgType mismatch (no UB, no throw) — AC-R6.
     // Return type is the canonical 2c v1.4 §4.8 owning_message_t<Msg> alias.
     template <class Msg>
-    [[nodiscard]] auto as() const noexcept [[clang::lifetimebound]]
-        -> owning_message_t<Msg> const*;
+    [[nodiscard]] auto as() const noexcept [[clang::lifetimebound]] -> owning_message_t<Msg> const*;
 
 private:
-    struct impl; /* small-variant OR heap polymorphic owner */
+    struct impl;             /* small-variant OR heap polymorphic owner */
     impl* pimpl_ = nullptr;  // R6 stub: heap pimpl; full SBO/polymorphic owner in 2b.
 };
 
@@ -85,9 +85,9 @@ private:
 // dict_reify_msg_type_mismatch (view MsgType != Msg::msg_type_v). AC-R1/R3/R8.
 // dict_reify_version_mismatch is NOT a failure mode here (dropped per RC#1).
 template <class Msg>
-[[nodiscard]] core::expected_t<owning_message_t<Msg>>
-reify_as(wire::MessageView<wire::access_mode::Index> const& view,
-         std::pmr::memory_resource* mr) noexcept;
+[[nodiscard]] core::expected_t<owning_message_t<Msg>> reify_as(
+    wire::MessageView<wire::access_mode::Index> const& view,
+    std::pmr::memory_resource* mr) noexcept;
 
 // Runtime-dispatch entry point. Resolution (AC-D2/D3/D6/D7):
 //  1. peek MsgType(35).
@@ -102,9 +102,8 @@ reify_as(wire::MessageView<wire::access_mode::Index> const& view,
 //   dict_unknown_appl_ver_id, dict_unresolved_application_version (NOT a
 //   sentinel fall-through — RC#1), dict_reify_unknown_msg_type (resolved
 //   version+MsgType has no codegen owner, e.g. runtime-XML-only version).
-[[nodiscard]] core::expected_t<owning_message_handle>
-reify(wire::MessageView<wire::access_mode::Index> const& view,
-      version_profile profile,
-      std::pmr::memory_resource* mr) noexcept;
+[[nodiscard]] core::expected_t<owning_message_handle> reify(
+    wire::MessageView<wire::access_mode::Index> const& view, version_profile profile,
+    std::pmr::memory_resource* mr) noexcept;
 
 }  // namespace fixpp::dict

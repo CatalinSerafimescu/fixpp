@@ -40,21 +40,20 @@
 //
 // Oracle: specs/003-dictionary-codegen/spec.md AC-D4 / seam #10b;
 //         [2c §6.3] worked example; contracts/reify_dispatch.hpp.
-#include <memory_resource>
-#include <string_view>
-#include <type_traits>
-
 #include <gtest/gtest.h>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
+#include <string_view>
+#include <type_traits>
 
 // Generated dispatch headers — included ONCE by this dispatch-consuming TU.
 // AC-D1 / contracts/reify_dispatch.hpp "included once per dispatch-consuming TU".
-#include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
 #include <fixpp/_dispatch/reify_dispatch_application.hpp>
+#include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
 
 namespace {
 
@@ -103,16 +102,15 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID9_ResolvesToV50sp2) {
     // [2c §6.3] Frame 2: NOS with ApplVerID=9 → application v50sp2.
     // Resolution decision: resolve_application_version(profile, "9") → v50sp2.
     auto resolved = resolve_application_version(kSessionProfile, "9");
-    ASSERT_TRUE(resolved.has_value())
-        << "AC-D4 Frame 2: ApplVerID='9' must parse successfully";
+    ASSERT_TRUE(resolved.has_value()) << "AC-D4 Frame 2: ApplVerID='9' must parse successfully";
     EXPECT_EQ(*resolved, application_version::v50sp2)
         << "AC-D4 Frame 2: ApplVerID='9' → v50sp2 per [2c §4.3] wire→C++ map";
 
     // Dispatch decision: dispatch_application with resolved v50sp2 + MsgType 'D'.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    auto r = fixpp::dict::dispatch::dispatch_application(
-        mv, "D", *resolved, kSessionProfile, &arena);
+    auto r =
+        fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 2: v50sp2 NewOrderSingle must NOT hit fail-loud default";
@@ -124,16 +122,15 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID6_ResolvesToV44Override) {
     // Resolution: resolve_application_version(profile, "6") → v44 (per-message
     // override; the session default v50sp2 is ignored).
     auto resolved = resolve_application_version(kSessionProfile, "6");
-    ASSERT_TRUE(resolved.has_value())
-        << "AC-D4 Frame 3: ApplVerID='6' must parse successfully";
+    ASSERT_TRUE(resolved.has_value()) << "AC-D4 Frame 3: ApplVerID='6' must parse successfully";
     EXPECT_EQ(*resolved, application_version::v44)
         << "AC-D4 Frame 3: per-message ApplVerID='6' → v44 override";
 
     // Dispatch decision: dispatch_application with v44 + MsgType 'D'.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    auto r = fixpp::dict::dispatch::dispatch_application(
-        mv, "D", *resolved, kSessionProfile, &arena);
+    auto r =
+        fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 3: v44 NewOrderSingle must NOT hit fail-loud default";
@@ -152,8 +149,8 @@ TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
     // Dispatch decision: dispatch_application with v50sp2 + MsgType 'F'.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    auto r = fixpp::dict::dispatch::dispatch_application(
-        mv, "F", *resolved, kSessionProfile, &arena);
+    auto r =
+        fixpp::dict::dispatch::dispatch_application(mv, "F", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 4: v50sp2 OrderCancelRequest must NOT hit fail-loud default";
@@ -190,8 +187,7 @@ TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;  // frozen stub MV
     auto r = fixpp::dict::reify(mv, kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value())
-        << "R6: dict::reify() must return an error with frozen stub MV";
+    ASSERT_FALSE(r.has_value()) << "R6: dict::reify() must return an error with frozen stub MV";
     // R6: error is dict_xml_parse_failed (get<35>() frozen — not the real
     // dispatch error). 2b-unblock: this test will return a valid handle.
     (void)r.error();
@@ -209,8 +205,8 @@ TEST(FixtCrossVocabulary, UnknownDefaultProfileResolutionDecision) {
     // Profile with Unknown DefaultApplVerID + absent ApplVerID(1128) →
     // dict_unresolved_application_version (AC-D6 propagation path).
     // Verified at the resolve_application_version level (PURE — R6-testable).
-    version_profile const unknown_default{
-        session_version::vt11, application_version::Unknown, true, 0};
+    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
+                                          0};
     auto res = resolve_application_version(unknown_default, "");
     ASSERT_FALSE(res.has_value());
     EXPECT_EQ(res.error(), error::dict_unresolved_application_version)

@@ -40,32 +40,32 @@ struct field_traits;  // primary; specialised below
 
 template <>
 struct field_traits<std::string_view> {
-    [[nodiscard]] static core::expected_t<std::string_view>
-    from_field_view(wire::field_view const& fv) noexcept;
+    [[nodiscard]] static core::expected_t<std::string_view> from_field_view(
+        wire::field_view const& fv) noexcept;
 };
 
 template <>
 struct field_traits<char> {
-    [[nodiscard]] static core::expected_t<char>
-    from_field_view(wire::field_view const& fv) noexcept;
+    [[nodiscard]] static core::expected_t<char> from_field_view(
+        wire::field_view const& fv) noexcept;
 };
 
 template <>
 struct field_traits<std::int32_t> {
-    [[nodiscard]] static core::expected_t<std::int32_t>
-    from_field_view(wire::field_view const& fv) noexcept;
+    [[nodiscard]] static core::expected_t<std::int32_t> from_field_view(
+        wire::field_view const& fv) noexcept;
 };
 
 template <>
 struct field_traits<std::int64_t> {
-    [[nodiscard]] static core::expected_t<std::int64_t>
-    from_field_view(wire::field_view const& fv) noexcept;
+    [[nodiscard]] static core::expected_t<std::int64_t> from_field_view(
+        wire::field_view const& fv) noexcept;
 };
 
 template <>
 struct field_traits<bool> {
-    [[nodiscard]] static core::expected_t<bool>
-    from_field_view(wire::field_view const& fv) noexcept;
+    [[nodiscard]] static core::expected_t<bool> from_field_view(
+        wire::field_view const& fv) noexcept;
 };
 
 // The remaining field-view-decodable types ([2c §4.1.3:269-271]) — the
@@ -80,8 +80,8 @@ struct field_traits<bool> {
 // field_traits specialisation; the decimal case does NOT use this helper (it
 // needs the caller-threaded `mr` this mr-less helper cannot forward). AC-FT3.
 template <class T>
-[[nodiscard]] inline core::expected_t<T>
-decode_field(core::expected_t<wire::field_view> fv) noexcept {
+[[nodiscard]] inline core::expected_t<T> decode_field(
+    core::expected_t<wire::field_view> fv) noexcept {
     if (!fv) return std::unexpected{fv.error()};
     return field_traits<T>::from_field_view(*fv);
 }

@@ -22,9 +22,9 @@
 // Oracle: specs/003-dictionary-codegen/contracts/wire_message_view_contract.hpp;
 // data-model Entity 9 (I-12).
 #pragma once
-#include <fixpp/core/error.hpp>   // fixpp::core::expected_t, fixpp::core::error
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
 #include <span>
 #include <string_view>
 
@@ -80,8 +80,8 @@ public:
         return std::unexpected{core::error::dict_xml_parse_failed};
     }
 
-    [[nodiscard]] core::expected_t<field_view>
-        get(std::uint16_t /*tag*/) const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] core::expected_t<field_view> get(std::uint16_t /*tag*/) const noexcept
+        [[clang::lifetimebound]] {
         return std::unexpected{core::error::dict_xml_parse_failed};
     }
 

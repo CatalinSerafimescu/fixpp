@@ -31,9 +31,9 @@
 // Oracle: specs/003-dictionary-codegen/spec.md AC-C1, AC-C2, AC-C3, seam #10a;
 //         [2c §7.6] per-version CMake targets; [arch §3] namespaces.
 
-#include <type_traits>
-
 #include <gtest/gtest.h>
+
+#include <type_traits>
 
 // Include two distinct version headers in the same TU — AC-C1 compile check.
 // If there were any namespace bleed (e.g. fixpp::v42::groups colliding with
@@ -49,21 +49,18 @@ namespace {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // They must be different types entirely.
-static_assert(
-    !std::is_same_v<fixpp::v42::NewOrderSingle, fixpp::v50sp2::NewOrderSingle>,
-    "AC-C3: fixpp::v42::NewOrderSingle and fixpp::v50sp2::NewOrderSingle "
-    "must be distinct types");
+static_assert(!std::is_same_v<fixpp::v42::NewOrderSingle, fixpp::v50sp2::NewOrderSingle>,
+              "AC-C3: fixpp::v42::NewOrderSingle and fixpp::v50sp2::NewOrderSingle "
+              "must be distinct types");
 
 // Neither direction of implicit conversion is permitted.
-static_assert(
-    !std::is_convertible_v<fixpp::v42::NewOrderSingle, fixpp::v50sp2::NewOrderSingle>,
-    "AC-C3: fixpp::v42::NewOrderSingle must NOT be implicitly convertible to "
-    "fixpp::v50sp2::NewOrderSingle");
+static_assert(!std::is_convertible_v<fixpp::v42::NewOrderSingle, fixpp::v50sp2::NewOrderSingle>,
+              "AC-C3: fixpp::v42::NewOrderSingle must NOT be implicitly convertible to "
+              "fixpp::v50sp2::NewOrderSingle");
 
-static_assert(
-    !std::is_convertible_v<fixpp::v50sp2::NewOrderSingle, fixpp::v42::NewOrderSingle>,
-    "AC-C3: fixpp::v50sp2::NewOrderSingle must NOT be implicitly convertible to "
-    "fixpp::v42::NewOrderSingle");
+static_assert(!std::is_convertible_v<fixpp::v50sp2::NewOrderSingle, fixpp::v42::NewOrderSingle>,
+              "AC-C3: fixpp::v50sp2::NewOrderSingle must NOT be implicitly convertible to "
+              "fixpp::v42::NewOrderSingle");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-C1 / namespace isolation: v42 and v50sp2 are scoped in distinct namespaces.
@@ -73,15 +70,13 @@ static_assert(
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Verify ExecutionReport is also a distinct type per version (not just NewOrderSingle).
-static_assert(
-    !std::is_same_v<fixpp::v42::ExecutionReport, fixpp::v50sp2::ExecutionReport>,
-    "AC-C1: fixpp::v42::ExecutionReport and fixpp::v50sp2::ExecutionReport must be "
-    "distinct types (no namespace bleed)");
+static_assert(!std::is_same_v<fixpp::v42::ExecutionReport, fixpp::v50sp2::ExecutionReport>,
+              "AC-C1: fixpp::v42::ExecutionReport and fixpp::v50sp2::ExecutionReport must be "
+              "distinct types (no namespace bleed)");
 
-static_assert(
-    !std::is_convertible_v<fixpp::v42::ExecutionReport, fixpp::v50sp2::ExecutionReport>,
-    "AC-C1: fixpp::v42::ExecutionReport must NOT be implicitly convertible to "
-    "fixpp::v50sp2::ExecutionReport (no cross-version implicit conversion)");
+static_assert(!std::is_convertible_v<fixpp::v42::ExecutionReport, fixpp::v50sp2::ExecutionReport>,
+              "AC-C1: fixpp::v42::ExecutionReport must NOT be implicitly convertible to "
+              "fixpp::v50sp2::ExecutionReport (no cross-version implicit conversion)");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Runtime test: trivial pass. All assertions are compile-time above.

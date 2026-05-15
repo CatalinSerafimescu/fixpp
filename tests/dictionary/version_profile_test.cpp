@@ -14,11 +14,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <string_view>
-#include <type_traits>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
+#include <string_view>
+#include <type_traits>
 
 namespace {
 
@@ -38,32 +37,34 @@ static_assert(alignof(resolved_message_version) == 1);
 static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 
 // AC-VP2 — resolve_application_version is a free function (not a member).
-static_assert(std::is_same_v<
-    decltype(resolve_application_version(std::declval<version_profile>(),
-                                         std::declval<std::string_view>())),
-    fixpp::core::expected_t<application_version>>);
+static_assert(
+    std::is_same_v<decltype(resolve_application_version(std::declval<version_profile>(),
+                                                        std::declval<std::string_view>())),
+                   fixpp::core::expected_t<application_version>>);
 
-constexpr version_profile kFixt{session_version::vt11, application_version::v50sp2,
-                                true, 0};
-constexpr version_profile kUnknownDefault{session_version::vt11,
-                                           application_version::Unknown, true, 0};
+constexpr version_profile kFixt{session_version::vt11, application_version::v50sp2, true, 0};
+constexpr version_profile kUnknownDefault{session_version::vt11, application_version::Unknown, true,
+                                          0};
 
 TEST(VersionProfileAcVp1, ReservedZeroOnEmit) {
     // AC-VP5 — _reserved zero on emit, ignored on read in v1.0.
     version_profile p{session_version::v44, application_version::v44, false, 0};
     EXPECT_EQ(p._reserved, 0);
-    resolved_message_version r{resolved_message_version::kind::application,
-                               session_version::v44, application_version::v44, 0};
+    resolved_message_version r{resolved_message_version::kind::application, session_version::v44,
+                               application_version::v44, 0};
     EXPECT_EQ(r._reserved, 0);
 }
 
 TEST(VersionProfileAcVp3, FullWireToCppMap) {
     // AC-VP3 — every wire ApplVerID value "2".."9".
-    struct Case { std::string_view wire; application_version expect; };
+    struct Case {
+        std::string_view wire;
+        application_version expect;
+    };
     constexpr Case cases[] = {
-        {"2", application_version::v40},  {"3", application_version::v41},
-        {"4", application_version::v42},  {"5", application_version::v43},
-        {"6", application_version::v44},  {"7", application_version::v50},
+        {"2", application_version::v40},    {"3", application_version::v41},
+        {"4", application_version::v42},    {"5", application_version::v43},
+        {"6", application_version::v44},    {"7", application_version::v50},
         {"8", application_version::v50sp1}, {"9", application_version::v50sp2},
     };
     for (auto const& c : cases) {
@@ -113,8 +114,7 @@ TEST(VersionProfileAcVp6, SixErrorSlotsLocked) {
     EXPECT_EQ(static_cast<std::uint8_t>(error::dict_reify_oom), 25);
     EXPECT_EQ(static_cast<std::uint8_t>(error::dict_unresolved_application_version), 26);
     EXPECT_EQ(static_cast<std::uint8_t>(error::dict_unknown_appl_ver_id), 27);
-    EXPECT_EQ(static_cast<std::uint8_t>(error::dict_no_dictionary_for_application_version),
-              28);
+    EXPECT_EQ(static_cast<std::uint8_t>(error::dict_no_dictionary_for_application_version), 28);
     // Existing slots preserved verbatim ([const §X.4]).
     EXPECT_EQ(static_cast<std::uint8_t>(error::out_of_memory), 1);
     EXPECT_EQ(static_cast<std::uint8_t>(error::dict_xml_oom), 22);

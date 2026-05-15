@@ -38,12 +38,11 @@
 
 #include <array>
 #include <cstddef>
-#include <memory_resource>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
 
 // Generated reify headers (build-tree only, AC-C4).
 // from_view() is defined in the generated Reify.hpp (inline out-of-class body).
@@ -56,7 +55,7 @@ namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 
 // Stack-local PMR monotonic buffer sized for a typical "20-tag" message.
-constexpr std::size_t k20TagBufSz  = 4  * 1024;
+constexpr std::size_t k20TagBufSz = 4 * 1024;
 // 64 KiB for the "200-tag" scenario.
 constexpr std::size_t k200TagBufSz = 64 * 1024;
 

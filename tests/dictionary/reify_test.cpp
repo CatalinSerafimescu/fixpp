@@ -23,19 +23,18 @@
 // Oracle: specs/003-dictionary-codegen/contracts/reify.hpp +
 //         specs/003-dictionary-codegen/contracts/generated_message.hpp;
 //         data-model Entity 4/6; spec AC-R1..R3/R6/R8.
-#include <memory_resource>
-#include <optional>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-#include <vector>
-
 #include <gtest/gtest.h>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
+#include <optional>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 // Generated headers (build-tree only, AC-C4).
 #include <fixpp/v44/Reify.hpp>
@@ -44,8 +43,8 @@
 
 namespace {
 
-using MV   = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
-using NOS  = fixpp::v44::NewOrderSingle;
+using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+using NOS = fixpp::v44::NewOrderSingle;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
 
 // ─────────────────────────────────────────────────────────────────
@@ -53,10 +52,8 @@ using ONOS = fixpp::v44::owning_NewOrderSingle;
 // owning_NewOrderSingle via the emitted owning_message_traits specialisation.
 // ─────────────────────────────────────────────────────────────────
 
-static_assert(std::is_same_v<
-    fixpp::dict::owning_message_t<NOS>,
-    ONOS>,
-    "AC-G7a: owning_message_traits specialisation must resolve to owning_NewOrderSingle");
+static_assert(std::is_same_v<fixpp::dict::owning_message_t<NOS>, ONOS>,
+              "AC-G7a: owning_message_traits specialisation must resolve to owning_NewOrderSingle");
 
 // AC-R2 — owning_<Msg> is move-only.
 static_assert(!std::is_copy_constructible_v<ONOS>,
@@ -78,35 +75,29 @@ static_assert(ONOS::which() == fixpp::dict::application_version::v44,
               "AC-R2: which() must return version_v");
 
 // AC-R3 — from_view factory return type: expected_t<owning_<Msg>>.
-static_assert(std::is_same_v<
-    decltype(ONOS::from_view(std::declval<MV const&>(),
-                             std::declval<std::pmr::memory_resource*>())),
-    fixpp::core::expected_t<ONOS>>,
-    "AC-R3: from_view must return expected_t<owning_NewOrderSingle>");
+static_assert(std::is_same_v<decltype(ONOS::from_view(std::declval<MV const&>(),
+                                                      std::declval<std::pmr::memory_resource*>())),
+                             fixpp::core::expected_t<ONOS>>,
+              "AC-R3: from_view must return expected_t<owning_NewOrderSingle>");
 
 // AC-R2 — view() return type matches the flyweight's view().
-static_assert(std::is_same_v<
-    decltype(std::declval<ONOS const&>().view()),
-    MV const&>,
-    "AC-R2: view() must return MV const&");
+static_assert(std::is_same_v<decltype(std::declval<ONOS const&>().view()), MV const&>,
+              "AC-R2: view() must return MV const&");
 
 // AC-R2 — field_value(uint16_t) return type.
-static_assert(std::is_same_v<
-    decltype(std::declval<ONOS const&>().field_value(std::uint16_t{})),
-    fixpp::core::expected_t<fixpp::wire::field_view>>,
-    "AC-R2: field_value(uint16_t) must return expected_t<field_view>");
+static_assert(std::is_same_v<decltype(std::declval<ONOS const&>().field_value(std::uint16_t{})),
+                             fixpp::core::expected_t<fixpp::wire::field_view>>,
+              "AC-R2: field_value(uint16_t) must return expected_t<field_view>");
 
 // AC-G7a — AC-R1 also checks all four versions' NOS (v44/v50sp2) via multiple
 // specialisation static_asserts emitted into Reify.hpp; check vt11 too.
-static_assert(std::is_same_v<
-    fixpp::dict::owning_message_t<fixpp::vt11::Heartbeat>,
-    fixpp::vt11::owning_Heartbeat>,
-    "AC-G7a: vt11::Heartbeat owning_message_traits must resolve to owning_Heartbeat");
+static_assert(std::is_same_v<fixpp::dict::owning_message_t<fixpp::vt11::Heartbeat>,
+                             fixpp::vt11::owning_Heartbeat>,
+              "AC-G7a: vt11::Heartbeat owning_message_traits must resolve to owning_Heartbeat");
 
-static_assert(std::is_same_v<
-    fixpp::dict::owning_message_t<fixpp::v50sp2::NewOrderSingle>,
-    fixpp::v50sp2::owning_NewOrderSingle>,
-    "AC-G7a: v50sp2 owning_message_traits must resolve to owning_NewOrderSingle");
+static_assert(std::is_same_v<fixpp::dict::owning_message_t<fixpp::v50sp2::NewOrderSingle>,
+                             fixpp::v50sp2::owning_NewOrderSingle>,
+              "AC-G7a: v50sp2 owning_message_traits must resolve to owning_NewOrderSingle");
 
 }  // namespace
 
@@ -143,8 +134,7 @@ TEST(ReifyTest, ViewAndFieldValueForward) {
     MV const& v = o.view();
     // field_value() delegates to view().get(tag).
     auto fv = o.field_value(11);
-    static_assert(std::is_same_v<decltype(fv),
-                                 fixpp::core::expected_t<fixpp::wire::field_view>>);
+    static_assert(std::is_same_v<decltype(fv), fixpp::core::expected_t<fixpp::wire::field_view>>);
     EXPECT_FALSE(fv.has_value());  // R6: field-absent
     // Second view() call hits the cache.
     MV const& v2 = o.view();

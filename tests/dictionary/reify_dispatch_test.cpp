@@ -42,17 +42,16 @@
 // Oracle: specs/003-dictionary-codegen/contracts/reify_dispatch.hpp;
 //         data-model Entity 8 / Invariant I-11; spec AC-D1..D7 / seam #15a/b/c/#10c.
 //         must_include_manifest.txt (AC-G12 curated CI subset).
-#include <memory_resource>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-
 #include <gtest/gtest.h>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 // Generated _dispatch/ headers — included ONCE by this dispatch-consuming TU
 // (AC-D1 / contracts/reify_dispatch.hpp "included once per dispatch-consuming
@@ -60,8 +59,8 @@
 // dispatch::dispatch_application as INLINE helpers (Entity 8 / I-11).
 // NOT included by the shipped include/fixpp/dict/reify.hpp (that would create
 // a shipped→build-tree layering violation, NFR-003-8).
-#include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
 #include <fixpp/_dispatch/reify_dispatch_application.hpp>
+#include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
 
 namespace {
 
@@ -78,23 +77,19 @@ using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 // AC-D1 — _dispatch/ headers emitted; AC-D2 — dispatch_fixt is callable.
 // AC-D3 — dispatch_application is callable.
 // ─────────────────────────────────────────────────────────────────────────────
-static_assert(std::is_same_v<
-    decltype(fixpp::dict::dispatch::dispatch_fixt(
-        std::declval<MV const&>(),
-        std::declval<char>(),
-        std::declval<version_profile>(),
-        std::declval<std::pmr::memory_resource*>())),
-    fixpp::core::expected_t<fixpp::dict::owning_message_handle>>,
-    "AC-D2: dispatch_fixt must return expected_t<owning_message_handle>");
+static_assert(std::is_same_v<decltype(fixpp::dict::dispatch::dispatch_fixt(
+                                 std::declval<MV const&>(), std::declval<char>(),
+                                 std::declval<version_profile>(),
+                                 std::declval<std::pmr::memory_resource*>())),
+                             fixpp::core::expected_t<fixpp::dict::owning_message_handle>>,
+              "AC-D2: dispatch_fixt must return expected_t<owning_message_handle>");
 
-static_assert(std::is_same_v<
-    decltype(fixpp::dict::dispatch::dispatch_application(
-        std::declval<MV const&>(),
-        std::declval<std::string_view>(),
-        std::declval<application_version>(),
-        std::declval<version_profile>(),
-        std::declval<std::pmr::memory_resource*>())),
-    fixpp::core::expected_t<fixpp::dict::owning_message_handle>>,
+static_assert(
+    std::is_same_v<decltype(fixpp::dict::dispatch::dispatch_application(
+                       std::declval<MV const&>(), std::declval<std::string_view>(),
+                       std::declval<application_version>(), std::declval<version_profile>(),
+                       std::declval<std::pmr::memory_resource*>())),
+                   fixpp::core::expected_t<fixpp::dict::owning_message_handle>>,
     "AC-D3: dispatch_application must return expected_t<owning_message_handle>");
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,8 +112,7 @@ TEST(ReifyDispatchFixt, SevenAdminMsgTypesAllHit) {
     // code is NOT dict_reify_unknown_msg_type.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const fixt_profile{
-        session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
     constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
@@ -136,8 +130,7 @@ TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
     // dict_reify_unknown_msg_type from the fail-loud default arm.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const fixt_profile{
-        session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
     // 'D' (NewOrderSingle) is application, not FIXT admin.
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, 'D', fixt_profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -167,35 +160,31 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
     //   v44 Logon A   (application, not FIXT admin)
     struct Case {
         application_version version;
-        std::string_view    msg_type;
-        const char*         label;
+        std::string_view msg_type;
+        const char* label;
     };
     constexpr Case kCases[] = {
-        {application_version::v42,    "D", "v42 NewOrderSingle"},
-        {application_version::v44,    "D", "v44 NewOrderSingle"},
+        {application_version::v42, "D", "v42 NewOrderSingle"},
+        {application_version::v44, "D", "v44 NewOrderSingle"},
         {application_version::v50sp2, "D", "v50sp2 NewOrderSingle"},
-        {application_version::v44,    "8", "v44 ExecutionReport"},
+        {application_version::v44, "8", "v44 ExecutionReport"},
         {application_version::v50sp2, "8", "v50sp2 ExecutionReport"},
         {application_version::v50sp2, "W", "v50sp2 MarketDataSnapshotFullRefresh"},
         {application_version::v50sp2, "F", "v50sp2 OrderCancelRequest"},
-        {application_version::v44,    "A", "v44 Logon (app, not FIXT admin)"},
+        {application_version::v44, "A", "v44 Logon (app, not FIXT admin)"},
     };
 
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{
-        session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
 
     for (auto const& c : kCases) {
-        auto r = fixpp::dict::dispatch::dispatch_application(
-            mv, c.msg_type, c.version, profile, &arena);
-        ASSERT_FALSE(r.has_value())
-            << c.label << ": R6 stub always returns an error — 2b-unblock.";
+        auto r =
+            fixpp::dict::dispatch::dispatch_application(mv, c.msg_type, c.version, profile, &arena);
+        ASSERT_FALSE(r.has_value()) << c.label << ": R6 stub always returns an error — 2b-unblock.";
         EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D3 / I-11: " << c.label
-            << " (version=" << static_cast<int>(c.version)
-            << ", MsgType=" << c.msg_type
-            << ") must NOT hit the fail-loud outer default arm";
+            << "AC-D3 / I-11: " << c.label << " (version=" << static_cast<int>(c.version)
+            << ", MsgType=" << c.msg_type << ") must NOT hit the fail-loud outer default arm";
     }
 }
 
@@ -210,25 +199,18 @@ TEST(ReifyDispatchApplication, RuntimeXmlOnlyVersionHitsOuterDefault) {
     // No FIX43.xml dependency — synthetic fixture with a hand-built MV.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{
-        session_version::v43, application_version::v43, false, 0};
+    version_profile const profile{session_version::v43, application_version::v43, false, 0};
 
     constexpr application_version kRuntimeOnlyVersions[] = {
-        application_version::v40,
-        application_version::v41,
-        application_version::v43,
-        application_version::v50,
-        application_version::v50sp1,
-        application_version::Unknown,
+        application_version::v40, application_version::v41,    application_version::v43,
+        application_version::v50, application_version::v50sp1, application_version::Unknown,
     };
     for (auto av : kRuntimeOnlyVersions) {
-        auto r = fixpp::dict::dispatch::dispatch_application(
-            mv, "D", av, profile, &arena);
+        auto r = fixpp::dict::dispatch::dispatch_application(mv, "D", av, profile, &arena);
         ASSERT_FALSE(r.has_value())
             << "dispatch_application must not succeed for runtime-XML-only version";
         EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D5 / I-11: runtime-XML-only version "
-            << static_cast<int>(av)
+            << "AC-D5 / I-11: runtime-XML-only version " << static_cast<int>(av)
             << " must return dict_reify_unknown_msg_type from fail-loud outer default";
     }
 }
@@ -242,8 +224,8 @@ TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagates) {
     // dict_unresolved_application_version from resolve_application_version,
     // NOT dict_reify_unknown_msg_type (the v1.0 misdiagnosis sentinel
     // fall-through is CLOSED per RC#1).
-    version_profile const unknown_default{
-        session_version::vt11, application_version::Unknown, true, 0};
+    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
+                                          0};
     auto r = resolve_application_version(unknown_default, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_unresolved_application_version)
@@ -264,11 +246,10 @@ TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagation_ViaReify) {
     // the dict::reify() function is callable and returns an error under R6.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const unknown_default{
-        session_version::vt11, application_version::Unknown, true, 0};
+    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
+                                          0};
     auto r = fixpp::dict::reify(mv, unknown_default, &arena);
-    ASSERT_FALSE(r.has_value())
-        << "dict::reify must return an error under R6 (frozen stub)";
+    ASSERT_FALSE(r.has_value()) << "dict::reify must return an error under R6 (frozen stub)";
     // R6: error is dict_xml_parse_failed (get<35>() frozen) — NOT the
     // dict_unresolved_application_version we'd get with real bytes.
     // The resolution propagation is verified via resolve_application_version
@@ -283,14 +264,12 @@ TEST(ReifyDispatchApplicationResolution, BadApplVerIdYieldsUnknownApplVerId) {
     // AC-D7: resolve_application_version("x", profile) → dict_unknown_appl_ver_id.
     // Not the outer dispatch default (dict_reify_unknown_msg_type) — distinct
     // error for "parse failure" vs "no codegen owner for resolved version".
-    version_profile const profile{
-        session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
     for (std::string_view bad : {"0", "1", "A", "x", "10", "99"}) {
         auto r = resolve_application_version(profile, bad);
         ASSERT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
         EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id)
-            << "AC-D7: non-parsing ApplVerID '" << bad
-            << "' must yield dict_unknown_appl_ver_id";
+            << "AC-D7: non-parsing ApplVerID '" << bad << "' must yield dict_unknown_appl_ver_id";
     }
 }
 
@@ -305,18 +284,14 @@ TEST(ReifyDispatchApplication, UnknownMsgTypeInKnownVersionHitsInnerDefault) {
     // We use '!' as a clearly invalid MsgType that no version emits.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{
-        session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
 
     for (application_version av :
-         {application_version::v42, application_version::v44,
-          application_version::v50sp2}) {
-        auto r = fixpp::dict::dispatch::dispatch_application(
-            mv, "!", av, profile, &arena);
+         {application_version::v42, application_version::v44, application_version::v50sp2}) {
+        auto r = fixpp::dict::dispatch::dispatch_application(mv, "!", av, profile, &arena);
         ASSERT_FALSE(r.has_value());
         EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D7 inner default: unknown MsgType '!' in version "
-            << static_cast<int>(av)
+            << "AC-D7 inner default: unknown MsgType '!' in version " << static_cast<int>(av)
             << " must return dict_reify_unknown_msg_type";
     }
 }

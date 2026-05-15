@@ -23,25 +23,24 @@
 //
 // Oracle: specs/003-dictionary-codegen/contracts/generated_message.hpp;
 //         data-model Entity 4 / I-9; spec AC-R4 / seam #14.
-#include <memory_resource>
-#include <type_traits>
-#include <utility>
-
 #include <gtest/gtest.h>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
+#include <type_traits>
+#include <utility>
 
 // Generated headers (build-tree only).
-#include <fixpp/v44/Reify.hpp>
 #include <fixpp/v42/Reify.hpp>
+#include <fixpp/v44/Reify.hpp>
 
 namespace {
 
-using MV   = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
-using OHB  = fixpp::v42::owning_Heartbeat;
+using OHB = fixpp::v42::owning_Heartbeat;
 
 // ─────────────────────────────────────────────────────────────────
 // Seam #14 compile-time static_asserts (AC-R4 / I-9)

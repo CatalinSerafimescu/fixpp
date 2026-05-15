@@ -15,9 +15,8 @@
 // the !fv forwarding (decode_field, header-inline), not the malformed-value
 // variant. Placeholder maps to dict_xml_parse_failed pending the [2c §4.1.3]
 // wire decode-error binding (T024/US1).
-#include <fixpp/dict/field_traits.hpp>
-
 #include <charconv>
+#include <fixpp/dict/field_traits.hpp>
 #include <string_view>
 
 namespace fixpp::dict {
@@ -26,13 +25,12 @@ namespace {
 constexpr core::error kDecodeFailed = core::error::dict_xml_parse_failed;  // see banner
 }
 
-core::expected_t<std::string_view>
-field_traits<std::string_view>::from_field_view(wire::field_view const& fv) noexcept {
+core::expected_t<std::string_view> field_traits<std::string_view>::from_field_view(
+    wire::field_view const& fv) noexcept {
     return fv.as_string();
 }
 
-core::expected_t<char>
-field_traits<char>::from_field_view(wire::field_view const& fv) noexcept {
+core::expected_t<char> field_traits<char>::from_field_view(wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     if (s.size() != 1) {
         return std::unexpected{kDecodeFailed};
@@ -40,8 +38,8 @@ field_traits<char>::from_field_view(wire::field_view const& fv) noexcept {
     return s.front();
 }
 
-core::expected_t<std::int32_t>
-field_traits<std::int32_t>::from_field_view(wire::field_view const& fv) noexcept {
+core::expected_t<std::int32_t> field_traits<std::int32_t>::from_field_view(
+    wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     std::int32_t out{};
     auto const* end = s.data() + s.size();
@@ -52,8 +50,8 @@ field_traits<std::int32_t>::from_field_view(wire::field_view const& fv) noexcept
     return out;
 }
 
-core::expected_t<std::int64_t>
-field_traits<std::int64_t>::from_field_view(wire::field_view const& fv) noexcept {
+core::expected_t<std::int64_t> field_traits<std::int64_t>::from_field_view(
+    wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     std::int64_t out{};
     auto const* end = s.data() + s.size();
@@ -64,8 +62,7 @@ field_traits<std::int64_t>::from_field_view(wire::field_view const& fv) noexcept
     return out;
 }
 
-core::expected_t<bool>
-field_traits<bool>::from_field_view(wire::field_view const& fv) noexcept {
+core::expected_t<bool> field_traits<bool>::from_field_view(wire::field_view const& fv) noexcept {
     std::string_view const s = fv.as_string();
     if (s == "Y") {
         return true;

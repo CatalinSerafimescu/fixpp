@@ -12,12 +12,11 @@
 
 #include <gtest/gtest.h>
 
-#include <type_traits>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
+#include <type_traits>
 
 namespace {
 
@@ -27,17 +26,17 @@ using fixpp::dict::Dictionary;
 using fixpp::dict::version_registry;
 
 // AC-X1 — the get() signature/return type is exactly as [2c §4.9] locks it.
-static_assert(std::is_same_v<
-    decltype(std::declval<version_registry const&>().get(application_version::v44)),
-    fixpp::core::expected_t<Dictionary const*>>);
+static_assert(
+    std::is_same_v<decltype(std::declval<version_registry const&>().get(application_version::v44)),
+                   fixpp::core::expected_t<Dictionary const*>>);
 
 TEST(VersionRegistryAcX2, EmptyRegistryReportsNoDictionary) {
     // AC-X3 — hand-built (default) registry; no engine wiring (2d owns
     // construction). AC-X2 — distinct error from dict_unknown_appl_ver_id
     // (a wire-string parse failure).
     version_registry const reg{};
-    for (auto v : {application_version::v42, application_version::v44,
-                   application_version::v50sp2, application_version::Unknown}) {
+    for (auto v : {application_version::v42, application_version::v44, application_version::v50sp2,
+                   application_version::Unknown}) {
         auto got = reg.get(v);
         ASSERT_FALSE(got.has_value());
         EXPECT_EQ(got.error(), error::dict_no_dictionary_for_application_version);

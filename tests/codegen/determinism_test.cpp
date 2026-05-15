@@ -22,6 +22,8 @@
 //   This approach is robust without requiring git: it does not depend on git
 //   being installed or a .git directory being accessible at test runtime.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -33,34 +35,29 @@
 #include <system_error>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 namespace fs = std::filesystem;
 
 // ── Compile-time constants injected by CMake ──────────────────────────────────
 #ifndef FIXPP_CODEGEN_BIN
-#  error "FIXPP_CODEGEN_BIN must be set by CMake target_compile_definitions"
+#error "FIXPP_CODEGEN_BIN must be set by CMake target_compile_definitions"
 #endif
 #ifndef FIXPP_DICT_DATA_DIR
-#  error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
+#error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
 #endif
 #ifndef FIXPP_CODEGEN_GOLDEN_DIR
-#  error "FIXPP_CODEGEN_GOLDEN_DIR must be set by CMake target_compile_definitions"
+#error "FIXPP_CODEGEN_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
 
-static constexpr const char* kBin        = FIXPP_CODEGEN_BIN;
-static constexpr const char* kDictDir    = FIXPP_DICT_DATA_DIR;
-static constexpr const char* kGoldenDir  = FIXPP_CODEGEN_GOLDEN_DIR;
+static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
+static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
+static constexpr const char* kGoldenDir = FIXPP_CODEGEN_GOLDEN_DIR;
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
-static constexpr std::array<const char*, 4> kXmls = {
-    "FIX42.xml", "FIX44.xml", "FIX50SP2.xml", "FIXT11.xml"
-};
+static constexpr std::array<const char*, 4> kXmls = {"FIX42.xml", "FIX44.xml", "FIX50SP2.xml",
+                                                     "FIXT11.xml"};
 
 // Versions in the same order as kXmls
-static constexpr std::array<const char*, 4> kVersions = {
-    "v42", "v44", "v50sp2", "vt11"
-};
+static constexpr std::array<const char*, 4> kVersions = {"v42", "v44", "v50sp2", "vt11"};
 
 // Golden file names (one per version)
 static constexpr std::array<const char*, 4> kGoldenFiles = {
@@ -84,8 +81,7 @@ static std::string read_file_binary(const fs::path& p) {
 // Snapshot: path → last_write_time for every file reachable from root.
 // Non-throwing; on any fs error the entry is simply omitted (the test will
 // detect a mtime change or new file when it crosses back).
-static std::map<fs::path, fs::file_time_type>
-snapshot_mtimes(const fs::path& root) {
+static std::map<fs::path, fs::file_time_type> snapshot_mtimes(const fs::path& root) {
     std::map<fs::path, fs::file_time_type> snap;
     std::error_code ec;
     for (auto const& entry : fs::recursive_directory_iterator(root, ec)) {
@@ -106,8 +102,10 @@ static std::string quote(const std::string& s) {
     // Replace each ' with '\'' and wrap in single quotes.
     std::string out = "'";
     for (char c : s) {
-        if (c == '\'') out += "'\\''";
-        else           out += c;
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out += c;
     }
     out += "'";
     return out;
@@ -131,8 +129,7 @@ struct TempDir {
         auto base = fs::temp_directory_path();
         // Use PID + a counter for a unique name without relying on mkdtemp.
         static int counter = 0;
-        path = base / (prefix + "_" + std::to_string(getpid()) +
-                       "_" + std::to_string(counter++));
+        path = base / (prefix + "_" + std::to_string(getpid()) + "_" + std::to_string(counter++));
         fs::create_directories(path);
     }
 
@@ -152,16 +149,14 @@ class DeterminismTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Verify prerequisites are reachable.
-        ASSERT_TRUE(fs::exists(kBin))        << "Tool binary not found: " << kBin;
-        ASSERT_TRUE(fs::exists(kDictDir))    << "Dict dir not found: "    << kDictDir;
-        ASSERT_TRUE(fs::exists(kGoldenDir))  << "Golden dir not found: "  << kGoldenDir;
+        ASSERT_TRUE(fs::exists(kBin)) << "Tool binary not found: " << kBin;
+        ASSERT_TRUE(fs::exists(kDictDir)) << "Dict dir not found: " << kDictDir;
+        ASSERT_TRUE(fs::exists(kGoldenDir)) << "Golden dir not found: " << kGoldenDir;
         for (auto const* xml : kXmls) {
-            ASSERT_TRUE(fs::exists(fs::path(kDictDir) / xml))
-                << "XML not found: " << xml;
+            ASSERT_TRUE(fs::exists(fs::path(kDictDir) / xml)) << "XML not found: " << xml;
         }
         for (auto const* gf : kGoldenFiles) {
-            ASSERT_TRUE(fs::exists(fs::path(kGoldenDir) / gf))
-                << "Golden not found: " << gf;
+            ASSERT_TRUE(fs::exists(fs::path(kGoldenDir) / gf)) << "Golden not found: " << gf;
         }
     }
 };
@@ -191,19 +186,21 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
         fs::path p2 = run2.path / rel;
 
         EXPECT_TRUE(fs::exists(p2)) << "File missing in run2: " << rel;
-        if (!fs::exists(p2)) { all_identical = false; continue; }
+        if (!fs::exists(p2)) {
+            all_identical = false;
+            continue;
+        }
 
         std::string bytes1 = read_file_binary(e1.path());
         std::string bytes2 = read_file_binary(p2);
         if (bytes1 != bytes2) {
-            ADD_FAILURE() << "Not byte-identical: " << rel
-                          << " (run1=" << bytes1.size()
+            ADD_FAILURE() << "Not byte-identical: " << rel << " (run1=" << bytes1.size()
                           << " bytes, run2=" << bytes2.size() << " bytes)";
             all_identical = false;
         }
     }
     EXPECT_TRUE(all_identical) << "NFR-003-7 / AC-T1 violated: at least one "
-        "generated file differs between the two codegen runs.";
+                                  "generated file differs between the two codegen runs.";
 }
 
 // ── AC-T2: No source-tree write ───────────────────────────────────────────────
@@ -233,8 +230,7 @@ TEST_F(DeterminismTest, NoSourceTreeWrite) {
 
     // (a) No new files.
     for (auto const& [p, _] : after) {
-        EXPECT_TRUE(before.count(p))
-            << "AC-T2: New file appeared under source dict dir: " << p;
+        EXPECT_TRUE(before.count(p)) << "AC-T2: New file appeared under source dict dir: " << p;
     }
 
     // (b) No mtime changes.
@@ -245,8 +241,7 @@ TEST_F(DeterminismTest, NoSourceTreeWrite) {
             ADD_FAILURE() << "AC-T2: File disappeared from source dict dir: " << p;
             continue;
         }
-        EXPECT_EQ(it->second, mtime_before)
-            << "AC-T2: mtime changed under source dict dir: " << p;
+        EXPECT_EQ(it->second, mtime_before) << "AC-T2: mtime changed under source dict dir: " << p;
     }
 
     // (c) Verify the tool output directory is under the temp dir (positive check:
@@ -276,28 +271,25 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
 
     for (std::size_t i = 0; i < kVersions.size(); ++i) {
         fs::path generated = run.path / kVersions[i] / "Messages.hpp";
-        fs::path golden    = fs::path(kGoldenDir) / kGoldenFiles[i];
+        fs::path golden = fs::path(kGoldenDir) / kGoldenFiles[i];
 
-        ASSERT_TRUE(fs::exists(generated))
-            << "Generated file missing: " << generated;
-        ASSERT_TRUE(fs::exists(golden))
-            << "Golden file missing: " << golden;
+        ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+        ASSERT_TRUE(fs::exists(golden)) << "Golden file missing: " << golden;
 
-        std::string gen_bytes    = read_file_binary(generated);
+        std::string gen_bytes = read_file_binary(generated);
         std::string golden_bytes = read_file_binary(golden);
 
         EXPECT_EQ(gen_bytes, golden_bytes)
-            << "Golden mismatch for " << kVersions[i]
-            << ": generated " << gen_bytes.size() << " bytes"
+            << "Golden mismatch for " << kVersions[i] << ": generated " << gen_bytes.size()
+            << " bytes"
             << ", golden " << golden_bytes.size() << " bytes.\n"
             << "  generated: " << generated << "\n"
             << "  golden:    " << golden << "\n"
             << "  Run 'diff " << generated.string() << " " << golden.string()
             << "' to see the diff.\n"
             << "  Regenerate golden with:\n"
-            << "    " << kBin
-            << " --xml " << (fs::path(kDictDir) / kXmls[i]).string()
-            << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i]
-            << "/Messages.hpp " << golden.string();
+            << "    " << kBin << " --xml " << (fs::path(kDictDir) / kXmls[i]).string()
+            << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
+            << golden.string();
     }
 }

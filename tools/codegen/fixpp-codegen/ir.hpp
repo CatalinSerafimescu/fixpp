@@ -14,12 +14,11 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/dict/field_ref.hpp>
+#include <fixpp/dict/version_profile.hpp>
 #include <memory_resource>
 #include <string>
 #include <vector>
-
-#include <fixpp/dict/field_ref.hpp>
-#include <fixpp/dict/version_profile.hpp>
 
 namespace fixpp::codegen {
 
@@ -33,13 +32,13 @@ namespace fixpp::codegen {
 // the FIX field name used to emit the typed accessor identifier.
 struct FieldIR {
     fixpp::dict::FieldRef ref{};
-    std::string           name;  // FIX field name, e.g. "ClOrdID"
+    std::string name;  // FIX field name, e.g. "ClOrdID"
 };
 
 struct MessageIR {
-    std::string           msg_type;  // FIX MsgType (e.g. "D")
-    std::string           name;      // English name (diagnostics / NormativeRefs)
-    std::vector<FieldIR>  fields;    // full per-message run (required + optional)
+    std::string msg_type;         // FIX MsgType (e.g. "D")
+    std::string name;             // English name (diagnostics / NormativeRefs)
+    std::vector<FieldIR> fields;  // full per-message run (required + optional)
 };
 
 struct LengthPairIR {
@@ -48,11 +47,11 @@ struct LengthPairIR {
 };
 
 struct VersionIR {
-    fixpp::dict::session_version     session{};
+    fixpp::dict::session_version session{};
     fixpp::dict::application_version application{};
-    std::string                     ns;        // "v42" / "v44" / "v50sp2" / "vt11"
-    std::vector<MessageIR>           messages;  // bytewise-sorted (002 D-6)
-    std::vector<LengthPairIR>        length_pairs;
+    std::string ns;                   // "v42" / "v44" / "v50sp2" / "vt11"
+    std::vector<MessageIR> messages;  // bytewise-sorted (002 D-6)
+    std::vector<LengthPairIR> length_pairs;
 };
 
 // Loads `xml_path` via XmlLoader and projects the Dictionary into VersionIR.
@@ -60,6 +59,6 @@ struct VersionIR {
 // [arch §5.3] / [const §III.5]); the user-facing library hot path is
 // unaffected. `mr` backs the loader's PMR allocations.
 [[nodiscard]] VersionIR build_ir(std::filesystem::path const& xml_path,
-                                 std::pmr::memory_resource*    mr);
+                                 std::pmr::memory_resource* mr);
 
 }  // namespace fixpp::codegen

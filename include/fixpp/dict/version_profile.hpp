@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
 #include <cstdint>
+#include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
 #include <string_view>
 #include <type_traits>
 
@@ -69,13 +69,13 @@ enum class application_version : std::uint8_t {
 // 4-byte profile carried by every Dictionary; the resolution input
 // `dict::reify` consumes (it holds no Dictionary). Verbatim [2c §4.3:408-422].
 struct version_profile {
-    session_version     session;                  // 1 byte
-    application_version default_appl;             // 1 byte
-    bool                has_per_message_override; // 1 byte; true iff FIXT.1.1
-                                                  // AND ApplVerID(1128) allowed
-                                                  // per message ([FIXT §5.3]).
-    std::uint8_t        _reserved;                // pad to 4; zero on emit,
-                                                  // ignore on read in v1.0.
+    session_version session;           // 1 byte
+    application_version default_appl;  // 1 byte
+    bool has_per_message_override;     // 1 byte; true iff FIXT.1.1
+                                       // AND ApplVerID(1128) allowed
+                                       // per message ([FIXT §5.3]).
+    std::uint8_t _reserved;            // pad to 4; zero on emit,
+                                       // ignore on read in v1.0.
 };
 static_assert(sizeof(version_profile) == 4);
 static_assert(std::is_trivially_copyable_v<version_profile>);
@@ -84,10 +84,10 @@ static_assert(std::is_trivially_copyable_v<version_profile>);
 // session_admin → vt11 (application == Unknown); application → resolved value.
 struct resolved_message_version {
     enum class kind : std::uint8_t { session_admin, application };
-    kind                k;             // 1 byte
-    session_version     session;       // 1 byte; vt11 for session_admin
-    application_version application;    // 1 byte; Unknown when k==session_admin
-    std::uint8_t        _reserved;     // pad to 4; zero on emit, ignore on read
+    kind k;                           // 1 byte
+    session_version session;          // 1 byte; vt11 for session_admin
+    application_version application;  // 1 byte; Unknown when k==session_admin
+    std::uint8_t _reserved;           // pad to 4; zero on emit, ignore on read
 };
 static_assert(sizeof(resolved_message_version) == 4);
 static_assert(alignof(resolved_message_version) == 1);
@@ -108,9 +108,8 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 //      dict_unresolved_application_version (RC#1 / AC-D6; the v1.0
 //      misdiagnosis sentinel-fall-through is CLOSED — it no longer returns
 //      dict_reify_unknown_msg_type).
-[[nodiscard]] core::expected_t<application_version>
-resolve_application_version(version_profile  profile,
-                            std::string_view appl_ver_id_value) noexcept;
+[[nodiscard]] core::expected_t<application_version> resolve_application_version(
+    version_profile profile, std::string_view appl_ver_id_value) noexcept;
 
 // ─── Wire ApplVerID(1128) → C++ application_version mapping ([2c §4.3:486]) ──
 // [FIXT §5.1] (DefaultApplVerID 1137) / [FIXT §5.3] (per-message ApplVerID

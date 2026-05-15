@@ -12,8 +12,8 @@
 #include <fixpp/core/error.hpp>            // expected_t, error
 #include <fixpp/dict/dictionary.hpp>       // Dictionary (002-shipped)
 #include <fixpp/dict/version_profile.hpp>  // application_version enum (002);
-                                          // version_profile struct is 003-owned
-                                          // (RC#1; spec §8 audit).
+                                           // version_profile struct is 003-owned
+                                           // (RC#1; spec §8 audit).
 
 namespace fixpp::dict {
 
@@ -25,8 +25,8 @@ public:
     // dict_unknown_appl_ver_id, a wire-string parse failure — AC-X2 /
     // data-model error mapping). Returned pointer aliases the registry's
     // storage (lifetime = registry lifetime).
-    [[nodiscard]] core::expected_t<Dictionary const*>
-        get(application_version v) const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] core::expected_t<Dictionary const*> get(application_version v) const noexcept
+        [[clang::lifetimebound]];
 
     // Construction shape intentionally unspecified in v1.0/v1.1 — 2d owns it.
     // The shape-only test (AC-X3) builds a registry by hand and exercises get().

@@ -12,12 +12,11 @@
 // reify suites once Reify.hpp is generated — not here.
 #include <gtest/gtest.h>
 
-#include <fixpp/wire/message_view_contract.hpp>
-
 #include <fixpp/v42/Messages.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v50sp2/Messages.hpp>
 #include <fixpp/vt11/Messages.hpp>
+#include <fixpp/wire/message_view_contract.hpp>
 
 namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
