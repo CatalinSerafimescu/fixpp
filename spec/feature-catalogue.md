@@ -75,6 +75,7 @@
 | D-006 | OFFICIAL | dictionary | FIX 5.0, 5.0SP1 data dictionaries | 5.0, 5.0SP1 | [FIX50] [FIX50SP1] application specifications | backlog | — | — | — | — |
 | D-007 | OFFICIAL | dictionary | XML data dictionary format loader — parse FIX standard XML (QuickFIX-style) at runtime | 4.0–5.0SP2 | [impl] implementation | backlog | — | — | — | — |
 | D-008 | OFFICIAL | dictionary | Code-generated constexpr field metadata from data dictionary — zero-runtime-cost field lookup | 4.0–5.0SP2 | [impl] implementation NFR | backlog | — | — | — | — |
+<!-- D-008/OSS-010 supplemental note (Gate B round 1, 2026-05-16): emission + compile-time shape landed in PR #67 (003-dictionary-codegen); behavioural typed-read/reify round-trip 2b-gated, tracked R6. -->
 | D-009 | OFFICIAL | dictionary | Custom dictionary extension — user-defined fields and messages | 4.0–5.0SP2 | [FIX50SP2 §3.2] Repeating groups | backlog | — | — | — | — |
 | D-010 | OFFICIAL | dictionary | Component definition support — reusable field groups (Instrument, Parties, etc.) | 4.4–5.0SP2 | [FIX50SP2 §3.2] Repeating groups | backlog | — | — | — | — |
 | D-011 | OFFICIAL | dictionary | FIX Latest / FIX Orchestra repository format | FIX Latest | [impl] FIX Orchestra spec (post-1.0) | backlog | — | — | — | — |
@@ -244,6 +245,7 @@
 | OSS-008 | OSS:hffix | wire | message_writer over caller-supplied buffer — serializer takes external storage | 4.0–5.0SP2 | hffix | backlog | — | — | — | — |
 | OSS-009 | OSS:fix8 | session | Async message dispatch via thread pool — decouple session I/O thread from application thread | 4.0–5.0SP2 | fix8 | backlog | — | — | — | — |
 | OSS-010 | OSS:fix8 | dictionary | Code-generated message classes from XML — compile-time field name constants | 4.0–5.0SP2 | fix8/compiler | backlog | — | — | — | — |
+<!-- OSS-010 supplemental note (Gate B round 1, 2026-05-16): emission + compile-time shape landed in PR #67 (003-dictionary-codegen); behavioural typed-read/reify round-trip 2b-gated, tracked R6. -->
 | OSS-011 | OSS:OpenFAST | wire | FAST encoding (FIX Adapted for Streaming) — template-based binary compression | post-1.0 v1.3 | OpenFAST | backlog | — | — | — | — |
 | OSS-012 | OSS:Aeron/SBE | wire | SBE (Simple Binary Encoding) — schema-driven binary encoding, flyweight accessors | post-1.0 v1.2 | Aeron/SBE | backlog | — | — | — | — |
 | OSS-013 | OSS:Aeron/SBE | wire | SBE flyweight pattern — accessor objects with no copy, direct-into-buffer read/write | post-1.0 v1.2 | Aeron/SBE | backlog | — | — | — | — |
