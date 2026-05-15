@@ -1,0 +1,28 @@
+# 003-dictionary-codegen — curated must-include CI conformance manifest (AC-G12).
+# Checked-in, Gate-A-reviewed. Format: "<version> <ClassIdentifier> <MsgType>"
+# (# = comment). Per AC-G12 the CI subset MUST cover, per applicable version:
+# every P1 headline message, every message declaring a repeating group, all
+# 7 FIXT.1.1 admin MsgTypes (0/1/2/3/4/5/A), the [2c §6.3] AC-D4 worked
+# example, and msgtype-boundary probes. The nightly run is exhaustive over
+# the full emitted set; this subset is the load-bearing CI gate.
+
+# --- 7 FIXT.1.1 admin MsgTypes (vt11 session layer) ---
+vt11 Heartbeat 0
+vt11 TestRequest 1
+vt11 ResendRequest 2
+vt11 Reject 3
+vt11 SequenceReset 4
+vt11 Logout 5
+vt11 Logon A
+
+# --- P1 headline + group-bearing application messages ---
+v42 NewOrderSingle D
+v44 NewOrderSingle D
+v50sp2 NewOrderSingle D
+v44 ExecutionReport 8
+v50sp2 ExecutionReport 8
+v50sp2 MarketDataSnapshotFullRefresh W
+
+# --- AC-D4 worked-example messages ([2c §6.3]) ---
+v50sp2 OrderCancelRequest F
+v44 Logon A

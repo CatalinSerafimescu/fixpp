@@ -76,12 +76,12 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 1 (write FIRST — must fail)
 
-- [ ] T017 [P] [US1] `tests/codegen/typed_accessor_test.cpp` — AC-G1..G8, AC-G11: per-field typed accessors, the `price(mr)` v1.4 decimal accessor + AC-G4a default/allocating-trait behaviour, `[[nodiscard]]`/`[[clang::lifetimebound]]`, repeating-group `Leg` flyweight, `field_value(uint16_t)` forwarder
-- [ ] T018 [P] [US1] `tests/codegen/flyweight_shape_test.cpp` — seam #18: AC-G7 `static_assert(sizeof == sizeof(MessageView<Index> const*))`, AC-G7a per-message `owning_message_traits<Msg>` specialisation pin (compile-time shape oracle), R6 drift guard incl. `view.get<1128>()` AND `view.get<35>()` well-formed against the frozen contract (N-P3-1/N-P2-2)
-- [ ] T019 [P] [US1] `tests/codegen/msgtype_boundary_test.cpp` — AC-G9 (FIX-Latest A-035..A-065 filtered + build warning, not emitted), AC-G10 (A-014..A-034 not emitted as typed classes)
-- [ ] T020 [P] [US1] `tests/codegen/validator_shape_test.cpp` — AC-V1..AC-V3, AC-V5, AC-V6: per-message rule-table shape + `NormativeReferences.md` per-message citations
-- [ ] T021 [P] [US1] `tests/codegen/length_data_table_test.cpp` — seam #19, AC-V4: Length+Data pair table exhaustive vs source XML, cross-checked vs `[FIX50SP2 §3.3]`
-- [ ] T022 [P] [US1] `tests/codegen/conformance/conformance_test.cpp` + `must_include_manifest.txt` — seam #1/#15b, AC-G1..G6/AC-G12: parameterised round-trip over the curated must-include CI subset (P1 headline + every group-bearing msg + 7 FIXT admin + AC-D4 worked-example + msgtype-boundary probes); manifest is checked in and Gate-A-reviewed; nightly exhaustive
+- [X] T017 [P] [US1] `tests/codegen/typed_accessor_test.cpp` — AC-G1..G8, AC-G11: per-field typed accessors, the `price(mr)` v1.4 decimal accessor + AC-G4a default/allocating-trait behaviour, `[[nodiscard]]`/`[[clang::lifetimebound]]`, repeating-group `Leg` flyweight, `field_value(uint16_t)` forwarder
+- [X] T018 [P] [US1] `tests/codegen/flyweight_shape_test.cpp` — seam #18: AC-G7 `static_assert(sizeof == sizeof(MessageView<Index> const*))`, AC-G7a per-message `owning_message_traits<Msg>` specialisation pin (compile-time shape oracle), R6 drift guard incl. `view.get<1128>()` AND `view.get<35>()` well-formed against the frozen contract (N-P3-1/N-P2-2)
+- [X] T019 [P] [US1] `tests/codegen/msgtype_boundary_test.cpp` — AC-G9 (FIX-Latest A-035..A-065 filtered + build warning, not emitted), AC-G10 (A-014..A-034 not emitted as typed classes)
+- [X] T020 [P] [US1] `tests/codegen/validator_shape_test.cpp` — AC-V1..AC-V3, AC-V5, AC-V6: per-message rule-table shape + `NormativeReferences.md` per-message citations
+- [X] T021 [P] [US1] `tests/codegen/length_data_table_test.cpp` — seam #19, AC-V4: Length+Data pair table exhaustive vs source XML, cross-checked vs `[FIX50SP2 §3.3]`
+- [X] T022 [P] [US1] `tests/codegen/conformance/conformance_test.cpp` + `must_include_manifest.txt` — seam #1/#15b, AC-G1..G6/AC-G12: parameterised round-trip over the curated must-include CI subset (P1 headline + every group-bearing msg + 7 FIXT admin + AC-D4 worked-example + msgtype-boundary probes); manifest is checked in and Gate-A-reviewed; nightly exhaustive
 
 ### Implementation for User Story 1
 
