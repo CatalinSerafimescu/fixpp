@@ -191,21 +191,25 @@ TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
 TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
     // AC-D4 worked-example full dict::reify() call.
     // R6-blocked: MsgType read (get<35>()) returns dict_xml_parse_failed from
-    // the frozen stub; dict::reify returns that error before reaching dispatch.
-    // gate-b/r1 RC#2: dict::reify's dispatch stubs now return
-    // dict_reify_wire_body_not_ready (those branches are unreachable in R6
-    // because get<35>() always fails first, but the error code is now correct
-    // for when 2b makes them reachable).
-    // The actual R6 return from dict::reify() is dict_xml_parse_failed (from
-    // get<35>()); the test asserts this exact code so misdispatch is detectable.
+    // the frozen stub (frozen-stub internal impl detail); dict::reify() normalizes
+    // that to dict_reify_wire_body_not_ready on the reachable R6 exit path.
+    // gate-b/r2 RC#2 (F1+F2): all three non-success exits of dict::reify() now
+    // consistently return dict_reify_wire_body_not_ready (the reify-domain error
+    // for the genuine "wire body not yet available" condition). dict_xml_parse_failed
+    // is reserved for genuine 002 XML-loader parse failures only; it must not
+    // surface from the public reify() API.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;  // frozen stub MV
     auto r = fixpp::dict::reify(mv, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: dict::reify() must return an error with frozen stub MV";
-    // R6 exact oracle: get<35>() on the frozen stub returns dict_xml_parse_failed.
+    // R6 exact oracle: dict::reify() returns the reify-domain
+    // dict_reify_wire_body_not_ready for the frozen-stub R6 condition (gate-b/r2
+    // RC#2 F1+F2 lockstep correction — pre-fix returned dict_xml_parse_failed,
+    // wrong layer/module, now normalized).
     // 2b-unblock: replace this with has_value() assertion and version() checks.
-    EXPECT_EQ(r.error(), error::dict_xml_parse_failed)
-        << "R6: dict::reify() must return dict_xml_parse_failed from frozen get<35>() "
+    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
+        << "R6: dict::reify() must return dict_reify_wire_body_not_ready (R6 wire-body "
+           "condition); dict_xml_parse_failed must not surface from the reify API "
            "(2b-unblock: returns success with valid handle)";
 
     // The resolution DECISIONS are verified by the pure-function tests above,

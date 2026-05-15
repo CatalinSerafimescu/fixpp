@@ -33,10 +33,14 @@
 //     headers, dict::reify() in this TU implements the resolution algorithm
 //     only and returns R6-scoped stubs for the owning_message_handle result.
 //
-// R6 scope: every get<>() on the frozen stub returns dict_xml_parse_failed.
+// R6 scope: every get<>() on the frozen stub returns dict_xml_parse_failed
+//   (frozen-stub internal impl detail). dict::reify() normalizes that to the
+//   reify-domain error dict_reify_wire_body_not_ready (slot 29) before returning:
 //   dict::reify():
-//     - get<35>() → dict_xml_parse_failed → treated as "no MsgType" → cannot
-//       determine FIXT-admin vs application, returns dict_xml_parse_failed.
+//     - get<35>() → dict_xml_parse_failed (stub internal) → normalized to
+//       dict_reify_wire_body_not_ready on the reachable exit (gate-b/r2 RC#2 F1).
+//       dict_xml_parse_failed is reserved for genuine 002 XML-loader parse
+//       failures; it must not surface from the reify public API.
 //     - Full behavioural dispatch (FIXT-admin match → vt11 owner;
 //       application match → vXX owner) is R6-blocked until 2b replaces the
 //       wire stub body with real frame bytes.
@@ -177,8 +181,15 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
     auto mt_fv = view.template get<35>();
     if (!mt_fv) {
         // R6: field-absent from frozen stub → cannot dispatch.
+        // gate-b/r2 RC#2 F1: normalize to dict_reify_wire_body_not_ready — the
+        // correct reify-domain error for the R6 "wire body not yet available"
+        // condition. dict_xml_parse_failed is reserved strictly for genuine 002
+        // XML-loader parse failures and must not surface from the reify API.
+        // All three non-success exits from dict::reify() now consistently use
+        // dict_reify_wire_body_not_ready (slot 29), matching the two unreachable
+        // branches at the FIXT-admin and application-dispatch stubs below.
         // 2b-unblock: real frame bytes → this path is not taken.
-        return std::unexpected{mt_fv.error()};
+        return std::unexpected{core::error::dict_reify_wire_body_not_ready};
     }
     std::string_view const mt_sv = mt_fv->as_string();
 
