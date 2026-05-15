@@ -145,12 +145,12 @@ All paths are relative to the library submodule root (`research/G19-fix-fpml-iso
 
 ### Tests for User Story 4 (write FIRST — must fail)
 
-- [ ] T038 [P] [US4] `tests/integration/multi_session_multi_version.cpp` — seam #10a, AC-C1..C3: multi-version coexistence, no namespace bleed, non-implicitly-convertible cross-version types
-- [ ] T039 [P] [US4] `tests/codegen/codegen_build_graph_test.cmake` registered as the `fixpp::dict::codegen-build-graph-check` CTest target (a `cmake -P` script test, NOT a GoogleTest TU) — AC-C4: (a) `build/<preset>/_codegen/include/fixpp/...` exists post-configure; (b) `generate-vXX` is a configure-time custom target; (c) per-version INTERFACE targets carry `INTERFACE_INCLUDE_DIRECTORIES` into the build tree; (d) `git status --porcelain` source tree clean post-configure (DoD §12 build-tree clause)
+- [X] T038 [P] [US4] `tests/integration/multi_session_multi_version.cpp` — seam #10a, AC-C1..C3: multi-version coexistence, no namespace bleed, non-implicitly-convertible cross-version types
+- [X] T039 [P] [US4] `tests/codegen/codegen_build_graph_test.cmake` registered as the `fixpp::dict::codegen-build-graph-check` CTest target (a `cmake -P` script test, NOT a GoogleTest TU) — AC-C4: (a) `build/<preset>/_codegen/include/fixpp/...` exists post-configure; (b) `generate-vXX` is a configure-time custom target; (c) per-version INTERFACE targets carry `INTERFACE_INCLUDE_DIRECTORIES` into the build tree; (d) `git status --porcelain` source tree clean post-configure (DoD §12 build-tree clause)
 
 ### Implementation for User Story 4
 
-- [ ] T040 [US4] Finalize the `[2c §7.6]` per-version `INTERFACE` target isolation in `CMakeLists.txt`/`cmake/` so a consumer paying for `fixpp::dict::v44` does not pull other versions; makes T038–T039 green (extends T016)
+- [X] T040 [US4] Finalize the `[2c §7.6]` per-version `INTERFACE` target isolation in `CMakeLists.txt`/`cmake/` so a consumer paying for `fixpp::dict::v44` does not pull other versions; makes T038–T039 green (extends T016)
 
 **Checkpoint**: US1–US4 work independently — verified multi-version isolation + build-graph hygiene.
 

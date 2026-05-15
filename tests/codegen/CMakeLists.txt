@@ -61,3 +61,24 @@ target_compile_definitions(codegen_conformance_test PRIVATE
   "FIXPP_CODEGEN_MANIFEST=\"${CMAKE_CURRENT_SOURCE_DIR}/conformance/must_include_manifest.txt\"")
 add_test(NAME codegen_conformance_test COMMAND codegen_conformance_test)
 set_tests_properties(codegen_conformance_test PROPERTIES LABELS codegen)
+
+# T039: cmake -P build-graph test — fixpp::dict::codegen-build-graph-check
+#
+# AC-C4: asserts that (a) generated headers exist post-configure, (b) generation
+# is configure-time (not build-time), (c) per-version INTERFACE targets carry
+# INTERFACE_INCLUDE_DIRECTORIES into the build tree, (d) source tree is clean.
+#
+# CTest name uses '::' (allowed in add_test NAME but not in add_custom_target).
+# The cmake -P script reads ${CMAKE_BINARY_DIR}/_codegen/graph_props.cmake which
+# is written by cmake/Codegen.cmake at configure time.
+#
+# The graph_props.cmake path is passed via -DFIXPP_GRAPH_PROPS= so the script
+# has no hard-coded paths and works with any preset / build directory.
+add_test(
+  NAME "fixpp::dict::codegen-build-graph-check"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_GRAPH_PROPS=${CMAKE_BINARY_DIR}/_codegen/graph_props.cmake"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_build_graph_test.cmake"
+)
+set_tests_properties("fixpp::dict::codegen-build-graph-check" PROPERTIES
+  LABELS codegen)
