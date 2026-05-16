@@ -5,8 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <expected>
 #include <fixpp/core/error.hpp>
+#include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
@@ -57,8 +57,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
             while (i < n && buf[i] != EQ && buf[i] != SOH) {
                 auto c = static_cast<unsigned char>(buf[i]);
                 if (c < '0' || c > '9') {
-                    status_ = core::expected_t<void>{std::unexpect,
-                                                     core::error::wire_invalid_field_format};
+                    status_ = err_invalid_field_format();
                     entries_.clear();
                     return;
                 }
@@ -66,13 +65,12 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
                 ++i;
             }
             if (i >= n || buf[i] != EQ || i == tag_start) {
-                status_ =
-                    core::expected_t<void>{std::unexpect, core::error::wire_invalid_field_format};
+                status_ = err_invalid_field_format();
                 entries_.clear();
                 return;
             }
             if (tag > 0xFFFFU) {
-                status_ = core::expected_t<void>{std::unexpect, core::error::wire_tag_out_of_range};
+                status_ = err_tag_out_of_range();
                 entries_.clear();
                 return;
             }
@@ -87,8 +85,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
             }
 
             if (entries_.size() >= default_max_offset_entries) {
-                status_ =
-                    core::expected_t<void>{std::unexpect, core::error::wire_offset_table_full};
+                status_ = err_offset_table_full();
                 entries_.clear();
                 return;
             }
@@ -120,16 +117,16 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
     } catch (std::bad_alloc const&) {
         entries_.clear();
         overlay_.clear();
-        status_ = core::expected_t<void>{std::unexpect, core::error::out_of_memory};
+        status_ = fail(core::error::out_of_memory);
     }
 }
 
 core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const noexcept {
     if (!status_) {
-        return core::expected_t<entry>{std::unexpect, status_.error()};
+        return fail<entry>(status_.error());
     }
     if (overlay_.empty()) {
-        return core::expected_t<entry>{std::unexpect, core::error::wire_required_field_missing};
+        return err_required_field_missing<entry>();
     }
     auto const mask = static_cast<std::uint32_t>(overlay_.size() - 1U);
     std::uint32_t slot = mix(tag) & mask;
@@ -144,12 +141,12 @@ core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const 
             break;
         }
     }
-    return core::expected_t<entry>{std::unexpect, core::error::wire_required_field_missing};
+    return err_required_field_missing<entry>();
 }
 
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
     if (!status_) {
-        return core::expected_t<group_index>{std::unexpect, status_.error()};
+        return fail<group_index>(status_.error());
     }
     // Locate the count field (first occurrence of no_tag). Delimiter-aware
     // group membership is resolved by group_view<GroupT> with the
@@ -162,13 +159,12 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         }
     }
     if (count_idx == entries_.size()) {
-        return core::expected_t<group_index>{std::unexpect,
-                                             core::error::wire_required_field_missing};
+        return err_required_field_missing<group_index>();
     }
     std::size_t const first = count_idx + 1U;
     std::size_t const avail = entries_.size() - first;
     if (avail > default_max_group_entries_per_instance) {
-        return core::expected_t<group_index>{std::unexpect, core::error::wire_group_too_large};
+        return err_group_too_large<group_index>();
     }
     return group_index{no_tag, first, avail};
 }

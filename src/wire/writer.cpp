@@ -228,14 +228,9 @@ core::expected_t<group_writer> Writer::open_group(std::uint16_t no_tag,
 }
 
 // ── Writer::commit ────────────────────────────────────────────────────────────
-// 1. body_end = pos_ (byte where 10= will start).
-// 2. body_length = body_end - body_start_.
-// 3. Render body_length; determine actual_digits.
-// 4. If actual_digits < bl_digit_count_, memmove body left by the gap.
-// 5. Patch the 9= digit field with the actual decimal value.
-// 6. Compute byte-sum-mod-256 over [0, body_end).
-// 7. Write "10=NNN\x01".
-// 8. Return total bytes written.
+// The 9= BodyLength field was reserved at max width; if the actual length needs
+// fewer digits, the body is memmove'd left to close the over-reservation gap
+// before the digits are patched and the 10=CheckSum field appended.
 core::expected_t<std::size_t> Writer::commit() && noexcept {
     if (overflow_) {
         return err_field_value_truncated<std::size_t>();
@@ -291,8 +286,6 @@ core::expected_t<std::size_t> Writer::commit() && noexcept {
         std::memcpy(digit_ptr, tmp.data(), n);
         // Write the SOH that terminates the 9= field.
         digit_ptr[n] = SOH_BYTE;
-        // Verify body_start_ immediately follows the SOH.
-        // (bl_digit_pos_ + actual_digits + 1 == body_start_)
     }
 
     // Compute byte-sum-mod-256 over [0, body_end).
@@ -329,8 +322,7 @@ void group_writer::close_impl() noexcept {
         return;
     }
     closed_ = true;
-    // Per the contract the caller writes the correct count at open_group().
-    // No additional backpatch is needed in this implementation.
+    // The count was already written at open_group(); nothing to backpatch.
 }
 
 // ── group_writer::append_field ────────────────────────────────────────────────

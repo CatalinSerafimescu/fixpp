@@ -218,17 +218,7 @@ core::expected_t<std::span<frame_view>> Framer::feed(std::span<const std::byte> 
         if (frame.status_code == parsed_frame::status::error) {
             carry.clear();
             pending_ = 0;
-            switch (frame.error_code) {
-                case core::error::wire_frame_too_large:
-                    return fail<std::span<frame_view>>(core::error::wire_frame_too_large);
-                case core::error::wire_checksum_mismatch:
-                    return fail<std::span<frame_view>>(core::error::wire_checksum_mismatch);
-                case core::error::wire_framing_resync:
-                    return fail<std::span<frame_view>>(core::error::wire_framing_resync);
-                case core::error::wire_invalid_body_length:
-                default:
-                    return fail<std::span<frame_view>>(core::error::wire_invalid_body_length);
-            }
+            return fail<std::span<frame_view>>(frame.error_code);
         }
 
         std::byte const* frame_ptr = source.data() + offset;
