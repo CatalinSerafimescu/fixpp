@@ -35,3 +35,8 @@ add_wire_test(wire_conformance_test conformance/conformance_test.cpp)  # T009
 
 # US1 / US2 / US3 / US4 test executables are registered as their
 # corresponding test tasks land (T011.. red-first per TDD).
+add_wire_test(wire_framer_partial_read_test
+  framer_partial_read_test.cpp)                                        # T038
+add_wire_test(wire_checksum_bodylength_corruption_test
+  checksum_bodylength_corruption_test.cpp)                             # T039
+add_wire_test(wire_parser_index_test parser_index_test.cpp)            # T012

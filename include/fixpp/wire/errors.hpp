@@ -19,44 +19,61 @@ template <class T = void>
 }
 
 // One helper per wire_* variant — names mirror the enum, `err_` prefixed.
-[[nodiscard]] constexpr auto err_frame_too_large() noexcept {
-    return fail(error::wire_frame_too_large);
+// Templated on the expected success type (defaults to void) so a call site
+// returning core::expected_t<U> can write `return err_frame_too_large<U>();`
+// and a void-returning one just `return err_frame_too_large();`.
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_frame_too_large() noexcept {
+    return fail<T>(error::wire_frame_too_large);
 }
-[[nodiscard]] constexpr auto err_invalid_body_length() noexcept {
-    return fail(error::wire_invalid_body_length);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_invalid_body_length() noexcept {
+    return fail<T>(error::wire_invalid_body_length);
 }
-[[nodiscard]] constexpr auto err_checksum_mismatch() noexcept {
-    return fail(error::wire_checksum_mismatch);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_checksum_mismatch() noexcept {
+    return fail<T>(error::wire_checksum_mismatch);
 }
-[[nodiscard]] constexpr auto err_framing_resync() noexcept {
-    return fail(error::wire_framing_resync);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_framing_resync() noexcept {
+    return fail<T>(error::wire_framing_resync);
 }
-[[nodiscard]] constexpr auto err_invalid_field_format() noexcept {
-    return fail(error::wire_invalid_field_format);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_invalid_field_format() noexcept {
+    return fail<T>(error::wire_invalid_field_format);
 }
-[[nodiscard]] constexpr auto err_offset_table_full() noexcept {
-    return fail(error::wire_offset_table_full);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_offset_table_full() noexcept {
+    return fail<T>(error::wire_offset_table_full);
 }
-[[nodiscard]] constexpr auto err_group_too_large() noexcept {
-    return fail(error::wire_group_too_large);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_group_too_large() noexcept {
+    return fail<T>(error::wire_group_too_large);
 }
-[[nodiscard]] constexpr auto err_tag_out_of_range() noexcept {
-    return fail(error::wire_tag_out_of_range);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_tag_out_of_range() noexcept {
+    return fail<T>(error::wire_tag_out_of_range);
 }
-[[nodiscard]] constexpr auto err_required_field_missing() noexcept {
-    return fail(error::wire_required_field_missing);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_required_field_missing() noexcept {
+    return fail<T>(error::wire_required_field_missing);
 }
-[[nodiscard]] constexpr auto err_header_out_of_order() noexcept {
-    return fail(error::wire_header_out_of_order);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_header_out_of_order() noexcept {
+    return fail<T>(error::wire_header_out_of_order);
 }
-[[nodiscard]] constexpr auto err_field_value_out_of_range() noexcept {
-    return fail(error::wire_field_value_out_of_range);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T>
+err_field_value_out_of_range() noexcept {
+    return fail<T>(error::wire_field_value_out_of_range);
 }
-[[nodiscard]] constexpr auto err_field_value_truncated() noexcept {
-    return fail(error::wire_field_value_truncated);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_field_value_truncated() noexcept {
+    return fail<T>(error::wire_field_value_truncated);
 }
-[[nodiscard]] constexpr auto err_unexpected_tag() noexcept {
-    return fail(error::wire_unexpected_tag);
+template <class T = void>
+[[nodiscard]] constexpr core::expected_t<T> err_unexpected_tag() noexcept {
+    return fail<T>(error::wire_unexpected_tag);
 }
 
 }  // namespace fixpp::wire
