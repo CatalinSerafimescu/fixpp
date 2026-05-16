@@ -235,7 +235,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 4. **`/analyze` is MANDATORY** for the same trigger set as `/clarify`. Drift between constitution ↔ spec ↔ plan ↔ tasks is caught here, before `/implement`.
 5. **`/checklist` output is part of CI evidence.** Checklists tied to NFRs and acceptance criteria become the e-book's "how to verify" appendix.
 6. **`/implement` is one task at a time, TDD red-green-refactor.** Sonnet executes; Opus reviews increments.
-7. **`/simplify` runs on the implementation diff before PR open.** Code-reuse, quality, efficiency findings fixed before review.
+7. **`/simplify` runs on the implementation diff before `/speckit-verify`** (pipeline step 9.5, before step 10 — see `.specify/pipeline.md`). Code-reuse, quality, efficiency findings reviewed by 3 specialized Opus agents, then Opus-triaged: genuine in-scope simplifications + any real Gate-B-relevant defect fixed; behavioral/perf redesigns + ambiguous items deferred as tracked follow-ups in the verify decision doc. **Rationale:** a post-`/simplify` source change invalidates every preset build dir, forcing the full 6-preset `/speckit-verify` matrix to re-run — so `/simplify` must precede verify, not merely precede PR open.
 8. **Stuck loop:** three failed `/implement` invocations on the same red test (each invocation is a fresh-context attempt at one TDD cycle, per §1 and §6) → escalate to Codex as fallback implementer; if still stuck, `AskUserQuestion`. Codex's PR review for that task must come from a **fresh** Codex session, not the one that wrote the code (independence between author and reviewer is non-negotiable).
 
 ---
