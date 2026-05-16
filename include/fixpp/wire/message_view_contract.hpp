@@ -33,6 +33,7 @@
 #pragma once
 
 #include <fixpp/wire/parser.hpp>  // the real [2b §4.3] surface (re-exported):
+#include <type_traits>            // std::is_base_of_v (drift-guard static_asserts)
                                   // access_mode, field_view, group_view,
                                   // MessageView<Mode>, OffsetTable, frame_view.
 
@@ -40,6 +41,10 @@ namespace fixpp::wire {
 
 // Seam #18 / I-12 drift guard, co-located with the re-export so any future
 // surface drift fails HERE (not only in flyweight_shape_test.cpp).
+// View/field_view/MessageView/access_mode arrive via the deliberate parser.hpp
+// re-export; misc-include-cleaner cannot follow that seam — waived here
+// (design, not a defect). [see 004-wire-codec-verify §run 2]
+// NOLINTBEGIN(misc-include-cleaner)
 static_assert(std::is_base_of_v<View, field_view>,
               "field_view must be the real `: public View` shape (cutover)");
 static_assert(std::is_base_of_v<View, MessageView<access_mode::Index>>,
@@ -47,5 +52,6 @@ static_assert(std::is_base_of_v<View, MessageView<access_mode::Index>>,
 static_assert(static_cast<int>(access_mode::Index) >= 0,
               "access_mode::Index must remain a valid enumerator (003 binds "
               "MessageView<access_mode::Index>)");
+// NOLINTEND(misc-include-cleaner)
 
 }  // namespace fixpp::wire

@@ -30,11 +30,17 @@
                                            // pins — consumed here, NOT
                                            // re-declared/deferred).
 #include <cstdint>
+#include <memory_resource>
+#include <string_view>
+
+// 003->004 cutover bridge: every wire::MessageView/field_view symbol arrives
+// via the message_view_contract.hpp re-export of parser.hpp.
+// misc-include-cleaner cannot follow that deliberate re-export seam, so it is
+// waived file-wide here (design, not a defect). [see 004-wire-codec-verify §run 2]
+// NOLINTBEGIN(misc-include-cleaner)
 #include <fixpp/wire/message_view_contract.hpp>  // REAL wire::MessageView/
                                                  // field_view (004 cutover
                                                  // re-export, T028)
-#include <memory_resource>
-#include <string_view>
 
 namespace fixpp::dict {
 
@@ -118,5 +124,6 @@ template <class Msg>
 [[nodiscard]] core::expected_t<owning_message_handle> reify(
     wire::MessageView<wire::access_mode::Index> const& view, version_profile profile,
     std::pmr::memory_resource* mr) noexcept;
+// NOLINTEND(misc-include-cleaner)
 
 }  // namespace fixpp::dict

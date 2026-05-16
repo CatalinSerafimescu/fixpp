@@ -16,4 +16,8 @@
 // 2c table_view; with the 2c-deferred mock, header-only instantiation is the
 // only correct C++ — recorded in specs/004-wire-codec/tasks.md Phase 6.
 
+// Intentional anchor include — gives this TU a non-empty wire surface; no
+// table_view-dependent code here. misc-include-cleaner cannot see the anchor
+// intent (waived, design — [see 004-wire-codec-verify §run 2]).
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <fixpp/wire/parser.hpp>  // anchors the wire TU; no table_view here.

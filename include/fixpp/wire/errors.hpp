@@ -7,6 +7,7 @@
 // side so call sites read `return wire::err_checksum_mismatch();` instead of
 // the verbose std::unexpected{core::error::wire_checksum_mismatch}.
 
+#include <expected>  // std::unexpect
 #include <fixpp/core/error.hpp>
 
 namespace fixpp::wire {

@@ -16,8 +16,10 @@
 // fenced by core::detail::trap_throw so no exception escapes the noexcept
 // parse->fromApp window (FR-013, [arch §5.3]).
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>                        // std::unexpect
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
@@ -56,12 +58,12 @@ struct len_data_pair {
     std::uint16_t data_tag;
 };
 inline constexpr len_data_pair length_data_table[] = {
-    {93, 89},    // SignatureLength / Signature
-    {90, 91},    // SecureDataLen / SecureData
-    {95, 96},    // RawDataLength / RawData
-    {212, 213},  // XmlDataLen / XmlData
-    {348, 349},  // EncodedHeaderLen / EncodedHeader
-    {350, 351},  // EncodedMsgLen / EncodedMsg
+    {.length_tag = 93, .data_tag = 89},    // SignatureLength / Signature
+    {.length_tag = 90, .data_tag = 91},    // SecureDataLen / SecureData
+    {.length_tag = 95, .data_tag = 96},    // RawDataLength / RawData
+    {.length_tag = 212, .data_tag = 213},  // XmlDataLen / XmlData
+    {.length_tag = 348, .data_tag = 349},  // EncodedHeaderLen / EncodedHeader
+    {.length_tag = 350, .data_tag = 351},  // EncodedMsgLen / EncodedMsg
 };
 
 [[nodiscard]] constexpr std::uint16_t data_tag_for_length(std::uint16_t length_tag) noexcept {
@@ -80,7 +82,7 @@ inline constexpr len_data_pair length_data_table[] = {
         if (c < '0' || c > '9') {
             break;
         }
-        out = out * 10U + static_cast<std::uint32_t>(c - '0');
+        out = (out * 10U) + static_cast<std::uint32_t>(c - '0');
     }
     return out;
 }
@@ -113,7 +115,7 @@ public:
     public:
         struct field {
             std::uint16_t tag = 0;
-            std::span<const std::byte> value{};
+            std::span<const std::byte> value;
         };
         field_iterator(std::span<const std::byte> buf, std::size_t pos) noexcept
             : buf_{buf}, pos_{pos} {
@@ -198,7 +200,7 @@ template <std::uint16_t NoTag, class GroupT>
         // that delimiter tag starts a new occurrence (document order; the
         // dictionary-driven nested-group refinement is layered by 2c's
         // GroupT). Slices are owned by this view's frame (zero-copy).
-        using slice = typename group_view<GroupT>::slice;
+        using slice = group_view<GroupT>::slice;
         static thread_local std::vector<slice> slices;  // borrowed below
         slices.clear();
         auto gi = table_.group(NoTag);
@@ -277,7 +279,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
             done_ = true;
             return;
         }
-        tag = tag * 10U + static_cast<std::uint32_t>(c - '0');
+        tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
         ++i;
     }
     if (i >= buf_.size() || buf_[i] != EQ) {
@@ -291,9 +293,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     // length is fixed by it (value may contain SOH).
     if (prev_data_tag_ != 0 && static_cast<std::uint16_t>(tag) == prev_data_tag_) {
         std::size_t end = vstart + prev_data_len_;
-        if (end > buf_.size()) {
-            end = buf_.size();
-        }
+        end = std::min(end, buf_.size());
         cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, end - vstart)};
         next_ = (end < buf_.size()) ? end + 1 : end;  // skip trailing SOH
         prev_data_tag_ = 0;

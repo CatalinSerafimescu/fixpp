@@ -32,7 +32,7 @@ public:
 
     class iterator {
     public:
-        iterator(kv const* p) noexcept : p_{p} {}
+        explicit iterator(kv const* p) noexcept : p_{p} {}
         [[nodiscard]] kv const& operator*() const noexcept { return *p_; }
         iterator& operator++() noexcept {
             ++p_;
@@ -50,10 +50,15 @@ public:
     [[nodiscard]] iterator end() const noexcept [[clang::lifetimebound]] {
         return iterator{items_.data() + items_.size()};
     }
+    // Contract-mandated API (shape oracle contracts/unknown_fields.hpp):
+    // "no unknown fields", deliberately distinct from View::empty()'s
+    // "flyweight has no bytes". The shadow is intentional, not a slicing
+    // hazard (value type, no virtual dispatch). [see 004-wire-codec-verify §run 2]
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
     [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
 
 private:
-    std::span<kv const> items_{};
+    std::span<kv const> items_;
 };
 
 }  // namespace fixpp::wire

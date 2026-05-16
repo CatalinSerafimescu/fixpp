@@ -23,6 +23,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>                        // std::unexpect
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
 #include <memory_resource>

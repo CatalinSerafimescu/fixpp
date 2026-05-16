@@ -9,7 +9,6 @@
 // is src/wire/framer.cpp — US3 / T040.
 
 #include <cstddef>
-#include <cstdint>
 #include <fixpp/core/error.hpp>  // core::expected_t
 #include <memory_resource>
 #include <span>

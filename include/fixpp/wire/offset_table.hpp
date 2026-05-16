@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "framer.hpp"
-#include "view.hpp"
 
 namespace fixpp::wire {
 
