@@ -1,0 +1,20 @@
+{
+  "_note": "Initial seed — linux-clang-DEBUG (2026-05-16). Release ceiling enforcement requires linux-clang-release build. [2b §6.6] ceiling: OffsetTable::find ≤ 15 ns (release, after build, 32-slot hash).",
+  "context": {
+    "date": "2026-05-16",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/offset_table_bench",
+    "build_type": "debug",
+    "preset": "linux-clang-debug"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_OffsetTable_Find_32slot",
+      "ceiling_ns": 15,
+      "ceiling_source": "[2b §6.6]: OffsetTable::find, after build, 32-slot hash, ≤ 15 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 34.1,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release"
+    }
+  ]
+}

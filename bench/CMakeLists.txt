@@ -17,3 +17,4 @@ set_target_properties(placeholder_bench PROPERTIES
 add_subdirectory(core)
 add_subdirectory(codegen)
 add_subdirectory(dictionary)
+add_subdirectory(wire)
