@@ -19,7 +19,15 @@ namespace fixpp::core {
 //   wire_required_field_missing = 38,  // [2b §6.5.4]
 //   wire_header_out_of_order    = 39,  // [2b §6.5.1]
 //   wire_field_value_out_of_range = 40,// [2b §6.5.3]
-//   wire_field_value_truncated  = 41,  // from 2a §6.4, surfaced unchanged
+//   wire_field_value_truncated  = 41,  // [2b §6.5 rule 3]/[2b §6.7]: the
+//       // validator's §6.5-rule-3 type-check site RE-MAPS 2a/001's
+//       // decimal_precision_loss (=12, raised by decimal_traits<T>::from_chars
+//       // on FLOAT precision loss) onto this wire-domain conformance variant
+//       // so the Session-Reject path carries a wire_* code (2a's decimal-
+//       // domain code is preserved/logged; the wire surface re-maps, not
+//       // re-defines — "surfaced unchanged" = same condition, wire-domain
+//       // slot). Distinct slot retained per [2b §6.7] 13-variant list (design
+//       // doc wins; NOT deleted — only the call site is now specified).
 //   wire_unexpected_tag         = 42,  // [2b §6.5.5] SessionRejectReason=2
 // };
 // DELETED vs v0.1: wire_tag_count_exceeded (dropped distinct-tag cap, RC#1).

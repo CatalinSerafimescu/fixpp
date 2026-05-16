@@ -62,7 +62,7 @@ cmake --preset linux-clang-release --target offset_table_footprint_bench
 ./build/.../offset_table_footprint_bench --benchmark_out=bench/results/wire_footprint.json
 ```
 
-Measures raw `entry[]` + hash overlay **separately**, occurrence space, over Logon / NewOrderSingle / NewOrderList×{1,10,100} / MDIR×{10,100,1000} / SecurityList×{1000,3000,5000}. Record the table + the hybrid-confirmed verdict in `.specify/decisions/004-wire-codec-verify.md` (closes `[arch §11 row 1]`).
+Measures raw `entry[]` + hash overlay **separately**, occurrence space, over Logon / NewOrderSingle / NewOrderList×{1,10,100} / MDIR×{10,100,1000} / SecurityList×{1000,3000,5000}. The corpora exceeding `default_max_offset_entries`=4096 (MDIR×1000, SecurityList×{3000,5000}) are run with the cap **raised** — the measurement target is footprint, not the `wire_offset_table_full` reject path (which SC-003 covers at the default cap; SC-008/D-7). Record the table + the hybrid-confirmed verdict in `.specify/decisions/004-wire-codec-verify.md` (closes `[arch §11 row 1]`).
 
 ## 7. Verify (mandatory after `/speckit-implement`, `[const §XVII.8]`)
 
@@ -79,13 +79,21 @@ Produces `.specify/decisions/004-wire-codec-verify.md` (GREEN / YELLOW / RED). E
 /gate-b <PR#>              # BEFORE merge ([const §XVII.2]); /speckit-verify GREEN/YELLOW precondition
 ```
 
-Gate-label evidence rule (`[const §XVII.8]`): `gate-{a,b}-done` requires `/speckit-verify` GREEN **and** the Codex convergence record `.specify/decisions/004-wire-codec-gate{a,b}.md`. Parent-repo tracked record = the Phase-4 doc + `research/reviews/` (the `.specify/decisions/` path is gitignored/local-only per project memory).
+**Pre-`/tasks` Gate A vs. the `gate-{a,b}-done` label are two distinct events.** The pre-`/tasks` Gate A *review record* (the Codex/Opus convergence record) alone unblocks `/tasks` per `[const §XVII.1]` — there is no PR and no `/speckit-verify` GREEN at that point. The `gate-{a,b}-done` *label* is a separate, **PR-scoped** artifact applied later at the `/gate-b` (post-`/implement`, open-PR) stage and is CI-enforced at merge per `[const §XVII.6]` / `[const §XVII.8]`'s `/gate-b`-precondition bullet.
 
-## 9. Cutover sanity (`/clarify` Q1, SC-006)
+Gate-label evidence rule (`[const §XVII.8]`, applied at the PR stage — not at pre-`/tasks` Gate A): the `gate-{a,b}-done` *label* requires `/speckit-verify` GREEN **and** the Codex convergence record `.specify/decisions/004-wire-codec-gate{a,b}.md`. Parent-repo tracked record = the Phase-4 doc + `research/reviews/` (the `.specify/decisions/` path is gitignored/local-only per project memory).
+
+## 9. Cutover sanity — surface migration (`/clarify` Q1, SC-006, D-15/RC#1)
+
+The cutover is a **surface migration** (frozen-thin → `[2b §4.3]` real `MessageView : public View`), not a body-only swap. The `<fixpp/wire/message_view_contract.hpp>` include path is kept as a thin re-export of `parser.hpp`'s real `MessageView`, but the **surface changes**, so 003's drift guard must be reconciled in the same PR.
 
 ```sh
 grep -rn 'message_view_contract' include/fixpp/dict tests/   # expect: only the kept re-export shim
-ctest --preset linux-clang-debug -R 'wire_cutover|dict_reify|core_decimal'  # 001+003 GREEN on real MessageView
+# 003 drift-guard reconciled to the migrated MessageView:View surface
+# (stub sizeof(MessageView<Index>)==pointer assertion retired; 003 I-1 preserved):
+ctest --preset linux-clang-debug -R 'flyweight_shape'
+# 001 (004-authored wire FLOAT accessor) + 003 (reify round-trip) GREEN on the real MessageView:
+ctest --preset linux-clang-debug -R 'wire_cutover|dict_reify|core_decimal'
 ```
 
-Zero references to the frozen R6 stub body must remain (the file is kept as a thin re-export of `parser.hpp`'s `MessageView`).
+Zero references to the frozen-stub *surface* must remain. The 001 leg is 004-authored net-new wire code (`field_view::bytes()` → `decimal_t::parse(span, mr)`), not a 001 file repoint (D-17).

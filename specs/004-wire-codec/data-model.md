@@ -27,6 +27,14 @@ Source of truth: `[2b §4]` (public API), `[2b §6]` (behavioral contract), `[2b
 - **Common:** `msg_type()`, `msg_seq_num()`, `begin()/end()` (`field_iterator`).
 - **Index-only (`requires Mode==Index`):** `offsets()`, `get<Tag>()`/`get(tag)`, `group<NoTag,GroupT>()`, `unknown_fields()`.
 - **Invariants:** aliases the originating `frame_view` buffer; capturing past `fromApp` is UB in release / debug-trap. Cross-strand escape only via `MessageView::reify(mr)` (owned by 2c). All view-returning members `[[clang::lifetimebound]]` on `*this`; all `expected_t<>` returns `[[nodiscard]]`.
+- **Cutover surface migration (D-15 / RC#1):** this is the `[2b §4.3]` real surface (`: public View`, `access_mode{Iter,Index}`, the common members above) — **structurally different** from the R6 frozen stub (no `View` base; `access_mode{Index}` only; no `msg_type/msg_seq_num/begin/end/offsets`). The cutover migrates the surface (the `<fixpp/wire/message_view_contract.hpp>` include path is preserved as a thin re-export, the **surface changes**); 003's `flyweight_shape_test.cpp` drift guard (seam #18 / I-12) is reconciled to this surface (the stub's own `sizeof(MessageView<Index>)==pointer` assertion is retired since `: public View` is no longer pointer-sized; 003's I-1 `sizeof(<Msg>)==sizeof(MessageView<Index> const*)` is **preserved** — a generated message holds a pointer).
+
+### E-FV — `field_view : View`
+
+- **Shape oracle:** `contracts/field_view.hpp` (D-16). `[2b §4.3]` returns `expected_t<field_view>` from `get<Tag>()`/`get(tag)` but enumerates no body; `[2b §4.1]`/`[2b §612]` require it to be a `View`-derived flyweight.
+- **Members:** inherited `bytes()` / `empty()` (from `View`, `[2b §4.1]`) + retained `as_string()` (kept from the frozen-stub / 003-oracle surface so the cutover is source-compatible with every merged-003 call site).
+- **Cutover role:** the type merged-003 `dict::reify` / `dict::field_traits::decode_field` consume; the decimal arm reads `fv->bytes()` then `fixpp::decimal_t::parse(span, mr)` (003 I-1/RC#2). The single authoritative `field_view` shape SC-006's "003 reify green" depends on.
+- **Invariants:** non-owning; lifetime ⊆ originating frame buffer; `[[clang::lifetimebound]]`; debug generation-token trap inherited from `View`.
 
 ### E5 — `OffsetTable` + `entry`
 
@@ -86,7 +94,7 @@ Current `error.hpp` max occupied slot = **29** (`dict_reify_wire_body_not_ready`
 | `wire_required_field_missing` (38) | §6.5.4 | conformance — Session-Reject |
 | `wire_header_out_of_order` (39) | §6.5.1 | conformance — Session-Reject |
 | `wire_field_value_out_of_range` (40) | §6.5.3 | conformance — Session-Reject |
-| `wire_field_value_truncated` (41) | from 2a §6.4, surfaced unchanged | precision loss — Session-Reject + log |
+| `wire_field_value_truncated` (41) | `[2b §6.5 rule 3]`/`[2b §6.7]`: validator §6.5-rule-3 type-check site RE-MAPS 2a/001 `decimal_precision_loss` (=12, raised by `decimal_traits<T>::from_chars` on FLOAT precision loss) onto this wire-domain slot | precision loss — Session-Reject + log (re-map call site = the validator's §6.5-rule-3 type-check; "surfaced unchanged" = same condition surfaced in the wire-domain slot, NOT a verbatim propagation of slot 12 and NOT a deletion — design doc `[2b §6.7]` keeps the distinct slot, only the call site is now specified) |
 | `wire_unexpected_tag` (42) | §6.5.5 | dict-known tag invalid for MsgType — Session-Reject `SessionRejectReason=2` (`[FIX50SP2 §2.1]`) |
 
 - v0.1's implicit `wire_tag_count_exceeded` is **deleted** (the dropped distinct-tag cap, Root cause #1).

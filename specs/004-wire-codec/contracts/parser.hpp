@@ -8,6 +8,7 @@
 #include <fixpp/core/error.hpp>
 #include "view.hpp"
 #include "framer.hpp"
+#include "field_view.hpp"  // [2b §4.3] field_view shape oracle (cutover surface)
 
 namespace fixpp::dict { class table_view; }   // value type, owned by 2c
 
