@@ -67,16 +67,16 @@ The `/speckit-analyze` cross-artifact pass produced 7 findings; all are resolved
 
 ### Tests for User Story 1 (write FIRST — must FAIL before implementation) ⚠️
 
-- [ ] T011 [P] [US1] Author the parse-domain keyed corpora `tests/wire/conformance/{w001,w002,w003,w006,w007,w008,w009,w012}_*.csv` (W-001 tag=value/SOH, W-002 header, W-003 trailer, W-006/W-007 nested groups, W-008 Length+Data, W-009 field types, W-012 offset index) feeding the shared seam #2 driver (T009).
+- [X] T011 [P] [US1] Author the parse-domain keyed corpora `tests/wire/conformance/{w001,w002,w003,w006,w007,w008,w009,w012}_*.csv` (W-001 tag=value/SOH, W-002 header, W-003 trailer, W-006/W-007 nested groups, W-008 Length+Data, W-009 field types, W-012 offset index) feeding the shared seam #2 driver (T009).
 - [X] T012 [P] [US1] Author `tests/wire/parser_index_test.cpp` — `Parser<Index>::parse` random-access, `get<Tag>`/`get(tag)`, `offsets()`, repeated-tag occurrence addressing, via `frame_view_factory` (red).
-- [ ] T013 [P] [US1] Author `tests/wire/parser_iter_test.cpp` — `Parser<Iter>::parse_iter` streaming, dict-free `field_iterator`, zero-alloc end-to-end, static `constexpr` Length+Data table (red).
-- [ ] T014 [P] [US1] Author `tests/wire/offset_table_test.cpp` — `entry` `sizeof==12`/`alignof==4` static_assert, document-order entries, O(1) `find`, DoS caps (`wire_offset_table_full` at 4096 occ, `wire_tag_out_of_range`, `wire_group_too_large`) (red).
-- [ ] T015 [P] [US1] Author `tests/wire/lifetime_trap_test.cpp` (seam #7) — debug generation-token trap on use-after-buffer-reuse + `-Wdangling` smoke; release strips the token (red).
-- [ ] T016 [P] [US1] Author `tests/wire/repeating_group_equivalence_test.cpp` (seam #8) — `group_view::iter()` and `operator[]` enumerate identical entries/order incl. nested groups (red).
-- [ ] T017 [P] [US1] Author `tests/wire/unknown_fields_test.cpp` (seam #9) — dictionary-missing vs dictionary-known-invalid split; no vector materialization; round-trip byte order (red).
-- [ ] T018 [P] [US1] Author `tests/wire/three_arena_pinning_test.cpp` (seam #13) — per-message arena holds offset table/overlay/sub-indices; framer-carry arena is session-lifetime; zero `new`/`delete` parse→`fromApp` (red).
-- [ ] T019 [P] [US1] Author `tests/wire/cutover_2b_gated_test.cpp` (SC-006) — 003 `dict::reify` round-trip + 004-authored 001 wire FLOAT accessor (`field_view::bytes()` → `decimal_t::parse(span, mr)`, allocation-free for `pod_decimal`) on the real `MessageView`/`field_view` (red).
-- [ ] T020 [P] [US1] Author `tests/wire/noexcept_trap_test.cpp` (FR-013, `[arch §5.3]`) — a throwing 2a/2c trait-wrapper **traps** (does not propagate) across the parse→`fromApp` `noexcept` window; debug + release. **New per analyze C1** (red).
+- [X] T013 [P] [US1] Author `tests/wire/parser_iter_test.cpp` — `Parser<Iter>::parse_iter` streaming, dict-free `field_iterator`, zero-alloc end-to-end, static `constexpr` Length+Data table (red).
+- [X] T014 [P] [US1] Author `tests/wire/offset_table_test.cpp` — `entry` `sizeof==12`/`alignof==4` static_assert, document-order entries, O(1) `find`, DoS caps (`wire_offset_table_full` at 4096 occ, `wire_tag_out_of_range`, `wire_group_too_large`) (red).
+- [X] T015 [P] [US1] Author `tests/wire/lifetime_trap_test.cpp` (seam #7) — debug generation-token trap on use-after-buffer-reuse + `-Wdangling` smoke; release strips the token (red).
+- [X] T016 [P] [US1] Author `tests/wire/repeating_group_equivalence_test.cpp` (seam #8) — `group_view::iter()` and `operator[]` enumerate identical entries/order incl. nested groups (red).
+- [X] T017 [P] [US1] Author `tests/wire/unknown_fields_test.cpp` (seam #9) — dictionary-missing vs dictionary-known-invalid split; no vector materialization; round-trip byte order (red).
+- [X] T018 [P] [US1] Author `tests/wire/three_arena_pinning_test.cpp` (seam #13) — per-message arena holds offset table/overlay/sub-indices; framer-carry arena is session-lifetime; zero `new`/`delete` parse→`fromApp` (red).
+- [X] T019 [P] [US1] Author `tests/wire/cutover_2b_gated_test.cpp` (SC-006) — 003 `dict::reify` round-trip + 004-authored 001 wire FLOAT accessor (`field_view::bytes()` → `decimal_t::parse(span, mr)`, allocation-free for `pod_decimal`) on the real `MessageView`/`field_view` (red).
+- [X] T020 [P] [US1] Author `tests/wire/noexcept_trap_test.cpp` (FR-013, `[arch §5.3]`) — a throwing 2a/2c trait-wrapper **traps** (does not propagate) across the parse→`fromApp` `noexcept` window; debug + release. **New per analyze C1** (red).
 
 ### Implementation for User Story 1
 

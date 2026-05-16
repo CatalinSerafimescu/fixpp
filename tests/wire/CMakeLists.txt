@@ -40,3 +40,13 @@ add_wire_test(wire_framer_partial_read_test
 add_wire_test(wire_checksum_bodylength_corruption_test
   checksum_bodylength_corruption_test.cpp)                             # T039
 add_wire_test(wire_parser_index_test parser_index_test.cpp)            # T012
+add_wire_test(wire_parser_iter_test parser_iter_test.cpp)              # T013
+add_wire_test(wire_offset_table_test offset_table_test.cpp)            # T014
+add_wire_test(wire_lifetime_trap_test lifetime_trap_test.cpp)          # T015
+add_wire_test(wire_repeating_group_equivalence_test
+  repeating_group_equivalence_test.cpp)                                # T016
+add_wire_test(wire_unknown_fields_test unknown_fields_test.cpp)        # T017
+add_wire_test(wire_three_arena_pinning_test
+  three_arena_pinning_test.cpp)                                        # T018
+add_wire_test(wire_cutover_2b_gated_test cutover_2b_gated_test.cpp)    # T019
+add_wire_test(wire_noexcept_trap_test noexcept_trap_test.cpp)          # T020
