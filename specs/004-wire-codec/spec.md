@@ -7,6 +7,14 @@
 
 > **Authority anchor:** This spec is anchored to `.specify/2b-wire.md` **Draft v0.2 — Gate A round 1 converged**. Where this spec and the design doc disagree, the design doc wins; an inconsistency is a defect in this spec, not a design change. Catalogue rows owned (in part): **W-001..W-014**, **OSS-006**, **OSS-008**, **OSS-013**, plus the parse/serialize/validate behaviour of every generated typed message under Appendix A. This is the third Phase-4 feature of the `wire/` module and the critical-path unblocker for the 2b-gated deferred work in `001-core-decimal` (wire FLOAT accessor) and `003-dictionary-codegen` (behavioural typed-read / `dict::reify` round-trip, tracked R6).
 
+## Clarifications
+
+### Session 2026-05-16
+
+- Q: Does feature 004 itself perform the cutover (remove the frozen `wire::MessageView` stub and turn the 001/003 2b-gated tests green in this PR), or deliver the wire layer only? → A: Cutover in 004 — 004 delivers the real wire layer AND rewires 001 (FLOAT accessor) + 003 (`dict::reify` round-trip) onto it, deletes the vendored frozen stub, and ships those tests green in this PR.
+- Q: What validator depth must feature 004 deliver as its default implementation? → A: Full per-version default — the runtime-virtual `Validator` plugin plus a complete default validator doing required-field + type-conformance + enum-membership + repeating-group-structure checks driven by real dictionary metadata for all four versions (v42/v44/v50sp2/vt11).
+- Q: Is the eager-vs-lazy offset-table measurement spike (`[arch §11 row 1]`) a required in-PR deliverable for 004, or deferred? → A: Required in 004 — a benchmark in occurrence space over the named venue/message corpora with the footprint result recorded as a decision artifact that closes `[arch §11 row 1]` within this PR.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" of this feature are the downstream library layers that compile against the wire surface (codegen-generated typed messages from 2c, the session FSM, MessageStore from 2e, the C-ABI accessors from 2i, the session tap from 2l) and, transitively, the application developer building a FIX engine on top of fixpp.
@@ -100,7 +108,7 @@ A consumer needs message-level structural and field-level type/required/enum che
 - **FR-007**: The system MUST serialize a message into a caller-supplied buffer (W-013) writing fields in required order and computing `BodyLength(9)` (W-004) and `CheckSum(10)` (W-005, unsigned byte-sum mod 256, 3-digit zero-padded ASCII) automatically at commit.
 - **FR-008**: A parse-then-serialize round trip MUST produce byte-identical output for every generated typed message across the supported versions (`v42`, `v44`, `v50sp2`, `vt11`), including opaque preservation of unknown/custom fields (`[SYN §3.1 Q4]`).
 - **FR-009**: The system MUST frame a multi-message TCP byte stream (W-010, OSS-013) emitting zero or more complete frames per feed, carrying partial trailing bytes over to the next feed, and verifying `BodyLength` and `CheckSum` before any parser is exposed to a frame.
-- **FR-010**: The system MUST provide a message `Validator` (W-014) checking required-field presence, field type conformance, enum value membership, and repeating-group structure, driven by dictionary metadata for the message's FIX version.
+- **FR-010**: The system MUST provide a complete default message `Validator` (W-014) checking required-field presence, field type conformance, enum value membership, and repeating-group structure, driven by real dictionary metadata for every supported FIX version (`v42`, `v44`, `v50sp2`, `vt11`) — not a structural-only or interface-only stand-in.
 - **FR-011**: The `Validator` MUST be a runtime-virtual plugin with at most 5 pure-virtual methods (`[const §XIV.2]`) and MUST hold dictionary metadata by value, introducing no virtual `wire/`→`dict/` runtime dependency edge.
 - **FR-012**: The system MUST NOT perform any heap allocation (`new`/`delete`) between the start of parse and the return of the simulated `fromApp` (`[const §VIII.5]`); allocation-bearing trait specializations MUST use the per-message arena supplied by the wire layer.
 - **FR-013**: The five wire primitives (`Framer`, `Parser`, `OffsetTable`, `Writer`, `Validator`) and the shared `View` flyweight base MUST be `noexcept` end-to-end across the parse→`fromApp` window; throwing third-party trait wrappers MUST trap rather than propagate (`[arch §5.3]`).
@@ -108,7 +116,7 @@ A consumer needs message-level structural and field-level type/required/enum che
 - **FR-015**: The system MUST enforce caller-tunable DoS bounds — maximum frame size (default 256 KiB → `wire_frame_too_large`), maximum offset-table occurrences (default 4096 → `wire_offset_table_full`), maximum group entries per instance (default 4096 → `wire_group_too_large`), and tag numeric range `uint16_t` 0..65535 (→ `wire_tag_out_of_range`) — with bounded memory and no crash when exceeded.
 - **FR-016**: The system MUST enforce the flyweight lifetime contract: `[[clang::lifetimebound]]` markers on view-producing surfaces (best-effort on Clang/GCC, accepted gap on MSVC per `[const §IX.4]`) and a debug-build generation-counter trap on use-after-buffer-reuse, with the counter compiled out in release builds.
 - **FR-017**: `CheckSum` verification MUST be mandatory with no production bypass switch (a tests-only hook is permitted).
-- **FR-018**: The feature MUST unblock the deferred behavioural work it gates: the `003-dictionary-codegen` typed-read / `dict::reify` round-trip (R6) and the `001-core-decimal` wire FLOAT accessor become exercisable end-to-end against the real `MessageView`.
+- **FR-018**: This feature MUST perform the 2b cutover within its own PR: the vendored frozen `wire::MessageView<Index>` contract stub (003's R6 deferral) MUST be removed, the `003-dictionary-codegen` typed-read / `dict::reify` round-trip and the `001-core-decimal` wire FLOAT accessor MUST be rewired onto the real `MessageView`, and their previously 2b-gated tests MUST ship green in this PR.
 
 ### Key Entities
 
@@ -131,10 +139,10 @@ A consumer needs message-level structural and field-level type/required/enum che
 - **SC-002**: Zero heap allocations occur between the start of parse and the return of `fromApp`, verified by an allocation-counting harness on the full parse + serialize path (no allocation regressions tolerated).
 - **SC-003**: 100% of a malformed/adversarial input corpus (bad `CheckSum`, inconsistent `BodyLength`, oversized frame, offset-table overflow, out-of-range tag, oversized group, truncation at every byte boundary) is rejected with the defined wire error and bounded memory — zero crashes, zero unbounded allocation, zero out-of-bounds access (clean under sanitizers and fuzzing).
 - **SC-004**: A byte stream arbitrarily fragmented (down to one byte per feed) at all message and field boundaries reassembles into exactly the original sequence of frames in order, with no lost or duplicated frames.
-- **SC-005**: The validator correctly classifies 100% of a labelled corpus of conforming vs. non-conforming messages (missing required field, type violation, enum violation, malformed repeating group) with no false accept of a non-conforming message.
-- **SC-006**: The previously 2b-gated tests ship green: the `003-dictionary-codegen` typed-read / `dict::reify` round-trip (R6) and the `001-core-decimal` wire FLOAT accessor execute end-to-end against the real `MessageView` (no remaining vendored frozen stub on those paths).
+- **SC-005**: The default validator correctly classifies 100% of a labelled corpus of conforming vs. non-conforming messages — covering missing required field, type violation, enum violation, and malformed repeating group — across all four supported versions (`v42`, `v44`, `v50sp2`, `vt11`), with no false accept of a non-conforming message.
+- **SC-006**: Within this feature's PR, the vendored frozen `wire::MessageView` stub is deleted and the previously 2b-gated tests ship green: the `003-dictionary-codegen` typed-read / `dict::reify` round-trip (R6) and the `001-core-decimal` wire FLOAT accessor execute end-to-end against the real `MessageView` (zero references to the frozen stub remain anywhere in the tree).
 - **SC-007**: The `Validator` plugin interface exposes ≤5 pure-virtual methods and the module dependency graph contains no `wire/`→`dict/` virtual runtime edge (enforced by the layering check).
-- **SC-008**: The eager-vs-lazy offset-table measurement spike (`[arch §11 row 1]`, design §10 Q1) is executed on the named venue/message corpora in occurrence space and its result recorded, confirming the hybrid disposition.
+- **SC-008**: Within this feature's PR, the eager-vs-lazy offset-table measurement spike (`[arch §11 row 1]`, design §10 Q1) is executed in occurrence space over the named venue/message corpora (FX/equities, options `SecurityList`, 1000-strike `MarketDataIncrementalRefresh`) and its footprint result recorded as a decision artifact that closes `[arch §11 row 1]`, confirming the hybrid disposition.
 
 ## Assumptions
 
