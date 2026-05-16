@@ -15,6 +15,7 @@
 // Single-definition rule: ONLY tests include this. Production wire code never
 // sees a table_view definition (it never instantiates without one).
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -52,6 +53,16 @@ public:
         group_first_[no_tag] = first;
         return *this;
     }
+    // Register one allowed enumerated value for `tag`. A tag with NO
+    // registered value set is treated as a non-enumerated (free) field —
+    // exactly FIX semantics: only fields carrying `<value>` children are
+    // enum-constrained. (The real 2c table_view sources this from the
+    // dictionary `<value enum=...>` set; recorded as the explicit 2c/002
+    // dependency in specs/004-wire-codec/tasks.md Phase 6.)
+    table_view& add_enum(std::uint16_t tag, std::string_view value) {
+        enums_[tag].insert(std::string{value});
+        return *this;
+    }
 
     // ---- value-contract surface bound by wire::Validator/Parser
     [[nodiscard]] std::span<std::uint16_t const>
@@ -81,11 +92,32 @@ public:
         return it == types_.end() ? field_type::String : it->second;
     }
 
+    // Runtime enum-membership check bound by wire::Validator's §6.5 enum
+    // rule. Returns true if `tag` is not an enumerated field (no registered
+    // value set) OR `value` matches one of its registered values byte-for-
+    // byte. A registered-but-unmatched value is the only rejection
+    // (→ wire_field_value_out_of_range, slot 40).
+    [[nodiscard]] bool
+    enum_valid(std::uint16_t tag,
+               std::span<const std::byte> value) const noexcept {
+        auto it = enums_.find(tag);
+        if (it == enums_.end()) {
+            return true;  // not an enumerated field — unconstrained
+        }
+        std::string v;
+        v.reserve(value.size());
+        for (auto b : value) {
+            v.push_back(static_cast<char>(b));
+        }
+        return it->second.contains(v);
+    }
+
 private:
     std::unordered_map<std::string, std::vector<std::uint16_t>> required_;
     std::unordered_map<std::string, std::unordered_set<std::uint16_t>> valid_;
     std::unordered_map<std::uint16_t, std::uint16_t> group_first_;
     std::unordered_map<std::uint16_t, field_type> types_;
+    std::unordered_map<std::uint16_t, std::unordered_set<std::string>> enums_;
 };
 
 }  // namespace fixpp::dict

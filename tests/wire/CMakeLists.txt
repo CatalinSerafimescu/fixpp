@@ -65,3 +65,14 @@ add_wire_test(wire_noexcept_trap_test noexcept_trap_test.cpp)          # T020
 # US2 — Writer / serialize / round-trip (T032–T033)
 add_wire_test(wire_round_trip_property_test
   round_trip_property_test.cpp)                                        # T033
+
+# US4 — Validator domain (seam #14) + per-version parameterized suite (SC-005)
+add_wire_test(wire_validator_domain_test validator_domain_test.cpp)        # T043
+add_wire_test(wire_validator_per_version_test validator_per_version_test.cpp) # T044
+
+# T055 — Coverage hardening: targeted error-path tests for writer / framer /
+# parser / validator to reach ≥90% line / ≥80% branch on wire scope.
+add_wire_test(wire_writer_error_path_test writer_error_path_test.cpp)         # T055
+add_wire_test(wire_framer_error_path_test framer_error_path_test.cpp)         # T055
+add_wire_test(wire_parser_error_path_test parser_error_path_test.cpp)         # T055
+add_wire_test(wire_validator_type_check_test validator_type_check_test.cpp)   # T055
