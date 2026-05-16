@@ -25,10 +25,9 @@ public:
     };
 
     constexpr unknown_fields_view() noexcept = default;
-    unknown_fields_view(std::span<kv const> items,
-                        detail::generation_token gen) noexcept
-        : View{items.empty() ? nullptr : items.front().data,
-               items.empty() ? 0 : items.front().len, gen},
+    unknown_fields_view(std::span<kv const> items, detail::generation_token gen) noexcept
+        : View{items.empty() ? nullptr : items.front().data, items.empty() ? 0 : items.front().len,
+               gen},
           items_{items} {}
 
     class iterator {
@@ -39,9 +38,7 @@ public:
             ++p_;
             return *this;
         }
-        [[nodiscard]] bool operator==(iterator const& o) const noexcept {
-            return p_ == o.p_;
-        }
+        [[nodiscard]] bool operator==(iterator const& o) const noexcept { return p_ == o.p_; }
 
     private:
         kv const* p_;

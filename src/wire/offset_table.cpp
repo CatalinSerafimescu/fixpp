@@ -3,17 +3,15 @@
 // robin-hood overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
 
-#include <fixpp/wire/offset_table.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <fixpp/core/error.hpp>
+#include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
 #include <new>
 #include <span>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/wire/framer.hpp>
 
 namespace fixpp::wire {
 
@@ -41,8 +39,7 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
     return cap;
 }
 
-OffsetTable::OffsetTable(frame_view const& frame,
-                         std::pmr::memory_resource* mr) noexcept
+OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
     : entries_(mr), overlay_(mr) {
     // A noexcept ctor must NOT let a throwing `mr` (bad_alloc) escape — that
     // would std::terminate (004 T059 / Codex adversarial review: the reify
@@ -50,94 +47,89 @@ OffsetTable::OffsetTable(frame_view const& frame,
     // allocation failure we degrade EXACTLY like the DoS-cap path below:
     // empty table, status_ = out_of_memory, find()/get<>() → field-absent.
     try {
-    auto buf = frame.bytes();
-    std::size_t i = 0;
-    std::size_t const n = buf.size();
+        auto buf = frame.bytes();
+        std::size_t i = 0;
+        std::size_t const n = buf.size();
 
-    while (i < n) {
-        std::size_t const tag_start = i;
-        std::uint32_t tag = 0;
-        while (i < n && buf[i] != EQ && buf[i] != SOH) {
-            auto c = static_cast<unsigned char>(buf[i]);
-            if (c < '0' || c > '9') {
-                status_ = core::expected_t<void>{
-                    std::unexpect, core::error::wire_invalid_field_format};
+        while (i < n) {
+            std::size_t const tag_start = i;
+            std::uint32_t tag = 0;
+            while (i < n && buf[i] != EQ && buf[i] != SOH) {
+                auto c = static_cast<unsigned char>(buf[i]);
+                if (c < '0' || c > '9') {
+                    status_ = core::expected_t<void>{std::unexpect,
+                                                     core::error::wire_invalid_field_format};
+                    entries_.clear();
+                    return;
+                }
+                tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+                ++i;
+            }
+            if (i >= n || buf[i] != EQ || i == tag_start) {
+                status_ =
+                    core::expected_t<void>{std::unexpect, core::error::wire_invalid_field_format};
                 entries_.clear();
                 return;
             }
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
-            ++i;
-        }
-        if (i >= n || buf[i] != EQ || i == tag_start) {
-            status_ = core::expected_t<void>{
-                std::unexpect, core::error::wire_invalid_field_format};
-            entries_.clear();
-            return;
-        }
-        if (tag > 0xFFFFU) {
-            status_ = core::expected_t<void>{
-                std::unexpect, core::error::wire_tag_out_of_range};
-            entries_.clear();
-            return;
-        }
-        ++i;  // step over '='
-        std::size_t const val_start = i;
-        while (i < n && buf[i] != SOH) {
-            ++i;
-        }
-        std::size_t const val_len = i - val_start;
-        if (i < n) {
-            ++i;  // step over SOH
-        }
-
-        if (entries_.size() >= default_max_offset_entries) {
-            status_ = core::expected_t<void>{
-                std::unexpect, core::error::wire_offset_table_full};
-            entries_.clear();
-            return;
-        }
-        entries_.push_back(entry{
-            .offset = static_cast<std::uint32_t>(val_start),
-            .length = static_cast<std::uint32_t>(val_len),
-            .tag = static_cast<std::uint16_t>(tag),
-            .group_index_link = 0U});
-    }
-
-    // Build the robin-hood overlay over first occurrences.
-    std::size_t const cap = overlay_cap_for(entries_.size());
-    overlay_.assign(cap, 0U);
-    auto const mask = static_cast<std::uint32_t>(cap - 1U);
-    for (std::size_t e = 0; e < entries_.size(); ++e) {
-        std::uint16_t const tag = entries_[e].tag;
-        std::uint32_t slot = mix(tag) & mask;
-        bool seen = false;
-        while (overlay_[slot] != 0U) {
-            if (entries_[overlay_[slot] - 1U].tag == tag) {
-                seen = true;  // keep FIRST occurrence
-                break;
+            if (tag > 0xFFFFU) {
+                status_ = core::expected_t<void>{std::unexpect, core::error::wire_tag_out_of_range};
+                entries_.clear();
+                return;
             }
-            slot = (slot + 1U) & mask;
+            ++i;  // step over '='
+            std::size_t const val_start = i;
+            while (i < n && buf[i] != SOH) {
+                ++i;
+            }
+            std::size_t const val_len = i - val_start;
+            if (i < n) {
+                ++i;  // step over SOH
+            }
+
+            if (entries_.size() >= default_max_offset_entries) {
+                status_ =
+                    core::expected_t<void>{std::unexpect, core::error::wire_offset_table_full};
+                entries_.clear();
+                return;
+            }
+            entries_.push_back(entry{.offset = static_cast<std::uint32_t>(val_start),
+                                     .length = static_cast<std::uint32_t>(val_len),
+                                     .tag = static_cast<std::uint16_t>(tag),
+                                     .group_index_link = 0U});
         }
-        if (!seen) {
-            overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
+
+        // Build the robin-hood overlay over first occurrences.
+        std::size_t const cap = overlay_cap_for(entries_.size());
+        overlay_.assign(cap, 0U);
+        auto const mask = static_cast<std::uint32_t>(cap - 1U);
+        for (std::size_t e = 0; e < entries_.size(); ++e) {
+            std::uint16_t const tag = entries_[e].tag;
+            std::uint32_t slot = mix(tag) & mask;
+            bool seen = false;
+            while (overlay_[slot] != 0U) {
+                if (entries_[overlay_[slot] - 1U].tag == tag) {
+                    seen = true;  // keep FIRST occurrence
+                    break;
+                }
+                slot = (slot + 1U) & mask;
+            }
+            if (!seen) {
+                overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
+            }
         }
-    }
     } catch (std::bad_alloc const&) {
         entries_.clear();
         overlay_.clear();
-        status_ = core::expected_t<void>{
-            std::unexpect, core::error::out_of_memory};
+        status_ = core::expected_t<void>{std::unexpect, core::error::out_of_memory};
     }
 }
 
-core::expected_t<OffsetTable::entry>
-OffsetTable::find(std::uint16_t tag) const noexcept {
+core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const noexcept {
     if (!status_) {
         return core::expected_t<entry>{std::unexpect, status_.error()};
     }
     if (overlay_.empty()) {
-        return core::expected_t<entry>{
-            std::unexpect, core::error::wire_required_field_missing};
+        return core::expected_t<entry>{std::unexpect, core::error::wire_required_field_missing};
     }
     auto const mask = static_cast<std::uint32_t>(overlay_.size() - 1U);
     std::uint32_t slot = mix(tag) & mask;
@@ -152,12 +144,10 @@ OffsetTable::find(std::uint16_t tag) const noexcept {
             break;
         }
     }
-    return core::expected_t<entry>{
-        std::unexpect, core::error::wire_required_field_missing};
+    return core::expected_t<entry>{std::unexpect, core::error::wire_required_field_missing};
 }
 
-core::expected_t<OffsetTable::group_index>
-OffsetTable::group(std::uint16_t no_tag) const noexcept {
+core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
     if (!status_) {
         return core::expected_t<group_index>{std::unexpect, status_.error()};
     }
@@ -172,14 +162,13 @@ OffsetTable::group(std::uint16_t no_tag) const noexcept {
         }
     }
     if (count_idx == entries_.size()) {
-        return core::expected_t<group_index>{
-            std::unexpect, core::error::wire_required_field_missing};
+        return core::expected_t<group_index>{std::unexpect,
+                                             core::error::wire_required_field_missing};
     }
     std::size_t const first = count_idx + 1U;
     std::size_t const avail = entries_.size() - first;
     if (avail > default_max_group_entries_per_instance) {
-        return core::expected_t<group_index>{
-            std::unexpect, core::error::wire_group_too_large};
+        return core::expected_t<group_index>{std::unexpect, core::error::wire_group_too_large};
     }
     return group_index{no_tag, first, avail};
 }

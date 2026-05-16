@@ -23,11 +23,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
-#include <span>
-
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
+#include <memory_resource>
+#include <span>
 
 namespace fixpp::wire {
 
@@ -48,28 +47,24 @@ private:
 class group_writer {
 public:
     // Constructed only through the passkey from Writer::open_group.
-    explicit group_writer(group_writer_token /*passkey*/,
-                           Writer* owner) noexcept
-        : owner_{owner} {}
+    explicit group_writer(group_writer_token /*passkey*/, Writer* owner) noexcept : owner_{owner} {}
 
-    group_writer(group_writer&&) noexcept            = default;
+    group_writer(group_writer&&) noexcept = default;
     group_writer& operator=(group_writer&&) noexcept = default;
 
     // Copy disallowed — group_writer is a move-only handle.
-    group_writer(group_writer const&)            = delete;
+    group_writer(group_writer const&) = delete;
     group_writer& operator=(group_writer const&) = delete;
 
     ~group_writer() noexcept { close_impl(); }
 
     // Append a raw (tag, value bytes) field into the group body.
-    [[nodiscard]] core::expected_t<void>
-    append_field(std::uint16_t tag,
-                 std::span<const std::byte> value) noexcept;
+    [[nodiscard]] core::expected_t<void> append_field(std::uint16_t tag,
+                                                      std::span<const std::byte> value) noexcept;
 
     // Typed convenience: calls the field's trait to_chars.
     template <class T>
-    [[nodiscard]] core::expected_t<void>
-    append_field(std::uint16_t tag, T const& v) noexcept;
+    [[nodiscard]] core::expected_t<void> append_field(std::uint16_t tag, T const& v) noexcept;
 
     // Seal the group (RAII fallback): no-op if already closed.
     void close() && noexcept { close_impl(); }
@@ -79,8 +74,8 @@ private:
 
     void close_impl() noexcept;
 
-    Writer* owner_  = nullptr;
-    bool    closed_ = false;
+    Writer* owner_ = nullptr;
+    bool closed_ = false;
 };
 
 // ── Writer ────────────────────────────────────────────────────────────────────
@@ -89,24 +84,22 @@ public:
     // Alias dst (caller-owned buffer); capture scratch_mr for group bookkeeping.
     // Both must outlive the Writer.
     explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]],
-                    std::pmr::memory_resource* scratch_mr
-                        [[clang::lifetimebound]]) noexcept;
+                    std::pmr::memory_resource* scratch_mr [[clang::lifetimebound]]) noexcept;
 
     // Raw bytes append: writes "tag=value\x01" into dst.
     // Returns wire_field_value_truncated if dst is too small (no OOB write).
-    [[nodiscard]] core::expected_t<void>
-    append_raw(std::uint16_t tag, std::span<const std::byte> value) noexcept;
+    [[nodiscard]] core::expected_t<void> append_raw(std::uint16_t tag,
+                                                    std::span<const std::byte> value) noexcept;
 
     // Typed append: 2a decimal format()->to_chars, then delegates to append_raw.
     // (C1) any potentially-throwing trait call is fenced by trap_throw.
     template <class T>
-    [[nodiscard]] core::expected_t<void>
-    append(std::uint16_t tag, T const& v) noexcept;
+    [[nodiscard]] core::expected_t<void> append(std::uint16_t tag, T const& v) noexcept;
 
     // Repeating-group: write "no_tag=count\x01" and return a group_writer that
     // aliases *this. Nesting must close in LIFO order (last opened, first closed).
-    [[nodiscard]] core::expected_t<group_writer>
-    open_group(std::uint16_t no_tag, std::uint32_t count) noexcept
+    [[nodiscard]] core::expected_t<group_writer> open_group(std::uint16_t no_tag,
+                                                            std::uint32_t count) noexcept
         [[clang::lifetimebound]];
 
     // Commit: backpatch digit-only 9=N, append 10=NNN\x01; returns total bytes.
@@ -129,9 +122,9 @@ private:
     [[nodiscard]] bool write_tag_eq(std::uint16_t tag) noexcept;
 
     // The destination buffer.
-    std::span<std::byte>       dst_;
+    std::span<std::byte> dst_;
     // Current write position within dst_.
-    std::size_t                pos_ = 0;
+    std::size_t pos_ = 0;
 
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
@@ -155,8 +148,7 @@ private:
 // ── group_writer template member ──────────────────────────────────────────────
 
 template <class T>
-core::expected_t<void>
-group_writer::append_field(std::uint16_t tag, T const& v) noexcept {
+core::expected_t<void> group_writer::append_field(std::uint16_t tag, T const& v) noexcept {
     if (!owner_) {
         return core::expected_t<void>{};
     }
@@ -173,8 +165,7 @@ group_writer::append_field(std::uint16_t tag, T const& v) noexcept {
 // `dict::field_traits<U>` layer is DECODE-only (from_field_view); it has no
 // encode/to_chars side, so it is intentionally NOT a target of append<T>.
 template <class T>
-core::expected_t<void>
-Writer::append(std::uint16_t tag, T const& v) noexcept {
+core::expected_t<void> Writer::append(std::uint16_t tag, T const& v) noexcept {
     // Use a stack-local scratch buffer for the rendered field value.
     // 256 bytes covers all FIX field widths without heap allocation.
     std::array<std::byte, 256> scratch{};
@@ -184,8 +175,8 @@ Writer::append(std::uint16_t tag, T const& v) noexcept {
     // expected_t<size_t> yields expected_t<expected_t<size_t>>: the OUTER
     // layer is !has_value only when an exception was trapped; the inner is
     // the format() result.
-    auto wrapped = core::detail::trap_throw([&]() noexcept(false)
-        -> core::expected_t<std::size_t> { return v.format(scratch_span); });
+    auto wrapped = core::detail::trap_throw(
+        [&]() noexcept(false) -> core::expected_t<std::size_t> { return v.format(scratch_span); });
     if (!wrapped) {  // exception trapped at the noexcept boundary
         return core::expected_t<void>{std::unexpect, wrapped.error()};
     }

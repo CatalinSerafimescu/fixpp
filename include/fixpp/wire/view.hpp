@@ -63,9 +63,8 @@ inline generation_token bump_pool_generation(std::uint16_t pool_id) noexcept {
 
 inline generation_token current_pool_token(std::uint16_t pool_id) noexcept {
     std::uint16_t* slot = pool_generation_slot(pool_id);
-    return generation_token{
-        .pool_id = pool_id,
-        .gen = (slot != nullptr) ? *slot : std::uint16_t{0}};
+    return generation_token{.pool_id = pool_id,
+                            .gen = (slot != nullptr) ? *slot : std::uint16_t{0}};
 }
 #endif
 
@@ -75,20 +74,21 @@ class View {
 public:
     constexpr View() noexcept = default;
 
-    [[nodiscard]] constexpr std::span<const std::byte>
-    bytes() const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] constexpr std::span<const std::byte> bytes() const noexcept
+        [[clang::lifetimebound]] {
         return {data_, len_};
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return len_ == 0; }
 
 protected:
-    constexpr View(std::byte const* data [[clang::lifetimebound]],
-                    std::size_t len,
-                    detail::generation_token gen) noexcept
-        : data_{data}, len_{len}
+    constexpr View(std::byte const* data [[clang::lifetimebound]], std::size_t len,
+                   detail::generation_token gen) noexcept
+        : data_{data},
+          len_{len}
 #ifndef NDEBUG
-        , gen_{gen}
+          ,
+          gen_{gen}
 #endif
     {
 #ifdef NDEBUG
@@ -101,8 +101,7 @@ protected:
     // originating buffer's pool was reset/reused. Inside the noexcept
     // parse->fromApp window per [2b §6.4] / FR-016.
     void check_alive() const noexcept {
-        std::uint16_t const* slot =
-            detail::pool_generation_slot(gen_.pool_id);
+        std::uint16_t const* slot = detail::pool_generation_slot(gen_.pool_id);
         if (slot != nullptr && *slot != gen_.gen) {
             std::abort();  // use-after-buffer-reuse — debug trap
         }
@@ -111,27 +110,19 @@ protected:
     constexpr void check_alive() const noexcept {}
 #endif
 
-    [[nodiscard]] constexpr std::byte const* data_ptr() const noexcept {
-        return data_;
-    }
-    [[nodiscard]] constexpr std::size_t data_len() const noexcept {
-        return len_;
-    }
+    [[nodiscard]] constexpr std::byte const* data_ptr() const noexcept { return data_; }
+    [[nodiscard]] constexpr std::size_t data_len() const noexcept { return len_; }
 #ifndef NDEBUG
-    [[nodiscard]] constexpr detail::generation_token token() const noexcept {
-        return gen_;
-    }
+    [[nodiscard]] constexpr detail::generation_token token() const noexcept { return gen_; }
 #else
-    [[nodiscard]] constexpr detail::generation_token token() const noexcept {
-        return {};
-    }
+    [[nodiscard]] constexpr detail::generation_token token() const noexcept { return {}; }
 #endif
 
 private:
-    std::byte const* data_ {};
-    std::size_t      len_  {};
+    std::byte const* data_{};
+    std::size_t len_{};
 #ifndef NDEBUG
-    detail::generation_token gen_ {};
+    detail::generation_token gen_{};
 #endif
 };
 

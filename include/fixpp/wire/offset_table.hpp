@@ -11,11 +11,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <memory_resource>
 #include <span>
 #include <vector>
-
-#include <fixpp/core/error.hpp>
 
 #include "framer.hpp"
 #include "view.hpp"
@@ -57,20 +56,15 @@ public:
                 std::pmr::memory_resource* mr [[clang::lifetimebound]]) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
-    [[nodiscard]] core::expected_t<void> build_status() const noexcept {
-        return status_;
-    }
+    [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
 
-    [[nodiscard]] core::expected_t<entry>
-    find(std::uint16_t tag) const noexcept;  // first occurrence, O(1)
+    [[nodiscard]] core::expected_t<entry> find(
+        std::uint16_t tag) const noexcept;  // first occurrence, O(1)
 
-    [[nodiscard]] std::span<entry const>
-    entries() const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] std::span<entry const> entries() const noexcept [[clang::lifetimebound]] {
         return {entries_.data(), entries_.size()};
     }
-    [[nodiscard]] std::size_t size() const noexcept {
-        return entries_.size();
-    }
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
 
     // Lazily-built group sub-index: the contiguous entry range owned by the
     // first occurrence of `no_tag` (the count field) through the last field
@@ -79,16 +73,11 @@ public:
     class group_index {
     public:
         group_index() = default;
-        group_index(std::uint16_t no_tag, std::size_t first,
-                    std::size_t count) noexcept
+        group_index(std::uint16_t no_tag, std::size_t first, std::size_t count) noexcept
             : no_tag_{no_tag}, first_{first}, count_{count} {}
         [[nodiscard]] std::uint16_t no_tag() const noexcept { return no_tag_; }
-        [[nodiscard]] std::size_t first_entry() const noexcept {
-            return first_;
-        }
-        [[nodiscard]] std::size_t entry_count() const noexcept {
-            return count_;
-        }
+        [[nodiscard]] std::size_t first_entry() const noexcept { return first_; }
+        [[nodiscard]] std::size_t entry_count() const noexcept { return count_; }
 
     private:
         std::uint16_t no_tag_ = 0;
@@ -96,8 +85,7 @@ public:
         std::size_t count_ = 0;
     };
 
-    [[nodiscard]] core::expected_t<group_index>
-    group(std::uint16_t no_tag) const noexcept;  // lazy
+    [[nodiscard]] core::expected_t<group_index> group(std::uint16_t no_tag) const noexcept;  // lazy
 
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;

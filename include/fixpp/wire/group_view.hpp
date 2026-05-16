@@ -27,34 +27,27 @@ public:
         std::size_t len = 0;
     };
 
-    group_view(std::span<slice const> instances,
-               detail::generation_token gen) noexcept
+    group_view(std::span<slice const> instances, detail::generation_token gen) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, gen},
           instances_{instances} {}
 
-    [[nodiscard]] std::size_t size() const noexcept {
-        return instances_.size();
-    }
+    [[nodiscard]] std::size_t size() const noexcept { return instances_.size(); }
 
-    [[nodiscard]] GroupT
-    operator[](std::size_t i) const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] GroupT operator[](std::size_t i) const noexcept [[clang::lifetimebound]] {
         auto const& s = instances_[i];
         return GroupT{std::span<const std::byte>{s.data, s.len}};
     }
 
     class iterator {
     public:
-        iterator(group_view const* gv, std::size_t i) noexcept
-            : gv_{gv}, i_{i} {}
+        iterator(group_view const* gv, std::size_t i) noexcept : gv_{gv}, i_{i} {}
         [[nodiscard]] GroupT operator*() const noexcept { return (*gv_)[i_]; }
         iterator& operator++() noexcept {
             ++i_;
             return *this;
         }
-        [[nodiscard]] bool operator==(iterator const& o) const noexcept {
-            return i_ == o.i_;
-        }
+        [[nodiscard]] bool operator==(iterator const& o) const noexcept { return i_ == o.i_; }
 
     private:
         group_view const* gv_;

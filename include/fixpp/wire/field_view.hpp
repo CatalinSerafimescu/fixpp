@@ -23,16 +23,14 @@ public:
     constexpr field_view() noexcept = default;
 
     // String-typed convenience over bytes() — aliases the originating frame.
-    [[nodiscard]] std::string_view
-    as_string() const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] std::string_view as_string() const noexcept [[clang::lifetimebound]] {
         auto b = bytes();
         return {reinterpret_cast<char const*>(b.data()), b.size()};
     }
 
 protected:
-    constexpr field_view(std::byte const* data [[clang::lifetimebound]],
-                          std::size_t len,
-                          detail::generation_token gen) noexcept
+    constexpr field_view(std::byte const* data [[clang::lifetimebound]], std::size_t len,
+                         detail::generation_token gen) noexcept
         : View{data, len, gen} {}
 
     // Only the parser (and the test factory) mint a populated field_view,
@@ -44,7 +42,7 @@ protected:
 // field_view over a sub-span of the frame without exposing the ctor.
 struct field_view_access {
     static field_view make(std::byte const* data, std::size_t len,
-                            detail::generation_token gen) noexcept {
+                           detail::generation_token gen) noexcept {
         return field_view{data, len, gen};
     }
 };

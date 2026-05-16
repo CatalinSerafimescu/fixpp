@@ -11,19 +11,17 @@
 //   - Zero heap allocation for group-free messages.
 //   - (C1) every potentially-throwing trait wrapper call fenced by trap_throw.
 
-#include <fixpp/wire/writer.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <fixpp/core/error.hpp>
+#include <fixpp/wire/errors.hpp>
+#include <fixpp/wire/writer.hpp>
 #include <memory_resource>
 #include <span>
 #include <utility>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/wire/errors.hpp>
 
 namespace fixpp::wire {
 
@@ -66,8 +64,7 @@ constexpr std::byte EQ_BYTE{static_cast<std::byte>('=')};
 
 // Render v as ASCII decimal into buf[0..n). buf must be ≥ digit_count(v) bytes.
 // Returns number of bytes written (≥ 1), or 0 if n < digit_count(v).
-[[nodiscard]] std::size_t
-render_u32(std::uint32_t v, std::byte* buf, std::size_t n) noexcept {
+[[nodiscard]] std::size_t render_u32(std::uint32_t v, std::byte* buf, std::size_t n) noexcept {
     std::size_t dc = digit_count(v);
     if (dc > n) {
         return 0;
@@ -88,9 +85,8 @@ render_u32(std::uint32_t v, std::byte* buf, std::size_t n) noexcept {
 // public surface; semantically distinct, swap is caught by the round-trip
 // property test.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-[[nodiscard]] std::size_t
-write_tag_eq(std::byte* buf, std::size_t buf_size,
-             std::size_t pos, std::uint16_t tag) noexcept {
+[[nodiscard]] std::size_t write_tag_eq(std::byte* buf, std::size_t buf_size, std::size_t pos,
+                                       std::uint16_t tag) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // A tag is uint16_t: max value 65535, max 5 digits + '=' = 6 bytes.
     std::array<std::byte, 7> tmp{};
@@ -98,8 +94,7 @@ write_tag_eq(std::byte* buf, std::size_t buf_size,
     if (pos + dc + 1U > buf_size) {
         return static_cast<std::size_t>(-1);
     }
-    std::size_t n = render_u32(static_cast<std::uint32_t>(tag),
-                               tmp.data(), tmp.size());
+    std::size_t n = render_u32(static_cast<std::uint32_t>(tag), tmp.data(), tmp.size());
     if (n == 0) {
         return static_cast<std::size_t>(-1);
     }
@@ -112,8 +107,7 @@ write_tag_eq(std::byte* buf, std::size_t buf_size,
 }  // namespace
 
 // ── Writer constructor ────────────────────────────────────────────────────────
-Writer::Writer(std::span<std::byte> dst,
-               std::pmr::memory_resource* scratch_mr) noexcept
+Writer::Writer(std::span<std::byte> dst, std::pmr::memory_resource* scratch_mr) noexcept
     : dst_{dst}, scratch_mr_{scratch_mr} {}
 
 // ── Writer::write_byte ────────────────────────────────────────────────────────
@@ -139,8 +133,7 @@ bool Writer::write_span(std::span<const std::byte> s) noexcept {
 
 // ── Writer::write_tag_eq ──────────────────────────────────────────────────────
 bool Writer::write_tag_eq(std::uint16_t tag) noexcept {
-    std::size_t new_pos =
-        ::fixpp::wire::write_tag_eq(dst_.data(), dst_.size(), pos_, tag);
+    std::size_t new_pos = ::fixpp::wire::write_tag_eq(dst_.data(), dst_.size(), pos_, tag);
     if (new_pos == npos) {
         overflow_ = true;
         return false;
@@ -150,9 +143,7 @@ bool Writer::write_tag_eq(std::uint16_t tag) noexcept {
 }
 
 // ── Writer::bytes_written ─────────────────────────────────────────────────────
-std::size_t Writer::bytes_written() const noexcept {
-    return pos_;
-}
+std::size_t Writer::bytes_written() const noexcept { return pos_; }
 
 // ── Writer::append_raw ────────────────────────────────────────────────────────
 // Writes "tag=value\x01" into dst.
@@ -162,9 +153,8 @@ std::size_t Writer::bytes_written() const noexcept {
 // byte immediately following the 9=placeholder\x01 field.
 //
 // At commit() we memmove the body left to close any over-reservation gap.
-core::expected_t<void>
-Writer::append_raw(std::uint16_t tag,
-                   std::span<const std::byte> value) noexcept {
+core::expected_t<void> Writer::append_raw(std::uint16_t tag,
+                                          std::span<const std::byte> value) noexcept {
     if (overflow_) {
         return err_field_value_truncated<void>();
     }
@@ -188,11 +178,15 @@ Writer::append_raw(std::uint16_t tag,
         constexpr std::size_t max_bl_digits = 6;
 
         // Write "9="
-        if (!write_byte(std::byte{'9'})) { return err_field_value_truncated<void>(); }
-        if (!write_byte(EQ_BYTE))        { return err_field_value_truncated<void>(); }
+        if (!write_byte(std::byte{'9'})) {
+            return err_field_value_truncated<void>();
+        }
+        if (!write_byte(EQ_BYTE)) {
+            return err_field_value_truncated<void>();
+        }
 
         // Record position of first placeholder digit.
-        bl_digit_pos_   = pos_;
+        bl_digit_pos_ = pos_;
         bl_digit_count_ = max_bl_digits;
 
         // Write placeholder zeros.
@@ -218,21 +212,19 @@ Writer::append_raw(std::uint16_t tag,
 // public contract signature; reshaping breaks the extract, so the
 // swappable-parameters lint is suppressed with rationale rather than papered.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-core::expected_t<group_writer>
-Writer::open_group(std::uint16_t no_tag, std::uint32_t count) noexcept {
+core::expected_t<group_writer> Writer::open_group(std::uint16_t no_tag,
+                                                  std::uint32_t count) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     std::array<std::byte, 12> count_buf{};
     std::size_t n = render_u32(count, count_buf.data(), count_buf.size());
     if (n == 0) {
         return err_field_value_truncated<group_writer>();
     }
-    auto rc = append_raw(no_tag,
-                         std::span<const std::byte>{count_buf.data(), n});
+    auto rc = append_raw(no_tag, std::span<const std::byte>{count_buf.data(), n});
     if (!rc) {
         return core::expected_t<group_writer>{std::unexpect, rc.error()};
     }
-    return core::expected_t<group_writer>{
-        std::in_place, group_writer_token{}, this};
+    return core::expected_t<group_writer>{std::in_place, group_writer_token{}, this};
 }
 
 // ── Writer::commit ────────────────────────────────────────────────────────────
@@ -256,8 +248,7 @@ core::expected_t<std::size_t> Writer::commit() && noexcept {
     if (body_end < body_start_) {
         return err_field_value_truncated<std::size_t>();
     }
-    auto body_length =
-        static_cast<std::uint32_t>(body_end - body_start_);
+    auto body_length = static_cast<std::uint32_t>(body_end - body_start_);
 
     // Compute actual digit count for body_length.
     std::size_t actual_digits = digit_count(body_length);
@@ -272,14 +263,14 @@ core::expected_t<std::size_t> Writer::commit() && noexcept {
         if (body_start_ < gap) {
             return err_field_value_truncated<std::size_t>();
         }
-        std::byte* src      = dst_.data() + body_start_;
-        std::byte* dst_ptr  = dst_.data() + body_start_ - gap;
+        std::byte* src = dst_.data() + body_start_;
+        std::byte* dst_ptr = dst_.data() + body_start_ - gap;
         std::size_t move_sz = body_end - body_start_;
         std::memmove(dst_ptr, src, move_sz);
 
         body_start_ -= gap;
-        body_end    -= gap;
-        pos_        -= gap;
+        body_end -= gap;
+        pos_ -= gap;
         bl_digit_count_ = actual_digits;
     }
 
@@ -309,8 +300,7 @@ core::expected_t<std::size_t> Writer::commit() && noexcept {
     {
         std::byte const* p = dst_.data();
         for (std::size_t k = 0; k < body_end; ++k) {
-            checksum += static_cast<unsigned>(
-                static_cast<unsigned char>(p[k]));
+            checksum += static_cast<unsigned>(static_cast<unsigned char>(p[k]));
         }
         checksum %= 256U;
     }
@@ -344,9 +334,8 @@ void group_writer::close_impl() noexcept {
 }
 
 // ── group_writer::append_field ────────────────────────────────────────────────
-core::expected_t<void>
-group_writer::append_field(std::uint16_t tag,
-                           std::span<const std::byte> value) noexcept {
+core::expected_t<void> group_writer::append_field(std::uint16_t tag,
+                                                  std::span<const std::byte> value) noexcept {
     if (owner_ == nullptr) {
         return core::expected_t<void>{};
     }

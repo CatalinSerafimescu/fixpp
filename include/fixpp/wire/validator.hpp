@@ -24,15 +24,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t
+#include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
+#include <fixpp/core/error.hpp>
 #include <memory_resource>
 #include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
-
-#include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t
-#include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
-#include <fixpp/core/error.hpp>
 
 #include "parser.hpp"  // MessageView<Mode>, access_mode
 
@@ -54,23 +53,20 @@ public:
 
     // Unconditional validate over every dictionary-known field present in
     // `msg` (NOT per-accessor). Working set is drawn from `scratch_mr`.
-    [[nodiscard]] virtual core::expected_t<void>
-    validate(MessageView<access_mode::Index> const& msg,
-             std::pmr::memory_resource* scratch_mr) const noexcept = 0;
+    [[nodiscard]] virtual core::expected_t<void> validate(
+        MessageView<access_mode::Index> const& msg,
+        std::pmr::memory_resource* scratch_mr) const noexcept = 0;
 
-    [[nodiscard]] virtual core::expected_t<void>
-    validate_field(std::uint16_t tag,
-                   std::span<const std::byte> value) const noexcept = 0;
+    [[nodiscard]] virtual core::expected_t<void> validate_field(
+        std::uint16_t tag, std::span<const std::byte> value) const noexcept = 0;
 
-    [[nodiscard]] virtual std::span<std::uint16_t const>
-    required_fields(std::string_view msg_type) const noexcept = 0;
+    [[nodiscard]] virtual std::span<std::uint16_t const> required_fields(
+        std::string_view msg_type) const noexcept = 0;
 
-    [[nodiscard]] virtual bool
-    field_valid_for(std::string_view msg_type,
-                    std::uint16_t tag) const noexcept = 0;
+    [[nodiscard]] virtual bool field_valid_for(std::string_view msg_type,
+                                               std::uint16_t tag) const noexcept = 0;
 
-    [[nodiscard]] virtual std::uint16_t
-    group_first_field(std::uint16_t no_tag) const noexcept = 0;
+    [[nodiscard]] virtual std::uint16_t group_first_field(std::uint16_t no_tag) const noexcept = 0;
 };
 
 // [const §XIV.2] cap = 5. The five pure-virtual above are the only pure
@@ -87,8 +83,7 @@ static_assert(std::is_abstract_v<Validator>, "[const §XIV.2] cap = 5");
 class dictionary_driven_validator final : public Validator {
 public:
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    explicit dictionary_driven_validator(
-        fixpp::dict::table_view dict) noexcept
+    explicit dictionary_driven_validator(fixpp::dict::table_view dict) noexcept
         : dict_{std::move(dict)} {}
 
     // [2b §6.5] Unconditional validation over every field present in `msg`.
@@ -105,9 +100,9 @@ public:
     // the OffsetTable (msg.get(), O(log n)), so no seen[] bitmap is allocated;
     // scratch_mr is threaded only to the Float/decimal parse path. Well within
     // the ≤ ~600 B [2b §6.5] working-set bound (no new/delete on any path).
-    [[nodiscard]] core::expected_t<void>
-    validate(MessageView<access_mode::Index> const& msg,
-             std::pmr::memory_resource* scratch_mr) const noexcept override {
+    [[nodiscard]] core::expected_t<void> validate(
+        MessageView<access_mode::Index> const& msg,
+        std::pmr::memory_resource* scratch_mr) const noexcept override {
         std::string_view const msg_type = msg.msg_type();
 
         // ── Step 1: iterate every present field ──────────────────────────
@@ -116,19 +111,17 @@ public:
 
             // (a) Unexpected tag check
             if (!dict_.field_valid_for(msg_type, fld.tag)) {
-                return core::expected_t<void>{
-                    std::unexpect, core::error::wire_unexpected_tag};
+                return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
 
             // (b) Enum validity check
             if (!dict_.enum_valid(fld.tag, fld.value)) {
-                return core::expected_t<void>{
-                    std::unexpect, core::error::wire_field_value_out_of_range};
+                return core::expected_t<void>{std::unexpect,
+                                              core::error::wire_field_value_out_of_range};
             }
 
             // (c) Type structural check ([2b §6.5 rule 3])
-            auto const check = check_field_type(
-                fld.tag, fld.value, scratch_mr);
+            auto const check = check_field_type(fld.tag, fld.value, scratch_mr);
             if (!check) {
                 return check;
             }
@@ -137,19 +130,17 @@ public:
         // ── Step 2: required-fields scan ─────────────────────────────────
         // Tags 8/9/10 are guaranteed present by the framer; skip them.
         constexpr std::uint16_t kBeginString = 8;
-        constexpr std::uint16_t kBodyLength  = 9;
-        constexpr std::uint16_t kCheckSum    = 10;
+        constexpr std::uint16_t kBodyLength = 9;
+        constexpr std::uint16_t kCheckSum = 10;
 
         auto const req = dict_.required_fields(msg_type);
         for (auto const req_tag : req) {
-            if (req_tag == kBeginString
-                || req_tag == kBodyLength
-                || req_tag == kCheckSum) {
+            if (req_tag == kBeginString || req_tag == kBodyLength || req_tag == kCheckSum) {
                 continue;  // framing-guaranteed — always present
             }
             if (!msg.get(req_tag).has_value()) {
-                return core::expected_t<void>{
-                    std::unexpect, core::error::wire_required_field_missing};
+                return core::expected_t<void>{std::unexpect,
+                                              core::error::wire_required_field_missing};
             }
         }
 
@@ -157,29 +148,26 @@ public:
     }
 
     // Single-field check: enum + type, no msg_type context.
-    [[nodiscard]] core::expected_t<void>
-    validate_field(std::uint16_t tag,
-                   std::span<const std::byte> value) const noexcept override {
+    [[nodiscard]] core::expected_t<void> validate_field(
+        std::uint16_t tag, std::span<const std::byte> value) const noexcept override {
         if (!dict_.enum_valid(tag, value)) {
-            return core::expected_t<void>{
-                std::unexpect, core::error::wire_field_value_out_of_range};
+            return core::expected_t<void>{std::unexpect,
+                                          core::error::wire_field_value_out_of_range};
         }
         return check_field_type(tag, value, nullptr);
     }
 
-    [[nodiscard]] std::span<std::uint16_t const>
-    required_fields(std::string_view msg_type) const noexcept override {
+    [[nodiscard]] std::span<std::uint16_t const> required_fields(
+        std::string_view msg_type) const noexcept override {
         return dict_.required_fields(msg_type);
     }
 
-    [[nodiscard]] bool
-    field_valid_for(std::string_view msg_type,
-                    std::uint16_t tag) const noexcept override {
+    [[nodiscard]] bool field_valid_for(std::string_view msg_type,
+                                       std::uint16_t tag) const noexcept override {
         return dict_.field_valid_for(msg_type, tag);
     }
 
-    [[nodiscard]] std::uint16_t
-    group_first_field(std::uint16_t no_tag) const noexcept override {
+    [[nodiscard]] std::uint16_t group_first_field(std::uint16_t no_tag) const noexcept override {
         return dict_.group_first_field(no_tag);
     }
 
@@ -190,75 +178,66 @@ private:
     // mr is only used for the Float/decimal parse path.
     // Returns success or a wire_* error; never throws.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    [[nodiscard]] core::expected_t<void>
-    check_field_type(std::uint16_t tag,
-                     std::span<const std::byte> value,
-                     std::pmr::memory_resource* mr) const noexcept {
+    [[nodiscard]] core::expected_t<void> check_field_type(
+        std::uint16_t tag, std::span<const std::byte> value,
+        std::pmr::memory_resource* mr) const noexcept {
         using ft = fixpp::dict::field_type;
         switch (dict_.field_type_of(tag)) {
-        case ft::Float: {
-            // (C1) trap_throw fences the potentially-throwing 2a decode
-            // boundary (FR-013, [arch §5.3]). Result is
-            // expected<expected<decimal_t, error>, error>; flatten both.
-            auto wrapped = core::detail::trap_throw(
-                [value, mr]() {
-                    return fixpp::decimal_t::parse(value, mr);
-                });
-            if (!wrapped) {
-                return core::expected_t<void>{
-                    std::unexpect, wrapped.error()};
-            }
-            if (!(*wrapped)) {
-                auto const inner_err = (*wrapped).error();
-                // Re-map 2a/001's decimal_precision_loss → wire surface slot.
-                if (inner_err == core::error::decimal_precision_loss) {
-                    return core::expected_t<void>{
-                        std::unexpect,
-                        core::error::wire_field_value_truncated};
+            case ft::Float: {
+                // (C1) trap_throw fences the potentially-throwing 2a decode
+                // boundary (FR-013, [arch §5.3]). Result is
+                // expected<expected<decimal_t, error>, error>; flatten both.
+                auto wrapped = core::detail::trap_throw(
+                    [value, mr]() { return fixpp::decimal_t::parse(value, mr); });
+                if (!wrapped) {
+                    return core::expected_t<void>{std::unexpect, wrapped.error()};
                 }
-                return core::expected_t<void>{
-                    std::unexpect, inner_err};
-            }
-            return {};
-        }
-        case ft::Int: {
-            // An Int field must be non-empty; optional leading '-'; then
-            // only ASCII digits [0-9].
-            if (value.empty()) {
-                return core::expected_t<void>{
-                    std::unexpect,
-                    core::error::wire_field_value_out_of_range};
-            }
-            std::size_t start = 0;
-            if (static_cast<unsigned char>(value[0]) == '-') {
-                start = 1;
-            }
-            for (std::size_t idx = start; idx < value.size(); ++idx) {
-                auto const ch = static_cast<unsigned char>(value[idx]);
-                if (ch < '0' || ch > '9') {
-                    return core::expected_t<void>{
-                        std::unexpect,
-                        core::error::wire_field_value_out_of_range};
+                if (!(*wrapped)) {
+                    auto const inner_err = (*wrapped).error();
+                    // Re-map 2a/001's decimal_precision_loss → wire surface slot.
+                    if (inner_err == core::error::decimal_precision_loss) {
+                        return core::expected_t<void>{std::unexpect,
+                                                      core::error::wire_field_value_truncated};
+                    }
+                    return core::expected_t<void>{std::unexpect, inner_err};
                 }
+                return {};
             }
-            return {};
-        }
-        case ft::Char: {
-            // A Char field must be exactly one byte.
-            if (value.size() != 1) {
-                return core::expected_t<void>{
-                    std::unexpect,
-                    core::error::wire_field_value_out_of_range};
+            case ft::Int: {
+                // An Int field must be non-empty; optional leading '-'; then
+                // only ASCII digits [0-9].
+                if (value.empty()) {
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_field_value_out_of_range};
+                }
+                std::size_t start = 0;
+                if (static_cast<unsigned char>(value[0]) == '-') {
+                    start = 1;
+                }
+                for (std::size_t idx = start; idx < value.size(); ++idx) {
+                    auto const ch = static_cast<unsigned char>(value[idx]);
+                    if (ch < '0' || ch > '9') {
+                        return core::expected_t<void>{std::unexpect,
+                                                      core::error::wire_field_value_out_of_range};
+                    }
+                }
+                return {};
             }
-            return {};
-        }
-        case ft::String:
-        case ft::Boolean:
-        case ft::Data:
-        case ft::Length:
-        default:
-            // No structural constraint beyond non-degenerate framing.
-            return {};
+            case ft::Char: {
+                // A Char field must be exactly one byte.
+                if (value.size() != 1) {
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_field_value_out_of_range};
+                }
+                return {};
+            }
+            case ft::String:
+            case ft::Boolean:
+            case ft::Data:
+            case ft::Length:
+            default:
+                // No structural constraint beyond non-degenerate framing.
+                return {};
         }
     }
 };

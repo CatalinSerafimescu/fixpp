@@ -10,11 +10,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>  // core::expected_t
 #include <memory_resource>
 #include <span>
 #include <vector>
-
-#include <fixpp/core/error.hpp>  // core::expected_t
 
 #include "view.hpp"
 
@@ -29,8 +28,7 @@ inline constexpr std::size_t default_max_frame_bytes =
 // reported by the Framer as wire_frame_too_large ([2b §6.1.3]).
 class pmr_carry_buffer {
 public:
-    pmr_carry_buffer(std::size_t capacity,
-                     std::pmr::memory_resource* mr) noexcept
+    pmr_carry_buffer(std::size_t capacity, std::pmr::memory_resource* mr) noexcept
         : buf_(mr), cap_(capacity) {
         buf_.reserve(capacity);  // the single session-lifetime allocation
     }
@@ -39,8 +37,7 @@ public:
     [[nodiscard]] std::size_t capacity() const noexcept { return cap_; }
     [[nodiscard]] bool empty() const noexcept { return buf_.empty(); }
 
-    [[nodiscard]] std::span<const std::byte> bytes() const noexcept
-        [[clang::lifetimebound]] {
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept [[clang::lifetimebound]] {
         return {buf_.data(), buf_.size()};
     }
 
@@ -61,8 +58,7 @@ public:
             buf_.clear();
             return;
         }
-        buf_.erase(buf_.begin(),
-                   buf_.begin() + static_cast<std::ptrdiff_t>(n));
+        buf_.erase(buf_.begin(), buf_.begin() + static_cast<std::ptrdiff_t>(n));
     }
 
     void clear() noexcept { buf_.clear(); }
@@ -82,8 +78,8 @@ class frame_view : public View {
 public:
     constexpr frame_view() noexcept = default;
 
-    [[nodiscard]] constexpr std::span<const std::byte>
-    body() const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] constexpr std::span<const std::byte> body() const noexcept
+        [[clang::lifetimebound]] {
         return {data_ptr() + body_off_, body_len_};
     }
 
@@ -93,15 +89,11 @@ protected:
     // Reshaping into a params struct would break the contract extract, so
     // the swappable-parameters lint is suppressed here rather than papered.
     // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-    constexpr frame_view(std::byte const* frame [[clang::lifetimebound]],
-                          std::size_t frame_len,
-                          std::size_t body_off,
-                          std::size_t body_len,
-                          detail::generation_token gen) noexcept
-    // NOLINTEND(bugprone-easily-swappable-parameters)
-        : View{frame, frame_len, gen},
-          body_off_{body_off},
-          body_len_{body_len} {}
+    constexpr frame_view(std::byte const* frame [[clang::lifetimebound]], std::size_t frame_len,
+                         std::size_t body_off, std::size_t body_len,
+                         detail::generation_token gen) noexcept
+        // NOLINTEND(bugprone-easily-swappable-parameters)
+        : View{frame, frame_len, gen}, body_off_{body_off}, body_len_{body_len} {}
 
     // The Framer algorithm (src/wire/framer.cpp, T040) and the test-only
     // frame_view_factory (T008) are the only producers of a populated
@@ -133,15 +125,12 @@ public:
     // Consumes an arbitrary byte chunk, emits zero or more complete,
     // framing-verified frames into `out`, carries the trailing partial
     // into `carry`. Implemented in src/wire/framer.cpp (T040 — US3).
-    [[nodiscard]] core::expected_t<std::span<frame_view>>
-    feed(std::span<const std::byte> incoming [[clang::lifetimebound]],
-         pmr_carry_buffer&          carry    [[clang::lifetimebound]],
-         std::span<frame_view>      out      [[clang::lifetimebound]]) noexcept
-        [[clang::lifetimebound]];
+    [[nodiscard]] core::expected_t<std::span<frame_view>> feed(
+        std::span<const std::byte> incoming [[clang::lifetimebound]],
+        pmr_carry_buffer& carry [[clang::lifetimebound]],
+        std::span<frame_view> out [[clang::lifetimebound]]) noexcept [[clang::lifetimebound]];
 
-    [[nodiscard]] std::size_t pending_bytes() const noexcept {
-        return pending_;
-    }
+    [[nodiscard]] std::size_t pending_bytes() const noexcept { return pending_; }
 
 private:
     Config cfg_{};

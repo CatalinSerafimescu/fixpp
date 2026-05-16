@@ -63,8 +63,7 @@ template <class T = void>
     return fail<T>(error::wire_header_out_of_order);
 }
 template <class T = void>
-[[nodiscard]] constexpr core::expected_t<T>
-err_field_value_out_of_range() noexcept {
+[[nodiscard]] constexpr core::expected_t<T> err_field_value_out_of_range() noexcept {
     return fail<T>(error::wire_field_value_out_of_range);
 }
 template <class T = void>

@@ -2,16 +2,14 @@
 // src/wire/framer.cpp — fixpp::wire out-of-line implementation.
 // US3 / T040 framing algorithm.
 
-#include <fixpp/wire/framer.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <span>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>
+#include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/view.hpp>
+#include <span>
 
 namespace fixpp::wire {
 namespace {
@@ -34,8 +32,7 @@ struct parsed_frame {
 
 [[nodiscard]] constexpr bool is_digit(std::byte b) noexcept {
     auto const ch = static_cast<unsigned char>(b);
-    return ch >= static_cast<unsigned char>('0')
-           && ch <= static_cast<unsigned char>('9');
+    return ch >= static_cast<unsigned char>('0') && ch <= static_cast<unsigned char>('9');
 }
 
 [[nodiscard]] parsed_frame make_error(core::error code) noexcept {
@@ -54,8 +51,7 @@ struct parsed_frame {
     };
 }
 
-[[nodiscard]] parsed_frame make_complete(std::size_t frame_len,
-                                         std::size_t body_off,
+[[nodiscard]] parsed_frame make_complete(std::size_t frame_len, std::size_t body_off,
                                          std::size_t body_len) noexcept {
     return parsed_frame{
         .status_code = parsed_frame::status::complete,
@@ -65,8 +61,7 @@ struct parsed_frame {
     };
 }
 
-[[nodiscard]] std::size_t find_soh(std::span<const std::byte> bytes,
-                                   std::size_t start) noexcept {
+[[nodiscard]] std::size_t find_soh(std::span<const std::byte> bytes, std::size_t start) noexcept {
     for (std::size_t i = start; i < bytes.size(); ++i) {
         if (bytes[i] == soh_byte) {
             return i;
@@ -102,8 +97,7 @@ struct parsed_frame {
     if (body_length_tag + 1U >= bytes.size()) {
         return make_partial();
     }
-    if (bytes[body_length_tag] != std::byte{'9'}
-        || bytes[body_length_tag + 1U] != std::byte{'='}) {
+    if (bytes[body_length_tag] != std::byte{'9'} || bytes[body_length_tag + 1U] != std::byte{'='}) {
         return make_error(core::error::wire_invalid_body_length);
     }
 
@@ -121,11 +115,9 @@ struct parsed_frame {
         if (!is_digit(bytes[i])) {
             return make_error(core::error::wire_invalid_body_length);
         }
-        std::size_t const digit =
-            static_cast<std::size_t>(static_cast<unsigned char>(bytes[i]))
-            - static_cast<std::size_t>('0');
-        if (body_length
-            > ((max_frame_bytes - digit) / static_cast<std::size_t>(10))) {
+        std::size_t const digit = static_cast<std::size_t>(static_cast<unsigned char>(bytes[i])) -
+                                  static_cast<std::size_t>('0');
+        if (body_length > ((max_frame_bytes - digit) / static_cast<std::size_t>(10))) {
             return make_error(core::error::wire_frame_too_large);
         }
         body_length = (body_length * static_cast<std::size_t>(10)) + digit;
@@ -150,9 +142,8 @@ struct parsed_frame {
     if (checksum_off + 7U > bytes.size()) {
         return make_partial();
     }
-    if (bytes[checksum_off] != std::byte{'1'}
-        || bytes[checksum_off + 1U] != std::byte{'0'}
-        || bytes[checksum_off + 2U] != std::byte{'='}) {
+    if (bytes[checksum_off] != std::byte{'1'} || bytes[checksum_off + 1U] != std::byte{'0'} ||
+        bytes[checksum_off + 2U] != std::byte{'='}) {
         return make_error(core::error::wire_invalid_body_length);
     }
     if (bytes[body_off + body_length - 1U] != soh_byte) {
@@ -166,8 +157,7 @@ struct parsed_frame {
             return make_error(core::error::wire_checksum_mismatch);
         }
         checksum_digits[i] =
-            static_cast<unsigned>(static_cast<unsigned char>(digit))
-            - static_cast<unsigned>('0');
+            static_cast<unsigned>(static_cast<unsigned char>(digit)) - static_cast<unsigned>('0');
     }
     if (bytes[checksum_off + 6U] != soh_byte) {
         return make_error(core::error::wire_checksum_mismatch);
@@ -175,14 +165,12 @@ struct parsed_frame {
 
     unsigned checksum = 0;
     for (std::size_t i = 0; i < checksum_off; ++i) {
-        checksum += static_cast<unsigned>(
-            static_cast<unsigned char>(bytes[i]));
+        checksum += static_cast<unsigned>(static_cast<unsigned char>(bytes[i]));
     }
     checksum %= 256U;
 
     unsigned const encoded_checksum =
-        (checksum_digits[0] * 100U) + (checksum_digits[1] * 10U)
-        + checksum_digits[2];
+        (checksum_digits[0] * 100U) + (checksum_digits[1] * 10U) + checksum_digits[2];
     if (encoded_checksum != checksum) {
         return make_error(core::error::wire_checksum_mismatch);
     }
@@ -197,10 +185,9 @@ struct parsed_frame {
 
 }  // namespace
 
-core::expected_t<std::span<frame_view>>
-Framer::feed(std::span<const std::byte> incoming,
-             pmr_carry_buffer& carry,
-             std::span<frame_view> out) noexcept {
+core::expected_t<std::span<frame_view>> Framer::feed(std::span<const std::byte> incoming,
+                                                     pmr_carry_buffer& carry,
+                                                     std::span<frame_view> out) noexcept {
     if (pending_ < carry.size()) {
         carry.consume_front(carry.size() - pending_);
     }
@@ -224,8 +211,7 @@ Framer::feed(std::span<const std::byte> incoming,
             break;
         }
 
-        parsed_frame const frame =
-            parse_frame(source.subspan(offset), cfg_.max_frame_bytes);
+        parsed_frame const frame = parse_frame(source.subspan(offset), cfg_.max_frame_bytes);
         if (frame.status_code == parsed_frame::status::partial) {
             break;
         }
@@ -234,28 +220,20 @@ Framer::feed(std::span<const std::byte> incoming,
             pending_ = 0;
             switch (frame.error_code) {
                 case core::error::wire_frame_too_large:
-                    return fail<std::span<frame_view>>(
-                        core::error::wire_frame_too_large);
+                    return fail<std::span<frame_view>>(core::error::wire_frame_too_large);
                 case core::error::wire_checksum_mismatch:
-                    return fail<std::span<frame_view>>(
-                        core::error::wire_checksum_mismatch);
+                    return fail<std::span<frame_view>>(core::error::wire_checksum_mismatch);
                 case core::error::wire_framing_resync:
-                    return fail<std::span<frame_view>>(
-                        core::error::wire_framing_resync);
+                    return fail<std::span<frame_view>>(core::error::wire_framing_resync);
                 case core::error::wire_invalid_body_length:
                 default:
-                    return fail<std::span<frame_view>>(
-                        core::error::wire_invalid_body_length);
+                    return fail<std::span<frame_view>>(core::error::wire_invalid_body_length);
             }
         }
 
         std::byte const* frame_ptr = source.data() + offset;
         out[produced] = frame_view{
-            frame_ptr,
-            frame.frame_len,
-            frame.body_off,
-            frame.body_len,
-            detail::generation_token{},
+            frame_ptr, frame.frame_len, frame.body_off, frame.body_len, detail::generation_token{},
         };
         ++produced;
         offset += frame.frame_len;

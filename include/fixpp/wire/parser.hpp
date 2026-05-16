@@ -18,15 +18,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
+#include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
+#include <fixpp/core/error.hpp>
 #include <memory_resource>
 #include <span>
 #include <string_view>
 #include <type_traits>
 #include <vector>
-
-#include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
-#include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
-#include <fixpp/core/error.hpp>
 
 #include "field_view.hpp"
 #include "framer.hpp"
@@ -57,16 +56,15 @@ struct len_data_pair {
     std::uint16_t data_tag;
 };
 inline constexpr len_data_pair length_data_table[] = {
-    {93, 89},   // SignatureLength / Signature
-    {90, 91},   // SecureDataLen / SecureData
-    {95, 96},   // RawDataLength / RawData
-    {212, 213}, // XmlDataLen / XmlData
-    {348, 349}, // EncodedHeaderLen / EncodedHeader
-    {350, 351}, // EncodedMsgLen / EncodedMsg
+    {93, 89},    // SignatureLength / Signature
+    {90, 91},    // SecureDataLen / SecureData
+    {95, 96},    // RawDataLength / RawData
+    {212, 213},  // XmlDataLen / XmlData
+    {348, 349},  // EncodedHeaderLen / EncodedHeader
+    {350, 351},  // EncodedMsgLen / EncodedMsg
 };
 
-[[nodiscard]] constexpr std::uint16_t
-data_tag_for_length(std::uint16_t length_tag) noexcept {
+[[nodiscard]] constexpr std::uint16_t data_tag_for_length(std::uint16_t length_tag) noexcept {
     for (auto const& p : length_data_table) {
         if (p.length_tag == length_tag) {
             return p.data_tag;
@@ -75,8 +73,7 @@ data_tag_for_length(std::uint16_t length_tag) noexcept {
     return 0;
 }
 
-[[nodiscard]] inline std::uint32_t
-parse_u32(std::span<const std::byte> v) noexcept {
+[[nodiscard]] inline std::uint32_t parse_u32(std::span<const std::byte> v) noexcept {
     std::uint32_t out = 0;
     for (auto b : v) {
         auto c = static_cast<unsigned char>(b);
@@ -96,16 +93,14 @@ public:
     constexpr MessageView() noexcept = default;
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
-        requires (Mode == access_mode::Index)
-        : View{frame.bytes().data(), frame.bytes().size(), {}},
-          table_{frame, mr} {}
+        requires(Mode == access_mode::Index)
+        : View{frame.bytes().data(), frame.bytes().size(), {}}, table_{frame, mr} {}
 
     explicit MessageView(frame_view const& frame) noexcept
-        requires (Mode == access_mode::Iter)
+        requires(Mode == access_mode::Iter)
         : View{frame.bytes().data(), frame.bytes().size(), {}} {}
 
-    [[nodiscard]] std::string_view
-    msg_type() const noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
     }
     [[nodiscard]] std::uint32_t msg_seq_num() const noexcept {
@@ -130,8 +125,7 @@ public:
             advance();
             return *this;
         }
-        [[nodiscard]] bool
-        operator==(field_iterator const& o) const noexcept {
+        [[nodiscard]] bool operator==(field_iterator const& o) const noexcept {
             return pos_ == o.pos_ && done_ == o.done_;
         }
 
@@ -156,59 +150,49 @@ public:
     }
 
     // ---- Index random access ---------------------------------------------
-    [[nodiscard]] OffsetTable const&
-    offsets() const noexcept [[clang::lifetimebound]]
-        requires (Mode == access_mode::Index) {
-        return table_;
-    }
+[[nodiscard]] OffsetTable const& offsets() const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return table_; }
 
-    template <std::uint16_t Tag>
-    [[nodiscard]] core::expected_t<field_view> get() const noexcept
-        [[clang::lifetimebound]] requires (Mode == access_mode::Index) {
-        return get(Tag);
-    }
+template <std::uint16_t Tag>
+[[nodiscard]] core::expected_t<field_view> get() const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return get(Tag); }
 
-    [[nodiscard]] core::expected_t<field_view>
-    get(std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-        requires (Mode == access_mode::Index) {
+[[nodiscard]] core::expected_t<field_view> get(std::uint16_t tag) const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         auto e = table_.find(tag);
         if (!e) {
             return core::expected_t<field_view>{std::unexpect, e.error()};
         }
-        return field_view_access::make(bytes().data() + e->offset,
-                                       e->length, token());
+        return field_view_access::make(bytes().data() + e->offset, e->length, token());
     }
 
-    // 004-authored 001 wire FLOAT-field accessor leg (D-17, FR-006 /
-    // [2b §7.1]). The wire layer performs NO decoding: it hands the field's
-    // raw bytes across the 2a trait-decode boundary to
-    // fixpp::decimal_t::parse(span, mr). (C1) the trait call is fenced by
-    // core::detail::trap_throw so a throwing custom FIXPP_DECIMAL_T trait
-    // cannot escape the noexcept parse->fromApp window (FR-013, [arch §5.3]).
-    [[nodiscard]] core::expected_t<fixpp::decimal_t>
-    get_decimal(std::uint16_t tag,
-                std::pmr::memory_resource* mr) const noexcept
-        [[clang::lifetimebound]] requires (Mode == access_mode::Index) {
+// 004-authored 001 wire FLOAT-field accessor leg (D-17, FR-006 /
+// [2b §7.1]). The wire layer performs NO decoding: it hands the field's
+// raw bytes across the 2a trait-decode boundary to
+// fixpp::decimal_t::parse(span, mr). (C1) the trait call is fenced by
+// core::detail::trap_throw so a throwing custom FIXPP_DECIMAL_T trait
+// cannot escape the noexcept parse->fromApp window (FR-013, [arch §5.3]).
+[[nodiscard]] core::expected_t<fixpp::decimal_t> get_decimal(
+    std::uint16_t tag, std::pmr::memory_resource* mr) const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         auto fv = get(tag);
         if (!fv) {
-            return core::expected_t<fixpp::decimal_t>{
-                std::unexpect, fv.error()};
+            return core::expected_t<fixpp::decimal_t>{std::unexpect, fv.error()};
         }
         auto span = fv->bytes();
         // trap_throw wraps the (possibly throwing) trait; result is
         // expected<expected<decimal_t>> — flatten it.
-        auto wrapped = core::detail::trap_throw(
-            [span, mr]() { return fixpp::decimal_t::parse(span, mr); });
+        auto wrapped =
+            core::detail::trap_throw([span, mr]() { return fixpp::decimal_t::parse(span, mr); });
         if (!wrapped) {
-            return core::expected_t<fixpp::decimal_t>{
-                std::unexpect, wrapped.error()};
+            return core::expected_t<fixpp::decimal_t>{std::unexpect, wrapped.error()};
         }
         return *wrapped;
     }
 
-    template <std::uint16_t NoTag, class GroupT>
-    [[nodiscard]] group_view<GroupT> group() const noexcept
-        [[clang::lifetimebound]] requires (Mode == access_mode::Index) {
+template <std::uint16_t NoTag, class GroupT>
+[[nodiscard]] group_view<GroupT> group() const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         // Delimiter-aware instance slicing uses the group's first field
         // (the entry immediately after the count). Each reappearance of
         // that delimiter tag starts a new occurrence (document order; the
@@ -225,26 +209,22 @@ public:
                 std::uint16_t delim = ents[first].tag;
                 std::size_t inst_start = first;
                 for (std::size_t k = first; k <= ents.size(); ++k) {
-                    bool boundary = (k == ents.size())
-                                    || (k > first && ents[k].tag == delim);
+                    bool boundary = (k == ents.size()) || (k > first && ents[k].tag == delim);
                     if (boundary) {
-                        std::byte const* d =
-                            bytes().data() + ents[inst_start].offset;
-                        std::size_t len = (ents[k - 1].offset
-                                           + ents[k - 1].length)
-                                          - ents[inst_start].offset;
+                        std::byte const* d = bytes().data() + ents[inst_start].offset;
+                        std::size_t len =
+                            (ents[k - 1].offset + ents[k - 1].length) - ents[inst_start].offset;
                         slices.push_back(slice{d, len});
                         inst_start = k;
                     }
                 }
             }
         }
-        return group_view<GroupT>{
-            std::span<slice const>{slices.data(), slices.size()}, token()};
+        return group_view<GroupT>{std::span<slice const>{slices.data(), slices.size()}, token()};
     }
 
-    [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
-        [[clang::lifetimebound]] requires (Mode == access_mode::Index) {
+[[nodiscard]] unknown_fields_view unknown_fields() const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         // Without the 2c dictionary bound here, no tag is classified as
         // dictionary-missing, so this is empty by construction. The
         // dictionary-aware split (missing vs known-invalid) is exercised
@@ -252,9 +232,7 @@ public:
         return unknown_fields_view{};
     }
 
-private:
-    [[nodiscard]] std::span<const std::byte>
-    field_bytes(std::uint16_t tag) const noexcept {
+private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
             if (!e) {
@@ -270,15 +248,14 @@ private:
             return {};
         }
     }
-    [[nodiscard]] std::string_view
-    field_string(std::uint16_t tag) const noexcept {
+    [[nodiscard]] std::string_view field_string(std::uint16_t tag) const noexcept {
         auto b = field_bytes(tag);
         return {reinterpret_cast<char const*>(b.data()), b.size()};
     }
 
     struct empty_t {};
-    [[no_unique_address]] std::conditional_t<
-        Mode == access_mode::Index, OffsetTable, empty_t> table_{};
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, OffsetTable, empty_t>
+        table_{};
 };
 
 // field_iterator::advance — dict-free; honours the static Length+Data table
@@ -312,14 +289,12 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 
     // Length+Data: if the PREVIOUS field was a Length tag, this Data field's
     // length is fixed by it (value may contain SOH).
-    if (prev_data_tag_ != 0
-        && static_cast<std::uint16_t>(tag) == prev_data_tag_) {
+    if (prev_data_tag_ != 0 && static_cast<std::uint16_t>(tag) == prev_data_tag_) {
         std::size_t end = vstart + prev_data_len_;
         if (end > buf_.size()) {
             end = buf_.size();
         }
-        cur_ = field{static_cast<std::uint16_t>(tag),
-                     buf_.subspan(vstart, end - vstart)};
+        cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, end - vstart)};
         next_ = (end < buf_.size()) ? end + 1 : end;  // skip trailing SOH
         prev_data_tag_ = 0;
         prev_data_len_ = 0;
@@ -329,13 +304,10 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     while (i < buf_.size() && buf_[i] != SOH) {
         ++i;
     }
-    cur_ = field{static_cast<std::uint16_t>(tag),
-                 buf_.subspan(vstart, i - vstart)};
+    cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, i - vstart)};
     next_ = (i < buf_.size()) ? i + 1 : i;
 
-    if (std::uint16_t dt = detail::data_tag_for_length(
-            static_cast<std::uint16_t>(tag));
-        dt != 0) {
+    if (std::uint16_t dt = detail::data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
         prev_data_len_ = detail::parse_u32(cur_.value);
     }
@@ -355,24 +327,24 @@ public:
     template <class TV = fixpp::dict::table_view>
     explicit Parser(TV /*dict_metadata*/) noexcept {}
 
-    [[nodiscard]] core::expected_t<MessageView<Mode>>
-    parse(frame_view const& frame [[clang::lifetimebound]],
-          std::pmr::memory_resource* mr) noexcept [[clang::lifetimebound]] {
+    [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
+                                                            [[clang::lifetimebound]],
+                                                            std::pmr::memory_resource* mr) noexcept
+        [[clang::lifetimebound]] {
         MessageView<Mode> mv{frame, mr};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
-                return core::expected_t<MessageView<Mode>>{
-                    std::unexpect, s.error()};
+                return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
             }
         }
         return mv;
     }
 
-    [[nodiscard]] core::expected_t<MessageView<access_mode::Iter>>
-    parse_iter(frame_view const& frame [[clang::lifetimebound]]) noexcept
-        [[clang::lifetimebound]] requires (Mode == access_mode::Iter) {
-        return MessageView<access_mode::Iter>{frame};
-    }
+    [[nodiscard]] core::expected_t<MessageView<access_mode::Iter>> parse_iter(
+        frame_view const& frame [[clang::lifetimebound]]) noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
+            return MessageView<access_mode::Iter>{frame};
+        }
 };
 
 }  // namespace fixpp::wire
