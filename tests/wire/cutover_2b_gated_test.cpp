@@ -77,15 +77,21 @@ TEST(WireCutover2bGated, WireFloatAccessorLegOnRealSurface) {
     EXPECT_FALSE(missing.has_value());
 }
 
-// RED marker (SC-006): the 003 dict::reify round-trip on the real
-// MessageView surface is blocked until the cutover lands —
-// include/fixpp/wire/message_view_contract.hpp is still the R6 frozen-thin
-// stub (T028) and include/fixpp/dict/reify.hpp still binds it, not the real
-// wire::MessageView<Index> (T029). T031 makes this GREEN and runs the
-// quickstart §9 grep sanity (zero references to the frozen-stub surface).
+// RED marker (SC-006), HONESTLY RE-SCOPED 2026-05-16: the type-surface
+// cutover IS done — message_view_contract.hpp re-exports the real
+// wire::MessageView/field_view (T028), reify.hpp/field_traits.hpp bind it,
+// and the FLOAT/field_traits decode path above is GREEN. The 003 dict::reify
+// *round-trip* is NOT just a header rewire: it runs through
+// owning_<Msg>::from_view, which deep-copies frame bytes into a caller arena
+// and is emitted by fixpp-codegen as a hardcoded R6 stub returning
+// dict_reify_wire_body_not_ready (generated <vXX>/Reify.hpp). Making it real
+// = a 003 codegen-emitter change + the owning-message deep-copy — carved as
+// its own deliverable, tasks.md T059. Stays DISABLED (not fake-green) until
+// T059 lands; flipping it today would be RED, not GREEN.
 TEST(WireCutover2bGated, DISABLED_ReifyRoundTripOnRealMessageView) {
-    FAIL() << "pending cutover T028 (message_view_contract re-export) + "
-              "T029 (dict::reify rewire onto real wire::MessageView<Index>)";
+    FAIL() << "blocked on T059: owning_<Msg>::from_view is a codegen-emitted "
+              "R6 stub (dict_reify_wire_body_not_ready); needs the codegen "
+              "from_view + owning-message deep-copy (not a header rewire)";
 }
 
 }  // namespace
