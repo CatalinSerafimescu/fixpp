@@ -20,12 +20,9 @@ public:
     constexpr group_view() noexcept = default;
 
     // instances: a span of (byte-offset,length) sub-frame slices, one per
-    // repeating-group occurrence, in document order. Owned by the parser's
-    // per-message arena; group_view only borrows it.
-    struct slice {
-        std::byte const* data = nullptr;
-        std::size_t len = 0;
-    };
+    // repeating-group occurrence, in document order. Owned by the
+    // OffsetTable's per-message arena; group_view only borrows it.
+    using slice = group_slice;
 
     group_view(std::span<slice const> instances, detail::generation_token gen) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
@@ -67,7 +64,7 @@ public:
     }
 
 private:
-    std::span<slice const> instances_{};
+    std::span<slice const> instances_;
 };
 
 }  // namespace fixpp::wire

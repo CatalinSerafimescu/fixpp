@@ -70,6 +70,15 @@ inline generation_token current_pool_token(std::uint16_t pool_id) noexcept {
 
 }  // namespace detail
 
+// One repeating-group instance: a (ptr,len) sub-frame slice into the
+// originating frame buffer. Materialized once into the per-message
+// OffsetTable arena ([2b §4.4] "all storage from the captured mr");
+// group_view only borrows it (no thread-local, no per-call rebuild).
+struct group_slice {
+    std::byte const* data = nullptr;
+    std::size_t len = 0;
+};
+
 class View {
 public:
     constexpr View() noexcept = default;

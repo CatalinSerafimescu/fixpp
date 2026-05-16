@@ -27,7 +27,6 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
-#include <vector>
 
 #include "field_view.hpp"
 #include "framer.hpp"
@@ -195,34 +194,13 @@ template <std::uint16_t Tag>
 template <std::uint16_t NoTag, class GroupT>
 [[nodiscard]] group_view<GroupT> group() const noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        // Delimiter-aware instance slicing uses the group's first field
-        // (the entry immediately after the count). Each reappearance of
-        // that delimiter tag starts a new occurrence (document order; the
+        // Instance slices are materialized once into the OffsetTable's
+        // per-message mr arena (delimiter-aware: each reappearance of the
+        // group's first field starts a new occurrence, document order; the
         // dictionary-driven nested-group refinement is layered by 2c's
-        // GroupT). Slices are owned by this view's frame (zero-copy).
-        using slice = group_view<GroupT>::slice;
-        static thread_local std::vector<slice> slices;  // borrowed below
-        slices.clear();
-        auto gi = table_.group(NoTag);
-        if (gi) {
-            auto ents = table_.entries();
-            std::size_t first = gi->first_entry();
-            if (first < ents.size()) {
-                std::uint16_t delim = ents[first].tag;
-                std::size_t inst_start = first;
-                for (std::size_t k = first; k <= ents.size(); ++k) {
-                    bool boundary = (k == ents.size()) || (k > first && ents[k].tag == delim);
-                    if (boundary) {
-                        std::byte const* d = bytes().data() + ents[inst_start].offset;
-                        std::size_t len =
-                            (ents[k - 1].offset + ents[k - 1].length) - ents[inst_start].offset;
-                        slices.push_back(slice{d, len});
-                        inst_start = k;
-                    }
-                }
-            }
-        }
-        return group_view<GroupT>{std::span<slice const>{slices.data(), slices.size()}, token()};
+        // GroupT). group_view only borrows the arena span — no thread-local,
+        // no cross-view aliasing, zero-alloc after the first build.
+        return group_view<GroupT>{table_.group_slices(NoTag), token()};
     }
 
 [[nodiscard]] unknown_fields_view unknown_fields() const noexcept

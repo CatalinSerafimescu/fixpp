@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "framer.hpp"
+#include "view.hpp"  // group_slice (mr-backed group instance slices)
 
 namespace fixpp::wire {
 
@@ -86,14 +87,38 @@ public:
 
     [[nodiscard]] core::expected_t<group_index> group(std::uint16_t no_tag) const noexcept;  // lazy
 
+    // Repeating-group instance slices for `no_tag`, in document order,
+    // materialized once into this table's per-message mr arena (append-only,
+    // reserved once → no reallocation), then cached per no_tag. The returned
+    // span is valid for the message lifetime and is NOT clobbered by another
+    // group's access — replaces the prior static thread_local
+    // (zero-alloc-after-build, no cross-view aliasing). Empty span if the
+    // group is absent or the table is RED.
+    [[nodiscard]] std::span<group_slice const> group_slices(std::uint16_t no_tag) const noexcept
+        [[clang::lifetimebound]];
+
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
 
+    std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
     std::pmr::vector<entry> entries_;
     // Open-address robin-hood overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.
     std::pmr::vector<std::uint32_t> overlay_;
     core::expected_t<void> status_;
+    // Lazy mr-backed group slices. Append-only and reserved once to the
+    // entry-count upper bound, so no push_back ever reallocates — every
+    // span handed out stays valid for the message lifetime even when
+    // several distinct groups are accessed and held simultaneously
+    // (the prior static thread_local clobbered across calls; this does not).
+    struct group_span {
+        std::uint16_t no_tag;
+        std::uint32_t start;  // index into group_slices_
+        std::uint32_t count;
+    };
+    mutable std::pmr::vector<group_slice> group_slices_;
+    mutable std::pmr::vector<group_span> group_index_;
+    mutable bool group_slices_reserved_ = false;
 };
 
 }  // namespace fixpp::wire

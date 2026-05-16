@@ -9,6 +9,7 @@
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/view.hpp>  // group_slice
 #include <memory_resource>
 #include <new>
 #include <span>
@@ -40,7 +41,7 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
-    : entries_(mr), overlay_(mr) {
+    : entries_(mr), overlay_(mr), group_slices_(mr), group_index_(mr) {
     // A noexcept ctor must NOT let a throwing `mr` (bad_alloc) escape — that
     // would std::terminate (004 T059 / Codex adversarial review: the reify
     // lazy view() rebuild made first-field-access an OOM kill-switch). On
@@ -48,6 +49,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
     // empty table, status_ = out_of_memory, find()/get<>() → field-absent.
     try {
         auto buf = frame.bytes();
+        frame_base_ = buf.data();
         std::size_t i = 0;
         std::size_t const n = buf.size();
 
@@ -99,18 +101,32 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
         std::size_t const cap = overlay_cap_for(entries_.size());
         overlay_.assign(cap, 0U);
         auto const mask = static_cast<std::uint32_t>(cap - 1U);
+        // DoS bound: a frame whose distinct tags adversarially hash-collide
+        // under mix() could make each insert probe O(occ), i.e. O(occ^2)
+        // total within the wire_offset_table_full cap. Cap the per-insert
+        // probe at a constant so build stays O(occ). On overflow the
+        // occurrence is left UN-indexed (skipped, never written to an
+        // occupied slot) — find() then reports that tag absent, a bounded,
+        // crash-free degradation that only a crafted hostile frame can hit
+        // (normal frames keep clusters far below the cap; load factor < 1).
+        constexpr std::size_t kMaxBuildProbe = 128;
         for (std::size_t e = 0; e < entries_.size(); ++e) {
             std::uint16_t const tag = entries_[e].tag;
             std::uint32_t slot = mix(tag) & mask;
-            bool seen = false;
+            bool skip_insert = false;
+            std::size_t probes = 0;
             while (overlay_[slot] != 0U) {
                 if (entries_[overlay_[slot] - 1U].tag == tag) {
-                    seen = true;  // keep FIRST occurrence
+                    skip_insert = true;  // keep FIRST occurrence
                     break;
                 }
                 slot = (slot + 1U) & mask;
+                if (++probes >= kMaxBuildProbe) {
+                    skip_insert = true;  // DoS bound: leave this occ un-indexed
+                    break;
+                }
             }
-            if (!seen) {
+            if (!skip_insert) {
                 overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
             }
         }
@@ -167,6 +183,53 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         return err_group_too_large<group_index>();
     }
     return group_index{no_tag, first, avail};
+}
+
+std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
+    // Already materialized for this no_tag — return the stable cached span.
+    for (auto const& gs : group_index_) {
+        if (gs.no_tag == no_tag) {
+            return {group_slices_.data() + gs.start, gs.count};
+        }
+    }
+    try {
+        // Reserve once to the entry-count upper bound (total instances across
+        // all groups ≤ entry count): subsequent appends never reallocate, so
+        // every previously returned span stays valid.
+        if (!group_slices_reserved_) {
+            group_slices_.reserve(entries_.size());
+            group_slices_reserved_ = true;
+        }
+        auto const start = static_cast<std::uint32_t>(group_slices_.size());
+        auto gi = group(no_tag);
+        if (gi) {
+            std::size_t const first = gi->first_entry();
+            if (first < entries_.size()) {
+                // Each reappearance of the group's first field (the entry
+                // after the count) starts a new occurrence; slice in document
+                // order from one delimiter up to (but excluding) the next.
+                std::uint16_t const delim = entries_[first].tag;
+                std::size_t inst_start = first;
+                for (std::size_t k = first; k <= entries_.size(); ++k) {
+                    bool const boundary =
+                        (k == entries_.size()) || (k > first && entries_[k].tag == delim);
+                    if (boundary) {
+                        std::byte const* d = frame_base_ + entries_[inst_start].offset;
+                        std::size_t const len =
+                            (entries_[k - 1U].offset + entries_[k - 1U].length) -
+                            entries_[inst_start].offset;
+                        group_slices_.push_back(group_slice{.data = d, .len = len});
+                        inst_start = k;
+                    }
+                }
+            }
+        }
+        auto const count = static_cast<std::uint32_t>(group_slices_.size()) - start;
+        group_index_.push_back(group_span{.no_tag = no_tag, .start = start, .count = count});
+        return {group_slices_.data() + start, count};
+    } catch (std::bad_alloc const&) {
+        return {};  // degrade to "no instances", never throw (noexcept)
+    }
 }
 
 }  // namespace fixpp::wire
