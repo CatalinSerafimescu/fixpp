@@ -302,8 +302,12 @@ public:
     // param would be ill-formed at template-definition time); TV deduces to
     // fixpp::dict::table_view at every call site, preserving the [2b §4.3]
     // by-value surface.
+    // NOLINTBEGIN(performance-unnecessary-value-param) — by-value is the
+    // [2b §4.3] surface contract; deferred-completeness design prevents a
+    // const-ref (TV is incomplete at template-definition time).
     template <class TV = fixpp::dict::table_view>
     explicit Parser(TV /*dict_metadata*/) noexcept {}
+    // NOLINTEND(performance-unnecessary-value-param)
 
     [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
                                                             [[clang::lifetimebound]],
