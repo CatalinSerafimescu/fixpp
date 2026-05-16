@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+# W-004: BodyLength computation. digit-only, no space padding [FIX50SP2 §3.3].
+# Body covers fields after 9=N\x01 up to (but not including) "10=". BodyLength
+# must equal the exact byte count of that span with no leading zeros or spaces.
+w004,4.4,bodylength-two-digit-body,383d4649582e342e3401393d31300133353d300133343d310131303d31363501,1,
+w004,4.4,bodylength-19byte-body,383d4649582e342e3401393d31390133353d300133343d37013131323d544553540131303d31393801,1,
+w004,4.4,bodylength-30byte-body,383d4649582e342e3401393d33300133353d440133343d310134393d53454e4445520135363d5441524745540131303d31353101,1,

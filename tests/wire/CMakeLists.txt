@@ -50,3 +50,7 @@ add_wire_test(wire_three_arena_pinning_test
   three_arena_pinning_test.cpp)                                        # T018
 add_wire_test(wire_cutover_2b_gated_test cutover_2b_gated_test.cpp)    # T019
 add_wire_test(wire_noexcept_trap_test noexcept_trap_test.cpp)          # T020
+
+# US2 — Writer / serialize / round-trip (T032–T033)
+add_wire_test(wire_round_trip_property_test
+  round_trip_property_test.cpp)                                        # T033
