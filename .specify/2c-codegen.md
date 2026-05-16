@@ -1,12 +1,12 @@
 # Design Doc 2c — Dictionary Codegen: Header Layout, Multi-Version Coexistence, Dialect Overlay Binding
 
-> **Status:** Draft v1.3 — Gate A round 3 converged
-> **Date:** 2026-05-08
+> **Status:** Draft v1.4 — post-sign-off targeted amendment (RC#2: decimal decoding API coherence)
+> **Date:** 2026-05-15
 > **Owner role:** 2c codegen design lead. `fixpp::dict` (`include/fixpp/dict/`, `src/dictionary/`) + the codegen tool `tools/codegen/fixpp-codegen` + the per-version generated header packs `include/fixpp/v42/`, `v44/`, `v50sp2/`, `vt11/` (build-tree only).
 > **Inherits:** `[arch §1]` (goals), `[arch §2]` (module layering — `dictionary` sits below `wire` and is consumed by `session`/`capi`), `[arch §3]` (namespaces — `fixpp::dict`, `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vt11`), `[arch §4.2]` (full `dictionary` module surface), `[arch §5.2]` (allocator policy — PMR-aware, per-session resource), `[arch §5.3]` (error model — `expected_t<T>` on hot path, exceptions reserved for `XmlLoader` construction), `[arch §5.4]` (banned `thread_local`), `[arch §5.5]` (lifetime model — typed messages are flyweights), `[arch §5.6]` (configuration shape — `SessionConfig` frozen at session open), `[arch §6]` (plugin pattern — ≤5 pure-virtual cap if any interface is virtualized), `[arch §7.3]` (header surface), `[arch §7.4]` (CMake target layout), `[arch §9.1]` (public vs internal headers), `[arch §9.2]` (versioning), `[arch §10]` (handoff requirements — row 2c).
 > **Cites:** `[const §I.1]` (v1.0 version surface), `[const §VI]` (spec coverage — every owned row maps to a coverage-index entry), `[const §VI.4]` (bidirectional traceability), `[const §VI.5]` (Normative References format), `[const §VII]` (testing — ≥10 seams), `[const §VIII.5]` (zero-allocation hot path), `[const §X]` (C ABI deferred to 2i; 2c-side commitments only), `[const §X.2]` (no C++ leakage through C ABI), `[const §XIV.2]` (≤5 pure-virtual cap on plugin interfaces), `[const §XV]` (banned patterns — no `thread_local`, no synchronous logging on the hot path; banned-pattern §XV.13 mandates the hybrid model 2c implements), `[const §XVII.1]` (Codex Gate A required), `[const §XVIII]` (post-v1 roadmap — FIX-Latest A-035..A-065 explicitly out of scope), `[const §XX]` (amendment procedure — Appendix D drafts amendment language for orchestrator application). Spec citations: `[FIX-SL §3]`, `[FIX42] FIX 4.2 application specification` (per `feature-catalogue.md` line 70 `Spec ref`), `[FIX44] FIX 4.4 application specification` (per the same `Spec ref` family), `[FIX50SP2 §3]`, `[FIX50SP2 §3.3]`, `[FIX50SP2 §3.4]`, `[FIXT §5]`, `[FIXT §5.1]`, `[FIXT §5.3]`. Per-message exhaustive references stay routed through the generated `_codegen/include/fixpp/<vXX>/NormativeReferences.md` per Appendix B (per C-P3-1). Sibling docs: `[2a §4.2]` (`fixpp::core::detail::trap_throw`), `[2a §4.4]` (`FIXPP_DECIMAL_T` alias rule), `[2a §6.5]` (decimal parse latency baseline), `[2a §7.2]` (decimal substitution at FLOAT accessors), `[2b §4.3]` (`Parser`, `MessageView`, `field_iterator`), `[2b §4.4]` (`OffsetTable`), `[2b §4.6]` (`dictionary_driven_validator`), `[2b §6.4]` (lifetime contract on flyweights), `[2b §6.6]` (three-arena pinning + view-escape contract), `[2b §6.7]` (errors-introduced sub-table), `[2b §7.2]` (wire surface that typed messages and `dict::table_view` consume), `[2b §7.4]` (MessageStore raw-frame contract). Synthesis: `[SYN §3.3 Q11]` (codegen output format = header-only `constexpr` arrays), `[SYN §3.3 Q12]` (multi-version coexistence = supported, version-namespaced types), `[SYN §3.3 Q13]` (dialect-extension layering = additive at runtime).
 > **Catalogue rows owned (in part):** **Dictionary infrastructure (per §1.3 dispositions):** D-001 (FIX 4.2 dict — codegen + runtime XML), D-002 (FIX 4.4 dict — codegen + runtime XML), D-003 (FIX 5.0SP2 + FIXT.1.1 dict — codegen + runtime XML), D-004 (FIX 4.0/4.1 dict — runtime XML only), D-005 (FIX 4.3 dict — runtime XML only), D-006 (FIX 5.0/5.0SP1 dict — runtime XML only), D-007 (XML loader for all 9 versions), D-008 (codegen, four versions only — codegen-vs-runtime-XML disposition recorded as a coverage-index supplemental note per Appendix D §2), D-009 (custom dictionary extension via `DialectOverlay`), D-010 (component definition support), D-011 (FIX Latest / FIX Orchestra — **deferred post-v1.0** per `[const §XVIII.2]`). **OSS rows:** OSS-001 (QuickFIX-XML compatible loader), OSS-010 (header-only generated typed messages with `constexpr` field metadata). **Application-message generated typed-message classes + `constexpr` field metadata** (typed-message *classes only* — parse/serialize/validate behaviour is owned by **2b**): A-001..A-013 (order-management; codegen for v42/v44/v50sp2), A-014..A-034 (additional order-management variants; **runtime-XML-only in v1.0; codegen deferred to v1.x** per the proposed `[const §XVIII.7]` sub-clause and the `[arch §4.2]` row 2c amendment in Appendix D §3), M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral / positions / account), R-001..R-005 (reg / IOI / news), N-001..N-003 (network counterparty / user request). FIX-Latest application-message rows A-035..A-065 are **post-v1.0** per `[const §XVIII]` and explicitly out of 2c scope.
-> **Convergence log:** see end-of-doc Appendix C — populated for the v1.2 → v1.3 Gate A round 3 convergence pass; addresses Codex round-3 review (1 P1 / 1 P2 / 1 P3) and Opus round-3 adversarial review (1 new P1 / 0 new P2 / 0 new P3, 1 root cluster), see Appendix C. The v1.1 → v1.2 Gate A round 2 entry (2 Codex P1 + 1 Codex P2 + 2 Codex P3 + 0 new Opus P1 + 1 new Opus P2 + 2 new Opus P3) and the v1.0 → v1.1 Gate A round 1 entry (5 Codex + 12 Opus findings, 3 root causes) are preserved below; v0.1 archived as `2c-codegen.draft-r1.md` (full rewrite triggered by Opus closing recommendation; user signed off Root cause #4 constitutional decision before reset re-spawn). Appendix D drafts the proposed constitutional amendment + architecture/coverage-index supplemental notes that the orchestrator applies on sign-off.
+> **Convergence log:** see end-of-doc Appendix C — the v1.3 → v1.4 entry (prepended) records the post-sign-off targeted amendment per `[const §XX]` that fixes RC#2 (decimal decoding API incoherent with the merged 2a/001 PMR-mandatory surface); it is **not** a Gate A round. The v1.2 → v1.3 Gate A round 3 convergence pass entry (Codex round-3 review 1 P1 / 1 P2 / 1 P3 and Opus round-3 adversarial review 1 new P1 / 0 new P2 / 0 new P3, 1 root cluster) is preserved below, see Appendix C. The v1.1 → v1.2 Gate A round 2 entry (2 Codex P1 + 1 Codex P2 + 2 Codex P3 + 0 new Opus P1 + 1 new Opus P2 + 2 new Opus P3) and the v1.0 → v1.1 Gate A round 1 entry (5 Codex + 12 Opus findings, 3 root causes) are preserved below; v0.1 archived as `2c-codegen.draft-r1.md` (full rewrite triggered by Opus closing recommendation; user signed off Root cause #4 constitutional decision before reset re-spawn). Appendix D drafts the proposed constitutional amendment + architecture/coverage-index supplemental notes that the orchestrator applies on sign-off.
 
 ---
 
@@ -258,7 +258,9 @@ Notes:
 
 #### 4.1.3 `dict::field_traits<T>` — typed decoding over `wire::field_view`
 
-The 2c-owned typed-decoding layer referenced from `[2b §1]` line 28 and `[2b W-009]` (line 806). `wire::MessageView<Index>` itself exposes only the two untyped accessors per `[2b §4.3]` lines 281–288 (`template <std::uint16_t Tag> get() const noexcept -> expected_t<field_view>` and `get(std::uint16_t tag) const noexcept -> expected_t<field_view>`); the typed-by-`T` decoding is layered here, in `fixpp::dict`, plus `decimal_t::from_chars` from `[2a §4.2]` for the decimal case.
+The 2c-owned typed-decoding layer referenced from `[2b §1]` line 28 and `[2b W-009]` (line 806). `wire::MessageView<Index>` itself exposes only the two untyped accessors per `[2b §4.3]` lines 281–288 (`template <std::uint16_t Tag> get() const noexcept -> expected_t<field_view>` and `get(std::uint16_t tag) const noexcept -> expected_t<field_view>`); the typed-by-`T` decoding is layered here, in `fixpp::dict`, plus — for the decimal case — the merged 2a parse entry point `decimal_t::parse(span, mr)` per `[2a §4.3]` (a thin shell over `decimal_traits<FIXPP_DECIMAL_T>::from_chars(span, mr)`, `[2a §4.2]`).
+
+> **RC#2 amendment (v1.4, `[const §XX]`).** v1.3 described the decimal route as `decimal_t::from_chars(fv->bytes())` — a no-`mr`, member-on-`decimal_t` call citing `[2a §4.2]`. That symbol does not exist on the merged 2a/001 surface: 2a's only decimal-parse entry points are `decimal_traits<T>::from_chars(std::span<const std::byte>, std::pmr::memory_resource*) noexcept -> expected_t<T>` (`[2a §4.2]`, mirrored at `specs/001-core-decimal/contracts/decimal_traits.hpp:98-100`) and the `decimal<T>` shell `decimal_t::parse(std::span<const std::byte>, std::pmr::memory_resource*) noexcept -> expected_t<decimal>` (`[2a §4.3]`, mirrored at `decimal_traits.hpp:162-163`), **both PMR-mandatory**; 2a's own Gate A explicitly removed the single-argument form (`[2a §8]`; `2a-decimal.md:532` Codex P2 #4 / Opus P1 #4). The corrected decimal route below threads an explicit `std::pmr::memory_resource* mr` into the decimal accessor and calls the real entry point `decimal_t::parse(fv->bytes(), mr)` (`[2a §4.3]`; its return type `expected_t<decimal_t>` matches the accessor return type exactly). All other v1.3 decisions in this sub-section (and the non-decimal `field_traits<T>` / `decode_field<T>` route) carry forward unchanged.
 
 ```cpp
 // include/fixpp/dict/field_traits.hpp
@@ -267,9 +269,12 @@ namespace fixpp::dict {
 // Primary template; specialisations cover std::string_view, char,
 // std::int32_t / std::int64_t, bool, the timestamp/date types, and the
 // MultiCharValue / MultiStringValue split. The `decimal_t` case is NOT a
-// `field_traits` specialisation — it routes through `decimal_t::from_chars`
-// directly per `[2a §4.2]`'s contract (a `field_traits<decimal_t>` shell
-// would just forward to the same call).
+// `field_traits` specialisation — it routes through the merged 2a
+// PMR-mandatory parse `decimal_t::parse(span, mr)` (`[2a §4.3]`, a shell
+// over `decimal_traits<FIXPP_DECIMAL_T>::from_chars`, `[2a §4.2]`)
+// directly (a `field_traits<decimal_t>` shell would just forward to the
+// same call, and could not carry the required `mr` through
+// `from_field_view`'s mr-less signature).
 template <class T>
 struct field_traits;  // primary; specialised below
 
@@ -290,8 +295,9 @@ struct field_traits<char> {
 // Helper that combines the get-then-check-then-decode shape every typed
 // accessor in §4.7 (and the `dict::reify` algorithm in §4.8) inlines.
 // Defined for every T that has a `field_traits<T>` specialisation; the
-// decimal case uses `decimal_t::from_chars(fv->bytes())` inline at the
-// call site rather than going through this helper.
+// decimal case uses `decimal_t::parse(fv->bytes(), mr)` (`[2a §4.3]`)
+// inline at the call site (it needs the caller-threaded `mr`, which this
+// mr-less helper cannot forward) rather than going through this helper.
 template <class T>
 [[nodiscard]] inline expected_t<T>
 decode_field(expected_t<wire::field_view> fv) noexcept {
@@ -303,6 +309,8 @@ decode_field(expected_t<wire::field_view> fv) noexcept {
 ```
 
 `field_traits<T>::from_field_view` and `decode_field<T>` are `noexcept` and allocation-free; they sit on the typed-accessor hot path (§6.2 ≤ 20 ns ceiling for the string/int/char accessors). Both are referenced from §4.7 (typed-message accessor sketches) and §4.8 (`dict::reify` algorithm step 3); the formal home is here, in §4.1.3, so the references in those sections compile against a single declaration.
+
+The **decimal route is distinct and is *not* `field_traits`-routed and *not* unconditionally allocation-free** (RC#2 / `[const §XX]` v1.4). It calls the merged 2a `decimal_traits<decimal_t>::from_chars(fv->bytes(), mr)` (`[2a §4.2]`), which is `noexcept` but **PMR-mandatory**: it takes a non-null `std::pmr::memory_resource* mr`. For the default `FIXPP_DECIMAL_T == pod_decimal` the parse ignores `mr` and is allocation-free, so the *default-traits* decimal accessor stays zero-alloc; but for an allocating substituted `FIXPP_DECIMAL_T` (e.g. `cpp_dec_float`, a supported substitution per `[2a §4.4]`) the parse may allocate from `mr` per call. The decimal accessor therefore takes an explicit `std::pmr::memory_resource* mr` argument so a valid resource is always in scope (the borrowed flyweight holds no arena and the AC-G7 `sizeof == one pointer` invariant forbids adding one — §4.7); the latency ceiling for the decimal accessor is the separate ≤ 75 ns row in §6.2, not the ≤ 20 ns string/int/char row. The decimal route's allocation contract is `[const §VIII.5]`-coherent: any heap traffic goes through the caller-supplied per-message arena `[arch §5.2]`, never raw `new`/`delete`, consistent with `[const §XV.1]`.
 
 ### 4.2 `fixpp::dict::ComponentRef` and `fixpp::dict::GroupRef`
 
@@ -1037,8 +1045,11 @@ public:
     // `[2b §4.3]`, returning `expected_t<wire::field_view>`) with the
     // field-traits dispatch baked in by codegen via
     // `dict::field_traits<T>::from_field_view(...)` for non-decimal types
-    // and `decimal_t::from_chars(fv->bytes())` for decimal types (per
-    // `[2a §4.2]`). The traits family is the 2c-owned typed-decoding layer
+    // and the merged 2a PMR-mandatory parse
+    // `decimal_t::parse(fv->bytes(), mr)` for decimal types (per
+    // `[2a §4.3]`; decimal accessors take an extra
+    // `std::pmr::memory_resource* mr` arg — RC#2 / `[const §XX]` v1.4).
+    // The traits family is the 2c-owned typed-decoding layer
     // referenced from `[2b §1]` line 28 / W-009; `MessageView` itself
     // exposes only the untyped `get<Tag>() -> expected_t<field_view>` and
     // `get(uint16_t) -> expected_t<field_view>` accessors per `[2b §4.3]`
@@ -1070,20 +1081,30 @@ public:
     side() const noexcept
     { return dict::decode_field<char>(view_.template get<54>()); }
 
+    // Decimal accessors take an explicit per-message arena `mr` (RC#2 /
+    // `[const §XX]` v1.4): the merged 2a parse entry point is
+    // PMR-mandatory and the flyweight holds no arena (the AC-G7
+    // `sizeof == one pointer` invariant forbids storing one). Callers
+    // pass the per-message arena `[arch §5.2]` — the same arena the
+    // underlying `MessageView` aliases per `[2b §6.4]`. `mr` must be
+    // non-null (the wire layer always supplies a valid resource, per
+    // `[2a §4.2]`). For the default `pod_decimal` trait the parse ignores
+    // `mr` and is allocation-free; allocating substituted traits draw
+    // from `mr`.
     [[nodiscard]] inline expected_t<fixpp::decimal_t>
-    order_qty() const noexcept
+    order_qty(std::pmr::memory_resource* mr) const noexcept
     {
         auto fv = view_.template get<38>();
         if (!fv) return std::unexpected{fv.error()};
-        return fixpp::decimal_t::from_chars(fv->bytes());  // [2a §4.2]
+        return fixpp::decimal_t::parse(fv->bytes(), mr);  // [2a §4.3]
     }
 
     [[nodiscard]] inline expected_t<fixpp::decimal_t>
-    price() const noexcept
+    price(std::pmr::memory_resource* mr) const noexcept
     {
         auto fv = view_.template get<44>();
         if (!fv) return std::unexpected{fv.error()};
-        return fixpp::decimal_t::from_chars(fv->bytes());  // [2a §4.2]
+        return fixpp::decimal_t::parse(fv->bytes(), mr);  // [2a §4.3]
     }
 
     // Repeating-group accessor: returns a wire::group_view<Leg> bound to
@@ -1129,7 +1150,7 @@ static_assert(sizeof(NewOrderSingle)
 Key properties:
 
 - **Flyweight contract (per N-P1-3).** The typed flyweight holds `wire::MessageView<Index> const&` — a *reference*, matching the lifetime contract from `[2b §6.4]` (the view aliases the originating frame buffer, the buffer's lifetime is the per-message arena's slot). Because the member is a reference the implicit copy/move-assignment operators are deleted, which is the right semantic for a flyweight: it is constructible and copyable (the implicit copy-ctor copies the reference, which is correct), but you cannot reassign one. The cross-strand transport path is `dict::reify_as<NewOrderSingle>(view, mr)` (§4.8), which produces an `owning_NewOrderSingle` whose internal members do *not* alias each other through references — see §4.8 for the value-typed shape.
-- **Zero allocation per accessor.** Every typed accessor is `inline noexcept` and dispatches directly to `wire::MessageView::get<Tag>()` (which is itself zero-allocation per `[2b §4.3]` Index mode). The compiler inlines the chain; the per-accessor cost is one `OffsetTable::find` call (~15 ns per `[2b §6.6]`) plus the type-specific dispatch (string/int/char ≤ 5 ns; decimal ~50 ns per `[2a §6.5]`).
+- **Zero allocation per non-decimal accessor; decimal accessor is PMR-routed (RC#2 / `[const §XX]` v1.4).** Every *string/int/char* typed accessor is `inline noexcept`, zero-arg, and dispatches directly to `wire::MessageView::get<Tag>()` (itself zero-allocation per `[2b §4.3]` Index mode) + an allocation-free `field_traits<T>` decode — these stay genuinely zero-alloc on the ≤ 20 ns ceiling. The compiler inlines the chain; the per-accessor cost is one `OffsetTable::find` call (~15 ns per `[2b §6.6]`) plus the type-specific dispatch (string/int/char ≤ 5 ns). The **decimal** accessor differs: it takes an explicit `std::pmr::memory_resource* mr` and calls `decimal_t::parse(fv->bytes(), mr)` (`[2a §4.3]`), which is `noexcept` but PMR-mandatory — allocation-free *only* for the default `pod_decimal` trait (which ignores `mr`); an allocating substituted `FIXPP_DECIMAL_T` may draw from `mr` per call. Decimal cost is `find` (~15 ns) + decimal parse (~50 ns per `[2a §6.5]`) on the separate ≤ 75 ns row (§6.2), not the ≤ 20 ns row. Any decimal heap traffic is confined to the caller-supplied per-message arena `[arch §5.2]` — no raw `new`/`delete`, `[const §VIII.5]` / `[const §XV.1]`-coherent.
 - **`[[nodiscard]]` on every `expected_t<T>`-returning method.** Mandated by the convergence-log-frozen rule from 2a/2b reviews; codegen template emits the attribute unconditionally.
 - **`[[clang::lifetimebound]]` on every view-returning method** (anything returning `std::string_view`, `std::span`, `wire::field_view`, `wire::group_view<...>`). Codegen emits the attribute unconditionally; per `[arch §5.5]`.
 - **`Leg`-and-similar nested group structs** are themselves flyweight types over `wire::group_view<T>::operator[](i)` (per `[2b §4.7]`); they follow the same accessor discipline and carry their own `field_value(uint16_t)` forwarder for overlay-promoted group tags.
@@ -1387,14 +1408,20 @@ public:
 
     // Same accessor surface as the flyweight NewOrderSingle. Each accessor
     // delegates to view().get<Tag>() (which is computed lazily from the
-    // owned bytes_).
+    // owned bytes_). The decimal accessors mirror the flyweight's
+    // PMR-mandatory shape (RC#2 / `[const §XX]` v1.4) but default `mr` to
+    // the instance's own owned `mr_` (§4.8 private members) — an
+    // `owning_<Msg>` always has an arena in scope, so the argument is a
+    // defaulted convenience, not a caller obligation as on the flyweight.
     [[nodiscard]] expected_t<std::string_view> cl_ord_id() const noexcept
         [[clang::lifetimebound]];
     [[nodiscard]] expected_t<std::string_view> symbol() const noexcept
         [[clang::lifetimebound]];
     [[nodiscard]] expected_t<char> side() const noexcept;
-    [[nodiscard]] expected_t<fixpp::decimal_t> order_qty() const noexcept;
-    [[nodiscard]] expected_t<fixpp::decimal_t> price() const noexcept;
+    [[nodiscard]] expected_t<fixpp::decimal_t>
+    order_qty(std::pmr::memory_resource* mr = nullptr) const noexcept;  // nullptr → use mr_; [2a §4.3]
+    [[nodiscard]] expected_t<fixpp::decimal_t>
+    price(std::pmr::memory_resource* mr = nullptr) const noexcept;      // nullptr → use mr_; [2a §4.3]
     [[nodiscard]] wire::group_view<NewOrderSingle::Leg> legs() const noexcept
         [[clang::lifetimebound]];
     [[nodiscard]] expected_t<wire::field_view>
@@ -1575,7 +1602,7 @@ The *C-ABI does not expose `dict::FieldRef`/`ComponentRef`/`GroupRef` directly* 
 
 ### 6.1 Allocation, exceptions, threading on the hot path
 
-- **Allocation.** Codegen output is `constexpr` static storage; per-tag accessors allocate nothing (they delegate to `wire::MessageView::get<Tag>()` which is allocation-free per `[2b §4.3]` Index mode). `Dictionary::field_ref(...)`, `required_fields(...)`, `field_valid_for(...)`, `group_first_field(...)`, `length_pair_data_tag(...)`, `was_dialect_promoted(...)`, `resolve_application_version(...)` are `noexcept` and consult the heap-pinned metadata-handle storage by pointer chase — no allocation. `Dictionary::with_overlay(...)` allocates *once at session open* from the user-supplied PMR (per `[arch §5.2]`); the merge result is heap-allocated but lives on the session's long-lifetime arena. `dict::reify_as<Msg>` and `dict::reify(...)` allocate from the user-supplied PMR (≤ 4 allocations per N-P2-5) at the cross-strand-handoff boundary, which is *outside* the parse → `fromApp` hot path. Hot-path discipline per `[const §VIII.5]` is preserved.
+- **Allocation.** Codegen output is `constexpr` static storage; **non-decimal** per-tag accessors allocate nothing (they delegate to `wire::MessageView::get<Tag>()` — allocation-free per `[2b §4.3]` Index mode — plus an allocation-free `field_traits<T>` decode). The **decimal** per-tag accessor is PMR-mandatory (RC#2 / `[const §XX]` v1.4): it takes an explicit `std::pmr::memory_resource* mr` and calls `decimal_t::parse(fv->bytes(), mr)` (`[2a §4.3]`), allocation-free for the default `pod_decimal` trait but potentially arena-allocating for a substituted `FIXPP_DECIMAL_T`; any heap traffic is confined to the caller-supplied per-message arena `[arch §5.2]`, never raw `new`/`delete`, so `[const §VIII.5]` / `[const §XV.1]` hot-path discipline is preserved (the constraint is "no `new`/`delete` between parse and `fromApp`", which arena/PMR allocation satisfies — `[const §VIII.5]`). `Dictionary::field_ref(...)`, `required_fields(...)`, `field_valid_for(...)`, `group_first_field(...)`, `length_pair_data_tag(...)`, `was_dialect_promoted(...)`, `resolve_application_version(...)` are `noexcept` and consult the heap-pinned metadata-handle storage by pointer chase — no allocation. `Dictionary::with_overlay(...)` allocates *once at session open* from the user-supplied PMR (per `[arch §5.2]`); the merge result is heap-allocated but lives on the session's long-lifetime arena. `dict::reify_as<Msg>` and `dict::reify(...)` allocate from the user-supplied PMR (≤ 4 allocations per N-P2-5) at the cross-strand-handoff boundary, which is *outside* the parse → `fromApp` hot path. Hot-path discipline per `[const §VIII.5]` is preserved.
 - **Exceptions.** Hot path is exception-free per `[arch §5.3]`. `XmlLoader::load(...)` and `XmlLoader::load_overlay(...)` may throw `dict::xml_parse_error`, `dict::unknown_version_error`, `dict::xml_unsupported_rule_error`, `dict::xml_unsupported_length_pair_error`, or `dict::xml_oom_error` — these are construction-time failures, not hot-path errors, and are the same ergonomic carve-out 2a/2b take. Every other function in this doc is `noexcept`; PMR allocations inside `noexcept` functions are wrapped in `trap_throw` (see §6.1.1).
 - **Threading.** `Dictionary` is **move-only-on-init, frozen-after-first-handoff, thread-safe-on-read** (per N-P2-4). Construction (`XmlLoader::load`, `Dictionary::with_overlay`) is single-threaded on the *overlay value* (per N-P2-3); once the `Dictionary` is handed to a session (via `SessionConfig`), it is frozen for the session's lifetime and safe to read concurrently from multiple threads. **Concurrent `with_overlay` calls on the same base `Dictionary` from different threads are safe** — the base's metadata is read-only; ref-count operations on the merged handle's `base_keepalive_` `shared_ptr` are atomic. **Concurrent `with_overlay` calls on the same overlay value are UB** — the overlay's `pmr::vector::push_back` during overlay-build races; treat the overlay value as single-threaded during build (per N-P2-3, refined from v1.0's blanket "single-threaded" prohibition). `table_view` is trivially copyable and value-typed; safe to share across threads as long as the underlying `Dictionary` (and its metadata handle) is alive. `DialectOverlay` and `XmlLoader` are constructed/used in single-threaded contexts (engine init, session open) — no synchronisation guarantees on concurrent use.
 
@@ -1611,7 +1638,7 @@ These are bench-harness regression bars (§9 seam #5); CI fails on >5% regressio
 | `Dictionary::length_pair_data_tag` | RawDataLength | ≤ 15 ns | flat lookup |
 | `Dictionary::resolve_application_version` | FIXT.1.1 dict, ApplVerID present | ≤ 20 ns | string parse + enum map |
 | Typed accessor — string/int/char (e.g., `NewOrderSingle::cl_ord_id`) | 20-tag message, warm | ≤ 20 ns | inlines into one `OffsetTable::find` (~15 ns per `[2b §6.6]`) + traits dispatch (~5 ns) |
-| Typed accessor — decimal (e.g., `NewOrderSingle::price`) | 20-tag message, warm | ≤ 75 ns | find (~15 ns) + decimal parse (~50 ns per `[2a §6.5]`) — split per N-P2-2 from the v0.1 unified ≤ 20 ns |
+| Typed accessor — decimal (e.g., `NewOrderSingle::price(mr)`) | 20-tag message, warm, default `pod_decimal` trait | ≤ 75 ns | find (~15 ns) + `decimal_t::parse(bytes, mr)` (~50 ns per `[2a §6.5]`) — split per N-P2-2 from the v0.1 unified ≤ 20 ns. PMR-mandatory signature (RC#2 / `[const §XX]` v1.4); allocation-free for `pod_decimal`. Allocating substituted `FIXPP_DECIMAL_T` is outside this bench bar (its cost is the substituted trait's, not 2c's). |
 | Typed accessor — `field_value(uint16_t)` runtime-keyed | 20-tag message, runtime tag | ≤ 25 ns | one `OffsetTable::find` + `field_view` construction; no per-type dispatch |
 | `Dictionary::with_overlay` | overlay with 50 fields, 5 messages | ≤ 1 ms | one-time merge cost; complexity O(N_base + N_overlay log N_overlay); §1.2 |
 | `dict::reify_as<Msg>` (typed) | 20-tag message, fresh PMR | ≤ 1 µs | byte-copy + offset-table rebuild; §1.2 |
@@ -1808,6 +1835,7 @@ Three storage classes for 2c-owned data, all rooted in heap-pinned metadata-hand
 - **Metadata-handle ownership is the lifetime root (per RC-3 / RC#2 / N-P1-1 / C-R2-P1-1).** Constructed by `XmlLoader::load(...)` — allocates the `dict_metadata_handle` on the user-supplied `mr` via `std::allocate_shared<dict_metadata_handle>(std::pmr::polymorphic_allocator<dict_metadata_handle>{mr}, ...)` so the shared-control-block deallocator returns memory to the originating `mr`. Fills it with span references for codegen versions or PMR copies for runtime-XML versions. `with_overlay(...)` allocates a fresh `dict_metadata_handle` on the user-supplied `mr` (the merged dict's `mr`) via the same `std::allocate_shared` mechanism, and stores a *copy* of the base's `handle_` (the same `shared_ptr<const dict_metadata_handle>`, sharing the base's control block) in the merged handle's `base_keepalive_` slot. The base may go out of scope while the merged dict still holds the keepalive (the control block's refcount drops from 2 to 1, not to 0). Held by value in `SessionConfig` through the `Dictionary` owning the handle. The user supplies the `mr` at every construction step; the metadata block's address survives `Dictionary` moves so `table_view` and `dictionary_driven_validator` stay valid.
 - **`DialectOverlay` storage.** Pinned to a non-null PMR resource at construction (per C-P2-5; via `DialectOverlay::create(mr)` or `XmlLoader::load_overlay(path, mr)`); lifetime = `DialectOverlay` value's lifetime (typically constructed at session open, consumed by `Dictionary::with_overlay(...)`, then dropped if the merged dictionary is the only retained handle).
 - **`owning_message_t<>` storage.** Caller-supplied PMR per `dict::reify_as<Msg>(view, mr)`; the value carries `mr` and frees on move-end. ≤ 4 PMR allocations per N-P2-5. PMR allocation failure inside the `noexcept` reify path is wrapped in `trap_throw` and surfaces as `dict_reify_oom` per §6.1.1 / RC-5.
+- **Decimal typed-accessor PMR (RC#2 / `[const §XX]` v1.4).** The decimal typed accessor is the one accessor that is *not* unconditionally allocation-free: the merged 2a parse entry point `decimal_t::parse(span, mr)` (`[2a §4.3]`, over `decimal_traits<FIXPP_DECIMAL_T>::from_chars`, `[2a §4.2]`) is PMR-mandatory. The accessor takes an explicit `std::pmr::memory_resource* mr`; on the borrowed flyweight the caller passes the per-message arena `[arch §5.2]` (the same arena the underlying `MessageView` aliases per `[2b §6.4]`); on `owning_<Msg>` it defaults to the instance's owned `mr_` (the §4.8 caller-`mr`-lifetime storage class above). This `mr` is **not** a 2c-owned storage class — it is the wire/caller-owned per-message arena — so it adds no row to the table; it is recorded here so the recap is not read as claiming the decimal arm is zero-alloc. For the default `pod_decimal` trait the parse ignores `mr` and is allocation-free; an allocating substituted `FIXPP_DECIMAL_T` draws from `mr` per call. No raw `new`/`delete`; `[const §VIII.5]` / `[const §XV.1]` preserved (arena/PMR is the sanctioned mechanism for the rare materialise case, `[const §XV.1]`).
 - **Banned: `thread_local`.** Per `[const §XV]` and `[arch §5.4]`. Codegen never emits `thread_local`; runtime types never allocate via `thread_local`. Trace context (per `[const §XIII.3]`) is strand-stored, not `thread_local`; 2c is not involved.
 
 ## 9. Test seams
@@ -1998,7 +2026,25 @@ Engineering-judgment decisions (16-byte `FieldRef`; `_reserved` discipline; `ver
 
 ## Appendix C — Convergence log
 
-Records the v0.1 → v1.0 RESET (preserved below), the v1.0 → v1.1 Gate A round 1 convergence pass (preserved below), the v1.1 → v1.2 Gate A round 2 convergence pass (preserved below), and the v1.2 → v1.3 Gate A round 3 convergence pass (this entry, prepended; round cap hit at round 3 / user-authorized one-pass post-cap convergence).
+Records the v0.1 → v1.0 RESET (preserved below), the v1.0 → v1.1 Gate A round 1 convergence pass (preserved below), the v1.1 → v1.2 Gate A round 2 convergence pass (preserved below), the v1.2 → v1.3 Gate A round 3 convergence pass (preserved below; round cap hit at round 3 / user-authorized one-pass post-cap convergence), and the v1.3 → v1.4 post-sign-off targeted amendment (this entry, prepended; **not a Gate A round** — a scoped `[const §XX]` amendment fixing RC#2 decimal-decoding API coherence).
+
+---
+
+### v1.3 → v1.4 (post-sign-off targeted amendment — RC#2)
+
+Date: 2026-05-15.
+
+**This is NOT a Gate A round.** It is a targeted post-sign-off design-doc amendment per `[const §XX]` (amendment process — conflict between a signed-off design and a merged upstream surface is resolved by amending the design, not by silently carrying the incoherence). Scope is **RC#2 only — decimal-decoding API coherence**. Every other v1.3 design decision is carried forward intact; no other section is reopened, no Gate A finding is re-litigated, and the non-decimal `field_traits<T>` / `decode_field<T>` route is untouched.
+
+**Trigger.** Three rounds of `003-dictionary-codegen` Gate A review (round 1: `research/reviews/opus_003-dictionary-codegen_gate_a_adversarial_review.md` — Codex P2-1 escalated to P1 + finding N-P1-1 "decimal accessor has no arena/mr source"; rounds 2–3: `research/reviews/opus_003-dictionary-codegen_gate_a_3_adversarial_review.md` — RC#2 confirmed "correctly-documented-as-blocking, un-fixable in-bundle") surfaced that v1.3's typed-decimal route — `fixpp::decimal_t::from_chars(fv->bytes())` cited as `[2a §4.2]` — is **incoherent with the merged 2a v0.3 / 001-core-decimal surface**:
+
+1. No such symbol exists. 2a's only decimal-parse entry points are `decimal_traits<T>::from_chars(std::span<const std::byte>, std::pmr::memory_resource*) noexcept -> expected_t<T>` (`[2a §4.2]`; mirrored at `specs/001-core-decimal/contracts/decimal_traits.hpp:98-100`) and the `decimal<T>` shell `decimal_t::parse(std::span<const std::byte>, std::pmr::memory_resource*) noexcept -> expected_t<decimal>` (`[2a §4.3]`; mirrored at `decimal_traits.hpp:162-163`) — **both PMR-mandatory**. 2a's own Gate A explicitly removed the single-argument form (`[2a §8]`; `2a-decimal.md:532`, Codex P2 #4 / Opus P1 #4).
+2. The v1.3 generated decimal accessor (zero-arg, `inline noexcept`) had **no memory-resource in scope** — a PMR-mandatory parse is uncallable from it.
+3. v1.3's "allocation-free / ≤ 20 ns" framing for the decimal route was false against the real API (the decimal arm was already split to a separate ≤ 75 ns row per N-P2-2, but the surrounding allocation prose still implied unconditional zero-alloc).
+
+**Net design effect — where the `mr` now comes from.** The decimal typed accessor takes an **explicit `std::pmr::memory_resource* mr` argument** and calls the real merged entry point `decimal_t::parse(fv->bytes(), mr)` (`[2a §4.3]`; its `expected_t<decimal_t>` return type matches the accessor return type exactly). This is the minimal change consistent with the existing v1.3 typed-accessor shape and §8 PMR model: the borrowed flyweight holds only a `wire::MessageView<Index> const&` and the AC-G7 `sizeof == one pointer` invariant forbids adding an arena member, so the resource is *threaded as an argument* rather than stored — the caller passes the per-message arena `[arch §5.2]` (the same arena `MessageView` already aliases per `[2b §6.4]`). On `owning_<Msg>`, which already owns an `mr_` (§4.8 private members), the `mr` argument defaults to `nullptr` meaning "use my own `mr_`". For the default `pod_decimal` trait the parse ignores `mr` and stays allocation-free; an allocating substituted `FIXPP_DECIMAL_T` draws from the supplied arena — never raw `new`/`delete`, so `[const §VIII.5]` ("no `new`/`delete` between parse and `fromApp`"; arena/PMR is the sanctioned mechanism) and `[const §XV.1]` ("arena/PMR for the rare materialise cases") remain satisfied.
+
+Sections touched (RC#2-scoped only): status block (v1.3 → v1.4, date 2026-05-15, convergence-log pointer); §4.1.3 (RC#2 amendment note added; preamble + the two code-block comments + the closing allocation/latency sentence corrected to the real PMR-mandatory `decimal_t::parse(span, mr)` route — non-decimal `field_traits`/`decode_field` text unchanged); §4.7 (typed-accessor preamble comment + the two flyweight decimal sketches `order_qty`/`price` rewritten to `decimal_t::parse(fv->bytes(), mr)` with an explicit `mr` parameter; the "Zero allocation per accessor" key-property bullet split into a genuinely-zero-alloc non-decimal arm + a PMR-mandatory decimal arm; flyweight `sizeof == one pointer` static_assert unchanged — no member added); §4.8 (the two `owning_<Msg>` decimal accessor declarations `order_qty`/`price` given the `mr = nullptr → use mr_` shape); §6.1 (allocation bullet split decimal vs non-decimal); §6.2 (decimal latency row annotated PMR-mandatory; ceiling unchanged at ≤ 75 ns); §8 (PMR-recap decimal-accessor bullet added; the three 2c-owned storage-class rows unchanged); Appendix C (Appendix C intro updated; this entry prepended). All prior Appendix C entries (v1.2 → v1.3, v1.1 → v1.2, v1.0 → v1.1, v0.1 → v1.0 RESET) are preserved verbatim below. No structural redesign; every changed line traces to the decimal-API incoherence or its directly-entailed allocation/latency-contract correction. Appendix D unchanged.
 
 ---
 

@@ -43,14 +43,16 @@ struct MsgFieldsRun {
 
 // Lookup helper: a name (slice into the pool) bound to a payload index.
 struct NamedIndex {
-    // cppcheck-suppress unusedStructMember  // read via lambda in dictionary.cpp component_impl (cppcheck lambda-member-access limitation)
+    // cppcheck-suppress unusedStructMember  // read via lambda in dictionary.cpp component_impl
+    // (cppcheck lambda-member-access limitation)
     NameSlice name{};
     std::uint32_t index{0};
 };
 
 // Field-name → tag entry (sorted by name bytewise).
 struct FieldNameEntry {
-    // cppcheck-suppress unusedStructMember  // read via lambda in dictionary.cpp field_by_name_impl (cppcheck lambda-member-access limitation)
+    // cppcheck-suppress unusedStructMember  // read via lambda in dictionary.cpp field_by_name_impl
+    // (cppcheck lambda-member-access limitation)
     NameSlice name{};
     std::uint16_t tag{0};
 };
@@ -87,7 +89,8 @@ public:
     // Per-MsgType required-fields run.
     [[nodiscard]] MsgFieldsRun find_msg_required(std::string_view msg_type) const noexcept;
 
-    // cppcheck-suppress unusedFunction  // public-ish accessor for the originating PMR; kept for future copy/share ops
+    // cppcheck-suppress unusedFunction  // public-ish accessor for the originating PMR; kept for
+    // future copy/share ops
     [[nodiscard]] std::pmr::memory_resource* mr() const noexcept { return mr_; }
 
     // ---- Public-API-shaped accessors used by Dictionary methods ----
@@ -116,12 +119,19 @@ public:
 
     // Returns the flat FieldRef run for a group (by no_tag).
     // Returns empty span if the group has no fields recorded.
-    [[nodiscard]] std::span<FieldRef const> group_fields_impl(
-        std::uint16_t no_tag) const noexcept;
+    [[nodiscard]] std::span<FieldRef const> group_fields_impl(std::uint16_t no_tag) const noexcept;
 
     [[nodiscard]] std::span<MessageEntry const> messages_impl() const noexcept {
         return std::span<MessageEntry const>{messages_};
     }
+
+    // 003-dictionary-codegen (RC#5 — F1 IR data path): the codegen tool needs
+    // the FULL per-message field run (required + optional) and tag→FIX-field-
+    // name, neither of which the runtime-MVS lookup surface exposed. Build-
+    // time codegen-enumeration only; not on any runtime hot path.
+    [[nodiscard]] std::span<FieldRef const> message_fields_impl(
+        std::string_view msg_type) const noexcept;
+    [[nodiscard]] std::string_view field_name_impl(std::uint16_t tag) const noexcept;
 
     [[nodiscard]] session_version version_impl() const noexcept { return version_; }
 

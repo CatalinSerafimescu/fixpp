@@ -1,0 +1,5 @@
+{
+  "comment": "R6-deferred stub baseline — from_view() dispatch overhead only.",
+  "note": "FIXPP_R6_BENCH_DEFERRED: NFR-003-3 ceilings (reify_as ≤1 µs/20-tag, ≤10 µs/200-tag; reify ≤1.2 µs) cannot be enforced against these stub timings. The frozen wire stub (R6) returns field-absent unconditionally; benchmarks measure PMR allocation + error-path overhead alone. Seed these baselines from the first 2b-green CI run.",
+  "benchmarks": []
+}

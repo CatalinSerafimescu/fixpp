@@ -49,6 +49,40 @@ INCLUDE_NAMESPACE_ALIASES: dict[str, str] = {
 # Also detect includes of fix/c_api.h (allowed everywhere except in engine internals)
 CAPI_RE = re.compile(r'#\s*include\s+[<"](fix/c_api[^>"]*)[>"]')
 
+# ── dictionary↔wire BRIDGE-SURFACE carve-out — [arch §2.4] RC#3 amendment ────
+# (2026-05-15, [const §XX]; applied at 003-dictionary-codegen re-/plan.)
+# The bridge surface compiles against BOTH `dictionary` and `wire` and is NOT
+# a `dictionary` module edge — it is header-only template glue
+# (wire::MessageView<Index> is a compile-time template parameter); no
+# `dictionary` .cpp links `wire`, so the acyclic graph of [arch §2.3] is
+# preserved. The generated fixpp::vXX::* tree is already covered by the §2.4
+# carve-out and lives in the build tree (not scanned). The hand-written bridge
+# headers + the vendored frozen wire-contract stub are exempted HERE so a
+# scanned src/dictionary bridge .cpp (e.g. an out-of-line reify.cpp that pulls
+# the wire contract) is classified as bridge, not as a `dictionary → wire`
+# violation. This is an EXACT documented file-list — it does not weaken the
+# `dictionary | core` whitelist for any other dict/ header.
+#
+# NOTE: this scanner walks src/ + bindings/ only (not include/), so the
+# hand-written include/fixpp/dict/reify.hpp / field_traits.hpp are not directly
+# scanned today; the load-bearing RC#3 resolution is the [arch §2.4] rule.
+# Extending the scan to include/ is tracked as a non-blocking follow-up
+# (plan.md "Re-/plan (RC resolution)" → RC#3); when it lands, these same
+# exempt paths apply.
+BRIDGE_EXEMPT_INCLUDES: set[str] = {
+    "fixpp/wire/message_view_contract.hpp",  # vendored frozen R6 stub
+}
+# Source files that ARE the dict↔wire bridge (relative to ROOT). A bridge file
+# may include the wire-contract stub above without it counting as a violation.
+BRIDGE_SOURCE_FILES: set[str] = {
+    "src/dictionary/reify.cpp",            # out-of-line reify bridge (if any; D-5)
+    "src/dictionary/version_registry.cpp",  # out-of-line registry bits (if any; D-5)
+    "src/dictionary/field_traits.cpp",     # out-of-line field_traits bridge (RC#1/RC#3; D-5)
+                                            # field_traits.cpp implements from_field_view
+                                            # which takes wire::field_view — uses the vendored
+                                            # frozen stub via message_view_contract.hpp
+}
+
 
 def module_of_path(path: Path) -> str | None:
     """Return the module name for a source file, or None if unknown."""
@@ -75,6 +109,13 @@ def check_file(path: Path, violations: list[str]) -> None:
 
     allowed_modules = ALLOWED.get(module, set())
 
+    # Is this file part of the [arch §2.4] dict↔wire bridge surface?
+    try:
+        rel = path.relative_to(ROOT).as_posix()
+    except ValueError:
+        rel = path.as_posix()
+    is_bridge_source = rel in BRIDGE_SOURCE_FILES
+
     with open(path, encoding="utf-8", errors="replace") as f:
         for lineno, line in enumerate(f, 1):
             m = INCLUDE_RE.search(line)
@@ -84,6 +125,10 @@ def check_file(path: Path, violations: list[str]) -> None:
             included_module = INCLUDE_NAMESPACE_ALIASES.get(included_module, included_module)
             if included_module == module:
                 continue  # self-include is always allowed
+            # [arch §2.4] RC#3 bridge carve-out: a bridge source file may pull
+            # the exempt wire-contract include without it counting as an edge.
+            if is_bridge_source and m.group(1) in BRIDGE_EXEMPT_INCLUDES:
+                continue
             if included_module not in allowed_modules:
                 violations.append(
                     f"{path}:{lineno}: module '{module}' includes "

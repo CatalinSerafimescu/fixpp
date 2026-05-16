@@ -57,6 +57,31 @@ add_subdirectory(src/tap)
 add_subdirectory(src/capi)
 add_subdirectory(src/service)
 
+# ── Codegen host tool (003-dictionary-codegen, build-only [const §III.5]) ────
+# F1 Candidate A: C++23 host executable reusing the merged fixpp::dictionary
+# runtime (no second XML parser — research.md D-1). Added AFTER src/dictionary
+# so fixpp::dictionary exists. Never installed / never linked into the
+# user-facing library.
+option(FIXPP_BUILD_CODEGEN_TOOL "Build the fixpp-codegen host tool" ON)
+if(FIXPP_BUILD_CODEGEN_TOOL)
+  add_subdirectory(tools/codegen/fixpp-codegen)
+endif()
+
+# ── [2c §7.6] Configure-time codegen target graph (T016) ─────────────────────
+# cmake/Codegen.cmake:
+#   • Bootstrap-builds fixpp-codegen at configure time (execute_process into
+#     ${CMAKE_BINARY_DIR}/_codegen_bootstrap) — AC-C4 / [arch §4.2] step 3.
+#   • Runs the tool immediately → ${CMAKE_BINARY_DIR}/_codegen/include/fixpp/…
+#   • Defines fixpp_codegen_generate (no-op marker; tests depend on it).
+#   • Defines fixpp::dict::{v42,v44,v50sp2,vt11,dispatch,runtime} INTERFACE
+#     targets with INTERFACE_INCLUDE_DIRECTORIES into the build tree only.
+#   • Defines fixpp::dict::generate-vXX configure-time marker targets.
+# Must be included AFTER src/dictionary (fixpp::dictionary exists) and AFTER
+# tools/codegen/fixpp-codegen (target defined, sources present for bootstrap).
+if(FIXPP_BUILD_CODEGEN_TOOL)
+  include(cmake/Codegen.cmake)
+endif()
+
 # ── Bindings ─────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_PYTHON)
   add_subdirectory(bindings/python)
@@ -70,6 +95,12 @@ endif()
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/core)
+  add_subdirectory(tests/codegen)  # 003-dictionary-codegen US1 suites (T017-T022).
+                                   # fixpp_codegen_generate is now defined in cmake/Codegen.cmake
+                                   # (included above) — visible here and in all test subdirs.
+  add_subdirectory(tests/integration)  # 003-dictionary-codegen US3 integration (T035).
+                                       # dispatch-consuming TUs #include the generated
+                                       # _dispatch/ headers (Entity 8 / I-11).
   add_subdirectory(tests/dictionary)
   add_subdirectory(tests/wire)
   add_subdirectory(tests/session)

@@ -11,6 +11,13 @@ Testing/
 .conan/
 conan_cache/
 CMakeUserPresets.json
+conan_toolchain.cmake
+conanbuild*.sh
+conanrun*.sh
+deactivate_conanbuild*.sh
+deactivate_conanrun*.sh
+conanbuildenv*.sh
+conanrunenv*.sh
 
 # Compiled objects
 *.o
