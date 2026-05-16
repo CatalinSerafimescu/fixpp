@@ -35,7 +35,11 @@ TEST(CodegenTypedAccessor, StringAndCharAccessorsForwardWireError) {
     static_assert(
         std::is_same_v<decltype(cl), fixpp::core::expected_t<std::string_view>>);  // AC-G4
     ASSERT_FALSE(cl.has_value());
-    EXPECT_EQ(cl.error(), fixpp::core::error::dict_xml_parse_failed);  // R6 / AC-FT3
+    // 2b cutover (004 T028/T030): the R6 stub forwarded its placeholder
+    // dict_xml_parse_failed sentinel; the real OffsetTable-backed surface
+    // forwards the genuine wire error — a default MessageView has an empty
+    // table, so an absent field is wire_required_field_missing [2b §6.5.4].
+    EXPECT_EQ(cl.error(), fixpp::core::error::wire_required_field_missing);  // AC-FT3
     auto sd = nos.side();
     static_assert(std::is_same_v<decltype(sd), fixpp::core::expected_t<char>>);
     EXPECT_FALSE(sd.has_value());

@@ -40,6 +40,13 @@ public:
     static_assert(sizeof(entry) == 12);
     static_assert(alignof(entry) == 4);
 
+    // A default-constructed table is empty and reports every field absent
+    // (status_ = ok, no entries/overlay -> find() = wire_required_field_
+    // missing). Required so a default MessageView<Index>{} is well-formed —
+    // the 2b cutover's dict::reify kEmpty sentinel + the seam #18
+    // flyweight_shape_test default-construct it (T028).
+    OffsetTable() = default;
+
     // Eagerly scans the frame's tag=value<SOH> stream into mr-backed
     // storage. On a DoS-cap breach the table is left empty and the breach
     // is reported by find()/build_status().
