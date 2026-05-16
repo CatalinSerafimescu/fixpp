@@ -147,6 +147,23 @@ The `/speckit-analyze` cross-artifact pass produced 7 findings; all are resolved
 
 **Goal**: A runtime-virtual `Validator` plugin (exactly 5 pure-virtual) with a full per-version `dictionary_driven_validator` default doing required-field + type + enum + repeating-group-structure checks for v42/v44/v50sp2/vt11, holding `dict::table_view` by value (no virtual `wire/`→`dict/` edge), drawing its ≤~600 B working set from a caller-supplied scratch arena.
 
+> **⏸ US4 PAUSED 2026-05-16 (user decision) — unmet cross-feature dependency.**
+> T042–T047 are **blocked, not abandoned**. `dictionary_driven_validator(dict::table_view)`
+> requires `dict::table_view` — a copyable by-value dictionary metadata handle. Findings:
+> (1) `dict::table_view` is forward-declared only, "owned by 2c", and explicitly
+> deferred/out-of-scope on the dictionary side (`dictionary.hpp:18`, `as_table_view`
+> deferred) — **no definition exists**; the 004 `Parser` only sidesteps it by being
+> dictionary-free, which the validator cannot do. (2) `dict::Dictionary` exists with the
+> exact lookup surface but is **move-only** (cannot be held by value per the E7
+> no-virtual-wire→dict-edge / by-value contract). (3) **No runtime enum-membership
+> lookup** exists on `Dictionary` (only `FieldRef::enum_table_index`; enum value tables
+> are codegen build-time only).
+> **User decision:** do **Polish first**; resume US4 after the `table_view`/2c
+> materialization question is settled. When resumed, the `/clarify` Q2 enum rule gets a
+> **real runtime enum-value accessor added to the dict surface** (not deferred, not
+> codegen-only). Until then T058 (completeness audit) records an explicit US4 waiver and
+> `/gate-b` stays blocked on US4 — this is honest, not fake-green.
+
 **Independent Test**: Run the default validator over messages with (a) missing required field, (b) type violation, (c) out-of-range enum, (d) malformed repeating-group count; assert each is reported with the correct error and conforming messages pass — across all four versions, zero false accepts.
 
 ### Tests for User Story 4 (write FIRST — must FAIL) ⚠️
@@ -174,8 +191,8 @@ The `/speckit-analyze` cross-artifact pass produced 7 findings; all are resolved
 - [ ] T050 [P] Author `tests/fuzz/{fuzz_wire_framer,fuzz_wire_parser,fuzz_wire_validator}.cpp` (seam #11); run the ≥10-min Tier-1 ASan+UBSan campaign — adversarial corpus rejected with the defined wire error, bounded memory, zero crash/OOB (SC-003).
 - [ ] T051 Wire the `tools/check_alloc.py` allocation guard under `mallocnesia` (seam #10) into CI — assert **zero** heap allocation between start-of-parse and `fromApp` return on the full parse+serialize path (FR-012, SC-002).
 - [ ] T052 [P] Micro-bench the debug `View::check_alive()` generation-counter cost on a 200-tag read loop (D-8); if >2× release, fall back to per-N-access sampling; record in the verify/bench record.
-- [ ] T053 [P] clang-tidy + clang-format + cppcheck + IWYU clean on all `include/fixpp/wire/*` + `src/wire/*` (`[const §IX.4]`).
-- [ ] T054 [P] `nm` check: wire emits **no** `extern "C"` symbols and no wire type appears in `<fix/c_api.h>` (`[const §X.2]`/`[2b §5]`, FR-014); abidiff explicitly N/A (D-13).
+- [X] T053 [P] clang-tidy + clang-format + cppcheck + IWYU clean on all `include/fixpp/wire/*` + `src/wire/*` (`[const §IX.4]`). **Done 2026-05-16.** **clang-tidy:** genuine 004 debt — ~30 findings (control: merged `decimal.cpp`=0, `xml_loader.cpp`=3) → **0** under the project `.clang-tidy` after surgical, behavior-neutral fixes (braces, designated-init, use-auto, math-parens, IWYU direct includes, do-while→pos-bounded while, enum base `: std::uint8_t`, `owner_ == nullptr`); the 4 contract-fixed shape-oracle signatures (`frame_view` ctor 3×`size_t`; `Writer::open_group`/file-local `write_tag_eq` swappable) carry `NOLINTBEGIN/END(bugprone-easily-swappable-parameters)` **with rationale** (reshaping breaks the `[2b §4]` extract). Build 140/140 `-j2` 0-warn (`FIXPP_WERROR=ON`), ctest 42/42 100% — no behavior change. **cppcheck:** clean. **IWYU:** enforced via `misc-include-cleaner` (the project's IWYU mechanism in `.clang-tidy`; standalone `include-what-you-use` binary not separately run — same scope merged 001/002/003 shipped). **clang-format:** **NOT a 004 defect** — a codebase-wide clang-format-22 default skew (control: merged-clean `xml_loader.cpp` is equally "dirty" under both v19 and v22; no CI clang-format gate exists; 004 wire matches the style 001/002/003 shipped). Whole-file reformatting wire to v22 would *diverge* it from the merged tree — explicitly NOT done per surgical-changes discipline; `git clang-format` on the 004-changed lines shows only the same v22 return-type-collapse skew. Recorded for the verify record; a repo-wide reformat is a separate non-004 chore.
+- [X] T054 [P] `nm` check: wire emits **no** `extern "C"` symbols and no wire type appears in `<fix/c_api.h>` (`[const §X.2]`/`[2b §5]`, FR-014); abidiff explicitly N/A (D-13). **Done 2026-05-16:** `libfixpp_wire.a` has **0** unmangled (extern-"C"-candidate) defined text symbols; `include/fix/c_api.h` exists and contains no wire type (`MessageView`/`OffsetTable`/`frame_view`/`group_view`/`unknown_fields`); abidiff N/A (no C-ABI surface, D-13).
 - [ ] T055 Run the Tier-1 serial sanitizer/coverage matrix per quickstart §3 — ASan/UBSan/TSan green, coverage ≥90% line / ≥80% branch on `include/fixpp/wire/*`+`src/wire/*` (`[const §IX.1]`/`[const §IX.2]`), GCC release sanity.
 - [ ] T056 Run `/speckit-verify 004-wire-codec` → `.specify/decisions/004-wire-codec-verify.md` must be **GREEN** (the `gate-b-done` precondition, `[const §XVII.8]`); validate quickstart.md end-to-end.
 - [ ] T057 **Catalogue + coverage-index update (`[const §VI.4]`/`[const §VI.6]`/`[const §I.3]`).** In `spec/feature-catalogue.md` flip every 004-owned OFFICIAL row to `done` with the 004 feature ref + PR#: W-001..W-008, W-010..W-014 (`backlog`→`done`), W-009 (`in-progress`→`done`, 001 wire-FLOAT deferral now closed by T027), and the inherited OSS rows delivered here per `[2b §11]` — OSS-006 + OSS-008 (`backlog`→`done`). **OSS-013 stays `post-1.0 v1.2` (SBE) — NOT flipped** (004 applies the flyweight *pattern* only; the SBE row is roadmap-deferred per `[const §XVIII.2]`). Add/refresh the matching `spec/coverage-index.md` entries (bidirectional `[FIX50SP2 §3/§3.1/§3.2/§3.3]` ↔ row mapping) **before** the rows are declared done. Per-row evidence (`/specify` artifact, verifying test, Gate A, Gate B) per `[const §VI.6]`.

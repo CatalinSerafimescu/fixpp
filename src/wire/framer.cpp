@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <span>
 
+#include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>
+#include <fixpp/wire/view.hpp>
 
 namespace fixpp::wire {
 namespace {
@@ -17,7 +19,7 @@ namespace {
 constexpr std::byte soh_byte{0x01};
 
 struct parsed_frame {
-    enum class status {
+    enum class status : std::uint8_t {
         complete,
         partial,
         error,
@@ -31,7 +33,7 @@ struct parsed_frame {
 };
 
 [[nodiscard]] constexpr bool is_digit(std::byte b) noexcept {
-    unsigned char const ch = static_cast<unsigned char>(b);
+    auto const ch = static_cast<unsigned char>(b);
     return ch >= static_cast<unsigned char>('0')
            && ch <= static_cast<unsigned char>('9');
 }

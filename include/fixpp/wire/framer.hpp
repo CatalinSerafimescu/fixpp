@@ -88,11 +88,17 @@ public:
     }
 
 protected:
+    // The (frame_len, body_off, body_len) run is the [2b §4.2] frame_view
+    // shape oracle — fixed signature, minted only by the parser/factory.
+    // Reshaping into a params struct would break the contract extract, so
+    // the swappable-parameters lint is suppressed here rather than papered.
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
     constexpr frame_view(std::byte const* frame [[clang::lifetimebound]],
                           std::size_t frame_len,
                           std::size_t body_off,
                           std::size_t body_len,
                           detail::generation_token gen) noexcept
+    // NOLINTEND(bugprone-easily-swappable-parameters)
         : View{frame, frame_len, gen},
           body_off_{body_off},
           body_len_{body_len} {}

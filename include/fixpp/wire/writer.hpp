@@ -48,7 +48,8 @@ private:
 class group_writer {
 public:
     // Constructed only through the passkey from Writer::open_group.
-    explicit group_writer(group_writer_token, Writer* owner) noexcept
+    explicit group_writer(group_writer_token /*passkey*/,
+                           Writer* owner) noexcept
         : owner_{owner} {}
 
     group_writer(group_writer&&) noexcept            = default;

@@ -58,13 +58,14 @@ inline generation_token bump_pool_generation(std::uint16_t pool_id) noexcept {
         ++(*slot);
         g = *slot;
     }
-    return generation_token{pool_id, g};
+    return generation_token{.pool_id = pool_id, .gen = g};
 }
 
 inline generation_token current_pool_token(std::uint16_t pool_id) noexcept {
     std::uint16_t* slot = pool_generation_slot(pool_id);
-    return generation_token{pool_id,
-                            (slot != nullptr) ? *slot : std::uint16_t{0}};
+    return generation_token{
+        .pool_id = pool_id,
+        .gen = (slot != nullptr) ? *slot : std::uint16_t{0}};
 }
 #endif
 

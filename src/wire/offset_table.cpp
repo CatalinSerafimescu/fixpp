@@ -7,8 +7,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <memory_resource>
 #include <new>
 #include <span>
+
+#include <fixpp/core/error.hpp>
+#include <fixpp/wire/framer.hpp>
 
 namespace fixpp::wire {
 
@@ -28,7 +33,7 @@ constexpr std::uint32_t mix(std::uint16_t tag) noexcept {
 }  // namespace
 
 std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
-    std::size_t want = (n * 5U) / 4U + 1U;  // 1.25 * n
+    std::size_t want = ((n * 5U) / 4U) + 1U;  // 1.25 * n
     std::size_t cap = 8U;
     while (cap < want) {
         cap <<= 1U;
@@ -60,7 +65,7 @@ OffsetTable::OffsetTable(frame_view const& frame,
                 entries_.clear();
                 return;
             }
-            tag = tag * 10U + static_cast<std::uint32_t>(c - '0');
+            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }
         if (i >= n || buf[i] != EQ || i == tag_start) {

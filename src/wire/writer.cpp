@@ -17,7 +17,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <expected>
+#include <memory_resource>
 #include <span>
+#include <utility>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>
@@ -31,15 +34,33 @@ constexpr std::byte EQ_BYTE{static_cast<std::byte>('=')};
 
 // Count decimal digits in v (v=0 → 1 digit).
 [[nodiscard]] constexpr std::size_t digit_count(std::uint32_t v) noexcept {
-    if (v < 10U)          return 1;
-    if (v < 100U)         return 2;
-    if (v < 1000U)        return 3;
-    if (v < 10000U)       return 4;
-    if (v < 100000U)      return 5;
-    if (v < 1000000U)     return 6;
-    if (v < 10000000U)    return 7;
-    if (v < 100000000U)   return 8;
-    if (v < 1000000000U)  return 9;
+    if (v < 10U) {
+        return 1;
+    }
+    if (v < 100U) {
+        return 2;
+    }
+    if (v < 1000U) {
+        return 3;
+    }
+    if (v < 10000U) {
+        return 4;
+    }
+    if (v < 100000U) {
+        return 5;
+    }
+    if (v < 1000000U) {
+        return 6;
+    }
+    if (v < 10000000U) {
+        return 7;
+    }
+    if (v < 100000000U) {
+        return 8;
+    }
+    if (v < 1000000000U) {
+        return 9;
+    }
     return 10;
 }
 
@@ -51,19 +72,26 @@ render_u32(std::uint32_t v, std::byte* buf, std::size_t n) noexcept {
     if (dc > n) {
         return 0;
     }
+    // dc == digit_count(v) ≥ 1, so this writes exactly dc digits least-
+    // significant-first and terminates at pos 0 (handles v == 0 → "0").
     std::size_t pos = dc;
-    do {
+    while (pos > 0U) {
         buf[--pos] = static_cast<std::byte>('0' + static_cast<int>(v % 10U));
         v /= 10U;
-    } while (v > 0U);
+    }
     return dc;
 }
 
 // Write a uint16_t tag as ASCII decimal digits + '=' into dst starting at pos.
 // Returns new pos after write, or npos on overflow.
+// (buf_size, pos) are positional cursor args of a file-local helper, not a
+// public surface; semantically distinct, swap is caught by the round-trip
+// property test.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 [[nodiscard]] std::size_t
 write_tag_eq(std::byte* buf, std::size_t buf_size,
              std::size_t pos, std::uint16_t tag) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     // A tag is uint16_t: max value 65535, max 5 digits + '=' = 6 bytes.
     std::array<std::byte, 7> tmp{};
     std::size_t dc = digit_count(static_cast<std::uint32_t>(tag));
@@ -113,7 +141,7 @@ bool Writer::write_span(std::span<const std::byte> s) noexcept {
 bool Writer::write_tag_eq(std::uint16_t tag) noexcept {
     std::size_t new_pos =
         ::fixpp::wire::write_tag_eq(dst_.data(), dst_.size(), pos_, tag);
-    if (new_pos == static_cast<std::size_t>(-1)) {
+    if (new_pos == npos) {
         overflow_ = true;
         return false;
     }
@@ -186,8 +214,13 @@ Writer::append_raw(std::uint16_t tag,
 }
 
 // ── Writer::open_group ────────────────────────────────────────────────────────
+// (no_tag, count) is the [2b §4.5] Writer::open_group shape oracle — the
+// public contract signature; reshaping breaks the extract, so the
+// swappable-parameters lint is suppressed with rationale rather than papered.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 core::expected_t<group_writer>
 Writer::open_group(std::uint16_t no_tag, std::uint32_t count) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     std::array<std::byte, 12> count_buf{};
     std::size_t n = render_u32(count, count_buf.data(), count_buf.size());
     if (n == 0) {
@@ -223,7 +256,7 @@ core::expected_t<std::size_t> Writer::commit() && noexcept {
     if (body_end < body_start_) {
         return err_field_value_truncated<std::size_t>();
     }
-    std::uint32_t body_length =
+    auto body_length =
         static_cast<std::uint32_t>(body_end - body_start_);
 
     // Compute actual digit count for body_length.
@@ -314,7 +347,7 @@ void group_writer::close_impl() noexcept {
 core::expected_t<void>
 group_writer::append_field(std::uint16_t tag,
                            std::span<const std::byte> value) noexcept {
-    if (!owner_) {
+    if (owner_ == nullptr) {
         return core::expected_t<void>{};
     }
     return owner_->append_raw(tag, value);

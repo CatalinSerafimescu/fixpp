@@ -106,7 +106,7 @@ private:
     // Open-address robin-hood overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.
     std::pmr::vector<std::uint32_t> overlay_;
-    core::expected_t<void> status_{};
+    core::expected_t<void> status_;
 };
 
 }  // namespace fixpp::wire
