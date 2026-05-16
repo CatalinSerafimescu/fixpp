@@ -24,6 +24,8 @@
 #include <type_traits>
 #include <vector>
 
+#include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
+#include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
 
 #include "field_view.hpp"
@@ -175,6 +177,33 @@ public:
         }
         return field_view_access::make(bytes().data() + e->offset,
                                        e->length, token());
+    }
+
+    // 004-authored 001 wire FLOAT-field accessor leg (D-17, FR-006 /
+    // [2b §7.1]). The wire layer performs NO decoding: it hands the field's
+    // raw bytes across the 2a trait-decode boundary to
+    // fixpp::decimal_t::parse(span, mr). (C1) the trait call is fenced by
+    // core::detail::trap_throw so a throwing custom FIXPP_DECIMAL_T trait
+    // cannot escape the noexcept parse->fromApp window (FR-013, [arch §5.3]).
+    [[nodiscard]] core::expected_t<fixpp::decimal_t>
+    get_decimal(std::uint16_t tag,
+                std::pmr::memory_resource* mr) const noexcept
+        [[clang::lifetimebound]] requires (Mode == access_mode::Index) {
+        auto fv = get(tag);
+        if (!fv) {
+            return core::expected_t<fixpp::decimal_t>{
+                std::unexpect, fv.error()};
+        }
+        auto span = fv->bytes();
+        // trap_throw wraps the (possibly throwing) trait; result is
+        // expected<expected<decimal_t>> — flatten it.
+        auto wrapped = core::detail::trap_throw(
+            [span, mr]() { return fixpp::decimal_t::parse(span, mr); });
+        if (!wrapped) {
+            return core::expected_t<fixpp::decimal_t>{
+                std::unexpect, wrapped.error()};
+        }
+        return *wrapped;
     }
 
     template <std::uint16_t NoTag, class GroupT>

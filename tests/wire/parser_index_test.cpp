@@ -103,6 +103,25 @@ TEST(WireParserIndex, OffsetsAndRepeatedOccurrence) {
     EXPECT_EQ(second, "PARTY-B");
 }
 
+TEST(WireParserIndex, FloatAccessorLegThroughTraitBoundary) {
+    // T027: field_view::bytes() -> fixpp::decimal_t::parse(span, mr). The
+    // wire layer decodes nothing; it crosses the 2a trait boundary.
+    auto buf = make_frame("35=D\x01" "34=1\x01" "44=1234.56\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value());
+
+    auto px = mv->get_decimal(44, &arena);
+    ASSERT_TRUE(px.has_value());  // parsed via decimal_t, allocation-bounded
+
+    auto missing = mv->get_decimal(9999, &arena);
+    EXPECT_FALSE(missing.has_value());
+}
+
 TEST(WireParserIter, StreamingDictFree) {
     auto buf = make_frame("35=0\x01" "34=7\x01" "112=TESTREQ\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
