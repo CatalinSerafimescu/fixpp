@@ -16,11 +16,15 @@
 //   * is_nothrow_move_constructible_v; no reference members (static_asserts)
 //   * NOT sizeof==one pointer (it owns arena storage — Entity 4 vs Entity 1)
 //
-// R6 note: the frozen wire stub carries no frame state. owning_<Msg>::from_view
-// stubs the bytes_ copy + view rebuild in a R6-minimal form that compiles and
-// satisfies the shape invariants; the behavioural reify round-trip (real bytes
-// survive arena reset) is R6-blocked until 2b. The owning_message_traits
-// specialisation + static_assert ARE compiled now (AC-G7a).
+// 2b cutover (004 T059): from_view now performs the REAL owning deep-copy of
+// src's validated frame bytes into the mr-owned bytes_; view() lazily rebuilds
+// a MessageView<Index> over bytes_ via the Framer (the sole frame_view
+// producer, [2b §4.2]). The behavioural reify round-trip (values survive a
+// SOURCE-arena reset, AC-R4/SC-006) is GREEN. owning_<Msg>'s shape is
+// unchanged (no carry_ member — a zero-cap local carry suffices). The
+// owning_message_traits specialisation + static_assert compile as before
+// (AC-G7a). NOTE: owning_message_handle's runtime-dispatch reify() path stays
+// separately deferred (needs the build-tree _dispatch CMake target).
 //
 // Deterministic LF-only emission over the bytewise-sorted message list
 // (NFR-003-7 / AC-T1). Mirrors app_version_enum() from emit_messages.cpp.
@@ -299,39 +303,51 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.line("}");
     w.line();
 
-    // view() lazy rebuild.
-    // R6: real frame bytes->MV wiring arrives when 2b swaps in the body.
-    // Stub: cache a default-constructed MV (field-absent for every get<>()).
+    // view() lazy rebuild — 2b cutover (004 T059). Spec-faithful: [2b §4.2]
+    // makes the Framer the SOLE frame_view producer. bytes_ is a byte-
+    // identical copy of an already-Framer-validated frame; re-feed it. A
+    // complete single frame fed with an EMPTY carry never appends to the
+    // carry (src/wire/framer.cpp), so a zero-capacity local pmr_carry_buffer
+    // performs NO allocation and is safe in this noexcept context.
+    // MessageView<Index>'s ctor builds the OffsetTable dict-free + noexcept.
+    // Lazy + cache-resetting move (I-9/AC-R4): rebuilds against post-move
+    // bytes_.data(). On any framing failure (impossible for a valid copy)
+    // fall back to a default MV (field-absent; memory-safe, never UB).
     w.raw("inline ");
     w.raw(kMV);
     w.raw(" const&\n");
     w.raw(oid);
     w.line("::view() const noexcept {");
-    w.line("    // R6: real bytes->MV reconstruction arrives when 2b swaps in the body.");
-    w.line("    // Stub: emplace a default-constructed MV (returns field-absent).");
-    w.line("    if (!view_cache_) view_cache_.emplace();");
+    w.line("    if (!view_cache_) {");
+    w.line("        ::fixpp::wire::pmr_carry_buffer carry{0, bytes_.get_allocator().resource()};");
+    w.line("        ::fixpp::wire::Framer framer{};");
+    w.line("        ::fixpp::wire::frame_view out_arr[1]{};");
+    w.line("        auto framed = framer.feed(");
+    w.line("            ::std::span<const ::std::byte>{bytes_.data(), bytes_.size()},");
+    w.line("            carry, ::std::span<::fixpp::wire::frame_view>{out_arr, 1});");
+    w.line("        if (framed && !framed->empty()) {");
+    w.raw("            view_cache_.emplace((*framed)[0], bytes_.get_allocator().resource());");
+    w.line();
+    w.line("        } else {");
+    w.line("            view_cache_.emplace();");
+    w.line("        }");
+    w.line("    }");
     w.line("    return *view_cache_;");
     w.line("}");
     w.line();
 
-    // from_view factory.
-    // R6: the frozen wire stub carries no frame bytes; owning_<Msg> cannot
-    // deep-copy src into bytes_ (2b swaps in the real wire body).
-    // The view argument is accepted and stored so the wiring is correct when 2b
-    // lands — this is the "F1 twin" fix (gate-b/r1 RC#1 / triage F2).
-    //
-    // Contract:
-    //   * src IS accepted (not discarded) — the dispatch arm passes the real view.
-    //   * A distinct error dict_reify_wire_body_not_ready is returned (NOT
-    //     dict_reify_unknown_msg_type and NOT success-with-no-copy): a positive
-    //     oracle must assert this exact code, so misdispatch cannot stay green.
-    //   * PMR allocation IS performed (pmr::vector with 1 element) so the OOM
-    //     trap path (AC-R7 / seam #16) fires on bad_alloc. An empty constructor
-    //     does not allocate; the 1-element form is required to make mr->allocate()
-    //     actually be called, keeping seam #7 testable.
-    //   * 2b-unblock: replace this body with a real deep-copy into bytes_ + view
-    //     rebuild from owned bytes and return success.
-    // trap_throw ([2a §4.2]): bad_alloc from pmr::vector → dict_reify_oom.
+    // from_view factory — 2b cutover (004 T059). Real owning deep-copy:
+    //   * src.bytes() is the full validated frame span ([2b §4.2] /
+    //     parser.hpp MessageView View-base). Deep-copy it into bytes_ (the
+    //     mr-owned arena), so the owning_<Msg> survives a SOURCE-arena reset
+    //     (AC-R4 / SC-006). view() lazily rebuilds the MV over bytes_.
+    //   * The pmr::vector copy IS the PMR allocation that keeps the OOM trap
+    //     path live (AC-R7 / seam #16); bad_alloc → dict_reify_oom
+    //     ([2a §4.2] trap shape).
+    //   * NOTE owning_message_handle's runtime-dispatch reify() path is a
+    //     SEPARATE concern (needs the build-tree _dispatch CMake target) and
+    //     stays deferred — T059 completes the typed reify_as<Msg> / SC-006
+    //     round-trip only.
     w.raw("inline ::fixpp::core::expected_t<");
     w.raw(oid);
     w.line(">");
@@ -339,19 +355,13 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.raw("::from_view(");
     w.raw(kMV);
     w.line(" const& src, ::std::pmr::memory_resource* mr) {");
-    w.line("    // R6-blocked: frozen wire stub carries no frame bytes (spec §5 R6 / gate-b/r1 RC#1).");
-    w.line("    // src IS wired through (not discarded) so the dispatch arm correctly forwards");
-    w.line("    // the parsed view — the copy will succeed automatically when 2b swaps the body.");
-    w.line("    // Return dict_reify_wire_body_not_ready (a distinct R6 placeholder) so a test");
-    w.line("    // oracle must assert this exact code; success-with-no-copy is prohibited (F2).");
-    w.line("    (void)src;  // used when 2b lands; suppress unused-variable warning under R6");
     w.line("    try {");
-    w.line("        // Perform exactly 1 PMR allocation to keep the OOM trap path live");
-    w.line("        // (AC-R7 / seam #16). pmr::vector(1 element, mr) allocates; an empty");
-    w.line("        // constructor would not. The vector is immediately discarded.");
-    w.line("        ::std::pmr::vector<::std::byte> tmp(1, ::std::byte{}, mr);");
-    w.line("        (void)tmp;");
-    w.line("        return ::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
+    w.raw("        ");
+    w.raw(oid);
+    w.line(" owned{mr};");
+    w.line("        auto const sb = src.bytes();  // full validated frame span");
+    w.line("        owned.bytes_.assign(sb.begin(), sb.end());  // deep copy into mr arena");
+    w.line("        return owned;  // move (custom noexcept move ctor)");
     w.line("    } catch (::std::bad_alloc const&) {");
     w.line("        return ::std::unexpected{::fixpp::core::error::dict_reify_oom};");
     w.line("    }");
@@ -371,10 +381,10 @@ std::string emit_reify(VersionIR const& ir) {
     w.line("// data-model Entity 4; AC-R2/AC-G7a). Shape oracle:");
     w.line("// specs/003-dictionary-codegen/contracts/generated_message.hpp.");
     w.line("//");
-    w.line("// R6: the vendored frozen wire stub carries no frame state; every get<>()");
-    w.line("// returns field-absent. from_view() stubs the deep-copy; the owning_message_traits");
-    w.line("// specialisation + static_assert compile now (AC-G7a). Behavioural reify");
-    w.line("// round-trip (values survive source-arena reset) is R6-blocked until 2b.");
+    w.line("// 2b cutover (004 T059): from_view deep-copies the validated frame into the");
+    w.line("// mr-owned bytes_; view() lazily rebuilds a MessageView<Index> over bytes_");
+    w.line("// via the Framer ([2b §4.2] sole producer). Values survive a SOURCE-arena");
+    w.line("// reset (AC-R4/SC-006). owning_message_handle runtime dispatch stays deferred.");
     w.line("#pragma once");
     w.raw("#include <fixpp/");
     w.raw(ir.ns);
@@ -385,11 +395,14 @@ std::string emit_reify(VersionIR const& ir) {
     w.line("#include <fixpp/dict/reify.hpp>         // owning_message_traits primary template");
     w.line("#include <fixpp/dict/version_profile.hpp>");
     w.line("#include <fixpp/wire/message_view_contract.hpp>");
+    w.line("#include <fixpp/wire/parser.hpp>          // MessageView<Index>, Framer,");
+    w.line("                                          // pmr_carry_buffer, frame_view (T059)");
     w.line("#include <cstddef>");
     w.line("#include <cstdint>");
     w.line("#include <memory_resource>");
     w.line("#include <new>");
     w.line("#include <optional>");
+    w.line("#include <span>");
     w.line("#include <string_view>");
     w.line("#include <type_traits>");
     w.line("#include <vector>");

@@ -49,7 +49,10 @@ public:
 
     // Eagerly scans the frame's tag=value<SOH> stream into mr-backed
     // storage. On a DoS-cap breach the table is left empty and the breach
-    // is reported by find()/build_status().
+    // is reported by find()/build_status(). Likewise, if `mr` throws
+    // bad_alloc mid-build it degrades the SAME way (empty table, status_ =
+    // out_of_memory) — a noexcept ctor must not let bad_alloc escape and
+    // std::terminate (004 T059 / Codex adversarial review).
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]]) noexcept;
 

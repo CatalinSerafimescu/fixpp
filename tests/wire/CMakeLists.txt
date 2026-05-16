@@ -49,6 +49,17 @@ add_wire_test(wire_unknown_fields_test unknown_fields_test.cpp)        # T017
 add_wire_test(wire_three_arena_pinning_test
   three_arena_pinning_test.cpp)                                        # T018
 add_wire_test(wire_cutover_2b_gated_test cutover_2b_gated_test.cpp)    # T019
+# T059: the cutover gate now exercises the 003 owning deep-copy round-trip,
+# so it needs the build-tree generated <vXX>/Reify.hpp + fixpp_dictionary
+# (fixpp_dictionary↔fixpp_wire is the permitted post-cutover static-archive
+# cycle, T028). fixpp_codegen_generate is defined in tests/codegen, which is
+# add_subdirectory'd before tests/wire.
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_cutover_2b_gated_test fixpp_codegen_generate)
+  target_include_directories(wire_cutover_2b_gated_test PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include")
+  target_link_libraries(wire_cutover_2b_gated_test PRIVATE fixpp_dictionary)
+endif()
 add_wire_test(wire_noexcept_trap_test noexcept_trap_test.cpp)          # T020
 
 # US2 — Writer / serialize / round-trip (T032–T033)

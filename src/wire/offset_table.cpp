@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <span>
 
 namespace fixpp::wire {
@@ -38,6 +39,12 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
 OffsetTable::OffsetTable(frame_view const& frame,
                          std::pmr::memory_resource* mr) noexcept
     : entries_(mr), overlay_(mr) {
+    // A noexcept ctor must NOT let a throwing `mr` (bad_alloc) escape — that
+    // would std::terminate (004 T059 / Codex adversarial review: the reify
+    // lazy view() rebuild made first-field-access an OOM kill-switch). On
+    // allocation failure we degrade EXACTLY like the DoS-cap path below:
+    // empty table, status_ = out_of_memory, find()/get<>() → field-absent.
+    try {
     auto buf = frame.bytes();
     std::size_t i = 0;
     std::size_t const n = buf.size();
@@ -109,6 +116,12 @@ OffsetTable::OffsetTable(frame_view const& frame,
         if (!seen) {
             overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
         }
+    }
+    } catch (std::bad_alloc const&) {
+        entries_.clear();
+        overlay_.clear();
+        status_ = core::expected_t<void>{
+            std::unexpect, core::error::out_of_memory};
     }
 }
 
