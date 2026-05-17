@@ -89,6 +89,13 @@ TEST(DecimalFormat, BufferTooSmall) {
     EXPECT_EQ(r.error(), error::decimal_buffer_too_small);
 }
 
+TEST(DecimalFormat, ZeroMantissaEmptyBufferTooSmall) {
+    std::span<std::byte> empty{};
+    auto r = decimal_traits<pod_decimal>::to_chars(pod_decimal{0, 0}, empty);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_buffer_too_small);
+}
+
 // Additional positive cases
 TEST(DecimalFormat, SimpleInteger) {
     auto r = fmt(pod_decimal{42, 0});

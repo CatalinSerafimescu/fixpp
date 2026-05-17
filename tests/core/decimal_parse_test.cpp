@@ -35,6 +35,18 @@ TEST(DecimalParse, EmptyInput) {
     EXPECT_EQ(r.error(), error::decimal_invalid_input);
 }
 
+TEST(DecimalParse, PlusSignOnly) {
+    auto r = parse("+");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_invalid_input);
+}
+
+TEST(DecimalParse, MinusSignOnly) {
+    auto r = parse("-");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_invalid_input);
+}
+
 // AC-P2: +0 and -0 are accepted and produce {0, 0}
 TEST(DecimalParse, PlusZero) {
     auto r = parse("+0");

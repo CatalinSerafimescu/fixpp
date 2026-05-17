@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <compare>
 #include <cstdint>
 #include <type_traits>
@@ -213,4 +214,51 @@ TEST(DecimalCrossTraits, X7_FromNonOverflowErrorPassthrough) {
     // Reset
     decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
     decimal_traits<Mock>::to_pod_error = error::decimal_overflow;
+}
+
+TEST(DecimalCrossTraits, ParseInvalidInputPropagatesError) {
+    std::array<std::byte, 1> src{std::byte{'+'}};
+    auto r = decimal<pod_decimal>::parse(
+        std::span<const std::byte>{src.data(), src.size()},
+        std::pmr::null_memory_resource());
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::decimal_invalid_input);
+}
+
+TEST(DecimalCrossTraits, ParseValidInputReturnsWrappedValue) {
+    std::array<std::byte, 3> src{std::byte{'1'}, std::byte{'.'}, std::byte{'5'}};
+    auto r = decimal<pod_decimal>::parse(
+        std::span<const std::byte>{src.data(), src.size()},
+        std::pmr::null_memory_resource());
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->value().mantissa, 15);
+    EXPECT_EQ(r->value().exponent, -1);
+}
+
+TEST(DecimalCrossTraits, FromSameTypeShortCircuitsWithoutTraitHooks) {
+    using Mock = fixpp::core::test::mock_pod;
+    decimal_traits<Mock>::fail_mask =
+        fixpp::core::test::mock_fail::from_pod | fixpp::core::test::mock_fail::to_pod;
+
+    decimal<Mock> src{Mock{7, -1}};
+    auto r = decimal<Mock>::from(src);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->value().mantissa, 7);
+    EXPECT_EQ(r->value().exponent, -1);
+
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
+}
+
+TEST(DecimalCrossTraits, ToSameTypeShortCircuitsWithoutTraitHooks) {
+    using Mock = fixpp::core::test::mock_pod;
+    decimal_traits<Mock>::fail_mask =
+        fixpp::core::test::mock_fail::from_pod | fixpp::core::test::mock_fail::to_pod;
+
+    decimal<Mock> src{Mock{9, -2}};
+    auto r = src.to<Mock>();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->value().mantissa, 9);
+    EXPECT_EQ(r->value().exponent, -2);
+
+    decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::none;
 }

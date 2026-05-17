@@ -77,6 +77,40 @@ TEST(DecimalCAPIErrorPaths, FormatExponentBelowMinus38Rejected) {
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_DECIMAL_INVALID);
 }
 
+// ── fixpp_decimal_compare / fixpp_decimal_equal — out-of-domain operands ─────
+// The bare (non-_checked) comparison entry points must return 0 when either
+// operand fails canonical-domain validation (exponent outside [-38, 0]).
+
+TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenLeftOperandOutOfDomain) {
+    fixpp_decimal_t bad{1, 5, {}};
+    fixpp_decimal_t good{1, 0, {}};
+    EXPECT_EQ(fixpp_decimal_compare(bad, good), 0);
+}
+
+TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenRightOperandOutOfDomain) {
+    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad{1, 5, {}};
+    EXPECT_EQ(fixpp_decimal_compare(good, bad), 0);
+}
+
+TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenBothOperandsOutOfDomain) {
+    fixpp_decimal_t bad_a{1, 5, {}};
+    fixpp_decimal_t bad_b{2, 5, {}};
+    EXPECT_EQ(fixpp_decimal_compare(bad_a, bad_b), 0);
+}
+
+TEST(DecimalCAPIErrorPaths, BareEqualReturnsZeroWhenLeftOperandOutOfDomain) {
+    fixpp_decimal_t bad{1, 5, {}};
+    fixpp_decimal_t good{1, 0, {}};
+    EXPECT_EQ(fixpp_decimal_equal(bad, good), 0);
+}
+
+TEST(DecimalCAPIErrorPaths, BareEqualReturnsZeroWhenRightOperandOutOfDomain) {
+    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad{1, 5, {}};
+    EXPECT_EQ(fixpp_decimal_equal(good, bad), 0);
+}
+
 // ── fixpp_decimal_init null guard ─────────────────────────────────────────────
 
 TEST(DecimalCAPIErrorPaths, InitNullIsNoop) {

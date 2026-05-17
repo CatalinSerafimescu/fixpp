@@ -19,6 +19,14 @@
 
 namespace fixpp::core {
 
+// Canonical pod_decimal exponent domain per 2a §4.2: exponent ∈ [kCanonicalExpMin, kCanonicalExpMax].
+inline constexpr int kCanonicalExpMin = -38;
+inline constexpr int kCanonicalExpMax = 0;
+
+// Locale-independent ASCII digit test. std::isdigit is locale-dependent and is
+// UB for negative char values — neither acceptable on the FIX-FLOAT parse path.
+constexpr bool is_ascii_digit(char c) noexcept { return c >= '0' && c <= '9'; }
+
 // ── T019a: from_chars ────────────────────────────────────────────────────────
 // Single-pass FIX FLOAT parser.  Grammar:
 //   [sign] integer_digits ['.' fractional_digits]
@@ -48,7 +56,7 @@ expected_t<pod_decimal> decimal_traits<pod_decimal>::from_chars(
     }
 
     // Must start with a digit (reject bare '.5' etc.)
-    if (*p < '0' || *p > '9') {
+    if (!is_ascii_digit(*p)) {
         return std::unexpected{error::decimal_invalid_input};
     }
 
@@ -57,7 +65,7 @@ expected_t<pod_decimal> decimal_traits<pod_decimal>::from_chars(
     std::int8_t exponent = 0;
     bool overflow = false;
 
-    while (p != end && *p >= '0' && *p <= '9') {
+    while (p != end && is_ascii_digit(*p)) {
         const int digit = *p - '0';
         // Check for multiplication overflow before doing it
         if (!overflow) {
@@ -74,11 +82,11 @@ expected_t<pod_decimal> decimal_traits<pod_decimal>::from_chars(
     if (p != end && *p == '.') {
         ++p;
         // Require at least one digit after '.' (reject '5.')
-        if (p == end || *p < '0' || *p > '9') {
+        if (p == end || !is_ascii_digit(*p)) {
             return std::unexpected{error::decimal_invalid_input};
         }
 
-        while (p != end && *p >= '0' && *p <= '9') {
+        while (p != end && is_ascii_digit(*p)) {
             const int digit = *p - '0';
             if (!overflow) {
                 if (exponent <= -38 || mantissa > (INT64_MAX - digit) / 10) {
@@ -127,8 +135,8 @@ expected_t<std::size_t> decimal_traits<pod_decimal>::to_chars(pod_decimal const&
         return std::unexpected{error::decimal_invalid_input};
     }
 
-    // AC-S3: exponent domain check (must be in [-38, 0])
-    if (v.exponent > 0 || v.exponent < -38) {
+    // AC-S3: exponent domain check (must be in [kCanonicalExpMin, kCanonicalExpMax])
+    if (v.exponent > kCanonicalExpMax || v.exponent < kCanonicalExpMin) {
         return std::unexpected{error::decimal_invalid_input};
     }
 
@@ -369,27 +377,20 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
 // ── T021: from_pod, to_pod, predicates ──────────────────────────────────────
 
 expected_t<pod_decimal> decimal_traits<pod_decimal>::from_pod(pod_decimal pd) noexcept {
-    // Enforce canonical domain per 2a §4.2: exponent ∈ [-38, 0].
+    // Enforce canonical domain per 2a §4.2: exponent ∈ [kCanonicalExpMin, kCanonicalExpMax].
     // INT64_MIN is the invalid sentinel — reject it too.
     if (pd.mantissa == INT64_MIN) {
         return std::unexpected{error::decimal_overflow};
     }
-    if (pd.exponent < -38 || pd.exponent > 0) {
+    if (pd.exponent < kCanonicalExpMin || pd.exponent > kCanonicalExpMax) {
         return std::unexpected{error::decimal_overflow};
     }
     return pd;
 }
 
 expected_t<pod_decimal> decimal_traits<pod_decimal>::to_pod(pod_decimal const& v) noexcept {
-    // Enforce canonical domain per 2a §4.2: exponent ∈ [-38, 0].
-    // INT64_MIN is the invalid sentinel.
-    if (v.mantissa == INT64_MIN) {
-        return std::unexpected{error::decimal_overflow};
-    }
-    if (v.exponent < -38 || v.exponent > 0) {
-        return std::unexpected{error::decimal_overflow};
-    }
-    return v;
+    // Same canonical-domain enforcement as from_pod (identical predicate).
+    return from_pod(v);
 }
 
 bool decimal_traits<pod_decimal>::is_finite(pod_decimal const& v) noexcept {
