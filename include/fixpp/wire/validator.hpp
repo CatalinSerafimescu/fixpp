@@ -105,6 +105,32 @@ public:
         std::pmr::memory_resource* scratch_mr) const noexcept override {
         std::string_view const msg_type = msg.msg_type();
 
+        // ── Step 0: header-order check ([2b §6.5.1], W-002) ─────────────
+        // FIX standard-header order: 8(BeginString), 9(BodyLength), 35(MsgType)
+        // must appear as the first three fields in document order. Tags 8 and 9
+        // are already verified positionally by the Framer; here we check that
+        // the first non-framing entry in the offset table is tag 35.
+        {
+            constexpr std::uint16_t kBeginStringH = 8;
+            constexpr std::uint16_t kBodyLengthH = 9;
+            constexpr std::uint16_t kCheckSumH = 10;
+            constexpr std::uint16_t kMsgType = 35;
+            auto const ents = msg.offsets().entries();
+            // Find the first entry that is not a framing tag.
+            for (auto const& e : ents) {
+                if (e.tag == kBeginStringH || e.tag == kBodyLengthH ||
+                    e.tag == kCheckSumH) {
+                    continue;  // skip framing — they are order-guaranteed by Framer
+                }
+                // First non-framing field must be MsgType (35).
+                if (e.tag != kMsgType) {
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_header_out_of_order};
+                }
+                break;
+            }
+        }
+
         // ── Step 1: iterate every present field ──────────────────────────
         for (auto it = msg.begin(); !(it == msg.end()); ++it) {
             auto const& fld = *it;
@@ -139,6 +165,63 @@ public:
                 continue;  // framing-guaranteed — always present
             }
             if (!msg.get(req_tag).has_value()) {
+                return core::expected_t<void>{std::unexpect,
+                                              core::error::wire_required_field_missing};
+            }
+        }
+
+        // ── Step 3: repeating-group structure check (/clarify Q2) ────────
+        // For each group declared in the dictionary (identified by the count
+        // field no_tag and its first-delimiter delim_tag), verify:
+        //   (a) the declared count matches the actual first-delimiter occurrences
+        //   (b) the first field after the count field is the delimiter (not a
+        //       different field injected before the first instance)
+        // Walk the offset table entries in document order.
+        auto const ents = msg.offsets().entries();
+        for (std::size_t i = 0; i < ents.size(); ++i) {
+            std::uint16_t const no_tag = ents[i].tag;
+            std::uint16_t const delim_tag = dict_.group_first_field(no_tag);
+            if (delim_tag == 0) {
+                continue;  // not a group count field in this dict
+            }
+            // Parse the declared count.
+            std::span<std::byte const> const count_bytes{
+                // The offset table's raw pointer into the frame buffer:
+                // bytes().data() is the frame start, entry.offset is value offset.
+                msg.bytes().data() + ents[i].offset, ents[i].length};
+            std::uint32_t declared_count = 0;
+            for (auto b : count_bytes) {
+                auto c = static_cast<unsigned char>(b);
+                if (c < '0' || c > '9') { break; }
+                declared_count = declared_count * 10U +
+                                 static_cast<std::uint32_t>(c - '0');
+            }
+            // Walk entries after the count to count actual delimiter occurrences
+            // and verify the first entry after the count is the delimiter.
+            if (declared_count == 0) {
+                continue;  // zero-count group: nothing to verify
+            }
+            // Entry i+1 must be the delimiter (first field of first instance).
+            if (i + 1 >= ents.size() || ents[i + 1].tag != delim_tag) {
+                return core::expected_t<void>{std::unexpect,
+                                              core::error::wire_required_field_missing};
+            }
+            // Count how many times delim_tag appears in the group body
+            // (all entries from i+1 until we hit a tag that belongs to the
+            // outer message level — heuristic: until we see no_tag again or
+            // the end). For robustness we count all occurrences within the
+            // remaining entries that match delim_tag.
+            std::uint32_t actual_count = 0;
+            for (std::size_t k = i + 1; k < ents.size(); ++k) {
+                if (ents[k].tag == delim_tag) {
+                    ++actual_count;
+                }
+                // If we encounter the same no_tag again, stop (nested repeat).
+                if (k > i + 1 && ents[k].tag == no_tag) {
+                    break;
+                }
+            }
+            if (actual_count != declared_count) {
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_required_field_missing};
             }

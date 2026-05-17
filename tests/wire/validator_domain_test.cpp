@@ -251,6 +251,92 @@ TEST(ValidatorDomain, UnexpectedTagRejected) {
         << static_cast<int>(result.error());
 }
 
+// (e) Malformed repeating-group: count > actual delimiter occurrences.
+//     NoPartyIDs=2 but only one PartyID (448) instance follows.
+//     Expected: wire_required_field_missing (count mismatch).
+TEST(ValidatorDomain, MalformedGroupCountRejected) {
+    auto gram = make_d_grammar();
+    dictionary_driven_validator v{std::move(gram)};
+
+    // 453=2 declares 2 instances, but only 1 delimiter (448) follows.
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "55=AAPL\x01" "54=1\x01"
+        "453=2\x01" "448=PA\x01" "447=D\x01");   // only 1 instance, not 2
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    ASSERT_FALSE(result.has_value())
+        << "group count=2 with only 1 instance must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << "expected wire_required_field_missing for count mismatch, got "
+        << static_cast<int>(result.error());
+}
+
+// (f) Malformed repeating-group: wrong first field (not the delimiter).
+//     The first entry after the count is NOT the delimiter tag.
+TEST(ValidatorDomain, MalformedGroupFirstFieldRejected) {
+    auto gram = make_d_grammar();
+    dictionary_driven_validator v{std::move(gram)};
+
+    // 453=1 but first group field is 447 (PartyIDSource), not 448 (PartyID).
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "55=AAPL\x01" "54=1\x01"
+        "453=1\x01" "447=D\x01" "448=PA\x01");   // delimiter 448 is NOT first
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    ASSERT_FALSE(result.has_value())
+        << "group with non-delimiter first field must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << "expected wire_required_field_missing for wrong first field, got "
+        << static_cast<int>(result.error());
+}
+
+// (g) Well-formed repeating group: count=2 with exactly 2 delimiter occurrences.
+TEST(ValidatorDomain, WellFormedGroupAccepted) {
+    auto gram = make_d_grammar();
+    dictionary_driven_validator v{std::move(gram)};
+
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "55=AAPL\x01" "54=1\x01"
+        "453=2\x01"
+        "448=PA\x01" "447=D\x01"   // instance 1
+        "448=PB\x01" "447=E\x01"); // instance 2
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "well-formed 2-instance group must validate OK; error="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
 // (d) Out-of-range enum value → wire_field_value_out_of_range.
 TEST(ValidatorDomain, EnumViolationRejected) {
     auto gram = make_d_grammar();
