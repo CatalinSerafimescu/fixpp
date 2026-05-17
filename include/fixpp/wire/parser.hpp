@@ -93,6 +93,23 @@ class MessageView : public View {
 public:
     constexpr MessageView() noexcept = default;
 
+    // [2b §4.3] Construct with type-erased dict opaque pointer + classify fn.
+    // The dict is owned by the Parser; the pointer and fn lifetime are tied
+    // to the Parser. No incomplete-type issues — uses void const* + fn ptr.
+    // ([PR68-02] fix.)
+    using classify_fn_t = bool (*)(void const*, std::string_view, std::uint16_t) noexcept;
+
+    MessageView(frame_view const& frame, std::pmr::memory_resource* mr,
+                void const* opaque_dict, classify_fn_t classify_fn) noexcept
+        requires(Mode == access_mode::Index)
+        : View{frame.bytes().data(), frame.bytes().size(),
+               frame.token()},  // [2b §6.4] thread real pool token
+          table_{frame, mr},
+          mr_{mr},
+          opaque_dict_{opaque_dict},
+          classify_fn_{classify_fn},
+          unk_items_{mr} {}
+
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
@@ -208,21 +225,15 @@ template <std::uint16_t NoTag, class GroupT>
         return group_view<GroupT>{table_.group_slices(NoTag), token()};
     }
 
+// [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
+// Parser that constructed this MessageView — no caller-supplied argument.
+// Walks the offset table and yields entries whose tag is not `field_valid_for`-
+// known in the dict, exempting framing tags 8/9/10. Builds and caches the kv
+// list in the per-message arena (mr_) on first call; idempotent.
+// ([PR68-02] fix — the dict is captured at Parser construction time.)
+// When dict_ptr_ is null (default/dict-free construction), no tag is classified
+// as known so all non-framing tags are yielded as unknown.
 [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        // Zero-dict path: without a dictionary no tag is classified as
-        // dictionary-missing. Use classify_unknown(dict) to get the real split.
-        return unknown_fields_view{};
-    }
-
-// [2b §4.8] Dictionary-aware unknown-fields classification. Walks the offset
-// table and yields entries whose tag is not `field_valid_for`-known in the
-// dictionary. Builds the kv list into the per-message arena (mr_) on first
-// call and caches it (idempotent). TV is the complete dict type at the call
-// site (seam-#1 mock or real 2c table_view); completeness deferred here.
-template <class TV>
-[[nodiscard]] unknown_fields_view classify_unknown(
-    TV const& dict) const noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         if (unk_items_built_) {
             return unknown_fields_view{
@@ -242,7 +253,11 @@ template <class TV>
                 e.tag == kCheckSum) {
                 continue;  // framing — never unknown
             }
-            if (!dict.field_valid_for(mtype, e.tag)) {
+            // classify_fn_ is nullptr for dict-free views (all non-framing =
+            // unknown); otherwise classify via the bound fn + opaque dict.
+            bool const known = (classify_fn_ != nullptr) &&
+                               classify_fn_(opaque_dict_, mtype, e.tag);
+            if (!known) {
                 unk_items_.push_back(unknown_fields_view::kv{
                     .tag = e.tag,
                     .data = raw.data() + e.offset,
@@ -279,9 +294,15 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     struct empty_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, OffsetTable, empty_t>
         table_{};
-    // Index-mode extras for classify_unknown() lazy build.
-    // mr_ declared BEFORE unk_items_ so it is initialised first.
+    // Index-mode extras. mr_ declared BEFORE unk_items_ so it is initialised
+    // first.
     std::pmr::memory_resource* mr_ = std::pmr::null_memory_resource();
+    // [2b §4.3] / [2b §4.8] type-erased dict threaded from the Parser.
+    // Uses void const* + function pointer to avoid requiring table_view to be
+    // complete at class-template definition time. ([PR68-02] fix.)
+    // nullptr classify_fn_ = dict-free path (all non-framing = unknown).
+    void const* opaque_dict_ = nullptr;
+    classify_fn_t classify_fn_ = nullptr;
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{
         std::pmr::null_memory_resource()};
@@ -344,29 +365,64 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 template <access_mode Mode = access_mode::Index>
 class Parser {
 public:
-    // dict_metadata is a value-typed metadata contract owned by 2c (only
-    // forward-declared in this header). The parse path is dictionary-free
-    // (Index/Iter decode no fields), so the dict arg is not retained by
-    // the Parser itself. The ctor is templated on the metadata type purely
-    // so its completeness is deferred to instantiation (a non-dependent
-    // by-value incomplete param would be ill-formed at template-definition
-    // time); TV deduces to fixpp::dict::table_view at every call site,
-    // preserving the [2b §4.3] by-value surface.
-    // For sessions that use unknown_fields() the caller passes the dict
-    // to MessageView::classify_unknown() (see below), which avoids storing
-    // an incomplete type in either Parser or MessageView.
+    // [2b §4.3] Parser accepts dict_metadata by value and stores a pointer to
+    // a copy held in the CALLER's scope. Thread the pointer into every
+    // MessageView so unknown_fields() classifies without a caller-supplied arg.
+    // ([PR68-02] fix.)
+    //
+    // Implementation note: we cannot hold `fixpp::dict::table_view` by value
+    // here because parser.hpp only forward-declares the type and non-test TUs
+    // that include parser.hpp (via message_view_contract.hpp) would see an
+    // incomplete-type member at class-template definition time. Instead we use
+    // a type-erased opaque_dict_ (void const*) + a classify function pointer,
+    // both set in the templated ctor where TV IS complete.
+    //
     // NOLINTBEGIN(performance-unnecessary-value-param) — by-value is the
-    // [2b §4.3] surface contract; deferred-completeness design prevents a
-    // const-ref (TV is incomplete at template-definition time).
+    // [2b §4.3] surface contract for the ctor.
     template <class TV = fixpp::dict::table_view>
-    explicit Parser(TV /*dict_metadata*/) noexcept {}
+    explicit Parser(TV dict_metadata) noexcept
+        // TV is complete at this instantiation point (seam-#1 rule). Store
+        // a COPY on the stack inside the caller's scope and immediately
+        // take its address — we can't safely take &dict_metadata (parameter
+        // is a temporary), so we move it into our own storage via placement
+        // into a pre-allocated aligned buffer.
+        // Trade-off: we still need SOMEWHERE to store the dict by value. The
+        // cleanest no-heap approach: store it in a stack-local inside parse().
+        // For this implementation we COPY it into a per-call local (idiomatic
+        // for the test usage pattern: Parser{dict}; parser.parse(frame, mr)).
+        //
+        // Since this makes Parser non-copyable (the dict copy lives here), we
+        // store the dict inside the Parser using a templated copy wrapper that
+        // erases the type. The wrapper needs to be small and noexcept.
+        : classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
+              return static_cast<TV const*>(d)->field_valid_for(mt, t);
+          }}
+    {
+        // Allocate the dict copy in-place inside the aligned storage.
+        static_assert(sizeof(TV) <= sizeof(dict_storage_), "dict too large for Parser storage");
+        static_assert(alignof(TV) <= alignof(std::max_align_t), "dict alignment too strict for Parser storage");
+        new (dict_storage_) TV(std::move(dict_metadata));
+        opaque_dict_ = dict_storage_;
+        destroy_fn_ = [](void* p) noexcept { static_cast<TV*>(p)->~TV(); };
+    }
     // NOLINTEND(performance-unnecessary-value-param)
+
+    ~Parser() noexcept {
+        if (opaque_dict_ && destroy_fn_) {
+            destroy_fn_(dict_storage_);
+        }
+    }
+    Parser(Parser const&) = delete;
+    Parser& operator=(Parser const&) = delete;
+    Parser(Parser&&) = delete;
+    Parser& operator=(Parser&&) = delete;
 
     [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
                                                             [[clang::lifetimebound]],
                                                             std::pmr::memory_resource* mr) noexcept
         [[clang::lifetimebound]] {
-        MessageView<Mode> mv{frame, mr};
+        // Thread the opaque dict pointer + classify fn into the MessageView.
+        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
                 return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
@@ -380,6 +436,16 @@ public:
         [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
             return MessageView<access_mode::Iter>{frame};
         }
+
+private:
+    // Type-erased dict storage. 512 bytes is ample for the mock_dict_table
+    // (std::unordered_map<string,...> x5 — typical sizeof is ~280 B).
+    // The real 2c table_view is expected to be similar. If a dict is larger,
+    // the static_assert in the ctor fires at instantiation time.
+    alignas(std::max_align_t) std::byte dict_storage_[512]{};
+    void const* opaque_dict_ = nullptr;
+    bool (*classify_fn_)(void const*, std::string_view, std::uint16_t) noexcept = nullptr;
+    void (*destroy_fn_)(void*) noexcept = nullptr;
 };
 
 }  // namespace fixpp::wire

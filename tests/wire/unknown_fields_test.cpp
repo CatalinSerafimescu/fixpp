@@ -76,9 +76,10 @@ TEST(WireUnknownFields, DocumentOrderRoundTripNoMaterialization) {
     EXPECT_FALSE(uf.empty());
 }
 
-// gate-b/r1: classify_unknown(dict) performs the real dict-aware split.
-// Tag 5000 is not registered for "D", so it must appear as unknown; known
-// fields (35, 34) and framing tags (8, 9, 10) must NOT appear.
+// [PR68-02] Contract API: unknown_fields() uses the dict passed to Parser at
+// construction time — no caller-supplied argument. Tag 5000 is not registered
+// for "D", so it must appear as unknown; known fields (35, 34) and framing
+// tags (8, 9, 10) must NOT appear. ([2b §4.3] / [2b §4.8])
 TEST(WireUnknownFields, DictBoundUnknownSplit) {
     // Build a dict that knows 35 (MsgType) and 34 (MsgSeqNum) for "D".
     fixpp::dict::table_view dict;
@@ -90,12 +91,15 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    // [2b §4.3]: Parser captures the dict by value at construction; unknown_fields()
+    // uses it without a caller-supplied argument.
+    Parser<access_mode::Index> parser{dict};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
-    // classify_unknown(dict) walks the offset table and classifies against dict.
-    auto uf = mv->classify_unknown(dict);
+    // unknown_fields() — contract API, no arg — walks the offset table and
+    // classifies against the dict stored at Parser construction time.
+    auto uf = mv->unknown_fields();
     // tag 5000 is not in the dict for "D" → must appear as unknown.
     EXPECT_FALSE(uf.empty()) << "tag 5000 must be classified as unknown";
     std::vector<std::uint16_t> unknown_tags;
@@ -109,22 +113,22 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
 }
 
 // With an empty dict (no known tags for this msg_type), all non-framing
-// tags are classified as unknown.
+// tags are classified as unknown by unknown_fields() (no-arg contract API).
 TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
     auto buf = make_raw_frame("35=D\x01" "34=1\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::dict::table_view empty_dict;
+    // Empty dict: all non-framing tags will be classified as unknown.
     Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
-    // With an empty dict, all non-framing tags are "unknown".
-    auto uf = mv->classify_unknown(empty_dict);
+    // unknown_fields() — no-arg contract API — uses the empty dict stored in Parser.
     // 35 (MsgType) and 34 (MsgSeqNum) are not in the empty dict → unknown.
     // Framing tags 8, 9, 10 must NOT appear.
+    auto uf = mv->unknown_fields();
     bool has_35 = false, has_34 = false, has_framing = false;
     for (auto it = uf.begin(); !(it == uf.end()); ++it) {
         auto tag = (*it).tag;
