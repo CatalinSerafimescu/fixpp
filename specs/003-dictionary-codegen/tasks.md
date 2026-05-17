@@ -262,3 +262,28 @@ Within every phase the test tasks are listed first and MUST fail before the emit
 - Every test seam in spec §9 + every AC (incl. AC-G7a, AC-C4, AC-VP*/AC-FT*) binds to a named on-disk file or the `fixpp::dict::codegen-build-graph-check` CTest target (plan.md seam→file map).
 
 **Total: 54 tasks** — Setup 3, Foundational 13, US1 11, US2 6, US3 4, US4 3, US5 2, US6 2, Polish 10.
+
+---
+
+## Phase 11 — Article IX §1 retro coverage remediation (2026-05-17)
+
+Branch `003-dictionary-codegen-cov-remediation`. Controlling plan:
+`.specify/decisions/retro-coverage-remediation-plan.md` (local-only). Last of
+the sequential 001→002→003 legs (001 = PR #69, 002 = PR #70). Scope is the
+**003-owned** modules only — NOT the 002 `dictionary.cpp`/`xml_loader.cpp`
+(closed in PR #70) and NOT 004 `wire/`. 003-owned surface:
+`src/dictionary/{field_traits,reify,version_profile,version_registry}.cpp`,
+`include/fixpp/dict/{field_traits,reify,version_profile,version_registry}.hpp`,
+and the `fixpp-codegen` host tool `tools/codegen/fixpp-codegen/*.{cpp,hpp}`.
+Generated codegen output (`build/<preset>/_codegen/...`) is build-tree-only
+and out of scope by construction.
+
+**Codegen-staleness prerequisite (`project_codegen_emitter_staleness`):**
+before ANY sanitizer/coverage build in T056/the verify matrix, run
+`build fixpp-codegen → rm -rf build/<preset>/_codegen → reconfigure` so the
+build dirs regenerate `Reify.hpp` from the current emitter (bit T059 and 004
+T055 twice — passes debug, fails logically under asan/ubsan/tsan/coverage).
+
+- [x] T055 `/simplify` scoped to the 003-owned surface above (3 general-purpose review agents → Opus close-analysis triage → apply only accepted in-scope, behaviour-preserving simplifications; surgical, no unrelated refactors, no touching 002/004 or generated output).
+- [x] T056 Coverage pass on the simplified 003 code: codegen-staleness prerequisite first; then fresh per-binary profraw over the 003-owned files, ≥95 % line / ≥85 % branch on the lcov DA/BRDA basis; record per-line Opus test-or-waive for residuals in `.specify/decisions/003-dictionary-codegen-verify.md`.
+- [x] T057 Catalogue refresh + completeness audit: `spec/feature-catalogue.md` + `spec/coverage-index.md`; re-run the completeness audit (a `/gate-b` precondition). A tests-only + behaviour-preserving remediation is expected to need no catalogue delta (001 PR #69 / 002 PR #70 precedent) — confirm or record the delta.

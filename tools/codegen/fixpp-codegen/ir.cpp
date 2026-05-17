@@ -10,7 +10,9 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace fixpp::codegen {
 
@@ -47,6 +49,20 @@ constexpr VersionMap kCodegenVersions[] = {
 constexpr std::uint16_t kMaxTag = 2500;
 
 }  // namespace
+
+std::vector<FieldIR const*> collect_top_fields(MessageIR const& m) {
+    std::vector<FieldIR const*> top;
+    std::unordered_set<std::uint16_t> seen;
+    for (auto const& f : m.fields) {
+        if (f.ref.group_no_tag != 0) {
+            continue;
+        }
+        if (seen.insert(f.ref.tag).second) {
+            top.push_back(&f);
+        }
+    }
+    return top;
+}
 
 VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr) {
     fixpp::dict::XmlLoader loader;
