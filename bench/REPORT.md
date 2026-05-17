@@ -37,3 +37,21 @@ per [const §VIII.4] and add BM_HffixParser_20tag to parser_bench.cpp.
 
 validator_bench.cpp intentionally absent. US4 PAUSED (dict::table_view undefined).
 Recorded as "deferred with US4" in all deliverables.
+
+## PR68-08 — Release baseline follow-up (gate-b/r1, 2026-05-17)
+
+Triage finding `opus_pr68_1_triage.md` PR68-08 (P2, waived): the [2b §6.6] ±5%
+regression gate is explicitly CI/linux-clang-release-scoped; this REPORT is honest
+that all timings above are debug-only and do NOT claim release compliance.
+
+**Tracked follow-up:** when `linux-clang-release` CI lands (currently blocked by
+`CMAKE_MAKE_PROGRAM`/Ninja preset gap in the GCC-release profile), re-run the
+bench suite under `linux-clang-release`, record the release baselines here, and
+commit the baseline JSON `_note` as "release-baseline committed". The ±5%
+regression gate fires on linux-clang-release CI; this follow-up closes the
+PR68-08 waiver.
+
+The `Validator::validate` ceiling (≤ 200 ns, [2b §6.6] table row for validator)
+is still debug-only deferred; it must be wired into `validator_bench.cpp` alongside
+the release-baseline commit. US4 is now landed (`dictionary_driven_validator`
+complete) so the only remaining blocker is the release-CI infra gap.
