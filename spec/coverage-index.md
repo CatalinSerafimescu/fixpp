@@ -196,7 +196,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
      no FIX-spec section maps to them by design; their verifying tests are recorded in
      feature-catalogue.md. W-009's wire FLOAT-accessor leg (the 001-core-decimal 2b deferral)
      is closed by 004 T027. Verified GREEN per .specify/decisions/004-wire-codec-verify.md
-     (run-2 FINAL @ ce1d4d2); Gate A converged r1; Gate B PR #68 (converging via gate-b loop). -->
+     (run-2 FINAL @ ce1d4d2); Gate A converged r1; Gate B PR #68 converged 2026-05-17 (gate-b-done, HEAD 8253ef7, P1=0/P2=0/P3=0). -->
 
 ### Session-Layer Messages (MsgType catalogue, all versions)
 
