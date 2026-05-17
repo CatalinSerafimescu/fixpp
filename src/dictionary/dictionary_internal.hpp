@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -26,6 +27,25 @@
 #include <vector>
 
 namespace fixpp::dict::detail {
+
+// Bytewise (locale-independent) `unsigned char` comparator over `string_view`
+// per research.md D-6 / Gate A round 1 P2.4. Shared by xml_loader.cpp (build
+// ordering) and dictionary.cpp (name lookups) — the two TUs that include this
+// private header — so the sort key is byte-identical across build and query.
+[[nodiscard]] inline int bytewise_compare(std::string_view a, std::string_view b) noexcept {
+    auto const n = std::min(a.size(), b.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        auto const lhs = static_cast<unsigned char>(a[i]);
+        auto const rhs = static_cast<unsigned char>(b[i]);
+        if (lhs != rhs) {
+            return lhs < rhs ? -1 : 1;
+        }
+    }
+    if (a.size() == b.size()) {
+        return 0;
+    }
+    return a.size() < b.size() ? -1 : 1;
+}
 
 // (offset, length) into the metadata-handle's name string pool. Indices are
 // stable for the handle's lifetime because the pool is reserved to its final

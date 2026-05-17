@@ -25,26 +25,8 @@
 
 namespace fixpp::dict {
 
-// Bytewise (locale-independent) `unsigned char` comparator over `string_view`
-// per research.md D-6 / Gate A round 1 P2.4.
-namespace {
-
-[[nodiscard]] inline int bytewise_compare(std::string_view a, std::string_view b) noexcept {
-    auto const n = std::min(a.size(), b.size());
-    for (std::size_t i = 0; i < n; ++i) {
-        auto const lhs = static_cast<unsigned char>(a[i]);
-        auto const rhs = static_cast<unsigned char>(b[i]);
-        if (lhs != rhs) {
-            return lhs < rhs ? -1 : 1;
-        }
-    }
-    if (a.size() == b.size()) {
-        return 0;
-    }
-    return a.size() < b.size() ? -1 : 1;
-}
-
-}  // namespace
+// `detail::bytewise_compare` (the locale-independent name sort key shared with
+// xml_loader.cpp) lives in dictionary_internal.hpp per research.md D-6.
 
 // ============================================================================
 // detail::dict_metadata_handle — sorted-array lookup helpers
@@ -52,24 +34,31 @@ namespace {
 
 namespace detail {
 
-MsgFieldsRun dict_metadata_handle::find_msg_fields(std::string_view msg_type) const noexcept {
+namespace {
+
+// Shared message-row binary search for the two per-MsgType run lookups below.
+// Returns SIZE_MAX when `msg_type` is absent (keeps the hot path allocation-
+// and exception-free; the callers map the sentinel to an empty run).
+[[nodiscard]] std::size_t find_msg_index(std::pmr::vector<MessageEntry> const& messages,
+                                          std::string_view msg_type) noexcept {
     auto const it = std::ranges::lower_bound(
-        messages_, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
-    if (it == messages_.end() || it->msg_type != msg_type) {
-        return {};
+        messages, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
+    if (it == messages.end() || it->msg_type != msg_type) {
+        return SIZE_MAX;
     }
-    auto const idx = static_cast<std::size_t>(it - messages_.begin());
-    return per_msg_field_offsets_[idx];
+    return static_cast<std::size_t>(it - messages.begin());
+}
+
+}  // namespace
+
+MsgFieldsRun dict_metadata_handle::find_msg_fields(std::string_view msg_type) const noexcept {
+    auto const idx = find_msg_index(messages_, msg_type);
+    return idx == SIZE_MAX ? MsgFieldsRun{} : per_msg_field_offsets_[idx];
 }
 
 MsgFieldsRun dict_metadata_handle::find_msg_required(std::string_view msg_type) const noexcept {
-    auto const it = std::ranges::lower_bound(
-        messages_, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
-    if (it == messages_.end() || it->msg_type != msg_type) {
-        return {};
-    }
-    auto const idx = static_cast<std::size_t>(it - messages_.begin());
-    return per_msg_required_offsets_[idx];
+    auto const idx = find_msg_index(messages_, msg_type);
+    return idx == SIZE_MAX ? MsgFieldsRun{} : per_msg_required_offsets_[idx];
 }
 
 FieldRef dict_metadata_handle::field_ref_impl(std::string_view msg_type,

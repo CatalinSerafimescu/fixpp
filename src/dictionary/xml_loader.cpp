@@ -161,23 +161,16 @@ constexpr VersionEntry kVersionTable[] = {
 }
 
 // ----------------------------------------------------------------------------
-// Bytewise (locale-independent) `unsigned char` comparator over `string_view`
-// per research.md D-6.
+// The bytewise name comparator (research.md D-6) is `detail::bytewise_compare`
+// in dictionary_internal.hpp — shared with dictionary.cpp so the build-time
+// sort key and the query-time lookup key are byte-identical.
 // ----------------------------------------------------------------------------
 
-[[nodiscard]] inline int bytewise_compare(std::string_view a, std::string_view b) noexcept {
-    auto const n = std::min(a.size(), b.size());
-    for (std::size_t i = 0; i < n; ++i) {
-        auto const lhs = static_cast<unsigned char>(a[i]);
-        auto const rhs = static_cast<unsigned char>(b[i]);
-        if (lhs != rhs) {
-            return lhs < rhs ? -1 : 1;
-        }
-    }
-    if (a.size() == b.size()) {
-        return 0;
-    }
-    return a.size() < b.size() ? -1 : 1;
+// Helper for parse_version: parse a non-negative decimal int from `s`,
+// requiring the whole span to be consumed. Returns false on any failure.
+[[nodiscard]] bool parse_nonneg_int(std::string_view s, int& out) noexcept {
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), out);
+    return r.ec == std::errc{} && r.ptr == s.data() + s.size() && out >= 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -291,29 +284,15 @@ void LoaderState::parse_version(pugi::xml_node const& root) {
     int major = 0;
     int minor = 0;
     int sp = 0;
-    {
-        std::string const s{major_attr.as_string("")};
-        auto const r = std::from_chars(s.data(), s.data() + s.size(), major);
-        if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || major < 0) {
-            throw unknown_version_error(
-                "dict::unknown_version_error: non-numeric or negative major");
-        }
+    if (std::string const s{major_attr.as_string("")}; !parse_nonneg_int(s, major)) {
+        throw unknown_version_error("dict::unknown_version_error: non-numeric or negative major");
     }
-    {
-        std::string const s{minor_attr.as_string("")};
-        auto const r = std::from_chars(s.data(), s.data() + s.size(), minor);
-        if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || minor < 0) {
-            throw unknown_version_error(
-                "dict::unknown_version_error: non-numeric or negative minor");
-        }
+    if (std::string const s{minor_attr.as_string("")}; !parse_nonneg_int(s, minor)) {
+        throw unknown_version_error("dict::unknown_version_error: non-numeric or negative minor");
     }
     if (sp_attr != nullptr) {
-        std::string const s{sp_attr.as_string("")};
-        if (!s.empty()) {
-            auto const r = std::from_chars(s.data(), s.data() + s.size(), sp);
-            if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || sp < 0) {
-                throw unknown_version_error("dict::unknown_version_error: non-numeric servicepack");
-            }
+        if (std::string const s{sp_attr.as_string("")}; !s.empty() && !parse_nonneg_int(s, sp)) {
+            throw unknown_version_error("dict::unknown_version_error: non-numeric servicepack");
         }
     }
     auto const resolved =
@@ -498,14 +477,7 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                 std::uint16_t first_field_tag = 0;
                 for (auto const& gc : child.children()) {
                     std::string_view const tn{gc.name()};
-                    if (tn == "field") {
-                        auto const cn = std::string{gc.attribute("name").as_string("")};
-                        auto const fi = by_name_.find(cn);
-                        if (fi != by_name_.end()) {
-                            first_field_tag = fi->second.tag;
-                            break;
-                        }
-                    } else if (tn == "group") {
+                    if (tn == "field" || tn == "group") {
                         auto const cn = std::string{gc.attribute("name").as_string("")};
                         auto const fi = by_name_.find(cn);
                         if (fi != by_name_.end()) {
@@ -657,7 +629,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 
     // Sort messages bytewise by msg_type — research.md D-6.
     std::ranges::sort(messages_, [](MessageDef const& a, MessageDef const& b) noexcept {
-        return bytewise_compare(a.msg_type, b.msg_type) < 0;
+        return detail::bytewise_compare(a.msg_type, b.msg_type) < 0;
     });
 
     // First pass: estimate name pool size.
@@ -869,7 +841,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     }
     std::ranges::sort(h.components_by_name_,
                       [&](detail::NamedIndex const& a, detail::NamedIndex const& b) noexcept {
-                          return bytewise_compare(h.name_at(a.name), h.name_at(b.name)) < 0;
+                          return detail::bytewise_compare(h.name_at(a.name), h.name_at(b.name)) < 0;
                       });
 
     // Build field-name index, sorted bytewise.
@@ -882,7 +854,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     }
     std::ranges::sort(h.field_by_name_, [&](detail::FieldNameEntry const& a,
                                             detail::FieldNameEntry const& b) noexcept {
-        return bytewise_compare(h.name_at(a.name), h.name_at(b.name)) < 0;
+        return detail::bytewise_compare(h.name_at(a.name), h.name_at(b.name)) < 0;
     });
 
     return handle;
