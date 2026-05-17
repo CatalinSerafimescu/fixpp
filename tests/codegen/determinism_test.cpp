@@ -36,6 +36,10 @@
 #include <unordered_set>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 #include "../../tools/codegen/fixpp-codegen/gen_util.hpp"
 #include <fixpp/dict/field_ref.hpp>
 
@@ -134,6 +138,18 @@ static int run_codegen_args(std::string_view args) {
     return std::system(cmd.c_str());
 }
 
+// Decode the raw std::system() return value to the child's exit code.
+// On POSIX, std::system() returns the wait(2)-encoded status; WEXITSTATUS
+// extracts the actual exit code.  Returns -1 if the process did not exit
+// normally (e.g. killed by a signal), which surfaces a clear diagnostic.
+static int exit_code(int system_ret) {
+#ifdef _WIN32
+    return system_ret;
+#else
+    return WIFEXITED(system_ret) ? WEXITSTATUS(system_ret) : -1;
+#endif
+}
+
 // RAII temp directory: created in the system temp dir, removed on destruction.
 struct TempDir {
     fs::path path;
@@ -217,22 +233,22 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
 }
 
 TEST_F(DeterminismTest, NoArgsExitsTwo) {
-    EXPECT_EQ(run_codegen_args(""), 2 << 8);
+    EXPECT_EQ(exit_code(run_codegen_args("")), 2);
 }
 
 TEST_F(DeterminismTest, MissingXmlValueExitsTwo) {
-    EXPECT_EQ(run_codegen_args("--xml"), 2 << 8);
+    EXPECT_EQ(exit_code(run_codegen_args("--xml")), 2);
 }
 
 TEST_F(DeterminismTest, MissingOutValueExitsTwo) {
-    EXPECT_EQ(run_codegen_args("--out"), 2 << 8);
+    EXPECT_EQ(exit_code(run_codegen_args("--out")), 2);
 }
 
 TEST_F(DeterminismTest, BadXmlPathExitsOne) {
     TempDir run("fixpp_det_badxml");
     fs::path missing = run.path / "missing.xml";
     std::string cmd = "--xml " + quote(missing.string()) + " --out " + quote(run.path.string());
-    EXPECT_EQ(run_codegen_args(cmd), 1 << 8);
+    EXPECT_EQ(exit_code(run_codegen_args(cmd)), 1);
 }
 
 // ── AC-T2: No source-tree write ───────────────────────────────────────────────
