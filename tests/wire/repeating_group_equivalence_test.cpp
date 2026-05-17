@@ -42,6 +42,27 @@ struct TestLeg {
     [[nodiscard]] std::string_view sv() const noexcept {
         return {reinterpret_cast<char const*>(data), len};
     }
+    // Parse the first field from the sub-frame (tag=value<SOH>).
+    // Returns {tag, value_sv} of the first field in the slice.
+    struct first_field_result { std::uint16_t tag; std::string_view value; };
+    [[nodiscard]] first_field_result parse_first_field() const noexcept {
+        std::string_view raw{reinterpret_cast<char const*>(data), len};
+        auto eq = raw.find('=');
+        if (eq == std::string_view::npos) {
+            return {0, {}};
+        }
+        std::uint32_t tag_val = 0;
+        for (std::size_t i = 0; i < eq; ++i) {
+            char c = raw[i];
+            if (c < '0' || c > '9') { return {0, {}}; }
+            tag_val = (tag_val * 10U) + static_cast<std::uint32_t>(c - '0');
+        }
+        auto val_start = eq + 1;
+        auto soh = raw.find('\x01', val_start);
+        auto val_end = (soh == std::string_view::npos) ? raw.size() : soh;
+        return {static_cast<std::uint16_t>(tag_val),
+                raw.substr(val_start, val_end - val_start)};
+    }
 };
 
 TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
@@ -86,10 +107,21 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
     EXPECT_EQ(via_index, via_iter) << "seam #8: iter() and operator[] must enumerate identical "
                                       "instances in identical order";
 
-    // The first leg slice carries its delimiter value (SYM1); the second
-    // leg slice carries the nested 604/605 group bytes — both enumeration
-    // paths see identical content (asserted via via_index == via_iter above).
-    EXPECT_NE(via_index[0].find("SYM1"), std::string::npos);
+    // RC#2 real-parse assertion: each slice starts with the delimiter field
+    // (tag 600 = "600=") so a real GroupT can parse it as "tag=value<SOH>...".
+    auto ff0 = gv[0].parse_first_field();
+    EXPECT_EQ(ff0.tag, 600U)
+        << "first parsed field of leg[0] must be the delimiter tag 600, got "
+        << ff0.tag;
+    EXPECT_EQ(ff0.value, "SYM1");
+
+    auto ff1 = gv[1].parse_first_field();
+    EXPECT_EQ(ff1.tag, 600U)
+        << "first parsed field of leg[1] must be the delimiter tag 600, got "
+        << ff1.tag;
+    EXPECT_EQ(ff1.value, "SYM2");
+
+    // Content completeness: second leg carries nested 605 group bytes too.
     EXPECT_NE(via_index[1].find("605=ALT2"), std::string::npos);
 }
 
