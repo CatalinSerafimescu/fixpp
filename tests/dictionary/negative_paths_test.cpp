@@ -11,11 +11,14 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory_resource>
 #include <string>
 #include <string_view>
+
+#include <unistd.h>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/error.hpp>
@@ -289,6 +292,21 @@ TEST(NegativePaths, RejectsNonNumericServicepack) {
     expect_unknown_version_error_contains(kXml, "non-numeric servicepack");
 }
 
+// Pins the !s.empty() short-circuit branch in xml_loader.cpp: servicepack=''
+// (attribute present but empty) must be treated identically to servicepack='0'
+// — i.e. SP0 — and resolve to v44.
+TEST(NegativePaths, EmptyServicepackResolvesAsSP0) {
+    auto* mr = std::pmr::new_delete_resource();
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack=''>)"
+        R"(<fields><field number='35' name='MsgType' type='STRING'/></fields>)"
+        R"(<messages/></fix>)";
+    EXPECT_NO_THROW({
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+        EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::v44);
+    });
+}
+
 TEST(NegativePaths, AllowsDictionaryWithoutComponentsBlock) {
     auto* mr = std::pmr::new_delete_resource();
     constexpr std::string_view kXml =
@@ -388,8 +406,16 @@ TEST(NegativePaths, RejectsGroupWithoutMatchingNoFieldDeclaration) {
 
 TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
     auto* mr = std::pmr::new_delete_resource();
+    // Per-process-unique filename avoids clobber under sharded/parallel reruns.
     auto const path =
-        std::filesystem::temp_directory_path() / "fixpp_dictionary_malformed_input.xml";
+        std::filesystem::temp_directory_path() /
+        ("fixpp_dictionary_malformed_input_" + std::to_string(::getpid()) + ".xml");
+    // RAII guard: remove the temp file on every exit path (throw or return).
+    struct FileGuard {
+        std::filesystem::path const& p;
+        ~FileGuard() { std::filesystem::remove(p); }
+    } guard{path};
+
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         ASSERT_TRUE(static_cast<bool>(out));
@@ -404,6 +430,4 @@ TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
         EXPECT_NE(std::string{e.what()}.find("Start-end tags mismatch"), std::string::npos)
             << "what()=" << e.what();
     }
-
-    std::filesystem::remove(path);
 }

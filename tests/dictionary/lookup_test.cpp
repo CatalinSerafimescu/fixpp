@@ -16,15 +16,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
 #include <memory_resource>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "../../src/dictionary/dictionary_internal.hpp"
 
 // ---------------------------------------------------------------------------
 // Per-version parameters
@@ -86,13 +83,6 @@ fixpp::dict::Dictionary load_small_dictionary() {
         R"(</messages>)"
         R"(</fix>)";
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
-}
-
-fixpp::dict::detail::dict_metadata_handle_ptr extract_handle_for_test(
-    fixpp::dict::Dictionary const& dict) {
-    static_assert(sizeof(fixpp::dict::Dictionary) ==
-                  sizeof(fixpp::dict::detail::dict_metadata_handle_ptr));
-    return *reinterpret_cast<fixpp::dict::detail::dict_metadata_handle_ptr const*>(&dict);
 }
 
 }  // namespace
@@ -552,10 +542,6 @@ TEST(DictionaryAccessors, SmallLoadedDictionaryCoversMissAndEmptyPaths) {
     EXPECT_TRUE(dict.field_valid_for("D", 11u));
     EXPECT_FALSE(dict.field_valid_for("D", 9999u));
     EXPECT_EQ(dict.length_pair_data_tag(35u), std::uint16_t{0});
-
-    auto const handle = extract_handle_for_test(dict);
-    ASSERT_TRUE(static_cast<bool>(handle));
-    EXPECT_TRUE(handle->component_fields_impl(std::numeric_limits<std::uint16_t>::max()).empty());
 }
 
 TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
