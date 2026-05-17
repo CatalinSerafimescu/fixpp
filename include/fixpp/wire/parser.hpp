@@ -23,6 +23,7 @@
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <string_view>
@@ -93,18 +94,34 @@ class MessageView : public View {
 public:
     constexpr MessageView() noexcept = default;
 
-    // [2b §4.3] Construct with type-erased dict opaque pointer + classify fn.
-    // The dict is owned by the Parser; the pointer and fn lifetime are tied
-    // to the Parser. No incomplete-type issues — uses void const* + fn ptr.
-    // ([PR68-02] fix.)
+    // [2b §4.3] Construct with type-erased dict opaque pointer + helper fns.
+    // The dict is borrowed from the caller; the pointer/fns alias that
+    // caller-owned object. No incomplete-type issues — uses void const* + fn
+    // ptrs. ([PR68-02]/[PR68-10] fix.)
     using classify_fn_t = bool (*)(void const*, std::string_view, std::uint16_t) noexcept;
+    using group_member_fn_t = OffsetTable::group_member_fn_t;
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr,
-                void const* opaque_dict, classify_fn_t classify_fn) noexcept
+                void const* opaque_dict, classify_fn_t classify_fn,
+                group_member_fn_t group_member_fn) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr},
+          table_{frame, mr, opaque_dict, group_member_fn},
+          mr_{mr},
+          opaque_dict_{opaque_dict},
+          classify_fn_{classify_fn},
+          unk_items_{mr} {}
+
+    // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
+    MessageView(frame_view const& frame, std::pmr::memory_resource* mr,
+                OffsetTable::Config cfg, void const* opaque_dict,
+                classify_fn_t classify_fn,
+                group_member_fn_t group_member_fn) noexcept
+        requires(Mode == access_mode::Index)
+        : View{frame.bytes().data(), frame.bytes().size(),
+               frame.token()},  // [2b §6.4] thread real pool token
+          table_{frame, mr, cfg, opaque_dict, group_member_fn},
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
@@ -365,53 +382,31 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 template <access_mode Mode = access_mode::Index>
 class Parser {
 public:
-    // [2b §4.3] Parser accepts dict_metadata by value and stores a pointer to
-    // a copy held in the CALLER's scope. Thread the pointer into every
-    // MessageView so unknown_fields() classifies without a caller-supplied arg.
-    // ([PR68-02] fix.)
-    //
-    // Implementation note: we cannot hold `fixpp::dict::table_view` by value
-    // here because parser.hpp only forward-declares the type and non-test TUs
-    // that include parser.hpp (via message_view_contract.hpp) would see an
-    // incomplete-type member at class-template definition time. Instead we use
-    // a type-erased opaque_dict_ (void const*) + a classify function pointer,
-    // both set in the templated ctor where TV IS complete.
-    //
-    // NOLINTBEGIN(performance-unnecessary-value-param) — by-value is the
-    // [2b §4.3] surface contract for the ctor.
-    template <class TV = fixpp::dict::table_view>
-    explicit Parser(TV dict_metadata) noexcept
-        // TV is complete at this instantiation point (seam-#1 rule). Store
-        // a COPY on the stack inside the caller's scope and immediately
-        // take its address — we can't safely take &dict_metadata (parameter
-        // is a temporary), so we move it into our own storage via placement
-        // into a pre-allocated aligned buffer.
-        // Trade-off: we still need SOMEWHERE to store the dict by value. The
-        // cleanest no-heap approach: store it in a stack-local inside parse().
-        // For this implementation we COPY it into a per-call local (idiomatic
-        // for the test usage pattern: Parser{dict}; parser.parse(frame, mr)).
-        //
-        // Since this makes Parser non-copyable (the dict copy lives here), we
-        // store the dict inside the Parser using a templated copy wrapper that
-        // erases the type. The wrapper needs to be small and noexcept.
-        : classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
-              return static_cast<TV const*>(d)->field_valid_for(mt, t);
-          }}
-    {
-        // Allocate the dict copy in-place inside the aligned storage.
-        static_assert(sizeof(TV) <= sizeof(dict_storage_), "dict too large for Parser storage");
-        static_assert(alignof(TV) <= alignof(std::max_align_t), "dict alignment too strict for Parser storage");
-        new (dict_storage_) TV(std::move(dict_metadata));
-        opaque_dict_ = dict_storage_;
-        destroy_fn_ = [](void* p) noexcept { static_cast<TV*>(p)->~TV(); };
-    }
-    // NOLINTEND(performance-unnecessary-value-param)
+    Parser() noexcept = default;
 
-    ~Parser() noexcept {
-        if (opaque_dict_ && destroy_fn_) {
-            destroy_fn_(dict_storage_);
-        }
-    }
+    template <class TV>
+    explicit Parser(TV&& dict_metadata) noexcept
+        requires(std::is_lvalue_reference_v<TV&&>)
+        : opaque_dict_{std::addressof(dict_metadata)},
+          classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
+              using dict_t = std::remove_reference_t<TV>;
+              return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
+          }},
+          group_member_fn_{[](void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept -> bool {
+              using dict_t = std::remove_reference_t<TV>;
+              auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
+              for (auto const member_tag : members) {
+                  if (member_tag == tag) {
+                      return true;
+                  }
+              }
+              return false;
+          }} {}
+
+    template <class TV>
+    explicit Parser(TV&&) noexcept
+        requires(!std::is_lvalue_reference_v<TV&&>) = delete;
+
     Parser(Parser const&) = delete;
     Parser& operator=(Parser const&) = delete;
     Parser(Parser&&) = delete;
@@ -421,12 +416,28 @@ public:
                                                             [[clang::lifetimebound]],
                                                             std::pmr::memory_resource* mr) noexcept
         [[clang::lifetimebound]] {
-        // Thread the opaque dict pointer + classify fn into the MessageView.
-        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_};
+        // Thread the opaque dict pointer + helper fns into the MessageView.
+        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_, group_member_fn_};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
                 return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
             }
+        }
+        return mv;
+    }
+
+    // FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
+    // but threads an OffsetTable::Config so the per-instance group cap is
+    // tunable through the public Parser API (not collapsed to constants).
+    [[nodiscard]] core::expected_t<MessageView<Mode>> parse(
+        frame_view const& frame [[clang::lifetimebound]],
+        std::pmr::memory_resource* mr,
+        OffsetTable::Config cfg) noexcept [[clang::lifetimebound]]
+        requires(Mode == access_mode::Index) {
+        MessageView<Mode> mv{frame, mr, cfg, opaque_dict_, classify_fn_,
+                             group_member_fn_};
+        if (auto s = mv.offsets().build_status(); !s) {
+            return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }
         return mv;
     }
@@ -438,14 +449,9 @@ public:
         }
 
 private:
-    // Type-erased dict storage. 512 bytes is ample for the mock_dict_table
-    // (std::unordered_map<string,...> x5 — typical sizeof is ~280 B).
-    // The real 2c table_view is expected to be similar. If a dict is larger,
-    // the static_assert in the ctor fires at instantiation time.
-    alignas(std::max_align_t) std::byte dict_storage_[512]{};
     void const* opaque_dict_ = nullptr;
     bool (*classify_fn_)(void const*, std::string_view, std::uint16_t) noexcept = nullptr;
-    void (*destroy_fn_)(void*) noexcept = nullptr;
+    OffsetTable::group_member_fn_t group_member_fn_ = nullptr;
 };
 
 }  // namespace fixpp::wire

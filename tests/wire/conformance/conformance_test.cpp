@@ -269,8 +269,11 @@ TEST_P(WireConformance, BehavioralDispatch) {
     // Frame produced: proceed to parse.
     // ── Parser step ──────────────────────────────────────────────────────
     std::pmr::monotonic_buffer_resource parse_mr;
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
-        fixpp::dict::table_view{}};
+    // RC3 (PR68-10): Parser binds the dictionary by non-owning reference and
+    // must not extend its lifetime, so the dict must outlive the parser as a
+    // named lvalue — the rvalue/temporary ctor is deleted by design.
+    fixpp::dict::table_view conformance_dict{};
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{conformance_dict};
     auto mv_result = parser.parse(*fv_result, &parse_mr);
 
     if (!mv_result.has_value()) {

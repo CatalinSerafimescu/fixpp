@@ -89,7 +89,7 @@ TEST(ParserErrorPath, ParseIndexReturnsErrorOnBadFieldFormat) {
     ASSERT_TRUE(fv.has_value()) << "factory must succeed on structurally valid frame";
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto result = parser.parse(*fv, &arena);
     ASSERT_FALSE(result.has_value()) << "parse() must propagate OffsetTable build_status error";
     EXPECT_EQ(result.error(), error::wire_invalid_field_format);
@@ -137,7 +137,7 @@ TEST(ParserErrorPath, IndexParseWithSOHBeforeEqualInTagReturnsError) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto result = parser.parse(*fv, &arena);
     ASSERT_FALSE(result.has_value()) << "parse() with SOH-before-'=' in tag must return error";
     EXPECT_EQ(result.error(), error::wire_invalid_field_format);
@@ -236,7 +236,7 @@ TEST(ParserErrorPath, GetDecimalTagAbsentReturnsFieldMissingError) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -259,7 +259,7 @@ TEST(ParserErrorPath, GetDecimalInvalidValueReturnsDecimalError) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 

@@ -89,7 +89,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
         ADD_FAILURE() << "make_frame_view failed";
         return {};
     }
-    Parser<access_mode::Index> parser{table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena_out);
     if (!mv.has_value()) {
         ADD_FAILURE() << "parser.parse failed";

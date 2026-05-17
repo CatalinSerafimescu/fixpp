@@ -75,7 +75,7 @@ parse_iter(std::span<const std::byte> buf) {
         ADD_FAILURE() << "make_frame_view failed: " << static_cast<int>(fv.error());
         return MessageView<access_mode::Iter>{};
     }
-    Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     if (!mv.has_value()) {
         ADD_FAILURE() << "parse_iter failed: " << static_cast<int>(mv.error());
@@ -162,7 +162,7 @@ TEST(RoundTripProperty, GoldenFrameHeartbeat) {
 
     auto fv = fixpp::wire::test::make_frame_view(golden);
     ASSERT_TRUE(fv.has_value());
-    Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     ASSERT_TRUE(mv.has_value());
 
@@ -188,7 +188,7 @@ TEST(RoundTripProperty, GoldenFrameNewOrderSingle) {
 
     auto fv = fixpp::wire::test::make_frame_view(golden);
     ASSERT_TRUE(fv.has_value());
-    Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     ASSERT_TRUE(mv.has_value());
 
@@ -312,7 +312,7 @@ TEST(RoundTripProperty, TenThousandSampleCorpus) {
             ++failures;
             continue;
         }
-        Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+        Parser<access_mode::Iter> parser{};
         auto mv = parser.parse_iter(*fv);
         if (!mv.has_value()) {
             ++failures;
@@ -398,7 +398,7 @@ TEST(RoundTripProperty, AppendTypedDecimalEmitsTraitBytes) {
     auto fv = fixpp::wire::test::make_frame_view(frame);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource parse_mr;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &parse_mr);
     ASSERT_TRUE(mv.has_value());
     auto px = mv->template get<44>();

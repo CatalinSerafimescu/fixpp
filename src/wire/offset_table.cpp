@@ -88,13 +88,56 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
-    : entries_(mr), overlay_(mr), group_slices_(mr), group_index_(mr) {
+    : frame_base_{nullptr},
+      cfg_{},
+      opaque_dict_{nullptr},
+      group_member_fn_{nullptr},
+      entries_(mr),
+      overlay_(mr),
+      group_slices_(mr),
+      group_index_(mr) {
+    build(frame);
+}
+
+OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
+                         void const* opaque_dict,
+                         group_member_fn_t group_member_fn) noexcept
+    : frame_base_{nullptr},
+      cfg_{},
+      opaque_dict_{opaque_dict},
+      group_member_fn_{group_member_fn},
+      entries_(mr),
+      overlay_(mr),
+      group_slices_(mr),
+      group_index_(mr) {
     build(frame);
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
                          Config cfg) noexcept
-    : entries_(mr), overlay_(mr), group_slices_(mr), group_index_(mr), cfg_{cfg} {
+    : frame_base_{nullptr},
+      cfg_{cfg},
+      opaque_dict_{nullptr},
+      group_member_fn_{nullptr},
+      entries_(mr),
+      overlay_(mr),
+      group_slices_(mr),
+      group_index_(mr) {
+    build(frame);
+}
+
+OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
+                         Config cfg,
+                         void const* opaque_dict,
+                         group_member_fn_t group_member_fn) noexcept
+    : frame_base_{nullptr},
+      cfg_{cfg},
+      opaque_dict_{opaque_dict},
+      group_member_fn_{group_member_fn},
+      entries_(mr),
+      overlay_(mr),
+      group_slices_(mr),
+      group_index_(mr) {
     build(frame);
 }
 
@@ -254,18 +297,6 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     if (!status_) {
         return fail<group_index>(status_.error());
     }
-    // Locate the count field (first occurrence of no_tag). Delimiter-aware
-    // group membership is resolved by group_view<GroupT> with the
-    // dictionary; here we bound and expose the contiguous entry range.
-    //
-    // [PR68-09] Boundary fix: to avoid counting trailing top-level fields
-    // as group entries, we apply a first-instance member-set heuristic.
-    // The group ends at the first entry whose tag is NOT a member of the
-    // first instance AND is NOT the group delimiter.  For the single-instance
-    // case (no second delimiter in the frame) the heuristic cannot determine
-    // the boundary without a dict; the dict-aware validator applies the full
-    // correct boundary via its own member-set scan in Step 3.
-    // The per-group DoS cap is evaluated against the member-bounded extent.
     std::size_t count_idx = entries_.size();
     for (std::size_t e = 0; e < entries_.size(); ++e) {
         if (entries_[e].tag == no_tag) {
@@ -282,67 +313,55 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         return group_index{no_tag, first, 0U};
     }
 
-    // Collect the first-instance member set by scanning from `first` to the
-    // second occurrence of the delimiter (or end if only one instance).
     std::uint16_t const delim = entries_[first].tag;
-    constexpr std::size_t kMaxMembers = 32;
-    std::uint16_t member_tags[kMaxMembers];
-    std::size_t member_count = 0;
-    member_tags[member_count++] = delim;  // delimiter is always a member
-
-    // Walk from first+1 until delimiter recurs (second instance) or end.
-    bool has_second_instance = false;
-    for (std::size_t k = first + 1U; k < entries_.size() && member_count < kMaxMembers; ++k) {
-        if (entries_[k].tag == delim) {
-            has_second_instance = true;
-            break;  // second instance starts — first instance boundary found
-        }
-        bool found = false;
-        for (std::size_t m = 0; m < member_count; ++m) {
-            if (member_tags[m] == entries_[k].tag) { found = true; break; }
-        }
-        if (!found) {
-            member_tags[member_count++] = entries_[k].tag;
-        }
-    }
-
-    // Apply the member-set boundary only when a second instance was found
-    // (has_second_instance == true).  In that case the first-instance scan
-    // collected only the tags before the second delimiter — an accurate
-    // member set that correctly excludes trailing top-level fields.
-    // When there is only one instance, the scan walked all remaining entries
-    // (including any post-group top-level fields), so applying the collected
-    // member set would still include them.  For single-instance groups the
-    // dict-aware Validator applies the correct boundary via its own Step 3
-    // member-set logic; at the OffsetTable layer we fall back to full extent
-    // to avoid false truncation. ([PR68-09] partial fix — multi-instance only.)
-    std::size_t group_end;
-    if (has_second_instance) {
-        // Multi-instance: member_set was bounded by first delimiter recurrence,
-        // so it is accurate.  Stop at the first non-member entry.
-        group_end = first;
-        for (std::size_t k = first; k < entries_.size(); ++k) {
-            bool is_member = false;
-            for (std::size_t m = 0; m < member_count; ++m) {
-                if (member_tags[m] == entries_[k].tag) { is_member = true; break; }
-            }
-            if (!is_member) {
+    std::size_t group_end = first;
+    if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
+        std::size_t k = first;
+        while (k < entries_.size()) {
+            if (entries_[k].tag != delim) {
                 break;
             }
-            group_end = k + 1U;
+            std::size_t const inst_start = k;
+            ++k;  // consume delimiter
+            while (k < entries_.size()) {
+                if (entries_[k].tag == delim) {
+                    break;  // next instance
+                }
+                if (!group_member_fn_(opaque_dict_, no_tag, entries_[k].tag)) {
+                    break;
+                }
+                bool seen_in_instance = false;
+                for (std::size_t m = inst_start + 1U; m < k; ++m) {
+                    if (entries_[m].tag == entries_[k].tag) {
+                        seen_in_instance = true;
+                        break;
+                    }
+                }
+                if (seen_in_instance) {
+                    break;
+                }
+                ++k;
+            }
+            group_end = k;
         }
     } else {
-        // Single-instance: cannot determine boundary without dict — use full
-        // extent (rest-of-entries_ after count field). The Validator applies
-        // the correct boundary via its dict-aware Step 3. ([PR68-09] note.)
+        // Dict-free fallback kept for non-dictionary callers.
         group_end = entries_.size();
     }
 
-    std::size_t const avail = group_end - first;
-    if (avail > cfg_.max_group_entries_per_instance) {
-        return err_group_too_large<group_index>();
+    std::size_t inst_start = first;
+    for (std::size_t k = first; k <= group_end; ++k) {
+        bool const boundary = (k == group_end) || (k > first && entries_[k].tag == delim);
+        if (!boundary) {
+            continue;
+        }
+        std::size_t const inst_count = k - inst_start;
+        if (inst_count > cfg_.max_group_entries_per_instance) {
+            return err_group_too_large<group_index>();
+        }
+        inst_start = k;
     }
-    return group_index{no_tag, first, avail};
+    return group_index{no_tag, first, group_end - first};
 }
 
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {

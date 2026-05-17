@@ -110,8 +110,7 @@ TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
 
     // Parse the frame into a MessageView (Index mode).
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
-        fixpp::dict::table_view{}};
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};
     auto mv_result = parser.parse(fv, &arena);
     ASSERT_TRUE(mv_result.has_value()) << "parse must succeed";
     auto mv = *mv_result;

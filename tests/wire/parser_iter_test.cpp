@@ -61,7 +61,7 @@ TEST(WireParserIter, StreamingDictFreeInDocumentOrder) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     ASSERT_TRUE(mv.has_value());
     EXPECT_EQ(mv->msg_type(), "0");
@@ -92,7 +92,7 @@ TEST(WireParserIter, LengthDataFieldCarriesEmbeddedSOH) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     ASSERT_TRUE(mv.has_value());
 

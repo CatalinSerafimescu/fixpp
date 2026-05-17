@@ -118,7 +118,7 @@ parse_index(std::vector<std::byte> const& buf,
     }
     // Parser constructor receives a default table_view (the parser is dict-free;
     // the mock table_view completes the type for instantiation).
-    Parser<access_mode::Index> parser{table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena_out);
     if (!mv.has_value()) {
         ADD_FAILURE() << "parser.parse failed: "
@@ -162,7 +162,8 @@ table_view make_d_grammar() {
      .add_enum(54, "1")
      .add_enum(54, "2")
      // repeating group: tag 453 (NoPartyIDs), first delimiter is tag 448
-     .set_group_first(453, 448);
+     .set_group_first(453, 448)
+     .add_group_member(453, 447);
     return t;
 }
 
@@ -371,6 +372,44 @@ TEST(ValidatorDomain, GroupThenTopLevelFieldNotOverCounted) {
         << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
 
+TEST(ValidatorDomain, TrailingTopLevelFieldSharingMemberTagIsNotAbsorbed) {
+    table_view gram;
+    gram.add_required("D", 8).add_required("D", 9).add_required("D", 35)
+        .add_required("D", 49).add_required("D", 56).add_required("D", 34)
+        .add_required("D", 11).add_required("D", 54).add_required("D", 10)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 447)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447)
+        .set_type(34, field_type::Int)
+        .set_type(54, field_type::Char)
+        .add_enum(54, "1")
+        .add_enum(54, "2");
+
+    dictionary_driven_validator v{std::move(gram)};
+
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "54=1\x01"
+        "453=1\x01" "448=PA\x01" "447=D\x01"
+        "447=TOP\x01");
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "a trailing top-level 447 field must not be absorbed into the "
+           "preceding 453 group instance";
+}
+
 // (i) Nested malformed group: inner group declares count > actual instances.
 // Outer 453=1 (delimiter=448) is well-formed; inner group 460=2 (delimiter=461)
 // inside the outer instance declares 2 instances but only 1 follows.
@@ -394,6 +433,9 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
         .add_valid("D", 461)   // inner group delimiter
         .set_group_first(453, 448)
         .set_group_first(460, 461)
+        .add_group_member(453, 447)
+        .add_group_member(453, 460)
+        .add_group_member(460, 461)
         .set_type(34, field_type::Int)
         .set_type(54, field_type::Char)
         .add_enum(54, "1").add_enum(54, "2");

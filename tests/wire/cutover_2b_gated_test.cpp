@@ -63,7 +63,7 @@ TEST(WireCutover2bGated, WireFloatAccessorLegOnRealSurface) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -99,7 +99,7 @@ TEST(WireCutover2bGated, ReifyRoundTripOnRealMessageView) {
         auto fv = fixpp::wire::test::make_frame_view(buf);
         ASSERT_TRUE(fv.has_value());
         std::pmr::monotonic_buffer_resource source_mr;
-        Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+        Parser<access_mode::Index> parser{};
         auto src = parser.parse(*fv, &source_mr);
         ASSERT_TRUE(src.has_value());
 

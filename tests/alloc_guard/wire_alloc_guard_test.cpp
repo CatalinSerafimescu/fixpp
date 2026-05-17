@@ -92,7 +92,7 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
             parse_buf.data(), parse_buf.size(),
             std::pmr::null_memory_resource()};
 
-        Parser<access_mode::Index> idx{fixpp::dict::table_view{}};
+        Parser<access_mode::Index> idx{};
         auto mv = idx.parse(*fv, &parse_arena);
         ASSERT_TRUE(mv.has_value());
 
@@ -106,7 +106,7 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         std::pmr::monotonic_buffer_resource write_mr{
             write_scratch.data(), write_scratch.size(),
             std::pmr::null_memory_resource()};
-        Parser<access_mode::Iter> itp{fixpp::dict::table_view{}};
+        Parser<access_mode::Iter> itp{};
         auto iv = itp.parse_iter(*fv);
         ASSERT_TRUE(iv.has_value());
 

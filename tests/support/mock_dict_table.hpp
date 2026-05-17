@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -51,6 +52,17 @@ public:
     }
     table_view& set_group_first(std::uint16_t no_tag, std::uint16_t first) {
         group_first_[no_tag] = first;
+        add_group_member(no_tag, first);
+        return *this;
+    }
+    table_view& add_group_member(std::uint16_t no_tag, std::uint16_t tag) {
+        auto& members = group_members_[no_tag];
+        for (auto const member : members) {
+            if (member == tag) {
+                return *this;
+            }
+        }
+        members.push_back(tag);
         return *this;
     }
     // Register one allowed enumerated value for `tag`. A tag with NO
@@ -86,6 +98,15 @@ public:
         return it == group_first_.end() ? std::uint16_t{0} : it->second;
     }
 
+    [[nodiscard]] std::span<std::uint16_t const>
+    group_member_tags(std::uint16_t no_tag) const noexcept {
+        auto it = group_members_.find(no_tag);
+        if (it == group_members_.end()) {
+            return {};
+        }
+        return {it->second.data(), it->second.size()};
+    }
+
     [[nodiscard]] field_type
     field_type_of(std::uint16_t tag) const noexcept {
         auto it = types_.find(tag);
@@ -116,6 +137,7 @@ private:
     std::unordered_map<std::string, std::vector<std::uint16_t>> required_;
     std::unordered_map<std::string, std::unordered_set<std::uint16_t>> valid_;
     std::unordered_map<std::uint16_t, std::uint16_t> group_first_;
+    std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_members_;
     std::unordered_map<std::uint16_t, field_type> types_;
     std::unordered_map<std::uint16_t, std::unordered_set<std::string>> enums_;
 };

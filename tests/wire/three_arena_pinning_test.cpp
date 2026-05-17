@@ -75,7 +75,7 @@ TEST(WireThreeArenaPinning, OffsetTableStorageRoutesThroughPerMessageArena) {
                                                  backing.size()};
     counting_resource arena{&upstream};
 
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -103,7 +103,7 @@ TEST(WireThreeArenaPinning, PerMessageArenasAreIsolated) {
 
     std::pmr::monotonic_buffer_resource a1;
     std::pmr::monotonic_buffer_resource a2;
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
 
     auto m1 = parser.parse(*f1, &a1);
     auto m2 = parser.parse(*f2, &a2);

@@ -26,6 +26,8 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 
 class OffsetTable {
 public:
+    using group_member_fn_t = bool (*)(void const*, std::uint16_t, std::uint16_t) noexcept;
+
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.
     struct Config {
@@ -65,7 +67,18 @@ public:
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]],
+                void const* opaque_dict,
+                group_member_fn_t group_member_fn) noexcept;
+
+    OffsetTable(frame_view const& frame [[clang::lifetimebound]],
+                std::pmr::memory_resource* mr [[clang::lifetimebound]],
                 Config cfg) noexcept;
+
+    OffsetTable(frame_view const& frame [[clang::lifetimebound]],
+                std::pmr::memory_resource* mr [[clang::lifetimebound]],
+                Config cfg,
+                void const* opaque_dict,
+                group_member_fn_t group_member_fn) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -115,6 +128,8 @@ private:
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
     Config cfg_{};  // caller-tunable caps (FR-015 / [2b §1.2])
+    void const* opaque_dict_ = nullptr;
+    group_member_fn_t group_member_fn_ = nullptr;
     std::pmr::vector<entry> entries_;
     // Open-address robin-hood overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.

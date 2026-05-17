@@ -91,8 +91,8 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    // [2b §4.3]: Parser captures the dict by value at construction; unknown_fields()
-    // uses it without a caller-supplied argument.
+    // [2b §4.3]: Parser borrows the caller-owned dict at construction;
+    // unknown_fields() uses it without a caller-supplied argument.
     Parser<access_mode::Index> parser{dict};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
@@ -112,6 +112,32 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
            "known dict tags 35/34 must not appear";
 }
 
+TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 34);
+
+    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "5000=x\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena);
+    }();
+    ASSERT_TRUE(mv.has_value());
+
+    auto uf = mv->unknown_fields();
+    std::vector<std::uint16_t> unknown_tags;
+    for (auto it = uf.begin(); !(it == uf.end()); ++it) {
+        unknown_tags.push_back((*it).tag);
+    }
+
+    ASSERT_EQ(unknown_tags.size(), 1U);
+    EXPECT_EQ(unknown_tags[0], 5000U);
+}
+
 // With an empty dict (no known tags for this msg_type), all non-framing
 // tags are classified as unknown by unknown_fields() (no-arg contract API).
 TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
@@ -121,11 +147,11 @@ TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
 
     std::pmr::monotonic_buffer_resource arena;
     // Empty dict: all non-framing tags will be classified as unknown.
-    Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
-    // unknown_fields() — no-arg contract API — uses the empty dict stored in Parser.
+    // unknown_fields() — no-arg contract API — uses the dict-free Parser path.
     // 35 (MsgType) and 34 (MsgSeqNum) are not in the empty dict → unknown.
     // Framing tags 8, 9, 10 must NOT appear.
     auto uf = mv->unknown_fields();

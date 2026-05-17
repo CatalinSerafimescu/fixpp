@@ -16,15 +16,20 @@
 
 #include <gtest/gtest.h>
 
+#include "support/mock_dict_table.hpp"
+
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
 
 namespace {
 
 using fixpp::core::error;
+using fixpp::wire::access_mode;
 using fixpp::wire::OffsetTable;
+using fixpp::wire::Parser;
 
 // Co-located shape invariant ([2b §4.4]) — the cutover-load-bearing layout.
 static_assert(sizeof(OffsetTable::entry) == 12);
@@ -153,12 +158,13 @@ TEST(WireOffsetTable, GroupBoundedUnderDefaultCap) {
     EXPECT_EQ(none.error(), error::wire_required_field_missing);
 }
 
-// FR-015 / [2b §1.2] "caller-tunable" DoS cap: lower per-group cap to 1
-// so a 2-instance group is over-cap and reaches wire_group_too_large.
-TEST(WireOffsetTable, DoSCapGroupTooLargeWithConfig) {
-    // 453=2 followed by 4 fields (2 per instance) — 4 entries available for
-    // the group body. With the default cap 4096 this is fine; with cap=3 it
-    // triggers wire_group_too_large.
+TEST(WireOffsetTable, DoSCapPerInstanceAllowsAggregateOverCap) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35).add_valid("D", 34).add_valid("D", 453)
+        .add_valid("D", 448).add_valid("D", 447)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447);
+
     auto buf = make_raw_frame("35=D\x01" "34=1\x01" "453=2\x01"
                               "448=PA\x01" "447=D\x01"
                               "448=PB\x01" "447=D\x01");
@@ -166,17 +172,47 @@ TEST(WireOffsetTable, DoSCapGroupTooLargeWithConfig) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    // Lower per-group cap to 3: 4 group-body entries > 3 → wire_group_too_large
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096,
                                   .max_group_entries_per_instance = 3};
-    OffsetTable t{*fv, &arena, tight_cfg};
-    ASSERT_TRUE(t.build_status().has_value()) << "frame still parses OK (offset cap not hit)";
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena, tight_cfg);
+    }();
+    ASSERT_TRUE(mv.has_value());
 
-    auto g = t.group(453);
-    ASSERT_FALSE(g.has_value()) << "per-group cap=3 with 4 group entries must reject";
-    EXPECT_EQ(g.error(), error::wire_group_too_large)
-        << "expected wire_group_too_large, got "
-        << static_cast<int>(g.error());
+    auto const& table = mv->offsets();
+    auto g = table.group(453);
+    ASSERT_TRUE(g.has_value()) << "each instance is under the cap even though the aggregate is 4";
+    EXPECT_EQ(g->entry_count(), 4U);
+}
+
+TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35).add_valid("D", 34).add_valid("D", 453)
+        .add_valid("D", 448).add_valid("D", 447).add_valid("D", 452)
+        .add_valid("D", 802)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447)
+        .add_group_member(453, 452)
+        .add_group_member(453, 802);
+
+    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "453=1\x01"
+                              "448=PA\x01" "447=D\x01" "452=1\x01" "802=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable::Config tight_cfg{.max_offset_entries = 4096,
+                                  .max_group_entries_per_instance = 3};
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena, tight_cfg);
+    }();
+    ASSERT_TRUE(mv.has_value());
+
+    auto g = mv->offsets().group(453);
+    ASSERT_FALSE(g.has_value());
+    EXPECT_EQ(g.error(), error::wire_group_too_large);
 }
 
 // RC#2: group slice must begin at the delimiter field's "tag=" prefix, NOT
@@ -211,58 +247,80 @@ TEST(WireOffsetTable, GroupSliceStartsAtTagEquals) {
         << "second slice must start at '448='; got: " << sv1;
 }
 
-// PR68-09 regression: group extent is bounded by the first-instance member-set
-// for multi-instance groups.  A two-instance group followed by a top-level
-// field must NOT include the top-level field in the group's entry range or
-// slices — the member set is determined from the first instance, so the
-// second occurrence of the delimiter marks the end of the first instance and
-// correctly excludes any post-group tags.  ([2b §4.7] / [2b §1.2])
-//
-// Note: for single-instance groups the OffsetTable cannot determine the
-// group boundary without a dictionary (the member scan collects all remaining
-// tags).  The dict-aware Validator fixes the single-instance case via its
-// own Step-3 member-set logic (validator_domain_test:GroupThenTopLevel*).
 TEST(WireOffsetTable, GroupExtentExcludesTrailingTopLevelFields) {
-    // Group 453 (NoPartyIDs), delimiter 448. Two instances: 448=PA,447=D and
-    // 448=PB,447=E. Top-level field 55=AAPL follows AFTER the group.
-    // Member set from first instance: {448, 447}. 55 is NOT in that set.
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35).add_valid("D", 34).add_valid("D", 55)
+        .add_valid("D", 453).add_valid("D", 448).add_valid("D", 447)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447);
+
     auto buf = make_raw_frame("35=D\x01" "34=1\x01"
-                              "453=2\x01"
-                              "448=PA\x01" "447=D\x01"   // instance 1
-                              "448=PB\x01" "447=E\x01"   // instance 2
-                              "55=AAPL\x01");             // top-level, post-group
+                              "453=1\x01"
+                              "448=PA\x01" "447=D\x01"
+                              "55=AAPL\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    OffsetTable t{*fv, &arena};
-    ASSERT_TRUE(t.build_status().has_value());
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena);
+    }();
+    ASSERT_TRUE(mv.has_value());
 
+    auto const& t = mv->offsets();
     auto g = t.group(453);
     ASSERT_TRUE(g.has_value());
-    // group() extent must cover only the 4 group entries (448=PA,447=D,
-    // 448=PB,447=E), NOT the trailing 55=AAPL. entry_count must be 4.
-    EXPECT_EQ(g->entry_count(), 4U)
-        << "group extent must be 4 (two 448+447 pairs only); got " << g->entry_count()
-        << ". 55=AAPL (top-level) must not be included in the group extent.";
+    EXPECT_EQ(g->entry_count(), 2U)
+        << "single-instance group extent must exclude the trailing 55=AAPL field";
 
-    // group_slices: 2 instance slices — neither must include 55=AAPL.
+    // group_slices: the lone instance must not include 55=AAPL.
     auto slices = t.group_slices(453);
-    ASSERT_EQ(slices.size(), 2U) << "two group instances expected";
+    ASSERT_EQ(slices.size(), 1U) << "one group instance expected";
     std::string_view sv0{reinterpret_cast<char const*>(slices[0].data), slices[0].len};
-    std::string_view sv1{reinterpret_cast<char const*>(slices[1].data), slices[1].len};
     EXPECT_EQ(sv0.substr(0, 4), "448=")
         << "slice[0] must start at '448='; got: " << sv0;
-    EXPECT_EQ(sv1.substr(0, 4), "448=")
-        << "slice[1] must start at '448='; got: " << sv1;
-    // Neither slice must contain 55=AAPL.
     EXPECT_EQ(sv0.find("55="), std::string_view::npos)
         << "slice[0] must NOT include trailing 55=AAPL; content: " << sv0;
-    EXPECT_EQ(sv1.find("55="), std::string_view::npos)
-        << "slice[1] must NOT include trailing 55=AAPL; content: " << sv1;
-    // Per-group DoS cap: entry_count is now member-bounded (4), not
-    // rest-of-message (which would have included 55 and 10 too).
-    EXPECT_LE(g->entry_count(), fixpp::wire::default_max_group_entries_per_instance);
+}
+
+TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35).add_valid("D", 34).add_valid("D", 9000).add_valid("D", 9999)
+        .set_group_first(9000, 9001);
+    for (std::uint16_t tag = 9001; tag <= 9033; ++tag) {
+        dict.add_valid("D", tag);
+        if (tag != 9001) {
+            dict.add_group_member(9000, tag);
+        }
+    }
+
+    std::string body = "35=D\x01""34=1\x01""9000=2\x01";
+    for (std::uint16_t tag = 9001; tag <= 9033; ++tag) {
+        body += std::to_string(tag) + "=X\x01";
+    }
+    body += "9001=Y\x01""9999=TAIL\x01";
+    auto buf = make_raw_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena);
+    }();
+    ASSERT_TRUE(mv.has_value());
+
+    auto g = mv->offsets().group(9000);
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->entry_count(), 34U);
+
+    auto slices = mv->offsets().group_slices(9000);
+    ASSERT_EQ(slices.size(), 2U);
+    std::string_view first_instance{reinterpret_cast<char const*>(slices[0].data), slices[0].len};
+    std::string_view second_instance{reinterpret_cast<char const*>(slices[1].data), slices[1].len};
+    EXPECT_NE(first_instance.find("9033="), std::string_view::npos);
+    EXPECT_EQ(second_instance.find("9999="), std::string_view::npos);
 }
 
 }  // namespace

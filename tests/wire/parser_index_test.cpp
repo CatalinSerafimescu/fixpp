@@ -51,7 +51,7 @@ TEST(WireParserIndex, RandomAccessByTag) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    fixpp::wire::Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -78,7 +78,7 @@ TEST(WireParserIndex, OffsetsAndRepeatedOccurrence) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    fixpp::wire::Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -111,7 +111,7 @@ TEST(WireParserIndex, FloatAccessorLegThroughTraitBoundary) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{fixpp::dict::table_view{}};
+    fixpp::wire::Parser<access_mode::Index> parser{};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -127,7 +127,7 @@ TEST(WireParserIter, StreamingDictFree) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    fixpp::wire::Parser<access_mode::Iter> parser{fixpp::dict::table_view{}};
+    fixpp::wire::Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     ASSERT_TRUE(mv.has_value());
     EXPECT_EQ(mv->msg_type(), "0");
