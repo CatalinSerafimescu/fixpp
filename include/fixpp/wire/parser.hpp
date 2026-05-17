@@ -95,11 +95,16 @@ public:
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
         requires(Mode == access_mode::Index)
-        : View{frame.bytes().data(), frame.bytes().size(), {}}, table_{frame, mr} {}
+        : View{frame.bytes().data(), frame.bytes().size(),
+               frame.token()},  // [2b §6.4] thread real pool token
+          table_{frame, mr},
+          mr_{mr},
+          unk_items_{mr} {}
 
     explicit MessageView(frame_view const& frame) noexcept
         requires(Mode == access_mode::Iter)
-        : View{frame.bytes().data(), frame.bytes().size(), {}} {}
+        : View{frame.bytes().data(), frame.bytes().size(),
+               frame.token()} {}  // [2b §6.4] thread real pool token
 
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
@@ -205,11 +210,49 @@ template <std::uint16_t NoTag, class GroupT>
 
 [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        // Without the 2c dictionary bound here, no tag is classified as
-        // dictionary-missing, so this is empty by construction. The
-        // dictionary-aware split (missing vs known-invalid) is exercised
-        // through the validator seam (US4) which holds table_view by value.
+        // Zero-dict path: without a dictionary no tag is classified as
+        // dictionary-missing. Use classify_unknown(dict) to get the real split.
         return unknown_fields_view{};
+    }
+
+// [2b §4.8] Dictionary-aware unknown-fields classification. Walks the offset
+// table and yields entries whose tag is not `field_valid_for`-known in the
+// dictionary. Builds the kv list into the per-message arena (mr_) on first
+// call and caches it (idempotent). TV is the complete dict type at the call
+// site (seam-#1 mock or real 2c table_view); completeness deferred here.
+template <class TV>
+[[nodiscard]] unknown_fields_view classify_unknown(
+    TV const& dict) const noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+        if (unk_items_built_) {
+            return unknown_fields_view{
+                std::span<unknown_fields_view::kv const>{
+                    unk_items_.data(), unk_items_.size()},
+                token()};
+        }
+        unk_items_built_ = true;
+        std::string_view const mtype = msg_type();
+        auto const raw = bytes();
+        // Framing tags 8/9/10 are always exempt from unknown classification.
+        constexpr std::uint16_t kBeginString = 8;
+        constexpr std::uint16_t kBodyLength = 9;
+        constexpr std::uint16_t kCheckSum = 10;
+        for (auto const& e : table_.entries()) {
+            if (e.tag == kBeginString || e.tag == kBodyLength ||
+                e.tag == kCheckSum) {
+                continue;  // framing — never unknown
+            }
+            if (!dict.field_valid_for(mtype, e.tag)) {
+                unk_items_.push_back(unknown_fields_view::kv{
+                    .tag = e.tag,
+                    .data = raw.data() + e.offset,
+                    .len = e.length});
+            }
+        }
+        return unknown_fields_view{
+            std::span<unknown_fields_view::kv const>{
+                unk_items_.data(), unk_items_.size()},
+            token()};
     }
 
 private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
@@ -236,6 +279,13 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     struct empty_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, OffsetTable, empty_t>
         table_{};
+    // Index-mode extras for classify_unknown() lazy build.
+    // mr_ declared BEFORE unk_items_ so it is initialised first.
+    std::pmr::memory_resource* mr_ = std::pmr::null_memory_resource();
+    // unk_items_: lazily built unknown-fields kv list in the per-message arena.
+    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{
+        std::pmr::null_memory_resource()};
+    mutable bool unk_items_built_ = false;
 };
 
 // field_iterator::advance — dict-free; honours the static Length+Data table
@@ -295,13 +345,16 @@ template <access_mode Mode = access_mode::Index>
 class Parser {
 public:
     // dict_metadata is a value-typed metadata contract owned by 2c (only
-    // forward-declared in this header). The parse path here is
-    // dictionary-free (Index/Iter decode no fields), so it is not retained.
-    // The ctor is templated on the metadata type purely so its completeness
-    // is deferred to instantiation (a non-dependent by-value incomplete
-    // param would be ill-formed at template-definition time); TV deduces to
-    // fixpp::dict::table_view at every call site, preserving the [2b §4.3]
-    // by-value surface.
+    // forward-declared in this header). The parse path is dictionary-free
+    // (Index/Iter decode no fields), so the dict arg is not retained by
+    // the Parser itself. The ctor is templated on the metadata type purely
+    // so its completeness is deferred to instantiation (a non-dependent
+    // by-value incomplete param would be ill-formed at template-definition
+    // time); TV deduces to fixpp::dict::table_view at every call site,
+    // preserving the [2b §4.3] by-value surface.
+    // For sessions that use unknown_fields() the caller passes the dict
+    // to MessageView::classify_unknown() (see below), which avoids storing
+    // an incomplete type in either Parser or MessageView.
     // NOLINTBEGIN(performance-unnecessary-value-param) — by-value is the
     // [2b §4.3] surface contract; deferred-completeness design prevents a
     // const-ref (TV is incomplete at template-definition time).

@@ -82,6 +82,10 @@ public:
         return {data_ptr() + body_off_, body_len_};
     }
 
+    // Expose the generation token so MessageView can thread it into the
+    // View base ([2b §6.4] lifetime trap end-to-end wiring).
+    using View::token;
+
 protected:
     // The (frame_len, body_off, body_len) run is the [2b §4.2] frame_view
     // shape oracle — fixed signature, minted only by the parser/factory.
@@ -131,9 +135,34 @@ public:
 
     [[nodiscard]] std::size_t pending_bytes() const noexcept { return pending_; }
 
+#ifndef NDEBUG
+    // Notify the generation-counter registry that the backing arena is being
+    // recycled — bumps the pool's generation so any outstanding frame_view /
+    // MessageView that captured the previous generation will trap on their
+    // next bytes() / get() call ([2b §6.4] / FR-016). Call this whenever
+    // the per-message buffer pool resets its storage.
+    void recycle_pool() noexcept {
+        (void)detail::bump_pool_generation(pool_id_);
+    }
+    [[nodiscard]] detail::generation_token frame_token() const noexcept {
+        return detail::current_pool_token(pool_id_);
+    }
+#endif
+
 private:
     Config cfg_{};
     std::size_t pending_ = 0;
+#ifndef NDEBUG
+    // Non-zero pool ID for this framer's arena ([2b §6.4]).  Starts at 1 and
+    // is unique per-Framer within a thread (session single-threaded per
+    // [const §XI.4]).
+    std::uint16_t pool_id_{[] {
+        static thread_local std::uint16_t counter{0};
+        std::uint16_t id = ++counter;
+        if (id == 0) { id = ++counter; }  // skip the "untracked" sentinel 0
+        return id;
+    }()};
+#endif
 };
 
 }  // namespace fixpp::wire

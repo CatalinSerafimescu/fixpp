@@ -7,19 +7,28 @@
 // token entirely so a View is exactly {data, len} and trivially copyable.
 //
 // Active here: the generation MECHANISM (debug) + the release strip
-// invariant. The end-to-end "a parser-minted view over a recycled per-
-// message arena traps" is DISABLED pending the three-arena pool wiring
-// (seam #13 / T018) — currently parser views carry the untracked pool 0
-// sentinel, which by design never traps. That gap is the honest red marker.
+// invariant + the end-to-end "parser-minted view over a recycled per-
+// message arena traps" test ([2b §6.4] / FR-016, gate-b/r1 wiring).
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <memory_resource>
+#include <span>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <fixpp/wire/field_view.hpp>
+#include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/view.hpp>
+
+#include "support/frame_view_factory.hpp"
+#include "support/mock_dict_table.hpp"
 
 namespace {
 
@@ -36,8 +45,7 @@ static_assert(sizeof(fixpp::wire::View) == sizeof(std::byte const*)
 
 #ifndef NDEBUG
 // Test probe: exposes View's protected ctor + check_alive so the trap
-// mechanism can be exercised directly (it is not yet wired into the parse
-// accessors — that wiring is seam #13 / T018, see DISABLED test below).
+// mechanism can be exercised directly (isolated mechanism test).
 struct probe : fixpp::wire::View {
     probe(std::byte const* d, std::size_t n,
           fixpp::wire::detail::generation_token g) noexcept
@@ -61,8 +69,8 @@ TEST(WireLifetimeTrapDeath, StaleGenerationAborts) {
 }
 
 TEST(WireLifetimeTrap, UntrackedPoolNeverTraps) {
-    // pool_id 0 is the "untracked" sentinel — framer-emitted views currently
-    // carry it; it must never trap even after a generation bump elsewhere.
+    // pool_id 0 is the "untracked" sentinel; it must never trap even after a
+    // generation bump elsewhere (e.g. from a different Framer's recycle).
     fixpp::wire::detail::generation_token untracked{};  // pool_id == 0
     std::byte storage{};
     probe v{&storage, 1, untracked};
@@ -71,13 +79,51 @@ TEST(WireLifetimeTrap, UntrackedPoolNeverTraps) {
     SUCCEED();
 }
 
-// RED marker: the use-after-buffer-reuse trap is not yet wired into the
-// parser's value accessors (field_view::bytes()/as_string() do not call
-// check_alive(), and parser views carry the untracked pool 0 token). Enable
-// when the three-arena per-message pool is wired (seam #13 / T018) so a
-// recycled arena invalidates outstanding field_views end-to-end.
-TEST(WireLifetimeTrapDeath, DISABLED_ParserViewTrapsAfterArenaRecycle) {
-    FAIL() << "pending three-arena pool wiring (seam #13 / T018)";
+// End-to-end trap test (gate-b/r1: pool token now threaded from Framer into
+// frame_view and MessageView; View::bytes() calls check_alive(); Framer
+// exposes recycle_pool() to simulate arena reset). A MessageView captured
+// past the Framer's recycle_pool() call must trap on its next bytes() /
+// msg_type() / get() access ([2b §6.4] / FR-016).
+TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
+    // Build a checksum-valid FIX frame.
+    std::string body{"35=D\x01" "34=1\x01"};
+    std::string nine = "9=" + std::to_string(body.size()) + "\x01";
+    std::string pre = "8=FIX.4.4\x01" + nine + body;
+    unsigned chksum = 0;
+    for (unsigned char c : pre) { chksum += c; }
+    char chk[16];
+    std::snprintf(chk, sizeof(chk), "10=%03u\x01", chksum % 256U);
+    std::string full = pre + chk;
+    std::vector<std::byte> raw(full.size());
+    std::memcpy(raw.data(), full.data(), full.size());
+
+    // Use the real Framer (which now assigns a non-zero pool_id_).
+    fixpp::wire::Framer framer;
+    fixpp::wire::pmr_carry_buffer carry{1024, std::pmr::get_default_resource()};
+    std::array<fixpp::wire::frame_view, 4> out_buf{};
+    auto frames = framer.feed(raw, carry,
+                              std::span<fixpp::wire::frame_view>{out_buf});
+    ASSERT_TRUE(frames.has_value()) << "feed must succeed";
+    ASSERT_GE(frames->size(), 1U) << "must have produced at least one frame";
+
+    fixpp::wire::frame_view fv = (*frames)[0];
+
+    // Parse the frame into a MessageView (Index mode).
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
+        fixpp::dict::table_view{}};
+    auto mv_result = parser.parse(fv, &arena);
+    ASSERT_TRUE(mv_result.has_value()) << "parse must succeed";
+    auto mv = *mv_result;
+
+    // Before recycling: bytes() is safe (same generation).
+    EXPECT_FALSE(mv.bytes().empty()) << "MessageView must have bytes";
+
+    // Simulate per-message arena recycle: bump the pool's generation.
+    framer.recycle_pool();
+
+    // After recycling: any bytes() call must abort (use-after-buffer-reuse).
+    EXPECT_DEATH(mv.bytes(), "") << "must trap after pool recycle";
 }
 #else
 TEST(WireLifetimeTrap, ReleaseStripsTokenNoTrapMachinery) {

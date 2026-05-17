@@ -222,8 +222,13 @@ core::expected_t<std::span<frame_view>> Framer::feed(std::span<const std::byte> 
         }
 
         std::byte const* frame_ptr = source.data() + offset;
+#ifndef NDEBUG
+        auto const gen_tok = detail::current_pool_token(pool_id_);
+#else
+        detail::generation_token const gen_tok{};
+#endif
         out[produced] = frame_view{
-            frame_ptr, frame.frame_len, frame.body_off, frame.body_len, detail::generation_token{},
+            frame_ptr, frame.frame_len, frame.body_off, frame.body_len, gen_tok,
         };
         ++produced;
         offset += frame.frame_len;
