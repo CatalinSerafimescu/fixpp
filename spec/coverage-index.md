@@ -186,6 +186,18 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | §3 | Message serializer — BodyLength + CheckSum computation | Y | W-013 | — |
 | §3 | Message validator — required fields, type conformance, enum values, group structure | Y | W-014 | — |
 
+<!-- W-001..W-014 supplemental note (T057, 2026-05-17): the wire-encoding rows above
+     are delivered by 004-wire-codec (PR #68). Bidirectional traceability:
+     [FIX50SP2 §3]   ↔ W-001 (Tag=Value), W-010 (framing), W-013 (serializer), W-014 (validator);
+     [FIX50SP2 §3.1] ↔ W-002 (header), W-003 (trailer), W-004 (BodyLength), W-005 (CheckSum);
+     [FIX50SP2 §3.2] ↔ W-006/W-007 (repeating + nested groups);
+     [FIX50SP2 §3.3] ↔ W-008 (Length+Data), W-009 (field data types).
+     W-011 (zero-copy parser) / W-012 (offset-table) are `[impl] implementation NFR` rows —
+     no FIX-spec section maps to them by design; their verifying tests are recorded in
+     feature-catalogue.md. W-009's wire FLOAT-accessor leg (the 001-core-decimal 2b deferral)
+     is closed by 004 T027. Verified GREEN per .specify/decisions/004-wire-codec-verify.md
+     (run-2 FINAL @ ce1d4d2); Gate A converged r1; Gate B PR #68 converged 2026-05-17 (gate-b-done, HEAD 8253ef7, P1=0/P2=0/P3=0). -->
+
 ### Session-Layer Messages (MsgType catalogue, all versions)
 
 | MsgType | Message | Catalogue ID | Gap note |

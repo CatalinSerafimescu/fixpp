@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+w009,4.4,mixed-field-types-int-float-char-string,383d4649582e342e3401393d34310133353d440133343d310134343d313233342e35360133383d3130300135343d310135353d41434d450131303d31353001,1,

@@ -29,8 +29,15 @@ target_include_directories(fixpp_dictionary PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
 )
 
-# Allowed dependency: core only [arch §2.3]
+# Allowed dependency: core only [arch §2.3], PLUS the 2b cutover link edge:
+# after 004 T028 the dict::reify / dict::field_traits bridge TUs bind the
+# REAL wire surface (message_view_contract.hpp re-exports parser.hpp), whose
+# OffsetTable/Framer bodies live in fixpp_wire. This is the intended
+# post-cutover topology (003 reify depends on 004 wire). fixpp_wire <->
+# fixpp_dictionary is a permitted static-archive cycle (CMake repeats the
+# archives); the MODULE-layer cycle is exempted for the bridge TUs via
+# check_layers.py BRIDGE_SOURCE_FILES / BRIDGE_EXEMPT_INCLUDES.
 target_link_libraries(fixpp_dictionary
-  PUBLIC fixpp_core
+  PUBLIC fixpp_core fixpp_wire
   PRIVATE pugixml::pugixml
 )

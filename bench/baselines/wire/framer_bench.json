@@ -1,0 +1,20 @@
+{
+  "_note": "Initial seed — linux-clang-DEBUG (2026-05-16). Release ceiling enforcement requires linux-clang-release build. [2b §6.6] ceiling: ≤ 30 ns (release, warm cache). Debug overhead is ~20-25× release; debug timing here is NOT the ceiling gate.",
+  "context": {
+    "date": "2026-05-16",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/framer_bench",
+    "build_type": "debug",
+    "preset": "linux-clang-debug"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Framer_Feed_NoCarry",
+      "ceiling_ns": 30,
+      "ceiling_source": "[2b §6.6]: Framer::feed, one frame, no carry, 80-byte body, ≤ 30 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 748.7,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release"
+    }
+  ]
+}

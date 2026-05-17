@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# W-014 validation-domain corpus (T042). Oracle-shape rows for the seam-#2
+# conformance driver (gate-b/r1: behavioral dispatcher replaces the CSV linter).
+# The dispatcher runs Framer+Parser+dictionary_driven_validator for each row
+# and asserts has_value()==expect_ok and error()==expect_code.
+# Behavioral assertions also live in T043 (validator_domain_test) and T044
+# (validator_per_version_test). expect_code names a fixpp::core::error
+# enumerator when expect_ok=0.
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+# ── conforming messages (one per FIX version) ───────────────────────────────
+w014,4.2,conforming-heartbeat-42,383d4649582e342e3201393d33300133353d300134393d53454e4445520135363d5441524745540133343d310131303d31323901,1,
+w014,4.4,conforming-new-order-single-44,383d4649582e342e3401393d36330133353d440134393d53454e4445520135363d5441524745540133343d310131313d4f5244310135353d4141504c0135343d310133383d3130300134303d320131303d32353501,1,
+w014,5.0SP2,conforming-heartbeat-50sp2,383d4649582e352e3053503201393d33300133353d300134393d53454e4445520135363d5441524745540133343d310131303d30383501,1,
+w014,T1.1,conforming-heartbeat-t11,383d464958542e312e3101393d33300133353d300134393d53454e4445520135363d5441524745540133343d310131303d32303901,1,
+# ── non-conforming messages (validation failures, per §6.5 error codes) ─────
+# missing required field (ClOrdID/tag-11 absent from NewOrderSingle)
+w014,4.4,missing-required-field-nos-44,383d4649582e342e3401393d33300133353d440134393d53454e4445520135363d5441524745540133343d310131303d31353101,0,wire_required_field_missing
+# enum violation: Side (tag 54) value 'X' is not in the {1..9} allowed set
+w014,4.4,enum-violation-side-44,383d4649582e342e3401393d36330133353d440134393d53454e4445520135363d5441524745540133343d310131313d4f5244310135353d4141504c0135343d580133383d3130300134303d320131303d30333801,0,wire_field_value_out_of_range
+# unexpected tag: tag 9999 is not valid for Heartbeat (35=0) in FIX 4.2
+w014,4.2,unexpected-tag-42,383d4649582e342e3201393d34310133353d300134393d53454e4445520135363d5441524745540133343d3101393939393d424f4755530131303d30333701,0,wire_unexpected_tag
+# malformed repeating-group count: NoPartyIDs=2 but only one field follows
+w014,4.4,malformed-repeating-group-count-44,383d4649582e342e3401393d34340133353d440134393d53454e4445520135363d5441524745540133343d31013435333d320135353d4141504c0131303d31313001,0,wire_required_field_missing
+# header out-of-order: MsgSeqNum(34) appears before MsgType(35) — violates [2b §6.5.1]
+w014,4.4,header-out-of-order-34-before-35,383d4649582e342e3401393d33300133343d310133353d300134393d53454e4445520135363d5441524745540131303d31333101,0,wire_header_out_of_order

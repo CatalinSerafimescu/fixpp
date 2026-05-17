@@ -1,0 +1,75 @@
+{
+  "context": {
+    "date": "2026-05-16T17:10:30+03:00",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/check_alive_bench",
+    "num_cpus": 8,
+    "mhz_per_cpu": 3593,
+    "cpu_scaling_enabled": false,
+    "aslr_enabled": false,
+    "caches": [
+      {
+        "type": "Data",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Instruction",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 2,
+        "size": 524288,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 3,
+        "size": 16777216,
+        "num_sharing": 8
+      }
+    ],
+    "load_avg": [0.554199,0.80957,0.872559],
+    "library_version": "v1.9.5",
+    "library_build_type": "debug",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_CheckAlive_200tag",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_CheckAlive_200tag",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 607396,
+      "real_time": 1.1488883397321706e+03,
+      "cpu_time": 1.1581336607419212e+03,
+      "time_unit": "ns",
+      "items_per_second": 1.7269163895286179e+08,
+      "ns_per_access": 5.7906683037096069e-09
+    },
+    {
+      "name": "BM_Bytes_200tag",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "BM_Bytes_200tag",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 831842,
+      "real_time": 8.5246157082709453e+02,
+      "cpu_time": 8.5958338963408926e+02,
+      "time_unit": "ns",
+      "items_per_second": 2.3267085242903164e+08,
+      "ns_per_access": 4.2979169481704467e-09
+    }
+  ]
+}

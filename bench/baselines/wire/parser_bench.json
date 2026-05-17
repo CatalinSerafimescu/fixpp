@@ -1,0 +1,37 @@
+{
+  "_note": "Initial seed — linux-clang-DEBUG (2026-05-16). Release ceiling enforcement requires linux-clang-release build. [2b §6.6] ceilings apply to release + warm cache only. hffix comparison: NOT wired (D-14 — measured-not-blocker). validator_bench: NOT PRESENT (US4 PAUSED).",
+  "context": {
+    "date": "2026-05-16",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/parser_bench",
+    "build_type": "debug",
+    "preset": "linux-clang-debug"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Parser_Iter_20tag",
+      "ceiling_ns": 80,
+      "ceiling_source": "[2b §6.6]: Parser<Iter>::parse_iter, 20-tag message, ≤ 80 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 26.7,
+      "measured_debug_note": "Debug build (NDEBUG off); real gate runs on linux-clang-release. Debug Iter mode is atypically fast because no OffsetTable build occurs."
+    },
+    {
+      "name": "BM_Parser_Index_20tag",
+      "ceiling_ns": 400,
+      "ceiling_source": "[2b §6.6]: Parser<Index>::parse, 20-tag message, ≤ 400 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 5876.6,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release (~20-25x debug overhead expected)"
+    },
+    {
+      "name": "BM_Parser_Index_200tag",
+      "ceiling_ns": 4000,
+      "ceiling_source": "[2b §6.6]: Parser<Index>::parse, 200-tag Instrument-heavy, ≤ 4 µs",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 43295.2,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release"
+    }
+  ],
+  "hffix_comparison": "hffix NOT wired into build. D-14 records this as 'measured-not-blocker': parse/sec vs hffix is a v1.0 release-candidate gate ([const §VIII.4]), not a per-PR blocker. Add hffix parity measurement when the library is available in the build."
+}

@@ -10,12 +10,16 @@
 // specs/003-dictionary-codegen/contracts/reify.hpp; data-model Entities 5/6;
 // spec §4.3/§4.4 AC-R1..AC-R8 / AC-D1..AC-D7 / AC-G7a.
 //
-// Bridge header (arch §2.4 v0.3 dual-compile carve-out, RC#3): #includes the
-// vendored frozen wire stub + the 003-owned version_profile additive surface;
-// NOT a cyclic dictionary→wire module link edge (check_layers.py
-// BRIDGE_SOURCE_FILES / BRIDGE_EXEMPT_INCLUDES). The literal dictionary→wire
-// whitelist edge was rejected (it would form the forbidden wire↔dictionary
-// cycle); see spec NFR-003-8 / plan "Re-/plan (RC#3)".
+// Bridge header (arch §2.4 v0.3 dual-compile carve-out, RC#3): #includes
+// message_view_contract.hpp which, post the 004 cutover (T028), re-exports
+// the REAL wire::MessageView/field_view surface, + the 003-owned
+// version_profile additive surface. The MODULE-layer dictionary→wire cycle
+// stays bridge-exempt (check_layers.py BRIDGE_SOURCE_FILES /
+// BRIDGE_EXEMPT_INCLUDES); the post-cutover LINK edge (fixpp_dictionary ->
+// fixpp_wire, a permitted static-archive cycle — see src/dictionary/
+// CMakeLists.txt) is the intended T028 topology. NOTE: this header binds the
+// real surface, but the owning deep-copy reify round-trip (owning_<Msg>::
+// from_view) remains codegen-R6-stubbed — carved out, see tasks.md T059.
 #pragma once
 #include <fixpp/core/error.hpp>            // core::expected_t, core::error
 #include <fixpp/dict/version_profile.hpp>  // version_profile +
@@ -26,9 +30,17 @@
                                            // pins — consumed here, NOT
                                            // re-declared/deferred).
 #include <cstdint>
-#include <fixpp/wire/message_view_contract.hpp>  // vendored frozen R6 stub
 #include <memory_resource>
 #include <string_view>
+
+// 003->004 cutover bridge: every wire::MessageView/field_view symbol arrives
+// via the message_view_contract.hpp re-export of parser.hpp.
+// misc-include-cleaner cannot follow that deliberate re-export seam, so it is
+// waived file-wide here (design, not a defect). [see 004-wire-codec-verify §run 2]
+// NOLINTBEGIN(misc-include-cleaner)
+#include <fixpp/wire/message_view_contract.hpp>  // REAL wire::MessageView/
+                                                 // field_view (004 cutover
+                                                 // re-export, T028)
 
 namespace fixpp::dict {
 
@@ -83,7 +95,8 @@ public:
 
 private:
     struct impl;             /* small-variant OR heap polymorphic owner */
-    impl* pimpl_ = nullptr;  // R6 stub: heap pimpl; full SBO/polymorphic owner in 2b.
+    impl* pimpl_ = nullptr;  // still a stub: heap pimpl; full SBO/polymorphic
+                             // owner = the carved owning deep-copy, tasks.md T059.
 };
 
 // Typed entry point — caller names Msg at compile time; no dispatch overhead.
@@ -111,5 +124,6 @@ template <class Msg>
 [[nodiscard]] core::expected_t<owning_message_handle> reify(
     wire::MessageView<wire::access_mode::Index> const& view, version_profile profile,
     std::pmr::memory_resource* mr) noexcept;
+// NOLINTEND(misc-include-cleaner)
 
 }  // namespace fixpp::dict

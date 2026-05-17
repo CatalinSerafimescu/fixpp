@@ -1,0 +1,28 @@
+{
+  "_note": "Initial seed — linux-clang-DEBUG (2026-05-16). Release ceiling enforcement requires linux-clang-release build. [2b §6.6] ceilings: Writer::commit ≤ 80 ns (20-tag), ≤ 800 ns (200-tag). validator_bench: NOT PRESENT (US4 PAUSED).",
+  "context": {
+    "date": "2026-05-16",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/writer_bench",
+    "build_type": "debug",
+    "preset": "linux-clang-debug"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Writer_Commit_20tag",
+      "ceiling_ns": 80,
+      "ceiling_source": "[2b §6.6]: Writer::commit, 20-tag message, ≤ 80 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 1855.5,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release"
+    },
+    {
+      "name": "BM_Writer_Commit_200tag",
+      "ceiling_ns": 800,
+      "ceiling_source": "[2b §6.6]: Writer::commit, 200-tag Instrument-heavy, ≤ 800 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_debug_ns": 17499.7,
+      "measured_debug_note": "Debug build; real gate runs on linux-clang-release"
+    }
+  ]
+}

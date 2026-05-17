@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+w012,4.4,offset-index-repeated-tag-occurrences,383d4649582e342e3401393d34310133353d440133343d31013434383d4649525354013434383d5345434f4e44013434383d54484952440131303d30323201,1,

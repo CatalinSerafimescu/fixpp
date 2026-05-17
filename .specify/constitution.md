@@ -110,10 +110,12 @@
 
 ## Article IX — Coverage, Sanitizers, Static Analysis
 
-1. **Coverage thresholds:**
-   - **Per-PR:** ≥90% line, ≥80% branch on **touched modules**.
-   - **Global** (once `wire/` and `session/` modules have shipped): ≥90% line.
+1. **Coverage thresholds (user-raised 2026-05-17, supersedes the prior 90/80):**
+   - **Per-PR:** **≥95% line, ≥85% branch** on **touched modules** (`include/fixpp/<mod>/*`+`src/<mod>/*`, test files excluded), measured with fresh per-binary profraw (never reuse a prior/aborted build's profraw — a mismatched profraw makes `llvm-cov` silently zero a function; see the verify-procedure note).
+   - **Binding rule — no silent uncovered error/edge path.** A PR may land below raw 95/85 **only if every uncovered line/branch carries a recorded Opus risk assessment** in `.specify/decisions/<feature>-verify.md`: *genuine error/edge path* → **must be tested** (a `catch`, a `wire_*`/error return, a DoS-cap, an overflow/truncation guard is genuine by default); *defensive / unreachable / trivial-accessor / dead-under-a-cap / dead-under-the-default-trait* → **waived with a one-line rationale**. Raw ≥95/≥85 with no uncovered error path also satisfies the gate. Either way: **no uncovered error/edge path without an explicit assessment** — that is the enforced gate; the percentage is the target.
+   - **Global** (once `wire/` and `session/` modules have shipped): ≥95% line.
    - Coverage is measured on Linux/Clang only (`llvm-cov` + `llvm-profdata`). Windows/MSVC builds (Tier 2) do not run a coverage step — coverage thresholds are platform-independent, and the only viable Windows tool (`OpenCppCoverage`, last release 2019) cannot reliably measure modern MSVC output.
+   - **Retroactive remediation backlog (not an instant violation, not blocking):** features merged before this raise — **001-core-decimal, 002-dictionary-xml-loader, 003-dictionary-codegen** — are tracked debt. Each gets a sequenced per-feature `/simplify`→coverage pass (own branch + `/speckit-verify` + review) **after 004-wire-codec closes**; until then they remain `done` and are not re-opened as violations. New features apply 95/85 from now.
 2. **Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass.
 3. **Sanitizers — Tier 2 (Windows/MSVC, manual/nightly):** ASan only. UBSan is not available under MSVC; equivalent UB coverage is provided by Linux/Clang Tier 1 (Article IX §2), since UBSan findings are language-level and platform-independent.
 4. **Static analysis — Tier 1:**
@@ -235,7 +237,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 4. **`/analyze` is MANDATORY** for the same trigger set as `/clarify`. Drift between constitution ↔ spec ↔ plan ↔ tasks is caught here, before `/implement`.
 5. **`/checklist` output is part of CI evidence.** Checklists tied to NFRs and acceptance criteria become the e-book's "how to verify" appendix.
 6. **`/implement` is one task at a time, TDD red-green-refactor.** Sonnet executes; Opus reviews increments.
-7. **`/simplify` runs on the implementation diff before PR open.** Code-reuse, quality, efficiency findings fixed before review.
+7. **`/simplify` runs on the implementation diff before `/speckit-verify`** (pipeline step 9.5, before step 10 — see `.specify/pipeline.md`). Code-reuse, quality, efficiency findings reviewed by 3 specialized Opus agents, then Opus-triaged: genuine in-scope simplifications + any real Gate-B-relevant defect fixed; behavioral/perf redesigns + ambiguous items deferred as tracked follow-ups in the verify decision doc. **Rationale:** a post-`/simplify` source change invalidates every preset build dir, forcing the full 6-preset `/speckit-verify` matrix to re-run — so `/simplify` must precede verify, not merely precede PR open.
 8. **Stuck loop:** three failed `/implement` invocations on the same red test (each invocation is a fresh-context attempt at one TDD cycle, per §1 and §6) → escalate to Codex as fallback implementer; if still stuck, `AskUserQuestion`. Codex's PR review for that task must come from a **fresh** Codex session, not the one that wrote the code (independence between author and reviewer is non-negotiable).
 
 ---

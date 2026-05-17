@@ -44,7 +44,35 @@ enum class error : std::uint8_t {
     // wire stub carries no frame bytes (2b swaps in the real body). This distinct
     // error code means tests cannot go green for the wrong reason: a positive
     // oracle must assert exactly this code until 2b lands (gate-b/r1 RC#1).
-    dict_reify_wire_body_not_ready = 29,
+    dict_reify_wire_body_not_ready = 29,  // cutover-obsolete once 2b lands: the
+    // real OffsetTable-backed MessageView carries frame bytes, so
+    // owning_<Msg>::from_view no longer needs this "no body yet" sentinel.
+    // Slot KEPT (non-renumbering, `[const §X.4]`); annotated, not removed.
+
+    // wire variants — owned by 004-wire-codec (data-model "Error mapping";
+    // contracts/wire_errors.hpp; `[2b §6.7]`). Appended at unused slots 30..42,
+    // non-renumbering (`[const §X.4]`). v0.1's wire_tag_count_exceeded was
+    // dropped (distinct-tag cap removed, RC#1) and is NOT reintroduced. The
+    // 2i C-ABI FIXPP_ERR_WIRE_* coalescing + tools/abi_history audit-trail
+    // entry are deferred to 2i under the same time-bounded waiver shape as
+    // 002/003 (no C-ABI surface added here — research D-13; this is C++
+    // core::error, not the C-ABI fixpp_error_t).
+    wire_frame_too_large = 30,           // [2b §6.1.3]
+    wire_invalid_body_length = 31,       // [2b §6.1.3]
+    wire_checksum_mismatch = 32,         // [2b §6.1.5]
+    wire_framing_resync = 33,            // [2b §6.1.2]
+    wire_invalid_field_format = 34,      // [2b §6.2]
+    wire_offset_table_full = 35,         // [2b §1.2/§4.4]
+    wire_group_too_large = 36,           // [2b §1.2/§4.4]
+    wire_tag_out_of_range = 37,          // [2b §1.2]
+    wire_required_field_missing = 38,    // [2b §6.5.4]
+    wire_header_out_of_order = 39,       // [2b §6.5.1]
+    wire_field_value_out_of_range = 40,  // [2b §6.5.3]
+    wire_field_value_truncated = 41,     // [2b §6.5 rule 3]/[2b §6.7]: the
+    // validator's §6.5-rule-3 type-check site RE-MAPS 2a/001's
+    // decimal_precision_loss (=12) onto this wire-domain slot so the
+    // Session-Reject path carries a wire_* code (re-mapped, not redefined).
+    wire_unexpected_tag = 42,  // [2b §6.5.5] SessionRejectReason=2
 };
 
 template <class T>

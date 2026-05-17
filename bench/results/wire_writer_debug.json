@@ -1,0 +1,73 @@
+{
+  "context": {
+    "date": "2026-05-16T17:05:06+03:00",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-debug/bench/wire/writer_bench",
+    "num_cpus": 8,
+    "mhz_per_cpu": 3593,
+    "cpu_scaling_enabled": false,
+    "aslr_enabled": false,
+    "caches": [
+      {
+        "type": "Data",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Instruction",
+        "level": 1,
+        "size": 32768,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 2,
+        "size": 524288,
+        "num_sharing": 2
+      },
+      {
+        "type": "Unified",
+        "level": 3,
+        "size": 16777216,
+        "num_sharing": 8
+      }
+    ],
+    "load_avg": [0.646973,0.611816,0.811035],
+    "library_version": "v1.9.5",
+    "library_build_type": "debug",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Writer_Commit_20tag",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_Writer_Commit_20tag",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 378136,
+      "real_time": 1.8554545375214786e+03,
+      "cpu_time": 1.8689329421160644e+03,
+      "time_unit": "ns",
+      "items_per_second": 5.3506467646065925e+05
+    },
+    {
+      "name": "BM_Writer_Commit_200tag",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "BM_Writer_Commit_200tag",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 39627,
+      "real_time": 1.7499653115298872e+04,
+      "cpu_time": 1.7637052287581704e+04,
+      "time_unit": "ns",
+      "items_per_second": 5.6698816995859488e+04
+    }
+  ]
+}

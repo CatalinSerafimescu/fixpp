@@ -12,18 +12,27 @@
 // Entity 11; spec §4.8 AC-FT1..AC-FT3.
 //
 // Bridge header (arch §2.4 v0.3 dual-compile carve-out, RC#3): it #includes
-// the vendored frozen wire stub; this is NOT a cyclic dictionary→wire module
-// edge (check_layers.py BRIDGE_SOURCE_FILES/BRIDGE_EXEMPT_INCLUDES).
+// message_view_contract.hpp which, post the 004 cutover (T028), re-exports
+// the REAL wire::field_view surface; still NOT a cyclic dictionary→wire
+// module edge (check_layers.py BRIDGE_SOURCE_FILES/BRIDGE_EXEMPT_INCLUDES).
+// from_field_view (string/char/int/bool) decodes the real field_view today.
 //
 // from_field_view / decode_field are noexcept + allocation-free and sit on the
 // ≤20 ns hot path (§6.2 string/int/char ceiling) — the bodies inline (defined
 // in the matching .cpp / inline at /tasks D-5; declarations pinned here).
 #pragma once
-#include <fixpp/core/error.hpp>                  // expected_t, error
-#include <fixpp/wire/message_view_contract.hpp>  // wire::field_view (vendored
-                                                 // frozen R6 stub; RC#3 bridge)
 #include <cstdint>
+#include <expected>              // std::unexpected
+#include <fixpp/core/error.hpp>  // expected_t, error
 #include <string_view>
+
+// This header IS the 003->004 cutover bridge: every wire::field_view symbol
+// arrives via the message_view_contract.hpp re-export of parser.hpp.
+// misc-include-cleaner cannot follow that deliberate re-export seam, so it is
+// waived file-wide here (design, not a defect). [see 004-wire-codec-verify §run 2]
+// NOLINTBEGIN(misc-include-cleaner)
+#include <fixpp/wire/message_view_contract.hpp>  // REAL wire::field_view
+                                                 // (004 cutover re-export)
 
 namespace fixpp::dict {
 
@@ -87,5 +96,6 @@ template <class T>
     }
     return field_traits<T>::from_field_view(*fv);
 }
+// NOLINTEND(misc-include-cleaner)
 
 }  // namespace fixpp::dict

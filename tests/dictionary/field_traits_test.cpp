@@ -56,14 +56,14 @@ TEST(FieldTraitsAcFt3, ForwardsGetErrorWhenAbsent) {
 
 TEST(FieldTraitsAcFt3, DelegatesToFromFieldViewWhenPresent) {
     // AC-FT3 — when fv has a value, decode_field forwards to
-    // field_traits<T>::from_field_view. With the frozen R6 wire stub
-    // (no frame state) field_view::as_string() is empty, so string_view
-    // decodes to "" — the success-VALUE path is R6-blocked until 2b lands
-    // a frame-backed body; here we assert the DELEGATION shape only.
+    // field_traits<T>::from_field_view. A DEFAULT-constructed field_view is
+    // genuinely empty (View base spans nothing), so string_view decodes to
+    // "" — this pins the DELEGATION shape with an empty view. Frame-backed
+    // value decoding is covered by the cutover round-trip suites (T059).
     fixpp::core::expected_t<fixpp::wire::field_view> present{fixpp::wire::field_view{}};
     auto r = decode_field<std::string_view>(present);
     ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->empty());  // stub field_view → empty string_view
+    EXPECT_TRUE(r->empty());  // empty field_view → empty string_view
 }
 
 }  // namespace

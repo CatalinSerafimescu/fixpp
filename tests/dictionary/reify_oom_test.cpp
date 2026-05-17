@@ -4,23 +4,19 @@
 // AC-R7: PMR-OOM injection → dict_reify_oom; ≤4 PMR allocs; zero-alloc guard
 // for string/int/char + default-trait decimal accessors.
 //
-// Seam #7 — PMR failure injection (gate-b/r1 RC#1 F2 fix): from_view now
-// makes 1 PMR allocation under R6 (a pmr::vector<byte>(1, byte{}, mr) that
-// keeps the OOM trap path live — see emit_reify.cpp). When the resource fails
-// on call 1, from_view must return dict_reify_oom (not propagate bad_alloc).
+// 2b cutover (004 T059): from_view performs the real owning deep-copy of the
+// validated frame into the supplied mr. That deep-copy IS the PMR allocation
+// the OOM trap (seam #7) and the ≤4 budget (seam #16, AC-R7) observe:
+//   * Seam #7: a resource failing on call 1 → from_view returns
+//     dict_reify_oom (bad_alloc caught by the inline try/catch, not propagated).
+//   * Seam #16: from_view's allocation count is ≤4 (the bytes_ copy; view()
+//     is lazy so the OffsetTable is not built here).
 //
-// Seam #16 — allocation count under R6: from_view makes exactly 1 allocation
-// (the pmr::vector<byte>(1,…) construction) and then returns dict_reify_wire_body_not_ready.
-// The AC-R7 budget is ≤4; 1 ≤ 4. The exact 4-alloc itemisation becomes
-// testable with 2b (deep-copy bytes_ + OffsetTable rebuilds).
+// Zero-alloc guard (mallocnesia scope, AC-T3 / NFR-003-4): string/int/char
+// flyweight accessors use dict::decode_field<T>(view.get<Tag>()) and the
+// default pod_decimal trait ignores mr — allocation-free regardless.
 //
-// Zero-alloc guard (mallocnesia scope, AC-T3 / NFR-003-4):
-//   * String/int/char accessors on the flyweight (fixpp::v44::NewOrderSingle)
-//     use dict::decode_field<T>(view.template get<Tag>()) — allocation-free.
-//   * The default pod_decimal trait ignores the passed mr; no allocation.
-//
-// Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16;
-//         spec §5 R6 deferral; gate-b/r1 RC#1 F2 (from_view makes alloc).
+// Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16.
 #include <gtest/gtest.h>
 
 #include <array>
@@ -29,13 +25,17 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/field_traits.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <fixpp/wire/parser.hpp>  // Framer, pmr_carry_buffer, MessageView (T059)
 #include <memory_resource>
 #include <optional>
+#include <span>
+#include <vector>
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>
 
 #include "support/failing_pmr_resource.hpp"
+#include "support/reify_test_frame.hpp"  // make_nos_frame (T059)
 
 namespace {
 
@@ -72,20 +72,27 @@ private:
 // ─────────────────────────────────────────────────────────────────
 
 TEST(ReifyOomTest, AllocBudgetAtMostFour) {
+    auto frame = fixpp::test_support::make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+    MV src{(*framed)[0], &frame_mr};
+
     std::array<std::byte, 1024 * 64> buf{};
     std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
     counting_pmr_resource counter{&upstream};
 
-    MV mv;
-    auto result = ONOS::from_view(mv, &counter);
-    // gate-b/r1 RC#1: from_view now allocates (tmp(mr)) then returns
-    // dict_reify_wire_body_not_ready — the R6 placeholder.
-    ASSERT_FALSE(result.has_value()) << "R6: from_view must return dict_reify_wire_body_not_ready";
-    EXPECT_EQ(result.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
-        << "AC-R3 R6 oracle: exact placeholder error code";
-
+    auto result = ONOS::from_view(src, &counter);
+    ASSERT_TRUE(result.has_value())
+        << "from_view must succeed (real owning deep-copy, T059)";
     EXPECT_LE(counter.count(), std::size_t{4})
-        << "AC-R7: from_view must use ≤4 PMR allocations per Entity 4 budget (R6: 1 alloc for tmp(mr))";
+        << "AC-R7: from_view must use ≤4 PMR allocations per Entity 4 budget "
+           "(the bytes_ deep-copy; view() is lazy)";
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -105,19 +112,29 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
 //       inspection; the test below exercises the no-allocation path only).
 //   (c) The error code slot and distinct-from-stub-error assertions.
 
-// gate-b/r1 RC#1 F2 fix: from_view now makes exactly 1 PMR allocation
-// (the `tmp(mr)` object construction). fail-on-call-1 therefore DOES fire,
-// the bad_alloc is caught, and from_view returns dict_reify_oom.
+// T059: from_view's owning deep-copy (pmr::vector assign of the frame bytes)
+// is the PMR allocation. fail-on-call-1 fires there → bad_alloc caught by the
+// inline try/catch → dict_reify_oom (not propagated).
 TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
+    auto frame = fixpp::test_support::make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+    MV src{(*framed)[0], &frame_mr};
+
     std::array<std::byte, 1024 * 64> buf{};
     std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
     fixpp::test_support::failing_pmr_resource fail{&upstream, /*fail_on_call_n=*/1};
 
-    MV mv;
     bool threw = false;
     std::optional<fixpp::core::expected_t<ONOS>> result;
     try {
-        result = ONOS::from_view(mv, &fail);
+        result = ONOS::from_view(src, &fail);
     } catch (...) {
         threw = true;
     }
@@ -125,30 +142,78 @@ TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
     ASSERT_TRUE(result.has_value()) << "from_view must return (not throw) even under OOM";
     ASSERT_FALSE(result->has_value()) << "fail-on-call-1: from_view must return an error";
     EXPECT_EQ(result->error(), fixpp::core::error::dict_reify_oom)
-        << "AC-R7 seam #7: bad_alloc on tmp(mr) must yield dict_reify_oom (not propagate)";
+        << "AC-R7 seam #7: bad_alloc on the bytes_ deep-copy must yield dict_reify_oom";
     EXPECT_GE(fail.allocate_calls(), std::size_t{1})
         << "The failing resource must have been called at least once";
 }
 
-// No-OOM path: live upstream arena → from_view returns dict_reify_wire_body_not_ready.
-// This confirms that the try/catch doesn't swallow the R6 placeholder return.
-TEST(ReifyOomTest, NoOomYieldsWireBodyNotReady) {
+// Codex adversarial review (T059): the lazy view() rebuild builds an
+// OffsetTable which ALLOCATES. A throwing mr there must DEGRADE gracefully
+// (empty table, status_=out_of_memory, fields absent) — it must NEVER
+// std::terminate out of the noexcept MessageView/OffsetTable ctor. This is
+// the OOM-on-first-view() path that from_view's own try/catch does not cover.
+TEST(ReifyOomTest, FirstViewRebuildOomDegradesNotTerminate) {
+    auto frame = fixpp::test_support::make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+    MV src{(*framed)[0], &frame_mr};
+
+    std::array<std::byte, 1024 * 64> buf{};
+    std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
+    // Alloc #1 = the bytes_ deep-copy (must succeed so from_view returns ok);
+    // fail #2 = the first OffsetTable allocation in the lazy view() rebuild.
+    fixpp::test_support::failing_pmr_resource fail{&upstream, /*fail_on_call_n=*/2};
+
+    auto owned = ONOS::from_view(src, &fail);
+    ASSERT_TRUE(owned.has_value())
+        << "from_view (bytes_ copy = alloc #1) must succeed before the view() OOM";
+
+    // First field access triggers the lazy view() rebuild → OffsetTable build
+    // hits the failing allocation. MUST NOT terminate; degrades to absent.
+    auto cl = owned->cl_ord_id();
+    EXPECT_FALSE(cl.has_value())
+        << "OOM during OffsetTable build → field-absent (graceful degrade)";
+    auto st = owned->view().offsets().build_status();
+    ASSERT_FALSE(st.has_value());
+    EXPECT_EQ(st.error(), fixpp::core::error::out_of_memory)
+        << "OffsetTable must record out_of_memory (graceful), not terminate";
+}
+
+// No-OOM path: a live arena + a real frame → from_view SUCCEEDS (the retired
+// R6 dict_reify_wire_body_not_ready placeholder no longer exists).
+TEST(ReifyOomTest, NoOomYieldsSuccess) {
+    auto frame = fixpp::test_support::make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+    MV src{(*framed)[0], &frame_mr};
+
     std::array<std::byte, 1024 * 64> buf{};
     std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
 
-    MV mv;
     bool threw = false;
     std::optional<fixpp::core::expected_t<ONOS>> result;
     try {
-        result = ONOS::from_view(mv, &upstream);
+        result = ONOS::from_view(src, &upstream);
     } catch (...) {
         threw = true;
     }
     EXPECT_FALSE(threw) << "from_view must not throw with a live arena";
-    ASSERT_TRUE(result.has_value()) << "from_view must return (not throw) with a live arena";
-    ASSERT_FALSE(result->has_value()) << "R6: from_view must return an error even with live arena";
-    EXPECT_EQ(result->error(), fixpp::core::error::dict_reify_wire_body_not_ready)
-        << "R6 no-OOM path: must return dict_reify_wire_body_not_ready (not dict_reify_oom)";
+    ASSERT_TRUE(result.has_value()) << "from_view must return (not throw)";
+    ASSERT_TRUE(result->has_value())
+        << "from_view must SUCCEED with a live arena + real frame (T059)";
+    EXPECT_EQ(result->value().cl_ord_id().value(), "ORD1");
 }
 
 // ─────────────────────────────────────────────────────────────────

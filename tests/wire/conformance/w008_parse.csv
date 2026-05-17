@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+w008,4.4,length-data-pair-with-embedded-soh,383d4649582e342e3401393d32340133353d440133343d310139353d350139363d61620163640131303d32313501,1,

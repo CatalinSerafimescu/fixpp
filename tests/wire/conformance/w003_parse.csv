@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+w003,4.4,trailer-checksum-well-formed,383d4649582e342e3401393d32300133353d300133343d390134393d410135363d420131303d31333301,1,

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+# W-013: Serializer with auto BodyLength/CheckSum [Writer::commit, 2b §4.5].
+# These are golden frames: Writer must produce byte-identical output when
+# appending the same fields in the same order.
+w013,4.4,heartbeat-minimal,383d4649582e342e3401393d31300133353d300133343d310131303d31363501,1,
+w013,4.4,new-order-single-sender-target,383d4649582e342e3401393d33300133353d440133343d310134393d53454e4445520135363d5441524745540131303d31353101,1,
+w013,4.4,new-order-single-multi-field,383d4649582e342e3401393d34370133353d440133343d34320134393d41434d450135363d42524f4b45520131313d4f52443132330135353d4141504c0131303d30303801,1,

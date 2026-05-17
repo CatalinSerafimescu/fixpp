@@ -8,83 +8,84 @@
 // race on the moved-to owning_<Msg> consumed on B, and MUST flag any incorrect
 // concurrent reads on one instance.
 //
-// R6 scope (gate-b/r1 RC#3-B hardening):
-//   from_view returns dict_reify_wire_body_not_ready under R6 (spec §5 deferral).
-//   The cross-strand move mechanics are NOT blocked (the compile-time shape +
-//   static_asserts cover the move contract). The behavioural half (real bytes
-//   survive strand-A arena reset, values read on B match pre-reset) is
-//   R6-gated: guarded under #if FIXPP_R6_WIRE_BODY_READY.
-//
-//   Positive oracle: from_view must return dict_reify_wire_body_not_ready (not
-//   success, not dict_xml_parse_failed). This exact code is asserted so that
-//   misdispatch or silent no-copy cannot stay green.
-//
-// When 2b swaps in the real wire body, set FIXPP_R6_WIRE_BODY_READY=1.
+// 2b cutover (004 T059): from_view performs the REAL owning deep-copy; the
+// cross-strand handoff (reify on A, std::move to B, consume on B) is now a
+// genuine behavioural test on a frame-backed MessageView<Index>. The R6
+// dict_reify_wire_body_not_ready oracle is retired. Cross-strand value
+// survival across an arena boundary is exercised for real.
 //
 // Oracle: specs/003-dictionary-codegen/contracts/reify.hpp (AC-R5);
-//         data-model Entity 4 I-10; spec AC-T3; spec §5 R6 deferral.
+//         data-model Entity 4 I-10; spec AC-T3.
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <fixpp/wire/parser.hpp>  // Framer, pmr_carry_buffer, MessageView (T059)
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>
+
+#include "support/reify_test_frame.hpp"  // make_nos_frame (T059)
 
 namespace {
 
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
+using fixpp::test_support::make_nos_frame;
+
+// Reify a NOS into owning_mr; the source frame buffer + its arena are built
+// and DESTROYED inside this function — so a returned ONOS that still reads
+// its fields proves the owning deep-copy is self-contained (AC-R5/AC-R4).
+[[nodiscard]] fixpp::core::expected_t<ONOS>
+reify_nos(std::pmr::memory_resource* owning_mr) {
+    auto buf = make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    if (!framed || framed->empty()) {
+        return std::unexpected{fixpp::core::error::dict_reify_wire_body_not_ready};
+    }
+    MV src{(*framed)[0], &frame_mr};
+    return ONOS::from_view(src, owning_mr);
+}
 
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────
-// Positive R6 oracle (gate-b/r1 RC#3-B): from_view returns
-// dict_reify_wire_body_not_ready (not success, not dict_xml_parse_failed).
+// 2b cutover (T059): from_view succeeds + the owning deep-copy is
+// self-contained (source frame + arena destroyed inside reify_nos).
 // ─────────────────────────────────────────────────────────────────
 
-TEST(ReiifyCrossStrand, FromViewReturnsWireBodyNotReady) {
-    // gate-b/r1 RC#3-B: positive oracle for the R6 placeholder.
-    // from_view MUST return dict_reify_wire_body_not_ready — asserting the
-    // exact code means any regression (silent success or wrong error) fails.
-    std::pmr::monotonic_buffer_resource arena_a;
-    MV mv_a;
-    auto result = ONOS::from_view(mv_a, &arena_a);
-    ASSERT_FALSE(result.has_value())
-        << "from_view must not return success under R6 (spec §5 deferral / gate-b/r1 RC#1 F2)";
-    EXPECT_EQ(result.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
-        << "AC-R5 R6 oracle: from_view must return dict_reify_wire_body_not_ready "
-           "(not dict_xml_parse_failed or success) until 2b supplies frame bytes";
+TEST(ReiifyCrossStrand, FromViewSucceedsSelfContained) {
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto result = reify_nos(&owning_mr);
+    ASSERT_TRUE(result.has_value())
+        << "from_view must succeed post-cutover (real owning deep-copy)";
+    auto cl = result->cl_ord_id();
+    ASSERT_TRUE(cl.has_value())
+        << "ClOrdID(11) readable though the source arena is already destroyed";
+    EXPECT_EQ(cl.value(), "ORD1");
 }
 
 // ─────────────────────────────────────────────────────────────────
-// AC-R5 — cross-strand: reify on A, move to B, consume on B
-// R6-gated: from_view returns an error; guarded below.
+// AC-R5 / AC-T3 — cross-strand: reify on A, move to B, consume on B.
 // ─────────────────────────────────────────────────────────────────
-
-#ifndef FIXPP_R6_WIRE_BODY_READY
-
-TEST(ReiifyCrossStrand, MoveAcrossThreadsNoRace_R6Deferred) {
-    // AC-R5 / AC-T3 behavioural: cross-strand move preserving values.
-    // R6-deferred (spec §5): from_view returns dict_reify_wire_body_not_ready.
-    // 2b-unblock: remove GTEST_SKIP, populate MV from real frame, assert values on B.
-    GTEST_SKIP() << "R6-deferred (spec §5): from_view behavioural round-trip "
-                    "awaits 2b wire body (FIXPP_R6_WIRE_BODY_READY not defined)";
-}
-
-#else  // FIXPP_R6_WIRE_BODY_READY — 2b-unblock: activate this test
 
 TEST(ReiifyCrossStrand, MoveAcrossThreadsNoRace) {
-    // AC-R5: full behavioural cross-strand handoff.
-    std::pmr::monotonic_buffer_resource arena_a;
-    MV mv_a;
-    auto result = ONOS::from_view(mv_a, &arena_a);
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto result = reify_nos(&owning_mr);
     ASSERT_TRUE(result.has_value()) << "from_view on strand A must succeed";
 
     std::optional<ONOS> shared;
@@ -97,15 +98,14 @@ TEST(ReiifyCrossStrand, MoveAcrossThreadsNoRace) {
         }
         ONOS& o = *shared;
         auto cl = o.cl_ord_id();
-        EXPECT_TRUE(cl.has_value()) << "2b: parsed values survive cross-strand move";
-        auto fv = o.field_value(11);
-        EXPECT_TRUE(fv.has_value());
+        ASSERT_TRUE(cl.has_value())
+            << "parsed values survive cross-strand move (AC-R5)";
+        EXPECT_EQ(cl.value(), "ORD1");
+        EXPECT_TRUE(o.field_value(11).has_value());
         EXPECT_EQ(o.which(), fixpp::dict::application_version::v44);
     });
     b.join();
 }
-
-#endif  // FIXPP_R6_WIRE_BODY_READY
 
 // ─────────────────────────────────────────────────────────────────
 // AC-T3 single-strand contract note
@@ -125,34 +125,19 @@ TEST(ReifyCrossStrand, SingleStrandContractDocumented) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// AC-R5 — [[clang::lifetimebound]] anchors return to *this
+// AC-R5 — view() anchors to the OWNED bytes, not the source arena.
 // ─────────────────────────────────────────────────────────────────
-// R6-gated: from_view returns an error under R6; this test is deferred.
-// 2b-unblock: activate via FIXPP_R6_WIRE_BODY_READY.
-
-#ifndef FIXPP_R6_WIRE_BODY_READY
-
-TEST(ReifyCrossStrand, ViewLifetimeBoundToOwner_R6Deferred) {
-    // AC-R5 lifetimebound: view() references owned bytes, not source arena.
-    // R6-deferred: from_view returns dict_reify_wire_body_not_ready (spec §5).
-    GTEST_SKIP() << "R6-deferred (spec §5): awaits 2b wire body";
-}
-
-#else  // FIXPP_R6_WIRE_BODY_READY
 
 TEST(ReifyCrossStrand, ViewLifetimeBoundToOwner) {
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    ONOS o = []() {
-        std::pmr::monotonic_buffer_resource local;
-        MV local_mv;
-        auto r = ONOS::from_view(local_mv, &local);
+    std::pmr::monotonic_buffer_resource owning_mr;
+    ONOS o = [&owning_mr]() {
+        auto r = reify_nos(&owning_mr);  // source frame + arena die on return
         EXPECT_TRUE(r.has_value());
         return std::move(*r);
     }();
-    MV const& v = o.view();
+    MV const& v = o.view();  // rebuilt over the owned deep-copy
     auto fv = v.get(11);
-    EXPECT_TRUE(fv.has_value());  // 2b: parsed value present
+    ASSERT_TRUE(fv.has_value())
+        << "view() must resolve against owned bytes after the source arena died";
+    EXPECT_EQ(fv->as_string(), "ORD1");
 }
-
-#endif  // FIXPP_R6_WIRE_BODY_READY

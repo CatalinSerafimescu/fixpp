@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+w007,4.4,nested-repeating-group,383d4649582e342e3401393d34340133353d440133343d31013535353d31013630303d53594d013630343d32013630353d4c31013630353d4c320131303d30383201,1,

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# w_id,fix_version,description,hex_frame,expect_ok,expect_code
+# W-005: CheckSum byte-sum-mod-256 computation [FIX50SP2 §3].
+# CheckSum = (sum of all bytes from 8= through end of body's trailing SOH) % 256
+# rendered as exactly 3 zero-padded ASCII digits ("10=NNN\x01").
+w005,4.4,checksum-198-heartbeat-with-testreqid,383d4649582e342e3401393d31390133353d300133343d37013131323d544553540131303d31393801,1,
+w005,4.4,checksum-076-new-order-single,383d4649582e342e3401393d33350133353d440133343d310134393d41434d450135363d4e5953450131313d4f52442d310131303d30373601,1,
+w005,4.4,checksum-165-minimal-heartbeat,383d4649582e342e3401393d31300133353d300133343d310131303d31363501,1,

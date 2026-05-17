@@ -1,1 +1,3 @@
-{"feature_directory": "specs/003-dictionary-codegen"}
+{
+  "feature_directory": "specs/004-wire-codec"
+}

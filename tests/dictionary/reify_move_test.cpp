@@ -9,39 +9,59 @@
 //   * std::is_nothrow_move_constructible_v<owning_<Msg>>
 //   * move ctor is NOT = default (cannot be trivial; custom reset of caches)
 //
-// Runtime oracle (gate-b/r1 RC#3-B hardening):
-//   * from_view() returns dict_reify_wire_body_not_ready (NOT success) under R6.
-//     This is the EXACT R6 placeholder — tests assert EQ to catch code changes.
-//   * The positive oracle (ASSERT_EQ error == dict_reify_wire_body_not_ready)
-//     ensures misdispatch or a silent no-copy cannot stay green:
-//     any change to the placeholder code fails this suite.
-//
-// R6 note: the frozen wire stub carries no frame bytes. The behavioural half
-// (parsed values pre-move == post-move; post-arena-reset values survive) is
-// deferred to spec §5 R6-gated; guarded under #if FIXPP_R6_WIRE_BODY_READY.
-//
-// 2b-unblock: set FIXPP_R6_WIRE_BODY_READY=1 to activate the behavioural block.
+// 2b cutover (004 T059): from_view performs the REAL owning deep-copy. The
+// R6 dict_reify_wire_body_not_ready oracle is retired. Move semantics are
+// verified both via the static shape oracle (below — UNCHANGED: the
+// no-new-member T059 design preserves owning_<Msg>'s shape) AND via real
+// behavioural assertions (parsed values survive move + source-arena death).
 //
 // Oracle: specs/003-dictionary-codegen/contracts/generated_message.hpp;
-//         data-model Entity 4 / I-9; spec AC-R4 / seam #14; spec §5 R6 deferral.
+//         data-model Entity 4 / I-9; spec AC-R4 / seam #14.
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <fixpp/wire/parser.hpp>  // Framer, pmr_carry_buffer, MessageView (T059)
 #include <memory_resource>
+#include <optional>
+#include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // Generated headers (build-tree only).
 #include <fixpp/v42/Reify.hpp>
 #include <fixpp/v44/Reify.hpp>
+
+#include "support/reify_test_frame.hpp"  // make_nos_frame (T059)
 
 namespace {
 
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
 using OHB = fixpp::v42::owning_Heartbeat;
+using fixpp::test_support::make_nos_frame;
+
+// Reify a NOS into owning_mr; the source frame buffer + arena are built and
+// DESTROYED inside, so a returned ONOS that still reads fields proves the
+// owning deep-copy survived the source's death (AC-R4 / SC-006).
+[[nodiscard]] inline fixpp::core::expected_t<ONOS>
+reify_nos(std::pmr::memory_resource* owning_mr) {
+    auto buf = make_nos_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    if (!framed || framed->empty()) {
+        return std::unexpected{fixpp::core::error::dict_reify_wire_body_not_ready};
+    }
+    MV src{(*framed)[0], &frame_mr};
+    return ONOS::from_view(src, owning_mr);
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Seam #14 compile-time static_asserts (AC-R4 / I-9)
@@ -78,125 +98,64 @@ static_assert(!std::is_trivially_move_constructible_v<OHB>);
 // assertions live in the #if FIXPP_R6_WIRE_BODY_READY guarded block below.
 // ─────────────────────────────────────────────────────────────────
 
-TEST(ReifyMoveTest, FromViewReturnsWireBodyNotReady) {
-    // gate-b/r1 RC#3-B positive oracle: from_view MUST return
-    // dict_reify_wire_body_not_ready (not success, not dict_xml_parse_failed,
-    // not dict_reify_unknown_msg_type) under R6. Failing this assertion means
-    // either a regression in the placeholder or a premature "success" stub.
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r = ONOS::from_view(mv, &arena);
-    ASSERT_FALSE(r.has_value())
-        << "from_view must not return success under R6 (wire body not available; "
-           "spec §5 deferral / gate-b/r1 RC#1 F2)";
-    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
-        << "AC-R3/R4 R6 oracle: from_view must return dict_reify_wire_body_not_ready "
-           "until 2b supplies the wire frame bytes (NOT dict_xml_parse_failed or success)";
+TEST(ReifyMoveTest, FromViewSucceeds) {
+    // Post-cutover (T059): from_view performs the real owning deep-copy and
+    // succeeds. (Was the retired R6 dict_reify_wire_body_not_ready oracle.)
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto r = reify_nos(&owning_mr);
+    ASSERT_TRUE(r.has_value())
+        << "from_view must succeed post-cutover (real owning deep-copy)";
+    auto cl = r->cl_ord_id();
+    ASSERT_TRUE(cl.has_value());
+    EXPECT_EQ(cl.value(), "ORD1");
 }
 
-TEST(ReifyMoveTest, OomPathStillFires) {
-    // AC-R7 / seam #16: even though from_view returns an error under R6,
-    // the PMR allocation still happens (to keep the OOM trap path live).
-    // Verify: a non-null resource is accepted without crashing.
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r = ONOS::from_view(mv, &arena);
-    // OOM path is exercised via OOM injection in reify_oom_test.cpp;
-    // here we just confirm the non-OOM path returns the R6 placeholder.
-    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready);
-}
+// ─── AC-R4 behavioural: move preserves values + resets caches ────────────────
 
-// ─── R6-gated behavioural block (auto-activates when 2b lands) ───────────────
-// Set FIXPP_R6_WIRE_BODY_READY=1 (compile-definition) when 2b swaps in the real
-// wire body. At that point from_view() will return a real owning_<Msg> and the
-// tests below must pass. This block is compiled (not excluded) to catch
-// syntax/type errors early, but each test body is skipped via GTEST_SKIP.
-// 2b-unblock checklist:
-//   □ Remove GTEST_SKIP() calls in this block.
-//   □ Assert pre_move values == post_move values.
-//   □ Assert post-arena-reset values on moved-to instance match.
-//   □ Remove the R6 override in reify_dispatch_test.cpp (SevenAdminMsgTypesAllHit etc).
-// ─────────────────────────────────────────────────────────────────────────────
-
-#ifndef FIXPP_R6_WIRE_BODY_READY
-
-TEST(ReifyMoveTest, MoveCtorResetsSourceCache_R6Deferred) {
-    // AC-R4 behavioural: post-move values == pre-move values.
-    // R6-deferred: from_view returns an error (spec §5 / gate-b/r1 RC#3-B).
-    // 2b-unblock: remove GTEST_SKIP, assert values before/after move match.
-    GTEST_SKIP() << "R6-deferred (spec §5): from_view behavioural round-trip "
-                    "awaits 2b wire body (FIXPP_R6_WIRE_BODY_READY not defined)";
-}
-
-TEST(ReifyMoveTest, MoveAssignResetsSourceCache_R6Deferred) {
-    // AC-R4 behavioural: post-move-assign values == pre-move values.
-    // R6-deferred — 2b-unblock: remove GTEST_SKIP, assert move-assign preserves values.
-    GTEST_SKIP() << "R6-deferred (spec §5): awaits 2b wire body";
-}
-
-TEST(ReifyMoveTest, MovedToCanCallAllAccessors_R6Deferred) {
-    // AC-R4 + US2: post-move accessors return parsed values.
-    // R6-deferred — 2b-unblock: remove GTEST_SKIP, assert typed values.
-    GTEST_SKIP() << "R6-deferred (spec §5): awaits 2b wire body";
-}
-
-TEST(ReifyMoveTest, WhichReturnVersionV_R6Deferred) {
-    // AC-R2 via AC-R4 path: which() after move returns version_v.
-    // R6-deferred: from_view returns an error; deferring this to 2b behavioural.
-    // NOTE: which() is a static constexpr — it is testable directly without
-    // an instance; the full move-path is verified when 2b lands.
-    GTEST_SKIP() << "R6-deferred (spec §5): awaits 2b wire body (move-path); "
-                    "which() static constexpr tested in static_assert above";
-}
-
-#else  // FIXPP_R6_WIRE_BODY_READY — 2b-unblock: activate these tests
-
-TEST(ReifyMoveTest, MoveCtorResetsSourceCache) {
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r = ONOS::from_view(mv, &arena);
-    ASSERT_TRUE(r.has_value());
-    MV const& pre_move_view = r->view();
-    MV const* pre_move_addr = &pre_move_view;
-    ONOS moved = std::move(*r);
-    auto fv = moved.field_value(11);
-    EXPECT_TRUE(fv.has_value());  // 2b: parsed value present
-    (void)pre_move_addr;
-}
-
-TEST(ReifyMoveTest, MoveAssignResetsSourceCache) {
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r1 = ONOS::from_view(mv, &arena);
-    auto r2 = ONOS::from_view(mv, &arena);
-    ASSERT_TRUE(r1.has_value());
-    ASSERT_TRUE(r2.has_value());
-    (void)r1->view();
-    *r2 = std::move(*r1);
-    auto fv = r2->field_value(35);
-    EXPECT_TRUE(fv.has_value());  // 2b: parsed value present
-    auto fv2 = r1->field_value(35);
-    EXPECT_FALSE(fv2.has_value());  // source arena reset → field-absent
-}
-
-TEST(ReifyMoveTest, MovedToCanCallAllAccessors) {
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r = ONOS::from_view(mv, &arena);
+TEST(ReifyMoveTest, MoveCtorPreservesValues) {
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto r = reify_nos(&owning_mr);
     ASSERT_TRUE(r.has_value());
     ONOS moved = std::move(*r);
-    EXPECT_TRUE(moved.cl_ord_id().has_value());
-    EXPECT_TRUE(moved.side().has_value());
+    auto cl = moved.cl_ord_id();
+    ASSERT_TRUE(cl.has_value()) << "moved-to reads parsed values (AC-R4)";
+    EXPECT_EQ(cl.value(), "ORD1");
     EXPECT_TRUE(moved.field_value(11).has_value());
 }
 
-TEST(ReifyMoveTest, WhichReturnVersionV) {
-    std::pmr::monotonic_buffer_resource arena;
-    MV mv;
-    auto r = ONOS::from_view(mv, &arena);
+TEST(ReifyMoveTest, MoveAssignPreservesAndResets) {
+    std::pmr::monotonic_buffer_resource mr1;
+    std::pmr::monotonic_buffer_resource mr2;
+    auto r1 = reify_nos(&mr1);
+    auto r2 = reify_nos(&mr2);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r2.has_value());
+    (void)r1->view();  // prime r1's cache (must be reset on move-assign)
+    *r2 = std::move(*r1);
+    auto cl = r2->cl_ord_id();
+    ASSERT_TRUE(cl.has_value()) << "move-assign target reads parsed values";
+    EXPECT_EQ(cl.value(), "ORD1");
+    // r1 is moved-from: bytes_ moved out + view_cache_ reset (I-9/AC-R4) →
+    // view() rebuilds over empty bytes_ → every field absent (no UB).
+    EXPECT_FALSE(r1->cl_ord_id().has_value())
+        << "moved-from source must be empty (cache reset, bytes moved out)";
+}
+
+TEST(ReifyMoveTest, MovedToCanCallAccessors) {
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto r = reify_nos(&owning_mr);
+    ASSERT_TRUE(r.has_value());
+    ONOS moved = std::move(*r);
+    EXPECT_TRUE(moved.cl_ord_id().has_value());     // tag 11 — in frame
+    EXPECT_TRUE(moved.field_value(55).has_value());  // tag 55 Symbol — in frame
+    EXPECT_FALSE(moved.field_value(54).has_value())  // tag 54 Side — NOT in frame
+        << "absent field reports absent (no UB)";
+}
+
+TEST(ReifyMoveTest, WhichReturnsVersionVAfterMove) {
+    std::pmr::monotonic_buffer_resource owning_mr;
+    auto r = reify_nos(&owning_mr);
     ASSERT_TRUE(r.has_value());
     ONOS moved = std::move(*r);
     EXPECT_EQ(moved.which(), fixpp::dict::application_version::v44);
 }
-
-#endif  // FIXPP_R6_WIRE_BODY_READY
