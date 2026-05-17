@@ -27,7 +27,8 @@
 // separately deferred (needs the build-tree _dispatch CMake target).
 //
 // Deterministic LF-only emission over the bytewise-sorted message list
-// (NFR-003-7 / AC-T1). Mirrors app_version_enum() from emit_messages.cpp.
+// (NFR-003-7 / AC-T1). Uses the shared app_version_enum() / kMessageView
+// from gen_util.hpp.
 #include <cstdint>
 #include <fixpp/dict/field_ref.hpp>
 #include <string>
@@ -45,15 +46,8 @@ namespace fixpp::codegen {
 
 namespace {
 
-constexpr std::string_view kMV = "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
-
-// Mirror of emit_messages.cpp app_version_enum().
-std::string_view app_version_enum(std::string_view ns) {
-    if (ns == "vt11") {
-        return "Unknown";
-    }
-    return ns;
-}
+// kMessageView + app_version_enum() are the shared codegen helpers in
+// gen_util.hpp (were verbatim-duplicated here and in emit_messages.cpp).
 
 // Emit one scalar accessor body that delegates through the lazy view().
 void emit_owning_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, TypeKind k) {
@@ -142,18 +136,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     gq += "::groups::";
 
     // Collect top-level fields (group_no_tag == 0), deduped by tag.
-    std::vector<FieldIR const*> top;
-    {
-        std::unordered_set<std::uint16_t> seen;
-        for (auto const& f : m.fields) {
-            if (f.ref.group_no_tag != 0) {
-                continue;
-            }
-            if (seen.insert(f.ref.tag).second) {
-                top.push_back(&f);
-            }
-        }
-    }
+    std::vector<FieldIR const*> const top = collect_top_fields(m);
 
     // ---- class body -------------------------------------------------------
     w.raw("class ");
@@ -207,13 +190,13 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.raw(oid);
     w.line(">");
     w.raw("    from_view(");
-    w.raw(kMV);
+    w.raw(kMessageView);
     w.line(" const& src, ::std::pmr::memory_resource* mr);");
     w.line();
 
     // Lazy view() rebuilder.
     w.raw("    [[nodiscard]] ");
-    w.raw(kMV);
+    w.raw(kMessageView);
     w.raw(" const&\n");
     w.line("    view() const noexcept [[clang::lifetimebound]];");
     w.line();
@@ -228,13 +211,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     {
         std::unordered_set<std::string> used;
         auto uniq = [&](std::string base, std::uint16_t tag) -> std::string {
-            if (used.insert(base).second) {
-                return base;
-            }
-            base += "_t";
-            base += std::to_string(tag);
-            used.insert(base);
-            return base;
+            return uniquify_accessor(used, std::move(base), tag);
         };
         for (auto const* f : top) {
             if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
@@ -265,7 +242,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.raw("    ::std::pmr::vector<::std::byte>                    bytes_;");
     w.line("      // owned arena copy");
     w.raw("    mutable ::std::optional<");
-    w.raw(kMV);
+    w.raw(kMessageView);
     w.raw("> view_cache_;  // lazy, nullopt after move\n");
     w.line("};");
     w.line();
@@ -314,7 +291,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     // bytes_.data(). On any framing failure (impossible for a valid copy)
     // fall back to a default MV (field-absent; memory-safe, never UB).
     w.raw("inline ");
-    w.raw(kMV);
+    w.raw(kMessageView);
     w.raw(" const&\n");
     w.raw(oid);
     w.line("::view() const noexcept {");
@@ -353,7 +330,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
     w.line(">");
     w.raw(oid);
     w.raw("::from_view(");
-    w.raw(kMV);
+    w.raw(kMessageView);
     w.line(" const& src, ::std::pmr::memory_resource* mr) {");
     w.line("    try {");
     w.raw("        ");

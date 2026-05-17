@@ -54,6 +54,11 @@ struct VersionIR {
     std::vector<LengthPairIR> length_pairs;
 };
 
+// Per-message top-level fields (group_no_tag == 0), deduped by tag in
+// first-encounter order. Shared by emit_messages.cpp + emit_reify.cpp (was
+// a verbatim inline block in each); the returned pointers alias `m.fields`.
+[[nodiscard]] std::vector<FieldIR const*> collect_top_fields(MessageIR const& m);
+
 // Loads `xml_path` via XmlLoader and projects the Dictionary into VersionIR.
 // Throws dict::xml_* on malformed input (host tool — exceptions allowed,
 // [arch §5.3] / [const §III.5]); the user-facing library hot path is

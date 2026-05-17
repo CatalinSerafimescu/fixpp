@@ -16,6 +16,7 @@
 //                    decimal is the PMR route, NOT field_traits — AC-G4/I-16).
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/dict/field_ref.hpp>
 #include <string>
 #include <string_view>
@@ -181,6 +182,37 @@ inline TypeKind kind_of(fixpp::dict::field_data_type t) noexcept {
             return TypeKind::Skip;
     }
     return TypeKind::Skip;
+}
+
+// The flyweight binding target — fully-qualified `MessageView<Index>`.
+// Shared by emit_messages.cpp (was `kView`) and emit_reify.cpp (was `kMV`).
+inline constexpr std::string_view kMessageView =
+    "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
+
+// FIX application-version enum token for a codegen namespace tag. vt11
+// (FIXT.1.1 session layer) has application axis Unknown; v42/v44/v50sp2
+// map verbatim. Was a verbatim copy in emit_messages.cpp + emit_reify.cpp.
+inline std::string_view app_version_enum(std::string_view ns) {
+    if (ns == "vt11") {
+        return "Unknown";
+    }
+    return ns;
+}
+
+// Collision-suffix accessor-name deduper. First occurrence of `base` is
+// returned as-is; subsequent collisions get a `_t<tag>` suffix. `used` is
+// caller-owned so each emission scope keeps its own set (identifiers stay
+// byte-identical to the prior inlined lambda). Was triplicated as an inline
+// lambda in emit_messages.cpp (×2) + emit_reify.cpp (×1).
+inline std::string uniquify_accessor(std::unordered_set<std::string>& used, std::string base,
+                                     std::uint16_t tag) {
+    if (used.insert(base).second) {
+        return base;
+    }
+    base += "_t";
+    base += std::to_string(tag);
+    used.insert(base);
+    return base;
 }
 
 }  // namespace fixpp::codegen

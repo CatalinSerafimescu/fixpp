@@ -41,16 +41,9 @@ namespace fixpp::codegen {
 
 namespace {
 
-constexpr std::string_view kView = "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
-
-std::string_view app_version_enum(std::string_view ns) {
-    // vt11 = FIXT.1.1 session layer: application axis Unknown (admin frames
-    // resolve {session_admin, vt11, Unknown}); v42/v44/v50sp2 map verbatim.
-    if (ns == "vt11") {
-        return "Unknown";
-    }
-    return ns;
-}
+// kMessageView (the flyweight binding target) + app_version_enum() are the
+// shared codegen helpers in gen_util.hpp (were verbatim-duplicated here and
+// in emit_reify.cpp).
 
 std::string_view kind_cpp_type(TypeKind k) {
     switch (k) {
@@ -219,19 +212,13 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     w.raw("        explicit ");
     w.raw(cls);
     w.raw("(");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const& v [[clang::lifetimebound]]) noexcept");
     w.line("            : view_(&v) {}");
 
     std::unordered_set<std::string> used;
     auto uniq = [&](std::string base, std::uint16_t tag) {
-        if (used.insert(base).second) {
-            return base;
-        }
-        base += "_t";
-        base += std::to_string(tag);
-        used.insert(base);
-        return base;
+        return uniquify_accessor(used, std::move(base), tag);
     };
 
     auto const it = mm.find(no_tag);
@@ -270,7 +257,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     emit_field_value(w, true);
     w.line("    private:");
     w.raw("        ");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const* view_ = nullptr;");
     w.line("    };");
 }
@@ -292,38 +279,21 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
     w.raw("    explicit ");
     w.raw(id);
     w.raw("(");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const& view [[clang::lifetimebound]]) noexcept");
     w.line("        : view_(view) {}");
     w.line();
 
     std::unordered_set<std::string> used;
     auto uniq = [&](std::string base, std::uint16_t tag) {
-        if (used.insert(base).second) {
-            return base;
-        }
-        base += "_t";
-        base += std::to_string(tag);
-        used.insert(base);
-        return base;
+        return uniquify_accessor(used, std::move(base), tag);
     };
 
     // Per-message top-level fields (group_no_tag == 0), deduped by tag.
     // Repeating groups are NOT re-nested per message — they live once in
     // the shared fixpp::<ns>::groups namespace (emitted by emit_messages);
     // the message references groups::G_<no_tag> by qualified name.
-    std::vector<FieldIR const*> top;
-    {
-        std::unordered_set<std::uint16_t> seen;
-        for (auto const& f : m.fields) {
-            if (f.ref.group_no_tag != 0) {
-                continue;
-            }
-            if (seen.insert(f.ref.tag).second) {
-                top.push_back(&f);
-            }
-        }
-    }
+    std::vector<FieldIR const*> const top = collect_top_fields(m);
     std::string gq = "::fixpp::";
     gq += ns;
     gq += "::groups::";
@@ -357,18 +327,18 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
     }
     emit_field_value(w, false);
     w.raw("    [[nodiscard]] inline ");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const&\n    view() const noexcept [[clang::lifetimebound]] { return view_; }");
     w.line();
     w.line("private:");
     w.raw("    ");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const& view_;");
     w.line("};");
     w.raw("static_assert(sizeof(");
     w.raw(id);
     w.raw(") == sizeof(");
-    w.raw(kView);
+    w.raw(kMessageView);
     w.line(" const*));");
     w.line();
 }
