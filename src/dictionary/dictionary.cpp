@@ -40,7 +40,7 @@ namespace {
 // Returns SIZE_MAX when `msg_type` is absent (keeps the hot path allocation-
 // and exception-free; the callers map the sentinel to an empty run).
 [[nodiscard]] std::size_t find_msg_index(std::pmr::vector<MessageEntry> const& messages,
-                                          std::string_view msg_type) noexcept {
+                                         std::string_view msg_type) noexcept {
     auto const it = std::ranges::lower_bound(
         messages, msg_type, {}, [](MessageEntry const& m) noexcept { return m.msg_type; });
     if (it == messages.end() || it->msg_type != msg_type) {
