@@ -77,6 +77,26 @@ TEST(DecimalCompare, BothNegativeCanonical) {
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::equal);
 }
 
+TEST(DecimalCompare, ZeroLessThanPositiveAfterZeroStripping) {
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{0, 0}, pod_decimal{5, 0}),
+              std::strong_ordering::less);
+}
+
+TEST(DecimalCompare, ZeroGreaterThanNegativeAfterZeroStripping) {
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{0, 0}, pod_decimal{-5, 0}),
+              std::strong_ordering::greater);
+}
+
+TEST(DecimalCompare, PositiveGreaterThanZeroAfterZeroStripping) {
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{5, 0}, pod_decimal{0, 0}),
+              std::strong_ordering::greater);
+}
+
+TEST(DecimalCompare, NegativeLessThanZeroAfterZeroStripping) {
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{-5, 0}, pod_decimal{0, 0}),
+              std::strong_ordering::less);
+}
+
 // Gate B P1 #1 regression: same-bucket negatives must order by magnitude,
 // not by raw signed-int comparison of mantissas. Before the fix, step-4
 // rescaling combined with the sign flip produced the wrong ordering when
@@ -100,6 +120,13 @@ TEST(DecimalCompare, SameBucketCrossCheck) {
     pod_decimal neg_a{-2, -1};
     pod_decimal neg_b{-19, -2};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(neg_a, neg_b), std::strong_ordering::less);
+}
+
+TEST(DecimalCompare, NegativeDifferentMagnitudeBucketsOrderByMagnitude) {
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{-1000, 0}, pod_decimal{-5, 0}),
+              std::strong_ordering::less);
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{-5, 0}, pod_decimal{-1000, 0}),
+              std::strong_ordering::greater);
 }
 
 // decimal<pod_decimal> operator== and operator<=> rely on compare
