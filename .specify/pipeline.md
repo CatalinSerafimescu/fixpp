@@ -57,7 +57,26 @@ PHASE 4 — PUBLISH + MERGE
                                       via gh pr edit OR /gate-b's Post-loop §3 if re-run on PR
 15. gh pr merge                       user-driven
 
-16. Review and close all issues for this phase
+16. MARK DONE — close-out bookkeeping  MANDATORY; nothing automates these,
+                                      each is updated from memory and gets
+                                      dropped if not enumerated. Update ALL
+                                      that exist for the feature:
+    a. feature-catalogue.md row(s) → `done` (+ coverage-index.md if a
+       baseline legitimately moved)
+    b. parent: submodule-pointer bump commit (post-merge)
+    c. gate-{a,b}-{done,waived} label via `gh api` REST on the merged PR
+       (post-PR gap recurs; `gh pr edit --add-label/--body` silently fails)
+    d. phases/phase-4.md Track Log: Phase status / Active module / Active
+       feature / Last action / Next gate; + Module Status table row
+    e. phases/phase-4/<module>/README.md: feature progress + exit-criteria
+    f. controlling plan / decision-doc progress log if one governs this
+       work (e.g. .specify/decisions/<plan>.md progress table) — LOCAL-ONLY
+       (.specify/decisions/ gitignored); the most frequently forgotten one
+    g. <feature>-verify.md / lifecycle doc: final "User sign-off" line
+    h. project memory: update the relevant state note if the close changes
+       cross-session status
+
+17. Review and close all issues for this phase
 ```
 
 ---
@@ -77,8 +96,18 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
 - **[C] MERGED** into the canonical block as step 10b (the §XVII.8
   completeness-audit / catalogue second Gate-B precondition).
 - **[D] Open coupling.** Step 8 (`/speckit-taskstoissues`) is DISABLED;
-  step 16 (close all issues) is its pair and is a no-op while 8 is off.
-  Re-enable together.
+  step 17 (close all issues, was 16) is its pair and is a no-op while 8 is
+  off. Re-enable together.
+- **[E] APPLIED (user-directed 2026-05-17).** Inserted step 16 "MARK DONE —
+  close-out bookkeeping". Root cause: the canonical pipeline ended at merge
+  + a no-op close-issues step (the disabled-step-8 pair), so marking
+  trackers done was done only from memory and items were dropped — symptom:
+  `retro-coverage-remediation-plan.md` progress log stalled at "⏳ next"
+  though 001/002/003 all merged (#69/#70/#71); recurring post-PR
+  `gate-a-done` label gap. Step 16 enumerates every close-out surface
+  (catalogue, submodule bump, gate label, phase-4 Track Log + module
+  README, controlling decision-doc log, lifecycle sign-off, memory) so the
+  set is explicit, not recalled. Old step 16 → 17.
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
 `/tasks` (§XVII.1), `/speckit-verify` mandatory + non-RED (§XVII.8),
