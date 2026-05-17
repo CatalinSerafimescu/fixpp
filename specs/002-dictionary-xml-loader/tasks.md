@@ -298,3 +298,16 @@ Every task above conforms to `- [ ] T### [P?] [Story?] Description with file pat
 - Commit after each task or logical group; per quickstart.md §13 the pre-PR confirmation line is mandatory.
 - Stop at any user-story checkpoint to validate that story independently before proceeding to the next.
 - `dict::table_view`, `dict::reify`, `dict::version_registry`, C-ABI `fixpp_dict_t`, SWIG bindings are **out of scope** per spec.md §5.
+
+---
+
+## Retroactive `/simplify` + coverage remediation (Article IX §1, 2026-05-17)
+
+Branch `002-dictionary-xml-loader-cov-remediation`. Controlling plan:
+`.specify/decisions/retro-coverage-remediation-plan.md` (local-only). Scope is
+the 002-owned modules only — NOT the 003 reify/version_registry/field_traits
+files that now share `dict/`.
+
+- [x] T039 `/simplify` scoped to 002-owned `include/fixpp/dict/{field_ref,component_ref,group_ref,version_profile,error,dictionary,xml_loader}.hpp` + `src/dictionary/{xml_loader,dictionary}.cpp` → 3 general-purpose review agents → Opus close-analysis triage → apply only accepted in-scope simplifications (surgical, no unrelated refactors). Landed `13f4488` (4 behavior-preserving changes: `bytewise_compare` hoisted to `dictionary_internal.hpp`, `find_msg_index` dedup, `parse_nonneg_int` dedup, byte-identical arm merge).
+- [x] T040 Coverage pass on the simplified 002 code: fresh per-binary profraw over the 002-owned files, ≥95% line / ≥85% branch on the lcov DA/BRDA basis; record per-line Opus test-or-waive for residuals in `.specify/decisions/002-dictionary-xml-loader-verify.md`. GATE MET — `dictionary.cpp` 100.00%/96.67%, `xml_loader.cpp` 98.69%/89.50% (both PASS outright), `dictionary_internal.hpp` 100% reachable (3 lines waived: private-handle `mr()` + zero-length-`NameSlice` guard). Tests `4650390` (Codex-authored, +289, tests-only). Codex's reported determinism SIGSEGV was a stale-binary false alarm — full clean rebuild → `ctest -L dictionary` 10/10 green.
+- [x] T041 Catalogue refresh: `spec/feature-catalogue.md` + `spec/coverage-index.md`; re-run the completeness audit (a `/gate-b` precondition). Determination: a tests-only + behavior-preserving internal-simplify remediation adds no FR/SC/feature/public-API/error-code — the 002 catalogue rows, coverage-index traceability, and tasks↔FR/SC↔catalogue mapping are unchanged (verified against the identical-shaped 001 precedent, PR #69, which made zero catalogue/coverage-index edits). NFR-002 (`spec/feature-catalogue.md:218`, all-features `backlog`) is intentionally not flipped here — it is an all-features NFR, out of a single feature's remediation scope. No catalogue/coverage-index edit warranted; completeness audit re-confirmed 100%.

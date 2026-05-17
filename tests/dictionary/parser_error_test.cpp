@@ -51,6 +51,21 @@ void assert_parse_error(std::string_view xml) {
     EXPECT_TRUE(caught) << "expected dict::xml_parse_error was not thrown";
 }
 
+void assert_parse_error_contains(std::string_view xml, std::string_view needle) {
+    std::array<std::byte, kBufSize> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size(),
+                                           std::pmr::null_memory_resource()};
+
+    try {
+        (void)fixpp::dict::XmlLoader{}.load_from_string(xml, &mr);
+        FAIL() << "expected dict::xml_parse_error";
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_parse_failed);
+        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos)
+            << "what()=" << e.what();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TC-PE-01: Unclosed tag — truncated <field> element; pugixml status_end_element_mismatch
 // or status_bad_end_element depending on pugixml version.
@@ -150,6 +165,11 @@ TEST(ParserError, NonNumericMinor) {
     } catch (fixpp::dict::unknown_version_error const& e) {
         EXPECT_EQ(e.code(), fixpp::core::error::dict_unknown_version);
     }
+}
+
+TEST(ParserError, MalformedXmlIncludesPugixmlDescription) {
+    constexpr std::string_view kXml = "<fix><unclosed>";
+    assert_parse_error_contains(kXml, "Start-end tags mismatch");
 }
 
 }  // namespace

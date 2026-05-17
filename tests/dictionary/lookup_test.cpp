@@ -20,6 +20,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,40 @@ struct VersionParam {
     // AC-D4 Instrument component: all four versions declare it
     bool has_instrument;
 };
+
+namespace {
+
+fixpp::dict::Dictionary load_small_dictionary() {
+    auto* mr = std::pmr::new_delete_resource();
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='11' name='ClOrdID' type='STRING'/>)"
+        R"(<field number='35' name='MsgType' type='STRING'/>)"
+        R"(<field number='453' name='NoPartyIDs' type='NUMINGROUP'/>)"
+        R"(<field number='55' name='Symbol' type='STRING'/>)"
+        R"(<field number='555' name='NoLegs' type='NUMINGROUP'/>)"
+        R"(</fields>)"
+        R"(<components>)"
+        R"(<component name='Empty'/>)"
+        R"(<component name='Instrument'><field name='Symbol' required='N'/></component>)"
+        R"(</components>)"
+        R"(<messages>)"
+        R"(<message name='Heartbeat' msgtype='0' msgcat='admin'>)"
+        R"(<field name='MsgType' required='Y'/>)"
+        R"(</message>)"
+        R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
+        R"(<field name='ClOrdID' required='Y'/>)"
+        R"(<component name='Instrument' required='N'/>)"
+        R"(<group name='NoPartyIDs' required='N'/>)"
+        R"(<group name='NoLegs' required='N'/>)"
+        R"(</message>)"
+        R"(</messages>)"
+        R"(</fix>)";
+    return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -472,6 +507,63 @@ TEST(DictionaryNoexcept, AllPublicAccessorsAreNoexcept) {
     static_assert(noexcept(std::declval<D>().group_fields(0u)));
 
     SUCCEED(); // All static_asserts above already enforce the property.
+}
+
+TEST(DictionaryAccessors, SmallLoadedDictionaryCoversMissAndEmptyPaths) {
+    auto dict = load_small_dictionary();
+
+    EXPECT_EQ(dict.group_first_field(9999u), std::uint16_t{0});
+
+    auto const empty_component = dict.component("Empty");
+    ASSERT_TRUE(empty_component.has_value());
+    EXPECT_EQ(empty_component->field_count, std::uint16_t{0});
+    EXPECT_TRUE(dict.component_fields("Empty").empty());
+    EXPECT_TRUE(dict.component_fields("MissingComponent").empty());
+
+    auto const empty_group = dict.group(453u);
+    ASSERT_TRUE(empty_group.has_value());
+    EXPECT_EQ(empty_group->field_count, std::uint16_t{0});
+    EXPECT_TRUE(dict.group_fields(453u).empty());
+    EXPECT_EQ(dict.group_first_field(454u), std::uint16_t{0});
+    EXPECT_TRUE(dict.group_fields(454u).empty());
+    EXPECT_TRUE(dict.group_fields(9999u).empty());
+
+    auto const present_msg_fields = dict.message_fields("D");
+    ASSERT_EQ(present_msg_fields.size(), std::size_t{4});
+    EXPECT_EQ(present_msg_fields[0].tag, std::uint16_t{11});
+    EXPECT_EQ(present_msg_fields[1].tag, std::uint16_t{55});
+    EXPECT_EQ(present_msg_fields[2].tag, std::uint16_t{453});
+    EXPECT_EQ(present_msg_fields[3].tag, std::uint16_t{555});
+    EXPECT_TRUE(dict.message_fields("Z").empty());
+
+    EXPECT_EQ(dict.field_name(11u), "ClOrdID");
+    EXPECT_TRUE(dict.field_name(9999u).empty());
+
+    EXPECT_TRUE(dict.field_valid_for("D", 11u));
+    EXPECT_FALSE(dict.field_valid_for("D", 9999u));
+    EXPECT_EQ(dict.length_pair_data_tag(35u), std::uint16_t{0});
+}
+
+TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
+    auto dict = load_small_dictionary();
+    auto null_dict = std::move(dict);
+    (void)null_dict;
+
+    EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::Unknown);
+    EXPECT_EQ(dict.field_ref("D", 11u).rule, fixpp::dict::field_presence::NotDeclared);
+    EXPECT_TRUE(dict.required_fields("D").empty());
+    EXPECT_FALSE(dict.field_valid_for("D", 11u));
+    EXPECT_EQ(dict.group_first_field(9999u), std::uint16_t{0});
+    EXPECT_EQ(dict.length_pair_data_tag(95u), std::uint16_t{0});
+    EXPECT_FALSE(dict.field("D", 11u).has_value());
+    EXPECT_FALSE(dict.field_by_name("ClOrdID").has_value());
+    EXPECT_FALSE(dict.component("Instrument").has_value());
+    EXPECT_FALSE(dict.group(9999u).has_value());
+    EXPECT_TRUE(dict.messages().empty());
+    EXPECT_TRUE(dict.component_fields("Instrument").empty());
+    EXPECT_TRUE(dict.group_fields(9999u).empty());
+    EXPECT_TRUE(dict.message_fields("D").empty());
+    EXPECT_TRUE(dict.field_name(11u).empty());
 }
 
 // ---------------------------------------------------------------------------
