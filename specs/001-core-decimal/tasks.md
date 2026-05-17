@@ -279,3 +279,35 @@ ctest validation pass                            → T023
 - T022 leaves `from<U>`/`to<U>` member bodies as `static_assert` stubs so US1 can ship with parse/format only; T039/T040 (US4) replace the stubs with real bodies. This preserves TDD red-green for AC-X1..X3 in T037
 - C-ABI symbol-leakage check (`[const §X.2]`) is enforced at Polish via T049b — `nm` audit on `libfixpp_capi.so` rejects any non-`fixpp_*` `T`-class export
 - Total task count: **58** (post-/analyze remediation 2026-05-12: T019 → T019a + T019b; new T030b, T033b, T049b, T054)
+
+---
+
+## Phase 9: Retroactive remediation (Article IX §1, 2026-05-17)
+
+Re-opened per the Article IX §1 retroactive-remediation backlog (threshold
+raised 90/80 → **95/85**, 2026-05-17; 004-wire-codec closed → backlog in
+scope). Branch `001-core-decimal-cov-remediation`. Controlling plan:
+`.specify/decisions/retro-coverage-remediation-plan.md`.
+
+- **T060 [Simplify]** Run `/simplify` scoped to the 001 touched modules
+  (`include/fixpp/core/*`, `src/core/*`, decimal C-ABI in `src/capi/*`):
+  3 review agents → Opus close-analysis triage → apply only accepted,
+  in-scope simplifications. Surgical; no unrelated refactors. → verify:
+  triage written, no in-scope finding left unaddressed; build + existing
+  decimal suite green post-simplify.
+- **T061 [Coverage]** Measure coverage on the *simplified* code with fresh
+  per-binary profraw (per-file awk-sum). Add tests (Codex-authored OK; CC
+  reviews + commits — Codex is read-only) to reach **≥95% line / ≥85%
+  branch** on touched modules, OR record a per-line Opus test-or-waive
+  assessment in `001-core-decimal-verify.md` for every uncovered error/edge
+  line. → verify: §IX binding rule satisfied (raw 95/85 OR every uncovered
+  line assessed).
+- **T062 [Catalogue]** Refresh `spec/feature-catalogue.md` +
+  `spec/coverage-index.md`; re-run the feature-completeness audit
+  (a /gate-b precondition). → verify: completeness audit non-failing.
+- **T063 [Verify]** `/speckit-verify` once, after T060–T062. → verify:
+  verdict non-RED; decision record refreshed against the branch tip.
+- **T064 [Gate B]** `/gate-b` hostile PR review loop (mandatory before
+  merge, Article XVII §2). → verify: converged; gate-b-{done,waived}.
+
+- Post-Phase-9 task count: **63**.
