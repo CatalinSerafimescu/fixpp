@@ -212,11 +212,26 @@ jobs:
 
       - name: Generate LCOV report
         run: |
+          # The merged profdata holds counts from ALL test binaries ctest ran.
+          # llvm-cov export only attributes coverage to the objects it is given,
+          # so enumerate every instrumented binary in bin/ (first one positional,
+          # the rest via -object) — not just core+capi, which silently dropped
+          # all dictionary/codegen/wire coverage.
+          OBJECTS=""
+          for b in build/linux-clang-coverage/bin/*; do
+            [ -f "$b" ] && [ -x "$b" ] || continue
+            [ "$(basename "$b")" = fixpp_core_tests ] && continue
+            OBJECTS="$OBJECTS -object $b"
+          done
+          # Trailing source paths restrict the report to library sources only
+          # (include/ + src/) — excludes tests/, bench/, tools/, bindings/,
+          # _deps/ and other non-library trees from the Codecov totals.
           llvm-cov-22 export \
             --format=lcov \
             --instr-profile=build/linux-clang-coverage/coverage.profdata \
             build/linux-clang-coverage/bin/fixpp_core_tests \
-            -object build/linux-clang-coverage/bin/fixpp_capi_tests \
+            $OBJECTS \
+            include src \
             > build/linux-clang-coverage/coverage.lcov
         # SOFT: no tests yet produce meaningful coverage; do not fail
         continue-on-error: true
