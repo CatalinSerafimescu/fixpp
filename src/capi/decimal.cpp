@@ -40,6 +40,12 @@ fixpp::core::expected_t<pod_decimal> pod_from_cabi(fixpp_decimal_t d) noexcept {
         pod_decimal{.mantissa = d.mantissa, .exponent = d.exponent});
 }
 
+// Predicate guarding the _checked C-ABI entry points. Deliberately checks ONLY
+// the exponent domain [-38, 0] — unlike from_pod (the bare-path lift) it does
+// NOT reject mantissa == INT64_MIN. This asymmetry is intentional: the _checked
+// surface forwards a sentinel mantissa to compare()/equal(), which carry their
+// own INT64_MIN handling (AC-C6). Routing this through from_pod would silently
+// tighten the frozen C-ABI contract — do not unify without an ABI decision.
 bool in_canonical_domain(fixpp_decimal_t d) noexcept {
     return d.exponent >= -38 && d.exponent <= 0;
 }
