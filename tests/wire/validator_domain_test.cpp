@@ -337,6 +337,94 @@ TEST(ValidatorDomain, WellFormedGroupAccepted) {
         << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
 
+// (h) Group followed by a top-level field: correct count must not over-count.
+// Frame: 453=1 with 1 instance (448=PA,447=D) followed by top-level 55=AAPL.
+// The validator must count actual_count=1 (only the one delimiter 448 in the
+// group body) and NOT include 55=AAPL in the group scope. ([PR68-04] fix.)
+TEST(ValidatorDomain, GroupThenTopLevelFieldNotOverCounted) {
+    auto gram = make_d_grammar();
+    // Add 55 as required so the message is valid overall (it appears after group).
+    // gram already has 55 registered as required for "D".
+    dictionary_driven_validator v{std::move(gram)};
+
+    // 453=1 + 1 real instance, then top-level 55=AAPL follows after the group.
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "54=1\x01"
+        "453=1\x01" "448=PA\x01" "447=D\x01"
+        "55=AAPL\x01");   // top-level field AFTER the group
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "well-formed group (1 instance) followed by top-level 55=AAPL must "
+           "validate OK — top-level field must NOT be counted as an extra group "
+           "instance; error="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
+// (i) Nested malformed group: inner group declares count > actual instances.
+// Outer 453=1 (delimiter=448) is well-formed; inner group 460=2 (delimiter=461)
+// inside the outer instance declares 2 instances but only 1 follows.
+// The validator must reject with wire_required_field_missing. ([PR68-04] fix.)
+TEST(ValidatorDomain, NestedMalformedGroupRejected) {
+    // Build a grammar that has a nested group inside 453:
+    //   453 (NoPartyIDs, delimiter=448) contains:
+    //     448 (PartyID) — the delimiter
+    //     447 (PartyIDSource) — a member
+    //     460 (NoRelationships, delimiter=461) — inner group count
+    //     461 (Relationship) — inner group delimiter/member
+    table_view gram;
+    gram.add_required("D", 8).add_required("D", 9).add_required("D", 35)
+        .add_required("D", 49).add_required("D", 56).add_required("D", 34)
+        .add_required("D", 11).add_required("D", 55).add_required("D", 54)
+        .add_required("D", 10)
+        .add_valid("D", 453)   // outer group count
+        .add_valid("D", 448)   // outer group delimiter
+        .add_valid("D", 447)   // outer group member
+        .add_valid("D", 460)   // inner group count
+        .add_valid("D", 461)   // inner group delimiter
+        .set_group_first(453, 448)
+        .set_group_first(460, 461)
+        .set_type(34, field_type::Int)
+        .set_type(54, field_type::Char)
+        .add_enum(54, "1").add_enum(54, "2");
+
+    dictionary_driven_validator v{std::move(gram)};
+
+    // Outer 453=1 (1 instance), inner 460=2 declares 2 but only 1 follows.
+    auto buf = make_frame(
+        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "11=ORD-1\x01" "55=AAPL\x01" "54=1\x01"
+        "453=1\x01"
+        "448=PA\x01" "447=D\x01"
+        "460=2\x01" "461=REL1\x01");   // inner 460 declares 2 but only 1 follows
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{
+        scratch_buf.data(), scratch_buf.size(),
+        std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    ASSERT_FALSE(result.has_value())
+        << "inner group 460=2 with only 1 delimiter must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << "expected wire_required_field_missing for inner group count mismatch, got "
+        << static_cast<int>(result.error());
+}
+
 // (d) Out-of-range enum value → wire_field_value_out_of_range.
 TEST(ValidatorDomain, EnumViolationRejected) {
     auto gram = make_d_grammar();

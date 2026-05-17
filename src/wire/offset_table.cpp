@@ -257,6 +257,15 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // Locate the count field (first occurrence of no_tag). Delimiter-aware
     // group membership is resolved by group_view<GroupT> with the
     // dictionary; here we bound and expose the contiguous entry range.
+    //
+    // [PR68-09] Boundary fix: to avoid counting trailing top-level fields
+    // as group entries, we apply a first-instance member-set heuristic.
+    // The group ends at the first entry whose tag is NOT a member of the
+    // first instance AND is NOT the group delimiter.  For the single-instance
+    // case (no second delimiter in the frame) the heuristic cannot determine
+    // the boundary without a dict; the dict-aware validator applies the full
+    // correct boundary via its own member-set scan in Step 3.
+    // The per-group DoS cap is evaluated against the member-bounded extent.
     std::size_t count_idx = entries_.size();
     for (std::size_t e = 0; e < entries_.size(); ++e) {
         if (entries_[e].tag == no_tag) {
@@ -268,7 +277,68 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         return err_required_field_missing<group_index>();
     }
     std::size_t const first = count_idx + 1U;
-    std::size_t const avail = entries_.size() - first;
+    if (first >= entries_.size()) {
+        // Count field is the last entry; group is empty.
+        return group_index{no_tag, first, 0U};
+    }
+
+    // Collect the first-instance member set by scanning from `first` to the
+    // second occurrence of the delimiter (or end if only one instance).
+    std::uint16_t const delim = entries_[first].tag;
+    constexpr std::size_t kMaxMembers = 32;
+    std::uint16_t member_tags[kMaxMembers];
+    std::size_t member_count = 0;
+    member_tags[member_count++] = delim;  // delimiter is always a member
+
+    // Walk from first+1 until delimiter recurs (second instance) or end.
+    bool has_second_instance = false;
+    for (std::size_t k = first + 1U; k < entries_.size() && member_count < kMaxMembers; ++k) {
+        if (entries_[k].tag == delim) {
+            has_second_instance = true;
+            break;  // second instance starts — first instance boundary found
+        }
+        bool found = false;
+        for (std::size_t m = 0; m < member_count; ++m) {
+            if (member_tags[m] == entries_[k].tag) { found = true; break; }
+        }
+        if (!found) {
+            member_tags[member_count++] = entries_[k].tag;
+        }
+    }
+
+    // Apply the member-set boundary only when a second instance was found
+    // (has_second_instance == true).  In that case the first-instance scan
+    // collected only the tags before the second delimiter — an accurate
+    // member set that correctly excludes trailing top-level fields.
+    // When there is only one instance, the scan walked all remaining entries
+    // (including any post-group top-level fields), so applying the collected
+    // member set would still include them.  For single-instance groups the
+    // dict-aware Validator applies the correct boundary via its own Step 3
+    // member-set logic; at the OffsetTable layer we fall back to full extent
+    // to avoid false truncation. ([PR68-09] partial fix — multi-instance only.)
+    std::size_t group_end;
+    if (has_second_instance) {
+        // Multi-instance: member_set was bounded by first delimiter recurrence,
+        // so it is accurate.  Stop at the first non-member entry.
+        group_end = first;
+        for (std::size_t k = first; k < entries_.size(); ++k) {
+            bool is_member = false;
+            for (std::size_t m = 0; m < member_count; ++m) {
+                if (member_tags[m] == entries_[k].tag) { is_member = true; break; }
+            }
+            if (!is_member) {
+                break;
+            }
+            group_end = k + 1U;
+        }
+    } else {
+        // Single-instance: cannot determine boundary without dict — use full
+        // extent (rest-of-entries_ after count field). The Validator applies
+        // the correct boundary via its dict-aware Step 3. ([PR68-09] note.)
+        group_end = entries_.size();
+    }
+
+    std::size_t const avail = group_end - first;
     if (avail > cfg_.max_group_entries_per_instance) {
         return err_group_too_large<group_index>();
     }
@@ -294,15 +364,22 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
         auto gi = group(no_tag);
         if (gi) {
             std::size_t const first = gi->first_entry();
-            if (first < entries_.size()) {
+            // group() now returns the bounded extent (excluding trailing
+            // top-level fields). Use gi->entry_count() to derive group_end so
+            // slices stay within the member-set boundary. ([PR68-09] fix.)
+            std::size_t const group_end = first + gi->entry_count();
+            if (first < entries_.size() && first < group_end) {
                 // Each reappearance of the group's first field (the entry
                 // after the count) starts a new occurrence; slice in document
                 // order from one delimiter up to (but excluding) the next.
+                // The loop is bounded by group_end, NOT entries_.size(), so
+                // trailing top-level fields are never included in the last
+                // instance slice. ([PR68-09] boundary fix.)
                 std::uint16_t const delim = entries_[first].tag;
                 std::size_t inst_start = first;
-                for (std::size_t k = first; k <= entries_.size(); ++k) {
+                for (std::size_t k = first; k <= group_end; ++k) {
                     bool const boundary =
-                        (k == entries_.size()) || (k > first && entries_[k].tag == delim);
+                        (k == group_end) || (k > first && entries_[k].tag == delim);
                     if (boundary) {
                         // RC#2 fix: slice must begin at the delimiter's "tag="
                         // prefix, NOT at its value. Walk back from val_start to

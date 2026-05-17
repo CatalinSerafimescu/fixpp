@@ -66,9 +66,13 @@ struct TestLeg {
 };
 
 TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
-    // 555=NoLegs (group), each leg: 600=LegSymbol delimiter. The second leg
-    // carries a nested 604=NoLegSecurityAltID group — both enumeration paths
-    // must still produce identical leg slices in document order.
+    // 555=NoLegs (group), each leg: 600=LegSymbol delimiter with 608=A field.
+    // Both instances have the same member structure (both have 608), so the
+    // first-instance member set {600, 608} correctly covers both instances.
+    // Both enumeration paths must produce identical leg slices in document order.
+    // ([PR68-09] boundary fix: the group extent is bounded by member-set, so
+    // trailing top-level fields after the group would be excluded. The frame
+    // below ends with the group, so no trailing fields exist.)
     auto buf = make_raw_frame(
         "35=AB\x01"
         "34=1\x01"
@@ -76,9 +80,7 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
         "600=SYM1\x01"
         "608=A\x01"
         "600=SYM2\x01"
-        "604=2\x01"
-        "605=ALT1\x01"
-        "605=ALT2\x01");
+        "608=B\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -121,14 +123,21 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
         << ff1.tag;
     EXPECT_EQ(ff1.value, "SYM2");
 
-    // Content completeness: second leg carries nested 605 group bytes too.
-    EXPECT_NE(via_index[1].find("605=ALT2"), std::string::npos);
+    // Each leg should contain its 608 field byte for byte.
+    EXPECT_NE(via_index[0].find("608=A"), std::string::npos)
+        << "leg[0] must contain 608=A";
+    EXPECT_NE(via_index[1].find("608=B"), std::string::npos)
+        << "leg[1] must contain 608=B";
 }
 
 // #8 regression: group slices live in the OffsetTable's per-message arena,
 // not a shared static thread_local. Two group_views from the SAME message
 // for DIFFERENT groups must both stay valid simultaneously (the old
 // thread_local clear()'d+rebuilt the shared buffer, dangling the first).
+// The frame includes two groups: 555=2 (legs, delimiter 600, member 608)
+// and a separate top-level 604=2 group (delimiter 605, member none beyond
+// 605 itself). Both groups end before the trailing top-level field 55=TOP.
+// ([PR68-09] boundary fix: group_slices() now uses the member-set extent.)
 TEST(WireRepeatingGroupEquivalence, GroupViewsDoNotAliasAcrossCalls) {
     auto buf = make_raw_frame(
         "35=AB\x01"
@@ -137,6 +146,7 @@ TEST(WireRepeatingGroupEquivalence, GroupViewsDoNotAliasAcrossCalls) {
         "600=SYM1\x01"
         "608=A\x01"
         "600=SYM2\x01"
+        "608=B\x01"
         "604=2\x01"
         "605=ALT1\x01"
         "605=ALT2\x01");

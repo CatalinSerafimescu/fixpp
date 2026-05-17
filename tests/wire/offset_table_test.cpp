@@ -211,4 +211,58 @@ TEST(WireOffsetTable, GroupSliceStartsAtTagEquals) {
         << "second slice must start at '448='; got: " << sv1;
 }
 
+// PR68-09 regression: group extent is bounded by the first-instance member-set
+// for multi-instance groups.  A two-instance group followed by a top-level
+// field must NOT include the top-level field in the group's entry range or
+// slices — the member set is determined from the first instance, so the
+// second occurrence of the delimiter marks the end of the first instance and
+// correctly excludes any post-group tags.  ([2b §4.7] / [2b §1.2])
+//
+// Note: for single-instance groups the OffsetTable cannot determine the
+// group boundary without a dictionary (the member scan collects all remaining
+// tags).  The dict-aware Validator fixes the single-instance case via its
+// own Step-3 member-set logic (validator_domain_test:GroupThenTopLevel*).
+TEST(WireOffsetTable, GroupExtentExcludesTrailingTopLevelFields) {
+    // Group 453 (NoPartyIDs), delimiter 448. Two instances: 448=PA,447=D and
+    // 448=PB,447=E. Top-level field 55=AAPL follows AFTER the group.
+    // Member set from first instance: {448, 447}. 55 is NOT in that set.
+    auto buf = make_raw_frame("35=D\x01" "34=1\x01"
+                              "453=2\x01"
+                              "448=PA\x01" "447=D\x01"   // instance 1
+                              "448=PB\x01" "447=E\x01"   // instance 2
+                              "55=AAPL\x01");             // top-level, post-group
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto g = t.group(453);
+    ASSERT_TRUE(g.has_value());
+    // group() extent must cover only the 4 group entries (448=PA,447=D,
+    // 448=PB,447=E), NOT the trailing 55=AAPL. entry_count must be 4.
+    EXPECT_EQ(g->entry_count(), 4U)
+        << "group extent must be 4 (two 448+447 pairs only); got " << g->entry_count()
+        << ". 55=AAPL (top-level) must not be included in the group extent.";
+
+    // group_slices: 2 instance slices — neither must include 55=AAPL.
+    auto slices = t.group_slices(453);
+    ASSERT_EQ(slices.size(), 2U) << "two group instances expected";
+    std::string_view sv0{reinterpret_cast<char const*>(slices[0].data), slices[0].len};
+    std::string_view sv1{reinterpret_cast<char const*>(slices[1].data), slices[1].len};
+    EXPECT_EQ(sv0.substr(0, 4), "448=")
+        << "slice[0] must start at '448='; got: " << sv0;
+    EXPECT_EQ(sv1.substr(0, 4), "448=")
+        << "slice[1] must start at '448='; got: " << sv1;
+    // Neither slice must contain 55=AAPL.
+    EXPECT_EQ(sv0.find("55="), std::string_view::npos)
+        << "slice[0] must NOT include trailing 55=AAPL; content: " << sv0;
+    EXPECT_EQ(sv1.find("55="), std::string_view::npos)
+        << "slice[1] must NOT include trailing 55=AAPL; content: " << sv1;
+    // Per-group DoS cap: entry_count is now member-bounded (4), not
+    // rest-of-message (which would have included 55 and 10 too).
+    EXPECT_LE(g->entry_count(), fixpp::wire::default_max_group_entries_per_instance);
+}
+
 }  // namespace

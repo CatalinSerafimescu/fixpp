@@ -206,21 +206,59 @@ public:
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_required_field_missing};
             }
-            // Count how many times delim_tag appears in the group body
-            // (all entries from i+1 until we hit a tag that belongs to the
-            // outer message level — heuristic: until we see no_tag again or
-            // the end). For robustness we count all occurrences within the
-            // remaining entries that match delim_tag.
+
+            // ── PR68-04 boundary fix: determine group extent via member-set ──
+            // Scan the first instance (from i+1 until the next occurrence of
+            // delim_tag, or end) to collect the member-tag set.  Any entry
+            // after this group whose tag is NOT in the member set is a
+            // top-level or outer-scope field — it terminates the group body.
+            // This prevents over-counting when a top-level field happens to
+            // share a tag value with the group delimiter.  ([2b §4.7], /clarify-Q2)
+            constexpr std::size_t kMaxGroupMembers = 32;
+            std::uint16_t member_tags[kMaxGroupMembers];
+            std::size_t member_count = 0;
+            member_tags[member_count++] = delim_tag;  // delimiter is always a member
+
+            for (std::size_t k = i + 2U;
+                 k < ents.size() && member_count < kMaxGroupMembers; ++k) {
+                if (ents[k].tag == delim_tag) {
+                    break;  // second instance starts — first instance ended
+                }
+                // Recurse into nested groups: a tag that is itself a no_tag
+                // (group_first_field returns non-zero) is still within this
+                // group body. Its members will be validated by the outer
+                // loop when it reaches that no_tag entry.
+                bool seen = false;
+                for (std::size_t m = 0; m < member_count; ++m) {
+                    if (member_tags[m] == ents[k].tag) { seen = true; break; }
+                }
+                if (!seen) {
+                    member_tags[member_count++] = ents[k].tag;
+                }
+            }
+
+            // Walk from i+1 to find the group body extent: stop at the first
+            // non-member tag (belongs to outer scope / top-level message).
+            std::size_t group_body_end = i + 1U;
+            for (std::size_t k = i + 1U; k < ents.size(); ++k) {
+                bool is_member = false;
+                for (std::size_t m = 0; m < member_count; ++m) {
+                    if (member_tags[m] == ents[k].tag) { is_member = true; break; }
+                }
+                if (!is_member) {
+                    break;  // first non-member entry — group body ends here
+                }
+                group_body_end = k + 1U;
+            }
+
+            // Count delimiter occurrences within the bounded group body only.
             std::uint32_t actual_count = 0;
-            for (std::size_t k = i + 1; k < ents.size(); ++k) {
+            for (std::size_t k = i + 1U; k < group_body_end; ++k) {
                 if (ents[k].tag == delim_tag) {
                     ++actual_count;
                 }
-                // If we encounter the same no_tag again, stop (nested repeat).
-                if (k > i + 1 && ents[k].tag == no_tag) {
-                    break;
-                }
             }
+
             if (actual_count != declared_count) {
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_required_field_missing};
