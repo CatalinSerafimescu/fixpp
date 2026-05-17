@@ -128,12 +128,9 @@ TEST(WireOffsetTable, InvalidFieldFormatRejected) {
     EXPECT_EQ(s.error(), error::wire_invalid_field_format);
 }
 
-TEST(WireOffsetTable, GroupBoundedAndUnreachableTooLargeUnderCap) {
-    // A well-formed group: 453=count, then 448/447 instances. With <=4096
-    // entries the build never trips the offset cap, so group() returns a
-    // bounded range and NEVER wire_group_too_large (that cap is reachable
-    // only above the offset cap, which fails the build first — asserted as a
-    // defense-in-depth invariant).
+TEST(WireOffsetTable, GroupBoundedUnderDefaultCap) {
+    // A well-formed group: 453=count, then 448/447 instances. The default
+    // 4096-entry cap allows normal groups; group() returns a bounded range.
     auto buf = make_raw_frame("35=D\x01" "34=1\x01" "453=2\x01"
                               "448=PA\x01" "447=D\x01"
                               "448=PB\x01" "447=D\x01");
@@ -154,6 +151,64 @@ TEST(WireOffsetTable, GroupBoundedAndUnreachableTooLargeUnderCap) {
     auto none = t.group(9999);
     ASSERT_FALSE(none.has_value());
     EXPECT_EQ(none.error(), error::wire_required_field_missing);
+}
+
+// FR-015 / [2b §1.2] "caller-tunable" DoS cap: lower per-group cap to 1
+// so a 2-instance group is over-cap and reaches wire_group_too_large.
+TEST(WireOffsetTable, DoSCapGroupTooLargeWithConfig) {
+    // 453=2 followed by 4 fields (2 per instance) — 4 entries available for
+    // the group body. With the default cap 4096 this is fine; with cap=3 it
+    // triggers wire_group_too_large.
+    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "453=2\x01"
+                              "448=PA\x01" "447=D\x01"
+                              "448=PB\x01" "447=D\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    // Lower per-group cap to 3: 4 group-body entries > 3 → wire_group_too_large
+    OffsetTable::Config tight_cfg{.max_offset_entries = 4096,
+                                  .max_group_entries_per_instance = 3};
+    OffsetTable t{*fv, &arena, tight_cfg};
+    ASSERT_TRUE(t.build_status().has_value()) << "frame still parses OK (offset cap not hit)";
+
+    auto g = t.group(453);
+    ASSERT_FALSE(g.has_value()) << "per-group cap=3 with 4 group entries must reject";
+    EXPECT_EQ(g.error(), error::wire_group_too_large)
+        << "expected wire_group_too_large, got "
+        << static_cast<int>(g.error());
+}
+
+// RC#2: group slice must begin at the delimiter field's "tag=" prefix, NOT
+// at its value.  A real 2c GroupT parses "tag=value<SOH>..." as a sub-frame;
+// the leading "NNN=" must be present.
+TEST(WireOffsetTable, GroupSliceStartsAtTagEquals) {
+    // Group 453, delimiter 448.  The first instance is "448=PA<SOH>447=D<SOH>".
+    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "453=2\x01"
+                              "448=PA\x01" "447=D\x01"
+                              "448=PB\x01" "447=D\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto slices = t.group_slices(453);
+    ASSERT_EQ(slices.size(), 2U);
+
+    // The first slice must start with "448=" (the delimiter tag=).
+    auto const& s0 = slices[0];
+    ASSERT_GE(s0.len, 4U) << "slice must be long enough to contain '448='";
+    std::string_view sv0{reinterpret_cast<char const*>(s0.data), s0.len};
+    EXPECT_EQ(sv0.substr(0, 4), "448=")
+        << "group slice must start at the delimiter tag=, not its value; got: " << sv0;
+
+    auto const& s1 = slices[1];
+    ASSERT_GE(s1.len, 4U);
+    std::string_view sv1{reinterpret_cast<char const*>(s1.data), s1.len};
+    EXPECT_EQ(sv1.substr(0, 4), "448=")
+        << "second slice must start at '448='; got: " << sv1;
 }
 
 }  // namespace

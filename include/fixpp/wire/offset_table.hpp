@@ -26,6 +26,13 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 
 class OffsetTable {
 public:
+    // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
+    // Defaults match the module-level inline constexpr above.
+    struct Config {
+        std::size_t max_offset_entries = default_max_offset_entries;
+        std::size_t max_group_entries_per_instance = default_max_group_entries_per_instance;
+    };
+
     struct entry {
         // Members ordered offset/length first so the struct packs to exactly
         // 12 bytes with alignof 4 (the [2b §4.4] invariant). The shape-oracle
@@ -52,8 +59,13 @@ public:
     // bad_alloc mid-build it degrades the SAME way (empty table, status_ =
     // out_of_memory) — a noexcept ctor must not let bad_alloc escape and
     // std::terminate (004 T059 / Codex adversarial review).
+    // The Config overload threads FR-015 / [2b §1.2] caller-tunable caps.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]]) noexcept;
+
+    OffsetTable(frame_view const& frame [[clang::lifetimebound]],
+                std::pmr::memory_resource* mr [[clang::lifetimebound]],
+                Config cfg) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -99,8 +111,10 @@ public:
 
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
+    void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
+    Config cfg_{};  // caller-tunable caps (FR-015 / [2b §1.2])
     std::pmr::vector<entry> entries_;
     // Open-address robin-hood overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.
