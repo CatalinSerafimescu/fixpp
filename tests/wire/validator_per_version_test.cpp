@@ -86,6 +86,23 @@ table_view make_heartbeat_grammar() {
     return t;
 }
 
+// Heartbeat grammar extended with a synthetic repeating group.
+//   Group count: tag 627 (NoHops — valid in FIX 4.4+; used here across all
+//   four version grammars uniformly since this is a mock dictionary).
+//   Delimiter:   tag 628 (HopCompID — first field of each instance).
+//   Member:      tag 629 (HopSendingTime — optional second member).
+// Used only by MalformedGroupCountRejected; other cases use the plain
+// make_heartbeat_grammar() to avoid grammar drift.
+table_view make_heartbeat_grammar_with_group() {
+    table_view t = make_heartbeat_grammar();
+    t.add_valid("0", 627)   // NoHops (group count field)
+     .add_valid("0", 628)   // HopCompID (group delimiter — member)
+     .add_valid("0", 629)   // HopSendingTime (optional group member)
+     .set_group_first(627, 628)   // 627 starts a group; 628 is the delimiter
+     .add_group_member(627, 629); // 629 is the second member
+    return t;
+}
+
 // ── MessageView builder ───────────────────────────────────────────────────────
 
 constexpr std::size_t kParseArenaSize  = 4096;
@@ -230,6 +247,34 @@ TEST_P(ValidatorPerVersion, UnexpectedTagRejected) {
         << p.label << ": unexpected tag 9999 must be rejected";
     EXPECT_EQ(result.error(), error::wire_unexpected_tag)
         << p.label << ": expected wire_unexpected_tag (42), got "
+        << static_cast<int>(result.error());
+}
+
+// ── 5. Malformed repeating-group count → wire_required_field_missing ──────────
+// SC-005 / FR-010 / /clarify-Q2: the validator must reject malformed repeating-
+// group structure across ALL four wire versions with no false accept.
+//
+// Shape (mirrors ValidatorDomain::MalformedGroupCountRejected via the per-version
+// grammar factory): NoHops (627) = 2 declares two hop instances, but only one
+// HopCompID (628) delimiter follows — actual_count (1) != declared_count (2) →
+// wire_required_field_missing (error slot 38).
+TEST_P(ValidatorPerVersion, MalformedGroupCountRejected) {
+    auto const& p = GetParam();
+    SCOPED_TRACE(p.label);
+
+    dictionary_driven_validator v{make_heartbeat_grammar_with_group()};
+
+    // 627=2 declares 2 hop instances; only one 628 delimiter follows.
+    auto buf = make_versioned_frame(
+        p.tag8_value,
+        "35=0\x01" "49=SENDER\x01" "56=TARGET\x01" "34=1\x01"
+        "627=2\x01" "628=HOP1\x01" "629=20260517\x01");  // 1 instance, not 2
+
+    auto result = do_validate(v, buf);
+    ASSERT_FALSE(result.has_value())
+        << p.label << ": NoHops=2 with only 1 HopCompID instance must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << p.label << ": expected wire_required_field_missing (38), got "
         << static_cast<int>(result.error());
 }
 

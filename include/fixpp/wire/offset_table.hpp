@@ -91,10 +91,23 @@ public:
     }
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
 
-    // Lazily-built group sub-index: the contiguous entry range owned by the
-    // first occurrence of `no_tag` (the count field) through the last field
-    // before the next top-level field. Bounded by
-    // default_max_group_entries_per_instance.
+    // Lazily-built group sub-index spanning entries owned by the first
+    // occurrence of `no_tag` (the count field).
+    //
+    // Dict-AWARE construction (Parser{dict} path — all production callers):
+    //   Group extent is bounded by real dictionary membership: the group ends
+    //   at the first entry whose tag the dict says is not a group member.
+    //   This is the [2b §4.7]-conformant path (dictionary's first-field-of-
+    //   group rule; cap = default_max_group_entries_per_instance).
+    //
+    // Dict-FREE construction (OffsetTable(frame, mr) / OffsetTable(frame, mr,
+    //   Config) — test/utility callers only; no production wire caller uses
+    //   this path):
+    //   When no dict predicate is threaded, the single-instance group extent
+    //   degrades to rest-of-message (group_end = entries_.size()). This is a
+    //   deliberate, scoped degradation documented as a [2b §4.7] deviation —
+    //   see .specify/decisions/004-wire-codec-completeness.md §4.7 deviation
+    //   note. The dict-aware path is fully §4.7-conformant.
     class group_index {
     public:
         group_index() = default;
