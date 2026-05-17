@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace fixpp::codegen {
 
