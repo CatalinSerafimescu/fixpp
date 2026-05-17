@@ -33,7 +33,11 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <unordered_set>
 #include <vector>
+
+#include "../../tools/codegen/fixpp-codegen/gen_util.hpp"
+#include <fixpp/dict/field_ref.hpp>
 
 namespace fs = std::filesystem;
 
@@ -121,6 +125,15 @@ static int run_codegen(const fs::path& out_dir) {
     return std::system(cmd.c_str());
 }
 
+static int run_codegen_args(std::string_view args) {
+    std::string cmd = quote(kBin);
+    if (!args.empty()) {
+        cmd += " ";
+        cmd += std::string(args);
+    }
+    return std::system(cmd.c_str());
+}
+
 // RAII temp directory: created in the system temp dir, removed on destruction.
 struct TempDir {
     fs::path path;
@@ -201,6 +214,25 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
     }
     EXPECT_TRUE(all_identical) << "NFR-003-7 / AC-T1 violated: at least one "
                                   "generated file differs between the two codegen runs.";
+}
+
+TEST_F(DeterminismTest, NoArgsExitsTwo) {
+    EXPECT_EQ(run_codegen_args(""), 2 << 8);
+}
+
+TEST_F(DeterminismTest, MissingXmlValueExitsTwo) {
+    EXPECT_EQ(run_codegen_args("--xml"), 2 << 8);
+}
+
+TEST_F(DeterminismTest, MissingOutValueExitsTwo) {
+    EXPECT_EQ(run_codegen_args("--out"), 2 << 8);
+}
+
+TEST_F(DeterminismTest, BadXmlPathExitsOne) {
+    TempDir run("fixpp_det_badxml");
+    fs::path missing = run.path / "missing.xml";
+    std::string cmd = "--xml " + quote(missing.string()) + " --out " + quote(run.path.string());
+    EXPECT_EQ(run_codegen_args(cmd), 1 << 8);
 }
 
 // ── AC-T2: No source-tree write ───────────────────────────────────────────────
@@ -292,4 +324,50 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
             << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
             << golden.string();
     }
+}
+
+TEST(CodegenGenUtil, AccessorNormalizationCoversKeywordsDigitsAndFallback) {
+    using fixpp::codegen::to_accessor;
+
+    EXPECT_EQ(to_accessor("ClOrdID"), "cl_ord_id");
+    EXPECT_EQ(to_accessor("SecurityIDSource"), "security_id_source");
+    EXPECT_EQ(to_accessor("Ord-ID"), "ord_id");
+    EXPECT_EQ(to_accessor("Ord-"), "ord");
+    EXPECT_EQ(to_accessor("_Ord"), "ord");
+    EXPECT_EQ(to_accessor("9Lives"), "_9_lives");
+    EXPECT_EQ(to_accessor("class"), "class_");
+    EXPECT_EQ(to_accessor("___"), "field");
+}
+
+TEST(CodegenGenUtil, IdentifierNormalizationCoversKeywordsDigitsAndFallback) {
+    using fixpp::codegen::to_identifier;
+
+    EXPECT_EQ(to_identifier("ExecutionReport"), "ExecutionReport");
+    EXPECT_EQ(to_identifier("9Foo-Bar"), "_9Foo_Bar");
+    EXPECT_EQ(to_identifier("class"), "class_");
+    EXPECT_EQ(to_identifier(""), "Msg");
+}
+
+TEST(CodegenGenUtil, GroupPrefixVersionAndCollisionHelpersCoverReachableBranches) {
+    EXPECT_EQ(fixpp::codegen::strip_no_prefix("NoLegs"), "Legs");
+    EXPECT_EQ(fixpp::codegen::strip_no_prefix("Notice"), "Notice");
+    EXPECT_EQ(fixpp::codegen::app_version_enum("vt11"), "Unknown");
+    EXPECT_EQ(fixpp::codegen::app_version_enum("v44"), "v44");
+
+    std::unordered_set<std::string> used;
+    EXPECT_EQ(fixpp::codegen::uniquify_accessor(used, "cl_ord_id", 11), "cl_ord_id");
+    EXPECT_EQ(fixpp::codegen::uniquify_accessor(used, "cl_ord_id", 11), "cl_ord_id_t11");
+}
+
+TEST(CodegenGenUtil, KindOfMapsRepresentativeFieldKinds) {
+    using fixpp::codegen::TypeKind;
+    using fixpp::codegen::kind_of;
+    using fixpp::dict::field_data_type;
+
+    EXPECT_EQ(kind_of(field_data_type::Price), TypeKind::Decimal);
+    EXPECT_EQ(kind_of(field_data_type::Char), TypeKind::Char);
+    EXPECT_EQ(kind_of(field_data_type::Boolean), TypeKind::Bool);
+    EXPECT_EQ(kind_of(field_data_type::SeqNum), TypeKind::Int32);
+    EXPECT_EQ(kind_of(field_data_type::Currency), TypeKind::String);
+    EXPECT_EQ(kind_of(field_data_type::DialectExtension), TypeKind::Skip);
 }

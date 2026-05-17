@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <memory_resource>
 #include <optional>
+#include <string>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -52,6 +53,32 @@ namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 using NOS = fixpp::v44::NewOrderSingle;
 using ONOS = fixpp::v44::owning_NewOrderSingle;
+
+MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr) {
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
+                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    EXPECT_TRUE(framed.has_value());
+    EXPECT_FALSE(framed->empty());
+    return MV{(*framed)[0], mr};
+}
+
+std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view body) {
+    std::string pre = std::string("8=") + std::string(begin_string) + "\x01"
+                      + "9=" + std::to_string(body.size()) + "\x01" + std::string(body);
+    unsigned sum = 0;
+    for (unsigned char c : pre) {
+        sum += c;
+    }
+    char checksum[8]{};
+    std::snprintf(checksum, sizeof(checksum), "10=%03u\x01", sum % 256U);
+    std::string full = pre + checksum;
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
+}
 
 // ─────────────────────────────────────────────────────────────────
 // AC-R1 / AC-G7a — compile-time shape: owning_message_t<NOS> resolves to
@@ -129,6 +156,81 @@ TEST(ReifyTest, FromViewEmptySourceIsWellFormed) {
         << "from_view must succeed (real deep-copy; R6 placeholder retired)";
     EXPECT_FALSE(result->cl_ord_id().has_value())
         << "empty source → every field absent, no UB";
+}
+
+TEST(ReifyTest, ReifyDefaultMessageViewNormalizesMissingMsgType) {
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+    auto r = fixpp::dict::reify(MV{}, profile, &arena);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready);
+}
+
+TEST(ReifyTest, ReifyFixtAdminFrameHitsReachableStubExit) {
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v50sp2, true, 0};
+    for (char mt : {'0', '1', '2', '3', '4', '5', 'A'}) {
+        auto frame = make_frame("FIXT.1.1",
+                                std::string("35=") + mt + "\x01" + "34=1\x01" + "49=S\x01"
+                                    + "56=T\x01");
+        std::pmr::monotonic_buffer_resource arena;
+        auto mv = parse_frame(frame, &arena);
+
+        auto r = fixpp::dict::reify(mv, profile, &arena);
+        ASSERT_FALSE(r.has_value()) << "MsgType=" << mt;
+        EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready)
+            << "MsgType=" << mt;
+    }
+}
+
+TEST(ReifyTest, ReifyApplicationFrameUsesProfileDefaultWhen1128Absent) {
+    auto buf = make_nos_frame();
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_frame(buf, &arena);
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+
+    auto r = fixpp::dict::reify(mv, profile, &arena);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready);
+}
+
+TEST(ReifyTest, ReifyApplicationFramePropagatesUnknownApplVerId) {
+    auto frame = make_frame("FIXT.1.1",
+                            "35=D\x01" "1128=bogus\x01" "34=1\x01" "49=S\x01" "56=T\x01");
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_frame(frame, &arena);
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+
+    auto r = fixpp::dict::reify(mv, profile, &arena);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_unknown_appl_ver_id);
+}
+
+TEST(ReifyTest, ReifyApplicationFramePropagatesUnresolvedDefault) {
+    auto buf = make_nos_frame();
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_frame(buf, &arena);
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::Unknown, true, 0};
+
+    auto r = fixpp::dict::reify(mv, profile, &arena);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_unresolved_application_version);
+}
+
+TEST(ReifyTest, ReifyMultiCharMsgTypeSkipsFixtAdminCheck) {
+    auto frame = make_frame("FIXT.1.1", "35=AB\x01" "34=1\x01" "49=S\x01" "56=T\x01");
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_frame(frame, &arena);
+    fixpp::dict::version_profile const profile{
+        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+
+    auto r = fixpp::dict::reify(mv, profile, &arena);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready);
 }
 
 TEST(ReifyTest, FromViewReturnsOwning) {
