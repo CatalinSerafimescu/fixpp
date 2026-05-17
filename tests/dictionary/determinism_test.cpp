@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory_resource>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -57,11 +58,11 @@ std::string field_ref_bytes(fixpp::dict::Dictionary const& d,
 TEST(Determinism, MessagesIterationByteIdentical) {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
 
-    std::array<std::byte, k4MiB> buf1{};
+    std::vector<std::byte> buf1(k4MiB);
     std::pmr::monotonic_buffer_resource mr1{buf1.data(), buf1.size()};
     auto d1 = fixpp::dict::XmlLoader{}.load(path, &mr1);
 
-    std::array<std::byte, k4MiB> buf2{};
+    std::vector<std::byte> buf2(k4MiB);
     std::pmr::monotonic_buffer_resource mr2{buf2.data(), buf2.size()};
     auto d2 = fixpp::dict::XmlLoader{}.load(path, &mr2);
 
@@ -79,11 +80,11 @@ TEST(Determinism, MessagesIterationByteIdentical) {
 TEST(Determinism, FieldRefSequenceByteIdentical) {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
 
-    std::array<std::byte, k4MiB> buf1{};
+    std::vector<std::byte> buf1(k4MiB);
     std::pmr::monotonic_buffer_resource mr1{buf1.data(), buf1.size()};
     auto d1 = fixpp::dict::XmlLoader{}.load(path, &mr1);
 
-    std::array<std::byte, k4MiB> buf2{};
+    std::vector<std::byte> buf2(k4MiB);
     std::pmr::monotonic_buffer_resource mr2{buf2.data(), buf2.size()};
     auto d2 = fixpp::dict::XmlLoader{}.load(path, &mr2);
 
@@ -113,7 +114,7 @@ TEST(Determinism, FieldRefSequenceByteIdentical) {
 TEST(Determinism, SurvivesMove) {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
 
-    std::array<std::byte, k4MiB> buf{};
+    std::vector<std::byte> buf(k4MiB);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto d1 = fixpp::dict::XmlLoader{}.load(path, &mr);
 
