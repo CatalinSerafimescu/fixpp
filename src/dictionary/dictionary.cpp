@@ -16,6 +16,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "dictionary_internal.hpp"
 #include "fixpp/dict/component_ref.hpp"
