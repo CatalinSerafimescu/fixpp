@@ -231,6 +231,7 @@ jobs:
       - name: Upload to Codecov
         uses: codecov/codecov-action@v6
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: build/linux-clang-coverage/coverage.lcov
           flags: unittests
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
