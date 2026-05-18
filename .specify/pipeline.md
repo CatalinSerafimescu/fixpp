@@ -26,6 +26,40 @@ PHASE 2 — TASKS
 7.  /speckit-checklist                api/abi/nfr review checklists (audience: Gate B)
 ##8.  /speckit-taskstoissues            optional — sync to GitHub issues   [DISABLED]
 
+8.5 CHECKLIST AUDIT                    MANDATORY gate — BLOCKS step 9.
+                                      For every domain checklist in
+                                      specs/<id>/checklists/ (the auto
+                                      /specify `requirements.md` is closed at
+                                      steps 1–2 and is exempt): the
+                                      orchestrator audits each CHK item
+                                      against spec.md, cross-checked vs
+                                      plan/tasks/data-model/contracts and the
+                                      signed-off design-doc anchor. Every
+                                      item MUST be ticked [x] with an inline
+                                      disposition tag:
+                                        SPEC-FIXED      — spec.md edited
+                                        DD-DECIDED §X   — settled in the
+                                                          signed-off design
+                                                          doc (anchor rule);
+                                                          recorded, not re-spec'd
+                                        WAIVED: <reason> — recorded; allowed
+                                                          ONLY for items NOT
+                                                          tagged Completeness/
+                                                          Clarity/Consistency
+                                      Genuine Completeness/Clarity/Consistency
+                                      gaps MUST be SPEC-FIXED or DD-DECIDED —
+                                      never WAIVED. Every design-doc §/RC
+                                      anchor cited by spec is spot-verified to
+                                      exist in the signed-off revision (no
+                                      dangling ref). Record = the checklist
+                                      file itself (boxes + disposition tags).
+                                      If ANY item is SPEC-FIXED, re-run
+                                      step 6 (/speckit-analyze) before step 9
+                                      (the spec edit invalidates the prior
+                                      drift check). Exit: zero
+                                      un-dispositioned [ ] boxes across all
+                                      domain checklists.
+
 PHASE 3 — IMPLEMENT
 9.  /speckit-implement                runs tasks, marks [X] (NOT evidence-based — see step 10)
 
@@ -108,6 +142,21 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   (catalogue, submodule bump, gate label, phase-4 Track Log + module
   README, controlling decision-doc log, lifecycle sign-off, memory) so the
   set is explicit, not recalled. Old step 16 → 17.
+- **[F] APPLIED (user-directed 2026-05-18).** Inserted step 8.5 "CHECKLIST
+  AUDIT" as a MANDATORY gate between step 7 (`/speckit-checklist`) and
+  step 9 (`/speckit-implement`). Root cause: `/speckit-checklist` emits
+  domain checklists but nothing required their CHK items to be
+  dispositioned before code is written — they were de facto deferred to
+  Gate B (step 11, post-implement), so a requirements-quality defect could
+  survive into implementation and only surface at hostile PR review. The
+  audit is a spec-vs-{plan,tasks,data-model,contracts,design-doc} review;
+  disposition is recorded in the checklist file itself (SPEC-FIXED /
+  DD-DECIDED §X / WAIVED). Completeness/Clarity/Consistency gaps cannot be
+  WAIVED. SPEC-FIXED dispositions loop back to step 6 (`/speckit-analyze`)
+  so a spec edit cannot bypass the drift check. First applied to
+  006-async-mutex `checklists/concurrency.md` (24 PASS / 6 GAP / 9 MINOR /
+  1 ACTION; 3 SPEC-FIXED: CHK017/CHK029/CHK037; CHK031 anchor spot-check
+  verified clean against `2f-async-mutex.md` v1.5).
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
 `/tasks` (§XVII.1), `/speckit-verify` mandatory + non-RED (§XVII.8),

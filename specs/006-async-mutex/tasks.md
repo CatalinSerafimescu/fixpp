@@ -55,7 +55,7 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 - [ ] T012 Define full `fixpp::sync::async_lock_guard` (E3): public default + move ctor; **private** engaged ctor `[[clang::lifetimebound]]` + `friend class detail::async_mutex_awaiter`; deleted copy; **destructive** `operator=(&&)` (unlock-then-take, self-assign no-op); `~async_lock_guard()`; `[[nodiscard]] release()`; `[[nodiscard]] owns_lock()` (RC#1/N-P1-3; FR-003).
 - [ ] T013 Define `fixpp::sync::async_mutex` (E1) class skeleton: all atomic members from data-model E1 (`state_`, `next_drain_head_`, `draining_`, `drain_in_progress_`, `active_holders_count_`, `active_acquirers_count_`, `drain_latch_ptr_`, `policy_`); `not_locked`/`locked_no_waiters` constants; the lock-freedom `static_assert`s (FR-013); `constexpr async_mutex()` + `explicit constexpr async_mutex(completion_policy)`; deleted copy/move; `~async_mutex()` firing `std::terminate()`/`abort_invariant` when held or waiters present (FR-008); declarations only for `async_lock(mr=nullptr)`/`unlock()`/`cancel_and_drain()`/`policy()`. No public `try_lock()` (FR-001/FR-015).
 - [ ] T014 [P] Create declaration-only header `include/fixpp/session/async_lock_via_session_executor.hpp` (E7): SPDX header + the exact `[2f §4.3.2]` signature `[[nodiscard]] asio::awaitable<expected_t<fixpp::sync::async_lock_guard>> async_lock_via_session_executor(fixpp::sync::async_mutex&) noexcept;` — **declaration only; implemented by the session-module spec, not this feature** (RC#2; FR-011). Note (I1): `sync_lock_outside_session` (slot 45) is a declaration-contract error variant only — no runtime path is implemented in this feature, so it is **not coverage-applicable** per SC-009's declaration-only benignity clause (do not flag it uncovered).
-- [ ] T015 [P] Scaffold `tools/check_no_std_mutex_in_awaitable_headers.sh` (owned/finalized by this feature per FR-014; not present on this branch): post-preprocessing (`-E`) scope, exit-non-zero on `std::mutex`/`std::recursive_mutex`/etc. in any header that pulls `asio::awaitable<...>`. Corpus/diagnostic/CI wiring completed in US5.
+- [ ] T015 [P] Scaffold `tools/check_no_std_mutex_in_awaitable_headers.sh` (owned/finalized by this feature per FR-014; not present on this branch — created from scratch here): post-preprocessing (`-E`) scope, exit-non-zero when any header that pulls `asio::awaitable<...>` names a member of the **FR-014 six-type banned set** (`std::mutex`, `std::recursive_mutex`, `std::timed_mutex`, `std::recursive_timed_mutex`, `std::shared_mutex`, `std::shared_timed_mutex`). Corpus/diagnostic/CI wiring completed in US5.
 
 **Checkpoint**: every type named in data-model exists; all 29 seam files (added per story) compile and FAIL.
 
@@ -179,14 +179,14 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 ### Tests for User Story 5 (write FIRST — must FAIL)
 
-- [ ] T062 [US5] Seam #14 `tests/sync/test_no_std_mutex_ci_gate.cpp` — drives the gate over the 3 fixtures and asserts zero FN/FP + diagnostic content (`[2f §9 #14]`).
-- [ ] T063 [P] [US5] Fixture `tests/sync/fixtures/header_with_std_mutex_and_awaitable.hpp` — deliberate violation; gate MUST fire.
+- [ ] T062 [US5] Seam #14 `tests/sync/test_no_std_mutex_ci_gate.cpp` — drives the gate over the 3 corpus fixtures and asserts zero FN/FP **per each of the FR-014 six banned spellings** (the violation fixture T063 exercises all six, one per guarded block) + diagnostic content (`[2f §9 #14]`; SC-006).
+- [ ] T063 [P] [US5] Fixture `tests/sync/fixtures/header_with_std_mutex_and_awaitable.hpp` — deliberate violation exercising **each of the FR-014 six banned spellings** (`std::mutex`, `std::recursive_mutex`, `std::timed_mutex`, `std::recursive_timed_mutex`, `std::shared_mutex`, `std::shared_timed_mutex`), one per preprocessor-guarded block so seam #14 can assert per-spelling; gate MUST fire on every one.
 - [ ] T064 [P] [US5] Fixture `tests/sync/fixtures/header_without_violation.hpp` — legitimate `async_mutex` in an awaitable header; gate MUST NOT fire.
 - [ ] T065 [P] [US5] Fixture `tests/sync/fixtures/header_transitive_awaitable_include.hpp` — `std::mutex` with `asio::awaitable` pulled transitively; post-preprocessing scope MUST catch it (`[2f §9 #14]` variant 3).
 
 ### Implementation for User Story 5
 
-- [ ] T066 [US5] Finalize `tools/check_no_std_mutex_in_awaitable_headers.sh`: post-`-E` preprocessing scope (Codex C-P2-10), diagnostic names `fixpp::sync::async_mutex`; wire as a first-class Tier-1 CI step (`[const §IX.4]`).
+- [ ] T066 [US5] Finalize `tools/check_no_std_mutex_in_awaitable_headers.sh`: post-`-E` preprocessing scope (Codex C-P2-10); the gate regex matches **exactly the FR-014 six-type banned set** (`std::mutex`, `std::recursive_mutex`, `std::timed_mutex`, `std::recursive_timed_mutex`, `std::shared_mutex`, `std::shared_timed_mutex`); diagnostic names `fixpp::sync::async_mutex`; wire as a first-class Tier-1 CI step (`[const §IX.4]`). (`using`/`typedef` aliases are out of grep scope per FR-014 — recorded limitation, not a corpus FN.)
 - [ ] T067 [US5] Run seam #14 + the script over the corpus GREEN: zero false negatives, zero false positives (SC-006).
 
 **Checkpoint**: all five user stories independently functional.
