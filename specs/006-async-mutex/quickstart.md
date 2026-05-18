@@ -2,6 +2,39 @@
 
 How to build, test, run sanitizers (especially TSan for concurrency correctness), bench, measure coverage, verify, and gate the awaitable mutex. Anchored to `.specify/2f-async-mutex.md` v1.5 and the constitution Tier-1 matrix (`[const §IX.6]`).
 
+## 0. STL-availability probe — `std::atomic<std::shared_ptr<T>>` (run BEFORE `/implement`)
+
+The mutex member `std::atomic<std::shared_ptr<detail::drain_latch_state>>`
+(`[2f §1.2]`/`[2f §4.1]`; data-model.md E1) needs the C++20 `std::atomic<
+std::shared_ptr<T>>` partial specialization (P0718). This is a documented
+implementation assumption on the supported libc++/libstdc++/MSVC-STL matrix
+(research.md D-4). Fail early if a supported STL lacks the surface:
+
+```sh
+# Minimal compile probe — must compile + run cleanly on EVERY supported STL.
+cat > /tmp/atomic_shared_ptr_probe.cpp <<'EOF'
+#include <atomic>
+#include <memory>
+int main() {
+    std::atomic<std::shared_ptr<int>> a{std::make_shared<int>(1)};
+    auto p = a.load();
+    a.store(std::make_shared<int>(2));
+    (void)p;
+    return 0;
+}
+EOF
+# Repeat per Tier-1/Tier-2 toolchain (libc++, libstdc++, MSVC-STL):
+clang++ -std=c++23 -stdlib=libc++ /tmp/atomic_shared_ptr_probe.cpp -o /tmp/probe && /tmp/probe
+g++     -std=c++23              /tmp/atomic_shared_ptr_probe.cpp -o /tmp/probe && /tmp/probe
+# (Windows/MSVC: cl /std:c++latest /EHsc atomic_shared_ptr_probe.cpp)
+```
+
+A non-compiling or failing probe on any supported STL is a hard
+pre-`/implement` blocker (the drain design depends on this type). This is a
+toolchain-availability gate, not a design risk — `[2f §4.1]` (lines 637–640)
+already bounds the type honestly (cold path, not lock-free in general,
+ordering pinned).
+
 ## 1. Build (local pre-PR gate, `[const §XVII.7]`)
 
 > Resource gate: local Conan/CMake builds are heavy. The agent surfaces `AskUserQuestion` before running them; the user approves first. The contributor adds `local build: green on linux-clang-debug @ <git-sha>` to the PR body.
@@ -82,9 +115,10 @@ cmake --build --preset linux-clang-tsan --target sync_arm64_weak_memory
 ctest --preset linux-clang-tsan -R 'sync_arm64_weak_memory'
 ```
 
-## 4. Fuzz — N/A for 006-async-mutex
+## 4. Fuzz + abidiff — N/A for 006-async-mutex
 
-The awaitable mutex surface (`async_lock`, `unlock`, `cancel_and_drain`) has no external untrusted input boundary — it is not a parser. Fuzz testing is N/A per `[2f §10]` (D-11 in `research.md`). The concurrency correctness boundary is covered by TSan + the stress seams (#6, #7, #8, #15, #16, #18).
+- **Fuzz N/A** (`[const §VII.7]`; research.md D-11; plan.md Constitution Check `[const §VII.7]` row): the awaitable mutex surface (`async_lock`, `unlock`, `cancel_and_drain`) has no external untrusted input boundary — it is not a parser. The concurrency correctness boundary is covered by TSan + the stress seams (#6, #7, #8, #15, #16, #18). `/speckit-verify` marks this `SKIPPED-with-reason`.
+- **abidiff N/A** (`[const §IX.5]`; research.md D-11; plan.md Constitution Check `[const §IX.5]` row): no C-ABI surface is added (`async_mutex` is C++-only per `[2f §5]`; zero `extern "C"` symbols). `/speckit-verify` marks this `SKIPPED-with-reason`.
 
 ## 5. Bench + ±5% regression gate (`[const §VIII.1]` / `[const §VIII.2]`)
 
@@ -147,7 +181,7 @@ ctest --preset linux-clang-debug -R 'sync_no_std_mutex_ci_gate'
 
 The gate operates post-preprocessing (post-`-E`) to catch transitive includes (Codex C-P2-10 close).
 
-## 8. Coverage (`[const §IX.2]`)
+## 8. Coverage (`[const §IX.1]`)
 
 ```sh
 conan install . -pr conan/profiles/linux-clang-coverage --build=missing
@@ -160,12 +194,13 @@ lcov --capture --directory build/linux-clang-coverage/CMakeFiles/fixpp_sync.dir 
      --output-file coverage/sync.info
 genhtml coverage/sync.info --output-directory coverage/sync/
 
-# Gate: DA (line) coverage ≥ 90%; BRDA (branch) coverage ≥ 80% on src/core/sync/
-# Basis: lcov DA/BRDA per [const §IX.2] (not llvm-cov aggregate — profraw
+# Gate: DA (line) coverage ≥ 95%; BRDA (branch) coverage ≥ 85% on the touched
+#       core/sync (+ session/ helper) modules (matches spec.md SC-009).
+# Basis: lcov DA/BRDA per [const §IX.1] (not llvm-cov aggregate — profraw
 # staleness caveat per project memory).
 ```
 
-**Note on templated headers:** `[const §XI.6]` HALO paths and `if constexpr` branches may show unreachable DA/BRDA under one toolchain. Judge on zero-hit DA / not-taken BRDA; do not bloat tests against impossible paths. Per project feedback: `[const §IX.2]` coverage gate basis = lcov DA/BRDA, not llvm-cov report aggregate.
+**Note on templated headers:** `[const §XI.6]` HALO paths and `if constexpr` branches may show unreachable DA/BRDA under one toolchain. Judge on zero-hit DA / not-taken BRDA; do not bloat tests against impossible paths. Per project feedback: the `[const §IX.1]` coverage gate basis = lcov DA/BRDA, not llvm-cov report aggregate. (`[const §IX.2]` is the *sanitizer* clause — TSan/ASan/UBSan, see §3; it is NOT the coverage clause.)
 
 ## 9. Verify (mandatory after `/speckit-implement`, `[const §XVII.8]`)
 
@@ -175,8 +210,9 @@ genhtml coverage/sync.info --output-directory coverage/sync/
 
 Produces `.specify/decisions/006-async-mutex-verify.md` (GREEN / YELLOW / RED). Each polish task is executed serially:
 
+0. STL-availability probe — `std::atomic<std::shared_ptr<T>>` compiles + runs on every supported STL (§0; research.md D-4). Hard pre-`/implement` blocker.
 1. Sanitizer matrix (TSan + ASan + UBSan + GCC release).
-2. Coverage gate (≥ 90% line / ≥ 80% branch on `src/core/sync/`).
+2. Coverage gate (≥ 95% line / ≥ 85% branch on the touched `core/sync` (+ `session/` helper) modules, `[const §IX.1]`, lcov DA/BRDA basis).
 3. `clang-tidy` / `cppcheck` / IWYU sweep.
 4. Alloc guard under `mallocnesia` (seams #10 #21).
 5. CI grep gate (`[const §XV.9]` / seam #14).
@@ -192,6 +228,8 @@ Produces `.specify/decisions/006-async-mutex-verify.md` (GREEN / YELLOW / RED). 
 /gate-a 006-async-mutex   # BEFORE /tasks ([const §XVII.1]); Codex + Opus adversarial; both Codex passes
 /gate-b <PR#>             # BEFORE merge ([const §XVII.2]); /speckit-verify GREEN/YELLOW precondition
 ```
+
+Canonical pipeline order is stated once in `plan.md` Constitution-Check `[const §XVI.4]` row (`/plan` → Gate A → `/tasks` → `/analyze` → `/implement`) — single source of truth; not restated here to avoid drift.
 
 Gate A triggers: Threading/Concurrency (all public methods, phase machine, memory-ordering table I-01..I-31) + Error semantics (4 new `sync_*` variants at slots 43–46) — both mandatory escalation criteria per `[const §XVII.1]`.
 

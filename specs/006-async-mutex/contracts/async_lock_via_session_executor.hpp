@@ -23,8 +23,10 @@
 //   This helper is the glue that core::async_mutex does NOT own:
 //   - It lives in include/fixpp/session/ (downstream of core/ per [arch §2.3]).
 //   - It is DECLARED by 2f at sign-off.
-//   - It is IMPLEMENTED by the Phase-4 session-module spec (or the 2e
-//     implementation for the MemoryStore use case).
+//   - It is IMPLEMENTED by the session-module spec, NOT this feature
+//     (design-doc §1.2 / §4.3.2: the session-module spec ships the
+//     implementation; 2e is 2f's first *consumer*, not licensed to ship
+//     this body).
 //   - It recovers the per-session resource from the awaiter's bound executor
 //     and forwards into async_lock(mr).
 //
@@ -35,10 +37,20 @@
 
 #pragma once
 
-// Forward declarations (build header includes these properly):
+// Build header includes these properly; this oracle forward-declares the
+// minimum so the EXACT signature is stated literally (RC#2 oracle-fidelity
+// policy — literal declaration, forward-declared dependencies; matches the
+// build header's own forward-declaration approach):
 // #include <asio/awaitable.hpp>
 // #include "fixpp/core/error.hpp"
 // #include "fixpp/sync/async_mutex.hpp"      (for async_mutex, async_lock_guard)
+#include <expected>
+
+namespace asio {
+class any_io_executor;
+template <class T, class Executor = any_io_executor> class awaitable;
+}  // namespace asio
+namespace fixpp::core { enum class error : int; }
 
 namespace fixpp::sync {
 class async_mutex;
@@ -46,7 +58,11 @@ class async_lock_guard;
 }  // namespace fixpp::sync
 
 namespace fixpp::sync {
-template <class T> using expected_t = /* std::expected<T, fixpp::core::error> */ void;
+// expected_t<T> = fixpp::core::expected_t<T> = std::expected<T, core::error>;
+// declared (not erased) so the helper's return type is stated EXACTLY as in
+// design-doc §4.3.2 (lines 843–844).
+template <class T>
+using expected_t = std::expected<T, fixpp::core::error>;
 }
 
 namespace fixpp::session {
@@ -77,8 +93,11 @@ namespace fixpp::session {
 //
 // [[nodiscard]]: the caller MUST check the expected_t; discarding a lock
 // acquisition is a logic error.
-[[nodiscard]] /* asio::awaitable<expected_t<fixpp::sync::async_lock_guard>> */
-void  // placeholder return type — replace with the real awaitable + expected_t
+//
+// EXACT declaration per design-doc §4.3.2 (lines 843–844) — literal, NOT a
+// placeholder (RC#2 oracle-fidelity close — this file claims exactness at the
+// header banner, so it MUST be exact).
+[[nodiscard]] asio::awaitable<expected_t<fixpp::sync::async_lock_guard>>
     async_lock_via_session_executor(fixpp::sync::async_mutex& m) noexcept;
 
 }  // namespace fixpp::session

@@ -47,15 +47,38 @@
 
 #include <atomic>
 #include <cstdint>
+#include <expected>
 #include <memory>
+#include <memory_resource>
+// Build header includes these properly; the oracle forward-declares the
+// minimum needed to state the EXACT signatures literally (RC#2 oracle-
+// fidelity policy: literal declarations, forward-declared dependencies —
+// the build header forward-declares expected_t / asio::awaitable the same
+// way, so no full ASIO / error.hpp include chain is needed here):
 // #include <asio/awaitable.hpp>             (build header only)
-// #include <memory_resource>                (build header only)
 // #include "fixpp/core/error.hpp"           (build header only)
 // #include "fixpp/core/sync/async_lock_guard.hpp"   (or same header)
+
+// Forward declarations for the literal signature oracle. The build header
+// gets these from <asio/awaitable.hpp> + "fixpp/core/error.hpp"; the second
+// awaitable template parameter (the executor) is defaulted by ASIO exactly
+// as written here, so `asio::awaitable<T>` resolves identically.
+namespace asio {
+class any_io_executor;
+template <class T, class Executor = any_io_executor> class awaitable;
+}  // namespace asio
+namespace fixpp::core { enum class error : int; }
 
 namespace fixpp::sync {
 
 class async_lock_guard;
+
+// expected_t alias mirrors core::expected_t<T> = std::expected<T, core::error>;
+// declared (not erased) so the async_lock / cancel_and_drain return types are
+// stated EXACTLY as in design-doc §4.1.
+template <class T>
+using expected_t = /* fixpp::core::expected_t<T> = */
+    std::expected<T, fixpp::core::error>;
 
 namespace detail {
 enum class waiter_phase : std::uint8_t;
@@ -137,11 +160,10 @@ public:
     // vs. post governed by policy_ (§4.6).
     //
     // [[nodiscard]]: co_await result MUST be consumed.
-    [[nodiscard]]
-    /* asio::awaitable<expected_t<async_lock_guard>> */
-    void  // placeholder — replace with asio::awaitable<expected_t<async_lock_guard>>
-        async_lock(/* std::pmr::memory_resource* mr = nullptr */ int mr = 0)
-        noexcept;
+    // EXACT signature per design-doc §4.1 (lines 505–506) — literal, NOT a
+    // placeholder (RC#2 / N-P1-1 oracle-fidelity close).
+    [[nodiscard]] asio::awaitable<expected_t<async_lock_guard>>
+        async_lock(std::pmr::memory_resource* mr = nullptr) noexcept;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Drain primitive (RC#3 + RC-B + RC-α + RC-β)
@@ -183,9 +205,9 @@ public:
     //                               itself cancelled (draining_ stays true;
     //                               subsequent async_lock returns
     //                               unexpected{sync_lock_drained}).
-    [[nodiscard]]
-    /* asio::awaitable<expected_t<void>> */
-    void  // placeholder — replace with asio::awaitable<expected_t<void>>
+    // EXACT signature per design-doc §4.1 (lines 579–580) — literal, NOT a
+    // placeholder (RC#2 / N-P1-1 oracle-fidelity close).
+    [[nodiscard]] asio::awaitable<expected_t<void>>
         cancel_and_drain() noexcept;
 
     // ─────────────────────────────────────────────────────────────────────────

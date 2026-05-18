@@ -71,6 +71,8 @@ The cancellation slot is registered exactly once at `await_suspend` (via `asio::
 
 `drain_latch_state` (RC-β v1.3) owns: `std::atomic<bool> released_`, `std::atomic<bool> aborted_`, `std::atomic<uint32_t> in_flight_resumptions_`, and a multi-waiter latch surface implemented as `asio::experimental::concurrent_channel<void()>` (or a project-internal fallback subscriber-list). The mutex stays `constexpr`-default-constructible because the state object is lazily heap-allocated inside the reaper's frame (the v1.2 by-value `asio::steady_timer` member was non-implementable per Opus C-R3-P2-1).
 
+**Implement-time STL-availability assumption (Codex P3 / Opus-confirmed, Gate A round 1):** the mutex member `std::atomic<std::shared_ptr<detail::drain_latch_state>>` (data-model.md E1; `[2f §1.2]`/`[2f §4.1]`) requires the `std::atomic<std::shared_ptr<T>>` partial specialization (C++20 / P0718). This is a documented **implementation assumption on the supported standard-library matrix** (libc++, libstdc++, MSVC-STL — `[const §IX.6]` Tier-1/Tier-2 toolchains). The design is honestly bounded at the authority level — `[2f §4.1]` (lines 637–640) pins the ordering and records "not lock-free in general … cold path … does not impact the hot-path cost" — so this is purely a *toolchain-availability* gate, not a design risk. A `static_assert`-style compile probe (a translation unit that instantiates `std::atomic<std::shared_ptr<int>>` and reads `is_always_lock_free` / `is_lock_free()`) MUST run as a `/speckit-verify` step-0 item on every supported STL **before `/implement`**, so a missing surface fails early rather than deep in the build (quickstart §0).
+
 **Anchor:** `[2f §4.7]` / `[2f §4.7.2]` / `[2f §4.7.3]` / `[2f §4.7.4]` / `[arch §5.5]`.
 
 ---

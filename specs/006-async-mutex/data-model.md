@@ -188,7 +188,7 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 **Source:** `[2f §4.3.2]`.
 
-**Role:** Thin session-layer helper. **Declared** by 2f; **implemented** by the Phase-4 session-module spec or 2e implementation (RC#2 layering fix — `core::async_mutex` carries zero dependency on `Session` / `EngineConfig`). Lives in `include/fixpp/session/async_lock_via_session_executor.hpp`, namespace `fixpp::session`, downstream of `core/` per `[arch §2.3]`.
+**Role:** Thin session-layer helper. **Declared** by 2f; **implemented by the session-module spec, not this feature** (RC#2 layering fix — `core::async_mutex` carries zero dependency on `Session` / `EngineConfig`). Per design-doc §1.2 (line 94) / §4.3.2 (line 833) the session-module spec ships the implementation body; 2e is named only as 2f's *first consumer* and is NOT licensed to ship this body. Lives in `include/fixpp/session/async_lock_via_session_executor.hpp`, namespace `fixpp::session`, downstream of `core/` per `[arch §2.3]`.
 
 **Declared signature:**
 

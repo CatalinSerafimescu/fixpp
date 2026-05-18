@@ -52,17 +52,32 @@
 #include <cstddef>
 #include <cstdint>
 
-// Forward declarations (build header includes these properly):
+// Build header includes these properly; this oracle forward-declares the
+// minimum so the EXACT layout + protocol is stated literally, including the
+// normative slot_ / result_ fields and the real await_resume() /
+// on_cancel() signatures (RC#2 oracle-fidelity policy — this file claims an
+// "exact layout and protocol that the implementation MUST match" at the
+// banner, so it MUST carry the real fields that drive the §1.1 byte budget):
 // #include <asio/awaitable.hpp>
 // #include <asio/cancellation_slot.hpp>
 // #include <asio/cancellation_type.hpp>
 // #include "fixpp/core/error.hpp"
+#include <expected>
+
+namespace asio {
+class cancellation_slot;
+enum class cancellation_type : unsigned int;  // ASIO's underlying type
+}  // namespace asio
+namespace fixpp::core { enum class error : int; }
 
 namespace fixpp::sync {
 
 class async_mutex;
 class async_lock_guard;
-template <class T> using expected_t = /* std::expected<T, fixpp::core::error> */ void;
+// expected_t<T> = fixpp::core::expected_t<T> = std::expected<T, core::error>;
+// declared (not erased) so result_ and await_resume() carry their real types.
+template <class T>
+using expected_t = std::expected<T, fixpp::core::error>;
 
 namespace detail {
 
@@ -96,21 +111,22 @@ struct alignas(8) async_mutex_awaiter {
     std::atomic<waiter_phase>  phase_;        // RC-A 3-state machine; the
                                               //   arbitration atom for unlock
                                               //   drain vs. cancellation handler.
-    // asio::cancellation_slot  slot_;        // bound at await_suspend via
-                                              //   asio::bind_allocator(
-                                              //     slot_allocator{this, mr})
-                                              //   — omitted here (ASIO type).
+    asio::cancellation_slot    slot_;         // NORMATIVE field (§4.2 line
+                                              //   743). Bound at await_suspend
+                                              //   via asio::bind_allocator(
+                                              //     slot_allocator{this, mr}).
     std::coroutine_handle<>    coro_;         // continuation; stored at
                                               //   await_suspend.
-    // expected_t<async_lock_guard>* result_; // sink for await_resume; points
-                                              //   into caller's frame-local
-                                              //   result slot. Valid from
+    expected_t<async_lock_guard>* result_;    // NORMATIVE field (§4.2 line
+                                              //   745). Sink for await_resume;
+                                              //   points into caller's frame-
+                                              //   local result slot. Valid from
                                               //   await_suspend entry through
                                               //   await_resume return.
-                                              //   v1.4 CAS-then-publish:
-                                              //   ONLY the CAS winner writes
-                                              //   *result_; losers do NOT touch it.
-                                              //   omitted here (template dep).
+                                              //   v1.4 CAS-then-publish: ONLY
+                                              //   the CAS winner writes
+                                              //   *result_; losers do NOT
+                                              //   touch it.
     std::array<std::byte, 32>  slot_storage_; // RC-C inline buffer for
                                               //   detail::slot_allocator when
                                               //   mr == nullptr (HALO path).
@@ -151,15 +167,16 @@ struct alignas(8) async_mutex_awaiter {
     //   unexpected{sync_lock_drained}). Clears slot_ via slot_.clear().
     // Cancellation-after-resume is a no-op: slot is cleared, and a stale
     // cancel CAS fails because phase_ is already terminal (Opus N-P1 close).
-    // expected_t<async_lock_guard> await_resume() noexcept;
-    // (return type uses template alias; omitted from this oracle's verbatim
-    //  signature to avoid the ASIO / error.hpp include chain)
+    // EXACT signature per §4.2 (line 753) — literal, NOT omitted.
+    expected_t<async_lock_guard> await_resume() noexcept;
 
     // on_cancel — invoked from the cancellation_slot handler.
     // CAS phase_: queued → cancelled (acq_rel/acquire). On CAS-success (winner):
     //   write *result_ = unexpected{sync_lock_aborted}, schedule resumption on
-    //   bound executor. On CAS-failure (drain won): no-op (waiter already granted).
-    void on_cancel(/* asio::cancellation_type */ int type) noexcept;
+    //   bound executor. On CAS-failure (drain won): no-op (waiter already
+    //   granted). EXACT parameter type per §4.5 — asio::cancellation_type,
+    //   NOT an int placeholder (RC#2 oracle-fidelity close).
+    void on_cancel(asio::cancellation_type type) noexcept;
 };
 
 // Compile-time alignment invariant — placed AFTER the awaiter definition
@@ -175,14 +192,19 @@ struct alignas(8) async_mutex_awaiter {
 }  // namespace fixpp::sync
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Field-layout sizing reference (v1.1, ≤ 96 B budget):
-//   async_mutex*               mutex_        : 8 B
-//   async_mutex_awaiter*       next_          : 8 B
-//   std::atomic<waiter_phase>  phase_         : 1 B (+ 3 B padding to 4 B align)
-//   asio::cancellation_slot    slot_          : implementation-defined; typically 8–16 B
-//   std::coroutine_handle<>    coro_          : 8 B
-//   expected_t<...>*           result_        : 8 B
+// Field-layout sizing reference (v1.1, ≤ 96 B budget — EXACT per design-doc
+// §1.1 line 70; matches data-model.md D-2 and the §1.1 inline arithmetic):
+//   async_mutex*               mutex_         :  8 B
+//   async_mutex_awaiter*       next_          :  8 B
+//   std::atomic<waiter_phase>  phase_         :  1 B (+ 3 B padding to 4 B align) → 4 B
+//   asio::cancellation_slot    slot_          : ≈ 16 B (ASIO impl-defined)
+//   std::coroutine_handle<>    coro_          :  8 B
+//   expected_t<...>*           result_        :  8 B
 //   std::array<std::byte,32>   slot_storage_  : 32 B
 //   ─────────────────────────────────────────────────────────
-//   Estimated total                           : ≈ 73–81 B (< 96 B budget)
+//   Raw total                                 : 8+8+4+16+8+8+32 = 84 B
+//   With alignas(8) trailing padding          : ≈ 88 B
+//   Published ceiling                         : ≤ 96 B
+//     (≈ 8 B headroom for asio::cancellation_slot's implementation-defined
+//      size — design-doc §1.1 names this slack intentionally)
 // ─────────────────────────────────────────────────────────────────────────────
