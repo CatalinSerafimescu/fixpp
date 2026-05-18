@@ -128,7 +128,7 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 - [ ] T045 [P] [US4] Write conformance `tests/session/conformance/tc_logout_test.cpp` — `12_*`, `13_*`, `13b_UnsolicitedLogoutMessage` (D-10) — must FAIL first
 - [ ] T046 [US4] Implement Logout build/interpret + FSM `Active → LogoutSent → Disconnected`, Logout-received path, and non-Active Logout transitions per `[FIX-SL §4.6]` (data-model matrix, FR-005)
 - [ ] T047 [US4] Implement two-phase `Session::close` (`[2d §6.5]`) — child `asio::cancellation_state` for Logout `async_write` + `Clock::sleep_until` graceful timeout (`session_logout_timeout`, D-8); phase-2 root `total` only after phase-1; `close()` idempotent; `close(terminal)` skips phase 1 (I-9)
-- [ ] T048 [US4] Implement the `cancellable_dispatch(session_executor, slot, handler)` parser-completion → `fromAdmin`/`fromApp` hand-off with the three `[2d §6.5]` deterministic fire/not-fire cases
+- [ ] T048 [US4] Implement the `cancellable_dispatch(session_executor, slot, handler)` parser-completion → `fromAdmin`/`fromApp` hand-off with the three `[2d §6.5]` deterministic fire/not-fire cases (US1–US3 deliver `fromAdmin`/`fromApp` via the direct per-session-strand dispatch wired in T016/T024; this task hardens that hand-off with the `[2d §6.5]` child-cancellation/two-phase semantics — not a re-implementation)
 - [ ] T049 [US4] Make seams #6/#11 + `tc_logout` green; refactor (SC-005)
 
 **Checkpoint**: US1–US4 independently functional.
@@ -160,7 +160,7 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 - [ ] T058 Write seam #1 `tests/session/fsm_transition_matrix_test.cpp` — assert every `[FIX-SL §4.10]` state×event cell in the FR-001 event alphabet has a defined transition (no UB, no silent no-op), incl. out-of-scope admin → `session_admin_not_supported` (FR-001, I-1) — green only after US1–US5
 - [ ] T059 Write seam #12 `tests/session/alloc_discipline_test.cpp` under `mallocnesia` (`tools/mallocnesia/libmallocnesia.so`) + `tools/check_alloc.py` — zero global `new`/`delete` on inbound-dispatch / timer-fire / seqnum paths (SC-009, I-7)
-- [ ] T060 [P] Verify the `noexcept` window + throwing-user-callback trap (`core::detail::trap_throw`) across the inbound-process / timer-fire window (FR-015)
+- [ ] T060 [P] Verify the `noexcept` window + throwing-user-callback trap (`core::detail::trap_throw`) across the inbound-process / timer-fire window, **and assert the no-C++-across-C-ABI layering check** (`nm` confirms zero `extern "C"` session symbols; no session type appears in `<fix/c_api.h>`) (FR-015, SC-009)
 - [ ] T061 [P] Add `bench/session/{fsm,seqnum,fix_time,heartbeat}_bench.cpp` + `bench/baselines/session/*.json` enforcing the plan.md Technical-Context ceilings at ±5% (`[const §VIII.1]`/`[const §VIII.2]`)
 - [ ] T062 Run the full Tier-1 preset matrix serially per quickstart §3 (debug / release / asan / ubsan / tsan / coverage + gcc-release sanity); resolve any failure (`[const §IX.2]`/`[const §IX.6]`)
 - [ ] T063 Confirm ≥95% line / ≥85% branch on `include/fixpp/session/*`, `src/session/*`, `include/fixpp/core/fix_time.*` on the lcov DA/BRDA basis; any uncovered line/branch carries a recorded Opus risk note (`[const §IX.1]`)
