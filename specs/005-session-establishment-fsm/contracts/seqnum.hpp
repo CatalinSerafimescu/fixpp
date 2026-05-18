@@ -17,7 +17,9 @@ inline constexpr seqnum_t seqnum_min = 1;  // FIX seqnums start at 1, [FIX-SL §
 inline constexpr seqnum_t seqnum_max = std::numeric_limits<seqnum_t>::max();
 
 // Counter manager contract (E3): increment-by-one per accepted/sent admin
-// message; too-low(no PossDup) = session-fatal; too-high = RecoveryPending;
+// message; too-low(no PossDup) = session-fatal ([FIX-SL §4.1]); too-high =
+// session-fatal (session_seqnum_gap_unrecoverable — recovery deferred,
+// Session-2026-05-18; no RecoveryPending state);
 // `next == seqnum_max` + increment requested ⇒ surface [2e §6.7]
 // store_seqnum_overflow (session-fatal, NO wrap). Bookkeeping serialized by
 // fixpp::sync::async_mutex (D-7; structurally zero contention under the

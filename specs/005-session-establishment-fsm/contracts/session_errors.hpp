@@ -6,17 +6,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+// PLANNED allocation (NOT yet published — pre-impl bundle; numbers/list
+// decided at Gate A / pinned at /speckit-tasks before any C-ABI release).
 // Appended to include/fixpp/core/error.hpp (occupied: 1,10-13,20-29,30-42):
 //   session_invalid_logon              = 43   FR-003/004
 //   session_compid_mismatch            = 44   FR-004  [FIX-SL §4.2.2]
 //   session_begin_string_unsupported   = 45   FR-003  [FIX-SL §4.2.1]
-//   session_seqnum_too_low             = 46   FR-008  [FIX-SL §4.5.3] (fatal)
-//   session_recovery_pending           = 47   Q1/FR-001 (held, not fatal)
+//   session_seqnum_too_low             = 46   FR-008  [FIX-SL §4.1] (fatal)
+//   session_seqnum_gap_unrecoverable   = 47   FR-008/FR-001 (too-high =
+//                                              session-fatal; recovery
+//                                              deferred — Session-2026-05-18;
+//                                              replaces session_recovery_pending)
 //   session_sending_time_accuracy      = 48   Q3/FR-013 (RejectReason=10)
 //   session_msg_type_invalid_for_state = 49   FR-007  [FIX-SL §4.5.4]
 //   session_logout_timeout             = 50   FR-005  [FIX-SL §4.6.2]
 //   session_test_request_unanswered    = 51   FR-006  [FIX-SL §4.5.5]
-//   session_invalid_config             = 52   [2d §4.5] open-validation
+//   session_admin_not_supported        = 52   FR-017  [FIX-SL §4.10]
+//   session_invalid_config             = 53   [2d §4.5] open-validation
 //
 // REUSE (do NOT duplicate):
 //   [2e §6.7] store_seqnum_overflow — seqnum_max overflow, session-fatal.

@@ -9,8 +9,12 @@ namespace fixpp::session {
 
 // Logon(35=A) — S-001/S-015/S-016/S-020. Initiator emits (seq=1, configured
 //   CompIDs, requested HeartBtInt(108), SendingTime(52) from effective_clock).
-//   Acceptor validates BeginString(8) version gate (FIX.4.x vs FIXT.1.1,
-//   [FIX-SL §4.2.1]) + SenderCompID(49)/TargetCompID(56) ([FIX-SL §4.2.2])
+//   Acceptor validates BeginString(8) version gate (FIX.4.2/4.4 codegen
+//   namespaces; FIXT.1.1/5.0SP2 NOT claimed by 005 — Gate A round 1
+//   version-coverage ledger, [FIX-SL §4.2.1]) + SenderCompID(49)/
+//   TargetCompID(56) point-to-point only ([FIX-SL §4.2.2]; S-016
+//   OnBehalfOfCompID(115)/DeliverToCompID(128) third-party addressing is
+//   deferred-with-traceability — 005 owns the 49/56 portion of S-016 only)
 //   + negotiates HeartBtInt ([FIX-SL §4.3.4]); refusal ⇒ session_invalid_
 //   logon / _compid_mismatch / _begin_string_unsupported, no Active.
 //   First message not Logon ⇒ refuse ([FIX-SL §4.3], US1#4).
