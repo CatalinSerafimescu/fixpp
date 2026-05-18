@@ -1,3 +1,3 @@
 {
-  "feature_directory": "specs/004-wire-codec"
+  "feature_directory": "specs/006-async-mutex"
 }
