@@ -222,3 +222,8 @@ fixpp_add_store_test(store_file_coverage_uplift SOURCES
   test_file_store_coverage_uplift.cpp
   _fixtures_/test_double_fsm.cpp
 )
+
+# ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
+# Placeholder for Phase 2: tc_establishment/seqnum/liveness/reject/logout/
+# sendingtime_test.cpp authored from the QuickFIX/J .def oracle (research D-10).
+add_subdirectory(conformance)

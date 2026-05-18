@@ -1,0 +1,4 @@
+{
+  "_note": "Placeholder — 005-session-establishment-fsm Phase 1. Real baselines are seeded in Phase 8 (T061) from a linux-clang-release run. Ceilings per plan.md Technical Context: inbound admin dispatch ≤250 ns, outbound admin emit ≤400 ns, seqnum next ≤50 ns, utc_time_to_fix_string ≤60 ns, fix_string_to_utc_time ≤80 ns, heartbeat timer fire ≤150 ns. Gate: ±5% vs these files ([const §VIII.2]).",
+  "benchmarks": []
+}

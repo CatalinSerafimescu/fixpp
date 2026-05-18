@@ -28,10 +28,10 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 **Purpose**: `session/` module skeleton + build wiring (reuse the merged 001–004 pattern; no new Conan row, `[const §III.2]`).
 
-- [ ] T001 Create the `session/` module tree per plan.md Project Structure: `include/fixpp/session/`, `src/session/`, `tests/session/`, `tests/session/conformance/`, `tests/support/`, `bench/session/`, `bench/baselines/session/`
-- [ ] T002 [P] Add the `fixpp_session` CMake target in `src/session/CMakeLists.txt` and wire it into the top-level build; link `fixpp_core` (incl. new `core/fix_time`), `fixpp_sync` (`async_mutex`), `fixpp_wire`, `fixpp_dict`, and the `[2e §4.1]` `message_store.hpp` seam header — no new Conan dependency
-- [ ] T003 [P] Add `tests/session/CMakeLists.txt` (GoogleTest + GoogleMock) including the `conformance/` subdir, and `bench/session` wiring (Google Benchmark) with a `bench/baselines/session/` baseline directory
-- [ ] T004 [P] Extend the Tier-1 static-analysis config (clang-tidy / clang-format / cppcheck / IWYU + the `[const §XV.9]` `std::mutex`-in-`asio::awaitable`-header grep gate) to cover `include/fixpp/session/*`, `src/session/*`, `include/fixpp/core/fix_time.hpp`, `src/core/fix_time.cpp`
+- [X] T001 Create the `session/` module tree per plan.md Project Structure: `include/fixpp/session/`, `src/session/`, `tests/session/`, `tests/session/conformance/`, `tests/support/`, `bench/session/`, `bench/baselines/session/`
+- [X] T002 [P] Add the `fixpp_session` CMake target in `src/session/CMakeLists.txt` and wire it into the top-level build; link `fixpp_core` (incl. new `core/fix_time`), `fixpp_sync` (`async_mutex`), `fixpp_wire`, `fixpp_dict`, and the `[2e §4.1]` `message_store.hpp` seam header — no new Conan dependency
+- [X] T003 [P] Add `tests/session/CMakeLists.txt` (GoogleTest + GoogleMock) including the `conformance/` subdir, and `bench/session` wiring (Google Benchmark) with a `bench/baselines/session/` baseline directory
+- [X] T004 [P] Extend the Tier-1 static-analysis config (clang-tidy / clang-format / cppcheck / IWYU + the `[const §XV.9]` `std::mutex`-in-`asio::awaitable`-header grep gate) to cover `include/fixpp/session/*`, `src/session/*`, `include/fixpp/core/fix_time.hpp`, `src/core/fix_time.cpp`
 
 ---
 
