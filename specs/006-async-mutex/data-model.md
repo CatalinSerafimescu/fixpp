@@ -18,8 +18,9 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 | Field | Type | Init | Role |
 |---|---|---|---|
-| `state_` | `std::atomic<uintptr_t>` | `not_locked` (= 1) | Lewis-Baker / cppcoro state encoding: `1` = not_locked; `0` = locked_no_waiters; `<ptr>` = LIFO head. `alignof(waiter) >= 8` keeps the low-bit sentinel distinguishable from any real pointer. |
-| `next_drain_head_` | `std::atomic<detail::async_mutex_awaiter*>` | `nullptr` | RC-A v1.1 — mutex-owned residual FIFO chain. `unlock()` walks this list first before the LIFO. Solves the v1.0 UAF where the granted waiter "owned" the residual list unreachable from `async_mutex*`-only state. |
+| `state_` | `std::atomic<uintptr_t>` | `not_locked` (= 1) | Lewis-Baker / cppcoro state encoding: `1` = not_locked; `0` = locked_no_waiters; `<ptr>` = LIFO head. **E-2:** `<ptr>` is a `detail::waiter_record*` (the stable node, E2a), not the frame-local awaiter. `alignof(waiter_record) >= 8` keeps the low-bit sentinel distinguishable from any real pointer. |
+| `next_drain_head_` | `std::atomic<detail::waiter_record*>` | `nullptr` | RC-A v1.1 — mutex-owned residual FIFO chain. **E-2:** retyped from `async_mutex_awaiter*` to `waiter_record*` (E2a). `unlock()` walks this list first before the LIFO. Solves the v1.0 UAF where the granted waiter "owned" the residual list unreachable from `async_mutex*`-only state. |
+| `waiter_pool_` | per-mutex bounded freelist/slab of `detail::waiter_record` | empty/pre-reserved | **E-2 (new):** stable-node storage for the contended `mr == nullptr` path. Zero global `operator new`/`delete`; an arena per `[const Art.VIII §5]` default. Exhaustion ⇒ `unexpected{sync_lock_alloc_failed}` (slot 44). |
 | `draining_` | `std::atomic<bool>` | `false` | RC-B v1.1 — set by `cancel_and_drain()`; from that point onward every `async_lock(...)` fast-fails with `unexpected{sync_lock_drained}` (checked in `await_ready` BEFORE the fast-path CAS). |
 | `drain_in_progress_` | `std::atomic_flag` | `ATOMIC_FLAG_INIT` | RC-B v1.1 — concurrent-call serialiser for `cancel_and_drain()`. Only the first caller (the reaper) wins `test_and_set`; all others subscribe to the drain epoch's latch. |
 | `active_holders_count_` | `std::atomic<std::uint32_t>` | `0` | v1.2 / v1.3 RC-α — incremented WINNER-ONLY at the grant CAS-success (fast-path `await_ready` CAS or drain-walker grant CAS); decremented at `unlock()` entry. `cancel_and_drain()` waits for `== 0`. Closes Opus C-R3-P1-1 "phantom holder count on CAS loss" defect. |
@@ -66,17 +67,19 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 **Role:** The waiter object — the suspension unit for `co_await m.async_lock()`. Lives inside the caller's coroutine frame on the hot path (HALO-eligible); allocated from `mr` on the PMR fallback path. Private; not part of the user surface.
 
-**Layout (`alignas(8)`, ≤ 96 B budget, v1.1):**
+> **E-2 split (v1.6, `[2f §4.2]` Erratum E-2):** the awaiter is **no longer the intrusive node**. The intrusive identity (`next_`, `phase_`, terminal `result_`, bound-executor handle) moves to the stable **`detail::waiter_record`** (E2a); the awaiter keeps only its frame-local machinery + a `record_` attachment pointer. The protocol/lifetime prose below reads against `waiter_record` for the contended path.
+
+**Layout (`alignas(8)`, ≤ 96 B budget, v1.1; E-2-amended):**
 
 | Field | Type | Role |
 |---|---|---|
 | `mutex_` | `async_mutex*` | Back-pointer to the originating mutex. |
-| `next_` | `async_mutex_awaiter*` | Intrusive link — reused by both `state_`'s LIFO chain and `next_drain_head_`'s FIFO chain (RC-A). |
-| `phase_` | `std::atomic<waiter_phase>` | Three-state atomic machine. Arbitrates between unlock drain and cancellation handler via CAS. |
+| `record_` | `detail::waiter_record*` | **E-2 (new):** stable node (E2a) this awaiter is attached to on the contended path; `nullptr` on the uncontended fast path. Intrusive `next_`/`phase_`/terminal-result now live on `*record_`. |
 | `slot_` | `asio::cancellation_slot` | Bound at `await_suspend` time via `asio::bind_allocator(slot_allocator{this, mr})`. |
 | `coro_` | `std::coroutine_handle<>` | Continuation — stored at `await_suspend`, used to resume the coroutine. |
-| `result_` | `expected_t<async_lock_guard>*` | Non-owning pointer into the caller's frame-local result slot. Valid from `await_suspend` entry through `await_resume` return. **v1.4 CAS-then-publish:** only the CAS winner writes `*result_`; losers do not touch it. |
 | `slot_storage_` | `std::array<std::byte, 32>` | RC-C v1.1 — inline 32-byte buffer for the cancellation handler closure on the embedded path with HALO firing. Fed to `detail::slot_allocator` when `mr == nullptr`. |
+
+**E-2 relocation:** `next_`, `phase_`, and `result_` are **removed from the awaiter** and re-homed on `detail::waiter_record` (E2a). On the uncontended fast path (`await_ready` CAS wins) no `waiter_record` is created and `record_ == nullptr`.
 
 **v1.1 layout changes vs v1.0:** removed `async_mutex_awaiter* residual_` (RC-A — mutex owns the residual list via `next_drain_head_`); added `slot_storage_` (RC-C — inline slot-handler storage).
 
@@ -95,7 +98,31 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 | `granted` | 1 | Drain CAS-granted ownership; `await_resume` returns the guard. Terminal. |
 | `cancelled` | 2 | Cancellation handler or reaper CAS-acquired; `await_resume` returns `unexpected{sync_lock_aborted}`. Terminal. |
 
-**Awaiter lifetime safety (RC-A close — Codex C-P1-1 UAF):** After `await_resume` returns, no external pointer threads through the awaiter. The drain physically detaches the entire LIFO chain (`state_.exchange(...)`) before walking it; cancelled waiters are not pushed into `next_drain_head_`. On the PMR-fallback path, the awaiter de-allocates back to `mr` after `await_resume` returns.
+**Awaiter lifetime safety (RC-A close — Codex C-P1-1 UAF; E-2):** After `await_resume` returns, no external pointer threads through the *awaiter*. Intrusive pointers thread through the stable `waiter_record` (E2a), whose reclamation is governed by I-32, not by the coroutine frame. The drain physically detaches the entire LIFO chain (`state_.exchange(...)`) before walking it; cancelled `waiter_record`s are skipped (not re-spliced). On the PMR-fallback path the `waiter_record` de-allocates back to `mr` once its refcount hits zero.
+
+---
+
+### E2a — `fixpp::sync::detail::waiter_record`
+
+**Source:** `[2f §4.2]` Erratum E-2 (v1.6) + `[2f §4.5]` + `[2f §4.5.1]` + `[2f §4.5.2]` + `[2f §4.7.2]`.
+
+**Role:** The **stable intrusive waiter node** linked through `async_mutex::state_` (LIFO) and `async_mutex::next_drain_head_` (RC-A residual FIFO). Distinct from, and outlives, the frame-local `async_mutex_awaiter` (E2). Created only on the **contended** path; never on the uncontended fast path.
+
+**Layout (`alignas(8)`):**
+
+| Field | Type | Role |
+|---|---|---|
+| `mutex_` | `async_mutex*` | Back-pointer to the originating mutex. |
+| `next_` | `waiter_record*` | Intrusive link — reused by both `state_`'s LIFO chain and `next_drain_head_`'s FIFO chain (RC-A). |
+| `phase_` | `std::atomic<waiter_phase>` | Three-state atomic machine (`queued`/`granted`/`cancelled`). Arbitrates unlock-drain / reaper vs. cancellation handler via CAS. **v1.4 CAS-then-publish** applies here. |
+| `result_` | `expected_t<async_lock_guard>` | **Terminal-result storage (owned, not a pointer).** Written only by the `phase_` CAS winner; read by `await_resume` via `record_`. Stable across coroutine-frame destruction (the E-2 fix). |
+| `attached_awaiter_` | `std::atomic<async_mutex_awaiter*>` | The frame-local awaiter currently consuming this node; cleared at `await_resume`. Non-null contributes one refcount edge (I-32). |
+| `exec_storage_` | `std::array<std::byte, N>` (inline, `alignas(max)`) | **E-2 Gap-B:** inline aligned storage for the bound executor (`[2d §4.8]` `session_executor` over a strand/`any_io_executor` SBO). `static_assert` enforces fit; overflow ⇒ `unexpected{sync_lock_alloc_failed}`. **No** heap-allocating type-erased `any_io_executor`. |
+| `refcount_` | `std::atomic<std::uint32_t>` | Single-shot reclamation token (I-32). Edges: +1 creator; one **transferred** in-lists membership ref across every `state_ ⇄ next_drain_head_` splice; +1 per scheduled prompt-resume (resumer); +1 while `attached_awaiter_ != nullptr`. `fetch_sub(1, acq_rel) == 1` reclaims (to `waiter_pool_` or `mr`). |
+
+**Reclamation (I-32) is sound _because of_ the single-drainer invariant.** Only one structural walker ever traverses the lists at a time: `unlock()` (runs solely under logical lock ownership) and `cancel_and_drain()`'s reaper (single via `drain_in_progress_.test_and_set(acq_rel)`) are mutually exclusive — `unlock()` short-circuits when `draining_ == true`. The cancellation handler performs no structural mutation (only the `phase_` CAS). Hence no competing-walker hazard; no hazard pointers / epoch GC are required. This is a **normative precondition** of E-2, not an implementation detail.
+
+**Storage (extends RC#2 / RC-C):** (a) uncontended ⇒ no `waiter_record`; (b) contended `mr == nullptr` ⇒ from `async_mutex::waiter_pool_` (bounded arena; zero global `new`); (c) contended `mr != nullptr` ⇒ from `mr`. Exhaustion ⇒ `unexpected{sync_lock_alloc_failed}` (slot 44).
 
 ---
 
@@ -218,12 +245,12 @@ Extracted from `[2f §6.2.2]`. Each row names the atomic operation, its ordering
 |---|---|---|---|---|---|
 | I-01 | Fast-path acquire CAS | `state_.compare_exchange_strong(not_locked → locked_no_waiters)` | `acquire` | `relaxed` | Acquire pairs with the prior holder's `unlock()` exchange release. Failure is a hint to enqueue. |
 | I-02 | Initial head-load (contended push) | `state_.load()` | `acquire` | n/a | Pairs with prior `unlock()` exchange's release. |
-| I-03 | LIFO push CAS | `state_.compare_exchange_weak(old → &waiter)` | `release` | `acquire` | Release publishes awaiter's `next_`/`phase_` writes to the unlocker. Failure-acquire sees the freshest head for retry. |
+| I-03 | LIFO push CAS | `state_.compare_exchange_weak(old → &record)` | `release` | `acquire` | **E-2:** pushes a `waiter_record*`. Release publishes `record->next_`/`phase_`/`attached_awaiter_`/`exec_storage_` writes to the unlocker. Failure-acquire sees the freshest head for retry. |
 | I-04 | Unlock exchange | `state_.exchange(locked_no_waiters)` | `acq_rel` | n/a | Acquire pairs with each pushed waiter's release; release publishes the unlock-decision to the next acquirer. |
 | I-05 | Empty-list close-out CAS | `state_.compare_exchange_strong(locked_no_waiters → not_locked)` | `acq_rel` | `acquire` | Failure-acquire: a new pusher arrived; read the new head. |
-| I-06 | Per-waiter phase CAS (drain grants) | `phase_.compare_exchange_strong(queued → granted)` | `acq_rel` | `acquire` | **v1.4 CAS-then-publish:** CAS winner writes `*result_` then schedules resumption. CAS loser performs no `*result_` write. Failure-acquire reads the cancellation/reaper winner's update. |
-| I-07 | Per-waiter phase CAS (cancel) | `phase_.compare_exchange_strong(queued → cancelled)` | `acq_rel` | `acquire` | **v1.4 CAS-then-publish:** same protocol as I-06 for the cancel winner. |
-| I-08 | `await_resume` phase load | `phase_.load()` | `acquire` | n/a | Pairs with the writer's release-CAS (I-06 or I-07). The resumed coroutine reads `*result_` only after this acquire. |
+| I-06 | Per-waiter phase CAS (drain grants) | `record->phase_.compare_exchange_strong(queued → granted)` | `acq_rel` | `acquire` | **E-2: on `waiter_record::phase_`.** v1.4 CAS-then-publish: winner writes `record->result_` then schedules prompt bound-executor resumption. Loser performs no result write. Failure-acquire reads the cancel/reaper winner's update. |
+| I-07 | Per-waiter phase CAS (cancel) | `record->phase_.compare_exchange_strong(queued → cancelled)` | `acq_rel` | `acquire` | **E-2: on `waiter_record::phase_`.** Same protocol as I-06 for the cancel winner; prompt resume is now UAF-safe because the node, not the frame, is stable. |
+| I-08 | `await_resume` phase load | `record->phase_.load()` | `acquire` | n/a | **E-2: on `waiter_record::phase_`.** Pairs with the writer's release-CAS (I-06 or I-07). The resumed coroutine reads `record->result_` only after this acquire. |
 | I-09 | `result_` slot publication | Non-atomic write by the CAS winner; sequenced AFTER the `phase_` release-CAS and BEFORE bound-executor resumption | n/a | n/a | **v1.4 CAS-then-publish.** No separate "ready publication" step — the per-waiter phase atom carries both the arbitration edge and the terminal-state signal. |
 | I-10 | `next_drain_head_` push (residual splice from `unlock()`) | `next_drain_head_.compare_exchange_weak(nullptr → residual_head)` (or append-tail retry) | `release` | `acquire` | Release publishes residual chain's `next_` writes to the next unlocker. Failure-acquire reads freshest tail for append. |
 | I-11 | `next_drain_head_` walk (drain start) | `next_drain_head_.exchange(nullptr)` | `acq_rel` | n/a | Acquire pairs with each pusher's release; release publishes the walker's atomic-take-ownership. |
@@ -247,6 +274,7 @@ Extracted from `[2f §6.2.2]`. Each row names the atomic operation, its ordering
 | I-29 | `drain_latch_state::in_flight_resumptions_` decrement (in resumption-handler lambda) | `in_flight_resumptions_.fetch_sub(1)` | `acq_rel` | n/a | Acquire pairs with increment at scheduling time; release publishes completion to the reaper's wait loop. The last handler (observing `fetch_sub == 1`) calls `signal_release()` or `signal_abort()`. |
 | I-30 | `drain_latch_state::in_flight_resumptions_` load (in `cancel_and_drain` wait loop) | `in_flight_resumptions_.load()` | `acquire` | n/a | Pairs with I-29's release. Reaper waits for zero alongside I-19 and I-22. |
 | I-31 | `notify()` (channel `try_send`) | channel-side `try_send()` | relaxed (channel's internal sequencing is the synchronisation primitive) | n/a | Non-terminal wake. Receiver's `wait()` re-loads counter atomics with acquire ordering; `notify()` itself does not need to publish writes. |
+| I-32 | `waiter_record` reclamation (E-2) | `record->refcount_.fetch_sub(1)` | `acq_rel` | n/a | Final drop (`== 1` observed) synchronises-with all prior ref-holding accesses and reclaims the node to `waiter_pool_`/`mr`. Single-shot; sound only under the single-drainer invariant (see E2a). Pairs with the +1 edges: creator, transferred in-lists membership, scheduled-resumer, `attached_awaiter_ != nullptr`. |
 
 ---
 

@@ -1,0 +1,39 @@
+{
+  "_note": "Placeholder seed (Phase 1 T003) — 006-async-mutex. Real baselines are committed by Phase 8 T071 from a linux-clang-release run. [2f §6.3] ceilings (release, warm cache); ±5% gate per [const §VIII.1/2]. Debug timing is NOT the gate (debug overhead ~20-25× release). Drain-side / cancel_and_drain rows are bench-harness-soft per [2e §6.6] precedent.",
+  "context": {
+    "date": "2026-05-18",
+    "build_type": "placeholder",
+    "preset": "linux-clang-release",
+    "status": "seed-not-measured"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_AsyncMutex_AsyncLock_Uncontended",
+      "ceiling_ns": 25,
+      "ceiling_source": "[2f §6.3 row 1]: async_lock uncontended, single CAS fast path, ≤ 20–25 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_ns": null
+    },
+    {
+      "name": "BM_AsyncMutex_Unlock_Uncontended",
+      "ceiling_ns": 15,
+      "ceiling_source": "[2f §6.3 row 3]: unlock uncontended, empty LIFO, ≤ 15 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_ns": null
+    },
+    {
+      "name": "BM_AsyncMutex_AsyncLock_Contended",
+      "ceiling_ns": 80,
+      "ceiling_source": "[2f §6.3 row 2]: async_lock contended (waiter suspends), LIFO push + slot bind, ≤ 80 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_ns": null
+    },
+    {
+      "name": "BM_AsyncMutex_DispatchVsPost_Delta",
+      "ceiling_ns": 25,
+      "ceiling_source": "[2f §6.3 row / §4.6]: dispatch ≈ 0 ns extra; post ≈ 25 ns extra",
+      "ceiling_tolerance_pct": 5,
+      "measured_ns": null
+    }
+  ]
+}

@@ -73,6 +73,30 @@ enum class error : std::uint8_t {
     // decimal_precision_loss (=12) onto this wire-domain slot so the
     // Session-Reject path carries a wire_* code (re-mapped, not redefined).
     wire_unexpected_tag = 42,  // [2b §6.5.5] SessionRejectReason=2
+
+    // sync variants — owned by 006-async-mutex (data-model.md Error mapping;
+    // contracts/sync_errors.hpp; [2f §6.5]). Appended at unused slots 43–46,
+    // non-renumbering ([const §X.4]). C-ABI FIXPP_ERR_SYNC_* coalescing +
+    // tools/abi_history audit-trail entry deferred to 2i (same time-bounded
+    // waiver shape as 002/003/004; no C-ABI surface added here).
+    sync_lock_aborted         = 43,  // [2f §4.5] — cancellation won the
+                                     //   CAS-arbitration race against the drain;
+                                     //   waiter was not granted ownership.
+                                     //   Joins FIXPP_ERR_CANCELLED at the C ABI.
+    sync_lock_alloc_failed    = 44,  // [2f §4.3] — PMR fallback's allocate()
+                                     //   threw std::bad_alloc (mr exhausted) or
+                                     //   the embedded inline 32-byte slot_storage_
+                                     //   buffer overflowed and null_memory_resource
+                                     //   rejected the allocation (trap_throw per
+                                     //   [2a §4.2]).
+    sync_lock_outside_session = 45,  // [2f §4.3.2] — async_lock_via_session_
+                                     //   executor called outside a session
+                                     //   serialisation domain (bound executor is
+                                     //   not a session_executor value).
+    sync_lock_drained         = 46,  // [2f §4.7.2] NEW v1.1 / RC-B —
+                                     //   cancel_and_drain() set draining_ = true;
+                                     //   subsequent async_lock(...) fast-fails
+                                     //   without enqueuing.
 };
 
 template <class T>

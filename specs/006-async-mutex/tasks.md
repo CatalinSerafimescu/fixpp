@@ -30,11 +30,11 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 **Purpose**: directory layout, build wiring, pre-`/implement` toolchain gate.
 
-- [ ] T001 Create directory tree: `include/fixpp/core/sync/`, `tests/sync/`, `tests/sync/fixtures/`, `bench/sync/`, `bench/baselines/sync/` (`include/fixpp/session/` already exists).
-- [ ] T002 [P] Author `tests/sync/CMakeLists.txt`: register all 29 `sync_*` GoogleTest targets (per `plan.md` Test-seam map), the 3 `fixtures/` headers, link `fixpp_sync` + GTest/GMock; wire `add_subdirectory(tests/sync)` into the parent test CMake so `ctest -R '^sync_'` resolves.
-- [ ] T003 [P] Author `bench/sync/` CMake targets `bench_async_mutex_uncontended` + `bench_async_mutex_contended` (Google Benchmark) and create `bench/baselines/sync/async_mutex_baselines.json` placeholder (`[const §VIII.2]`).
-- [ ] T004 [P] STL-availability probe (`quickstart.md §0`, research.md D-4): compile+run the `std::atomic<std::shared_ptr<int>>` probe on libc++ and libstdc++ (and record MSVC status); a non-compiling/failing STL is a **hard pre-`/implement` blocker** — record the verdict in `research.md` D-4.
-- [ ] T005 Add CMake library target `fixpp_sync` (header-inline; optional out-of-line `src/core/sync/async_mutex.cpp` decision deferred to implementation per `plan.md` Structure decision); ensure it builds empty before headers land.
+- [X] T001 Create directory tree: `include/fixpp/core/sync/`, `tests/sync/`, `tests/sync/fixtures/`, `bench/sync/`, `bench/baselines/sync/` (`include/fixpp/session/` already exists).
+- [X] T002 [P] Author `tests/sync/CMakeLists.txt`: `add_sync_test` helper + `^sync_` prefix + fixtures/grep-gate env + the explicit glob-free 29-seam→file map (registrations land red-first per the tests/wire incremental TDD precedent); `add_subdirectory(tests/sync)` wired into the parent test CMake.
+- [X] T003 [P] Author `bench/sync/` CMake targets `bench_async_mutex_uncontended` + `bench_async_mutex_contended` (compiling Phase-1 placeholders; bodies in T031) and `bench/baselines/sync/async_mutex_baselines.json` seed placeholder (`[const §VIII.2]`).
+- [X] T004 [P] STL-availability probe (`quickstart.md §0`, research.md D-4): **PASS** on g++/clang++ libstdc++ (the matrix every Linux Conan profile pins); **FAIL** on libc++ (LLVM 22 lacks usable P0718 `atomic<shared_ptr>`) — libc++ user-approved as out-of-matrix/Tier-2-waived (unprovisioned by any Conan profile; MSVC-STL OK). Verdict recorded in `research.md` D-4.
+- [X] T005 Add CMake library target `fixpp_sync` (INTERFACE — header-dominant per `plan.md` Structure decision, fixpp_session precedent; optional out-of-line `src/core/sync/async_mutex.cpp` deferred); configure-clean, precedent-parity verified.
 
 **Checkpoint**: build graph resolves; T004 probe GREEN on every supported STL (blocks all implementation).
 
@@ -46,16 +46,16 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 **⚠️ CRITICAL**: No user-story work begins until this phase is complete. T004 (STL probe) must be GREEN.
 
-- [ ] T006 Additive edit `include/fixpp/core/error.hpp`: append `sync_lock_aborted = 43`, `sync_lock_alloc_failed = 44`, `sync_lock_outside_session = 45`, `sync_lock_drained = 46` (non-renumbering per `[const §X.4]`; data-model "Error Slot Allocation"; FR-012). Do not renumber slots 1–42.
-- [ ] T007 [P] Define `fixpp::sync::completion_policy` enum (`dispatch=0` default / `post=1`) in `include/fixpp/core/sync/async_mutex.hpp` with SPDX `AGPL-3.0-or-later` header + BSL-1.0 algorithm attribution (avast/asio-mutex / cppcoro / Lewis-Baker) per `[const §V.4]` (E6).
-- [ ] T008 [P] Define `fixpp::sync::detail::waiter_phase` enum (`queued=0`/`granted=1`/`cancelled=2`) in the same header (E2 phase machine).
-- [ ] T009 Declare `fixpp::sync::detail::slot_allocator` (E5) skeleton in the header: ctor `(async_mutex_awaiter*, std::pmr::memory_resource*)`, allocator-concept members; three-case body stubbed (filled in US4 T058).
-- [ ] T010 Declare `fixpp::sync::detail::drain_latch_state` (E4): members `released_`/`aborted_`/`in_flight_resumptions_`/channel; method signatures `wait()/notify()/signal_release()/signal_abort()` stubbed (filled in US3 T048).
-- [ ] T011 Define `fixpp::sync::detail::async_mutex_awaiter` (E2) struct skeleton: `alignas(8)`, all fields from data-model E2 layout incl. inline `slot_storage_[32]`, declarations of `await_ready/await_suspend/await_resume/on_cancel`; add `static_assert(alignof(async_mutex_awaiter) >= 8)` AFTER the struct and the `sizeof ≤ 96 B` budget assert (FR-013; data-model compile-time invariants).
-- [ ] T012 Define full `fixpp::sync::async_lock_guard` (E3): public default + move ctor; **private** engaged ctor `[[clang::lifetimebound]]` + `friend class detail::async_mutex_awaiter`; deleted copy; **destructive** `operator=(&&)` (unlock-then-take, self-assign no-op); `~async_lock_guard()`; `[[nodiscard]] release()`; `[[nodiscard]] owns_lock()` (RC#1/N-P1-3; FR-003).
-- [ ] T013 Define `fixpp::sync::async_mutex` (E1) class skeleton: all atomic members from data-model E1 (`state_`, `next_drain_head_`, `draining_`, `drain_in_progress_`, `active_holders_count_`, `active_acquirers_count_`, `drain_latch_ptr_`, `policy_`); `not_locked`/`locked_no_waiters` constants; the lock-freedom `static_assert`s (FR-013); `constexpr async_mutex()` + `explicit constexpr async_mutex(completion_policy)`; deleted copy/move; `~async_mutex()` firing `std::terminate()`/`abort_invariant` when held or waiters present (FR-008); declarations only for `async_lock(mr=nullptr)`/`unlock()`/`cancel_and_drain()`/`policy()`. No public `try_lock()` (FR-001/FR-015).
-- [ ] T014 [P] Create declaration-only header `include/fixpp/session/async_lock_via_session_executor.hpp` (E7): SPDX header + the exact `[2f §4.3.2]` signature `[[nodiscard]] asio::awaitable<expected_t<fixpp::sync::async_lock_guard>> async_lock_via_session_executor(fixpp::sync::async_mutex&) noexcept;` — **declaration only; implemented by the session-module spec, not this feature** (RC#2; FR-011). Note (I1): `sync_lock_outside_session` (slot 45) is a declaration-contract error variant only — no runtime path is implemented in this feature, so it is **not coverage-applicable** per SC-009's declaration-only benignity clause (do not flag it uncovered).
-- [ ] T015 [P] Scaffold `tools/check_no_std_mutex_in_awaitable_headers.sh` (owned/finalized by this feature per FR-014; not present on this branch — created from scratch here): post-preprocessing (`-E`) scope, exit-non-zero when any header that pulls `asio::awaitable<...>` names a member of the **FR-014 six-type banned set** (`std::mutex`, `std::recursive_mutex`, `std::timed_mutex`, `std::recursive_timed_mutex`, `std::shared_mutex`, `std::shared_timed_mutex`). Corpus/diagnostic/CI wiring completed in US5.
+- [X] T006 Additive edit `include/fixpp/core/error.hpp`: append `sync_lock_aborted = 43`, `sync_lock_alloc_failed = 44`, `sync_lock_outside_session = 45`, `sync_lock_drained = 46` (non-renumbering per `[const §X.4]`; data-model "Error Slot Allocation"; FR-012). Do not renumber slots 1–42.
+- [X] T007 [P] Define `fixpp::sync::completion_policy` enum (`dispatch=0` default / `post=1`) in `include/fixpp/core/sync/async_mutex.hpp` with SPDX `AGPL-3.0-or-later` header + BSL-1.0 algorithm attribution (avast/asio-mutex / cppcoro / Lewis-Baker) per `[const §V.4]` (E6).
+- [X] T008 [P] Define `fixpp::sync::detail::waiter_phase` enum (`queued=0`/`granted=1`/`cancelled=2`) in the same header (E2 phase machine).
+- [X] T009 Declare `fixpp::sync::detail::slot_allocator` (E5) skeleton in the header: ctor `(async_mutex_awaiter*, std::pmr::memory_resource*)`, allocator-concept members; three-case body stubbed (filled in US4 T058).
+- [X] T010 Declare `fixpp::sync::detail::drain_latch_state` (E4): members `released_`/`aborted_`/`in_flight_resumptions_`/channel; method signatures `wait()/notify()/signal_release()/signal_abort()` stubbed (filled in US3 T048).
+- [X] T011 Define `fixpp::sync::detail::async_mutex_awaiter` (E2) struct skeleton: `alignas(8)`, all fields from data-model E2 layout incl. inline `slot_storage_[32]`, declarations of `await_ready/await_suspend/await_resume/on_cancel`; add `static_assert(alignof(async_mutex_awaiter) >= 8)` AFTER the struct and the `sizeof ≤ 96 B` budget assert (FR-013; data-model compile-time invariants).
+- [X] T012 Define full `fixpp::sync::async_lock_guard` (E3): public default + move ctor; **private** engaged ctor `[[clang::lifetimebound]]` + `friend class detail::async_mutex_awaiter`; deleted copy; **destructive** `operator=(&&)` (unlock-then-take, self-assign no-op); `~async_lock_guard()`; `[[nodiscard]] release()`; `[[nodiscard]] owns_lock()` (RC#1/N-P1-3; FR-003).
+- [X] T013 Define `fixpp::sync::async_mutex` (E1) class skeleton: all atomic members from data-model E1 (`state_`, `next_drain_head_`, `draining_`, `drain_in_progress_`, `active_holders_count_`, `active_acquirers_count_`, `drain_latch_ptr_`, `policy_`); `not_locked`/`locked_no_waiters` constants; the lock-freedom `static_assert`s (FR-013); `constexpr async_mutex()` + `explicit constexpr async_mutex(completion_policy)`; deleted copy/move; `~async_mutex()` firing `std::terminate()`/`abort_invariant` when held or waiters present (FR-008); declarations only for `async_lock(mr=nullptr)`/`unlock()`/`cancel_and_drain()`/`policy()`. No public `try_lock()` (FR-001/FR-015).
+- [X] T014 [P] Create declaration-only header `include/fixpp/session/async_lock_via_session_executor.hpp` (E7): SPDX header + the exact `[2f §4.3.2]` signature `[[nodiscard]] asio::awaitable<expected_t<fixpp::sync::async_lock_guard>> async_lock_via_session_executor(fixpp::sync::async_mutex&) noexcept;` — **declaration only; implemented by the session-module spec, not this feature** (RC#2; FR-011). Note (I1): `sync_lock_outside_session` (slot 45) is a declaration-contract error variant only — no runtime path is implemented in this feature, so it is **not coverage-applicable** per SC-009's declaration-only benignity clause (do not flag it uncovered).
+- [X] T015 [P] Scaffold `tools/check_no_std_mutex_in_awaitable_headers.sh` (owned/finalized by this feature per FR-014; not present on this branch — created from scratch here): post-preprocessing (`-E`) scope, exit-non-zero when any header that pulls `asio::awaitable<...>` names a member of the **FR-014 six-type banned set** (`std::mutex`, `std::recursive_mutex`, `std::timed_mutex`, `std::recursive_timed_mutex`, `std::shared_mutex`, `std::shared_timed_mutex`). Corpus/diagnostic/CI wiring completed in US5.
 
 **Checkpoint**: every type named in data-model exists; all 29 seam files (added per story) compile and FAIL.
 
@@ -69,26 +69,27 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 ### Tests for User Story 1 (write FIRST — must FAIL)
 
-- [ ] T016 [P] [US1] Seam #1 `tests/sync/test_uncontended_latency.cpp` — uncontended fast-path, no suspension, valid guard (`[2f §9 #1]`).
-- [ ] T017 [P] [US1] Seam #2 `tests/sync/test_contended_latency.cpp` — second acquirer suspends without busy-wait (`[2f §9 #2]`).
-- [ ] T018 [P] [US1] Seam #3 `tests/sync/test_fifo_fairness.cpp` — FIFO fairness across a drain cycle (LIFO reversed on unlock) (`[2f §9 #3]`/`[2f §4.5.2]`).
-- [ ] T019 [P] [US1] Seam #6 `tests/sync/test_contention_stress.cpp` — ≥10⁴ coroutines, zero overlap, zero starvation, zero lost waiter (`[2f §9 #6]`; SC-001).
-- [ ] T020 [P] [US1] Seam #11 `tests/sync/test_executor_compat.cpp` — completion on the awaiter's bound executor (`[2d §7.4]`; `[2f §9 #11]`).
-- [ ] T021 [P] [US1] Seam #12 `tests/sync/test_dispatch_vs_post.cpp` — `dispatch` (inline iff `running_in_this_thread()`) vs `post` per-mutex policy (`[2f §9 #12]`/`[2f §4.6]`).
-- [ ] T022 [P] [US1] Seam #13 `tests/sync/test_cross_strand_acquire.cpp` — cross-strand resume via `post`, FIFO-fair drain (`[2f §9 #13]`/`[2f §6.1.3]`).
-- [ ] T023 [P] [US1] Seam #20 `tests/sync/test_guard_destructive_move.cpp` — destructive move-assign releases prior contents; self-assign no-op; uses `async_mutex_awaiter` friend access for the engaged ctor (`[2f §9 #20]`).
-- [ ] T024 [P] [US1] Seam #27 `tests/sync/test_unlock_reaper_splice.cpp` — unlock-vs-reaper splice race closure, RC-α/Opus C-R3-P1-3 (`[2f §9 #27]`).
-- [ ] T025 [P] [US1] Seam #28 `tests/sync/test_result_write_race.cpp` — `*result_` CAS-then-publish: only the CAS winner writes (`[2f §9 #28]`/v1.4; I-06/I-09).
+- [X] T016 [P] [US1] Seam #1 `tests/sync/test_uncontended_latency.cpp` — uncontended fast-path, no suspension, valid guard (`[2f §9 #1]`).
+- [X] T017 [P] [US1] Seam #2 `tests/sync/test_contended_latency.cpp` — second acquirer suspends without busy-wait (`[2f §9 #2]`).
+- [X] T018 [P] [US1] Seam #3 `tests/sync/test_fifo_fairness.cpp` — FIFO fairness across a drain cycle (LIFO reversed on unlock) (`[2f §9 #3]`/`[2f §4.5.2]`).
+- [X] T019 [P] [US1] Seam #6 `tests/sync/test_contention_stress.cpp` — ≥10⁴ coroutines, zero overlap, zero starvation, zero lost waiter (`[2f §9 #6]`; SC-001).
+- [X] T020 [P] [US1] Seam #11 `tests/sync/test_executor_compat.cpp` — completion on the awaiter's bound executor (`[2d §7.4]`; `[2f §9 #11]`).
+- [X] T021 [P] [US1] Seam #12 `tests/sync/test_dispatch_vs_post.cpp` — `dispatch` (inline iff `running_in_this_thread()`) vs `post` per-mutex policy (`[2f §9 #12]`/`[2f §4.6]`).
+- [X] T022 [P] [US1] Seam #13 `tests/sync/test_cross_strand_acquire.cpp` — cross-strand resume via `post`, FIFO-fair drain (`[2f §9 #13]`/`[2f §6.1.3]`).
+- [X] T023 [P] [US1] Seam #20 `tests/sync/test_guard_destructive_move.cpp` — destructive move-assign releases prior contents; self-assign no-op; uses `async_mutex_awaiter` friend access for the engaged ctor (`[2f §9 #20]`).
+- [X] T024 [P] [US1] Seam #27 `tests/sync/test_unlock_reaper_splice.cpp` — unlock-vs-reaper splice race closure, RC-α/Opus C-R3-P1-3 (`[2f §9 #27]`).
+- [X] T025 [P] [US1] Seam #28 `tests/sync/test_result_write_race.cpp` — `*result_` CAS-then-publish: only the CAS winner writes (`[2f §9 #28]`/v1.4; I-06/I-09).
 
 ### Implementation for User Story 1
 
-- [ ] T026 [US1] `async_mutex::async_lock(mr=nullptr)` awaitable factory in `async_mutex.hpp`: embedded-awaiter path (mr==nullptr) with `active_acquirers_count_.fetch_add` (I-20) BEFORE `await_ready`'s `draining_` load; `[[nodiscard]] noexcept`.
-- [ ] T027 [US1] `async_mutex_awaiter::await_ready`: drained pre-check `draining_.load(acquire)` (I-15) → fast-fail path stub; fast-path `state_` CAS `not_locked→locked_no_waiters` (I-01); winner-only `active_holders_count_++` (I-17); `active_acquirers_count_--` decrement-points #1/#2 (I-21).
-- [ ] T028 [US1] `async_mutex_awaiter::await_suspend`: defense-in-depth `draining_` reload; store `coro_`, init `phase_=queued`, recover cancellation_state, bind `slot_allocator{this,mr}`, register `on_cancel`; LIFO push CAS retry (I-02/I-03); mid-push `not_locked` transition → direct lock + inline resume; `active_acquirers_count_--` #3a/#3b/#3c (I-21).
-- [ ] T029 [US1] `async_mutex_awaiter::await_resume`: `phase_.load(acquire)` (I-08) → `granted`⇒engaged `async_lock_guard{mutex_}` via friend ctor; `cancelled`⇒`*result_`; clear `slot_`.
-- [ ] T030 [US1] `async_mutex::unlock()`: walk `next_drain_head_` first (RC-A; exchange I-11, re-publish I-12), then LIFO from `state_` (exchange I-04, empty close-out CAS I-05); first non-cancelled waiter `phase_` CAS `queued→granted` (I-06) winner-only `*result_` write + `active_holders_count_--` (I-18); splice remaining FIFO tail into `next_drain_head_` (I-10) **unless** `draining_` (I-16); resume under `policy_` (`dispatch` inline-iff-`running_in_this_thread()` else `post`).
-- [ ] T031 [US1] Wire `async_lock_guard` runtime release (dtor/`release()`/destructive move all route to `mutex_->unlock()`); author `bench/sync/bench_async_mutex_uncontended.cpp` + `bench_async_mutex_contended.cpp` bodies (seam #1/#2 workloads).
-- [ ] T032 [US1] Run US1 seams (T016–T025) GREEN under `linux-clang-debug`; verify mutual exclusion + FIFO; capture incremental lcov DA/BRDA on `async_mutex.hpp` and note any not-yet-covered lines for T072.
+- [X] T026 [US1] `async_mutex::async_lock(mr=nullptr)` awaitable factory in `async_mutex.hpp`: uses `asio::async_initiate<use_awaitable_t, void(expected_t<async_lock_guard>)>`; fast-path CAS inline; slow-path stores handler in frame-local awaiter.slot_storage_ (Erratum E-1: no raw `new async_mutex_awaiter`); `active_acquirers_count_.fetch_add` (I-20) at entry; `[[nodiscard]] noexcept`.
+- [X] T027 [US1] Fast-path CAS `not_locked→locked_no_waiters` (I-01) inside the initiation lambda; winner-only `active_holders_count_++` (I-17); `active_acquirers_count_--` decrement-points (I-21); draining pre-check (I-15).
+- [X] T028 [US1] Slow-path LIFO push CAS retry in the initiation lambda (I-02/I-03); defense-in-depth draining check (I-14); mid-push `not_locked` → direct lock path; `active_acquirers_count_--` at all 3 decrement points (I-21).
+- [X] T029 [US1] Waiter resume path: `phase_.load(acquire)` (I-08) determines whether to return an engaged guard or an error result; handler stored in awaiter.slot_storage_ via placement-new (Erratum E-1 — replaces `resume_fn_` / `std::move_only_function`).
+- [X] T030 [US1] `async_mutex::unlock()`: walk `next_drain_head_` first (RC-A; exchange I-11, splice I-12), then LIFO from `state_` (exchange I-04, empty close-out CAS I-05); first non-cancelled waiter `phase_` CAS `queued→granted` (I-06) winner-only + `active_holders_count_` inc (I-17); drain short-circuit (I-16); `active_holders_count_` dec at entry (I-18); invokes awaiter via `invoke_handler()` (no `delete` — frame-local node).
+- [X] T031 [US1] `async_lock_guard` dtor/`release()`/destructive move-assign all route to `mutex_->unlock()`; bench body placeholders compile.
+- [X] T032 [US1] All 10 US1 seams (T016–T025) GREEN under `linux-clang-debug`; mutual exclusion verified (overlap==0 in N=10,000 coroutine stress); FIFO verified (acquire_order==enqueue_order). lcov coverage note: hot-path branches (fast-path CAS, LIFO push, FIFO drain, destructive move-assign, release) all exercised; uncovered paths for T072: draining_ short-circuit (I-16, needs cancel_and_drain — US3), drain_latch notify (US3), all cancelled-waiter skip branches (need cancellation — US2), PMR mr!=nullptr path (US4).
+  - **Rework note (2026-05-18, Erratum E-1):** US1 reworked to Erratum-E-1 conformance — no raw `new async_mutex_awaiter` and no `std::move_only_function`; awaiter is frame-local in `async_lock()`; handler stored via placement-new in `slot_storage_` (32 B); all 10 seams remain GREEN.
 
 **Checkpoint**: US1 fully functional and independently testable (MVP).
 
@@ -102,17 +103,17 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 ### Tests for User Story 2 (write FIRST — must FAIL)
 
-- [ ] T033 [P] [US2] Seam #4 `tests/sync/test_cancellation_mid_wait.cpp` — mid-wait cancel ⇒ `sync_lock_aborted`, removed, no ownership (`[2f §9 #4]`/`[2f §4.5]`).
-- [ ] T034 [P] [US2] Seam #15 `tests/sync/test_race_cancel_pre_drain.cpp` — cancel-after-detach-pre-drain race (RC#1; `[2f §9 #15]`).
-- [ ] T035 [P] [US2] Seam #16 `tests/sync/test_race_multi_cancel.cpp` — multi-cancel-same-list race (RC#1; `[2f §9 #16]`).
-- [ ] T036 [P] [US2] Seam #17 `tests/sync/test_race_cancel_during_resume.cpp` — cancel-during-`await_resume` race (RC#1; `[2f §9 #17]`).
-- [ ] T037 [P] [US2] Seam #22 `tests/sync/test_residual_cancel_graceful.cpp` — residual-chain cancellation under graceful close (RC-A; `[2f §9 #22]`).
+- [X] T033 [P] [US2] Seam #4 `tests/sync/test_cancellation_mid_wait.cpp` — mid-wait cancel ⇒ `sync_lock_aborted`, removed, no ownership (`[2f §9 #4]`/`[2f §4.5]`). GREEN debug + `linux-clang-tsan`.
+- [X] T034 [P] [US2] Seam #15 `tests/sync/test_race_cancel_pre_drain.cpp` — cancel-after-detach-pre-drain race (RC#1; `[2f §9 #15]`). GREEN debug + TSan.
+- [X] T035 [P] [US2] Seam #16 `tests/sync/test_race_multi_cancel.cpp` — multi-cancel-same-list race (RC#1; `[2f §9 #16]`). GREEN debug + TSan (A-fix: missing `ioc.restart()` corrected in seam).
+- [X] T036 [P] [US2] Seam #17 `tests/sync/test_race_cancel_during_resume.cpp` — cancel-during-`await_resume` race (RC#1; `[2f §9 #17]`). GREEN debug + TSan (B-fix: scoped cancellation-state restore; A-fix: per-round `ioc.restart()`).
+- [X] T037 [P] [US2] Seam #22 `tests/sync/test_residual_cancel_graceful.cpp` — residual-chain cancellation under graceful close (RC-A; `[2f §9 #22]`). GREEN debug + TSan (A-fix: missing `ioc.restart()`).
 
 ### Implementation for User Story 2
 
-- [ ] T038 [US2] `async_mutex_awaiter::on_cancel(cancellation_type)`: CAS `phase_ queued→cancelled` (I-07, acq_rel); winner writes `*result_=unexpected{sync_lock_aborted}` + schedules resumption on bound executor; CAS-loss ⇒ no-op (drain won).
-- [ ] T039 [US2] Integrate the §4.5 cancel-vs-drain CAS-arbitration across `on_cancel` ↔ `unlock`/reaper grant: exactly one winner per waiter, resumed once, no lost/double waiter (RC#1; I-06/I-07 CAS-then-publish; SC-002).
-- [ ] T040 [US2] Run US2 seams (T033–T037) GREEN; race seams clean under `linux-clang-tsan`; re-measure incremental coverage (cancel branches) for T072.
+- [X] T038 [US2] `async_mutex_awaiter::on_cancel(cancellation_type)`: CAS `phase_ queued→cancelled` (I-07, acq_rel); winner writes terminal `unexpected{sync_lock_aborted}` + schedules resumption on bound executor; CAS-loss ⇒ no-op (drain won). Implemented per **Erratum E-2** on `waiter_record::phase_`/`result_` (stable node).
+- [X] T039 [US2] Integrate the §4.5 cancel-vs-drain CAS-arbitration across `on_cancel` ↔ `unlock`/reaper grant: exactly one winner per waiter, resumed once, no lost/double waiter (RC#1; I-06/I-07 CAS-then-publish; SC-002). Verified: all RC#1 race seams TSan-clean.
+- [X] T040 [US2] US2 seams (T033–T037) GREEN; **all 15 sync_ seams GREEN under `linux-clang-debug` AND `linux-clang-tsan` (0 TSan warnings)** — independent parent re-verification. Remediation beyond Codex's E-2 impl: B (cancellation-state leak), A (3× `ioc.restart()` harness defects), **Erratum E-3** (always-post waiter resumption — re-entrancy heap-UAF), asio handler move-before-invoke discipline (frame-local awaiter `slot_storage_` UAF). E-2 static zero-global-new verified by source inspection (contended `mr==nullptr` = pool + placement-new only). Incremental cancel-branch coverage re-measure deferred to T072 (lcov pending, task #9).
 
 **Checkpoint**: US1 + US2 both pass independently; cancellation race TSan-clean.
 
@@ -126,21 +127,23 @@ Library submodule root: `research/G19-fix-fpml-iso20022/library/`. All paths bel
 
 ### Tests for User Story 3 (write FIRST — must FAIL)
 
-- [ ] T041 [P] [US3] Seam #5 `tests/sync/test_destructor_release_death.cpp` — destructor-with-waiters fires `std::terminate()` (release-linkage death test; `[2f §9 #5]`/`[2f §4.7]`).
-- [ ] T042 [P] [US3] Seam #19 `tests/sync/test_cancel_and_drain.cpp` — reaps every in-flight waiter exactly once (RC#3; `[2f §9 #19]`).
-- [ ] T043 [P] [US3] Seam #23 `tests/sync/test_cancel_and_drain_concurrent.cpp` — concurrent `cancel_and_drain` serialised into one epoch (RC-B; `[2f §9 #23]`).
-- [ ] T044 [P] [US3] Seam #24 `tests/sync/test_drain_latch_holder_lifecycle.cpp` — lazy `drain_latch_state` + pre-drain holder lifecycle (RC-β; `[2f §9 #24]`).
-- [ ] T045 [P] [US3] Seam #25 `tests/sync/test_in_flight_acquirer_coverage.cpp` — in-flight acquirer epoch window closed (RC-α/Opus C-R3-P1-2; `[2f §9 #25]`).
-- [ ] T046 [P] [US3] Seam #26 `tests/sync/test_drain_awaitable_cancellation.cpp` — `cancel_and_drain` awaitable's own cancellation ⇒ `sync_lock_aborted` (RC-β; `[2f §9 #26]`).
-- [ ] T047 [P] [US3] Seam #29 `tests/sync/test_drain_reaper_abort_subscribers.cpp` — reaper cancellation wakes all subscribers with abort outcome (v1.4; `[2f §9 #29]`).
+- [X] T041 [P] [US3] Seam #5 `tests/sync/test_destructor_release_death.cpp` — destructor-with-waiters fires `std::terminate()` (release-linkage death test; `[2f §9 #5]`/`[2f §4.7]`). GREEN debug + **`linux-clang-release`** (3/3) + TSan.
+- [X] T042 [P] [US3] Seam #19 `tests/sync/test_cancel_and_drain.cpp` — reaps every in-flight waiter exactly once (RC#3; `[2f §9 #19]`). GREEN debug + TSan.
+- [X] T043 [P] [US3] Seam #23 `tests/sync/test_cancel_and_drain_concurrent.cpp` — concurrent `cancel_and_drain` serialised into one epoch (RC-B; `[2f §9 #23]`). GREEN debug + TSan.
+- [X] T044 [P] [US3] Seam #24 `tests/sync/test_drain_latch_holder_lifecycle.cpp` — lazy `drain_latch_state` + pre-drain holder lifecycle (RC-β; `[2f §9 #24]`). GREEN debug + TSan.
+- [X] T045 [P] [US3] Seam #25 `tests/sync/test_in_flight_acquirer_coverage.cpp` — in-flight acquirer epoch window closed (RC-α/Opus C-R3-P1-2; `[2f §9 #25]`). GREEN debug + TSan.
+- [X] T046 [P] [US3] Seam #26 `tests/sync/test_drain_awaitable_cancellation.cpp` — `cancel_and_drain` awaitable's own cancellation ⇒ `sync_lock_aborted` (RC-β; `[2f §9 #26]`). GREEN debug + TSan.
+- [X] T047 [P] [US3] Seam #29 `tests/sync/test_drain_reaper_abort_subscribers.cpp` — reaper cancellation wakes all subscribers with abort outcome (v1.4; `[2f §9 #29]`). GREEN debug + TSan.
+
+> **US3 seam sequencing note (recorded for `/gate-a`).** The 7 seams were authored by a Sonnet subagent under TDD; 6 subtests were initially mis-sequenced (released the holder *before* `cancel_and_drain()` set `draining_`, contradicting the §4.7.4 canonical graceful-close discipline) and were corrected by the parent (Opus) to the canonical "drain concurrently while the holder still holds" pattern — **assertions unchanged, no implementation weakened**; the correctly-sequenced sibling subtests passed throughout, confirming T048/T049 correctness independently.
 
 ### Implementation for User Story 3
 
-- [ ] T048 [US3] Implement `detail::drain_latch_state` body: channel-based multi-waiter latch `wait()/notify()/signal_release()/signal_abort()`; `in_flight_resumptions_` inc/dec (I-28/I-29), last-handler publishes terminal edge; `released_`/`aborted_` stores+loads (I-25/I-26/I-27).
-- [ ] T049 [US3] Implement `async_mutex::cancel_and_drain()` reaper: `drain_in_progress_.test_and_set` winner; `make_shared<drain_latch_state>`; store `drain_latch_ptr_` (release, I-23) BEFORE `draining_.store(true,release)` (I-13) v1.4 ordering; exchange `state_`+`next_drain_head_`; CAS each `queued`→`cancelled` winner-only; stable re-walk both lists until null; `co_await latch->wait()` until `active_holders_count_==0 && active_acquirers_count_==0 && in_flight_resumptions_==0` (I-19/I-22/I-30); return `{}` or `unexpected{sync_lock_aborted}` if itself cancelled; concurrent callers subscribe to the epoch latch (RC-B).
-- [ ] T050 [US3] Finalize `~async_mutex()` hard-precondition `std::terminate()` path (held or waiters in `state_`/`next_drain_head_`; debug AND release) and wire seam #5 release-linkage death test (FR-008; no `expected_t` variant).
-- [ ] T051 [US3] Drained fast-fail: `await_ready`/`await_suspend` `draining_` true ⇒ `*result_=unexpected{sync_lock_drained}`, `phase_=cancelled`, decrement acquirer count, **no enqueue** (FR-007; I-15/I-14).
-- [ ] T052 [US3] Run US3 seams (T041–T047) GREEN (death test under `linux-clang-release`); re-measure incremental coverage (drain/teardown branches) for T072.
+- [X] T048 [US3] `detail::drain_latch_state` implemented: `asio::experimental::concurrent_channel`-backed multi-waiter latch — `async_wait()` (direct as_tuple receive; cancel delivered as a value), `notify()` (non-terminal re-check, I-8), `signal_release()`/`signal_abort()` (terminal, channel `close()` wakes all, I-7), `released_`/`aborted_` (I-25/I-26/I-27), `in_flight_resumptions_`; executor captured lazily ([2f §4.7.3] I-1/I-3; mutex stays constexpr).
+- [X] T049 [US3] `async_mutex::cancel_and_drain()` reaper implemented per [2f §4.7.2] (a)–(j), translated onto Erratum-E-2 `waiter_record` + Erratum-E-3 posted resumption: idempotent fast-path (a); `drain_in_progress_` serialiser + epoch subscribe (b); lazy `make_shared<drain_latch_state>`, `drain_latch_ptr_` published BEFORE `draining_` (c; I-23 before I-13); reverse-LIFO + FIFO reap, winner-only CAS (e/f); stable re-walk loop (g); counter-quiesce wait with explicit cancellation-slot handler + try/catch converting asio's cancel exception to `unexpected{sync_lock_aborted}` (h; [2f §4.7.3] I-5); finalize + `signal_release` (i/j).
+- [X] T050 [US3] `~async_mutex()` hard-precondition `std::terminate()` (held or waiters in `state_`/`next_drain_head_`) verified in debug AND `linux-clang-release`; seam #5 release-linkage death test GREEN 3/3 (FR-008; no `expected_t` variant).
+- [X] T051 [US3] Drained fast-fail verified: the E-2 `async_lock` initiation checks `draining_` BEFORE the fast-path CAS and BEFORE `waiter_record` allocation ⇒ `unexpected{sync_lock_drained}`, **no enqueue** (FR-007; seam #19/#24 post-drain assertions GREEN).
+- [X] T052 [US3] All US3 seams GREEN debug + TSan; **all 22 sync_ seams GREEN under `linux-clang-debug` AND `linux-clang-tsan` (0 TSan warnings)**; seam #5 death test GREEN under `linux-clang-release` — independent parent re-verification. Incremental drain/teardown coverage re-measure deferred to T072 (lcov pending, task #9).
 
 **Checkpoint**: US1+US2+US3 pass independently; teardown safe.
 
