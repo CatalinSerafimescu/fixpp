@@ -93,3 +93,14 @@ book/
 *-decisions.md
 
 .claude
+# Vendored spec-kit skills under .claude/ stay ignored EXCEPT the one
+# locally-patched file: speckit-implement/SKILL.md carries the project's
+# pipeline.md §8.5 checklist-audit routing (see its LOCAL PATCH header).
+# Re-include each path level, re-exclude its contents, whitelist the file.
+!.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/speckit-implement/
+.claude/skills/speckit-implement/*
+!.claude/skills/speckit-implement/SKILL.md
