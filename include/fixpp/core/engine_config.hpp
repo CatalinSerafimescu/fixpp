@@ -26,6 +26,7 @@
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>                       // expected_t / error (clock_not_set)
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/dict/version_registry.hpp>            // dict::version_registry (2d construction)
 #include <fixpp/service/control_plane_factory.hpp>  // unique_ptr member ⇒ complete type
 
 namespace fixpp::dict      { class Dictionary; }
@@ -138,6 +139,27 @@ validate_engine_config(const EngineConfig& cfg) noexcept {
         return std::unexpected(error::clock_not_set);
     }
     return expected_t<void>{};
+}
+
+// 2d-OWNED minimal realization of the "build version_registry from
+// EngineConfig::dictionaries at Engine::open" step (D-13 / D-20 / T049 /
+// I-15 / FR-017). This feature ships NO Engine type; the free function is
+// the 2d-owned construction proxy. The downstream Engine calls it at open.
+//
+// Builds a dict::version_registry from cfg.dictionaries via the merged-003
+// [2c §4.9] API. Non-FIXT.1.1 dicts map session_version → application_version;
+// vt11 session-layer dicts are skipped (session-admin; app-version resolved
+// per-message via ApplVerID(1128)).
+//
+// A registry built from an EMPTY dictionaries list is valid — it holds no
+// entries; any subsequent get() returns dict_no_dictionary_for_application_version
+// (the 2c-owned slot-28 error, NOT a 2d synonym — seam 20 / I-15).
+//
+// Returns expected_t<version_registry> (always succeeds for a well-formed
+// EngineConfig; errors during get() are the registry's responsibility).
+[[nodiscard]] inline expected_t<fixpp::dict::version_registry>
+build_version_registry(const EngineConfig& cfg) noexcept {
+    return fixpp::dict::version_registry{cfg.dictionaries};
 }
 
 }  // namespace fixpp::core

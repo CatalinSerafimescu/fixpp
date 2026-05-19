@@ -27,6 +27,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
 #include "support/scripted_fsm.hpp"
 
 namespace {
@@ -64,6 +65,7 @@ void run_combo(asio::any_io_executor ex, threading_mode mode, bool attested,
     SessionConfig cfg;
     cfg.mode = mode;
     cfg.already_serialized_executor = attested;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
     Session s{engine, cfg};
 
     auto of = asio::co_spawn(engine.executor, s.open(), asio::use_future);

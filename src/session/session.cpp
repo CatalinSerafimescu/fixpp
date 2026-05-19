@@ -9,6 +9,7 @@
 // each replaces the marked placeholder body, it is not additive guesswork.
 #include <fixpp/session/session.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -84,6 +85,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // T048 (US5): runtime out-of-range-cast reject for backpressure_mode
+    // (I-14 / [const §XV.15] / [2d §6.4] / FR-010). The enum is closed with
+    // exactly 2 values (block=0, disconnect_and_recover=1); drop_oldest is
+    // UNREPRESENTABLE. A cast from an out-of-range integer (FFI/SWIG bypass)
+    // is caught here as a defence-in-depth backstop.
+    FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(fixpp::session::SessionConfig::backpressure_mode);
+    {
+        const auto raw = static_cast<std::uint8_t>(cfg_.app_backpressure);
+        if (raw != static_cast<std::uint8_t>(
+                       fixpp::session::SessionConfig::backpressure_mode::block) &&
+            raw != static_cast<std::uint8_t>(
+                       fixpp::session::SessionConfig::backpressure_mode::disconnect_and_recover)) {
+            co_return std::unexpected(error::invalid_session_config);
+        }
+    }
+
     // (1) SINGLE error::executor_not_serialised enforcement point (slot 48
     // / FR-009 / I-06): make_session_executor wraps make_strand under
     // per_session_strand, carries the bare attested executor under
@@ -109,7 +126,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // (survives cross-thread resume — NOT thread_local).
     trace_slot_.store(cfg_.initial_trace_context);
 
-    // (4c) null dictionary / sentinel     → wired by T050 (US5)
+    // T050 (US5): null dictionary → invalid_session_config (slot 53 / FR-016
+    // / FR-018 / I-13). dictionary is REQUIRED — the uniform resolved =
+    // override.value_or(engine_anchor) pattern for the dictionary axis: a
+    // null dictionary means neither session nor engine supplied one.
+    if (!cfg_.dictionary) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
+    // T050 (US5): default-constructed (null) security_profile sentinel →
+    // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
+    // D-21: SecurityProfile is forward-declared only (struct SecurityProfile
+    // in fixpp::tls — 2g owns the concrete type). 007 cannot instantiate a
+    // SecurityProfile for tests or for the "opt-in to plaintext" sentinel
+    // (2g's call). The null check IS the 2d-owned rejection invariant, but
+    // the concrete non-null sentinel is 2g-owned. Since all 007 tests supply
+    // no security_profile (= nullptr) and we cannot create a real one here,
+    // enforcing nullptr == reject now would break the full threading test
+    // suite with no fix path in 007's scope (same minimal-skeleton reasoning
+    // as D-15 for MessageStoreFactory / D-16 for flush hook).
+    //
+    // 2d records the rejection invariant (N-P2-3 / [const §XII.5]); 2g wires
+    // the actual enforcement by shipping the concrete SecurityProfile type
+    // and a "opt-out-to-plaintext" escape value. The comment and the seam-13
+    // test cover the compile-time + runtime backpressure invariant (T048);
+    // the security_profile enforcement is the analogous 2g boundary.
+    //
+    // ⚠ WIRING POINT FOR 2g: replace this comment with:
+    //   if (cfg_.security_profile == nullptr) {
+    //       co_return std::unexpected(error::invalid_session_config);
+    //   }
+    // once fixpp::tls::SecurityProfile is a complete type.
 
     state_ = lifecycle::open;
     co_return fixpp::core::expected_t<void>{};

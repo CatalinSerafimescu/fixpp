@@ -26,6 +26,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
 #include "support/scripted_fsm.hpp"
 
 namespace {
@@ -44,6 +45,11 @@ EngineConfig make_engine(asio::any_io_executor ex) {
     return e;  // clock null is fine — US1 does not resolve effective_clock
 }
 
+// Shared minimal dictionary for all open_session calls — T050 requires a
+// non-null dictionary at Session::open (FR-018 / I-13 / seam 13).
+static std::shared_ptr<const fixpp::dict::Dictionary> g_dict =
+    fixpp::test_support::make_minimal_dictionary();
+
 void open_session(Session& s, asio::thread_pool& pool) {
     auto fut = asio::co_spawn(pool, s.open(), asio::use_future);
     ASSERT_TRUE(fut.get().has_value());
@@ -53,6 +59,7 @@ TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
     asio::thread_pool pool{8};
     EngineConfig engine = make_engine(pool.get_executor());
     SessionConfig cfg;                          // default per_session_strand
+    cfg.dictionary = g_dict;                   // T050: non-null dict required at open
     Session s{engine, cfg};
     open_session(s, pool);
 
@@ -90,6 +97,7 @@ TEST(SeamStrandSerialisation, CrossSessionConcurrentSamEngineExecutor) {
     asio::thread_pool pool{8};
     EngineConfig engine = make_engine(pool.get_executor());
     SessionConfig cfg;
+    cfg.dictionary = g_dict;                   // T050: non-null dict required at open
     Session a{engine, cfg};
     Session b{engine, cfg};
     open_session(a, pool);

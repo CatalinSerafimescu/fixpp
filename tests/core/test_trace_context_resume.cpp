@@ -39,6 +39,8 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -65,6 +67,7 @@ TEST(SeamTraceContextResume, SurvivesResumeOnDifferentThread) {
         ioc.get_executor());
 
     SessionConfig cfg;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
     fixpp::otel::trace_context seed{};
     for (std::size_t i = 0; i < seed.trace_id.size(); ++i)
         seed.trace_id[i] = std::byte(0xA0 + i);

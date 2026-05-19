@@ -37,6 +37,8 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -60,6 +62,7 @@ TEST(SeamCancellationFromAppToClose, FlushHookOnceUnderGracefulNeverUnderTermina
         engine.executor = ctx.get_executor();
         engine.clock    = make_mock(ctx.get_executor());
         SessionConfig cfg;
+        cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
         Session s{engine, cfg};
         asio::co_spawn(ctx, s.open(), asio::detached);
         ctx.run();
@@ -88,6 +91,7 @@ TEST(SeamCancellationFromAppToClose, FlushHookOnceUnderGracefulNeverUnderTermina
         engine.executor = ctx.get_executor();
         engine.clock    = make_mock(ctx.get_executor());
         SessionConfig cfg;
+        cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
         Session s{engine, cfg};
         asio::co_spawn(ctx, s.open(), asio::detached);
         ctx.run();
@@ -114,6 +118,7 @@ TEST(SeamCancellationFromAppToClose, Phase1FlushResolvesBeforePhase2RootTotal) {
     engine.executor = ctx.get_executor();
     engine.clock    = make_mock(ctx.get_executor());
     SessionConfig cfg;
+    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
     Session s{engine, cfg};
     asio::co_spawn(ctx, s.open(), asio::detached);
     ctx.run();
@@ -167,6 +172,7 @@ TEST(SeamCancellationFromAppToClose, FromAppBlockedSleepDrainedByTerminalClose) 
     auto clk        = make_mock(ctx.get_executor());
     engine.clock    = clk;
     SessionConfig cfg;
+    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
     Session s{engine, cfg};
     asio::co_spawn(ctx, s.open(), asio::detached);
     ctx.run();
@@ -210,6 +216,7 @@ TEST(SeamCancellationFromAppToClose, IdempotentThreeStateModel) {
     engine.executor = ctx.get_executor();
     engine.clock    = make_mock(ctx.get_executor());
     SessionConfig cfg;
+    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
 
     // never-opened → session_already_closed, no side effects.
     {

@@ -62,6 +62,29 @@ enum class lock_policy : std::uint8_t {
 #  define FIXPP_ENUM_CLOSED
 #endif
 
+// Compile-time exhaustiveness guard for switch sites over backpressure_mode.
+// Place FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(T) immediately before any
+// switch(backpressure_mode), enumeration BLOCK_VAL and DISCONNECT_VAL below.
+// The static_assert fires if the underlying integer range of T ever grows
+// beyond the 2 legal values (block=0, disconnect_and_recover=1). Dropping
+// drop_oldest from the enum is intentional per [const §XV.15] / [2d §6.4] /
+// I-14; this macro is the compile-time enforcement companion.
+//
+// Usage pattern (at every switch site):
+//   FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(SessionConfig::backpressure_mode);
+//   switch (cfg.app_backpressure) {
+//       case SessionConfig::backpressure_mode::block:              ...
+//       case SessionConfig::backpressure_mode::disconnect_and_recover: ...
+//   }
+#define FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(T)                         \
+    static_assert(                                                              \
+        static_cast<std::uint8_t>(T::block) == 0 &&                            \
+        static_cast<std::uint8_t>(T::disconnect_and_recover) == 1,             \
+        "backpressure_mode must be closed: exactly {block=0, "                  \
+        "disconnect_and_recover=1}. drop_oldest is BANNED on the app/session " \
+        "path ([const §XV.15] / [2d §6.4] / I-14). Extend this list if "      \
+        "the enum changes and update ALL switch sites.")
+
 // Value-typed; FROZEN at Session::open ([arch §5.6] — close-and-reopen only).
 struct SessionConfig {
     enum class FIXPP_ENUM_CLOSED backpressure_mode : std::uint8_t {

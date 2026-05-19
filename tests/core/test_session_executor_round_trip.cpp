@@ -24,6 +24,8 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
+
 namespace {
 
 using fixpp::core::error;
@@ -76,6 +78,7 @@ TEST(SeamSessionExecutorRoundTrip, SecondOpenRejectedSessionAlreadyOpen) {
     EngineConfig engine;
     engine.executor = pool.get_executor();
     SessionConfig cfg;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
     Session s{engine, cfg};
 
     auto first = asio::co_spawn(pool, s.open(), asio::use_future).get();

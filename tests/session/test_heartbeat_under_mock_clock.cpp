@@ -23,6 +23,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/minimal_dictionary.hpp"
 #include "support/scripted_fsm.hpp"
 
 namespace {
@@ -43,6 +44,7 @@ TEST(SeamHeartbeatUnderMockClock, DeterministicHeartbeatWindowViaScriptedFsm) {
     engine.executor = ioc.get_executor();
     engine.clock    = clk;
     fixpp::session::SessionConfig cfg;
+    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
     fixpp::session::Session s{engine, cfg};
 
     ASSERT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());

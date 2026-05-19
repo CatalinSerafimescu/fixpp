@@ -24,6 +24,9 @@ target_link_libraries(threading_session_executor_round_trip PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(threading_session_executor_round_trip PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
 add_test(NAME threading_session_executor_round_trip
          COMMAND threading_session_executor_round_trip)
 

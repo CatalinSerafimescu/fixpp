@@ -215,3 +215,23 @@ The 2f-requested `[2d App D §D.1/§D.2/§D.3]` edits (the `Session::session_are
 The strand wrap restores the implicit contract the comment at `system_clock_source.cpp:97` always *intended* ("Cancel each on its OWN executor (asio timers are not thread-safe)") — that "own executor" must itself be a serializer. A per-clock strand would over-serialize all timers against each other (an unnecessary global bottleneck), and a "callers must externally serialize" contract would violate I-09 / I-17. Per-timer-strand is the minimal correct shape.
 
 **Anchor:** I-09 / I-17; `[2d §4.1.1]` `system_clock_source` "thread-safe under concurrent `cancel_sleeps()` from any thread"; `src/core/system_clock_source.cpp::sleep_until`; seam 10 (TSan-mandatory).
+
+---
+
+### D-20 — `build_version_registry(const EngineConfig&)` free function replaces Engine::open build step (007 ships no Engine type)
+
+**Decision:** The 2d design doc describes `Engine::open` performing a `version_registry` construction pass over `EngineConfig::dictionaries`. 007 ships a **minimal Session skeleton** — no `Engine` type (D-4 scope). The registry-build step is therefore realized as a **free function** `fixpp::core::build_version_registry(const EngineConfig& cfg) → expected_t<fixpp::dict::version_registry>` declared in `include/fixpp/core/engine_config.hpp`. The `version_registry` 2d-construction ctor (taking `const std::vector<std::shared_ptr<const Dictionary>>&`) is added to `dict::version_registry` per `[2c §4.9]`'s 2d surface allocation; the mapping `session_version → application_version` (v40..v50sp2; vt11 → Unknown/skip) is resolved in `src/dictionary/version_registry.cpp`. Seam 20 (`test_version_registry_missing_routes_to_dict_layer.cpp`) exercises `build_version_registry(EngineConfig{})` → empty registry → `get()` → `error::dict_no_dictionary_for_application_version` (slot 28).
+
+**Rationale:** The contract requires `Engine::open` to build the registry; 007 cannot ship `Engine::open` without shipping `Engine` (a far larger surface owned by a downstream feature). A free-function proxy is the minimal-faithful realization: it takes the same input (`EngineConfig`), produces the same output (`version_registry`), and is trivially subsumed when a real `Engine` class is introduced (2d-downstream feature simply calls the same ctor internally). The seam test asserts the 2c-error-slot contract is the right slot (28, NOT a 2d synonym) so the dict-layer error identity is stable across layers.
+
+**Anchor:** `[2c §4.9]` / `[2d §5.1]` / `[2d §9.20]` (seam 20); `include/fixpp/core/engine_config.hpp`; `include/fixpp/dict/version_registry.hpp`; D-4.
+
+---
+
+### D-21 — `SecurityProfile* == nullptr` sentinel enforcement deferred to 2g (`fixpp::tls::SecurityProfile` is forward-declared only in 007)
+
+**Decision:** `Session::open()` validates `cfg_.dictionary != nullptr` (T050 / I-14 / `[const §XV.15]`) but **does NOT** add a `cfg_.security_profile != nullptr` rejection. The `fixpp::tls::SecurityProfile` type is forward-declared in `session_config.hpp` as an incomplete type; 007 ships no `#include <fixpp/tls/security_profile.hpp>` because the concrete type is downstream (`2g` / TLS feature). The `security_profile` field carries raw-pointer semantics and holds `nullptr` as the legal "no-TLS" sentinel — so a null check alone is not the right contract anyway (non-null means TLS-required, null means plaintext-allowed). A wiring-point comment is inserted in `src/session/session.cpp` marking exactly where 2g must add its check once the type is complete.
+
+**Rationale:** Enforcing an incomplete-type field now would require pulling in a downstream header (breaks the `[arch §2.3]` layering) or asserting a raw pointer NULL which would forbid the legal "no-TLS" null path. The correct enforcement is: "non-null ⇒ validate the pointed-to object" which requires the complete type. Deferred to 2g; the comment creates a searchable TODOs surface so the enforcement is not forgotten.
+
+**Anchor:** `[2d §5.2]` / `[const §XV.15]`; `include/fixpp/session/session_config.hpp` `security_profile` field; `src/session/session.cpp` wiring-point comment; 2g TLS feature.

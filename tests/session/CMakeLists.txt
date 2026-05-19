@@ -48,3 +48,7 @@ add_threading_test(threading_clock_injection_corpus     test_clock_injection_cor
 # ── US3 (Phase 5) seam registrations ────────────────────────────────────────
 add_threading_test(threading_cancellation_parse_to_fromapp test_cancellation_parse_to_fromapp.cpp)  # seam 4
 add_threading_test(threading_cancellation_fromapp_to_close test_cancellation_fromapp_to_close.cpp)  # seam 5
+
+# ── US5 (Phase 7) seam registrations ────────────────────────────────────────
+add_threading_test(threading_backpressure_drop_oldest_banned     test_backpressure_drop_oldest_banned.cpp)               # seam 13
+add_threading_test(threading_version_registry_missing_dict_layer test_version_registry_missing_routes_to_dict_layer.cpp)  # seam 20
