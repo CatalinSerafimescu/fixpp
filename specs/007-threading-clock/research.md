@@ -159,3 +159,15 @@ The 2f-requested `[2d App D §D.1/§D.2/§D.3]` edits (the `Session::session_are
 **Rationale:** Faithful to the `2f → 2d → 2e` prerequisite ordering (CLAUDE.md / `spec.md` Assumptions). 006's session-side helper was deliberately declaration-only (impl owned by the session-module spec); 2d ships the `session_executor`/`session_arena()` it binds against, closing the layering loop without re-litigating 006.
 
 **Anchor:** `[2f §4.3.2]` / `[2f App D §D.1]` / `[2c §4.9]` / `[arch §2.3]`; CLAUDE.md prerequisite ordering; verified `include/fixpp/session/async_lock_via_session_executor.hpp` present on this branch.
+
+---
+
+### D-15 — `EngineConfig`/`SessionConfig` `unique_ptr` members ⇒ minimal `MessageStoreFactory` / `ControlPlaneFactory` interface stubs (007-owned; 005/2j extend)
+
+**Decision:** Ship two minimal abstract-interface stubs — `fixpp::session::MessageStoreFactory` (`include/fixpp/session/message_store_factory.hpp`) and `fixpp::service::ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`) — each a pure-virtual base with a virtual destructor and deleted copy/move. `TransportFactory` stays a forward declaration (it is only ever a `shared_ptr<>` member, which destructs fine incomplete).
+
+**Rationale:** `data-model.md` E4/E5 + `contracts/engine_config.hpp` / `contracts/session_config.hpp` pin `std::unique_ptr<ControlPlaneFactory> control_plane_factory` and `std::unique_ptr<MessageStoreFactory> store_factory` as the *frozen* shape (unique ownership). A value-typed struct with a `unique_ptr`-to-**incomplete**-type member has an ill-formed implicit destructor — so realizing `EngineConfig`/`SessionConfig` as the compilable value types T009/T010 require *forces* these two types to be complete now. The concrete factories + their full surface are owned by the deferred `005` (MessageStore) / `2j` (control plane); 007 ships only the polymorphic bind target. Same "minimal real skeleton, downstream extends the namespace" pattern as D-1 (`trace_context` / `2k`) and D-4 (`Session` / `005`).
+
+**Provenance / process note:** these two headers were created reactively during `/speckit-implement` Phase 2 (T010/T014 build failure), NOT scheduled at `/speckit-tasks` and NOT flagged by the step-9 `gate.md` checklist audit (the audit checked the config entities were forward-declared but not that they were *realizable as complete value types from their contract*). Retro-tracked here (D-15) + as task T010a so the SC-008 feature-completeness audit (tasks↔FR/SC↔files) stays honest. Lesson recorded in agent memory: the §9 audit must check realizability, not merely forward-declaration presence.
+
+**Anchor:** `data-model.md` E4/E5; `contracts/engine_config.hpp` / `contracts/session_config.hpp`; D-1 / D-4 minimal-skeleton precedent; `[arch §2.3]` (zero-dependency interface headers — no new link edge).
