@@ -92,6 +92,16 @@ add_sync_test(sync_drain_reaper_abort_subscribers test_drain_reaper_abort_subscr
 # US5 (T062–T065): sync_no_std_mutex_ci_gate #14 (+ 3 fixtures/ headers)
 # Polish: sync_arm64_weak_memory #18 (T068); sync_consumer_contract_compile (T078)
 
+# ── Gate-B/r1 seam registrations (F-2 regression lock + F-3-residual UAF) ────
+# Seam #30: reentrant cancel_and_drain() after abort must return
+# unexpected{sync_lock_aborted}, not false success (F-2 regression lock).
+add_sync_test(sync_cancel_and_drain_reentrant_after_abort
+    test_cancel_and_drain_reentrant_after_abort.cpp)
+# Seam #31: in-flight-acquirer + reentrant-drain UAF window (F-3-residual).
+# I-6 escape-hatch (a) works post-F-2-fix; destroy after quiescence is safe.
+add_sync_test(sync_reentrant_drain_uaf_window
+    test_reentrant_drain_uaf_window.cpp)
+
 # ── Polish seam registrations (T068, T078) ───────────────────────────────────
 # Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering
 # spec under a multi-threaded io_context (TSan is the portable check; native

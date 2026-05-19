@@ -27,7 +27,7 @@
 //   due to Lewis Baker / cppcoro; all post-RC additions are original work.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Design anchor: .specify/2f-async-mutex.md v1.5 + Erratum E-1 (2026-05-18)
+// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-4)
 // Data model:    specs/006-async-mutex/data-model.md
 // Contracts:     specs/006-async-mutex/contracts/async_mutex.hpp
 //                specs/006-async-mutex/contracts/async_mutex_awaiter.hpp
@@ -1167,7 +1167,10 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     if (draining_.load(std::memory_order_acquire)) {
         if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
             co_return co_await subscribe(std::move(st));
-        co_return expected_t<void>{};  // prior epoch published + cleared
+        // drain_latch_ptr_ is null only after a clean signal_release() epoch;
+        // on the abort path the latch is kept published (aborted_==true) so
+        // this branch is only reachable after a successful prior drain.
+        co_return expected_t<void>{};
     }
 
     // ── (b) Concurrent-call serialiser — only the first becomes reaper. ───
@@ -1177,6 +1180,9 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
             co_await asio::post(ex, asio::use_awaitable);
         if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
             co_return co_await subscribe(std::move(st));
+        // null only after a clean signal_release() epoch; abort path keeps the
+        // latch published (aborted_==true) so this branch is only reachable
+        // after a successful prior drain (consistent with F-2 fix above).
         co_return expected_t<void>{};
     }
 
@@ -1290,9 +1296,20 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         // wakes every subscriber; draining_ stays true; in-flight resumption
         // handlers retain the latch shared_ptr and finish. No trailing
         // co_await here (a cancellation may be latched in this state).
+        //
+        // F-2 fix (gate-b/r1): do NOT clear drain_latch_ptr_ here. The latch
+        // stays published (aborted_==true) so any fresh reentrant
+        // cancel_and_drain() call takes the subscribe() branch at the idempotent
+        // fast path (hpp:1167-1170) and observes aborted_==true → returns
+        // unexpected{sync_lock_aborted} instead of false success. This closes the
+        // UAF: a reentrant caller can no longer return success while in-flight
+        // resumption handlers still hold waiter_record refs and dereference the
+        // mutex. Follows I-5/I-6/I-7 (binding invariants); the §4.7.2 sketch
+        // comment "prior epoch published + cleared" was self-inconsistent with
+        // I-5/I-7 on the abort path and is reconciled here: drain_latch_ptr_ is
+        // cleared only on the release path (below), after signal_release().
         latch->signal_abort();
         if (reaper_slot.is_connected()) reaper_slot.clear();
-        drain_latch_ptr_.store(nullptr, std::memory_order_release);
         co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
     }
 
