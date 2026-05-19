@@ -12,7 +12,24 @@
 //   Namespace: fixpp::sync
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Source of truth: .specify/2f-async-mutex.md v1.5 §4.1 + §6.2 + §1.1
+// Source of truth: .specify/2f-async-mutex.md v1.5 §4.1 + §6.2 + §1.1,
+//                  AS AMENDED BY v1.6 errata E-2 / E-3 / E-4 (recorded
+//                  post-sign-off at /implement; re-touch 006 Gate A scope):
+//   - E-2 (§4.2): the frame-local awaiter is NOT the intrusive node; the
+//       stable detail::waiter_record is. state_ / next_drain_head_ hold
+//       detail::waiter_record*; the contended mr==nullptr zero-global-new
+//       node is drawn from the per-mutex waiter_pool_ (NOT an embedded
+//       waiter node). See data-model.md E2/E2a + invariant I-32.
+//   - E-3 (§4.6.2): 2f waiter resumption is ALWAYS post-ed to the bound
+//       executor — never inline-dispatched — regardless of completion_policy
+//       or running_in_this_thread() (re-entrant inline resume = heap-UAF,
+//       TSan-diagnosed). completion_policy survives only as a semantic knob.
+//   - E-4 (§4.3.4): asio 1.36.0's cancellation_slot has NO allocator-binding
+//       hook (source-verified). detail::slot_allocator is NOT bound to the
+//       slot; the cancellation closure lives in asio's per-thread recycler
+//       (zero global new/delete only in steady state, post per-thread
+//       warm-up). slot_allocator is retained as the typed storage-policy
+//       wrapper for the waiter_record fallback.
 //
 // async_mutex — the awaitable mutex value type.
 //   - The only legal mutex shape in coroutine context per [const §XI.3].
@@ -83,6 +100,8 @@ using expected_t = /* fixpp::core::expected_t<T> = */
 namespace detail {
 enum class waiter_phase : std::uint8_t;
 class async_mutex_awaiter;
+struct waiter_record;   // E-2: the STABLE intrusive node (state_ /
+                        // next_drain_head_ point here, NOT at the awaiter).
 class slot_allocator;
 class drain_latch_state;
 }  // namespace detail
@@ -139,25 +158,36 @@ public:
     //                                      cancel_and_drain() (RC-B close).
     //   - with unexpected{sync_lock_alloc_failed} (=44) — PMR allocation failure.
     //
-    // PMR-aware fallback (RC#2 fix):
-    //   mr == nullptr (default) — awaiter embedded in caller's coroutine frame.
-    //     HALO-eligible per [const §XI.6]: awaiter ≤ 96 B (v1.1 layout).
-    //     Zero allocation on the v1.0 hot path.
-    //   mr != nullptr — awaiter allocated from mr. Type-erased completion
-    //     handlers (asio::any_completion_handler) and composed operations pass
-    //     mr explicitly. The session-side helper (E7, declared separately in
-    //     session/) recovers mr from the bound session_executor.
+    // PMR-aware fallback (RC#2 fix; E-2-amended):
+    //   mr == nullptr (default) — frame-local awaiter embedded in caller's
+    //     coroutine frame (HALO-eligible per [const §XI.6]: awaiter ≤ 96 B,
+    //     v1.1 layout). E-2: the contended stable node (detail::waiter_record)
+    //     is drawn from the per-mutex waiter_pool_ bounded arena — zero global
+    //     new/delete on the v1.0 hot path (NOT an embedded waiter node).
+    //   mr != nullptr — awaiter AND waiter_record allocated from / reclaimed
+    //     to mr. Type-erased completion handlers (asio::any_completion_handler)
+    //     and composed operations pass mr explicitly. The session-side helper
+    //     (E7, declared separately in session/) recovers mr from the bound
+    //     session_executor.
     //
-    // The cancellation slot's handler-closure storage is bound via
-    // asio::bind_allocator(detail::slot_allocator{this, mr}) at await_suspend
-    // time (RC-C close — Codex C-P2-7).
+    // E-4 (source-verified, asio 1.36.0): the cancellation slot's handler-
+    // closure storage is NOT asio::bind_allocator-wrapped — cancellation_slot
+    // exposes no allocator-binding hook. detail::slot_allocator is NOT bound
+    // to the slot; the closure is owned by asio's per-thread recycling cache
+    // (zero global new/delete only in STEADY STATE, after a documented
+    // per-thread warm-up; the one-time per-thread first-touch is §6.4
+    // bench-soft). slot_allocator is retained as the typed storage-policy
+    // wrapper for the waiter_record fallback (the allocation 2f controls),
+    // unit-verified by §9 seam #21.
     //
     // Cancellation: honours total (waiter unlinked, completes with
     // unexpected{sync_lock_aborted}); partial is treated as total; terminal
     // is treated as total.
     //
-    // Completion: runs on the awaiter's bound executor per [2d §7.4]; inline
-    // vs. post governed by policy_ (§4.6).
+    // Completion: runs on the awaiter's bound executor per [2d §7.4]. E-3:
+    // 2f waiter resumption is ALWAYS post-ed — never inline-dispatched —
+    // regardless of policy_ or running_in_this_thread() (re-entrant inline
+    // resume = TSan-diagnosed heap-UAF). policy_ is a semantic knob only.
     //
     // [[nodiscard]]: co_await result MUST be consumed.
     // EXACT signature per design-doc §4.1 (lines 505–506) — literal, NOT a
@@ -186,10 +216,12 @@ public:
     //   (d) Bind reaper's cancellation_state.
     //   (e) Sentinel-discriminated atomic exchange of both state_ and
     //       next_drain_head_.
-    //   (f) reap_chain: for each queued waiter: phase CAS queued→cancelled
-    //       (acq_rel); CAS winner writes *result_ = unexpected{sync_lock_aborted}
-    //       and schedules bound-executor resumption (winner-only — v1.4
-    //       CAS-then-publish); captures latch_state shared_ptr.
+    //   (f) reap_chain: for each queued waiter_record: phase CAS
+    //       queued→cancelled (acq_rel) on record->phase_ (E-2); CAS winner
+    //       writes record->result_ = unexpected{sync_lock_aborted} and
+    //       post-s bound-executor resumption (winner-only — v1.4
+    //       CAS-then-publish; E-3 always-post); captures latch_state
+    //       shared_ptr. Node reclaimed via record->refcount_ (I-32).
     //   (g) Stable re-walk loop: re-exchange both lists until both observe
     //       nullptr (closes Opus C-R3-P1-3 unlock-vs-reaper splice race).
     //   (h) co_await latch_state->wait() until:
@@ -214,8 +246,11 @@ public:
     // Release
 
     // unlock — release the mutex. Walks next_drain_head_ first (RC-A), then
-    // the LIFO from state_. The first non-cancelled queued waiter is granted
-    // ownership; remaining FIFO tail is spliced into next_drain_head_.
+    // the LIFO from state_ (both are detail::waiter_record* chains — E-2).
+    // The first non-cancelled queued waiter_record is granted ownership
+    // (record->phase_ CAS queued→granted; winner writes record->result_);
+    // remaining FIFO tail is spliced into next_drain_head_. The granted
+    // waiter is resumed via one post hop (E-3 always-post — never inline).
     //
     // Under draining_ == true: does NOT splice; decrements active_holders_count_
     // and notifies the drain latch (Opus C-R3-P1-3 close).
@@ -241,10 +276,22 @@ private:
     // the cache-line locality guarantee stated in §6.3 row 1 footnote)
 
     // Primary state atom — Lewis-Baker / cppcoro encoding.
+    // E-2: a non-sentinel value is a detail::waiter_record* (the stable node),
+    // NOT the frame-local awaiter.
     std::atomic<uintptr_t>                              state_             {not_locked};
 
     // RC-A v1.1 — mutex-owned residual FIFO chain.
-    std::atomic<detail::async_mutex_awaiter*>           next_drain_head_   {nullptr};
+    // E-2: retyped from detail::async_mutex_awaiter* to detail::waiter_record*
+    // (the stable intrusive node; see data-model.md E2a + invariant I-32).
+    std::atomic<detail::waiter_record*>                 next_drain_head_   {nullptr};
+
+    // E-2 (new) — per-mutex bounded, pre-reserved freelist/slab of
+    // detail::waiter_record. Stable-node storage for the contended
+    // mr==nullptr path: zero global operator new/delete (an arena per
+    // [const §VIII.5] default). Exhaustion ⇒ unexpected{sync_lock_alloc_failed}
+    // (slot 44). The exact storage shape (inline slab vs. intrusive freelist)
+    // is an implementation choice; the zero-global-new contract is normative.
+    // detail::waiter_pool waiter_pool_;   // (build header: concrete type)
 
     // RC-B v1.1 — drain flag; set by cancel_and_drain(), never cleared.
     std::atomic<bool>                                   draining_          {false};
@@ -283,14 +330,16 @@ private:
 //   static_assert(std::atomic<uintptr_t>::is_always_lock_free,
 //       "fixpp::sync: async_mutex requires lock-free std::atomic<uintptr_t>.");
 //   static_assert(
-//       std::atomic<fixpp::sync::detail::async_mutex_awaiter*>::is_always_lock_free,
-//       "fixpp::sync: next_drain_head_ atomic exchange requires lock-free "
-//       "std::atomic<async_mutex_awaiter*>.");
+//       std::atomic<fixpp::sync::detail::waiter_record*>::is_always_lock_free,
+//       "fixpp::sync: state_/next_drain_head_ atomic exchange requires "
+//       "lock-free std::atomic<detail::waiter_record*> (E-2).");
 //
-// Placed AFTER the async_mutex_awaiter struct definition (in async_mutex_awaiter.hpp
-// / the detail section of the build header):
+// Placed AFTER the detail::waiter_record struct definition (in the detail
+// section of the build header) — E-2: the sentinel must be distinguishable
+// from any real waiter_record*, and alignof on an incomplete class is
+// ill-formed:
 //
-//   static_assert(alignof(async_mutex_awaiter) >= 8,
-//       "fixpp::sync: async_mutex_awaiter must be 8-byte-aligned so the "
-//       "low-bit `not_locked` sentinel is distinguishable from a real waiter.");
+//   static_assert(alignof(fixpp::sync::detail::waiter_record) >= 8,
+//       "fixpp::sync: detail::waiter_record must be 8-byte-aligned so the "
+//       "low-bit `not_locked` sentinel is distinguishable from a real node.");
 // ─────────────────────────────────────────────────────────────────────────────

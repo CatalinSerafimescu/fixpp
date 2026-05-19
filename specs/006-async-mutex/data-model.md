@@ -1,6 +1,6 @@
 # Phase 1 Data Model — 006-async-mutex
 
-Source of truth: `.specify/2f-async-mutex.md` **v1.5** (Gate-A-converged). On conflict the design anchor wins.
+Source of truth: `.specify/2f-async-mutex.md` **v1.5 + v1.6 errata E-1..E-4** (v1.5 Gate-A-converged; E-1/E-2/E-3/E-4 recorded post-sign-off at `/implement`, re-touching 006 Gate A scope — propagated through this bundle). On conflict the design anchor (as amended by the errata) wins.
 
 Entities are the logical runtime objects that 2f introduces. They map to named C++ types in `include/fixpp/core/sync/` (plus one declaration-only type in `include/fixpp/session/`). Relationships and invariants are extracted verbatim from the referenced design-doc sections.
 
@@ -20,7 +20,7 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 |---|---|---|---|
 | `state_` | `std::atomic<uintptr_t>` | `not_locked` (= 1) | Lewis-Baker / cppcoro state encoding: `1` = not_locked; `0` = locked_no_waiters; `<ptr>` = LIFO head. **E-2:** `<ptr>` is a `detail::waiter_record*` (the stable node, E2a), not the frame-local awaiter. `alignof(waiter_record) >= 8` keeps the low-bit sentinel distinguishable from any real pointer. |
 | `next_drain_head_` | `std::atomic<detail::waiter_record*>` | `nullptr` | RC-A v1.1 — mutex-owned residual FIFO chain. **E-2:** retyped from `async_mutex_awaiter*` to `waiter_record*` (E2a). `unlock()` walks this list first before the LIFO. Solves the v1.0 UAF where the granted waiter "owned" the residual list unreachable from `async_mutex*`-only state. |
-| `waiter_pool_` | per-mutex bounded freelist/slab of `detail::waiter_record` | empty/pre-reserved | **E-2 (new):** stable-node storage for the contended `mr == nullptr` path. Zero global `operator new`/`delete`; an arena per `[const Art.VIII §5]` default. Exhaustion ⇒ `unexpected{sync_lock_alloc_failed}` (slot 44). |
+| `waiter_pool_` | per-mutex bounded freelist/slab of `detail::waiter_record` | empty/pre-reserved | **E-2 (new):** stable-node storage for the contended `mr == nullptr` path. Zero global `operator new`/`delete`; an arena per `[const §VIII.5]` default. Exhaustion ⇒ `unexpected{sync_lock_alloc_failed}` (slot 44). |
 | `draining_` | `std::atomic<bool>` | `false` | RC-B v1.1 — set by `cancel_and_drain()`; from that point onward every `async_lock(...)` fast-fails with `unexpected{sync_lock_drained}` (checked in `await_ready` BEFORE the fast-path CAS). |
 | `drain_in_progress_` | `std::atomic_flag` | `ATOMIC_FLAG_INIT` | RC-B v1.1 — concurrent-call serialiser for `cancel_and_drain()`. Only the first caller (the reaper) wins `test_and_set`; all others subscribe to the drain epoch's latch. |
 | `active_holders_count_` | `std::atomic<std::uint32_t>` | `0` | v1.2 / v1.3 RC-α — incremented WINNER-ONLY at the grant CAS-success (fast-path `await_ready` CAS or drain-walker grant CAS); decremented at `unlock()` entry. `cancel_and_drain()` waits for `== 0`. Closes Opus C-R3-P1-1 "phantom holder count on CAS loss" defect. |
@@ -39,8 +39,8 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 - `static_assert(sizeof(uintptr_t) >= sizeof(void*))` — placed after the namespace closes in §4.1.
 - `static_assert(std::atomic<uintptr_t>::is_always_lock_free)` — algorithm's wait-freedom claim depends on this; reject targets where false.
-- `static_assert(std::atomic<fixpp::sync::detail::async_mutex_awaiter*>::is_always_lock_free)` — `next_drain_head_` exchange requires lock-free atomic pointer.
-- `static_assert(alignof(async_mutex_awaiter) >= 8)` — placed AFTER the awaiter struct definition (alignof on an incomplete class is ill-formed).
+- `static_assert(std::atomic<fixpp::sync::detail::waiter_record*>::is_always_lock_free)` — **E-2:** `state_`/`next_drain_head_` hold `waiter_record*`; their exchange/CAS requires a lock-free atomic pointer.
+- `static_assert(alignof(waiter_record) >= 8)` — **E-2:** placed AFTER the `waiter_record` struct definition (alignof on an incomplete class is ill-formed); keeps the low-bit `not_locked` sentinel distinguishable from any real `waiter_record*`.
 
 **Constructors:**
 
@@ -75,9 +75,10 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 |---|---|---|
 | `mutex_` | `async_mutex*` | Back-pointer to the originating mutex. |
 | `record_` | `detail::waiter_record*` | **E-2 (new):** stable node (E2a) this awaiter is attached to on the contended path; `nullptr` on the uncontended fast path. Intrusive `next_`/`phase_`/terminal-result now live on `*record_`. |
-| `slot_` | `asio::cancellation_slot` | Bound at `await_suspend` time via `asio::bind_allocator(slot_allocator{this, mr})`. |
-| `coro_` | `std::coroutine_handle<>` | Continuation — stored at `await_suspend`, used to resume the coroutine. |
-| `slot_storage_` | `std::array<std::byte, 32>` | RC-C v1.1 — inline 32-byte buffer for the cancellation handler closure on the embedded path with HALO firing. Fed to `detail::slot_allocator` when `mr == nullptr`. |
+| `slot_` | `asio::cancellation_slot` | Registered at `await_suspend` time. **E-4:** NOT `asio::bind_allocator`-wrapped (asio 1.36.0 exposes no allocator-binding hook on `cancellation_slot`); the closure storage is owned by asio's per-thread recycler (zero global `new`/`delete` in steady state, post per-thread warm-up — see E5). `slot_allocator` is the typed wrapper for the `waiter_record` fallback, NOT bound to the slot. |
+| `slot_storage_` | `std::array<std::byte, 32>` | RC-C v1.1 / **E-1:** inline 32-byte buffer holding the asio **completion** handler, placement-new'd here at `await_suspend` (`store_handler`). This **replaces** the design's `coro_` stored continuation — there is **no `coro_` field**. **E-4 ¶3:** it does **NOT** back the cancellation-slot closure (that closure is owned by asio's per-thread recycler — asio exposes no allocator-binding hook). `detail::slot_allocator` is **not** fed `slot_storage_`; it is the typed storage-policy wrapper for the **`waiter_record` fallback** allocation (the allocation 2f controls) when `mr == nullptr`. Agrees with the `slot_` row above and the `research.md`-mirrored member table. |
+| `invoke_fn_t invoke_fn_` | `void(*)(void*, expected_t<async_lock_guard>) noexcept` | **E-1:** type-erased invoke trampoline into `slot_storage_` — replaces the retired `coro_.resume()`. |
+| `destroy_fn_t destroy_fn_` | `void(*)(void*) noexcept` | **E-1:** type-erased destroy trampoline for the in-buffer completion handler. |
 
 **E-2 relocation:** `next_`, `phase_`, and `result_` are **removed from the awaiter** and re-homed on `detail::waiter_record` (E2a). On the uncontended fast path (`await_ready` CAS wins) no `waiter_record` is created and `record_ == nullptr`.
 
@@ -86,9 +87,9 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 **Awaiter protocol:**
 
 - `bool await_ready() noexcept` — RC-α pre-step: `active_acquirers_count_.fetch_add(1, acq_rel)` in the awaitable factory BEFORE this call. Step 1: `draining_.load(acquire)` — if true, write `*result_ = unexpected{sync_lock_drained}`, set `phase_ = cancelled` (release), decrement `active_acquirers_count_` (RC-α decrement-point #1), return true (fast-fail). Step 2: `state_.compare_exchange_strong(not_locked → locked_no_waiters, acquire/relaxed)` — on success, increment `active_holders_count_` (winner-only), decrement `active_acquirers_count_` (RC-α decrement-point #2), return true. On failure, return false → `await_suspend` is invoked.
-- `void await_suspend(coroutine_handle<> h) noexcept` — Step 1: `draining_.load(acquire)` check (defense-in-depth for the race window between §4.2.1 steps 1 and 2); if true: fast-fail with `sync_lock_drained`, decrement `active_acquirers_count_` (RC-α decrement-point #3a), resume inline. Steps 2–6: store `coro_ = h`; init `phase_ = queued` (relaxed); recover `cancellation_state`; bind slot allocator via `asio::bind_allocator(slot_allocator{this, mr})`; register `on_cancel`; LIFO push CAS retry loop (release/acquire). On CAS-success, decrement `active_acquirers_count_` (RC-α decrement-point #3b — tracking transfers to the LIFO walk). Step 7: if state transitions to `not_locked` mid-push, CAS to `locked_no_waiters` directly, decrement `active_acquirers_count_` (decrement-point #3c), increment `active_holders_count_`, resume inline.
+- `void await_suspend(coroutine_handle<> h) noexcept` — Step 1: `draining_.load(acquire)` check (defense-in-depth for the race window between §4.2.1 steps 1 and 2); if true: fast-fail with `sync_lock_drained`, decrement `active_acquirers_count_` (RC-α decrement-point #3a), resume inline. Steps 2–6: store the composed-operation **completion** handler (derived from `h`) via placement-new into `slot_storage_` — `store_handler` sets `invoke_fn_`/`destroy_fn_` (**E-1:** replaces the retired `coro_ = h`); init `phase_ = queued` (relaxed); recover `cancellation_state`; register `on_cancel` on `slot_` (**E-4:** NO `asio::bind_allocator` — asio exposes no slot allocator hook; the closure lives in asio's per-thread recycler); LIFO push CAS retry loop (release/acquire). On CAS-success, decrement `active_acquirers_count_` (RC-α decrement-point #3b — tracking transfers to the LIFO walk). Step 7: if state transitions to `not_locked` mid-push, CAS to `locked_no_waiters` directly, decrement `active_acquirers_count_` (decrement-point #3c), increment `active_holders_count_`, resume inline.
 - `expected_t<async_lock_guard> await_resume() noexcept` — `phase_.load(acquire)`: `granted` → return engaged `async_lock_guard{mutex_}`; `cancelled` → return `*result_` (either `unexpected{sync_lock_aborted}` or `unexpected{sync_lock_drained}`). Then clears `slot_`. The `async_lock_guard` engaged constructor is `private` + `friend`-only (Opus N-P3-1 close).
-- `void on_cancel(cancellation_type type) noexcept` — CAS `phase_: queued → cancelled` (acq_rel/acquire). On CAS-success (winner): write `*result_ = unexpected{sync_lock_aborted}`, schedule resumption on bound executor. On CAS-failure (drain won): no-op — the waiter already holds the guard.
+- `void on_cancel(cancellation_type type) noexcept` — CAS `phase_: queued → cancelled` (acq_rel/acquire) on the `waiter_record` (per the E-2 remap). On CAS-success (winner): write `result_ = unexpected{sync_lock_aborted}`, **`post` the resumption to the bound executor (E-3: always-`post`, never inline-`dispatch`)**. On CAS-failure (drain won): no-op — the waiter already holds the guard.
 
 **Phase enum (`fixpp::sync::detail::waiter_phase`, collapsed from v1.0's four states — RC-A):**
 
@@ -200,16 +201,18 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 ### E6 — `fixpp::sync::completion_policy`
 
-**Source:** `[2f §4.1]` (the `completion_policy` enum; NOT a class, NOT a plugin).
+**Source:** `[2f §4.1]` (the `completion_policy` enum; NOT a class, NOT a plugin), **superseded for 2f waiter resumption by `[2f §4.6.2]` Erratum E-3 (v1.6)**.
 
-**Role:** Per-mutex completion policy enum. Governs the inline-vs-post behaviour of `unlock()`'s drain handoff.
+**Role:** Per-mutex completion policy enum. Retained as a **semantic/intent knob** (constructor-set, `const`, queryable via `policy()`).
+
+> **E-3 (v1.6, TSan-diagnosed):** 2f's waiter-resumption site is *intrinsically re-entrant* (always inside `unlock()`/`on_cancel()`, always nested in a coroutine on the bound-executor thread), so `asio::dispatch`'s inline fast-path is **never** safe here (re-entrant inline resume = heap-UAF). 2f waiter resumption is therefore **always `post`ed** to the bound executor — never inline-`dispatch`ed — **regardless of `completion_policy` or `running_in_this_thread()`**. Both rows below `post` for waiter resumption; the "inline if `running_in_this_thread()`" predicate is superseded for it (it would still apply to a *non-reentrant* completion context, of which 2f has none).
 
 **Members:**
 
 | Enumerant | `uint8_t` | Behaviour |
 |---|---|---|
-| `dispatch` | 0 | ASIO `dispatch` semantics: if `executor.running_in_this_thread()` is true at unlock time, resume inline on the unlocking thread; otherwise post. Default; matches `[2d §7.4]` surface. |
-| `post` | 1 | Always post the resumed coroutine through the bound executor; one executor hop per resumption regardless of caller thread. |
+| `dispatch` | 0 | Semantic/intent default; matches `[2d §7.4]` surface. **E-3:** for 2f waiter resumption this **always `post`s** (the inline-iff-`running_in_this_thread()` path is superseded — re-entrant inline resume was a TSan-diagnosed heap-UAF). |
+| `post` | 1 | Always post the resumed coroutine through the bound executor; one executor hop per resumption regardless of caller thread. **E-3:** unchanged — this was already the always-`post` behaviour 2f waiter resumption now uses under both policies. |
 
 ---
 

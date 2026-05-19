@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 **Active feature:** `006-async-mutex` — the awaitable mutex `fixpp::sync::async_mutex`: Lewis-Baker / cppcoro lock-free algorithm + mutex-owned residual FIFO (RC-A) + three-state `waiter_phase` machine + lazy `drain_latch_state` (RC-β) + `cancel_and_drain()` drain primitive + PMR-aware fallback via explicit `async_lock(mr)` + session-side helper declaration (RC#2 layering) + 4 `sync_*` error variants at slots 43–46 (fifth Phase 4 feature; 29 named test seams; TSan mandatory).
 
-For technologies, project structure, build/test commands, and gate status, read the current plan: [`specs/006-async-mutex/plan.md`](specs/006-async-mutex/plan.md). Design anchor: `.specify/2f-async-mutex.md` **v1.5 (Gate-A-converged)** — on conflict the design doc wins.
+For technologies, project structure, build/test commands, and gate status, read the current plan: [`specs/006-async-mutex/plan.md`](specs/006-async-mutex/plan.md). Design anchor: `.specify/2f-async-mutex.md` **v1.5 + v1.6 errata E-1..E-4** (v1.5 Gate-A-converged; E-1/E-2/E-3/E-4 recorded post-sign-off at `/implement`, re-touching 006 Gate A scope) — on conflict the design doc (as amended by the v1.6 errata) wins.
 
 Prerequisite design docs (consumed but not modified by this feature): `2d` (Threading/Clock; executor-compat surface; `[2d §4.8]` `session_executor`; `[2d §7.4]` completion contract), `2e` (MessageStore; `async_mutex` is the writer-mutex per `[2e §6.4]`; **2f sign-off is the named hard hand-off gate for 2e implementation per `[2e §3.1]`**). Cross-doc Appendix D drop-ins (§D.1/§D.2/§D.3) to `2d` are queued at 2f sign-off — NOT applied by this feature (see `research.md` D-12).
 

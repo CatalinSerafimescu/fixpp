@@ -1,6 +1,6 @@
 # Quickstart — 006-async-mutex
 
-How to build, test, run sanitizers (especially TSan for concurrency correctness), bench, measure coverage, verify, and gate the awaitable mutex. Anchored to `.specify/2f-async-mutex.md` v1.5 and the constitution Tier-1 matrix (`[const §IX.6]`).
+How to build, test, run sanitizers (especially TSan for concurrency correctness), bench, measure coverage, verify, and gate the awaitable mutex. Anchored to `.specify/2f-async-mutex.md` **v1.5 + v1.6 errata E-1..E-4** (E-1/E-2/E-3/E-4 recorded post-sign-off at `/implement`, re-touching 006 Gate A scope) and the constitution Tier-1 matrix (`[const §IX.6]`).
 
 ## 0. STL-availability probe — `std::atomic<std::shared_ptr<T>>` (run BEFORE `/implement`)
 
@@ -76,6 +76,8 @@ LD_PRELOAD=tools/mallocnesia/libmallocnesia.so \
   ctest --preset linux-clang-debug -R 'sync_pmr_fallback'
 ```
 
+**Per-thread cancellation-recycler warm-up (mandatory before any zero-global-`new` measurement — `[2f §4.3.4]` Erratum E-4 ¶4(b)).** asio's `cancellation_slot` has **no allocator-binding hook**: the **first** cancellation-slot assignment on a given thread does one global `aligned_new` into asio's per-thread recycling cache; every subsequent assignment on that thread reuses the thread-local block. The zero-global-`new` guarantee therefore holds **only in steady state**. Each alloc-guard / `mallocnesia` harness MUST run a documented, explicitly-commented per-thread warm-up iteration (one acquire/cancel cycle per worker thread that primes the recycler) **before** the measurement window opens; the warm-up's one-time first-touch allocation is amortized and is **outside** the measured region (treated as `[2f §6.4]` / §4.3.4 case-2 bench-soft, not a measurement-window allocation). The substantive `waiter_record` allocation remains genuinely zero-global via the per-mutex `waiter_pool_` (E-2) and is what the gate asserts. The verified seam #10 / #21 harness (`tasks.md` T056) already performs this warm-up; it is recorded here so the operator does not misread a first-touch as a regression.
+
 ## 3. Tier-1 sanitizer matrix — TSan is mandatory (`[const §IX.2]` / `[const §XVII.8]`)
 
 `async_mutex` is a concurrency primitive; TSan is the primary correctness gate. Run each preset serially (never parallel — `[const §XVII.8]`):
@@ -129,7 +131,7 @@ Latency seams #1 and #2 are Google Benchmark targets. The §6.3 ceilings are:
 | #1 | `async_lock` uncontended (single CAS fast path) | ≤ 20–25 ns warm-cache |
 | #2 | `async_lock` contended (waiter suspends) | ≤ 80 ns |
 | #2 | `unlock` uncontended | ≤ 15 ns |
-| #12 | `dispatch` vs `post` completion policy delta | `dispatch` ≈ 0 ns extra; `post` ≈ 25 ns extra |
+| #12 | `completion_policy` waiter-resume cost (intent knob) | **E-3:** waiter resumption is **always one `post` hop** regardless of `completion_policy` — there is **no** per-policy waiter-resume latency split (`dispatch` is *not* a free inline-resume; `completion_policy` is a semantic/intent selector only). Cost is the single bound-executor `post` hop for **both** policies. |
 
 ```sh
 cmake --preset linux-clang-release
@@ -214,7 +216,7 @@ Produces `.specify/decisions/006-async-mutex-verify.md` (GREEN / YELLOW / RED). 
 1. Sanitizer matrix (TSan + ASan + UBSan + GCC release).
 2. Coverage gate (≥ 95% line / ≥ 85% branch on the touched `core/sync` (+ `session/` helper) modules, `[const §IX.1]`, lcov DA/BRDA basis).
 3. `clang-tidy` / `cppcheck` / IWYU sweep.
-4. Alloc guard under `mallocnesia` (seams #10 #21).
+4. Alloc guard under `mallocnesia` (seams #10 #21) — measured **in steady state, after the mandatory per-thread cancellation-recycler warm-up** (`[2f §4.3.4]` Erratum E-4 ¶4(b); §2 warm-up note). The substantive zero-global-`new` assertion is the per-mutex `waiter_pool_` `waiter_record` allocation (E-2); the one-time per-thread asio cancellation first-touch is amortized and outside the measurement window (bench-soft).
 5. CI grep gate (`[const §XV.9]` / seam #14).
 6. Bench regression (seams #1 #2 #12 — ±5% vs `[2f §6.3]` ceilings).
 7. ARM64 TSan stress if ARM64 host is available (seam #18).

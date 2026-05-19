@@ -13,11 +13,24 @@
 //   the main async_mutex header)
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Source of truth: .specify/2f-async-mutex.md v1.5 §4.1
+// Source of truth: .specify/2f-async-mutex.md v1.5 §4.1, AS AMENDED BY
+//                  v1.6 Erratum E-3 (§4.6.2; recorded post-sign-off at
+//                  /implement; re-touches 006 Gate A scope).
 //
-// Per-mutex completion policy. Governs the inline-vs-post behaviour of
-// unlock()'s drain handoff (item 4 of [SYN §3.2 Q6b]'s six-item list).
-// The default is `dispatch`; HFT / fairness-sensitive sites pick `post`.
+// Per-mutex completion policy (item 4 of [SYN §3.2 Q6b]'s six-item list).
+//
+// ── E-3 (§4.6.2, v1.6, TSan-diagnosed) ──  2f's waiter-resumption site is
+//   INTRINSICALLY RE-ENTRANT (always inside unlock()/on_cancel(), always
+//   nested in a coroutine on the bound-executor thread), so asio::dispatch's
+//   inline fast-path is NEVER safe here (re-entrant inline resume = heap-UAF).
+//   2f WAITER RESUMPTION IS ALWAYS post-ed to the bound executor — never
+//   inline-dispatched — REGARDLESS of completion_policy or
+//   running_in_this_thread(). completion_policy is preserved ONLY as a
+//   semantic/intent knob (constructor-set, const, queryable via policy());
+//   for waiter resumption BOTH `dispatch` and `post` post. The
+//   "inline if running_in_this_thread()" predicate is superseded for waiter
+//   resumption (it would still apply to a non-reentrant completion context,
+//   of which 2f has none).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -33,21 +46,23 @@ namespace fixpp::sync {
 //
 // Not a plugin (zero pure-virtual; not a base class; not extensible per 2f §1).
 enum class completion_policy : std::uint8_t {
-    // ASIO `dispatch` semantics on the bound executor: if
-    // executor.running_in_this_thread() is true at unlock time, the resumed
-    // coroutine runs inline on the unlocking thread; if false, the resumption
-    // posts. Under `direct_executor` mode + a user-attested executor that does
-    // not publish running_in_this_thread(), the predicate falls to
-    // always-post.
+    // Semantic/intent default; matches the [2d §7.4] surface lock.
     //
-    // Default; matches the [2d §7.4] surface lock.
-    // §9 seam #12: verified against `post` for ≤ 0 ns extra vs ≈ 25 ns extra.
+    // E-3: for 2f WAITER RESUMPTION this ALWAYS post-s — the
+    // "inline if executor.running_in_this_thread()" asio::dispatch fast-path
+    // is SUPERSEDED here (re-entrant inline resume was a TSan-diagnosed
+    // heap-UAF on US1 sync_fifo_fairness / US2 sync_cancellation_mid_wait).
+    // The knob is retained for intent/queryability (policy()); it does not
+    // re-enable inline resumption for 2f.
+    // §9 seam #12 asserts mutual-exclusion + completion under BOTH policies
+    // (not inline-ness); seam #13 asserts at-most-one post hop (exactly one).
     dispatch = 0,
 
     // Always post the resumed coroutine through the bound executor; one
     // executor hop per resumption regardless of caller thread.
-    // Selected by HFT / fairness-sensitive sites where no inline resumption
-    // is acceptable.
+    // E-3: this was already the always-post behaviour 2f waiter resumption
+    // now uses under BOTH policies. Selected by HFT / fairness-sensitive
+    // sites for explicit-intent symmetry.
     post = 1,
 };
 

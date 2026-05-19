@@ -1,9 +1,9 @@
 # Implementation Plan — 006-async-mutex
 
 **Branch**: `006-async-mutex` | **Date**: 2026-05-18 | **Spec**: [spec.md](spec.md)
-**Design anchor**: `.specify/2f-async-mutex.md` **v1.5** (Gate-A-converged through v1.5). On conflict the anchor wins; an inconsistency is a defect in this plan.
+**Design anchor**: `.specify/2f-async-mutex.md` **v1.5 + v1.6 errata E-1..E-4** (v1.5 Gate-A-converged; E-1/E-2/E-3/E-4 recorded post-sign-off at `/implement`, re-touching 006 Gate A scope). On conflict the anchor (as amended by the errata) wins; an inconsistency is a defect in this plan.
 
-> **Authority anchor:** This feature realizes the **signed-off Phase-2 design doc `.specify/2f-async-mutex.md` v1.5** as shipped code. Where this plan and the design doc disagree, **the design doc wins; an inconsistency is a defect in this bundle.** 006 is the **first of three prerequisite features** (`2f-async-mutex [006]` → `2d-threading` → `2e-msgstore`) that the deferred `005-session-establishment-fsm` consumes; 2f is the lowest-level standalone concurrency primitive (zero upstream code dependency beyond the merged 001–004 `core`/ASIO baseline). Catalogue row owned: **NFR-016** (NEW) — Awaitable mutex `fixpp::sync::async_mutex` (design doc §11 / Appendix A; added to `spec/feature-catalogue.md` + `spec/coverage-index.md` at sign-off). 005 is a deferred dependent; 2d and 2e are unblocked sequentially by this PR.
+> **Authority anchor:** This feature realizes the **signed-off Phase-2 design doc `.specify/2f-async-mutex.md` v1.5 + v1.6 errata E-1..E-4** as shipped code. Where this plan and the design doc disagree, **the design doc (as amended by the v1.6 errata) wins; an inconsistency is a defect in this bundle.** 006 is the **first of three prerequisite features** (`2f-async-mutex [006]` → `2d-threading` → `2e-msgstore`) that the deferred `005-session-establishment-fsm` consumes; 2f is the lowest-level standalone concurrency primitive (zero upstream code dependency beyond the merged 001–004 `core`/ASIO baseline). Catalogue row owned: **NFR-016** (NEW) — Awaitable mutex `fixpp::sync::async_mutex` (design doc §11 / Appendix A; added to `spec/feature-catalogue.md` + `spec/coverage-index.md` at sign-off). 005 is a deferred dependent; 2d and 2e are unblocked sequentially by this PR.
 
 ## Normative References
 
@@ -26,13 +26,13 @@ Governing sources:
 
 ## Summary
 
-This feature delivers the **`fixpp::sync::async_mutex` value type** and associated surface, realizing `.specify/2f-async-mutex.md` v1.5 as shipped code:
+This feature delivers the **`fixpp::sync::async_mutex` value type** and associated surface, realizing `.specify/2f-async-mutex.md` v1.5 + v1.6 errata E-1..E-4 as shipped code (the v1.6 E-2/E-3/E-4 errata re-touch 006 Gate A scope and are propagated through this bundle):
 
 - **`fixpp::sync::async_mutex`** — the awaitable mutex class (`include/fixpp/core/sync/async_mutex.hpp`), with the six-item design list from `[SYN §3.2 Q6b]`: (1) waiter embedded in the awaiter object (HALO-eligible, ≤ 96 B); (2) explicit-`mr` PMR fallback overload; (3) ASIO `cancellation_type::total` CAS-arbitration contract; (4) per-mutex `dispatch`/`post` completion policy; (5) `std::terminate()` destructor precondition + `cancel_and_drain()` drain primitive; (6) full test seam coverage (29 seams, `[2f §9]`).
 - **`fixpp::sync::async_lock_guard`** — RAII guard with `[[clang::lifetimebound]]` and destructive move-assign (RC#1 / N-P1-3 close; `[2f §4.4]`).
-- **`fixpp::sync::detail::async_mutex_awaiter`** — per-waiter three-state `waiter_phase` atomic machine (`{ queued, granted, cancelled }`, RC-A v1.1; `[2f §4.2]`).
+- **`fixpp::sync::detail::async_mutex_awaiter`** + **`fixpp::sync::detail::waiter_record`** — **`[2f §4.2]` Erratum E-2 (v1.6)** two-object split: the frame-local awaiter (HALO-eligible) is **not** the intrusive node; the stable `detail::waiter_record` carries the three-state `waiter_phase` atomic machine (`{ queued, granted, cancelled }`, RC-A v1.1), the intrusive `next_`, the owned terminal result, the bound-executor SBO, and the `refcount_` reclamation token (invariant I-32); contended `mr == nullptr` allocation flows through the per-mutex `waiter_pool_`.
 - **`fixpp::sync::detail::drain_latch_state`** — lazy-constructed event-state object allocated as `std::shared_ptr<detail::drain_latch_state>` inside `cancel_and_drain`'s coroutine frame (RC-β v1.3; `[2f §4.7.2/§4.7.3]`).
-- **`fixpp::sync::detail::slot_allocator`** — three-case storage allocator (RC-C v1.1; `[2f §4.3.4]`): 32-byte inline buffer / null-resource / PMR.
+- **`fixpp::sync::detail::slot_allocator`** — **`[2f §4.3.4]` Erratum E-4 (v1.6):** typed storage-policy wrapper for the `waiter_record` fallback (NOT bound to the cancellation slot — asio exposes no allocator-binding hook; the cancellation closure lives in asio's per-thread recycler, zero global heap in steady state after per-thread warm-up). Unit-verified by seam #21.
 - **`fixpp::sync::completion_policy`** — per-mutex `dispatch`/`post` enum (`[2f §4.1]`).
 - **Declaration** of `fixpp::session::async_lock_via_session_executor` (`include/fixpp/session/async_lock_via_session_executor.hpp`) — declared by 2f per `[2f §4.3.2]`, **implemented by the later session-module spec** (RC#2 layering boundary; `[arch §2.3]`).
 - **Additive edit** to `include/fixpp/core/error.hpp` — four `sync_*` error variants appended at the first free slots 43–46 (planned, non-renumbering per `[const §X.4]`; `[2f §6.5]`).
@@ -59,21 +59,21 @@ This feature delivers the **`fixpp::sync::async_mutex` value type** and associat
 | Operation | Workload | Ceiling |
 |---|---|---|
 | `async_lock` uncontended | single CAS fast path; v1.3 RC-α acquirer/holder counters included `[2f §4.2.1]` | **≤ 20–25 ns** |
-| `async_lock` contended (enqueue) | LIFO push + cancellation slot bind; awaiter ≤ 96 B HALO-embedded | ≤ 80 ns |
+| `async_lock` contended (enqueue) | `waiter_record` pool-draw (E-2) + LIFO push + cancellation-slot assign (E-4: asio per-thread recycler, no `bind_allocator`); awaiter ≤ 96 B HALO-embedded | ≤ 80 ns |
 | `unlock` uncontended | empty LIFO; exchange + close-out CAS; v1.3 holder-counter decrement | **≤ 15 ns** |
-| `unlock` contended drain (same-strand dispatch, per waiter handoff) | drain-side cost only; excludes resumed coroutine's own work `[2f §6.3 footer]` | ≤ 30 ns + ≤ 50 ns/waiter (bench-harness-soft) |
+| `unlock` contended drain (one `post` hop per waiter handoff — **E-3:** always posted, never inline-dispatched, regardless of `completion_policy`) | drain-side cost only; excludes resumed coroutine's own work `[2f §6.3 footer]` | ≤ 30 ns + ≤ 50 ns/waiter (bench-harness-soft) |
 | `cancel_and_drain()` per N waiters | full drain epoch; lazy `drain_latch_state` alloc; RC-α stable-loop | ≤ 120 ns + ≤ 80 ns/waiter (bench-harness-soft) |
 
 Bench harnesses in `bench/sync/` enforce these via Google Benchmark (`[const §VIII.1]`); ±5% (`[const §VIII.2]`). Drain-cost rows are bench-harness-soft (per `[2e §6.6]` precedent for long-tail rows).
 
 **Constraints:**
 
-- Zero global `new`/`delete` on the v1.0 hot path (`[const §VIII.5]` / `[const §XI.5]`): waiter embedded in caller's coroutine frame (HALO-eligible, ≤ 96 B per `[2f §1.1]`); cancellation slot handler closure storage via the awaiter's 32-byte inline `slot_storage_` buffer (`detail::slot_allocator` three-case table per `[2f §4.3.4]`). `tools/check_alloc.py` under `mallocnesia` verifies (seams #7, #8, #10).
+- Zero global `new`/`delete` on the v1.0 hot path (`[const §VIII.5]` / `[const §XI.5]`): frame-local awaiter HALO-embedded (≤ 96 B per `[2f §1.1]`); the substantive contended allocation — the stable `detail::waiter_record` (`[2f §4.2]` Erratum E-2) — drawn from the per-mutex `waiter_pool_` bounded arena (zero global `new`). **Per `[2f §4.3.4]` Erratum E-4 (v1.6, source-verified):** asio's `cancellation_slot` has no allocator-binding hook, so the cancellation-slot closure is owned by asio's per-thread recycler — zero global `new`/`delete` **in steady state after a documented per-thread warm-up**; the one-time first-touch is `[2f §6.4]` bench-soft (observable, non-fatal). `detail::slot_allocator` is the typed storage-policy wrapper for the `waiter_record` fallback, NOT bound to the slot. `tools/check_alloc.py` under `mallocnesia` verifies in steady state (seams #7, #8, #10).
 - All public methods `noexcept`; PMR throw routes through `fixpp::core::detail::trap_throw` per `[2a §4.2]`.
 - ASIO native cancellation slots end-to-end; **no parallel `stop_token`** (`[const §XI.2]`); `cancellation_type::total` triggers the per-waiter phase CAS-arbitration (`[2f §4.5]`).
 - `std::terminate()` hard precondition on `~async_mutex()` if waiters present or mutex held; callers MUST drain before destruction (`[2f §4.7]` RC#3 fix).
 - No `std::mutex` in any header that includes `asio::awaitable<...>` (`[const §XV.9]`); enforced by `tools/check_no_std_mutex_in_awaitable_headers.sh` with post-preprocessing scope.
-- Memory-ordering static_asserts for lock-freedom on `state_`, `next_drain_head_` atomics; ARM64 weak-memory correctness verified by TSan (`[2f §6.2.2]`, seam #18).
+- Memory-ordering static_asserts for lock-freedom on `state_` and `next_drain_head_` (**E-2:** both hold `detail::waiter_record*`) atomics; ARM64 weak-memory correctness verified by TSan (`[2f §6.2.2]`, seam #18).
 - `async_mutex` is `constexpr`-default-constructible and executor-free per `[arch §5.5]`; the `drain_latch_state` is constructed lazily inside `cancel_and_drain`'s coroutine frame (RC-β v1.3 — the v1.2 by-value `asio::steady_timer` member was non-implementable per Opus C-R3-P2-1).
 - **RC#2 layering boundary** — `core::async_mutex` does NOT reach into `session/` or an engine handle for memory. The explicit `async_lock(mr)` overload is the sole PMR fallback path; the session-side helper lives in `session/`, implemented by the session-module spec.
 
@@ -259,6 +259,11 @@ gate_a_required: yes
 The Phase-2 design doc `.specify/2f-async-mutex.md` v1.5 is signed-off and Gate-A-converged. **The Phase-4 bundle Gate A is a distinct review of record** — it reviews this Phase-4 bundle (plan.md, research.md, data-model.md, contracts/, spec.md) for internal consistency, completeness, and faithfulness to the design doc. It does not re-litigate Phase-2 design decisions.
 
 **Execution:** both Codex passes (rescue + `/codex:adversarial-review`) per `feedback_gate_a_codex_dual_pass`; Opus triages/rewrites; reviews → `research/reviews/`. Gate A runs **before `/speckit-tasks`**; blockers resolved/waived before tasks. The pipeline order then follows the **single canonical statement** in the Constitution-Check `[const §XVI.4]` row above (`/plan` → Gate A → `/tasks` → `/analyze` → `/implement`): after Gate A converges, `/speckit-tasks`, then `/speckit-analyze` (drift detection against constitution/spec/plan/tasks per Article XVI §4), then `/speckit-implement`.
+
+### Re-touch round 1 — applied 2026-05-19
+
+- Re-touch round 1 applied 2026-05-19: errata-scoped (2f v1.6 E-2/E-3/E-4 propagation). Codex P1=3 P2=1 P3=1; Opus post-judging P1=4 P2=2 P3=2; rewrite addresses RC-1 (errata propagation halted at data-model/tasks). Reviews: research/reviews/codex_006-async-mutex_gate_a_retouch_review.md, research/reviews/opus_006-async-mutex_gate_a_retouch_adversarial_review.md.
+- Re-touch round 2 applied 2026-05-19: errata-scoped final convergence pass. Codex P1=1 P2=1 P3=1; Opus post-judging P1=1 P2=2 P3=1; rewrite addresses the E-1 awaiter-field-list propagation gap + retired-E-3-perf-split + data-model slot_storage_ self-contradiction + residual v1.5 pin. Reviews: research/reviews/codex_006-async-mutex_gate_a_retouch_2_review.md, research/reviews/opus_006-async-mutex_gate_a_retouch_2_adversarial_review.md.
 
 ### Round 1 — applied 2026-05-18
 
