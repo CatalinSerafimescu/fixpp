@@ -26,8 +26,18 @@ namespace {
 
 using namespace std::chrono_literals;
 
-template <class MakeClock>
-void race(MakeClock make_clock) {
+// `drain` is invoked every poll iteration while waiting for completions to
+// reach N. For mock_clock the awaiter deadline (real steady_clock::now()+50ms)
+// is unreachable by frozen mock time, so the ONLY completion path is abort:
+// any waiter that registers AFTER the concurrent one-shot cancel_sleeps()
+// must be drained by a continued cancel, else its co_spawn coroutine never
+// finishes and pool.join() blocks forever (manifests only under TSan, whose
+// ~20x slowdown makes the fixed 5ms park window too short for all N to
+// register pre-cancel). cancel_sleeps() is idempotent + erase-under-lock, so
+// repeating it completes each awaiter exactly once. system_clock_source has
+// real, reachable 50ms deadlines, so its stragglers self-complete: no-op.
+template <class MakeClock, class Drain>
+void race(MakeClock make_clock, Drain drain) {
     asio::thread_pool pool{4};
     auto clk = make_clock(pool.get_executor());
 
@@ -63,6 +73,7 @@ void race(MakeClock make_clock) {
     const auto t0 = std::chrono::steady_clock::now();
     while (completions.load(std::memory_order_relaxed) < N &&
            std::chrono::steady_clock::now() - t0 < 5s) {
+        drain(clk);
         std::this_thread::sleep_for(5ms);
     }
     pool.join();
@@ -73,16 +84,21 @@ void race(MakeClock make_clock) {
 }
 
 TEST(SeamSleepCancelRace, MockClockEveryAwaiterCompletesExactlyOnce) {
-    race([](asio::any_io_executor ex) {
-        return std::make_shared<fixpp::core::mock_clock>(
-            fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ex);
-    });
+    race(
+        [](asio::any_io_executor ex) {
+            return std::make_shared<fixpp::core::mock_clock>(
+                fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
+                ex);
+        },
+        [](auto& clk) { clk->cancel_sleeps(); });
 }
 
 TEST(SeamSleepCancelRace, SystemClockSourceEveryAwaiterCompletesExactlyOnce) {
-    race([](asio::any_io_executor ex) {
-        return std::make_shared<fixpp::core::system_clock_source>(ex);
-    });
+    race(
+        [](asio::any_io_executor ex) {
+            return std::make_shared<fixpp::core::system_clock_source>(ex);
+        },
+        [](auto&) {});
 }
 
 }  // namespace
