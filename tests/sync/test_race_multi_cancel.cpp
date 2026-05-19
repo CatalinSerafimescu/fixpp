@@ -31,16 +31,14 @@
 
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "sync/sync_test_support.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
 using fixpp::core::error;
 
-static asio::awaitable<void> yield_n(int n) {
-    auto ex = co_await asio::this_coro::executor;
-    for (int i = 0; i < n; ++i)
-        co_await asio::post(ex, asio::use_awaitable);
-}
+using fixpp::sync::test::yield_n;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // N=8 waiters queued; all cancellations fired while unlocker drains.

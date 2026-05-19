@@ -12,8 +12,6 @@
 // RC#3: std::terminate() enforced in BOTH debug and release builds.
 //
 // Positive control: a properly drained-then-destroyed mutex does NOT terminate.
-// T050 (US3) finalises the destructor; T052 wires release-linkage CI execution.
-// Note: release-linkage CI execution is wired at T050/T052 by the parent.
 
 #include <gtest/gtest.h>
 
@@ -30,6 +28,8 @@
 
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "sync/sync_test_support.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -37,11 +37,7 @@ using fixpp::sync::async_lock_guard;
 using fixpp::sync::expected_t;
 using fixpp::core::error;
 
-static asio::awaitable<void> yield_n(int n) {
-    auto ex = co_await asio::this_coro::executor;
-    for (int i = 0; i < n; ++i)
-        co_await asio::post(ex, asio::use_awaitable);
-}
+using fixpp::sync::test::yield_n;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper functions for death-test children.

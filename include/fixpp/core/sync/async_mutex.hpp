@@ -180,7 +180,7 @@ public:
     // cancel_and_drain — drain the mutex of all current and future acquisitions.
     // EXACT signature per [2f §4.1] lines 579-580, contracts/async_mutex.hpp.
     [[nodiscard]] asio::awaitable<expected_t<void>>
-        cancel_and_drain() noexcept;  // TODO(T049)
+        cancel_and_drain() noexcept;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Release

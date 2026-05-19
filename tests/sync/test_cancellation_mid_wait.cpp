@@ -32,6 +32,8 @@
 
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "sync/sync_test_support.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -40,11 +42,7 @@ using fixpp::sync::expected_t;
 using fixpp::core::error;
 
 // Post N yields on the calling coroutine's executor.
-static asio::awaitable<void> yield_n(int n) {
-    auto ex = co_await asio::this_coro::executor;
-    for (int i = 0; i < n; ++i)
-        co_await asio::post(ex, asio::use_awaitable);
-}
+using fixpp::sync::test::yield_n;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test 1: total — basic mid-wait cancel.

@@ -124,7 +124,6 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
     // measuring.  One full contended acquire+suspend+cancel/grant+release cycle
     // on the io_context's run thread is sufficient to seat the thread-local
     // recycling block so subsequent assignments cost zero global new/delete.
-    // Comment: E-4: prime asio's per-thread cancellation recycler before measuring.
     for (int i = 0; i < WARMUP_ITERATIONS; ++i) {
         run_one_cycle();
     }
