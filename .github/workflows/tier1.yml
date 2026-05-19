@@ -4,6 +4,12 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    # `labeled`/`unlabeled` are load-bearing: the gate-precheck job below
+    # skips the heavy matrix until gate-a/gate-b labels are present. Without
+    # these event types, adding `gate-b-done` after /gate-b would NOT
+    # re-trigger Tier 1 and the PR would wedge with the matrix permanently
+    # skipped. Mirrors the trigger set in gate-a.yml / gate-b.yml.
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
     branches: ["**"]
   workflow_dispatch:
 
@@ -11,10 +17,129 @@ env:
   CONAN_HOME: ~/.conan2
 
 jobs:
+  # ── Gate precheck — Tier 1 does not spend CI until gates are satisfied ────
+  # The user's pipeline is local-first: /speckit-verify mirrors Tier 1
+  # locally, /gate-a (design) and /gate-b (PR review) converge via Codex and
+  # apply gate-{a,b}-{done,waived}. Only THEN is the CI matrix worth running.
+  # gate-a.yml / gate-b.yml already enforce the labels (red on a PR without
+  # them); this job ADDS a cheap gate so the expensive matrix below is simply
+  # SKIPPED (not run) until both gates clear — it never fails red itself
+  # (the two gate workflows own the red signal; no duplicate).
+  #
+  # Non-PR events (post-merge push:main, manual workflow_dispatch) are trusted
+  # and always proceed — there is no PR/labels to inspect post-merge.
+  #
+  # The label/auto-waive logic below is a faithful mirror of gate-a.yml +
+  # gate-b.yml §6 (whitespace-only, pure-doc, Gate-A trigger paths). Keep the
+  # three copies in sync if the gate rules change.
+  gate-precheck:
+    name: gate-precheck (Gate A + Gate B)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.decide.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the gates permit Tier 1
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+
+          # ── Non-PR events: trusted, always run ──────────────────────────
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Event '${{ github.event_name }}' is not a pull_request — Tier 1 runs unconditionally."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "Changed files:"; cat /tmp/changed.txt
+
+          # ── Shared auto-waive (mirror gate-a.yml / gate-b.yml §6) ───────
+          WS_EMPTY=false
+          if [ -z "$(git diff -w "$BASE_SHA" "$HEAD_SHA")" ]; then
+            WS_EMPTY=true
+          fi
+          NON_DOC=$(grep -Ev '^[^/]*\.md$|^docs/|^book/|^README' /tmp/changed.txt || true)
+          SPECIFY_DOCS=$(grep -E '^\.specify/[^/]+\.md$' /tmp/changed.txt || true)
+          PURE_DOC=false
+          if [ -z "$NON_DOC" ] && [ -z "$SPECIFY_DOCS" ]; then
+            PURE_DOC=true
+          fi
+
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' || true)
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' || true)
+
+          # ── Gate A (mirror gate-a.yml) ──────────────────────────────────
+          GATE_A_OK=false
+          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
+            echo "Gate A: auto-waived (whitespace-only or pure-doc)."
+            GATE_A_OK=true
+          else
+            TRIGGER_RE='^(include/|src/|codegen/|\.specify/[^/]+\.md$)'
+            if [ -z "$(grep -E "$TRIGGER_RE" /tmp/changed.txt || true)" ]; then
+              echo "Gate A: no trigger paths touched — does not apply."
+              GATE_A_OK=true
+            elif echo "$LABELS" | grep -qx 'gate-a-done'; then
+              echo "Gate A: gate-a-done present."
+              GATE_A_OK=true
+            elif echo "$LABELS" | grep -qx 'gate-a-waived' && echo "$BODY" | awk '
+                BEGIN { found = 0; rationale = 0 }
+                /^##+[[:space:]]*[Gg]ate[[:space:]]*[Aa]/ { found = 1; next }
+                found && /[^[:space:]]/ { rationale = 1 }
+                END { exit (rationale ? 0 : 1) }'; then
+              echo "Gate A: waived with rationale in PR body."
+              GATE_A_OK=true
+            else
+              echo "Gate A: NOT satisfied (trigger paths touched, no gate-a-done/waived)."
+            fi
+          fi
+
+          # ── Gate B (mirror gate-b.yml) ──────────────────────────────────
+          GATE_B_OK=false
+          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
+            echo "Gate B: auto-waived (whitespace-only or pure-doc)."
+            GATE_B_OK=true
+          elif echo "$LABELS" | grep -qx 'gate-b-done'; then
+            echo "Gate B: gate-b-done present."
+            GATE_B_OK=true
+          elif echo "$LABELS" | grep -qx 'gate-b-waived' && echo "$BODY" | awk '
+              BEGIN { found = 0; rationale = 0 }
+              /^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/ { found = 1; next }
+              found && /[^[:space:]]/ { rationale = 1 }
+              END { exit (rationale ? 0 : 1) }'; then
+            echo "Gate B: waived with rationale in PR body."
+            GATE_B_OK=true
+          else
+            echo "Gate B: NOT satisfied (no gate-b-done/waived)."
+          fi
+
+          # ── Verdict (this job stays green either way) ────────────────────
+          if [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ]; then
+            echo "Both gates satisfied — Tier 1 matrix will run."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Gates not yet satisfied (A=$GATE_A_OK B=$GATE_B_OK) — Tier 1 heavy jobs SKIPPED to save CI. Run /gate-a + /gate-b and add the labels; adding a label re-triggers this workflow. Red enforcement (if any) comes from the gate-a / gate-b workflows."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
   # ── Linux build / test matrix ────────────────────────────────────────────
   linux:
     name: "${{ matrix.preset }}"
     runs-on: ubuntu-24.04
+    needs: gate-precheck
+    if: needs.gate-precheck.outputs.proceed == 'true'
 
     strategy:
       fail-fast: false
@@ -116,7 +241,8 @@ jobs:
   coverage:
     name: linux-clang-coverage
     runs-on: ubuntu-24.04
-    needs: []  # runs in parallel with matrix
+    needs: gate-precheck  # runs in parallel with matrix, after the gate check
+    if: needs.gate-precheck.outputs.proceed == 'true'
 
     steps:
       - uses: actions/checkout@v6
@@ -255,6 +381,8 @@ jobs:
   python-bindings:
     name: python-bindings
     runs-on: ubuntu-24.04
+    needs: gate-precheck
+    if: needs.gate-precheck.outputs.proceed == 'true'
 
     steps:
       - uses: actions/checkout@v6
@@ -344,6 +472,8 @@ jobs:
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
+    needs: gate-precheck
+    if: needs.gate-precheck.outputs.proceed == 'true'
 
     steps:
       - uses: actions/checkout@v6
@@ -361,6 +491,8 @@ jobs:
   bench:
     name: bench (soft)
     runs-on: ubuntu-24.04
+    needs: gate-precheck
+    if: needs.gate-precheck.outputs.proceed == 'true'
 
     steps:
       - uses: actions/checkout@v6
