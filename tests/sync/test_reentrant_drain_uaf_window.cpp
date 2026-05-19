@@ -48,13 +48,16 @@
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 
 #include <atomic>
+#include <cstddef>
 #include <future>
 #include <memory>
+#include <memory_resource>
 #include <vector>
 
 #include <fixpp/core/sync/async_mutex.hpp>
@@ -69,6 +72,25 @@ using fixpp::sync::expected_t;
 using fixpp::core::error;
 
 using fixpp::sync::test::yield_n;
+
+class counting_memory_resource final : public std::pmr::memory_resource {
+public:
+    std::atomic<int> alloc_count{0};
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        alloc_count.fetch_add(1, std::memory_order_acq_rel);
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
+        std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
+    }
+
+    bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
+        return this == &other;
+    }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test 1: I-6 escape-hatch (a) works after F-2 fix.
@@ -275,11 +297,11 @@ TEST(SeamReentrantDrainUAFWindow, MultipleReentrantCallsAllReturnAbort) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test 3 (gate-b/r2 P2): RC-α in-flight-acquirer window — acquirer starts
-// async_lock() AFTER draining_=true, while the reaper has been aborted and the
-// reentrant drain is being called. The acquirer must take the drained-bypass
-// (async_mutex.hpp:827-833) and return sync_lock_drained. Destroy only after
-// full quiescence (I-6(b) discipline). ASan+TSan clean.
+// Test 3 (gate-b/r3 P2): RC-α in-flight-acquirer window — the acquirer is
+// spawned before the reentrant drain resolves, then released via deterministic
+// single-threaded detached ordering only after the aborted reentrant
+// cancel_and_drain() returns. The load-bearing check is that async_lock(&mr)
+// returns sync_lock_drained WITHOUT allocating waiter storage.
 //
 // Sequence:
 //  (1) Holder acquires the mutex (fast-path CAS → active_holders_count_=1).
@@ -288,24 +310,22 @@ TEST(SeamReentrantDrainUAFWindow, MultipleReentrantCallsAllReturnAbort) {
 //  (3) Canceller fires reaper_sig → signal_abort() → reaper returns
 //      unexpected{sync_lock_aborted} (I-5/I-7). draining_ stays true;
 //      drain_latch_ptr_ stays published (aborted_=true).
-//  (4) Reentrant_coro: calls cancel_and_drain() — sees draining_=true, loads
-//      aborted latch → unexpected{sync_lock_aborted}. Then sets acquirer_go.
-//  (5) Acquirer_coro: was blocked on acquirer_go; now starts async_lock().
-//      active_acquirers_count_.fetch_add(1) at async_mutex.hpp:822.
-//      Lambda: draining_.load()==true → drained-bypass at :827-833.
-//      active_acquirers_count_.fetch_sub(1) at :828. Returns sync_lock_drained.
-//      active_acquirers_count_ is back to 0. Acquirer coroutine completes.
-//  (6) Reentrant_coro: yield_n → holder_release=true → holder unlocks.
+//  (4) Reentrant_coro: spawns the detached acquirer, then calls
+//      cancel_and_drain() — sees draining_=true, loads the aborted latch, and
+//      returns unexpected{sync_lock_aborted}. Only then does it set
+//      acquirer_go=true.
+//  (5) Acquirer_coro: was already spawned and waiting on acquirer_go; once
+//      released, it calls async_lock(&counting_mr). The correct path is the
+//      early drained-bypass at async_mutex.hpp:827-833, so alloc_count stays 0
+//      and the result is sync_lock_drained. If :827-833 regresses, the same
+//      acquire falls into waiter-record allocation at :861 before the second
+//      draining_ check at :925-933, and alloc_count becomes 1+ even though the
+//      final error code is still sync_lock_drained.
+//  (6) Reentrant_coro: waits for the acquirer to resolve, then holder_release=true.
 //      unlock() under draining_: state_ CAS → not_locked; latch->notify()
 //      (no-op: channel already closed). active_holders_count_=0.
 //  (7) All futures joined; mtx.reset() — state_==not_locked, all counts 0.
 //      ASan monitors for any access to the destroyed mutex (UAF regression).
-//
-// Genuine lock: EXPECT_EQ(acquirer_result, 1 /*sync_lock_drained*/) is RED if
-// the drained-bypass at hpp:827 is removed — the acquirer would then enroll in
-// LIFO with no live reaper to reap it, producing sync_lock_aborted (wrong) or
-// hanging (test timeout). ASan fires on mtx.reset() if an in-flight handler
-// references waiter_pool_storage_ of the destroyed mutex.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
@@ -317,11 +337,10 @@ TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
     std::atomic<int>  reaper_result{-1};
     std::atomic<int>  reentrant_result{-1};
     std::atomic<int>  acquirer_result{-1};
+    counting_memory_resource counting_mr;
     std::atomic<bool> holder_release{false};
-    // Gate: acquirer waits until the reentrant drain has returned
-    // (draining_==true AND latch is aborted), ensuring the acquirer's
-    // async_lock() hits the drained-bypass (hpp:827) not the fast-path CAS.
     std::atomic<bool> acquirer_go{false};
+    std::atomic<bool> acquirer_done{false};
 
     // Holder: keeps mutex locked until signalled.
     auto holder_coro = [&]() -> asio::awaitable<void> {
@@ -350,14 +369,32 @@ TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
         reaper_sig.emit(asio::cancellation_type::total);
     };
 
-    // Reentrant + gate: after reaper returns sync_lock_aborted, calls
-    // cancel_and_drain() (asserts sync_lock_aborted per I-5/I-7), then opens
-    // the acquirer gate. After acquiring gate is open and a few yields pass
-    // (acquirer resolves via drained-bypass synchronously), releases the holder.
+    // Reentrant + gate: after reaper returns sync_lock_aborted, spawns the
+    // detached acquirer, observes the aborted latch via reentrant
+    // cancel_and_drain(), then releases the acquirer and waits for it to finish
+    // before letting the holder unlock.
     auto reentrant_coro = [&]() -> asio::awaitable<void> {
+        auto ex = co_await asio::this_coro::executor;
+
         // Wait for reaper to finish.
         while (reaper_result.load(std::memory_order_acquire) == -1)
             co_await yield_n(1);
+
+        asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
+            while (!acquirer_go.load(std::memory_order_acquire))
+                co_await yield_n(1);
+
+            auto r = co_await mtx->async_lock(&counting_mr);
+            if (r.has_value())
+                acquirer_result.store(0, std::memory_order_release);  // WRONG: granted
+            else if (r.error() == error::sync_lock_drained)
+                acquirer_result.store(1, std::memory_order_release);  // CORRECT
+            else if (r.error() == error::sync_lock_aborted)
+                acquirer_result.store(2, std::memory_order_release);  // WRONG
+            else
+                acquirer_result.store(3, std::memory_order_release);  // WRONG
+            acquirer_done.store(true, std::memory_order_release);
+        }, asio::detached);
 
         // I-5/I-7 reentrant subscribe: must observe aborted latch.
         auto d = co_await mtx->cancel_and_drain();
@@ -368,41 +405,14 @@ TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
         else
             reentrant_result.store(2, std::memory_order_release);
 
-        // Open the RC-α gate: acquirer may now call async_lock().
-        // At this point draining_==true and drain_latch_ptr_ is aborted.
-        // The acquirer will hit the drained-bypass at async_mutex.hpp:827.
+        // Open the RC-α gate only after the reentrant drain has returned.
         acquirer_go.store(true, std::memory_order_release);
 
-        // Yield to let acquirer_coro run (it resolves synchronously via the
-        // drained-bypass, so a few yields suffice), then release the holder.
-        co_await yield_n(8);
+        while (!acquirer_done.load(std::memory_order_acquire))
+            co_await yield_n(1);
+
         holder_release.store(true, std::memory_order_release);
         co_await yield_n(4);
-    };
-
-    // Acquirer: waits for the RC-α gate, then starts async_lock().
-    // draining_==true → drained-bypass (async_mutex.hpp:827-833):
-    //   active_acquirers_count_.fetch_add(1) at :822 (RC-α window opens)
-    //   draining_.load()==true at :827 → branch taken
-    //   active_acquirers_count_.fetch_sub(1) at :828 (RC-α window closes)
-    //   handler(sync_lock_drained) called synchronously → coroutine resumes
-    //
-    // Genuine lock: result must be sync_lock_drained (value 1). If the
-    // drained-bypass at :827 is absent, the acquirer would enroll in LIFO
-    // with the already-aborted drain unable to reap it → hang or wrong result.
-    auto acquirer_coro = [&]() -> asio::awaitable<void> {
-        while (!acquirer_go.load(std::memory_order_acquire))
-            co_await yield_n(1);
-        // draining_==true is guaranteed here (set by cancel_and_drain() above).
-        auto r = co_await mtx->async_lock();
-        if (r.has_value())
-            acquirer_result.store(0, std::memory_order_release);  // WRONG: granted
-        else if (r.error() == error::sync_lock_drained)
-            acquirer_result.store(1, std::memory_order_release);  // CORRECT
-        else if (r.error() == error::sync_lock_aborted)
-            acquirer_result.store(2, std::memory_order_release);  // WRONG
-        else
-            acquirer_result.store(3, std::memory_order_release);  // WRONG
     };
 
     auto fh  = asio::co_spawn(ioc, holder_coro(), asio::use_future);
@@ -411,14 +421,12 @@ TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
         asio::bind_cancellation_slot(reaper_sig.slot(), asio::use_future));
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
     auto frt = asio::co_spawn(ioc, reentrant_coro(), asio::use_future);
-    auto faq = asio::co_spawn(ioc, acquirer_coro(), asio::use_future);
 
     ioc.run();
     fh.get();
     fr.get();
     fcn.get();
     frt.get();
-    faq.get();
 
     EXPECT_EQ(reaper_result.load(), 1)
         << "Reaper must return sync_lock_aborted";
@@ -427,17 +435,12 @@ TEST(SeamReentrantDrainUAFWindow, RcAlphaInFlightAcquirerDeathSeam) {
            "unexpected{sync_lock_aborted} (I-5/I-7). Got: "
         << reentrant_result.load()
         << " (0=false-success/BUG, 1=aborted/OK)";
-    // RC-α core assertion: the in-flight acquirer (started after draining_=true)
-    // must have taken the drained-bypass (async_mutex.hpp:827-833) and returned
-    // sync_lock_drained. Any other result means the RC-α window is broken:
-    //   0=granted/BUG: fast-path CAS raced (impossible — holder still held)
-    //   1=drained/OK:  drained-bypass fired correctly (expected)
-    //   2=aborted/WRONG: acquirer hit the LIFO path + got reaped (wrong branch)
-    //   3=other/BUG:   alloc failure or unexpected error
     EXPECT_EQ(acquirer_result.load(), 1)
-        << "RC-α: in-flight acquirer (started post-drain, draining_=true) "
-           "must return sync_lock_drained via drained-bypass at hpp:827. "
+        << "RC-α acquirer must return sync_lock_drained. "
            "Got: " << acquirer_result.load();
+    EXPECT_EQ(counting_mr.alloc_count.load(std::memory_order_acquire), 0)
+        << "RC-α acquirer must bypass waiter allocation while draining_ is true; "
+           "alloc_count=" << counting_mr.alloc_count.load(std::memory_order_acquire);
 
     // I-6(b) discipline: all coroutines fully resolved before destroy.
     // ASan monitors for any waiter_pool_storage_ access after mutex death.
