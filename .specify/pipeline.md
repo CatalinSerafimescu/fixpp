@@ -59,6 +59,12 @@ PHASE 2 — TASKS
                                       drift check). Exit: zero
                                       un-dispositioned [ ] boxes across all
                                       domain checklists.
+                                      EXECUTOR: /speckit-checklist-audit
+                                      (the command that performs this gate;
+                                      mandatory before step 9 — do NOT hand-
+                                      walk it ad hoc, do NOT rely on
+                                      /speckit-implement's weak unticked-box
+                                      prompt as the gate).
 
 PHASE 3 — IMPLEMENT
 9.  /speckit-implement                runs tasks, marks [X] (NOT evidence-based — see step 10)

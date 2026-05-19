@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// include/fixpp/core/engine_config.hpp
+//
+// fixpp::core::EngineConfig — value-typed engine-level shared resources.
+// Engine::open(EngineConfig) consumes it once. clock == nullptr is rejected
+// with error::clock_not_set at Engine::open REGARDLESS of any session
+// clock_override (root cause #2 / FR-006 / I-03; enforced in T031).
+// dictionaries → dict::version_registry built at Engine::open via the
+// merged-003 [2c §4.9] API (D-13; T049). engine_trace_context is published
+// to consumers through engine_trace_context_snapshot, a std::atomic<…>
+// snapshot with a seqlock fallback because T001 measured
+// std::atomic<trace_context>::is_always_lock_free == false on every Tier-1
+// STL (research D-1; [2d §4.4]). [2d §4.4]. Realizes
+// specs/007-threading-clock/contracts/engine_config.hpp.
+#pragma once
+
+#include <atomic>
+#include <cstring>
+#include <memory>
+#include <memory_resource>
+#include <vector>
+
+#include <asio/any_io_executor.hpp>
+
+#include <fixpp/core/clock.hpp>
+#include <fixpp/core/error.hpp>                       // expected_t / error (clock_not_set)
+#include <fixpp/core/trace_context.hpp>
+#include <fixpp/service/control_plane_factory.hpp>  // unique_ptr member ⇒ complete type
+
+namespace fixpp::dict      { class Dictionary; }
+namespace fixpp::core      { class Logger; }
+namespace fixpp::otel      { class TracerProvider; class MeterProvider; }
+namespace fixpp::session   { class MessageStoreFactory; }   // shared_ptr — incomplete OK
+namespace fixpp::tls       { class cert_source; }
+namespace fixpp::transport { class TransportFactory; }       // shared_ptr — incomplete OK
+
+namespace fixpp::core {
+
+namespace detail {
+
+// Engine-held publishable snapshot of fixpp::otel::trace_context.
+//
+// T001 (2026-05-19): std::atomic<trace_context>::is_always_lock_free == false
+// on libstdc++ AND libc++ (32 B > 16 B max CAS). Per research D-1 a non-
+// lock-free result MUST select an explicit seqlock fallback, never silently
+// degrade to a lock-backed std::atomic. This type picks the native lock-free
+// std::atomic path when (some target ever) reports is_always_lock_free, else
+// a single-writer / many-reader seqlock over a memcpy of the 32-byte POD
+// (correct because trace_context is trivially-copyable — pinned by the
+// trace_context.hpp static_assert).
+class trace_context_snapshot {
+public:
+    trace_context_snapshot() noexcept { store(fixpp::otel::trace_context{}); }
+
+    explicit trace_context_snapshot(const fixpp::otel::trace_context& v) noexcept {
+        store(v);
+    }
+
+    void store(const fixpp::otel::trace_context& v) noexcept {
+        if constexpr (kLockFree) {
+            atom_.store(v, std::memory_order_release);
+        } else {
+            // single-writer seqlock: odd = write in progress.
+            const auto s = seq_.load(std::memory_order_relaxed);
+            seq_.store(s + 1, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
+            std::memcpy(&bytes_, &v, sizeof(v));
+            std::atomic_thread_fence(std::memory_order_release);
+            seq_.store(s + 2, std::memory_order_release);
+        }
+    }
+
+    [[nodiscard]] fixpp::otel::trace_context load() const noexcept {
+        if constexpr (kLockFree) {
+            return atom_.load(std::memory_order_acquire);
+        } else {
+            fixpp::otel::trace_context out{};
+            for (;;) {
+                const auto s1 = seq_.load(std::memory_order_acquire);
+                if (s1 & 1U) continue;                 // writer mid-update
+                std::memcpy(&out, &bytes_, sizeof(out));
+                std::atomic_thread_fence(std::memory_order_acquire);
+                const auto s2 = seq_.load(std::memory_order_relaxed);
+                if (s1 == s2) return out;              // consistent snapshot
+            }
+        }
+    }
+
+    [[nodiscard]] static constexpr bool lock_free() noexcept { return kLockFree; }
+
+private:
+    static constexpr bool kLockFree =
+        std::atomic<fixpp::otel::trace_context>::is_always_lock_free;
+
+    // Only one of the two storage paths is ever used (selected at compile
+    // time); both are declared so the type stays a single value member.
+    std::atomic<fixpp::otel::trace_context> atom_{};
+    std::atomic<std::uint32_t>              seq_{0};
+    fixpp::otel::trace_context              bytes_{};
+};
+
+}  // namespace detail
+
+struct EngineConfig {
+    asio::any_io_executor    executor;
+    std::shared_ptr<Clock>   clock;                 // rejected if null @ Engine::open
+
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
+
+    std::pmr::memory_resource* default_message_resource = std::pmr::get_default_resource();
+    std::pmr::memory_resource* default_session_resource = std::pmr::get_default_resource();
+
+    std::shared_ptr<fixpp::core::Logger>          logger;   // null → no-op
+    std::shared_ptr<fixpp::otel::TracerProvider>  tracer;   // null → no-op
+    std::shared_ptr<fixpp::otel::MeterProvider>   meter;    // null → no-op
+
+    std::shared_ptr<fixpp::session::MessageStoreFactory> default_store_factory;
+    std::shared_ptr<fixpp::tls::cert_source>             default_cert_source;
+    std::shared_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
+
+    // Seed value; the engine publishes/reads it via the atomic snapshot below
+    // (the engine-fallback trace-context path — FR-015 / I-12).
+    fixpp::otel::trace_context engine_trace_context{};
+
+    std::unique_ptr<fixpp::service::ControlPlaneFactory> control_plane_factory;  // null permitted
+};
+
+// The Engine::open() clock_not_set precondition (FR-006 / I-03 / root cause
+// #2): EngineConfig::clock == nullptr is rejected REGARDLESS of any session
+// clock_override. This feature ships no full Engine type (the engine
+// establishment is downstream); validate_engine_config() is the minimal
+// 2d-owned realization of that engine-open invariant — the broader Engine
+// calls it at open. Additional engine-open config invariants accrue here.
+[[nodiscard]] inline expected_t<void>
+validate_engine_config(const EngineConfig& cfg) noexcept {
+    if (cfg.clock == nullptr) {
+        return std::unexpected(error::clock_not_set);
+    }
+    return expected_t<void>{};
+}
+
+}  // namespace fixpp::core
