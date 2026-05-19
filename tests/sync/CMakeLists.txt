@@ -54,6 +54,13 @@ add_sync_test(sync_race_multi_cancel         test_race_multi_cancel.cpp)
 add_sync_test(sync_race_cancel_during_resume test_race_cancel_during_resume.cpp)
 add_sync_test(sync_residual_cancel_graceful  test_residual_cancel_graceful.cpp)
 
+# ── US4 seam registrations (T053–T057) ──────────────────────────────────────
+add_sync_test(sync_tsan_clean              test_tsan_clean.cpp)
+add_sync_test(sync_asan_clean              test_asan_clean.cpp)
+add_sync_test(sync_halo_firing             test_halo_firing.cpp)
+add_sync_test(sync_pmr_fallback            test_pmr_fallback.cpp)
+add_sync_test(sync_slot_allocator_storage  test_slot_allocator_storage.cpp)
+
 # ── US3 seam registrations (T041–T047) ──────────────────────────────────────
 # Seam #5: destructor release-linkage death test.
 # Note: EXPECT_DEATH fires std::terminate() in the child process; this
@@ -84,3 +91,37 @@ add_sync_test(sync_drain_reaper_abort_subscribers test_drain_reaper_abort_subscr
 #   sync_pmr_fallback #10, sync_slot_allocator_storage #21
 # US5 (T062–T065): sync_no_std_mutex_ci_gate #14 (+ 3 fixtures/ headers)
 # Polish: sync_arm64_weak_memory #18 (T068); sync_consumer_contract_compile (T078)
+
+# ── US5 seam registration (T062) ─────────────────────────────────────────────
+# Seam #14: CI grep-gate driver.  Shells out to the bash gate script over the
+# T063–T065 fixture corpus and asserts zero-FN / zero-FP.
+# add_sync_test sets a baseline ENVIRONMENT with SYNC_FIXTURES_DIR and
+# SYNC_GREP_GATE_SCRIPT; the explicit set_tests_properties below extends it
+# with the two include paths the gate script needs (project + asio).
+add_sync_test(sync_no_std_mutex_ci_gate test_no_std_mutex_ci_gate.cpp)
+set_tests_properties(sync_no_std_mutex_ci_gate PROPERTIES
+  ENVIRONMENT
+    "SYNC_GREP_GATE_SCRIPT=${SYNC_GREP_GATE_SCRIPT};\
+SYNC_FIXTURES_DIR=${SYNC_FIXTURES_DIR};\
+SYNC_GATE_INC=${CMAKE_SOURCE_DIR}/include;\
+SYNC_ASIO_INC=$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+# ── T066: first-class Tier-1 gate over the REAL awaitable-header corpus ───────
+# Seam #14 above validates the gate's behaviour against the synthetic T063–T065
+# fixtures.  This ctest is the production gate itself ([const §XV.9] / [2f
+# §6.6] / SC-006): it runs the bash script directly over every real header that
+# (transitively) pulls asio::awaitable — async_mutex.hpp and the session-side
+# helper — and MUST exit 0 (zero violations).  It rides the existing Tier-1
+# ctest/conan environment (no separate workflow job; asio include dir resolved
+# from the target), so it is a first-class non-waivable Tier-1 step.  The
+# corpus list is explicit and glob-free ([const §VI.4]); add new awaitable
+# headers here as they land.
+add_test(NAME check_no_std_mutex_corpus
+  COMMAND bash "${SYNC_GREP_GATE_SCRIPT}"
+    -I "${CMAKE_SOURCE_DIR}/include"
+    -I "$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>"
+    --
+    "${CMAKE_SOURCE_DIR}/include/fixpp/core/sync/async_mutex.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/async_lock_via_session_executor.hpp"
+)

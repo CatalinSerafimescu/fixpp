@@ -402,7 +402,31 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// T009: E5 — slot_allocator skeleton (stubbed; T058 fills in)
+// T058: E5 — slot_allocator (RC-C, re-anchored by Erratum E-4).
+//
+// Erratum E-4 (2026-05-19): asio 1.36.0's cancellation_slot has NO
+// allocator-binding hook (cancellation_signal::prepare_memory ->
+// thread_info_base::allocate(cancellation_signal_tag); a per-thread recycling
+// cache, not bind_allocator-aware). slot_allocator is therefore NOT bound to
+// the cancellation slot. It is retained as the typed, Allocator-shaped
+// storage-policy wrapper for the allocation 2f *does* control — the
+// waiter_record fallback — and is unit-verified by §9 seam #21 in isolation.
+// The cancellation-handler closure uses asio's per-thread recycler (zero
+// global new/delete in steady state by construction; one-time per-thread
+// first-touch is §6.4 bench-soft).
+//
+// Three exhaustive cases (post-E-4, re-anchored to waiter_record storage):
+//   case 1 (mr == nullptr): the per-mutex waiter_pool_ arm (E-2) — modelled
+//          here by the inline buffer; over-capacity -> std::bad_alloc, which
+//          the caller's trap converts to unexpected{sync_lock_alloc_failed}.
+//   case 2: N/A — the waiter_record is never coroutine-frame-resident.
+//   case 3 (mr != nullptr): std::pmr::polymorphic_allocator<void>{mr} —
+//          modelled here by forwarding allocate/deallocate to mr; mr
+//          exhaustion -> std::bad_alloc -> trap -> sync_lock_alloc_failed.
+//
+// The production waiter_record allocation lives inline in async_lock()
+// (per-mutex waiter_pool_ freelist / pmr_waiter_block) and realises the same
+// three cases directly; slot_allocator carries the policy for seam #21.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class slot_allocator {
@@ -638,6 +662,15 @@ static_assert(alignof(waiter_record) >= 8,
     "waiter pointer.");
 static_assert(sizeof(waiter_record) <= 256,
     "fixpp::sync: waiter_record exceeds waiter_pool storage budget.");
+
+// T060: §1.1 / §6.4 awaiter byte budget — HALO-eligibility precondition.
+// The frame-local awaiter (Erratum E-2 split: intrusive identity moved to
+// waiter_record) must stay within the published ≤ 96 B ceiling so it fits in
+// the caller's coroutine-frame free space and the HALO elision (§6.4, seam #9)
+// remains viable. async_lock's await_ready/await_suspend equivalents are the
+// inline header-only async_initiate lambda below — no out-of-line escape.
+static_assert(sizeof(async_mutex_awaiter) <= 96,
+    "fixpp::sync: async_mutex_awaiter exceeds the §1.1 ≤ 96 B HALO budget.");
 
 }  // namespace detail
 

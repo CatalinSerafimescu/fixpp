@@ -96,28 +96,62 @@ else
     exit 2
 fi
 
-# ─── FR-014 banned patterns ───────────────────────────────────────────────────
-# Each is a token that must NOT appear in any translation unit that also
-# references asio::awaitable.
-BANNED_PATTERNS=(
-    'std::mutex'
-    'std::recursive_mutex'
-    'std::timed_mutex'
-    'std::recursive_timed_mutex'
-    'std::shared_mutex'
-    'std::shared_timed_mutex'
-)
-
 # ─── Awaitable presence pattern ───────────────────────────────────────────────
-# After preprocessing, the asio::awaitable template definition appears under
-# its namespace, so "asio::awaitable" only appears in user-code call sites.
-# A more reliable signal is the presence of the asio/awaitable.hpp header path
-# in a preprocessor line marker (# N "path/asio/awaitable.hpp") or the
-# template declaration token "class awaitable" inside the asio namespace block.
-# We use the file-path line marker approach: after -E, line markers include the
-# form:  # N ".../asio/awaitable.hpp"
-# which is present whenever asio::awaitable is (transitively) included.
+# After preprocessing, asio::awaitable's template definition lives under its
+# namespace; the reliable transitive-include signal is the presence of the
+# asio/awaitable.hpp path in a preprocessor line marker (# N ".../asio/
+# awaitable.hpp"), present whenever asio::awaitable is (transitively) pulled.
 AWAITABLE_PATTERN='asio/awaitable.hpp'
+
+# ─── T066: file-attributed banned-token detection ────────────────────────────
+# CRITICAL correctness point: a naive substring grep of the -E output FALSE-
+# POSITIVES on every legitimate asio-awaitable header, because asio itself uses
+# std::mutex internally (so `std::mutex` is always present post-preprocessing).
+# The FR-014 / [const §XV.9] intent is to reject a banned spelling that
+# originates in the *header under test or its project-local transitive
+# includes* — NOT asio's / libstdc++'s own internal use.
+#
+# We therefore walk the -E output tracking the active GCC/Clang line marker
+# (`# <lineno> "<file>" <flags>`): a banned token counts only when the active
+# region is NON-system (flag 3 absent) AND the owning file is not an asio /
+# toolchain / Conan-cache path. This catches the project-local transitive case
+# (T065) while never firing on asio's internal std::mutex (T064 zero-FP).
+#
+# `using`/`typedef` aliases remain out of scope (FR-014 recorded limitation).
+
+# awk detector: prints one line per distinct banned spelling found in a
+# non-system region; stdout is consumed by the caller (which aggregates).
+detect_banned() {
+    awk '
+    function is_system(fname, flags) {
+        if (flags ~ /(^| )3( |$)/)              return 1
+        if (fname ~ /\/asio\//)                 return 1
+        if (fname ~ /\/(c\+\+|bits|gcc|clang|llvm)\//) return 1
+        if (fname ~ /^\/usr\//)                 return 1
+        if (fname ~ /\.conan2\//)               return 1
+        if (fname == "<built-in>" || fname == "<command-line>" || fname == "<stdin>") return 1
+        return 0
+    }
+    BEGIN { sys = 1 }
+    /^# [0-9]+ "/ {
+        rest  = substr($0, index($0, "\"") + 1)
+        fname = substr(rest, 1, index(rest, "\"") - 1)
+        flags = substr(rest, index(rest, "\"") + 1)
+        sys   = is_system(fname, flags)
+        next
+    }
+    {
+        if (sys) next
+        n = split("std::mutex std::recursive_mutex std::timed_mutex std::recursive_timed_mutex std::shared_mutex std::shared_timed_mutex", pats, " ")
+        for (i = 1; i <= n; i++) {
+            p  = pats[i]
+            re = "(^|[^A-Za-z0-9_])" p "([^A-Za-z0-9_]|$)"
+            if ($0 ~ re) seen[p] = 1
+        }
+    }
+    END { for (p in seen) print p }
+    ' "$1"
+}
 
 # ─── Process headers ─────────────────────────────────────────────────────────
 VIOLATIONS=0
@@ -128,35 +162,29 @@ for HEADER in "${HEADERS[@]}"; do
         continue
     fi
 
-    # Preprocess the header into a temporary file.
     TMP_PP=$(mktemp /tmp/check_mutex_XXXXXX.pp)
-    # Wrap in a minimal .cpp for -E preprocessing.
     TMP_SRC=$(mktemp /tmp/check_mutex_XXXXXX.cpp)
     echo "#include \"$HEADER\"" > "$TMP_SRC"
 
-    # Run -E; tolerate failures (header may have missing deps — we only care
-    # about the output text we do get).
+    # Preprocess (-E); KEEP line markers (no -P) so token→file attribution
+    # works. Tolerate failures — analyse whatever output we got.
     $CXX -std=c++23 "${INCLUDE_FLAGS[@]}" -E "$TMP_SRC" -o "$TMP_PP" 2>/dev/null || true
-
-    # Cleanup the source wrapper (keep TMP_PP for grep below).
     rm -f "$TMP_SRC"
 
-    # Only proceed if the preprocessed output mentions asio::awaitable.
-    # Use grep directly on the file (avoids echo-of-large-string shell issues).
+    # Only headers that (transitively) pull asio::awaitable are in scope.
     if ! grep -qF "$AWAITABLE_PATTERN" "$TMP_PP" 2>/dev/null; then
         rm -f "$TMP_PP"
-        continue  # This header does not pull asio::awaitable — skip.
+        continue
     fi
 
-    # Check each banned spelling.
-    for BANNED in "${BANNED_PATTERNS[@]}"; do
-        if grep -qF "$BANNED" "$TMP_PP" 2>/dev/null; then
-            echo "VIOLATION: $HEADER" >&2
-            echo "  Found '${BANNED}' in a header that references 'asio::awaitable'." >&2
-            echo "  Use 'fixpp::sync::async_mutex' instead ([const §XV.9] / [2f §6.6])." >&2
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-    done
+    while IFS= read -r BANNED; do
+        [[ -z "$BANNED" ]] && continue
+        echo "VIOLATION: $HEADER" >&2
+        echo "  Found '${BANNED}' (project-owned, non-system) in a header that" >&2
+        echo "  transitively references 'asio::awaitable'." >&2
+        echo "  Use 'fixpp::sync::async_mutex' instead ([const §XV.9] / [2f §6.6])." >&2
+        VIOLATIONS=$((VIOLATIONS + 1))
+    done < <(detect_banned "$TMP_PP")
 
     rm -f "$TMP_PP"
 done
@@ -164,8 +192,9 @@ done
 if [[ $VIOLATIONS -gt 0 ]]; then
     echo "" >&2
     echo "check_no_std_mutex_in_awaitable_headers: FAILED — $VIOLATIONS violation(s) found." >&2
-    echo "  std::mutex (and related types) are banned in headers that include asio::awaitable<...>." >&2
-    echo "  Replace with fixpp::sync::async_mutex ([const §XV.9] / [2f §6.6])." >&2
+    echo "  std::mutex (and the FR-014 related types) are banned in headers that" >&2
+    echo "  include asio::awaitable<...>. Replace with fixpp::sync::async_mutex" >&2
+    echo "  ([const §XV.9] / [2f §6.6])." >&2
     exit 1
 fi
 

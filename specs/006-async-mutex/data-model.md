@@ -182,16 +182,18 @@ Entities are the logical runtime objects that 2f introduces. They map to named C
 
 ### E5 — `fixpp::sync::detail::slot_allocator`
 
-**Source:** `[2f §4.3.4]` (RC-C close — Codex C-P2-6 / Opus N-P2-2).
+**Source:** `[2f §4.3.4]` (RC-C close — Codex C-P2-6 / Opus N-P2-2), **superseded for the cancellation-slot closure by `[2f §4.3.4]` Erratum E-4 (v1.6)**.
 
-**Role:** Project-internal `Allocator`-shaped wrapper that supplies storage for the `asio::cancellation_slot`'s handler closure. Parameterised on `(async_mutex_awaiter* awaiter, std::pmr::memory_resource* mr)`. Models the standard allocator concept (composes with `asio::bind_allocator`). Declared in `fixpp::sync::detail`.
+> **E-4 (v1.6, source-verified non-implementable):** asio 1.36.0's `cancellation_slot::emplace`/`assign` has **no allocator-binding hook** (`prepare_memory()` → `thread_info_base::allocate(cancellation_signal_tag)`; per-thread recycling cache, not `bind_allocator`-aware). `slot_allocator` is therefore **not bound to the cancellation slot**. It is retained as the typed `Allocator`-shaped storage-policy wrapper for the allocation 2f *does* control — the **`waiter_record` fallback** (E2a). The cancellation-handler closure uses asio's per-thread recycler (zero global `new`/`delete` in steady state by construction; one-time per-thread first-touch is §6.4 bench-soft, like case 2). The three-case table below is re-anchored from "cancellation closure" to "`waiter_record` storage decision"; the awaiter's 32 B `slot_storage_` continues to hold only the asio **completion** handler per Erratum E-1.
 
-**Three-case storage (exhaustive):**
+**Role:** Project-internal `Allocator`-shaped storage-policy wrapper for the `waiter_record` fallback. Parameterised on `(async_mutex_awaiter* awaiter, std::pmr::memory_resource* mr)`. Declared in `fixpp::sync::detail`; unit-verified by §9 seam #21 in isolation.
+
+**Three-case storage (exhaustive; post-E-4, re-anchored to `waiter_record`):**
 
 | Case | Condition | Source | Notes |
 |---|---|---|---|
-| 1 — Embedded + HALO | `mr == nullptr` AND HALO elides the awaiter | `awaiter->slot_storage_` (inline 32 B buffer); overflow falls back to `std::pmr::null_memory_resource()` | Zero global-heap touch. Overflow → `trap_throw` → `unexpected{sync_lock_alloc_failed}`. Hard contract violation under `[const §VIII.5]`; §9 seam #10 verifies the 32-byte budget holds for the v1.0 ASIO handler closure. |
-| 2 — Embedded + no HALO | `mr == nullptr` AND HALO did NOT fire | Same inline buffer preference; falls back to global heap (via promise allocator) | Observable in benchmark mode (§9 seam #9); non-fatal **iff** seam #10 passes for the same toolchain. |
+| 1 — Embedded | `mr == nullptr` | per-mutex `waiter_pool_` slot (E-2; the `slot_allocator` inline-buffer arm models this) | Zero global-heap touch. Pool exhaustion → `trap_throw`/`bad_alloc` → `unexpected{sync_lock_alloc_failed}` (slot 44). `[const §VIII.5]`; §9 seam #10 verifies steady-state zero global `new` under `mallocnesia` (post per-thread warm-up). |
+| 2 — N/A for the waiter record | (the `waiter_record` is never placed on the coroutine frame — it is pool- or `mr`-backed) | — | The HALO-not-firing branch does not exist for the `waiter_record`; coroutine-frame HALO is verified separately for the awaiter by §9 seam #9. |
 | 3 — PMR fallback | `mr != nullptr` | `std::pmr::polymorphic_allocator<void>{mr}` forwarded directly | Zero global-heap. `mr->allocate()` failure → `trap_throw` → `unexpected{sync_lock_alloc_failed}`. |
 
 ---
