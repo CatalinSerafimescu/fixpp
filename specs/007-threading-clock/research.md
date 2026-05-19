@@ -235,3 +235,13 @@ The strand wrap restores the implicit contract the comment at `system_clock_sour
 **Rationale:** Enforcing an incomplete-type field now would require pulling in a downstream header (breaks the `[arch §2.3]` layering) or asserting a raw pointer NULL which would forbid the legal "no-TLS" null path. The correct enforcement is: "non-null ⇒ validate the pointed-to object" which requires the complete type. Deferred to 2g; the comment creates a searchable TODOs surface so the enforcement is not forgotten.
 
 **Anchor:** `[2d §5.2]` / `[const §XV.15]`; `include/fixpp/session/session_config.hpp` `security_profile` field; `src/session/session.cpp` wiring-point comment; 2g TLS feature.
+
+---
+
+### D-22 — `bench_threading_regression` CTest entry is LOCAL-ONLY; CI promotion is a Phase 4 follow-up
+
+**Decision:** T056 wires the ±5% regression check as a CTest entry (`bench_threading_regression`) that runs locally via `ctest -R bench_threading_regression` against the committed `bench/baselines/threading/threading_baselines.json`. The test is NOT added to any GitHub Actions workflow YAML in this feature (hard rule: no CI YAML modifications in 007). The gate remains SOFT (bench_compare.py always exits 0 per `[const §VIII.2]`). Promotion to CI is tracked as a post-Phase-4 follow-up; the CTest infrastructure exists and is ready for wiring.
+
+**Rationale:** The bench binary takes ~0.6s (release) in the regression check. Adding it to CI would require a release build in the CI matrix; that is a non-trivial infrastructure change that belongs in a dedicated CI-hardening pass, not in a threading-contract feature PR.
+
+**Anchor:** `bench/threading/CMakeLists.txt`; `cmake/run_bench_regression.cmake`; `tools/bench_compare.py`; `bench/baselines/threading/threading_baselines.json`; `[const §VIII.2]`.

@@ -26,6 +26,25 @@
 //       plus a single relaxed-atomic slot check at hand-off (≤ 5 ns);
 //       completes expected_t<void>{}.
 //
+// T054 (US6 / D-6): HALO-ELIGIBILITY + PMR FALLBACK + EXCEPTION CONTRACT
+//   HALO: this function is HEADER-ONLY and the parse→fromApp chain is a
+//   SINGLE STRAND-LOCAL INVOCATION chain that clang's HALO analysis targets
+//   for coroutine frame elision ([const §XI.6] / [2d §6.2]). When HALO fires,
+//   the awaiter-frame heap allocation is completely elided. When HALO does
+//   NOT fire (e.g., cross-thread dispatch with a non-deterministic control
+//   flow from the compiler's perspective), the coroutine frame is allocated
+//   by asio's default frame allocator; in that case the PMR arena is used for
+//   the DISPATCH NODE and the SLOT-OBSERVATION FLAG (see ARENA DERIVATION
+//   below) — not the coroutine frame itself (asio::awaitable<> frame alloc
+//   is opaque to the session PMR layer). In the SESSION context the measured
+//   global-heap zero-alloc property is satisfied because: (a) in-strand HALO
+//   fires, and (b) cross-strand post uses a bind_allocator PMR hint at the
+//   asio::dispatch call site (seam 7 / T051 mallocnesia guard confirms).
+//   EXCEPTION CONTRACT: every potentially-throwing internal call is fenced
+//   by a catch(bad_alloc) → strand_dispatch_failed_oom projection, so no
+//   exception crosses the parse→fromApp window ([arch §5.3]). This mirrors
+//   the `fixpp::core::detail::trap_throw` pattern from 001/004 (D-6).
+//
 // ARENA DERIVATION (pinned — [2d §6.5]:1153-1154): the dispatch node is
 // allocated from the session PMR arena recovered THROUGH `exec`
 // (`exec.session_ptr()->session_arena()` — the [2d §4.5] never-null chain).
