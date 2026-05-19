@@ -8,11 +8,11 @@ metadata:
   source: "templates/commands/implement.md"
   # >>> LOCAL PATCH (Antreprenoriat) — DO NOT regenerate blindly <<<
   # Step 2 ("Check checklists status") was rewritten to route the
-  # pipeline.md §8.5 CHECKLIST AUDIT through /speckit-checklist-audit and
+  # pipeline.md §9 CHECKLIST AUDIT through /speckit-checklist-audit and
   # to remove the weak "proceed anyway? (yes/no)" bypass. This vendored
   # upstream skill is otherwise pristine. If spec-kit is re-vendored or
   # regenerated, this header WILL be clobbered — re-apply the step-2 change
-  # (see pipeline.md §8.5 and `git log` of this file).
+  # (see pipeline.md §9 and `git log` of this file).
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -85,7 +85,7 @@ You **MUST** consider the user input before proceeding (if not empty).
      - **PASS**: All checklists have 0 incomplete items
      - **FAIL**: One or more checklists have incomplete items
 
-   - **`pipeline.md` step 8.5 — CHECKLIST AUDIT — is the gate here, NOT a
+   - **`pipeline.md` step 9 — CHECKLIST AUDIT — is the gate here, NOT a
      yes/no bypass.** The audit is a MANDATORY gate that BLOCKS this step.
      Its executor is the `/speckit-checklist-audit` skill. `requirements.md`
      (the auto-`/specify` spec-quality checklist) is exempt; every *domain*
@@ -95,14 +95,14 @@ You **MUST** consider the user input before proceeding (if not empty).
      AND carries an inline disposition tag** (`PASS:` / `SPEC-FIXED:` /
      `DD-DECIDED §X:` / `WAIVED:<reason>`). Boxes ticked WITHOUT a
      disposition tag are pre-ticked-but-unaudited and do **not** satisfy
-     the gate (this is the failure mode that lets §8.5 be silently skipped).
+     the gate (this is the failure mode that lets §9 be silently skipped).
 
    - **If any domain checklist has an incomplete OR un-dispositioned box**:
      - Display the table.
      - **STOP** and instruct the user to run `/speckit-checklist-audit`
        (offer to invoke it now). Do NOT offer a "proceed anyway (yes/no)"
        bypass — a genuine Completeness/Clarity/Consistency gap may NEVER be
-       waived (pipeline.md §8.5). Resume `/speckit-implement` only after the
+       waived (pipeline.md §9). Resume `/speckit-implement` only after the
        audit reports GREEN.
      - If the audit SPEC-FIXED anything, `/speckit-analyze` must be re-run
        before continuing (the audit will say so).
