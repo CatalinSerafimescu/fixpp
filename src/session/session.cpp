@@ -9,8 +9,13 @@
 // each replaces the marked placeholder body, it is not additive guesswork.
 #include <fixpp/session/session.hpp>
 
+#include <memory>
 #include <memory_resource>
+#include <optional>
 #include <utility>
+
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/session_executor.hpp>
@@ -106,12 +111,66 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 }
 
 asio::awaitable<fixpp::core::expected_t<void>>
-Session::close(close_mode /*mode*/) noexcept {
-    // PLACEHOLDER (T012). Real body: T037 (US3 two-phase close + phase-1
-    // FileStore::flush_for_session_close() hook), T038 (idempotent
-    // three-state model + cancellation surfacing), T039 (phase-2 root total
-    // propagation), T045 (trace-slot teardown).
-    co_return fixpp::core::expected_t<void>{};
+Session::close(close_mode mode) noexcept {
+    using fixpp::core::error;
+
+    // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]:830-832,863) ──
+    // never-opened OR already-closed(drained) → session_already_closed
+    // (slot 52); no side effects.
+    if (state_ == lifecycle::never_opened ||
+        state_ == lifecycle::closed_drained) {
+        co_return std::unexpected(error::session_already_closed);
+    }
+    // already-closing (in-flight) → the SAME in-flight result, NO error, NO
+    // side effects: await the first call's shared slot, then mirror it. (The
+    // 2d-owned property the seam asserts; the scripted double drives the
+    // interleave deterministically — [2d §6.5]:1172.)
+    if (state_ == lifecycle::closing) {
+        auto shared = close_result_;
+        while (!shared || !shared->has_value()) {
+            co_await asio::post(co_await asio::this_coro::executor,
+                                asio::use_awaitable);
+        }
+        co_return **shared;
+    }
+
+    // ── First close() on an OPEN session: run the two-phase body once ──────
+    state_       = lifecycle::closing;
+    close_result_ = std::make_shared<
+        std::optional<fixpp::core::expected_t<void>>>();
+
+    // T037 phase 1 — graceful ONLY (terminal skips phase 1 entirely; the
+    // hook is NOT invoked). Invoked EXACTLY ONCE, after the (scripted) last
+    // in-flight store(...) resumes and BEFORE the Logout step. A
+    // store_io_failure is logged then close PROCEEDS (I-07); 007 has no log
+    // sink wired (005/2e), so the failure is observed by the hook's own
+    // bookkeeping and close still completes successfully. The real Logout
+    // exchange + Clock::sleep_until close-timeout under a CHILD
+    // cancellation_state are 005-owned (no transport / no D-9 timeout value
+    // in 007 — D-16); the 2d-owned phase-1 obligation wired here is the
+    // call-site + the once/never ordering the seam asserts.
+    if (mode == close_mode::graceful && close_flush_hook_) {
+        const auto flush = close_flush_hook_();
+        (void)flush;  // store_io_failure → logged-then-proceed (I-07)
+    }
+
+    // T037/T039 phase 2 — fire root cancellation_type::total ONLY after
+    // phase 1 has resolved (peer ACK | child timeout | child cancelled —
+    // collapsed to "phase 1 done" in the scripted scope). This is the single
+    // propagation point: every strand of in-flight session work bound to
+    // root_cancellation_slot() (transport r/w, heartbeat sleep, mutex
+    // acquire, cancellable_dispatch, parser→fromApp — all 005-owned) unwinds
+    // here. terminal reaches phase 2 immediately (phase 1 skipped).
+    root_cancel_.emit(asio::cancellation_type::total);
+
+    // Completed: both phases drained (transport closed / arenas reset /
+    // trace slot cleared — the trace-slot teardown is T045/US4). Cancellation
+    // surfaces as operation_aborted/dispatch_aborted on the in-flight work,
+    // never a thrown exception across parse→fromApp (I-09); close() itself
+    // completes expected_t<void>{}.
+    *close_result_ = fixpp::core::expected_t<void>{};
+    state_         = lifecycle::closed_drained;
+    co_return **close_result_;
 }
 
 }  // namespace fixpp::session

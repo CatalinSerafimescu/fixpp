@@ -23,11 +23,14 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <utility>
 
 #include <asio/awaitable.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
 
 #include <fixpp/core/error.hpp>          // expected_t
@@ -113,6 +116,34 @@ public:
         return effective_clock_;
     }
 
+    // ENGINE-INTERNAL (fixpp::session/ + seam tests). The phase-1 close
+    // flush seam (D-16 / I-07): 007 ships NO MessageStore/FileStore type —
+    // the real non-virtual FileStore::flush_for_session_close() reached via
+    // the session's unique_ptr<MessageStore> friend mechanism is 2e/005's.
+    // 007 wires only the CALL SITE and asserts the 2d-owned ORDERING
+    // property (D-5 scripted-test-double scoping). The seam-5 scripted
+    // double installs a hook here; close(graceful) invokes it EXACTLY ONCE
+    // in phase 1 (after the last in-flight store(...) resumes, before the
+    // Logout step); close(terminal) NEVER invokes it. A hook returning
+    // unexpected{store_io_failure} is logged and close proceeds (I-07).
+    using close_flush_hook =
+        std::function<fixpp::core::expected_t<void>()>;
+    void set_close_flush_hook(close_flush_hook hook) noexcept {
+        close_flush_hook_ = std::move(hook);
+    }
+
+    // ENGINE-INTERNAL (fixpp::session/ + seam tests). The ROOT cancellation
+    // slot (T039 / I-07): in-flight session work (transport read/write,
+    // heartbeat sleep, awaitable-mutex acquire, app-callback dispatch via
+    // cancellable_dispatch, the parser→fromApp chain — all 005-owned in the
+    // real engine) binds to this slot so phase-2's cancellation_type::total
+    // tears every strand of in-flight work down. 007 exposes the slot and
+    // fires phase-2 total; the scripted double binds a sleep/dispatch to it
+    // and asserts the propagation property only.
+    [[nodiscard]] asio::cancellation_slot root_cancellation_slot() noexcept {
+        return root_cancel_.slot();
+    }
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto
@@ -166,9 +197,21 @@ private:
     };
     lifecycle state_ = lifecycle::never_opened;
 
-    // session_executor binding, resolved effective_clock, root
-    // cancellation_state, and the in-flight close awaitable handle are added
-    // by the per-story tasks (T020/T030/T037).
+    // Phase-1 flush seam (D-16). Default-empty: a graceful close with no
+    // installed hook simply skips phase-1 flush (no store wired yet — the
+    // real unique_ptr<MessageStore> friend call is 005/2e's).
+    close_flush_hook close_flush_hook_;
+
+    // Root cancellation signal (T039). Phase 2 fires cancellation_type::total
+    // on this; in-flight work bound to root_cancellation_slot() unwinds.
+    asio::cancellation_signal root_cancel_;
+
+    // Idempotent THREE-STATE close (I-10): the FIRST close() runs the body
+    // and caches its result here; a concurrent/subsequent call while
+    // state_==closing observes the SAME in-flight result (no error, no side
+    // effects) by awaiting this shared slot rather than re-running phase 1/2.
+    std::shared_ptr<std::optional<fixpp::core::expected_t<void>>>
+        close_result_;
 };
 
 }  // namespace fixpp::session

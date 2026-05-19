@@ -10,10 +10,12 @@
 // Linked into fixpp_session; its sole call site is Session::open() (T020).
 #include <fixpp/core/session_executor.hpp>
 
+#include <memory_resource>
 #include <utility>
 
 #include <asio/strand.hpp>
 
+#include <fixpp/session/session.hpp>          // complete Session (session_arena())
 #include <fixpp/session/session_config.hpp>   // complete threading_mode
 
 namespace fixpp::core {
@@ -46,6 +48,14 @@ make_session_executor(asio::any_io_executor resolved_exec,
 
     // Unreachable for the closed 2-value enum; defensive (out-of-range cast).
     return std::unexpected(error::invalid_session_config);
+}
+
+// [2d §6.5]:1153-1154 arena bridge — defined HERE (session TU) so
+// fixpp::session::Session is complete; the core header only declares it.
+std::pmr::memory_resource*
+session_arena_of(const session_executor& exec) noexcept {
+    auto* s = exec.session_ptr();
+    return s ? s->session_arena() : nullptr;
 }
 
 }  // namespace fixpp::core

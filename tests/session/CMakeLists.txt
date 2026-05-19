@@ -37,3 +37,7 @@ add_threading_test(threading_direct_executor_reentrancy test_direct_executor_ree
 # ── US2 (Phase 4) seam registrations ────────────────────────────────────────
 add_threading_test(threading_heartbeat_under_mock_clock test_heartbeat_under_mock_clock.cpp)  # seam 9
 add_threading_test(threading_clock_injection_corpus     test_clock_injection_corpus.cpp)      # seam 11
+
+# ── US3 (Phase 5) seam registrations ────────────────────────────────────────
+add_threading_test(threading_cancellation_parse_to_fromapp test_cancellation_parse_to_fromapp.cpp)  # seam 4
+add_threading_test(threading_cancellation_fromapp_to_close test_cancellation_fromapp_to_close.cpp)  # seam 5

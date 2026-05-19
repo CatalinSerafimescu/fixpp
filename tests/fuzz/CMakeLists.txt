@@ -51,3 +51,20 @@ target_include_directories(fuzz_wire_parser PRIVATE
 set_target_properties(fuzz_wire_parser PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# T035 — Seam #12 of `[2d §9]` — VOLUNTARY session cancellation-timing
+# fuzzer (Gate-A discretion; NOT a [const §VII.7] obligation — D-11). Fires
+# Session::close(graceful|terminal) at an input-selected co_await checkpoint
+# interleaved with cancellable_dispatch; asserts no deadlock / double-free /
+# PMR leak / silent global-heap dispatch fallback. Links fixpp_session
+# (brings fixpp_core + asio).
+add_executable(fuzz_session_cancellation fuzz_session_cancellation.cpp)
+target_link_libraries(fuzz_session_cancellation PRIVATE fixpp_session fixpp_core)
+target_compile_options(fuzz_session_cancellation PRIVATE -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_session_cancellation PRIVATE -fsanitize=fuzzer,address,undefined)
+target_include_directories(fuzz_session_cancellation PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(fuzz_session_cancellation PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)

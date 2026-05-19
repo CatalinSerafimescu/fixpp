@@ -22,6 +22,7 @@
 // [2d §4.8]. Realizes specs/007-threading-clock/contracts/session_executor.hpp.
 #pragma once
 
+#include <memory_resource>
 #include <type_traits>
 #include <utility>
 
@@ -139,5 +140,17 @@ make_session_executor(asio::any_io_executor resolved_exec,
                        fixpp::session::threading_mode mode,
                        bool already_serialized_executor,
                        fixpp::session::Session* session) noexcept;
+
+// The [2d §6.5]:1153-1154 arena-derivation bridge: recovers the never-null
+// session PMR arena THROUGH the wrapper (== exec.session_ptr()->
+// session_arena(), the [2d §4.5] chain). DECLARED here (core leaf) so
+// cancellable_dispatch.hpp can derive the dispatch-node arena without core/
+// including any session/ header; DEFINITION lands in the session TU
+// (src/session/session_executor.cpp) where fixpp::session::Session is
+// complete ([arch §2.3] leaf rule — mirrors make_session_executor). Returns
+// nullptr only for a default-constructed (session-less) wrapper — never on
+// the dispatch path, where the wrapper always carries a Session*.
+[[nodiscard]] std::pmr::memory_resource*
+session_arena_of(const session_executor& exec) noexcept;
 
 }  // namespace fixpp::core
