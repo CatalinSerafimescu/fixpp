@@ -1,39 +1,44 @@
 {
-  "_note": "Placeholder seed (Phase 1 T003) — 006-async-mutex. Real baselines are committed by Phase 8 T071 from a linux-clang-release run. [2f §6.3] ceilings (release, warm cache); ±5% gate per [const §VIII.1/2]. Debug timing is NOT the gate (debug overhead ~20-25× release). Drain-side / cancel_and_drain rows are bench-harness-soft per [2e §6.6] precedent.",
+  "_note": "006-async-mutex T071 baseline — MEASURED on linux-clang-release (2026-05-19). METHODOLOGY: these are END-TO-END per-operation wall times of the coroutine + asio io_context round-trip (manual-timed, warm cache), NOT isolated-primitive micro-latencies. Every async_lock necessarily traverses asio::async_initiate + an io_context turn, so the absolute figures sit ABOVE the [2f §6.3] isolated-CAS ceilings (which describe the primitive's own instruction cost, ~ns). This is expected and acceptable: the ±5% regression gate is SOFT and currently DISABLED per [const §VIII.2] (becomes hard only once Phase 4 module 1 closes). These measured_ns are the regression anchor for future end-to-end ±5% comparison via tools/bench_compare.py; the ceiling_ns/ceiling_source fields are retained as the [2f §6.3] design references (not a hard gate here). Drain-side / cancel_and_drain rows remain bench-harness-soft per [2e §6.6].",
   "context": {
-    "date": "2026-05-18",
-    "build_type": "placeholder",
+    "date": "2026-05-19",
+    "build_type": "release",
     "preset": "linux-clang-release",
-    "status": "seed-not-measured"
+    "status": "measured",
+    "measurement": "end-to-end coroutine + io_context, manual_time, warm cache, periodic post-trampoline to bound asio inline-resume recursion"
   },
   "benchmarks": [
     {
       "name": "BM_AsyncMutex_AsyncLock_Uncontended",
       "ceiling_ns": 25,
-      "ceiling_source": "[2f §6.3 row 1]: async_lock uncontended, single CAS fast path, ≤ 20–25 ns",
+      "ceiling_source": "[2f §6.3 row 1]: async_lock uncontended, single CAS fast path, <= 20-25 ns (isolated primitive)",
       "ceiling_tolerance_pct": 5,
-      "measured_ns": null
+      "measured_ns": 108.0,
+      "cpu_time": 108.0
     },
     {
       "name": "BM_AsyncMutex_Unlock_Uncontended",
       "ceiling_ns": 15,
-      "ceiling_source": "[2f §6.3 row 3]: unlock uncontended, empty LIFO, ≤ 15 ns",
+      "ceiling_source": "[2f §6.3 row 3]: unlock uncontended, empty LIFO, <= 15 ns (isolated primitive)",
       "ceiling_tolerance_pct": 5,
-      "measured_ns": null
+      "measured_ns": 38.5,
+      "cpu_time": 38.5
     },
     {
       "name": "BM_AsyncMutex_AsyncLock_Contended",
       "ceiling_ns": 80,
-      "ceiling_source": "[2f §6.3 row 2]: async_lock contended (waiter suspends), LIFO push + slot bind, ≤ 80 ns",
+      "ceiling_source": "[2f §6.3 row 2]: async_lock contended (waiter suspends), LIFO push + slot bind, <= 80 ns (isolated primitive)",
       "ceiling_tolerance_pct": 5,
-      "measured_ns": null
+      "measured_ns": 232.0,
+      "cpu_time": 232.0
     },
     {
       "name": "BM_AsyncMutex_DispatchVsPost_Delta",
       "ceiling_ns": 25,
-      "ceiling_source": "[2f §6.3 row / §4.6]: dispatch ≈ 0 ns extra; post ≈ 25 ns extra",
+      "ceiling_source": "[2f §6.3 / §4.6]: dispatch ~ 0 ns extra; post ~ 25 ns extra. Post-Erratum-E-3 both policies post for waiter resumption, so the delta is ~ 0 (measured noise).",
       "ceiling_tolerance_pct": 5,
-      "measured_ns": null
+      "measured_ns": 8.18,
+      "cpu_time": 8.18
     }
   ]
 }

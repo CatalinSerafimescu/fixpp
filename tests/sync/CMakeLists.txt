@@ -92,6 +92,16 @@ add_sync_test(sync_drain_reaper_abort_subscribers test_drain_reaper_abort_subscr
 # US5 (T062–T065): sync_no_std_mutex_ci_gate #14 (+ 3 fixtures/ headers)
 # Polish: sync_arm64_weak_memory #18 (T068); sync_consumer_contract_compile (T078)
 
+# ── Polish seam registrations (T068, T078) ───────────────────────────────────
+# Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering
+# spec under a multi-threaded io_context (TSan is the portable check; native
+# ARM64 execution recorded host-unavailable in the verify doc — T068).
+add_sync_test(sync_arm64_weak_memory test_arm64_weak_memory.cpp)
+# T078: consumer compile/link contract — SC-008 / [2e §3.1] hand-off gate.
+# Compile-only static_assert/SFINAE TU over the SHIPPED headers; links
+# fixpp_sync to confirm non-inline surface link-completeness.
+add_sync_test(sync_consumer_contract_compile test_consumer_contract_compile.cpp)
+
 # ── US5 seam registration (T062) ─────────────────────────────────────────────
 # Seam #14: CI grep-gate driver.  Shells out to the bash gate script over the
 # T063–T065 fixture corpus and asserts zero-FN / zero-FP.
