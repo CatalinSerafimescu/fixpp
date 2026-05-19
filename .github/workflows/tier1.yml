@@ -16,6 +16,16 @@ on:
 env:
   CONAN_HOME: ~/.conan2
 
+# Only the newest Tier 1 run per PR (or per branch on push:main) keeps
+# spending CI. Several runs pile up otherwise: each pre-gate push leaves a
+# SKIPPED run, then applying gate-{a,b}-done fires one `labeled` event per
+# label add/remove — every one re-triggers this workflow on the same head.
+# Without this, 3–4 full matrices ran in parallel after the gate labels
+# landed. Grouped by PR number (falls back to ref for push:main).
+concurrency:
+  group: tier1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Gate precheck — Tier 1 does not spend CI until gates are satisfied ────
   # The user's pipeline is local-first: /speckit-verify mirrors Tier 1
