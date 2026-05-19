@@ -103,7 +103,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     effective_clock_ = cfg_.clock_override ? cfg_.clock_override
                                            : engine_.clock;
 
-    // (3) trace_slot_ population          → wired by T045 (US4)
+    // (3) T045: populate the session_local<trace_context> slot from
+    // SessionConfig::initial_trace_context (FR-014). Stored in-domain at
+    // open; current_trace_context reads it through the stable Session*
+    // (survives cross-thread resume — NOT thread_local).
+    trace_slot_.store(cfg_.initial_trace_context);
+
     // (4c) null dictionary / sentinel     → wired by T050 (US5)
 
     state_ = lifecycle::open;
@@ -163,10 +168,16 @@ Session::close(close_mode mode) noexcept {
     // here. terminal reaches phase 2 immediately (phase 1 skipped).
     root_cancel_.emit(asio::cancellation_type::total);
 
+    // T045: clear the session_local<trace_context> slot at close completion
+    // (FR-014). Reached in BOTH graceful and terminal once the two phases
+    // resolve; the slot stays valid until here (seam 17: never read through
+    // a destroyed slot — the slot lives in the Session, drained, not freed).
+    trace_slot_.clear();
+
     // Completed: both phases drained (transport closed / arenas reset /
-    // trace slot cleared — the trace-slot teardown is T045/US4). Cancellation
-    // surfaces as operation_aborted/dispatch_aborted on the in-flight work,
-    // never a thrown exception across parse→fromApp (I-09); close() itself
+    // trace slot cleared above). Cancellation surfaces as
+    // operation_aborted/dispatch_aborted on the in-flight work, never a
+    // thrown exception across parse→fromApp (I-09); close() itself
     // completes expected_t<void>{}.
     *close_result_ = fixpp::core::expected_t<void>{};
     state_         = lifecycle::closed_drained;

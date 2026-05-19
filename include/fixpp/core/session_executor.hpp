@@ -40,6 +40,7 @@
 // session/ TU (src/session/session_executor.cpp, T019) where the complete
 // enum is visible. The header here only declares it.
 namespace fixpp::session { class Session; enum class threading_mode : unsigned char; }
+namespace fixpp::otel    { struct trace_context; }   // bridge return — incomplete OK in this decl
 
 namespace fixpp::core {
 
@@ -79,6 +80,18 @@ public:
 
     asio::execution_context& query(asio::execution::context_t) const noexcept {
         return asio::query(inner_, asio::execution::context);
+    }
+
+    // asio::any_io_executor's target-validity check probes `context_as<U>`
+    // (it is one of the any_io_executor supportable_properties — co_spawn(se,
+    // …) needs it). NOT covered by the templated `query(Property)` below
+    // because `can_query_v<any_io_executor, context_as_t<U>>` is false:
+    // any_io_executor itself doesn't expose context_as via can_query, so the
+    // constrained template SFINAE-rejects it. Explicit forwarding closes the
+    // gap (seam 21 — survive erasure into any_io_executor for co_spawn).
+    template <class U>
+    U query(asio::execution::context_as_t<U>) const noexcept {
+        return asio::query(inner_, asio::execution::context_as<U>);
     }
 
     template <class Property>
@@ -152,5 +165,20 @@ make_session_executor(asio::any_io_executor resolved_exec,
 // the dispatch path, where the wrapper always carries a Session*.
 [[nodiscard]] std::pmr::memory_resource*
 session_arena_of(const session_executor& exec) noexcept;
+
+// The [2d §4.6] / E8 / I-11 current-trace-context bridge: resolves the
+// session-domain trace_context THROUGH the typed wrapper (session_ptr() — a
+// MEMBER FUNCTION, round-3 RC#1 — NOT any_io_executor::query). hit
+// (session_ptr non-null, session open) → the session's trace_slot_.load();
+// empty-slot mid-open (recovered but not yet open) → default trace_context
+// + a debug assert; session-less wrapper → default trace_context (the
+// concrete engine_trace_context snapshot fallback is the downstream Engine's
+// — 007 ships no Engine type; D-17). DECLARED here (core leaf) so the
+// current_trace_context awaitable in trace_context.hpp recovers Session
+// without core/ including any session/ header; DEFINITION lands in the
+// session TU (src/session/session_executor.cpp) where Session is complete
+// ([arch §2.3] — mirrors session_arena_of / make_session_executor).
+[[nodiscard]] fixpp::otel::trace_context
+session_trace_context_of(const session_executor& exec) noexcept;
 
 }  // namespace fixpp::core

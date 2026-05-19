@@ -10,12 +10,14 @@
 // Linked into fixpp_session; its sole call site is Session::open() (T020).
 #include <fixpp/core/session_executor.hpp>
 
+#include <cassert>
 #include <memory_resource>
 #include <utility>
 
 #include <asio/strand.hpp>
 
-#include <fixpp/session/session.hpp>          // complete Session (session_arena())
+#include <fixpp/core/trace_context.hpp>       // complete trace_context (bridge return)
+#include <fixpp/session/session.hpp>          // complete Session (session_arena()/trace)
 #include <fixpp/session/session_config.hpp>   // complete threading_mode
 
 namespace fixpp::core {
@@ -56,6 +58,28 @@ std::pmr::memory_resource*
 session_arena_of(const session_executor& exec) noexcept {
     auto* s = exec.session_ptr();
     return s ? s->session_arena() : nullptr;
+}
+
+// [2d §4.6] / E8 / I-11 current-trace-context bridge — defined HERE so
+// Session is complete; trace_context.hpp's awaitable only declares it.
+fixpp::otel::trace_context
+session_trace_context_of(const session_executor& exec) noexcept {
+    auto* s = exec.session_ptr();
+    if (s == nullptr) {
+        // session_executor with no Session* (default-constructed wrapper) —
+        // not the dispatch/awaiter path; engine snapshot is downstream's.
+        return fixpp::otel::trace_context{};
+    }
+    if (!s->is_open()) {
+        // Empty-slot mid-open: the slot is not yet populated (open() stores
+        // it). Default trace_context + debug assert (E8 / I-12) — a
+        // current_trace_context read before Session::open is a caller bug.
+        assert(false &&
+               "current_trace_context read before Session::open() populated "
+               "the session_local<trace_context> slot");
+        return fixpp::otel::trace_context{};
+    }
+    return s->trace_context_value();   // hit → trace_slot_.load()
 }
 
 }  // namespace fixpp::core

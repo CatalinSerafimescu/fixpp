@@ -107,6 +107,18 @@ public:
     }
     [[nodiscard]] bool is_open() const noexcept { return state_ == lifecycle::open; }
 
+    // ENGINE-INTERNAL (fixpp::session/ + the session_trace_context_of
+    // bridge). The session-domain trace context (FR-014/FR-015/I-11): the
+    // session_local<trace_context> slot, populated at open() from
+    // SessionConfig::initial_trace_context and cleared at close completion
+    // (T045). Read through the borrowed stable Session* by
+    // current_trace_context — survives cross-thread coroutine resume because
+    // it is plain value ownership, NOT thread_local (E7/E8).
+    [[nodiscard]] const fixpp::otel::trace_context&
+    trace_context_value() const noexcept {
+        return trace_slot_.load();
+    }
+
     // The single effective_clock resolved ONCE at open() (FR-005 / I-03):
     // SessionConfig::clock_override ?: EngineConfig::clock, bound to the
     // session lifetime. Every session-scoped consumer reads this; valid only

@@ -42,6 +42,10 @@ function(add_threading_core_test name)
     "${CMAKE_SOURCE_DIR}/tests"
   )
   add_test(NAME ${name} COMMAND ${name})
+  # See tests/session/CMakeLists.txt for the asio shared_target_executor
+  # TSan suppression rationale (US4 seam 6 et al).
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
 endfunction()
 
 # ── US2 (Phase 4) core seam registrations ───────────────────────────────────
@@ -49,6 +53,11 @@ add_threading_core_test(threading_mock_clock_determinism      test_mock_clock_de
 add_threading_core_test(threading_sleep_cancel_race           test_sleep_cancel_race.cpp)            # seam 10 (TSan+ASan)
 add_threading_core_test(threading_engine_shutdown_order       test_engine_shutdown_order.cpp)        # seam 14
 add_threading_core_test(threading_third_party_clock_conformance test_third_party_clock_conformance.cpp)  # seam 15 / SC-006
+
+# ── US4 (Phase 6) core seam registrations ───────────────────────────────────
+add_threading_core_test(threading_trace_context_resume        test_trace_context_resume.cpp)         # seam 6
+add_threading_core_test(threading_session_local_lifetime      test_session_local_lifetime.cpp)       # seam 17 (TSan)
+add_threading_core_test(threading_session_executor_accessor_survives_erasure test_session_executor_accessor_survives_erasure.cpp)  # seam 21
 
 # Phase 4: fixpp_core_tests — pure C++ US1/US2/US4 tests (no C-ABI header dependency)
 add_executable(fixpp_core_tests

@@ -27,6 +27,13 @@ function(add_threading_test name)
     "${CMAKE_SOURCE_DIR}/tests"
   )
   add_test(NAME ${name} COMMAND ${name})
+  # asio's any_executor ref-count uses memory_order_release + manual fence;
+  # TSan cannot track happens-before through it and flags shared_target_
+  # executor<session_executor> refcount races during teardown when a custom
+  # executor target is erased into any_io_executor (US4 seam 6 et al). The
+  # suppressions file scopes the noise; harmless under non-TSan builds.
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
 endfunction()
 
 # ── US1 (Phase 3) seam registrations ────────────────────────────────────────

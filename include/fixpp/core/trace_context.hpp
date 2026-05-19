@@ -23,6 +23,12 @@
 #include <cstdint>
 #include <type_traits>
 
+#include <asio/any_io_executor.hpp>
+#include <asio/awaitable.hpp>
+#include <asio/this_coro.hpp>
+
+#include <fixpp/core/session_executor.hpp>   // typed session_ptr recovery (RC#1)
+
 namespace fixpp::otel {
 
 struct trace_context {
@@ -39,3 +45,37 @@ static_assert(sizeof(trace_context) == 32
               "trivially-copyable, standard-layout POD (D-1 / E11)");
 
 }  // namespace fixpp::otel
+
+namespace fixpp {
+
+// fixpp::current_trace_context — free awaitable (E8 / FR-015 / I-11 / I-12;
+// T044). Reads the coroutine's executor via `co_await asio::this_coro::
+// executor`, then recovers Session* through the TYPED session_executor
+// accessor (round-3 RC#1 — NOT asio::any_io_executor::query, NOT
+// thread_local). Safe across a prior coroutine resume on a different thread:
+// the value is read through the borrowed, stable Session* recovered fresh,
+// never via thread-affine storage.
+//
+// Shape note (D-18): the data-model E8 / `contracts/trace_context.hpp` shape
+// `inline constexpr struct current_trace_context_t { auto operator co_await()
+// const noexcept; } current_trace_context;` is unrealizable as written INSIDE
+// an asio::awaitable coroutine — asio's promise type defines
+// `await_transform` and silently rejects any operand it does not recognise
+// (asio::awaitable / this_coro::* / a frame-callable). The minimal idiomatic
+// realisation is a coroutine function returning an asio::awaitable so the
+// promise routes it through the `await_transform(awaitable<T,Executor>)`
+// overload. Usage becomes `co_await fixpp::current_trace_context()`.
+//
+// Engine-fallback note: 007 ships no Engine type; a session-less executor
+// yields a default trace_context (D-17 — concrete engine snapshot fallback
+// is the downstream Engine's).
+[[nodiscard]] inline asio::awaitable<fixpp::otel::trace_context>
+current_trace_context() {
+    asio::any_io_executor ex = co_await asio::this_coro::executor;
+    if (const auto* se = ex.template target<fixpp::core::session_executor>()) {
+        co_return fixpp::core::session_trace_context_of(*se);
+    }
+    co_return fixpp::otel::trace_context{};
+}
+
+}  // namespace fixpp

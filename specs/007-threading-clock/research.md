@@ -183,3 +183,23 @@ The 2f-requested `[2d App D §D.1/§D.2/§D.3]` edits (the `Session::session_are
 **Provenance / process note:** caught **proactively at the start of `/speckit-implement` Phase 5** by the value-typed-entity realizability sub-check just added to the `/speckit-checklist-audit` skill (the D-15 hardening) — i.e. the hardened §9 rule working as intended: a contract that *names* a not-yet-existent owning type (`MessageStore`) for a 2d-owned obligation is a realizability question resolved BEFORE coding, not a build-time surprise. Recorded as a decision (not a reactive fix) + tasks.md note on T037.
 
 **Anchor:** I-07 / `contracts/session.hpp`:64-82 / `[2d §4.7]:853,857` (as amended at `2e` v0.4 `[2d]:1594-1602`); D-5 scripted-test-double scoping; D-4/D-15 minimal-skeleton precedent; `[arch §2.3]`.
+
+---
+
+### D-17 — Engine-fallback `engine_trace_context` snapshot source is downstream Engine's; 007's session-less `current_trace_context` returns default
+
+**Decision:** When `current_trace_context()` cannot recover a `Session*` (the executor is not a `session_executor`, i.e. control plane / listener accept / bootstrap — the I-12 / E8 "miss" path), 007 returns a default-constructed `fixpp::otel::trace_context{}` rather than a real engine-snapshot read. The published-snapshot machinery (`detail::trace_context_snapshot` in `engine_config.hpp`) exists and is correct, but the snapshot itself lives on the downstream `Engine` (not in 007's scope — 007 ships **no** `Engine` type). A stateless free awaitable has no reachable engine handle in the no-session case.
+
+**Rationale:** E8 / I-12 pin the miss-path as "read the engine atomic `engine_trace_context` snapshot (no domain query)" — but with no `Engine` type to hold the snapshot, the *concrete* snapshot read is the downstream `Engine` spec's wiring. 007's faithful realization: (a) the **hit** path (recovered `Session*`, session open) returns `Session::trace_slot_.load()` via the `session_trace_context_of` core-leaf bridge; (b) **empty-slot mid-open** (recovered `Session*`, not yet open) → default + debug assert; (c) **miss** (no `session_executor` target) → default. The `Engine` later replaces (c) with a real snapshot read of `EngineConfig::engine_trace_context` via `detail::trace_context_snapshot` — no 2d-surface change required (the bridge is the only call site to update).
+
+**Anchor:** I-11 / I-12 / E8 / `contracts/trace_context.hpp`; `[2d §4.6]`; 007 minimal-skeleton "no Engine type" scoping (D-4 precedent); `detail::trace_context_snapshot` already implemented in `engine_config.hpp`.
+
+---
+
+### D-18 — `current_trace_context` realized as a coroutine function (not the contract's `inline constexpr struct ... { operator co_await(); }`)
+
+**Decision:** Ship `fixpp::current_trace_context` as a coroutine function `[[nodiscard]] inline asio::awaitable<fixpp::otel::trace_context> current_trace_context();` whose body does `auto ex = co_await asio::this_coro::executor; co_return …recover…;`. Usage: `co_await fixpp::current_trace_context()` (with parentheses). The data-model E8 / `contracts/trace_context.hpp` shape `inline constexpr struct current_trace_context_t { auto operator co_await() const noexcept; } current_trace_context;` is **unrealizable as written** inside an `asio::awaitable` coroutine — `asio::detail::awaitable_frame_base` defines `await_transform` and silently rejects any operand that is not an `asio::awaitable<T,Executor>`, a `this_coro::*` tag, or a frame-callable. A custom struct with an `operator co_await()` returning an arbitrary awaiter does NOT route through any of asio's `await_transform` overloads → compile error at every consumer call site.
+
+**Rationale:** The contract's "synchronous in the common case" property is preserved: the only suspension is `co_await asio::this_coro::executor`, which asio routes through its `await_transform(this_coro::executor_t)` overload and resumes immediately (no real suspension). The recovery semantics (typed `session_executor` target → `session_trace_context_of` bridge; D-17 fallback to default) are unchanged. The only deviation is the **shape of the consumer call**: `co_await fixpp::current_trace_context()` instead of `co_await fixpp::current_trace_context`. This is a minimal ergonomic deviation consistent with idiomatic asio coroutines; the spec shape was a descriptive convenience, not a binding signature. Same minimal-realization-vs-contract pattern as D-16 (flush hook seam) and D-17 (engine fallback source).
+
+**Anchor:** E8 / `contracts/trace_context.hpp`; `[2d §4.6]`; asio `awaitable_frame_base::await_transform` overload set; `co_await asio::this_coro::executor` precedent for synchronous resume.
