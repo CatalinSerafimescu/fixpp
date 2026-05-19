@@ -2,6 +2,7 @@
 // SHAPE ORACLE — NOT the build header. [2d §4.2] default Clock impl.
 #pragma once
 #include "clock.hpp"
+#include <asio/any_io_executor.hpp>
 
 namespace fixpp::core {
 
@@ -15,12 +16,18 @@ namespace fixpp::core {
 // (no live waiters in a well-formed shutdown — D-9 / root cause #5).
 class system_clock_source final : public Clock {
 public:
-    system_clock_source();
+    // Construct with the ENGINE-LEVEL executor (EngineConfig::executor) —
+    // NOT the session strand ([2d §4.2] note). The per-session reusable
+    // timer slot pool keyed by Session* is allocated lazily at first
+    // sleep_until and reset (not destroyed) between cycles.
+    explicit system_clock_source(asio::any_io_executor exec) noexcept;
     ~system_clock_source() override;
 
     [[nodiscard]] utc_time_point    now() const noexcept override;
     [[nodiscard]] steady_time_point steady_now() const noexcept override;
-    asio::awaitable<expected_t<void>> sleep_until(steady_time_point) override;
+    // NO expected_t — cancellation via asio::error::operation_aborted
+    // ([2d §4.1] / §4.2).
+    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point) override;
     void cancel_sleeps() noexcept override;
 };
 

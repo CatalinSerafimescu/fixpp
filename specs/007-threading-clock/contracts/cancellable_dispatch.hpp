@@ -22,8 +22,18 @@ template <class T> class expected_t;  // fwd
 //       awaitable completes expected_t<void>{}.
 // First parameter is the project-owned session_executor wrapper (round 3
 // root cause #1) so the primitive uniformly accepts BOTH per_session_strand
-// (strand-wrapped) and direct_executor (bare attested) shapes. The dispatch
-// node is allocated from the awaiter's session PMR resource — NO global heap.
+// (strand-wrapped) and direct_executor (bare attested) shapes.
+//
+// ARENA DERIVATION (pinned — [2d §6.5]:1153-1154): the dispatch node is
+// allocated from the session PMR arena recovered THROUGH `exec`, i.e. from
+// `exec.session_ptr()->session_arena()` (the [2d §4.5] resolution chain,
+// never-null). Touching the global heap on the dispatch path is a CONTRACT
+// VIOLATION surfaced as error::strand_dispatch_failed_oom (slot 50) on
+// arena exhaustion, never a silent global-heap fallback — seam 7's alloc
+// guard fails the build otherwise. The signature carries no separate arena
+// parameter precisely because the arena is reachable via session_ptr();
+// an implementation taking the global heap while matching this signature is
+// non-conformant.
 template <typename Handler>
 [[nodiscard]] asio::awaitable<expected_t<void>>
 cancellable_dispatch(session_executor exec,

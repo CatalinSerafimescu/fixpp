@@ -3,6 +3,7 @@
 // Real header: include/fixpp/core/test/mock_clock.hpp (PUBLIC test header).
 #pragma once
 #include "clock.hpp"
+#include <asio/any_io_executor.hpp>
 #include <chrono>
 #include <memory>
 
@@ -17,16 +18,34 @@ namespace fixpp::core {
 // the engine when held by a fixture shared_ptr.
 class mock_clock final : public Clock {
 public:
-    mock_clock();
+    // Seeded construction ([2d §4.3]): independent initial UTC + steady
+    // wall-time + the engine executor. Both clocks step independently via
+    // advance()/step_to()/set_utc_skew() so a test can simulate wall-clock
+    // skew vs monotonic time (NTP step) deterministically.
+    mock_clock(utc_time_point initial_utc,
+               steady_time_point initial_steady,
+               asio::any_io_executor exec);
     ~mock_clock() override;
 
     [[nodiscard]] utc_time_point    now() const noexcept override;
     [[nodiscard]] steady_time_point steady_now() const noexcept override;
-    asio::awaitable<expected_t<void>> sleep_until(steady_time_point) override;
+    // NO expected_t — cancellation via asio::error::operation_aborted
+    // ([2d §4.1] / §4.3): the awaiter is removed from the per-deadline list
+    // and completes with operation_aborted.
+    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point) override;
     void cancel_sleeps() noexcept override;
 
-    // Test driver — not part of the Clock interface.
+    // ── Test-only API ([2d §4.3]) — not part of the Clock interface ──────
+    // Step monotonic time by delta; wakes any sleep_until awaiter whose
+    // deadline <= new steady_now. Wall-clock now() moves by the same delta
+    // unless a wall-clock skew was set via set_utc_skew().
     void advance(std::chrono::nanoseconds delta) noexcept;
+    // Force monotonic time to point; wakes any awaiter whose deadline <=
+    // point ("fast-forward to next heartbeat").
+    void step_to(steady_time_point point) noexcept;
+    // Set a wall-clock-only delta that does NOT affect steady_now (NTP-step
+    // simulation; SendingTime-threshold tests).
+    void set_utc_skew(std::chrono::nanoseconds skew) noexcept;
 
 private:
     struct state;                    // opaque mutable-state object

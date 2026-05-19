@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace fixpp::otel {
 
@@ -16,8 +17,19 @@ struct trace_context {
     std::array<std::byte, 16> trace_id{};
     std::array<std::byte, 8>  span_id{};
     std::uint8_t              flags{};
-    // implementation padding to 32 B
+    std::array<std::byte, 7>  _pad{};   // explicit pad to a fixed 32 B
 };
+
+// The 32-byte size + trivial-copyability + standard-layout are the CONTRACT
+// (the std::atomic<trace_context> snapshot's is_always_lock_free probe and
+// the seqlock memcpy fallback both depend on them — D-1 / E11 / [2d §1.2] /
+// quickstart.md:7). An implementer is NOT free to land 25 or 40 bytes; this
+// is pinned, not advisory.
+static_assert(sizeof(trace_context) == 32
+              && std::is_trivially_copyable_v<trace_context>
+              && std::is_standard_layout_v<trace_context>,
+              "fixpp::otel::trace_context must be a 32-byte, "
+              "trivially-copyable, standard-layout POD (D-1 / E11)");
 
 }  // namespace fixpp::otel
 

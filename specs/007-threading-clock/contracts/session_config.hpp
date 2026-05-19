@@ -30,21 +30,21 @@ enum class lock_policy : std::uint8_t {
     spin  = 1,                // opt-in; store-write path always mutex ([const §XI.5])
 };
 
-// CLOSED, exactly 2 values — drop_oldest is UNREPRESENTABLE on the
-// app/session message path ([const §XV.15] / [2d §6.4]). The build header
-// applies [[clang::enum_extensibility(closed)]] (correctly placed after the
-// enum name, where supported); a static_assert at every switch enumerates
-// exactly these two; a runtime out-of-range cast is rejected with
-// error::invalid_session_config (seam 13). Attribute syntax/placement is an
-// /implement detail and is intentionally NOT pinned by this oracle.
-enum class backpressure_mode : std::uint8_t {
-    block                  = 0,   // push back to producer (default)
-    disconnect_and_recover = 1,   // terminate session; FIX ResendRequest on reconnect
-};
-
 // Value-typed; FROZEN at Session::open ([arch §5.6] — close-and-reopen only).
 // executor/clock/dictionary axes: resolved = override.value_or(engine_anchor).
 struct SessionConfig {
+    // CLOSED, exactly 2 values — drop_oldest is UNREPRESENTABLE on the
+    // app/session message path ([const §XV.15] / [2d §6.4]). The build header
+    // applies [[clang::enum_extensibility(closed)]] (correctly placed after the
+    // enum name, where supported); a static_assert at every switch enumerates
+    // exactly these two; a runtime out-of-range cast is rejected with
+    // error::invalid_session_config (seam 13). Attribute syntax/placement is an
+    // /implement detail and is intentionally NOT pinned by this oracle.
+    enum class backpressure_mode : std::uint8_t {
+        block                  = 0,   // push back to producer (default)
+        disconnect_and_recover = 1,   // terminate session; FIX ResendRequest on reconnect
+    };
+
     std::optional<asio::any_io_executor> executor_override;
     threading_mode mode  = threading_mode::per_session_strand;
     lock_policy    locks = lock_policy::mutex;
