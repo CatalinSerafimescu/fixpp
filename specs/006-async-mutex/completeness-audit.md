@@ -2,7 +2,9 @@
 
 `/gate-b` precondition per `[const §XVII.8]` / `feedback_feature_completeness_gate`.
 Maps every FR-001..FR-016 and SC-001..SC-010 to its covering implementation +
-seam/evidence. Status: **100% covered** (no waivers).
+seam/evidence. Status: **100% covered** (no waivers). Updated gate-b/r1
+2026-05-19: F-1 catalogue closure + F-2 abort-reentrant UAF fix + F-3-residual
+seams + F-4 metadata re-anchor to v1.6.
 
 ## Functional Requirements
 
@@ -23,7 +25,7 @@ seam/evidence. Status: **100% covered** (no waivers).
 | FR-013 publish memory-ordering spec + static_asserts | T069 | I-01..I-31 audit; FR-013 static_asserts compile clang-22+gcc-13; seam #18 |
 | FR-014 `[const §XV.9]` CI grep gate | US5 T062-T067 | seam #14 + `check_no_std_mutex_corpus` Tier-1 ctest, zero FN/FP |
 | FR-015 out-of-scope surface absent (U1) | T078 negative asserts | `sync_consumer_contract_compile` (no try_lock/alias/engaged-ctor/hook) |
-| FR-016 NFR-016 catalogue row at sign-off | T075 | `spec/feature-catalogue.md:228` + `spec/coverage-index.md:462` present |
+| FR-016 NFR-016 catalogue row closed at sign-off | T075 + gate-b/r1 F-1 fix | `spec/feature-catalogue.md:228` NFR-016 Status=done, /specify=v1.6, PR=#73, Tests=32 seams, Verified=GREEN; `spec/coverage-index.md:462` v1.6 sign-off with E-3/E-4 semantics |
 
 ## Success Criteria
 
@@ -38,7 +40,7 @@ seam/evidence. Status: **100% covered** (no waivers).
 | SC-007 ordering static_asserts compile + weak-memory | T069/seam #18 | clang-22+gcc-13 compile; `sync_arm64_weak_memory` GREEN incl. TSan; native ARM64 host-unavailable (x86_64) — recorded |
 | SC-008 consumer compile/link check | T078 | `sync_consumer_contract_compile` GREEN across full matrix |
 | SC-009 clean under merged sanitizer/static matrix | T070/T073 | TSan 30/30 (mandatory) + ASan + UBSan + gcc-release 30/30; clang-tidy zero correctness defects; coverage residue via `[const §IX.1]` justification note |
-| SC-010 NFR-016 catalogue + coverage-index | T075 | both present (see FR-016) |
+| SC-010 NFR-016 catalogue + coverage-index closed | T075 + gate-b/r1 F-1 fix | both closed: catalogue Status=done/v1.6/PR/Tests/Verified populated; coverage-index v1.6 narrative with E-3 always-post semantics (see FR-016) |
 
 ## Tasks ↔ phases
 

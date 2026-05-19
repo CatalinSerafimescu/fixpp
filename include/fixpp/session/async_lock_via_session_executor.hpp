@@ -26,7 +26,7 @@
 //
 //   Declaration only — NOT implemented here.
 //
-// Design anchor: .specify/2f-async-mutex.md v1.5 §4.3.2
+// Design anchor: .specify/2f-async-mutex.md v1.6 §4.3.2
 // Shape oracle:  specs/006-async-mutex/contracts/async_lock_via_session_executor.hpp
 // ─────────────────────────────────────────────────────────────────────────────
 //
