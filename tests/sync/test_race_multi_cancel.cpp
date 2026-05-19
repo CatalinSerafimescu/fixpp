@@ -47,7 +47,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamRaceMultiCancel, EightWaitersAllFiredSimultaneously) {
     constexpr int N = 8;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> granted_count{0};
@@ -55,6 +54,7 @@ TEST(SeamRaceMultiCancel, EightWaitersAllFiredSimultaneously) {
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -117,7 +117,6 @@ TEST(SeamRaceMultiCancel, EightWaitersAllFiredSimultaneously) {
 
 TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
     constexpr int N = 32;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> granted_count{0};
@@ -125,6 +124,7 @@ TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -172,12 +172,12 @@ TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
 
 TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
     constexpr int N = 4;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> total{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();

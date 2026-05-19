@@ -53,7 +53,6 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     constexpr int N = 8;   // number of waiting acquirers
     constexpr int D = 4;   // number of concurrent drain callers
 
-    async_mutex mtx;
 
     std::atomic<int> aborted_count{0};
     std::atomic<int> granted_count{0};
@@ -62,6 +61,7 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     std::atomic<int> drain_fail_count{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Canonical §4.7.4 sequencing: the D drainers run CONCURRENTLY while the
     // holder is still in its critical section (single ioc.run(), no two-phase
@@ -131,11 +131,11 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancelAndDrainConcurrent, IdempotentDrainAfterEpochCompletes) {
-    async_mutex mtx;
     bool first_drain_ok  = false;
     bool second_drain_ok = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         // First drain.
@@ -164,11 +164,11 @@ TEST(SeamCancelAndDrainConcurrent, NoDoubleResumeUnderConcurrentDrain) {
     constexpr int N = 12;
     constexpr int D = 3;
 
-    async_mutex mtx;
     std::atomic<int> total_completions{0};
     std::atomic<int> drain_success_count{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Phase 1: hold + queue N waiters, then release.
     auto phase1 = [&]() -> asio::awaitable<void> {

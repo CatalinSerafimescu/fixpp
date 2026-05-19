@@ -33,12 +33,12 @@ TEST(SeamContendedLatency, SecondAcquirerSuspends) {
     //  (a) they never overlap (in_critical is never > 1 simultaneously).
     //  (b) the second acquirer does in fact run (both complete).
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap_detected = 0;
     int first_done = 0, second_done = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto coro1 = [&]() -> asio::awaitable<void> {
         auto guard = co_await mtx.async_lock();
@@ -81,12 +81,12 @@ TEST(SeamContendedLatency, MutualExclusionMultipleWaiters) {
     // should remain consistent (each increment is visible to subsequent holders).
 
     constexpr int N = 8;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap_count = 0;
     int counter = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         auto guard = co_await mtx.async_lock();

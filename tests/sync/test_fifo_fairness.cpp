@@ -37,7 +37,6 @@ TEST(SeamFifoFairness, DrainCycleReversesLIFO) {
     // unlock reverses it so the first enqueued gets the lock first).
 
     constexpr int N = 16;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
 
@@ -45,6 +44,7 @@ TEST(SeamFifoFairness, DrainCycleReversesLIFO) {
     std::vector<int> acquire_order; // coroutine index in the order they acquire
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder: acquires first, lets others enqueue, then releases.
     auto holder = [&]() -> asio::awaitable<void> {
@@ -101,12 +101,12 @@ TEST(SeamFifoFairness, MutualExclusionPreservedAcrossMultipleDrains) {
     // Multiple drain cycles: each cycle has 4 waiters.
     constexpr int ROUNDS = 4;
     constexpr int PER_ROUND = 4;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int total_acquires = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto round_coros = [&]() -> asio::awaitable<void> {
         for (int r = 0; r < ROUNDS; ++r) {

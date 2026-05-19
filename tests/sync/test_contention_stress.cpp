@@ -28,12 +28,12 @@ TEST(SeamContentionStress, TenThousandCoroutines) {
     // double-increment, no overlap).
 
     constexpr int N = 10'000;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int counter = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -64,12 +64,12 @@ TEST(SeamContentionStress, ZeroLostWaiterOnChainedAcquires) {
 
     constexpr int N = 1'000;
     constexpr int ACQUIRES_PER = 2;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int total = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         for (int i = 0; i < ACQUIRES_PER; ++i) {

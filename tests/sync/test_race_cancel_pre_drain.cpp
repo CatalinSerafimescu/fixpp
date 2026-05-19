@@ -50,7 +50,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
     constexpr int N = 3;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
 
@@ -59,6 +58,7 @@ TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder: acquires, yields to let waiters queue, fires cancel on sigs[1],
     // then releases.
@@ -119,7 +119,6 @@ TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
 
 TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
     constexpr int N = 8;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> granted_count{0};
@@ -127,6 +126,7 @@ TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -174,12 +174,12 @@ TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
 
 TEST(SeamRaceCancelPreDrain, MutexFreeAfterRace) {
     constexpr int N = 4;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> total{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();

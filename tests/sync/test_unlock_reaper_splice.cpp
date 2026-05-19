@@ -38,12 +38,12 @@ TEST(SeamUnlockReaperSplice, ResidualFifoChainDrainedCorrectly) {
     //
     // All N waiters must eventually acquire and release.  No waiter is lost.
     constexpr int N = 32;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int total = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder: acquires first, yields to allow all waiters to queue, then
     // releases.  The first unlock drain produces next_drain_head_ residual.
@@ -89,12 +89,12 @@ TEST(SeamUnlockReaperSplice, MultipleRoundsResidualChain) {
     // next_drain_head_ residual chain splicing across multiple unlock calls.
     constexpr int ROUNDS = 3;
     constexpr int PER_ROUND = 16;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int total = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         for (int r = 0; r < ROUNDS; ++r) {

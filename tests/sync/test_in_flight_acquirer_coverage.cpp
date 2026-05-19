@@ -55,7 +55,6 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
-    async_mutex mtx;
 
     bool drain_ok = false;
     std::atomic<int> acquirer_granted{0};
@@ -63,6 +62,7 @@ TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
     std::atomic<int> acquirer_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Stagger: in-flight acquirer starts just before drain.
     auto run = [&]() -> asio::awaitable<void> {
@@ -170,13 +170,13 @@ TEST(SeamInFlightAcquirerCoverage, MultipleIterationsCoverRaceWindow) {
 
 TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
     constexpr int M = 8;
-    async_mutex mtx;
 
     std::atomic<int> post_drain_drained{0};
     std::atomic<int> post_drain_granted{0};
     bool drain_ok = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;
@@ -227,7 +227,6 @@ TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
 TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
     constexpr int K = 6;   // concurrent in-flight acquirers
 
-    async_mutex mtx;
 
     std::atomic<int> total_completed{0};
     std::atomic<int> granted_count{0};
@@ -235,6 +234,7 @@ TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
     std::atomic<int> drain_success{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Spawn K in-flight acquirers with varying stagger, and 2 concurrent drains
     // as top-level futures (not nested, avoiding deadlock).

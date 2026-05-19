@@ -51,7 +51,6 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
-    async_mutex mtx;
     asio::cancellation_signal cancel_sig;
 
     std::optional<expected_t<async_lock_guard>> waiter_result;
@@ -59,6 +58,7 @@ TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
     int  holder_counter = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder coroutine: acquires mutex, yields to let waiter park,
     // fires cancellation, then releases.
@@ -116,12 +116,12 @@ TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancellationMidWait, PartialCancelTreatedAsTotal) {
-    async_mutex mtx;
     asio::cancellation_signal cancel_sig;
 
     std::optional<expected_t<async_lock_guard>> waiter_result;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -155,12 +155,12 @@ TEST(SeamCancellationMidWait, PartialCancelTreatedAsTotal) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancellationMidWait, TerminalCancelTreatedAsTotal) {
-    async_mutex mtx;
     asio::cancellation_signal cancel_sig;
 
     std::optional<expected_t<async_lock_guard>> waiter_result;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -194,13 +194,13 @@ TEST(SeamCancellationMidWait, TerminalCancelTreatedAsTotal) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancellationMidWait, CancelledWaiterDoesNotAcquireOwnership) {
-    async_mutex mtx;
     asio::cancellation_signal cancel_sig;
 
     bool cancelled_got_lock = false;
     bool second_got_lock    = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();

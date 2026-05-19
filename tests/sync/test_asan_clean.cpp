@@ -49,12 +49,12 @@ TEST(SyncAsanClean, ContentionMixMutualExclusion) {
     constexpr int N            = 64;
     constexpr int ACQUIRES_PER = 8;
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap  = 0;
     int counter  = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         for (int i = 0; i < ACQUIRES_PER; ++i) {
@@ -94,12 +94,12 @@ TEST(SyncAsanClean, ContentionMixMutualExclusion) {
 TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
     constexpr int N = 32;
 
-    async_mutex mtx;
     std::atomic<int> granted_count{0};
     std::atomic<int> cancelled_count{0};
     std::atomic<int> completed_count{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -160,10 +160,10 @@ TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
 TEST(SyncAsanClean, DrainPathNoHeapErrors) {
     constexpr int N = 16;
 
-    async_mutex drain_mtx;
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex drain_mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;

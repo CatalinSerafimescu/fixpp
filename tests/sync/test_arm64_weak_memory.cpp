@@ -39,12 +39,12 @@ TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
     constexpr int N = 4'000;
     const unsigned T = std::max(2u, std::thread::hardware_concurrency());
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     std::atomic<int> overlap{0};
     std::atomic<int> completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -80,12 +80,12 @@ TEST(SeamArm64WeakMemory, DrainUnderMultiThreadContention) {
     constexpr int N = 1'500;
     const unsigned T = std::max(2u, std::thread::hardware_concurrency());
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     std::atomic<int> overlap{0};
     std::atomic<int> done{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // §4.7.4 canonical graceful-close: the holder holds, then releases on its
     // OWN bounded timeline (a fixed number of executor yields so the drain +

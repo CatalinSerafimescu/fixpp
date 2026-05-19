@@ -49,13 +49,13 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamRaceCancelDuringResume, LateSignalIsNoOpWaiterKeepsLock) {
-    async_mutex mtx;
     asio::cancellation_signal cancel_sig;
 
     bool waiter_got_lock = false;
     bool waiter_kept_lock = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -110,12 +110,12 @@ TEST(SeamRaceCancelDuringResume, LateSignalIsNoOpWaiterKeepsLock) {
 
 TEST(SeamRaceCancelDuringResume, GrantOrCancelExactlyOneOutcomePerWaiter) {
     constexpr int ROUNDS = 32;
-    async_mutex mtx;
 
     std::atomic<int> lock_granted{0};
     std::atomic<int> lock_aborted{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     for (int r = 0; r < ROUNDS; ++r) {
         asio::cancellation_signal cancel_sig;
@@ -168,12 +168,12 @@ TEST(SeamRaceCancelDuringResume, GrantOrCancelExactlyOneOutcomePerWaiter) {
 
 TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
     constexpr int N = 16;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> total{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();

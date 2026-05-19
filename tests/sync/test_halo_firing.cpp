@@ -66,12 +66,12 @@ TEST(SyncHaloFiring, ContendedEmbeddedPathFunctional) {
     // contention and actually exercise the suspend/resume path.
     constexpr int N = 64;
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap  = 0;
     int counter  = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         // mr == nullptr → embedded path (HALO-eligible frame layout).

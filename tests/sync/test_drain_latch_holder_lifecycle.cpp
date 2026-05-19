@@ -55,7 +55,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     constexpr int N = 6;
-    async_mutex mtx;
 
     std::atomic<int> aborted_count{0};
     std::atomic<int> completed_count{0};
@@ -64,6 +63,7 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     std::atomic<bool> holder_released{false};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder coroutine: acquires, holds for a while, then releases.
     auto holder_coro = [&]() -> asio::awaitable<void> {
@@ -130,13 +130,13 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
 
 TEST(SeamDrainLatchHolderLifecycle, NeverDrainedMutexWorksNormally) {
     constexpr int N = 8;
-    async_mutex mtx;  // default-constructed; drain_latch_ptr_ is null
 
     std::atomic<int> granted{0};
     std::atomic<int> in_critical{0};
     int overlap = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;  // default-constructed; drain_latch_ptr_ is null
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -165,11 +165,11 @@ TEST(SeamDrainLatchHolderLifecycle, NeverDrainedMutexWorksNormally) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDrainLatchHolderLifecycle, AcquireAfterDrainIsRejected) {
-    async_mutex mtx;
     bool drain_ok = false;
     bool post_drain_acquire_rejected = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         auto d = co_await mtx.cancel_and_drain();
@@ -207,7 +207,6 @@ TEST(SeamDrainLatchHolderLifecycle, AcquireAfterDrainIsRejected) {
 
 TEST(SeamDrainLatchHolderLifecycle, TwoConcurrentDrainersWithPreDrainHolder) {
     constexpr int N = 4;
-    async_mutex mtx;
 
     std::atomic<int> aborted_count{0};
     std::atomic<int> granted_count{0};
@@ -215,6 +214,7 @@ TEST(SeamDrainLatchHolderLifecycle, TwoConcurrentDrainersWithPreDrainHolder) {
     std::atomic<int> drain_success{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Canonical §4.7.4 sequencing: two drainers run CONCURRENTLY while the
     // pre-drain holder still holds (single ioc.run()). One wins

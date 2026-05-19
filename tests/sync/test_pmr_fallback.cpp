@@ -60,12 +60,12 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
     constexpr int N = 32;
     std::array<std::byte, 32768> buf{};
 
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap  = 0;
     int counter  = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Holder: grabs the lock and holds it long enough for all N waiters to enqueue.
     auto holder_coro = [&]() -> asio::awaitable<void> {
@@ -128,10 +128,10 @@ TEST(SyncPmrFallback, TinyPmrExhaustionReturnsAllocFailed) {
     // 32 bytes: definitely too small for one pmr_waiter_block.
     std::array<std::byte, 32> tiny_buf{};
 
-    async_mutex mtx;
     bool alloc_failed_received = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         // Step 1: hold the lock so the next async_lock MUST enqueue (contended path).
@@ -192,9 +192,9 @@ TEST(SyncPmrFallback, UncontendedPmrTakesFastPath) {
         buf.data(), buf.size(),
         std::pmr::null_memory_resource()};
 
-    async_mutex mtx;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         // Uncontended: fast-path CAS → no pmr_waiter_block allocated.

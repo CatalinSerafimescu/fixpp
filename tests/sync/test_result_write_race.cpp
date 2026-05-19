@@ -34,13 +34,13 @@ TEST(SeamResultWriteRace, EveryAcquireReceivesWellFormedResult) {
     // N coroutines contend.  Each verifies its result is either has_value()
     // (a valid guard) or has_error().  Never an uninitialised slot.
     constexpr int N = 256;
-    async_mutex mtx;
     std::atomic<int> in_critical{0};
     int overlap = 0;
     int good_results = 0;
     int bad_results = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto make_coro = [&]() -> asio::awaitable<void> {
         auto r = co_await mtx.async_lock();
@@ -70,10 +70,10 @@ TEST(SeamResultWriteRace, EveryAcquireReceivesWellFormedResult) {
 TEST(SeamResultWriteRace, SequentialResultsAreConsistent) {
     // Sequential acquires: each result must be an engaged guard.
     constexpr int N = 64;
-    async_mutex mtx;
     int good = 0;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto f = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
         for (int i = 0; i < N; ++i) {

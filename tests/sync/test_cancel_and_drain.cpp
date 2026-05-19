@@ -48,7 +48,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamCancelAndDrain, EightWaitersAllAbortedOnDrain) {
     constexpr int N = 8;
-    async_mutex mtx;
 
     std::atomic<int> aborted_count{0};
     std::atomic<int> granted_count{0};
@@ -56,6 +55,7 @@ TEST(SeamCancelAndDrain, EightWaitersAllAbortedOnDrain) {
     bool drain_succeeded = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Canonical §4.7.4 graceful-close sequencing: cancel_and_drain() runs
     // CONCURRENTLY while the holder is still in its critical section. The
@@ -112,11 +112,11 @@ TEST(SeamCancelAndDrain, EightWaitersAllAbortedOnDrain) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancelAndDrain, PostDrainAcquireReturnsSyncLockDrained) {
-    async_mutex mtx;
     bool drain_ok = false;
     bool post_drain_correct = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         // Drain an idle mutex (no waiters, not held).
@@ -145,11 +145,11 @@ TEST(SeamCancelAndDrain, PostDrainAcquireReturnsSyncLockDrained) {
 
 TEST(SeamCancelAndDrain, NoDoubleResumeNoLostWaiter) {
     constexpr int N = 16;
-    async_mutex mtx;
 
     std::atomic<int> total_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;
@@ -191,12 +191,12 @@ TEST(SeamCancelAndDrain, NoDoubleResumeNoLostWaiter) {
 
 TEST(SeamCancelAndDrain, MultiplePostDrainAcquiresAllGetDrained) {
     constexpr int M = 8;
-    async_mutex mtx;
 
     std::atomic<int> drained_count{0};
     bool drain_ok = false;
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto run = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;

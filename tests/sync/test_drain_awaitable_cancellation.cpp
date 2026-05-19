@@ -50,7 +50,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     constexpr int N = 4;
-    async_mutex mtx;
 
     asio::cancellation_signal drain_cancel_sig;
     bool drain_aborted = false;
@@ -58,6 +57,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     std::atomic<int> waiter_completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
 
     // Canonical §4.7.3 I-5 sequencing: the holder stays HELD so the reaper
     // reaches and PARKS on its cancellable wait (step (h)); the drain's own
@@ -144,12 +144,12 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDrainAwaitableCancellation, NoDanglingFuturesOnDrainCancellation) {
-    async_mutex mtx;
     asio::cancellation_signal drain_sig;
 
     bool drain_done = false;
 
     asio::io_context ioc;
+    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
 
     auto drain_coro = [&]() -> asio::awaitable<void> {
         auto d = co_await mtx.cancel_and_drain();

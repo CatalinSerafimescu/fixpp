@@ -52,7 +52,6 @@ using fixpp::sync::test::yield_n;
 
 TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
     constexpr int N = 8;
-    async_mutex mtx;
 
     // N cancellation signals — one per waiter.
     std::vector<asio::cancellation_signal> sigs(N);
@@ -65,6 +64,7 @@ TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
     std::atomic<int> lock_holder_idx{-1};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     // Initial holder: holds until all N waiters have pushed onto the LIFO,
     // then releases (no cancellation signals here).
@@ -149,7 +149,6 @@ TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
 
 TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
     constexpr int N = 8;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> total_completed{0};
@@ -157,6 +156,7 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
     std::atomic<int> aborted_count{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
@@ -208,12 +208,12 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
 
 TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
     constexpr int N = 4;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(N);
     std::atomic<int> aborted{0};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
     auto holder = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();

@@ -64,8 +64,6 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
     constexpr int S = 3;   // reaper + 2 subscribers (only reaper's slot fires)
     constexpr int N = 4;   // waiters queued on the mutex
 
-    async_mutex mtx;
-
     // Only sigs[0] is fired; sigs[1] and sigs[2] are never fired.
     // Per v1.4 contract, sigs[1] and sigs[2] must still receive sync_lock_aborted.
     std::vector<asio::cancellation_signal> sigs(S);
@@ -75,6 +73,9 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
     std::atomic<int> drain_completed_count{0};
 
     asio::io_context ioc;
+    // mtx after ioc: cancel_and_drain() binds a channel to ioc's executor;
+    // ~async_mutex must run before ~io_context (else channel_service UAF).
+    async_mutex mtx;
 
     // Canonical §4.7.3 I-5/v1.4 sequencing (single ioc.run()): the holder
     // stays HELD so the reaper reaps the N waiters and PARKS on its wait()
@@ -160,12 +161,12 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
 
 TEST(SeamDrainReaperAbortSubscribers, NoHangWithImmediateReaperAbort) {
     constexpr int S = 3;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(S);
     std::atomic<int> completed{0};
 
     asio::io_context ioc;
+    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
 
     std::vector<std::future<void>> dfuts;
     dfuts.reserve(S);
@@ -200,13 +201,13 @@ TEST(SeamDrainReaperAbortSubscribers, NoHangWithImmediateReaperAbort) {
 TEST(SeamDrainReaperAbortSubscribers, LateAbortDoesNotLeaveSubscriberHanging) {
     constexpr int S = 2;
     constexpr int N = 2;
-    async_mutex mtx;
 
     std::vector<asio::cancellation_signal> sigs(S);
     std::atomic<int> completed{0};
     std::atomic<int> waiter_done{0};
 
     asio::io_context ioc;
+    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
 
     // Phase 1: hold, park N waiters, release.
     auto phase1 = [&]() -> asio::awaitable<void> {
@@ -267,8 +268,6 @@ TEST(SeamDrainReaperAbortSubscribers, LateAbortDoesNotLeaveSubscriberHanging) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDrainReaperAbortSubscribers, SubscriberGetsAbortedWhenReaperAborted) {
-    async_mutex mtx;
-
     asio::cancellation_signal reaper_sig;
     // subscriber_sig is never fired.
 
@@ -277,6 +276,7 @@ TEST(SeamDrainReaperAbortSubscribers, SubscriberGetsAbortedWhenReaperAborted) {
 
     std::atomic<bool> holder_release{false};
     asio::io_context ioc;
+    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
 
     // Canonical §4.7.3 I-5 sequencing: a holder stays HELD so the reaper
     // reaches and PARKS on its wait(); only then is the reaper's slot fired,
