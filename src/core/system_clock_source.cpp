@@ -26,6 +26,7 @@
 
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/strand.hpp>
 #include <asio/use_awaitable.hpp>
 
 namespace fixpp::core {
@@ -58,7 +59,17 @@ steady_time_point system_clock_source::steady_now() const noexcept {
 
 asio::awaitable<void>
 system_clock_source::sleep_until(steady_time_point deadline) {
-    auto timer = std::make_shared<asio::steady_timer>(impl_->engine_exec);
+    // Per-timer strand on engine_exec: asio timers are NOT thread-safe and the
+    // contract ([2d §4.1.1]; I-09/I-17) permits concurrent cancel_sleeps() from
+    // any thread. Without this wrap, engine_exec is a multi-threaded executor
+    // (e.g. thread_pool), so async_wait completion on one worker can race a
+    // posted cancel() on another worker — TSan-flagged in
+    // deadline_timer_service::cancel (seam 10). The strand serialises all ops
+    // (expires_at / async_wait / cancel) on this one timer; cancel_sleeps()
+    // already posts cancel() via the timer's own executor (now this strand),
+    // so the existing post is correct as-is.
+    auto timer = std::make_shared<asio::steady_timer>(
+        asio::make_strand(impl_->engine_exec));
     timer->expires_at(deadline);
 
     std::uint64_t id;
