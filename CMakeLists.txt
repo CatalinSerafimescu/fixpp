@@ -32,6 +32,9 @@ include(cmake/Coverage.cmake)
 # ── External dependencies (Conan-generated CMakeDeps) ───────────────────────
 find_package(GTest CONFIG QUIET)
 find_package(benchmark CONFIG QUIET)
+# asio/1.36.0 — 006-async-mutex (first async/coroutine feature; user-approved
+# new Conan row per [const §III.2], conanfile.py).
+find_package(asio CONFIG QUIET)
 
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -46,6 +49,7 @@ enable_testing()
 
 # ── Modules (acyclic order per [arch §2.2]) ──────────────────────────────────
 add_subdirectory(src/core)
+add_subdirectory(src/core/sync)   # fixpp_sync — 006-async-mutex (depends on fixpp_core + asio)
 add_subdirectory(src/dictionary)
 add_subdirectory(src/wire)
 add_subdirectory(src/tls)
@@ -114,6 +118,7 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/alloc_guard)
   add_subdirectory(tests/oracle)
   add_subdirectory(tests/link)
+  add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
 endif()
 
 if(FIXPP_BUILD_FUZZ)

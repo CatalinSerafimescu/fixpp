@@ -771,6 +771,163 @@ static_assert(alignof(async_mutex_awaiter) >= 8,
 }  // namespace fixpp::sync::detail
 ```
 
+> **── v1.5 Erratum E-1 (2026-05-18, recorded at `/implement`; user-approved) ──**
+>
+> **Defect:** §4.2/§4.2.2 describe `async_mutex_awaiter` as a *raw C++20 awaiter*
+> driven directly by `co_await m.async_lock()` (storing `coro_ = h` in
+> `await_suspend(std::coroutine_handle<>)`), while §3/§6.1 (line ~155) require
+> `async_lock()` to return `asio::awaitable<expected_t<async_lock_guard>>`. These
+> are **mutually inconsistent**: `asio::awaitable<T>`'s promise `await_transform`
+> does not pass arbitrary raw C++ awaiters through, and this mutex is *only* ever
+> consumed inside asio coroutines (`[const §XI.1]`). The Gate-A rounds (1–2)
+> verified document/transcription fidelity only, never implementability, so this
+> slipped through. This erratum resolves it **without re-opening any design
+> decision** — every guarantee (FIFO, cancellation CAS-arbitration, RC-A residual,
+> drain, zero-global-heap, PMR three-case, ≤96 B awaiter) is preserved.
+>
+> **Resolution (binding for `/implement`; the design doc remains authoritative as
+> amended by this erratum):** `async_lock(mr)` is realized as an
+> `asio::async_compose`/`asio::async_initiate` operation over completion
+> signature `void(expected_t<async_lock_guard>)`. The `async_mutex_awaiter` is the
+> **operation/waiter state object** (not separately `new`'d). Field mapping:
+> the design's `coro_` continuation is **replaced by the composed-operation
+> completion handler** (semantically identical: "resume the suspended caller with
+> the result"); all other fields (`mutex_`, `next_`, `phase_`, `slot_`, `result_`,
+> `slot_storage_`) and every I-01..I-31 ordering are unchanged. `await_ready` /
+> `await_suspend` / `await_resume` prose maps onto the initiation/intermediate/
+> completion stages of the composed op respectively; the §4.2.2 step-4
+> `asio::bind_allocator(detail::slot_allocator{this, mr})` is bound as the
+> **completion handler's associated allocator**, so `async_compose`'s own
+> operation-state storage **and** the cancellation-slot handler closure both draw
+> from the §4.3.4 three-case storage (caller-frame inline `slot_storage_` when
+> `mr==nullptr`+HALO / promise-allocator when no-HALO / `mr` when non-null) —
+> **never a raw global `new`**. The zero-global-heap (`[const §VIII.5]`), HALO
+> (§6.4, seam #9), PMR-fallback (§4.3, seam #10), `slot_allocator` three-case
+> (seam #21) and awaiter byte-budget (≤96 B, T011/T078) contracts are thereby
+> preserved exactly. Any implementation that separately heap-allocates the waiter
+> node via global `operator new` is **non-conforming** to this erratum.
+
+> **── v1.6 Erratum E-2 (2026-05-18, recorded at `/implement`; Codex-diagnosed, Opus-cross-reviewed + source-confirmed, user-authorized) ──**
+>
+> **Defect (cancellation/lifetime contradiction introduced by E-1).** E-1 made
+> `async_mutex_awaiter` *frame-local* while §4.2 keeps the awaiter object itself
+> as the intrusive node linked through `state_` and `next_drain_head_` (it carries
+> `next_`, `phase_`, `result_`). §4.5 (`total` row), §4.5.1 window 4, and the
+> memory-ordering invariant I-07 mandate that the cancel-CAS winner
+> (`queued → cancelled`) write the aborted result and **then schedule resumption
+> promptly on the bound executor**. For a cancelled *interior* waiter still linked
+> in the singly-linked intrusive LIFO, prompt resumption runs the bound-executor
+> completion, which resumes and then destroys the `async_lock(mr)` coroutine frame
+> — destroying the frame-local awaiter (hence its `next_`/`phase_`/`result_`)
+> **while `state_` / `next_drain_head_` still hold raw pointers to it**. A
+> Treiber-style intrusive LIFO has no lock-free interior-node deletion, so the
+> cancel winner cannot first unlink itself. Result: a guaranteed use-after-free.
+> The as-implemented mitigation (defer resumption to a later `unlock()` walk)
+> avoids the UAF but loses liveness when no later walker exists (seams #16
+> `sync_race_multi_cancel`, #17 `sync_race_cancel_during_resume` hang) and
+> swallows residual cancellation (#22 `sync_residual_cancel_graceful`), and
+> `state_`'s grant path mis-arbitrates against a cancelled node (#4
+> `sync_cancellation_mid_wait` aborts — cancelled waiter wrongly granted). Codex
+> (2026-05-18) proved the three constraints — *E-1 frame-local awaiter*, *§4.2
+> awaiter-is-the-node*, *§4.5 prompt bound-executor cancel-resume* — are jointly
+> unsatisfiable by any surgical implementation; independently cross-reviewed and
+> source-confirmed by Opus (`async_mutex.hpp:214/411` — node is `async_mutex_awaiter*`;
+> `:511-524` — `on_cancel` defers; `:819-865` — walker derefs the frame).
+>
+> **Resolution (binding for `/implement`; the design doc remains authoritative as
+> amended by E-1 *and* this erratum).** Split the waiter into two objects, changing
+> exactly one assumption — *"the frame-local awaiter is the intrusive node"* →
+> *"the frame-local awaiter attaches to a stable, pooled intrusive node"*:
+>
+> 1. `detail::async_mutex_awaiter` — **remains frame-local and HALO-eligible**;
+>    owns the E-1 composed-op completion-handler machinery + `slot_storage_`,
+>    plus a `detail::waiter_record* record_` attachment pointer. It is **no longer**
+>    the intrusive node.
+> 2. `detail::waiter_record` — **the stable intrusive node** linked through
+>    `state_` and `next_drain_head_`. Carries `next_`, the `phase_` CAS atom, the
+>    terminal `expected_t<async_lock_guard>` result storage, the back-pointer
+>    `mutex_`, an `std::atomic<async_mutex_awaiter*> attached_awaiter_`, inline
+>    bound-executor storage (Gap-B below), and a `std::atomic<std::uint32_t>
+>    refcount_` lifetime token. Its lifetime is independent of the coroutine frame.
+>
+> **Normative remapping (no semantic change to any other clause).** Wherever
+> §4.2 / §4.2.1 / §4.2.2 / §4.2.3 / §4.5 / §4.5.1 / §4.5.2 / §4.7.2 and the
+> `result_`-ownership paragraph below say the *awaiter* is the intrusive node or
+> carries `next_`/`phase_`/`result_`, **read `waiter_record`**. `state_` and
+> `next_drain_head_` store `detail::waiter_record*`. The §4.5 prompt-resume
+> semantics, the v1.4 CAS-then-publish writer discipline, the one-winner walk, FIFO,
+> RC-A residual observability, the three-state phase machine, and every I-01..I-31
+> ordering are **unchanged** — they now apply to `waiter_record::phase_` /
+> `waiter_record::result_`. This erratum makes the §4.5 contract *implementable*;
+> it does not relax it. `await_resume` reads the terminal result through
+> `record_` (the frame may legitimately outlive nothing; the *node* is the
+> stable storage), superseding the "result_ points into caller-frame storage"
+> clause of the v1.2/v1.4 paragraph below for the contended path.
+>
+> **Gap-close A — reclamation is pinned to the existing single-drainer invariant
+> (no hazard pointers / epoch GC).** The mutex already serializes all list
+> *consumption*: the only two structural walkers are `unlock()` (runs solely
+> under logical lock ownership ⇒ at most one) and `cancel_and_drain()`'s reaper
+> (single, gated by `drain_in_progress_.test_and_set(acq_rel)`), and they are
+> **mutually exclusive** because `unlock()` takes the drain-aware short-circuit
+> (§4.5.2 — does not walk/grant) when `draining_ == true`. Hence at most one
+> walker ever traverses the lists; the only other actor on a node is its
+> per-waiter cancellation handler, which performs **no structural mutation** —
+> it arbitrates solely via the `phase_` CAS. `waiter_record` reclamation is
+> therefore single-shot via `refcount_` with edges: **+1 creator** (the
+> `async_lock` initiation); **a single in-lists membership ref _transferred_**
+> (never re-counted) across every `state_ ⇄ next_drain_head_` splice; **+1 per
+> scheduled prompt-resume** (resumer ref, dropped when the bound-executor
+> completion runs); **+1 while `attached_awaiter_ != nullptr`** (dropped at
+> `await_resume`). The final `refcount_.fetch_sub(1, acq_rel) == 1` reclaims the
+> node (returns it to the pool / `mr`) — new invariant **I-32**. Because there is
+> never a *competing* walker, the classic "load pointer, it's freed before I take
+> a ref" hazard cannot arise; the only race is the sole walker vs. the
+> cancel-CAS winner on one node, fully arbitrated by `phase_` + the resumer ref
+> keeping the node alive until the scheduled completion runs. Refcount is
+> sufficient and TSan-clean *because of* the single-drainer property — this is a
+> normative precondition of the protocol, not an implementation detail.
+>
+> **Gap-close B — inline bound-executor storage (no type-erasure heap).**
+> `waiter_record` stores the bound executor in an inline aligned buffer
+> `exec_storage_`, **not** a heap-allocating type-erased `asio::any_io_executor`,
+> mirroring E-1's `slot_storage_` discipline. A `static_assert` requires the
+> project's bound executor (the `[2d §4.8]` `session_executor` wrapper over a
+> strand / `any_io_executor` SBO) to fit `exec_storage_`; overflow surfaces
+> `unexpected{sync_lock_alloc_failed}` (error slot 44) — the identical contract
+> to the §4.3.4 case-1 inline-buffer overflow. This keeps the contended
+> `mr == nullptr` path free of global `operator new` from executor type-erasure.
+>
+> **`waiter_record` storage policy (extends §4.3 / §4.3.4).** (a) **Uncontended**
+> (`await_ready` fast-path CAS wins): **no `waiter_record`** is created — zero
+> allocation by construction (unchanged). (b) **Contended, `mr == nullptr`:**
+> `waiter_record` is drawn from a **per-mutex bounded, pre-reserved freelist/slab**
+> owned by `async_mutex` — zero global `operator new`/`delete` on this path.
+> (c) **Contended, `mr != nullptr`:** `waiter_record` is allocated from `mr` and
+> reclaimed back to `mr` (extends the §4.3 PMR three-case to the node). Pool or
+> `mr` exhaustion surfaces `unexpected{sync_lock_alloc_failed}` (slot 44).
+> **Constitutional posture (corrects the "weakens `[const Art.VIII §5]`"
+> framing).** `[const Art.VIII §5]` makes *arena/PMR the **default** sanctioned
+> allocator on the hot path*; a bounded per-mutex arena is exactly that
+> mechanism, **not** a deviation. E-2 therefore **preserves** the zero-global-`new`
+> guarantee (uncontended: by construction; contended: by the pre-reserved arena),
+> and does not require a constitution amendment or a §VIII deviation
+> justification. The HALO (§6.4 #9), PMR-fallback (§4.3 #10), `slot_allocator`
+> three-case (#21), and CAS-then-publish (#28) seams are preserved; seams #4 / #16
+> / #17 / #22 become satisfiable. Any implementation that uses global
+> `operator new` for a `waiter_record` on the contended `mr == nullptr` path, or
+> that uses a heap-allocating type-erased executor, is **non-conforming** to E-2.
+>
+> **Scope / Gate note.** E-2 amends Gate-A-converged 2f. Recorded at `/implement`;
+> Codex-diagnosed, Opus-authored after independent source confirmation,
+> user-authorized 2026-05-18 ("I finalize E-2, then Codex implements"). Companion
+> edits land in `specs/006-async-mutex/data-model.md` (new entity **E2a
+> `waiter_record`**; `state_`/`next_drain_head_` retyped to `waiter_record*`;
+> E2 `async_mutex_awaiter` gains `record_`, loses `next_`/`phase_`/`result_`
+> ownership; new invariant **I-32**; I-06/I-07/I-08 redefined on
+> `waiter_record::phase_`). This re-touches 006 Gate A scope — flag for the
+> eventual `/gate-a`.
+
 **`result_` validity window and ownership (v1.2 / Opus N-P3-3 round-2 close; v1.4 CAS-then-publish close).** `result_` is a non-owning raw pointer that points into the *caller-frame storage* for the `expected_t<async_lock_guard>` value the coroutine yields via `await_resume`. Concretely: the awaiter is constructed in-place at the `co_await m.async_lock()` site; `result_` is initialised by the `async_lock(...)` awaitable factory to point at a stack-local `expected_t<async_lock_guard>` slot in the suspended coroutine's frame (or, on the PMR fallback path, at the equivalent slot allocated alongside the awaiter from `mr`). **Lifetime contract:** `result_` is valid from `await_suspend(h)` entry through `await_resume()` return, inclusive — i.e., for the duration of the awaiter's suspension. **Validity ends at `await_resume` return** (the coroutine resumes, reads `*result_`, and the awaiter is destroyed in the embedded path or de-allocated back to `mr` in the PMR-fallback path). **Writer-side discipline (v1.4): CAS-then-publish.** Potential writers (the unlock-walker and the cancellation-handler, OR the reaper-walker in §4.7.2 step (f) and the cancellation-handler) first arbitrate ownership by CAS'ing `phase_` from `queued` to their terminal state (`granted` or `cancelled`) with `memory_order_acq_rel`. **Only the CAS winner writes `*result_`; the loser observes terminal phase and does not touch `*result_`.** The winner then writes `*result_` and schedules the coroutine on its bound executor. The resumed coroutine's `await_resume` performs `phase_.load(acquire)` first, then reads `*result_`; that acquire-load synchronises with the winner's release-CAS, and the result-slot write is sequenced before the bound-executor resumption. **Critical section closure:** the winner-side `*result_ = ...` write is sequenced *before* `schedule_resume_on_bound_executor(awaiter)`, so the awaiter remains alive for the duration of the writer's critical section and `result_` continues to point at valid storage until the resumed coroutine returns from `await_resume()`. The §6.2.2 row "`result_` slot publication" governs the cross-thread publication ordering. The §9 seam #28 verifies the CAS-then-publish arbitration under TSan.
 
 **Residual ownership lives on the mutex (RC-A close).** The v1.0 design carried `residual_` on the awaiter — the granted waiter "owned" the FIFO chain of remaining queued waiters from the unlock-drain. Codex C-P1-2 / Opus C-P1-2 / Opus N-P1-1 / Opus N-P1-2 collectively showed this is unimplementable: the `async_lock_guard` carries only `async_mutex*` (§4.4), `unlock()` is invoked on `async_mutex*`-only state, and the awaiter is destroyed/deallocated when `await_resume` returns. The granted waiter's residual list was unreachable from `async_mutex::unlock()` and was destroyed on holder-cancellation mid-critical-section. v1.1's fix moves the residual chain into `async_mutex::next_drain_head_` (a `std::atomic<async_mutex_awaiter*>` field on the mutex itself); every `unlock()` walks `next_drain_head_` first; `cancel_and_drain()` (§4.7.2) atomically exchanges and reaps both `state_` and `next_drain_head_`.
@@ -871,6 +1028,20 @@ The cancellation slot's handler-closure storage is supplied by the project-inter
 | 3 — PMR fallback path | `mr != nullptr` (caller-supplied PMR resource — type-erased completion handlers, `asio::any_completion_handler` callsites, the session-side helper `async_lock_via_session_executor`) | `std::pmr::polymorphic_allocator<void>{mr}`; the `slot_allocator` wrapper forwards `allocate`/`deallocate` directly to `mr`. | `mr` (caller-supplied — typically `SessionConfig::session_arena` per `[2d §4.5]` / `[2d §8]` for in-session callers, `EngineConfig::default_session_resource` for engine bootstrap). | `mr->allocate(...)` throws `std::bad_alloc`, caught by `trap_throw`, surfaces as `unexpected{sync_lock_alloc_failed}`. |
 
 The §9 seam **"slot-allocator storage cases"** (#21) verifies the per-case storage selection for all three cases — placing the awaiter under each of (case 1) HALO-firing path, (case 2) HALO-not-firing path with promise-allocator instrumentation, and (case 3) PMR fallback path with a `monotonic_buffer_resource`; verifies zero global-heap allocations on cases 1 and 3, and detects (does not auto-fail) the case-2 global-heap touch.
+
+> **── v1.6 Erratum E-4 (2026-05-19, recorded at `/implement`; source-verified non-implementable, Opus-authored, user-authorized) ──**
+>
+> **Defect (no asio allocator-binding hook on the cancellation slot).** §4.3.4 ¶1, §4.5 step 4 (line ~960 "*Binds the cancellation slot's handler-closure allocator via `asio::bind_allocator(detail::slot_allocator{this, mr})`*"), §6.1, the §6.3 enqueue cost line, and NFR-016 ("*32-byte inline slot-handler-storage buffer per RC-C … zero global-heap on the v1.0 contended path*") all assume the cancellation-handler closure's storage can be redirected to `detail::slot_allocator` via `asio::bind_allocator`. **Source-verified against the pinned asio 1.36.0**, this is not implementable: `asio::cancellation_slot::emplace`/`assign` (`asio/cancellation_signal.hpp:143`) obtains memory exclusively through `prepare_memory()` → `asio::detail::thread_info_base::allocate(thread_info_base::cancellation_signal_tag(), …)` (`asio/impl/cancellation_signal.ipp:52`; `asio/detail/thread_info_base.hpp:138`). There is **no associated-allocator query and no `bind_allocator` hook** on that path; the coroutine promise allocator does not reach it either. The cancellation-handler closure storage is owned by asio's **per-thread recycling cache** (`reusable_memory_[cancellation_signal_tag]`): the first cancellation-slot assignment on a given thread performs one global `aligned_new`; every subsequent assignment on that thread reuses the thread-local block → zero global `new`/`delete` in steady state, but **never** routable to a project allocator. `detail::slot_allocator` cannot be wired the way §4.3.4 / line ~960 prescribe.
+>
+> **Resolution (binding for `/implement`).**
+> 1. **asio's per-thread cancellation recycling cache is the sanctioned cancellation-handler-closure allocator.** The NFR-016 / `[const §VIII.5]` "zero global `new`/`delete` on the v1.0 contended path" guarantee is satisfied **by construction in steady state** (post per-thread warm-up). The one-time per-thread first-touch `aligned_new` is amortized and is **not** a hot-path event — it is treated exactly like §6.4 / §4.3.4 case-2 *bench-soft* (observable, non-fatal). The dominant contended-path allocation — the `waiter_record` — remains genuinely zero-global-`new` via the per-mutex `waiter_pool_` (Erratum E-2) on the embedded path, and from the caller `mr` on the PMR path; that property is unaffected and is the substantive content of US4 / SC-004.
+> 2. **`detail::slot_allocator` is NOT bound to the cancellation slot** (no asio hook exists). It is retained as the typed, `Allocator`-shaped storage-policy wrapper for the allocation 2f *does* control — the `waiter_record` fallback. Its three-case body (T058) is implemented and **unit-verified by seam #21 in isolation** as the storage-decision type. The production `waiter_record` allocation in `async_lock` already realizes the same exhaustive three cases: case 1 = embedded per-mutex `waiter_pool_` slot (E-2; zero global heap); case 2 = N/A for the waiter record (it is *never* placed on the coroutine frame — it is pool- or `mr`-backed, so the HALO-not-firing branch does not exist for it); case 3 = `pmr_waiter_block` drawn from caller `mr`. Overflow / `mr` exhaustion → `null`-equivalent → surfaces as `unexpected{error::sync_lock_alloc_failed}` (no `std::terminate`), matching the §4.3.4 failure column.
+> 3. **§4.3.4's three-case table is superseded for the cancellation-slot closure** and **re-anchored to the `waiter_record` storage decision** (the mapping in (2)). The "*so it composes with `asio::bind_allocator`*" clause in §4.3.4 ¶1, the `asio::bind_allocator(detail::slot_allocator{this, mr})` wording in §4.5 step 4 / line ~960 / §6.1 / §6.3, and the NFR-016 "32-byte inline slot-handler-storage buffer per RC-C" phrasing are **factually superseded** by this erratum. The awaiter's 32-byte `slot_storage_` buffer continues to hold the asio **completion** handler via placement-new per Erratum E-1 (unchanged); it does **not** back the cancellation closure (asio's recycler does).
+> 4. **Seam #21 / seam #10 assert, post-E-4:** (a) `slot_allocator`'s three-case `allocate`/`deallocate` logic directly (inline-buffer hit / null-resource overflow-trap → `bad_alloc` → `trap_throw` → `sync_lock_alloc_failed` / PMR forward-to-`mr`); (b) the embedded contended path is zero global `new`/`delete` under the `mallocnesia` interceptor **in steady state**, measured after a documented per-thread warm-up iteration that primes asio's cancellation recycler (the warm-up is an explicit, commented harness step — not a measurement-window allocation); (c) the PMR path draws all fallback allocations from the supplied resource, none global; (d) `mr` exhaustion ⇒ `sync_lock_alloc_failed`, trapped (no `terminate`).
+>
+> **Contract preservation.** NFR-016 / SC-004 (zero global heap on the v1.0 contended path) is preserved in steady state — the substantive `waiter_record` allocation is genuinely zero-global (E-2 pool); only the per-thread-amortized asio cancellation first-touch is conceded, consistent with the pre-existing §6.4 / §4.3.4 case-2 bench-soft treatment. RC#2 layering (`core` never reaches into `session/`) is preserved — `slot_allocator` and the PMR `waiter_record` path take `mr` purely as a parameter. The cancellation *semantics* (§4.5 CAS arbitration, `on_cancel`, `sync_lock_aborted`) are entirely unaffected — E-4 changes only *where the closure bytes live*, which the 22 green US1–US3 seams already exercise through asio's recycler.
+>
+> **Scope / Gate note.** E-4 amends Gate-A-converged 2f §4.3.4 / §4.5 step 4 / §6.1 / §6.3 / NFR-016. Source-verified non-implementability (asio 1.36.0), Opus-authored, user-authorized 2026-05-19. Re-touches 006 Gate A scope (flag for `/gate-a`, alongside E-2 and E-3).
 
 ### 4.4 The RAII lock guard
 
@@ -1039,6 +1210,54 @@ Replaces v0.1's invalid "`dispatch` falls through to `post`" prose. The predicat
 The §9 seam **"Cross-strand acquire"** (#13) exercises `direct_executor` + cross-thread unlock and verifies the resumption lands on the bound executor with at most one post hop.
 
 The v1.0 default is `dispatch`; 2e's writer mutex on `MemoryStore`/`FileStore` keeps the default. A future high-frequency seqnum counter or pinset-rotation site may pick `post`; that is a per-callsite decision documented at the consumer's design level.
+
+> **── v1.6 Erratum E-3 (2026-05-18, recorded at `/implement`; TSan-diagnosed, Opus-authored, user-authorized) ──**
+>
+> **Defect (re-entrant inline resume = heap-UAF).** §4.6.2's `dispatch`-policy
+> rule — *"`asio::dispatch(bound_executor, resumption_handler)`; invoked inline
+> if `bound_executor.running_in_this_thread()`"* — is **unsafe for 2f waiter
+> resumption**. The resumption handler resumes a *suspended `asio::awaitable`
+> coroutine* (the parked `async_lock()` waiter). In 2f that resumption is
+> **always** driven from inside `unlock()` (the granting holder's guard
+> destructor) or `on_cancel()` (the cancellation handler) — both of which
+> execute **nested within another `asio::awaitable` coroutine's
+> `awaitable_thread`** on the bound executor's thread. There,
+> `running_in_this_thread()` is `true`, so `asio::dispatch` runs the resumption
+> **synchronously and re-entrantly**: the waiter coroutine runs to `co_return`
+> and its frame is destroyed *while still nested in the unlocker's
+> `awaitable_thread` frame stack*. asio's `awaitable_thread`/`awaitable_frame`
+> chaining is **not re-entrant across a nested coroutine resume**; the freed
+> frame is then read by asio's `pop_frame`/`entry_point` → `heap-use-after-free`
+> (observed under TSan on US1 `sync_fifo_fairness` and US2
+> `sync_cancellation_mid_wait`; non-waivable per `[const Art.VII]` TSan gate).
+>
+> **Resolution (binding for `/implement`; no other §4.6 clause changes).** 2f
+> waiter resumption is **always `post`ed** to the bound executor — never
+> inline-`dispatch`ed — *regardless of `completion_policy` or
+> `running_in_this_thread()`*. Rationale: 2f's resumption site is
+> *intrinsically re-entrant* (always inside `unlock()`/`on_cancel()`, always
+> inside a coroutine on the bound-executor thread), so the §4.6.2 inline
+> fast-path is **never** safe here. The `post` hop (≈25 ns, §4.6.2) decouples
+> the resumed waiter onto a fresh top-level `awaitable_thread`, eliminating the
+> re-entrancy. **`completion_policy` is preserved as a semantic/intent knob**
+> (and remains constructor-set, `const`, queryable via `policy()`), but for
+> waiter resumption both `dispatch` and `post` post; the §4.6.2
+> "inline if `running_in_this_thread()`" sentence is **superseded for waiter
+> resumption** by this erratum (it would still apply to any *non-reentrant*
+> completion context, of which 2f has none).
+>
+> **Contract preservation.** `[2d §7.4]` (completion on the awaiter's bound
+> executor) is preserved — `post` lands on the bound executor. Seam #12
+> (`dispatch vs post`) asserts only mutual exclusion + completion under both
+> policies (not inline-ness) — unaffected. Seam #13 (cross-strand) requires
+> "at most one post hop" — satisfied (exactly one). The only forfeited property
+> is the ≈0 ns inline latency optimisation, which was never sound at 2f's
+> re-entrant resume site. Any implementation that inline-`dispatch`es a 2f
+> waiter resumption is **non-conforming** to E-3.
+>
+> **Scope / Gate note.** E-3 amends Gate-A-converged 2f §4.6.2. TSan-diagnosed,
+> Opus-authored, user-authorized 2026-05-18. Re-touches 006 Gate A scope
+> (flag for `/gate-a`, alongside E-2).
 
 ### 4.7 Destructor — `std::terminate()` precondition + `cancel_and_drain()` (RC#3)
 

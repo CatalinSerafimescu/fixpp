@@ -16,7 +16,11 @@ class FixppConan(ConanFile):
     # ── Runtime dependencies ─────────────────────────────────────────────────
     # Phase 3: only smoke tests (gtest) and placeholder bench (benchmark) compile.
     # Pinned at the highest stable versions on Conan Center as of 2026-05-10.
-    # Returns in Phase 4: asio/1.36.0, openssl/3.6.2 (4.x is breaking, not yet on Conan).
+    # asio/1.36.0 added 2026-05-18 for 006-async-mutex (first async/coroutine
+    #   feature; user-approved per [const §III.2], pugixml precedent). Standalone
+    #   asio, BSL-1.0 (LGPL-only ban [const §68] inapplicable). 001-004 were
+    #   non-async so it was never added despite the Phase-4 note below.
+    # Returns in Phase 4: openssl/3.6.2 (4.x is breaking, not yet on Conan).
     # Returns in Phase 5: grpc/1.78.1 (1.80 is upstream-only), iceoryx2 via CMake
     #   FetchContent of v0.8.1 gated on FIXPP_USE_ICEORYX2 (Rust/cargo prereq).
     # 002-dictionary-xml-loader adds pugixml/1.14 (MIT) for the XML data-
@@ -26,6 +30,7 @@ class FixppConan(ConanFile):
         "gtest/1.17.0",
         "benchmark/1.9.5",
         "pugixml/1.14",
+        "asio/1.36.0",
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────
