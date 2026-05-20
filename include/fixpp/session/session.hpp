@@ -87,8 +87,30 @@ public:
     // once in phase 1 (after the last in-flight store(...) resumes, before
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
     // invoked). partial excluded (N-P1-3).
+    //
+    // PRECONDITION — v1.0 caller model (gate-b/r1 RC#2, P1.3→P2):
+    //   close() is called from within the session's serialisation domain
+    //   (strand under per_session_strand mode; attested executor under
+    //   direct_executor). Concurrent foreign-thread invocation is UNDEFINED
+    //   in v1.0; the C-ABI thunk (2i) is responsible for serialising user-
+    //   thread invocations onto the session domain before calling close().
+    //   The `closing` re-entry polling loop is a future-proof barrier; under
+    //   the v1.0 caller model it is effectively empty (the first close runs
+    //   to completion within the serialisation domain before any second
+    //   close() call can reach the `closing` branch).
+    //   TODO(005): when the C-ABI thunk (2i) wires real concurrent callers,
+    //   harden with atomic<lifecycle> + atomic_shared_ptr/mutex to make
+    //   foreign-thread concurrent close safe.
+    //
+    // NOTE on noexcept (gate-b/r1 RC#2, P2.1): `close()` is NOT declared
+    // noexcept because the first-close path allocates via std::make_shared
+    // and may invoke the user-supplied close_flush_hook_ (std::function),
+    // both of which can throw. Under the project-wide D-9 terminate-on-OOM
+    // policy a bad_alloc from make_shared on the cold path would terminate;
+    // the hook's exception guarantee is the hook author's responsibility. The
+    // C-ABI thunk (2i) wraps the call in try/catch as its projection.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        close(close_mode mode = close_mode::graceful) noexcept;
+        close(close_mode mode = close_mode::graceful);
 
     // ENGINE-INTERNAL accessor (callable from fixpp::session/ ONLY —
     // [arch §2.3] leaf rule; consumed by the merged-006 session-side helper
@@ -178,17 +200,27 @@ public:
                        // non-serialised executor). RELEASE builds compile
                        // this out — that misuse is documented
                        // user-contract-violation UB, not a runtime guard.
+                       //
+                       // RC#2 P2.3 (gate-b/r1): RAII guard so the flag is
+                       // always cleared on scope exit, even if the callback
+                       // throws. Without this, a throwing callback left
+                       // in_dispatch_ permanently set and false-positived the
+                       // next otherwise-serial dispatch assertion.
+                       struct dispatch_guard {
+                           std::atomic<bool>& flag;
+                           ~dispatch_guard() noexcept {
+                               flag.store(false, std::memory_order_release);
+                           }
+                       };
                        const bool prev =
                            in_dispatch_.exchange(true, std::memory_order_acq_rel);
                        assert(!prev &&
                               "concurrent session callback entry: strand "
                               "invariant violated (direct_executor attested "
                               "over a non-serialised executor?)");
+                       [[maybe_unused]] dispatch_guard guard{in_dispatch_};
 #endif
                        g();
-#ifndef NDEBUG
-                       in_dispatch_.store(false, std::memory_order_release);
-#endif
                    });
     }
 

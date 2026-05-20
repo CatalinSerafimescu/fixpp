@@ -23,6 +23,7 @@
 #include <fixpp/core/error.hpp>             // expected_t, error values
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <fixpp/tls/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check
 
 namespace fixpp::session {
 
@@ -72,6 +73,9 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     using fixpp::core::error;
 
+    // ── All config validations run BEFORE any observable state mutation ──────
+    // (RC#2 P2.2 fix: reorder to prevent partial side-effects on failure path)
+
     // (5) reject a second open() on the same handle (slot 51 / FR-018).
     // Any non-never_opened state means open() already ran.
     if (state_ != lifecycle::never_opened) {
@@ -115,10 +119,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
     }
 
-    // (1) SINGLE error::executor_not_serialised enforcement point (slot 48
-    // / FR-009 / I-06): make_session_executor wraps make_strand under
-    // per_session_strand, carries the bare attested executor under
-    // direct_executor, and rejects direct_executor && !attested.
+    // T050 (US5): null dictionary → invalid_session_config (slot 53 / FR-016
+    // / FR-018 / I-13). dictionary is REQUIRED — the uniform resolved =
+    // override.value_or(engine_anchor) pattern for the dictionary axis: a
+    // null dictionary means neither session nor engine supplied one.
+    if (!cfg_.dictionary) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
+    // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
+    // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
+    // The minimal-stub pattern (D-15 / D-21 amended) ships SecurityProfile
+    // as a complete value type with a sentinel discriminant (kind::unset).
+    // 2g extends with the concrete TLS binding; the field SHAPE is now
+    // correct and the constitutional no-implicit-default rule is enforced.
+    if (cfg_.security_profile.k ==
+            fixpp::tls::SecurityProfile::kind::unset) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
+    // ── Executor binding — the single executor_not_serialised enforcement
+    // point (slot 48 / FR-009 / I-06): make_session_executor wraps
+    // make_strand under per_session_strand, carries the bare attested
+    // executor under direct_executor, and rejects direct_executor && !attested.
+    // This is the first observable mutation; all config rejections are above.
     auto bound = fixpp::core::make_session_executor(
         std::move(resolved), cfg_.mode, cfg_.already_serialized_executor, this);
     if (!bound) {
@@ -140,44 +164,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // (survives cross-thread resume — NOT thread_local).
     trace_slot_.store(cfg_.initial_trace_context);
 
-    // T050 (US5): null dictionary → invalid_session_config (slot 53 / FR-016
-    // / FR-018 / I-13). dictionary is REQUIRED — the uniform resolved =
-    // override.value_or(engine_anchor) pattern for the dictionary axis: a
-    // null dictionary means neither session nor engine supplied one.
-    if (!cfg_.dictionary) {
-        co_return std::unexpected(error::invalid_session_config);
-    }
-
-    // T050 (US5): default-constructed (null) security_profile sentinel →
-    // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
-    // D-21: SecurityProfile is forward-declared only (struct SecurityProfile
-    // in fixpp::tls — 2g owns the concrete type). 007 cannot instantiate a
-    // SecurityProfile for tests or for the "opt-in to plaintext" sentinel
-    // (2g's call). The null check IS the 2d-owned rejection invariant, but
-    // the concrete non-null sentinel is 2g-owned. Since all 007 tests supply
-    // no security_profile (= nullptr) and we cannot create a real one here,
-    // enforcing nullptr == reject now would break the full threading test
-    // suite with no fix path in 007's scope (same minimal-skeleton reasoning
-    // as D-15 for MessageStoreFactory / D-16 for flush hook).
-    //
-    // 2d records the rejection invariant (N-P2-3 / [const §XII.5]); 2g wires
-    // the actual enforcement by shipping the concrete SecurityProfile type
-    // and a "opt-out-to-plaintext" escape value. The comment and the seam-13
-    // test cover the compile-time + runtime backpressure invariant (T048);
-    // the security_profile enforcement is the analogous 2g boundary.
-    //
-    // ⚠ WIRING POINT FOR 2g: replace this comment with:
-    //   if (cfg_.security_profile == nullptr) {
-    //       co_return std::unexpected(error::invalid_session_config);
-    //   }
-    // once fixpp::tls::SecurityProfile is a complete type.
-
     state_ = lifecycle::open;
     co_return fixpp::core::expected_t<void>{};
 }
 
 asio::awaitable<fixpp::core::expected_t<void>>
-Session::close(close_mode mode) noexcept {
+Session::close(close_mode mode) {
     using fixpp::core::error;
 
     // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]:830-832,863) ──

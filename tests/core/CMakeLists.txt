@@ -62,6 +62,12 @@ add_threading_core_test(threading_trace_context_resume        test_trace_context
 add_threading_core_test(threading_session_local_lifetime      test_session_local_lifetime.cpp)       # seam 17 (TSan)
 add_threading_core_test(threading_session_executor_accessor_survives_erasure test_session_executor_accessor_survives_erasure.cpp)  # seam 21
 
+# ── gate-b/r1 RC#2: FR-015 outside-session engine-fallback seam ─────────────
+# Asserts current_trace_context() on plain executor returns default trace_context
+# (D-17 / P1.2→P2 missing-test closure).
+add_threading_core_test(threading_trace_context_engine_fallback
+  test_trace_context_engine_fallback.cpp)  # gate-b/r1
+
 # Phase 4: fixpp_core_tests — pure C++ US1/US2/US4 tests (no C-ABI header dependency)
 add_executable(fixpp_core_tests
   decimal_parse_test.cpp
