@@ -35,7 +35,7 @@ public:
         capacity_policy             policy             = capacity_policy::bounded;
         std::size_t                 inbound_capacity   = 10'000;
         std::size_t                 outbound_capacity  = 10'000;
-        std::size_t                 max_frame_bytes    = 0;        // 0 → operator MUST set
+        std::size_t                 max_frame_bytes    = 256 * 1024; // 256 KiB default per design-doc §4.2 line 448
         std::pmr::memory_resource*  store_resource     = nullptr;  // null → engine-provided dedicated monotonic_buffer_resource (FR-026)
     };
 

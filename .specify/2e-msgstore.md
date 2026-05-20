@@ -712,7 +712,9 @@ public:
     [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender_comp_id,
          std::string_view target_comp_id,
-         std::pmr::memory_resource* mr) noexcept = 0;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,                 // engine-resolved EngineConfig::max_store_memory_per_session per N9 / [2e §1.2]
+         asio::any_io_executor file_io_executor) noexcept = 0;  // engine-resolved EngineConfig::file_io_executor per §4.3.2:665 / :669
 };
 
 // Default factories shipped with v1.0 — thin wrappers over the
@@ -721,14 +723,16 @@ class MemoryStoreFactory final : public MessageStoreFactory {
 public:
     explicit MemoryStoreFactory(MemoryStore::Config c = {}) noexcept;
     expected_t<std::unique_ptr<MessageStore>>
-        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
 };
 
 class FileStoreFactory final : public MessageStoreFactory {
 public:
     explicit FileStoreFactory(FileStore::Config c) noexcept;
     expected_t<std::unique_ptr<MessageStore>>
-        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
 };
 
 }  // namespace fixpp::session
@@ -1221,7 +1225,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.3 ships **21 seams** (
 18. **Session shutdown ordering test (round-1 N7).** Spin a `Session` with `MemoryStore` + `FileStore`; issue 100 in-flight `store()` calls; trigger `Session::close(terminal)`; verify under TSan + ASan: no UAF on `session_arena`; all `store_cancelled` outcomes route correctly; `~MessageStore` runs before `session_arena` release. `tests/session/test_store_shutdown_ordering.cpp`.
 19. **`FileStore::flush_for_session_close()` graceful-close drain (round-2 RC#2 per Codex C-R2-P1-5 — NEW seam).** Open `FileStore` with `policy = commit_batched(N=64)`; `store()` 32 frames (half a batch — under v0.2's no-flush-hook model these would be silently lost on a host crash before the batch boundary). Call `Session::close(graceful)` — engine reaches the concrete `FileStore` and invokes `flush_for_session_close()`. Re-open; `retrieve(1, 32, outbound, visitor)` returns all 32 frames byte-identical. Variant: under `Session::close(terminal)`, verify `flush_for_session_close()` is **NOT** invoked (per Appendix D §D.2 contract); the 32-frame data-loss is the documented `commit_batched` window. `tests/session/test_file_store_flush_for_session_close.cpp`.
 20. **`store_seqnum_out_of_order` detection (Opus N2-P2-3 — NEW seam).** Open `MemoryStore`; via a test-only friend hook, drive `store(seq=5, frame, outbound)` while `next_seqnum(outbound, false) == 1`. Verify the awaitable returns `expected_t::unexpected{store_seqnum_out_of_order}`; verify the entry-array index is unchanged (no slab memcpy, no entry write); verify the writer mutex was acquired and released across the verification. Same for `FileStore`. `tests/session/test_store_seqnum_out_of_order.cpp`.
-21. **Fuzzer.** `tests/fuzz/fuzz_message_store.cpp` — libFuzzer-driven random interleavings of `store/retrieve/reset/next_seqnum` against `MemoryStore` and `FileStore`. ASan + UBSan + TSan invariants. Required by `[const §IX.4]`-extended (the store is on the session message path; fuzzing the surface catches torn-state regressions across the round-2 single-log on-disk algorithm).
+21. **Fuzzer.** `tests/fuzz/fuzz_message_store.cpp` — libFuzzer-driven random interleavings of `store/retrieve/reset/next_seqnum` against `MemoryStore` and `FileStore`. ASan + UBSan + TSan invariants. Required by `[const §VII.7]` (the store is on the session message path; fuzzing the surface catches torn-state regressions across the round-2 single-log on-disk algorithm).
 
 ## 10. Open questions
 
@@ -1253,7 +1257,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.3 ships **21 seams** (
 
 - No new catalogue rows. S-011..S-014, OSS-002, COM-009 are already OFFICIAL.
 - `library/spec/coverage-index.md` line 76 (`§4.8 | Message recovery | Y | S-014 | —`) is amended to **`S-011, S-012, S-013, S-014`** (Codex P2-10 / per Opus confirm) with a note that 2e discharges the **store-side** API + default impls and Phase-4 owns the FSM.
-- `[arch §11]` Q3 disposition is updated from `Phase 2 validates [SYN §3.2 Q7]` to `CLOSED in 2e v0.3: Path B only (documented incompatibility); see [2e §4.8.A]. v0.2's Path A subset wrapper retired in round 2 per Codex C-R2-P2-1 escalation.`
+- `[arch §11]` Q3 disposition is updated from `Phase 2 validates [SYN §3.2 Q7]` to the live FR-039 wording at `architecture.md:598` (Path B verdict, no runtime adapter; documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface; disposition applied by `008-message-store` Phase-4 Gate A convergence). v0.2's Path A subset wrapper retired in round 2 per Codex C-R2-P2-1 escalation; v0.3 verdict is Path B only.
 - **Two `[2d]` sibling-doc amendments via Appendix D drop-ins (round-2 root cause #2 close):**
   - `[2d §4.5]` `SessionConfig::store_factory` field type is amended from `std::shared_ptr<MessageStoreFactory>` to `std::unique_ptr<MessageStoreFactory>` (N1 sibling-doc edit) — **Appendix D §D.1**.
   - `[2d §4.7]` per-mode effect table gains a `FileStore::flush_for_session_close()` row + a one-paragraph contract on the hook's cancellation/error semantics (Codex C-R2-P1-5 / round-2 RC#2) — **Appendix D §D.2**.
@@ -1596,3 +1600,47 @@ The orchestrator applies this edit at 2e sign-off; the amendment is recorded in 
 > **`FileStore::flush_for_session_close()` hook contract (driven by `[2e §7.6]`).** The engine-internal `FileStore::flush_for_session_close()` is a non-virtual, non-public method on the concrete `FileStore` (NOT on `MessageStore`'s pure-virtual interface — see `[2e §4.1.1]`); the engine reaches it via the session's stored `unique_ptr<MessageStore>` through a friend mechanism. Under `close_mode::graceful` it is invoked once during phase 1, after the FSM's last in-flight `store(...)` awaitable has resumed and before the Logout `async_write` is issued; it drains any pending `commit_batched` / `commit_interval` records to durable storage so the regulator-mandated tail records make it past a host crash that follows close. Cancellation: the hook completes either with success (`expected_t<void>{}`) or with `expected_t::unexpected{store_io_failure}` on a mid-flush `fdatasync`/`FlushFileBuffers` error; the engine logs the failure and proceeds with phase 1's Logout exchange (the durability gap is documented as a `commit_batched` / `commit_interval` data-loss window per `[2e §4.3.1]`). Under `close_mode::terminal` the hook is **not** invoked — terminal close fires root cancellation immediately, and the in-flight `MessageStore::write` row above governs the in-flight state. The hook is **idempotent**: a second invocation is a no-op (returns `expected_t<void>{}` immediately).
 
 The orchestrator applies this edit at 2e sign-off; the amendment is recorded in `[2d-threading.md App C]` as a cross-doc edit driven by 2e's round-2 root cause #2 (Codex C-R2-P1-5).
+
+### D.3 `[2e §4.4] MessageStoreFactory — public-surface factory shape` — `make()` virtual signature extended from 3-param to 5-param (added post-design-doc-sign-off by `008-message-store` Phase-4 Gate A — round-1 RC#1 + fresh-loop round-2 RC#1)
+
+**Tension (NEW post-sign-off):** `[2e §4.4]` lines 712–715 declare the pure-virtual `MessageStoreFactory::make()` with 3 parameters — `(sender_comp_id, target_comp_id, mr)` — and the §4.4 closing paragraph constrains the factory CTOR to be Config-only (no `EngineConfig&` back-channel). The `008-message-store` Phase-4 bundle Gate A surfaced two composition gaps that the 3-param shape cannot satisfy without violating that Config-only CTOR rule:
+
+1. **Cap-construction guard (round-1 RC#1, Codex P1-3 / N9 cluster).** `[2e §1.2]:54` and `§4.4 store_factory_failed` (line 1117) require `MemoryStoreFactory::make()` to reject Configs whose product `(inbound_capacity + outbound_capacity) * max_frame_bytes` exceeds `EngineConfig::max_store_memory_per_session`. Under the 3-param signature the factory has no path to read the engine-resolved cap value at call time, and reading it through an `EngineConfig&` CTOR back-channel breaks `§4.4`'s Config-only CTOR rule. Resolution: thread the engine-resolved value at call time as `make()`'s 4th parameter `std::size_t max_store_memory_bytes` (the engine reads `EngineConfig::max_store_memory_per_session` at session-open and passes it to each `make()` call). The factory CTOR stays Config-only.
+2. **`file_io_executor` injection for path-only `cfg_loader` (fresh-loop round-2 RC#1).** `[2e §4.3.2]:665` requires `FileStore::Config::file_io_executor` at `FileStore` construction; `[2e §4.8.A.2]:869` prescribes the path-only `cfg_loader(const std::filesystem::path&)` reader, which has no `EngineConfig` access. Composing these two contracts on the 3-param `make()` is impossible without either (a) breaking §4.4's Config-only CTOR rule (passing `EngineConfig&` through the factory constructor) or (b) breaking `§4.3.2:665` (constructing `FileStore` without a required field). Resolution: thread the engine-resolved value at call time as `make()`'s 5th parameter `asio::any_io_executor file_io_executor` (the engine reads `EngineConfig::file_io_executor` at session-open and passes it to each `make()` call). `FileStore` itself is constructed inside `make()` after the executor is resolved, preserving `§4.3.2:665`'s required-at-construction contract. **Precedence rule:** Config-supplied wins — if the factory's stored `Config.file_io_executor` is non-empty (caller passed their own at factory construction), that wins; otherwise the engine-threaded 5th-parameter value populates the minted `FileStore::Config::file_io_executor`; both empty → `make()` returns `store_factory_failed` (no "no executor" operating mode for `FileStore`). `MemoryStoreFactory::make()` accepts the 5th parameter and silently discards it (no-op; non-empty values are accepted, not a misuse — `MemoryStore` has no file-I/O work).
+
+Both additions use the same threading pattern: engine-resolved Config-supplied parameters at call time, factory CTOR stays Config-only, design-doc §4.4 frozen-public-surface rule preserved.
+
+**Before** (current `2e-msgstore.md` v0.4 text, `[2e §4.4]` lines 712–715 within the `MessageStoreFactory` block — the existing comment block above the method is not modified):
+
+```cpp
+    [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view sender_comp_id,
+         std::string_view target_comp_id,
+         std::pmr::memory_resource* mr) noexcept = 0;
+```
+
+…and the matching default-factory declarations at lines 723–724 (`MemoryStoreFactory`) and 730–731 (`FileStoreFactory`):
+
+```cpp
+    expected_t<std::unique_ptr<MessageStore>>
+        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+```
+
+**After** (drop-in replacement — the pure-virtual on `MessageStoreFactory` and the `override` declarations on both default factories):
+
+```cpp
+    [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view sender_comp_id,
+         std::string_view target_comp_id,
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,                 // engine-resolved EngineConfig::max_store_memory_per_session per N9 / [2e §1.2]
+         asio::any_io_executor file_io_executor) noexcept = 0;  // engine-resolved EngineConfig::file_io_executor per §4.3.2:665 / :669
+```
+
+```cpp
+    expected_t<std::unique_ptr<MessageStore>>
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
+```
+
+**Effective:** as of `008-message-store` Phase-4 Gate A convergence (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §4.4]` block at lines 712–732 has been replaced in-place with the 5-param "After" form above, shipping inside the `008-message-store` PR bundle (parallel to the FR-037/038/039 hybrid-ownership pattern recorded in `008-message-store` spec.md Clarifications Q3 + research.md D-8). This contrasts with D.1/D.2 which were pre-applied at 2e v0.4 sign-off and shipped through `007-threading-clock`'s merge. This Appendix D §D.3 entry is retained as the byte-exact diff record of the amendment.

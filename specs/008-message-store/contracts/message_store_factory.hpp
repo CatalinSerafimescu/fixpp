@@ -23,6 +23,8 @@
 #include <memory_resource>
 #include <string_view>
 
+#include <asio/any_io_executor.hpp>
+
 #include <fixpp/core/error.hpp>                  // expected_t
 #include <fixpp/session/message_store.hpp>       // MessageStore
 
@@ -41,22 +43,42 @@ public:
     // sender / target are FIX-CompID strings consumed for the on-disk log
     // filename (FileStore) and for the session_triple_hash in the sentinel
     // record (FileStore). mr is the per-session PMR resource the impl uses
-    // for its allocations.
+    // for its allocations. max_store_memory_bytes is the engine-resolved
+    // EngineConfig::max_store_memory_per_session value the engine threads
+    // in at call time so the factory can enforce the storage-DoS guard
+    // (FR-014 / SC-004 / I-11) without taking an EngineConfig& back-channel
+    // through the constructor — keeps the factory CTOR Config-only per the
+    // design-doc §4.4 frozen surface. file_io_executor is the
+    // engine-resolved EngineConfig::file_io_executor value the engine
+    // threads in at call time for FileStore impls that need it
+    // (FR-024 / I-13 / research D-7); the FileStoreFactory populates the
+    // minted FileStore::Config::file_io_executor with this value (preserving
+    // [2e §4.3.2]:665 required-at-construction on FileStore itself, since
+    // FileStore is constructed inside make()) UNLESS the factory's Config
+    // already carries a caller-supplied executor, in which case the
+    // Config-supplied executor wins (caller override; Path-B user shape).
+    // MemoryStore impls ignore the file_io_executor parameter (the empty /
+    // default-constructed value is permitted on the MemoryStoreFactory path).
     //
     // Returns std::unique_ptr<MessageStore> ownership (N1) — no shared_ptr,
     // no sharing across sessions, no mid-session swap ([arch §5.6]).
     //
     // Validation: both default factories (MemoryStoreFactory, FileStoreFactory)
-    // enforce the storage-DoS guard against EngineConfig::max_store_memory_per_session
-    // (FR-014 / SC-004 / I-11); on overflow returns store_factory_failed.
+    // enforce the storage-DoS guard against max_store_memory_bytes
+    // (FR-014 / SC-004 / I-11) using checked overflow-safe arithmetic; on
+    // any overflow / cap-exceeded condition returns store_factory_failed.
     // FileStoreFactory also takes an flock / LockFileEx advisory exclusive
     // lock on the live log (FR-013 / I-16); contention → store_factory_failed.
     // FileStoreFactory verifies the sentinel record's session_triple_hash on
-    // re-open; mismatch → store_factory_failed.
+    // re-open; mismatch → store_factory_failed. FileStoreFactory rejects with
+    // store_factory_failed if the resolved file_io_executor (Config-supplied
+    // OR threaded-in) is empty.
     [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender,
          std::string_view target,
-         std::pmr::memory_resource* mr) noexcept = 0;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,
+         asio::any_io_executor file_io_executor) noexcept = 0;
 };
 
 }  // namespace fixpp::session

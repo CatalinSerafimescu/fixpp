@@ -9,20 +9,9 @@ Build / test / sanitizer / coverage / verify recipes. Every command runs with `c
 ## 0. Pre-`/implement` probes (run BEFORE `/speckit-implement`)
 
 ```bash
-# Probe std::crc32 availability for FileStore CRC32 (research D-3). Decides
-# whether T002 adds the crc32c/1.1.2 Conan row.
-cat > /tmp/probe_crc32.cpp <<'EOF'
-#include <cstdint>
-#include <ranges>
-int main() {
-#ifdef __cpp_lib_std_crc32   // SD-6 feature-test (none exists today)
-    return 0;
-#else
-    return 1;                // expected fall-through on Clang 22 / libc++ / libstdc++
-#endif
-}
-EOF
-clang++ -std=c++23 /tmp/probe_crc32.cpp -o /tmp/probe_crc32 && /tmp/probe_crc32 && echo "std::crc32 available" || echo "std::crc32 NOT available — add crc32c/1.1.2 Conan row at T002"
+# CRC32 source is pinned at /plan time: crc32c/1.1.2 Conan row (research D-3).
+# No toolchain probe is required — std::crc32 does not exist in any C++ stdlib
+# today; the false branch was eliminated. The Conan row is added by /tasks.
 
 # Verify [2d §4.5] / [2d §4.7] cross-doc amendments shipped at 007 merge
 # (research D-8). Should return the three load-bearing lines unchanged.
@@ -30,8 +19,8 @@ grep -n 'store_factory\|flush_for_session_close' \
     include/fixpp/session/session_config.hpp \
     .specify/2d-threading.md | head -10
 
-# Verify the structural cross-doc edits this feature OWES (FR-037/038/039)
-# are still at the documented anchors (so the edit is a single-line touch).
+# Verify the structural cross-doc edits this feature pre-applied at Path A (FR-037/038/039)
+# are at the documented anchors (the touches have already landed; these are verification probes).
 sed -n '76p'   spec/coverage-index.md         # FR-037 anchor
 sed -n '240p'  spec/feature-catalogue.md      # FR-038 OSS-002
 sed -n '332p'  spec/feature-catalogue.md      # FR-038 COM-009
@@ -74,7 +63,7 @@ ctest --preset linux-clang-debug --output-on-failure -R 'memory_store|file_store
 #   seam 1  test_memory_store_round_trip
 #   seam 2  test_file_store_crash_survival       (Linux Tier-1 + Windows Tier-2)
 #   seam 3  test_file_store_torn_write           (Linux Tier-1 + Windows Tier-2)
-#   seam 4  test_memory_store_capacity
+#   seam 4  test_memory_store_capacity              (incl. overflow sub-scenario: inbound=SIZE_MAX/2-1, outbound=2, max_frame_bytes=8 → store_factory_failed per FR-014 checked arithmetic)
 #   seam 5  test_store_fifo_fair                 (TSan + ASan)
 #   seam 6  test_store_cancellation_contract     (per-method)
 #   seam 7  test_outbound_store_post_commit      (Writer::commit byte-equality)
@@ -150,12 +139,12 @@ conan install . --profile=conan/profiles/linux-clang-asan --build=missing
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
 cmake --build --preset linux-clang-asan --target fuzz_message_store -j
 
-# Ten-minute corpus run per [const §VII.7]-extended:
+# Ten-minute corpus run per [const §VII.7]:
 build/linux-clang-asan/tests/fuzz/fuzz_message_store \
     tests/fuzz/corpus/message_store/ \
     -max_total_time=600 -timeout=10 -rss_limit_mb=1024
 
-# Also runs under UBSan + TSan invariants per [const §IX.4]-extended:
+# Also runs under UBSan + TSan invariants per [const §IX.2] (Tier-1 sanitizers):
 # (separate build presets — fuzz_message_store target lives in each).
 ```
 
@@ -307,4 +296,4 @@ UBSan-on-MSVC is N/A per `[const §IX.3]`; equivalent UB coverage is Linux/Clang
 
 ---
 
-**Next:** `/speckit-tasks` consumes `plan.md` + `research.md` + `data-model.md` + `contracts/` and emits `tasks.md` with dependency-ordered T-IDs (T001..T-N). Then `/speckit-analyze` runs the drift check. Then `/gate-a`. Then `/speckit-implement`.
+**Next** (matches `plan.md` Constitution-Check row `[const §XVI.4]`): `/plan` → Gate A → `/tasks` → `/analyze` → `/implement` → `/simplify` → `/speckit-verify` → Gate B. After `/plan` the next command is `/gate-a 008-message-store`; once Gate A is converged or waived, `/speckit-tasks` consumes `plan.md` + `research.md` + `data-model.md` + `contracts/` and emits `tasks.md` with dependency-ordered T-IDs (T001..T-N). Then `/speckit-analyze` runs the drift check. Then `/speckit-implement`.

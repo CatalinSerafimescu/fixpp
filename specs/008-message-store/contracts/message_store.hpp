@@ -36,9 +36,13 @@ public:
     virtual ~MessageStore()                        = default;
 
     // store: persist a single frame. frame is taken as a non-owning span and
-    // MUST be deep-copied into store-owned storage BEFORE the awaitable's
-    // first suspension point per [2b §6.4] view-escape (I-02). On
-    // mutex-acquire, verifies seq == next_seqnum(dir, false) inside the
+    // MUST be deep-copied into store-owned storage AFTER acquiring the writer
+    // mutex and BEFORE any further suspension that could release the session
+    // strand (i.e., before pwrite / fdatasync posts to file_io_executor) per
+    // [2b §6.4] view-escape and design-doc §6.3.3 step 3 (I-02; under the
+    // v1.0 single-session-serialisation-domain discipline the uncontended
+    // async_mutex::async_lock() does NOT suspend per [2f §4.3.2] fast-path).
+    // On mutex-acquire, verifies seq == next_seqnum(dir, false) inside the
     // critical section; mismatch → store_seqnum_out_of_order (I-05). Under
     // capacity_policy::bounded, MemoryStore returns store_capacity_exhausted
     // when the per-direction cap is reached (I-08). FileStore returns

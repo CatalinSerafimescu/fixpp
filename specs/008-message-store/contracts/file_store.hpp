@@ -11,47 +11,72 @@
 // CRC32 (Castagnoli) + sentinel record. Atomic-rename reset() with platform
 // durability primitive (Linux: parent-dir fsync MANDATORY; Windows:
 // MOVEFILE_WRITE_THROUGH MANDATORY — round-3 C-R3-P1-2; I-15).
-// Per-instance file_io_executor for pwrite/fdatasync work (FR-024 / I-13 /
-// research D-7). flush_for_session_close() is engine-internal, dispatched
-// via has_flush_for_session_close concept (I-17 / FR-028).
+// Caller-supplied FileStore::Config::file_io_executor for pwrite/fdatasync
+// work (Config field per design-doc §4.3.2 line 665; typical: an
+// EngineConfig-exposed 4-thread asio::thread_pool shared across all
+// FileStores per design-doc §4.3.2 line 669; FR-024 / I-13 / research D-7).
+// flush_for_session_close() is engine-internal, dispatched via
+// has_flush_for_session_close concept (I-17 / FR-028).
 #pragma once
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory_resource>
+#include <string>
 #include <string_view>
-#include <variant>
+
+#include <asio/any_io_executor.hpp>
 
 #include <fixpp/session/message_store.hpp>
 
 namespace fixpp::session {
 
-// FileStorePolicy variants. Per-policy data-loss window documented per
-// FR-011: commit_per_message = 0% loss; commit_batched(N) = half-batch
-// window; commit_interval(ms) = ms-bounded window.
-struct commit_per_message_t {};
-inline constexpr commit_per_message_t commit_per_message{};
-
-struct commit_batched   { std::size_t every_n_records; };
-struct commit_interval  { std::chrono::milliseconds period; };
-
-using FileStorePolicy = std::variant<commit_per_message_t,
-                                     commit_batched,
-                                     commit_interval>;
+// FileStorePolicy — struct (NOT std::variant) per design-doc §4.3 line 507–537.
+// Per-policy data-loss window documented per FR-011:
+//   commit_per_message      = 0% loss (fdatasync per record);
+//   commit_batched(N)       = up to N-1 record loss window since last batch boundary;
+//   commit_interval(ms)     = ms-bounded loss window.
+struct FileStorePolicy {
+    enum class kind : std::uint8_t {
+        commit_per_message = 0,
+        commit_batched     = 1,
+        commit_interval    = 2,
+    };
+    kind                       which       = kind::commit_per_message;
+    std::size_t                batch_size  = 1;                                  // commit_batched only.
+    std::chrono::milliseconds  interval    = std::chrono::milliseconds{100};     // commit_interval only.
+};
 
 class FileStore final : public MessageStore {
 public:
     struct Config {
-        std::filesystem::path       dir;
-        FileStorePolicy             policy           = commit_per_message;
-        std::size_t                 max_frame_bytes  = 0;
-        std::pmr::memory_resource*  store_resource   = nullptr;
+        // Directory holding session-local store files. Created if missing.
+        std::filesystem::path     directory;
+
+        // Session identity; encoded into filename so two sessions in the
+        // same directory don't collide (sender__target.log — single log
+        // per session per §6.3.1).
+        std::string               sender_comp_id;
+        std::string               target_comp_id;
+
+        // Durability knob.
+        FileStorePolicy           policy            = {};
+
+        // Maximum frame size accepted on store(). Per-record cap; the log
+        // file itself has no size limit other than fs free space.
+        std::size_t               max_frame_bytes   = 256 * 1024;
+
+        // Executor for the file-I/O work (§4.3.2).
+        asio::any_io_executor     file_io_executor;
+
+        // PMR resource for store-owned scratch.
+        std::pmr::memory_resource* store_resource   = nullptr;
     };
 
-    FileStore(Config cfg,
-              std::string_view sender,
-              std::string_view target) noexcept;
+    // 1-arg constructor per design-doc §4.3 line 570.
+    explicit FileStore(Config c) noexcept;
     ~FileStore() override;
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>

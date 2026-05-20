@@ -4,7 +4,7 @@
 //
 // SHAPE ORACLE — declaration-only contract for
 // fixpp::session::quickfix_compat::cfg_loader. Anchor: .specify/2e-msgstore.md
-// v0.4 §4.8.A.2. FR-030.
+// v0.4 §4.8.A.2 (line 869). FR-030.
 //
 // CONFIG TRANSLATION ONLY — NO runtime adapter. Path A retired in v0.3 per
 // Codex C-R2-P2-1 escalation ([2e §4.8.B]). The five hazards listed in
@@ -25,8 +25,6 @@
 #include <fixpp/core/error.hpp>                  // expected_t
 #include <fixpp/session/file_store_factory.hpp>  // FileStoreFactory
 
-namespace fixpp::core { struct EngineConfig; }
-
 namespace fixpp::session::quickfix_compat {
 
 // Reads a QuickFIX .cfg file (the [DEFAULT] / [SESSION] block format),
@@ -34,14 +32,22 @@ namespace fixpp::session::quickfix_compat {
 // CFG semantics), emits an equivalent FileStoreFactory. The factory is
 // returned by unique_ptr (caller owns it; pass into SessionConfig::store_factory).
 //
-// Errors: file-not-found, parse-failure, malformed key → returns
-// store_factory_failed (or a slot-future-determined parse-error variant; T-impl
-// decides whether to introduce a quickfix_compat-specific parse-error variant
-// or reuse store_factory_failed with a structured-log event). Default at
-// /plan time: reuse store_factory_failed (no new error variant for the
-// translator; the user reads the log for the parse error).
+// The returned FileStoreFactory carries a FileStore::Config whose
+// file_io_executor is left default-constructed (empty). The engine populates
+// it from EngineConfig::file_io_executor at FileStoreFactory::make() time
+// (see contracts/message_store_factory.hpp + contracts/file_store_factory.hpp);
+// this preserves the Config-only-CTOR contract per design-doc §4.4 frozen
+// surface AND the FileStore::Config::file_io_executor required-at-construction
+// contract per [2e §4.3.2]:665 (FileStore is constructed inside make()).
+//
+// Errors: file-not-found, parse-failure, malformed key all return
+// store_factory_failed (slot 61). The cfg_loader does NOT introduce a new
+// error variant. Observability of the precise parse-failure reason
+// (structured-log events at warn level for triage) is a 2k-ownership
+// concern per design-doc §7.5 line 1163 and is deferred to 2k along with
+// the rest of FR-035 / FR-036 (see spec.md §Observability — owed to 2k).
+// FR-021's 10-variant freeze binds.
 [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<FileStoreFactory>>
-cfg_to_file_store_factory(const std::filesystem::path& cfg_path,
-                          const fixpp::core::EngineConfig& engine_cfg) noexcept;
+cfg_to_file_store_factory(const std::filesystem::path& cfg_path) noexcept;
 
 }  // namespace fixpp::session::quickfix_compat

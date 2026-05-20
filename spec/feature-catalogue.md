@@ -237,7 +237,7 @@
 | ID | Source | Category | Title | FIX version(s) | Lib ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
 | OSS-001 | OSS:QuickFIX | dictionary | XML data dictionary at runtime — FIX44.xml, FIX50SP2.xml well-known format | 4.0–5.0SP2 | QuickFIX src/DataDictionary | backlog | — | — | — | — |
-| OSS-002 | OSS:QuickFIX | session | FileStore / MemoryStore persistence API — seqnum + message body keyed by seqnum | 4.0–5.0SP2 | QuickFIX src/FileStore | backlog | — | — | — | — |
+| OSS-002 | OSS:QuickFIX | session | FileStore / MemoryStore persistence API — seqnum + message body keyed by seqnum (v1.0 disposition: **Path B** per `[2e §4.8.A]` / `008-message-store` FR-039 — documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface; **no runtime adapter**) | 4.0–5.0SP2 | QuickFIX src/FileStore | backlog | 008-message-store | — | — | — |
 | OSS-003 | OSS:QuickFIX | session | FileLog / ScreenLog — structured session event logging API | 4.0–5.0SP2 | QuickFIX src/FileLog | backlog | — | — | — | — |
 | OSS-004 | OSS:QuickFIX | transport | Thread-per-session model — acceptor spawns one I/O thread per session | 4.0–5.0SP2 | QuickFIX src/ThreadedSocketAcceptor | backlog | — | — | — | — |
 | OSS-005 | OSS:QuickFIX | session | Application callback interface — onLogon/onLogout/fromApp/toApp/fromAdmin/toAdmin | 4.0–5.0SP2 | QuickFIX include/Application.h | backlog | — | — | — | — |
@@ -329,7 +329,7 @@
 
 | ID | Source | Category | Title | FIX version(s) | Vendor ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| COM-009 | COMMERCIAL:CameronTec | session | Warm standby failover — MessageStore designed for network replication | 4.0–5.0SP2 | CameronTec Catalys HA | backlog | — | — | — | — |
+| COM-009 | COMMERCIAL:CameronTec | session | Warm standby failover — MessageStore designed for network replication (v1.0 disposition: **post-v1.0 forward-compat invariant only** per `[2e §10] Q2` / `008-message-store` research D-9; v1.0 ships single-log non-replicable `FileStore`; replication-compatibility is a forward-compat surface not realised in v1.0) | 4.0–5.0SP2 | CameronTec Catalys HA | backlog | 008-message-store | — | — | — |
 | COM-010 | COMMERCIAL:OnixS | session | Spinlock vs mutex option — user-selectable hot-path lock type | 4.0–5.0SP2 | OnixS | backlog | — | — | — | — |
 | COM-011 | COMMERCIAL:OnixS | session | Per-session FIX dialect — venue-specific field customization without changing global dictionary | 4.0–5.0SP2 | OnixS | backlog | — | — | — | — |
 | COM-012 | COMMERCIAL:B2BITS | tooling | Git-backed session configuration — plain-text diffable config format | all | B2BITS FIXICC H2 | backlog | — | — | — | — |

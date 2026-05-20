@@ -92,7 +92,7 @@ public:
         capacity_policy policy             = capacity_policy::bounded;
         std::size_t     inbound_capacity   = 10'000;
         std::size_t     outbound_capacity  = 10'000;
-        std::size_t     max_frame_bytes    = 0;        // 0 → operator MUST set
+        std::size_t     max_frame_bytes    = 256 * 1024;  // 256 KiB default per design-doc §4.2 line 448
         std::pmr::memory_resource* store_resource = nullptr;  // null → engine provides dedicated monotonic_buffer_resource
     };
 
@@ -110,26 +110,31 @@ public:
 **Catalogue:** S-013 (NEW done at this feature's Gate-B merge)
 
 ```cpp
-struct commit_per_message_t {};
-inline constexpr commit_per_message_t commit_per_message{};
-
-struct commit_batched   { std::size_t every_n_records; };
-struct commit_interval  { std::chrono::milliseconds period; };
-
-using FileStorePolicy = std::variant<commit_per_message_t,
-                                     commit_batched,
-                                     commit_interval>;
+// FileStorePolicy — struct (NOT std::variant) per design-doc §4.3 line 507–537.
+struct FileStorePolicy {
+    enum class kind : std::uint8_t {
+        commit_per_message = 0,
+        commit_batched     = 1,
+        commit_interval    = 2,
+    };
+    kind                       which       = kind::commit_per_message;
+    std::size_t                batch_size  = 1;                                  // commit_batched only.
+    std::chrono::milliseconds  interval    = std::chrono::milliseconds{100};     // commit_interval only.
+};
 
 class FileStore final : public MessageStore {
 public:
     struct Config {
-        std::filesystem::path dir;
-        FileStorePolicy       policy = commit_per_message;
-        std::size_t           max_frame_bytes = 0;
-        std::pmr::memory_resource* store_resource = nullptr;
+        std::filesystem::path     directory;
+        std::string               sender_comp_id;
+        std::string               target_comp_id;
+        FileStorePolicy           policy            = {};
+        std::size_t               max_frame_bytes   = 256 * 1024;
+        asio::any_io_executor     file_io_executor;
+        std::pmr::memory_resource* store_resource   = nullptr;
     };
 
-    FileStore(Config cfg, std::string_view sender, std::string_view target) noexcept;
+    explicit FileStore(Config c) noexcept;
     ~FileStore() override;  // flushes / closes the log; idempotent
 
     // store/retrieve/next_seqnum/reset overrides — see contracts/file_store.hpp.
@@ -146,7 +151,7 @@ private:
 
 **On-disk layout** per `[2e §6.3.1]`:
 
-- Single append-only log file per session: `<dir>/<sender>__<target>.log`.
+- Single append-only log file per session: `<directory>/<sender>__<target>.log`.
 - File starts with a 16-byte aligned **sentinel record** `[record_kind=sentinel(2) | dir=0 | reserved(2) | magic(4) | version(4) | session_triple_hash(...) | crc32(4)]` (exact byte layout T-impl, must align to 8-byte boundary).
 - Each subsequent record: `[record_kind | dir | reserved(2) | seq(4) | len(4) | crc32(4) | bytes(len) | padding-to-8-byte-align]` (16-byte header + payload + padding).
 - `record_kind ∈ { frame=0, counters=1, sentinel=2 }`.
@@ -159,7 +164,7 @@ private:
 
 **Advisory open lock** (FR-013): `flock(LOCK_EX | LOCK_NB)` (Linux) / `LockFileEx(LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY)` (Windows) at open; second opener gets `store_factory_failed`.
 
-**Per-instance `file_io_executor`** (FR-024, research D-7): one ASIO `io_context` (or `thread_pool` size 1) per `FileStore`; all `pwrite` / `fdatasync` / `rename` work posted there; completions rebind to the session strand via `cancellable_dispatch` (`[2d §6.5]`).
+**`file_io_executor` (Config field, caller-supplied)** (FR-024, research D-7): caller passes `asio::any_io_executor` (typical: an `EngineConfig`-exposed 4-thread `asio::thread_pool` shared across all FileStores per design-doc §4.3.2 line 669); all `pwrite` / `fdatasync` / `rename` work posted there; completions rebind to the session strand via `cancellable_dispatch` (`[2d §6.5]`).
 
 ### E5 — `fixpp::session::MessageStoreFactory`
 
@@ -178,11 +183,13 @@ public:
     [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender,
          std::string_view target,
-         std::pmr::memory_resource* mr) noexcept = 0;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,
+         asio::any_io_executor file_io_executor) noexcept = 0;
 };
 ```
 
-**This is an in-place extension** of the 007-shipped polymorphic bind target. The class identity (`fixpp::session::MessageStoreFactory`) is preserved; the deleted move/copy + virtual destructor remain; we **add** the `make(...)` pure-virtual (N1; `unique_ptr` ownership per `[2e §4.4]` / `[arch §5.6]`).
+**This is an in-place extension** of the 007-shipped polymorphic bind target. The class identity (`fixpp::session::MessageStoreFactory`) is preserved; the deleted move/copy + virtual destructor remain; we **add** the `make(...)` pure-virtual (N1; `unique_ptr` ownership per `[2e §4.4]` / `[arch §5.6]`). The 4th `max_store_memory_bytes` parameter is the engine-resolved cap value threaded in at call time so the factory CTOR stays Config-only per the design-doc §4.4 frozen surface — no `EngineConfig&` back-channel on the constructor. The 5th `file_io_executor` parameter is the engine-resolved `EngineConfig::file_io_executor` value threaded in by the engine at call time (FR-024 / I-13 / research D-7); `FileStoreFactory::make()` populates the minted `FileStore::Config::file_io_executor` with this value (preserving the `[2e §4.3.2]:665` required-at-construction contract on `FileStore` itself, since `FileStore` is constructed inside `make()`), with a Config-supplied executor winning if the factory's own Config already carried one (caller override). `MemoryStoreFactory::make()` ignores the parameter.
 
 ### E6 — `fixpp::session::MemoryStoreFactory`
 
@@ -191,17 +198,18 @@ public:
 ```cpp
 class MemoryStoreFactory final : public MessageStoreFactory {
 public:
-    MemoryStoreFactory(MemoryStore::Config cfg,
-                       const fixpp::core::EngineConfig& engine_cfg) noexcept;
+    explicit MemoryStoreFactory(MemoryStore::Config cfg = {}) noexcept;
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender,
          std::string_view target,
-         std::pmr::memory_resource* mr) noexcept override;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,
+         asio::any_io_executor file_io_executor) noexcept override;
 };
 ```
 
-**Storage-DoS guard** (FR-014 / SC-004): `make()` validates `(cfg.inbound_capacity + cfg.outbound_capacity) * cfg.max_frame_bytes ≤ engine_cfg.max_store_memory_per_session`; on overflow returns `store_factory_failed`.
+**Storage-DoS guard** (FR-014 / SC-004 / I-11): `make()` enforces overflow-safe checked arithmetic against `max_store_memory_bytes` (the engine-resolved `EngineConfig::max_store_memory_per_session` threaded in by the engine at call time). See I-11 for the exact rule. The 5th `file_io_executor` parameter is ignored on this path (MemoryStore has no file-I/O work); both empty/default-constructed and non-empty values are **accepted and silently discarded** (no-op, NOT a misuse — `MemoryStore` has no file-I/O work, so any executor value is contractually meaningless on this path; the engine threads the same `EngineConfig::file_io_executor` value into every factory's `make()` per FR-005, and the MemoryStore path discards it rather than branching on emptiness).
 
 ### E7 — `fixpp::session::FileStoreFactory`
 
@@ -210,17 +218,18 @@ public:
 ```cpp
 class FileStoreFactory final : public MessageStoreFactory {
 public:
-    FileStoreFactory(FileStore::Config cfg,
-                     const fixpp::core::EngineConfig& engine_cfg) noexcept;
+    explicit FileStoreFactory(FileStore::Config cfg) noexcept;
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender,
          std::string_view target,
-         std::pmr::memory_resource* mr) noexcept override;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,
+         asio::any_io_executor file_io_executor) noexcept override;
 };
 ```
 
-**Same storage-DoS guard surface** as E6, plus opens the live log, takes the advisory lock, runs the restart algorithm.
+**Same storage-DoS guard surface** as E6, plus opens the live log, takes the advisory lock, runs the restart algorithm. Resolves the `file_io_executor` per the Config-supplied-wins rule (FR-024 / I-13 / research D-7): if the factory's stored `Config.file_io_executor` is non-empty it is used; otherwise the engine-threaded 5th-parameter `file_io_executor` (sourced from `EngineConfig::file_io_executor` per design-doc §4.3.2:669) populates the minted `FileStore::Config`. If both are empty, returns `store_factory_failed`. The minted `FileStore`'s `Config::file_io_executor` is thus always non-empty at `FileStore` construction time, preserving `[2e §4.3.2]:665`.
 
 ### E8 — `fixpp::session::direction_t`
 
@@ -248,21 +257,27 @@ inline constexpr seqnum_t seqnum_max = std::numeric_limits<seqnum_t>::max();
 }
 ```
 
-### E10 — `FileStorePolicy` (alias via `std::variant`)
+### E10 — `FileStorePolicy` (struct with `kind` enum)
 
 **Header:** `include/fixpp/session/file_store.hpp` (declared alongside `FileStore::Config`)
 
 ```cpp
-struct commit_per_message_t {};
-struct commit_batched   { std::size_t every_n_records; };
-struct commit_interval  { std::chrono::milliseconds period; };
-using FileStorePolicy = std::variant<commit_per_message_t, commit_batched, commit_interval>;
+struct FileStorePolicy {
+    enum class kind : std::uint8_t {
+        commit_per_message = 0,
+        commit_batched     = 1,
+        commit_interval    = 2,
+    };
+    kind                       which       = kind::commit_per_message;
+    std::size_t                batch_size  = 1;                                  // commit_batched only.
+    std::chrono::milliseconds  interval    = std::chrono::milliseconds{100};     // commit_interval only.
+};
 ```
 
-Per-policy data-loss window documented in the block-comment per FR-011:
+Per-policy data-loss window documented in the block-comment per FR-011 (design-doc §4.3 lines 521–526):
 
 - `commit_per_message`: 0% loss (fdatasync per record).
-- `commit_batched(N)`: half-batch loss window (~N/2 records since last batch boundary).
+- `commit_batched(N)`: up to N-1 records may be lost since last batch boundary.
 - `commit_interval(ms)`: ms-bounded loss window since last timer-fired flush.
 
 ### E11 — `fixpp::session::detail::has_flush_for_session_close` (concept)
@@ -291,8 +306,7 @@ concept has_flush_for_session_close = requires(S& s) {
 namespace fixpp::session::quickfix_compat {
 
 [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<FileStoreFactory>>
-cfg_to_file_store_factory(const std::filesystem::path& cfg_path,
-                          const fixpp::core::EngineConfig& engine_cfg) noexcept;
+cfg_to_file_store_factory(const std::filesystem::path& cfg_path) noexcept;
 
 }  // namespace fixpp::session::quickfix_compat
 ```
@@ -308,7 +322,7 @@ The invariants are the **behavioural** contract; the contracts/ headers are the 
 | ID | Statement | Owner | Enforcement |
 |----|-----------|-------|-------------|
 | I-01 | All four `MessageStore` methods acquire the per-instance `fixpp::sync::async_mutex` writer mutex on entry. The mutex is `async_mutex` regardless of `SessionConfig::lock_policy` (`[const §XI.5]`). | E1 / E3 / E4 | Static (grep gate `[const §XV.9]`) + dynamic (seam 5 FIFO-fair concurrent-writer under TSan; seam 20 verifies mutex acquired-then-released around `store_seqnum_out_of_order` reject). |
-| I-02 | `store` deep-copies the `frame` span into store-owned storage **before** the awaitable's first suspension point (`[2b §6.4]` view-escape). | E3 / E4 | Seam 9 (awaitable visitor + span lifetime) for the symmetric retrieve-side; seam 7 (outbound store-after-commit byte-equality) for the input-side. |
+| I-02 | `store` deep-copies the `frame` span into store-owned storage **after acquiring the writer mutex and before any further suspension that could release the session strand** (i.e., before `pwrite` / `fdatasync` posts to `file_io_executor`) per `[2b §6.4]` view-escape and design-doc §6.3.3 step 3 (under the v1.0 single-session-serialisation-domain discipline the uncontended `async_mutex::async_lock()` does NOT suspend per `[2f §4.3.2]` fast-path). | E3 / E4 | Seam 9 (awaitable visitor + span lifetime) for the symmetric retrieve-side; seam 7 (outbound store-after-commit byte-equality) for the input-side. |
 | I-03 | `retrieve` acquires the writer mutex at entry to validate `begin`/`end` and snapshot the index, but **releases the mutex before** the visitor's `co_await`. Mid-traversal mutation is detected; the next visitor call observes the new state without UB; already-visited frames are not re-visited; iteration stops at the original `end`. | E1 / E3 / E4 | Seam 9 + a TSan rendezvous in the same seam (concurrent `store()` during a `retrieve` walk completes without race; visitor sees stable per-frame span). |
 | I-04 | `retrieve_visitor::on_frame`'s `frame` span is stable across the visitor's `co_await`. The visitor MUST NOT retain it past the awaitable's completion (compile-time `[[clang::lifetimebound]]`). | E2 | Seam 9 (`[[asan]]`-instrumented access to the span returns the right bytes after a 100-µs visitor `co_await`). |
 | I-05 | `store` verifies `seq == next_seqnum(dir, false)` inside the writer-mutex critical section **after mutex acquire and before any slab memcpy / pwrite**. On mismatch returns `expected_t::unexpected{store_seqnum_out_of_order}`, no state mutation, mutex released cleanly. | E3 / E4 | Seam 20 (drive `store(seq=5)` while `next_seqnum(outbound, false) == 1`). |
@@ -317,7 +331,7 @@ The invariants are the **behavioural** contract; the contracts/ headers are the 
 | I-08 | `capacity_policy::bounded` MemoryStore returns `store_capacity_exhausted` on the next `store()` after the per-direction cap is reached. No silent eviction. No termination. The entry-array index is unchanged. The writer mutex is released cleanly. | E3 | Seam 4 (101st store on a `outbound_capacity = 100` instance returns the variant). |
 | I-09 | `capacity_policy::evict_oldest` is **unrepresentable** on the public API — not a public name, not a numeric value (`[const §XV.15]`). Closed 2-value enum + `[[clang::enum_extensibility(closed)]]` + `static_assert` at every switch + runtime out-of-range-cast reject. | E3 | Seam 4 variant (`unbounded`: 10⁵ frames stored without capacity error). Static enforcement via compile-time `static_assert` on enum values + clang-tidy. |
 | I-10 | `MemoryStore::store` performs **zero allocator calls** under `bounded` policy after construction (FR-007). One PMR allocation at construction for slot+slab combined. | E3 | Seam 15 (tracking PMR resource counter unchanged after 10⁴ `store()` calls). |
-| I-11 | `MemoryStore::Config` whose product `(inbound_capacity + outbound_capacity) * max_frame_bytes` exceeds `EngineConfig::max_store_memory_per_session` is rejected at `MemoryStoreFactory::make()` with `store_factory_failed`. Same for `FileStoreFactory` (the cap binds both factories; FR-014 / `[2e §1.2]`). | E6 / E7 | Seam 4 variant (`MemoryStore::Config` whose product overflows the engine cap is rejected). |
+| I-11 | `make()` MUST reject the Config via `store_factory_failed` if any of the following hold (overflow-safe checked arithmetic; the engine-resolved `EngineConfig::max_store_memory_per_session` is threaded in as `make()`'s 4th parameter `max_store_memory_bytes`): (a) `inbound_capacity + outbound_capacity` overflows `std::size_t`; (b) `(inbound_capacity + outbound_capacity) > 0` and `max_frame_bytes > max_store_memory_bytes / (inbound_capacity + outbound_capacity)`; (c) `max_frame_bytes` exceeds `Framer::Config::max_frame_bytes`. The same rule binds both factories (FR-014 / `[2e §1.2]`). Additionally, `FileStoreFactory::make()` MUST reject with `store_factory_failed` if BOTH the factory's stored `Config.file_io_executor` AND `make()`'s 5th-parameter `file_io_executor` are empty / default-constructed (executor injection per FR-024 / I-13 / research D-7 — there is no "no executor" operating mode for `FileStore`). | E6 / E7 | Seam 4 — primary test plus an overflow sub-scenario `inbound_capacity = SIZE_MAX/2 - 1, outbound_capacity = 2, max_frame_bytes = 8` expecting `store_factory_failed`. |
 | I-12 | `FileStore` single append-only log per session at `<dir>/<sender>__<target>.log`; every record carries `kind | dir | seq | len | crc32 | bytes`; the file starts with a sentinel record `magic | version | session_triple_hash | crc32`. | E4 | Seam 1 + seam 2 (round-trip + crash-survival). |
 | I-13 | `FileStore::store(commit_per_message)` linearisation point = successful return of `fdatasync` (Linux) / `FlushFileBuffers` (Windows). Cancellation before the syscall returns success → `store_cancelled`; cancellation after → durable, normal completion. | E4 | Seam 6 (FileStore variant) + seam 2 (crash-survival under `commit_per_message` shows 0% loss). |
 | I-14 | `FileStore` open detects torn writes via per-record CRC32 on the restart scan and truncates the log to the last whole record. Stale `<live>.log.reset.tmp` from a crashed prior reset is unlinked before the scan. | E4 | Seam 3 (Linux Tier-1 + Windows Tier-2). |
@@ -362,9 +376,11 @@ The C-ABI prefix-group mapping is **documented** in the `error.hpp` comment for 
 
 **File:** `include/fixpp/core/engine_config.hpp`
 
-**Edit:** add `std::size_t max_store_memory_per_session = 1ULL << 30;` (1 GiB default) adjacent to the existing `default_store_factory` field (currently line 119 in the 007 baseline). FR-014a / Clarifications Q5 / research D-10.
+**Edit (FR-014a):** add `std::size_t max_store_memory_per_session = 1ULL << 30;` (1 GiB default) adjacent to the existing `default_store_factory` field (currently line 119 in the 007 baseline). Clarifications Q5 / research D-10.
 
-**Non-breaking** — default value preserves prior `EngineConfig` semantics. A session whose store does not exceed 1 GiB is unaffected. The field is engine-wide (no `SessionConfig` override).
+**Edit (FR-024a):** add `asio::any_io_executor file_io_executor;` (default-constructed empty) adjacent to the existing `default_store_factory` field per design-doc §4.3.2:669 ("`EngineConfig` exposes a default `file_io_executor`"). The engine threads this value into each `MessageStoreFactory::make()` invocation as the 5th `file_io_executor` parameter (FR-005 / FR-024 / research D-7). Typical operating mode: caller constructs a 4-thread `asio::thread_pool` at engine-open and assigns its executor here (shared across all `FileStore`s in the engine per design-doc §4.3.2:669). The `FileStoreFactory::make()` path rejects with `store_factory_failed` if both the factory's `Config.file_io_executor` AND the engine-threaded value are empty (I-11).
+
+**Non-breaking** — default values preserve prior `EngineConfig` semantics. A session whose store does not exceed 1 GiB is unaffected by `max_store_memory_per_session`; a session that uses `MemoryStore` (only) is unaffected by an empty `file_io_executor` (MemoryStore ignores it). Both fields are engine-wide (no `SessionConfig` override).
 
 ---
 
