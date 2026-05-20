@@ -1,0 +1,15 @@
+# 007-threading-clock: asio any_executor type-erasure ref-count race
+#
+# asio::detail::ref_count_down uses fetch_sub(memory_order_release) + a
+# manual atomic_thread_fence(acquire) on the last decrement (a classic
+# shared_ptr-style refcount optimisation — atomic_count.hpp). The pattern
+# is CORRECT but TSan cannot always establish happens-before across the
+# manual fence, so it flags races in shared_target_executor<T>::~impl()
+# when a custom executor (e.g. fixpp::core::session_executor) is erased
+# into asio::any_io_executor and its any_executor copy is dropped on a
+# thread other than the one that constructed it (co_spawn on
+# session_executor → strand on a multi-thread io_context, US4 seam 6 et al).
+# Affects asio 1.36.0; not a fixpp::session_local concurrency issue (the
+# slot is plain value ownership, read on the strand — race-free).
+race:asio::execution::detail::shared_target_executor
+race:asio::execution::detail::any_executor_base

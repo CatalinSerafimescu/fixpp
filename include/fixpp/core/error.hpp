@@ -97,6 +97,69 @@ enum class error : std::uint8_t {
                                      //   cancel_and_drain() set draining_ = true;
                                      //   subsequent async_lock(...) fast-fails
                                      //   without enqueuing.
+
+    // threading variants — owned by 007-threading-clock (data-model.md Error
+    // model; contracts/threading_errors.hpp; [2d §6.7]). Appended at unused
+    // slots 47–55, non-renumbering ([const §X.4]); design-doc table order. NO
+    // separate enum type (D-2 — single core::error; the "session" group is the
+    // lifecycle subset, for C-ABI coalescing only). C-ABI
+    // FIXPP_ERR_THREAD_{CONFIG,SESSION_LIFECYCLE,RUNTIME} / FIXPP_ERR_CANCELLED
+    // coalescing + tools/abi_history audit-trail entry deferred to 2i (same
+    // time-bounded waiver shape as 002/003/004/006; no C-ABI surface added
+    // here). NOT introduced (design-doc dropped — [2d §6.7] / D-7):
+    // trace_context_provider_threw (C-P2-4), cancellation_propagation_timeout
+    // (N-P2-1), version_registry_dictionary_missing (Opus N2-P2-1 — the
+    // FIXT.1.1 miss routes through the EXISTING slot-28
+    // dict_no_dictionary_for_application_version).
+    executor_already_stopped   = 47,  // [2d §4.4] — resolved executor
+                                      //   (executor_override.value_or(
+                                      //   EngineConfig::executor)) joined before
+                                      //   Engine::open / Session::open.
+                                      //   → FIXPP_ERR_THREAD_CONFIG
+    executor_not_serialised    = 48,  // [2d §4.5]/§6.1 — mode==direct_executor
+                                      //   without already_serialized_executor
+                                      //   (root cause #1 / C-P1-2); enforced at
+                                      //   the SINGLE point make_session_executor.
+                                      //   → FIXPP_ERR_THREAD_CONFIG
+    clock_sleeps_cancelled     = 49,  // [2d §4.1]/§6.6 — a sleep_until waiter
+                                      //   completed via cancel_sleeps. Maps to
+                                      //   asio::error::operation_aborted at the
+                                      //   awaitable level; this value is the
+                                      //   OPTIONAL expected_t projection (NOT the
+                                      //   sleep_until return type — [2d §4.1]).
+                                      //   Joins FIXPP_ERR_CANCELLED ([const §XI.2]).
+    strand_dispatch_failed_oom = 50,  // [2d §6.2]/§6.5 — PMR fallback for the
+                                      //   strand's posted handler / the
+                                      //   cancellable_dispatch node exhausted the
+                                      //   per-session arena. Forced disconnect.
+                                      //   → FIXPP_ERR_THREAD_RUNTIME
+    session_already_open       = 51,  // [2d §4.7] — Session::open() called twice
+                                      //   on the same handle (programmer error).
+                                      //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
+    session_already_closed     = 52,  // [2d §4.7]:830-832,863 / [2d §6.5]:1172 —
+                                      //   close() on a NEVER-OPENED or an
+                                      //   ALREADY-CLOSED (drained) session. NOT
+                                      //   returned for an ALREADY-CLOSING
+                                      //   (in-flight) session — that returns the
+                                      //   SAME in-flight awaitable, no error.
+                                      //   Idempotency; non-fatal.
+                                      //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
+    invalid_session_config     = 53,  // [2d §4.5]/§6.1 — incompatible combo
+                                      //   (direct_executor+lock_policy::spin even
+                                      //   when attested; null EngineConfig::
+                                      //   executor; null dictionary;
+                                      //   default-constructed security_profile
+                                      //   sentinel — N-P2-3).
+                                      //   → FIXPP_ERR_THREAD_CONFIG
+    clock_not_set              = 54,  // [2d §4.4] — EngineConfig::clock is null
+                                      //   at Engine::open, regardless of
+                                      //   per-session clock_override (root #2).
+                                      //   → FIXPP_ERR_THREAD_CONFIG
+    dispatch_aborted           = 55,  // [2d §6.5] — cancellable_dispatch's slot
+                                      //   fired BEFORE the posted handler was
+                                      //   picked up; handler reaped (not invoked).
+                                      //   Expected on the §4.7 phase-2 close path.
+                                      //   Joins FIXPP_ERR_CANCELLED (reused).
 };
 
 template <class T>

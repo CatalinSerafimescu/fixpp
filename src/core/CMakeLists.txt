@@ -11,4 +11,10 @@ target_include_directories(fixpp_core PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
 )
 
-# core has no internal project dependencies — it is the leaf [arch §2.2]
+# core has no internal project dependencies — it is the leaf [arch §2.2].
+# The asio-dependent fixpp::core threading impls do NOT live in this leaf
+# target: system_clock_source.cpp is compiled into fixpp_session; the
+# test-only mock_clock.cpp is a test-support lib (built only with tests).
+if(FIXPP_BUILD_TESTS)
+  add_subdirectory(test)   # fixpp_mock_clock — test-only deterministic Clock
+endif()
