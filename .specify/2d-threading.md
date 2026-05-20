@@ -1,6 +1,6 @@
 # Design Doc 2d — Application Threading Contract & `fixpp::core::Clock`
 
-> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent)
+> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent); **shipped via 007-threading-clock PR #74 (merged 2026-05-20, squash `9c39a275`) + layer-hotfix PR #75 (squash `dab5f6a`)**
 > **Date:** 2026-05-08
 > **Convergence-log pointer:** addresses Codex round-3 review (1 P1 / 0 P2 / 0 P3) and Opus round-3 adversarial review (combined post-judging 1 P1 / 0 P2 / 0 P3; 1 root cause), see Appendix C round 3 entry.
 > **Owner:** `fixpp::core` (`include/fixpp/core/clock.hpp`, `include/fixpp/core/engine_config.hpp`, `include/fixpp/core/session_executor.hpp`, `include/fixpp/core/session_local.hpp`, `include/fixpp/core/trace_context.hpp`); `fixpp::session` (`include/fixpp/session/session_config.hpp`); test surface co-owned with `tests/support/` (`include/fixpp/core/test/mock_clock.hpp`).
