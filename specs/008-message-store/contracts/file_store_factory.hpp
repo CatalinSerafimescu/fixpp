@@ -34,6 +34,27 @@
 // make() also opens the live log, takes the advisory flock / LockFileEx
 // (I-16), runs the restart algorithm (I-14), verifies the sentinel
 // record's session_triple_hash.
+//
+// CompID filesystem-safety validation (v0.5 per [2e §D.4] — Gap 1 close):
+// make() MUST validate sender / target CompIDs before composing the
+// filename <directory>/<sender>__<target>.log and before opening any
+// file or taking the advisory lock — reject empty, path separators,
+// NUL, `.`/`..` segments, control chars [0x00, 0x1F]/0x7F, NAME_MAX
+// excess — with store_factory_failed. Mirrored at cfg_loader.hpp as
+// defense in depth.
+//
+// Filesystem-type scope restriction (v0.5 per [2e §D.5] — Gap 2 close):
+// FileStore is supported only on filesystems where flock / LockFileEx
+// provides effective cross-process exclusive-lock semantics for every
+// host that may open the live log path. NFS (without correctly-
+// configured rpc.lockd), SMB/CIFS, FUSE network FS, and cluster
+// filesystems (GPFS, Lustre, GFS2, OCFS2) are unsupported in v1.0.
+// make() does NOT detect or warn on such deployments (the probe-is-
+// worse-than-nothing argument: a same-host probe doesn't prove
+// multi-host correctness; a filesystem-type probe is non-portable and
+// incomplete); operators MUST verify cross-host lock semantics out of
+// band. The [2e §10 Q4] single-writer contract holds only under this
+// scope restriction.
 #pragma once
 
 #include <memory>

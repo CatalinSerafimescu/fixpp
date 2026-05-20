@@ -47,6 +47,19 @@ namespace fixpp::session::quickfix_compat {
 // concern per design-doc §7.5 line 1163 and is deferred to 2k along with
 // the rest of FR-035 / FR-036 (see spec.md §Observability — owed to 2k).
 // FR-021's 10-variant freeze binds.
+//
+// CompID filesystem-safety validation mirror (v0.5 per [2e §D.4] — Gap 1
+// close, defense in depth): cfg_to_file_store_factory MUST validate the
+// effective sender / target CompID values parsed from the CFG file with
+// the same rules as FileStoreFactory::make() — reject empty, path
+// separators ('/' on Linux; '/' or '\\' on Windows), NUL, `.` / `..`
+// segments, control characters in [0x00, 0x1F] / 0x7F, or values that
+// would produce a path component exceeding NAME_MAX — with
+// store_factory_failed at config-load time. This is the defense-in-depth
+// mirror that ensures malformed CFGs fail fast at load rather than at
+// session-open. The same validation runs again at make() time (per
+// [2e §D.4]) so direct Path-B users who bypass cfg_loader are also
+// protected.
 [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<FileStoreFactory>>
 cfg_to_file_store_factory(const std::filesystem::path& cfg_path) noexcept;
 

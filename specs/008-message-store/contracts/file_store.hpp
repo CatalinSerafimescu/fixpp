@@ -58,6 +58,20 @@ public:
         // Session identity; encoded into filename so two sessions in the
         // same directory don't collide (sender__target.log — single log
         // per session per §6.3.1).
+        //
+        // FILESYSTEM-SAFETY VALIDATION (v0.5 per [2e §D.4] — Gap 1 close).
+        // FileStoreFactory::make() MUST validate these values before
+        // composing the filename and before opening any file or taking
+        // the advisory lock: each MUST be non-empty, MUST NOT contain a
+        // path separator ('/' on Linux; '/' or '\\' on Windows), a NUL
+        // byte, a `.` or `..` path segment, a control character in
+        // [0x00, 0x1F] or 0x7F, and the composed path component MUST
+        // NOT exceed NAME_MAX (pathconf(_PC_NAME_MAX) on Linux;
+        // MAX_PATH minus directory prefix on Windows). On violation,
+        // make() returns store_factory_failed before any file is opened.
+        // Validation uses primitive string_view::find_first_of / find;
+        // std::filesystem::path constructors are NOT invoked until
+        // validation passes (preserves noexcept on make()).
         std::string               sender_comp_id;
         std::string               target_comp_id;
 

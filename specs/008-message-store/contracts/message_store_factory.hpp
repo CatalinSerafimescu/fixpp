@@ -17,6 +17,24 @@
 // (already at session_config.hpp:106 per the 007-shipped [2d §4.5] Appendix
 // D §D.1 amendment); the unique_ptr ownership of the returned MessageStore
 // per make() is N1 (independent of the factory's ownership shape).
+//
+// Store-object allocation contract (v0.5 per [2e §D.6] — Gap 3 close):
+// the make() return type std::unique_ptr<MessageStore> commits the v1.0
+// contract to std::default_delete<MessageStore> destruction (the
+// default unique_ptr deleter): the concrete store object MUST be
+// destructible via `delete static_cast<MessageStore*>(p)`. Factory
+// implementations that wish to use a PMR allocator for the store
+// object itself MUST wrap deallocation into a std::default_delete-
+// compatible path (typical pattern: a static operator delete overload
+// on the concrete store class that routes back to the PMR resource,
+// paired with std::pmr::polymorphic_allocator::new_object for the
+// matching allocation). A std::unique_ptr<MessageStore, CustomDeleter>
+// return type is NOT supported in v1.0; reserved for a possible
+// post-v1.0 evolution per [const §X.4]. The `mr` PMR parameter
+// threaded into make() and the [2e §6.1.1] / [2e §8] / FR-026 / FR-027
+// PMR contracts govern only the store's INTERNAL storage (slab, ring,
+// framing scratch, index, persisted-frame copy) — they do NOT govern
+// the deleter shape of the store object itself.
 #pragma once
 
 #include <memory>
