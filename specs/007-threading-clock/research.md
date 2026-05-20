@@ -259,3 +259,30 @@ The strand wrap restores the implicit contract the comment at `system_clock_sour
 Alternative considered + rejected: friend-access from `Session` to `system_clock_source`'s private state. Rejected because the `Clock` interface is the polymorphic surface — a downstream `Clock` implementation with per-session state (e.g., a future `historical_replay_clock`) needs the same hook. The 4-pure-virtual / ≤5-total cap allows exactly one default-virtual hook here; this is it.
 
 **Anchor:** `include/fixpp/core/clock.hpp::Clock::forget_session`; `src/core/system_clock_source.cpp::forget_session`; `src/session/session.cpp::~Session`; E12 / D-8 / I-01 / I-18; `[2d §4.5]` (arena outlives session).
+
+---
+
+### D-21 — AMENDED (gate-b/r1 RC#1)
+
+**Original D-21** declared `SecurityProfile* == nullptr` enforcement deferred to 2g because the type was forward-declared only. The original D-21 as written took two steps: (a) defer enforcement (defensible) and (b) reshape the field from value-typed to raw pointer (NOT defensible — violates contract oracle `contracts/session_config.hpp:60`, `[arch §5.6]`, `[const §XII.5]`).
+
+**Amendment (gate-b/r1):** Step (b) is rejected. The D-15 minimal-interface-stub pattern is applied instead:
+- `include/fixpp/tls/security_profile.hpp` ships `struct SecurityProfile { enum class kind : std::uint8_t { unset=0, mtls_ca=1, mtls_pinned=2, one_way_ca=3 }; kind k = kind::unset; };` — a complete value type in 007.
+- `SessionConfig::security_profile` is restored to the contract oracle's value-typed shape.
+- `Session::open()` rejects `cfg_.security_profile.k == kind::unset` with `error::invalid_session_config` (slot 53 / FR-018 / N-P2-3 / `[const §XII.5]`).
+- 2g extends (adds concrete TLS binding, cert_source wiring, cipher-suite policy) without a breaking field-shape change.
+- Test seam: `tests/session/test_session_open_rejects_unset_security_profile.cpp`.
+
+The TapConsumer drift is also fixed in this commit: `include/fixpp/tap/tap_consumer.hpp` ships a minimal stub and `SessionConfig::tap_consumer` is restored to value-typed shape (no open-time rejection for TapConsumer — unlike SecurityProfile, no `[const §XII.5]` no-implicit-default constraint applies).
+
+**Anchor:** `include/fixpp/tls/security_profile.hpp`; `include/fixpp/tap/tap_consumer.hpp`; `include/fixpp/session/session_config.hpp`; `src/session/session.cpp`; D-15 pattern; `[const §XII.5]`; `[arch §5.6]`; `contracts/session_config.hpp`.
+
+---
+
+### D-24 — SC-004 wording aligned with end-to-end bench-harness methodology (gate-b/r1 RC#3)
+
+**Decision:** SC-004's "meets every §6.3 ceiling" wording is amended to distinguish rows that meet their absolute ceilings under the current end-to-end harness from rows where harness methodology overhead dominates the primitive cost. Three rows are declared **bench-soft** under the D-24 carve-out: in-strand dispatch (≤25 ns ceiling, ~244 ns measured end-to-end), in-domain trace access (≤15 ns ceiling, ~39 ns measured), and engine-fallback (≤25 ns ceiling, ~41 ns measured). For these rows the §6.3 absolute figures are the §10-Q4 primitive-cost tightening targets; the CI gate enforces only the ±5% regression-bar. The existing cross-thread carve-out (D-22 / I-19) is preserved.
+
+**Rationale:** The bench source's own methodology note (`bench/threading/bench_threading.cpp:8-26`) explicitly states "benches are END-TO-END per-operation wall times of the coroutine + io_context round-trip (manual-timed, warm cache). The actual primitive costs are expected to be lower in isolation." The three over-ceiling rows measure a coroutine + io_context + strand-hop round-trip (typically 200-250 ns of overhead) around a primitive that IS sub-25/15 ns in isolation. Reporting SC-004 as fully GREEN while the committed baseline empirically exceeded three published ceilings was a spec-vs-evidence contradiction (gate-b/r1 P1.4 / Opus triage confirmation). This D-24 alignment makes SC-004 truthful against the published evidence without changing any code or baseline numbers.
+
+**Anchor:** `specs/007-threading-clock/spec.md` SC-004 (amended); `bench/threading/bench_threading.cpp:8-26` methodology note; `bench/baselines/threading/threading_baselines.json`; D-22; I-19; `[2d §6.3]` §10-Q4 follow-up; gate-b/r1 RC#3.

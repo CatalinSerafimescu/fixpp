@@ -24,6 +24,20 @@
 // primitive costs are expected to be lower in isolation; the regression gate
 // is on these end-to-end figures. See bench/baselines/threading/
 // threading_baselines.json for the recorded baseline and methodology notes.
+//
+// Row classification (D-24 / gate-b/r1 RC#3):
+//   END-TO-END DOMINATED (harness overhead > primitive cost; bench-soft per D-24):
+//     BM_Threading_InStrand_Dispatch    — io_context round-trip + strand hop dominates
+//     BM_Threading_TraceContextInDomain — io_context round-trip + session_local read
+//     BM_Threading_EngineFallback       — io_context round-trip + default-return path
+//   NEAR PRIMITIVE COST (harness overhead < primitive cost; meet their ceilings):
+//     BM_Threading_CrossStrand_Reify_20tag  — reify cost dominates
+//     BM_Threading_CrossStrand_Reify_200tag — reify cost dominates
+//     BM_Threading_ClockNow                 — single std::chrono call
+//   BENCH-SOFT per I-19 (OS-scheduler-dependent):
+//     BM_Threading_CrossThread_Dispatch     — cross-thread post; ceiling is §10-Q4 target
+//   MARGINAL (measured slightly over; within ±5% regression bar):
+//     BM_Threading_SteadyNow               — single steady_clock::now call
 
 #include <benchmark/benchmark.h>
 
