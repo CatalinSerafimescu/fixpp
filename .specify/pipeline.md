@@ -114,6 +114,16 @@ PHASE 4 — PUBLISH + MERGE
     g. <feature>-verify.md / lifecycle doc: final "User sign-off" line
     h. project memory: update the relevant state note if the close changes
        cross-session status
+    i. Phase-2 design-doc shipped-status pointer (when this feature
+       realizes a Phase-2 design doc): update `.specify/<2N>-*.md`'s Status
+       header with "+ shipped via <feature> PR #<N> (merged YYYY-MM-DD,
+       squash <SHA>)" AND extend the matching `phases/phase-2.md` Track Log
+       row with the same pointer. Precedents: 2c→003 PR #67, 2f→006 PR
+       #73, 2d→007 PR #74; bullet (i) added 2026-05-20 because the
+       previous three merges all silently dropped this surface —
+       `feature-catalogue.md` and phase-4 docs captured the
+       implementation-status delta, but the Phase-2 design-of-record kept
+       reading as "Draft, Gate-A-converged" indefinitely.
 
 20. Review and close all issues for this phase
 ```

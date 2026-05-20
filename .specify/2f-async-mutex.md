@@ -1,6 +1,6 @@
 # Design Doc 2f — Awaitable Mutex `fixpp::sync::async_mutex`
 
-> **Status:** Draft v1.5
+> **Status:** Draft v1.5 (v1.6 errata E-1..E-4 applied post-006 sign-off; Gate A re-touch converged 2026-05-19); **shipped via 006-async-mutex PR #73 (merged 2026-05-19, squash `1e2f0e4`)**
 > **Date:** 2026-05-08
 > **Owner:** Opus (Phase 2 design author)
 > **Headers:** `fixpp::sync::async_mutex` (`include/fixpp/core/sync/async_mutex.hpp`); RAII guard `fixpp::sync::async_lock_guard` (same header); session-side helper `fixpp::session::async_lock_via_session_executor(async_mutex&)` (`include/fixpp/session/async_lock_via_session_executor.hpp`); CI-side enforcement of `[const §XV.9]` (`tools/check_no_std_mutex_in_awaitable_headers.sh` — grep gate; clang-tidy custom check is the post-v1 path per §10 Q3).
