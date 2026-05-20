@@ -23,7 +23,7 @@
 #include <fixpp/core/error.hpp>             // expected_t, error values
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <fixpp/tls/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check
+#include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 
 namespace fixpp::session {
 
@@ -134,7 +134,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // 2g extends with the concrete TLS binding; the field SHAPE is now
     // correct and the constitutional no-implicit-default rule is enforced.
     if (cfg_.security_profile.k ==
-            fixpp::tls::SecurityProfile::kind::unset) {
+            fixpp::session::SecurityProfile::kind::unset) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
