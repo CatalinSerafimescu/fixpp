@@ -13,6 +13,10 @@
 
 #include <asio/awaitable.hpp>
 
+namespace fixpp::session {
+class Session;  // opaque key for forget_session (defined in fixpp/session/session.hpp)
+}
+
 namespace fixpp::core {
 
 using utc_time_point    = std::chrono::time_point<std::chrono::system_clock>;
@@ -47,6 +51,15 @@ public:
     // Idempotent; safe to call concurrently AND re-entrantly (incl. from
     // inside a sleep_until completion handler) (FR-003 / E1).
     virtual void cancel_sleeps() noexcept = 0;
+
+    // Optional hook: notify the clock that a session is about to be destroyed
+    // so per-session state (e.g. system_clock_source's reusable timer slot
+    // pool, T055 / D-8) can be released BEFORE the session's arena memory is
+    // reclaimed. Idempotent; safe to call from Session::~Session() (which is
+    // the canonical call site). Default no-op for clocks without per-session
+    // state (mock_clock). Total virtual count = 5 (≤5 per I-01 / [const §XIV.2]
+    // — 4 pure-virtual + this 1 default-implemented hook).
+    virtual void forget_session(fixpp::session::Session* /*session*/) noexcept {}
 };
 
 }  // namespace fixpp::core

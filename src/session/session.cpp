@@ -49,7 +49,18 @@ Session::Session(const fixpp::core::EngineConfig& engine,
     // (never null), so I-18's never-null contract holds for the lifetime.
 }
 
-Session::~Session() = default;
+// D-23: release any per-session Clock state (system_clock_source's reusable
+// timer-slot pool keyed by Session*, etc.) BEFORE the session_arena memory
+// is reclaimed by member destruction. Idempotent — the default Clock hook
+// is a no-op for clocks without per-session state. effective_clock_ is
+// nullptr until open() resolves it (state_ == never_opened); after a
+// successful open() it remains non-null until destruction (the Clock is
+// shared_ptr-owned by EngineConfig and outlives the session — [2d §4.1]).
+Session::~Session() {
+    if (effective_clock_) {
+        effective_clock_->forget_session(this);
+    }
+}
 
 std::pmr::memory_resource* Session::session_arena() const noexcept {
     return session_arena_;  // I-18: frozen at ctor, never null, never swapped

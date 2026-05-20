@@ -245,3 +245,17 @@ The strand wrap restores the implicit contract the comment at `system_clock_sour
 **Rationale:** The bench binary takes ~0.6s (release) in the regression check. Adding it to CI would require a release build in the CI matrix; that is a non-trivial infrastructure change that belongs in a dedicated CI-hardening pass, not in a threading-contract feature PR.
 
 **Anchor:** `bench/threading/CMakeLists.txt`; `cmake/run_bench_regression.cmake`; `tools/bench_compare.py`; `bench/baselines/threading/threading_baselines.json`; `[const §VIII.2]`.
+
+---
+
+### D-23 — `Clock::forget_session(Session*)` hook called from `~Session` releases per-session Clock state before arena reclamation
+
+**Decision:** Add a non-pure-virtual hook `void Clock::forget_session(Session*) noexcept {}` (default empty body) called from `Session::~Session()` so per-session `Clock`-side state (the `system_clock_source` reusable-timer slot pool keyed by `Session*` — T055 / D-8 / E12) is released BEFORE the session's `session_arena` memory is reclaimed by member destruction. `system_clock_source` overrides it to erase the `session_slots` entry under `impl_->m`; `mock_clock` inherits the no-op default. Total `Clock` virtual count = 5 (4 pure + 1 default-implemented hook), exactly at the I-01 / `[const §XIV.2]` ≤5 cap.
+
+**Rationale:** Without an explicit hook, the `session_slots` map (`unordered_map<Session*, shared_ptr<SessionTimerSlot>>` in `system_clock_source::state`) grows unbounded for the clock's lifetime AND the entry's `shared_ptr` points into memory backed by the destroyed session's arena. For a `std::pmr::monotonic_buffer_resource` (typical `session_arena`) the arena's destruction frees its blocks while the `shared_ptr`'s deallocator is a no-op — so the slot object remains in reclaimed memory. A subsequent `Session` heap-allocated at the same address would find the stale slot via `find(this)` and serve a `steady_timer` whose strand binds an executor that may no longer exist. The pre-D-23 comment at `system_clock_source.cpp:60` claimed `cancel_sleeps()` cleaned the map; it never did (simplify-review quality-axis H#1 finding).
+
+`Session::~Session()` is the canonical lifetime hook (runs while `session_arena_` is still valid — Session merely borrows the resource pointer; the resource itself outlives Session per `[2d §4.5]`). Calling `effective_clock_->forget_session(this)` is idempotent (no-op when never opened, no-op for sessions that never slept). The hook does NOT replace `cancel_sleeps()` — the two are orthogonal: `cancel_sleeps()` aborts in-flight `async_wait`s on `inflight`-tracked timers; `forget_session` releases the cached reusable slot in `session_slots`.
+
+Alternative considered + rejected: friend-access from `Session` to `system_clock_source`'s private state. Rejected because the `Clock` interface is the polymorphic surface — a downstream `Clock` implementation with per-session state (e.g., a future `historical_replay_clock`) needs the same hook. The 4-pure-virtual / ≤5-total cap allows exactly one default-virtual hook here; this is it.
+
+**Anchor:** `include/fixpp/core/clock.hpp::Clock::forget_session`; `src/core/system_clock_source.cpp::forget_session`; `src/session/session.cpp::~Session`; E12 / D-8 / I-01 / I-18; `[2d §4.5]` (arena outlives session).

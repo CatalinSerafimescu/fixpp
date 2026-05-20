@@ -104,7 +104,7 @@ struct SessionConfig {
 
     std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership
     std::shared_ptr<fixpp::tls::cert_source>       cert_source;
-    fixpp::tls::SecurityProfile*                   security_profile = nullptr;  // no-implicit-default sentinel (N-P2-3)
+    fixpp::tls::SecurityProfile*                   security_profile = nullptr;  // N-P2-3 sentinel — enforcement deferred to 2g (D-21; src/session/session.cpp WIRING POINT FOR 2g)
 
     std::shared_ptr<const fixpp::dict::Dictionary>     dictionary;       // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional

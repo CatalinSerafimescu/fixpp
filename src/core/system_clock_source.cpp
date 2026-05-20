@@ -25,6 +25,15 @@
 // for non-hot-path engine-scope sleeps, e.g. close-timeout machinery).
 // Both threading modes (per_session_strand / direct_executor) use the same
 // Session* keying axis (round 2 root cause #1 — D-8).
+//
+// Slot lifetime — D-23 (cleanup): the slot lives in session_arena, so its
+// memory is reclaimed when ~Session destroys the arena. The session_slots
+// map's shared_ptr to the slot must therefore be released BEFORE
+// ~Session — otherwise the next session whose address happens to coincide
+// (heap-reused) finds a stale slot pointing into reclaimed arena memory
+// (use-after-free). The cleanup is forget_session(Session*), called from
+// Session::~Session() (the canonical lifetime hook) per Clock's
+// default-virtual forget_session API.
 #include <fixpp/core/system_clock_source.hpp>
 
 #include <chrono>
@@ -56,12 +65,20 @@ namespace fixpp::core {
 // Per-session timer slot (E12 / D-8).
 //
 // Allocated ONCE from session_arena at the first sleep_until on that session.
-// Lifetime: until the session is deregistered (on the cancel_sleeps() / session
-// close path, the slot is cleaned up via the per-session slot map).
+// Lifetime: until forget_session(Session*) erases it (D-23) — canonically
+// called from ~Session BEFORE the session_arena is reclaimed.
 //
 // Timer is constructed on a per-timer strand over engine_exec (D-19): asio
-// timers are not thread-safe; the strand serialises expires_at / async_wait /
-// cancel across the session strand and any concurrent cancel_sleeps() post.
+// timers are not thread-safe — cancel_sleeps() posts sp->cancel() onto the
+// strand, serialising it against itself across concurrent cancel_sleeps()
+// callers. expires_at() and async_wait() initiation are called from the
+// awaiter's coroutine (NOT on the timer's strand); the design assumes the
+// natural async_wait completion ordering (cancel completes the in-flight
+// wait BEFORE the awaiter resumes to start the next sleep) ensures these
+// don't overlap with a posted cancel. Concurrent overlapping sleeps on the
+// SAME session under direct_executor would already break asio's "one
+// outstanding async_wait per timer" rule, so the slot pool's single-timer
+// design implicitly requires user-side serialisation under direct_executor.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 struct SessionTimerSlot {
@@ -86,7 +103,7 @@ struct system_clock_source::state {
                        std::shared_ptr<SessionTimerSlot>> session_slots;
 };
 
-system_clock_source::system_clock_source(asio::any_io_executor exec) noexcept
+system_clock_source::system_clock_source(asio::any_io_executor exec)
     : impl_(std::make_unique<state>()) {
     impl_->engine_exec = std::move(exec);
 }
@@ -242,6 +259,26 @@ void system_clock_source::cancel_sleeps() noexcept {
     for (auto& sp : live) {
         auto ex = sp->get_executor();
         asio::post(ex, [sp] { sp->cancel(); });
+    }
+}
+
+// D-23: release this session's reusable-timer slot under the impl_->m lock,
+// BEFORE the session's arena memory is reclaimed by ~Session. Idempotent —
+// a session that never slept has no entry; erase is a no-op. The slot's
+// shared_ptr destruction calls the deallocator on the (still-live) session
+// arena's polymorphic_allocator; for a monotonic_buffer_resource that's a
+// no-op, which is correct (the arena owns the memory).
+void system_clock_source::forget_session(
+    fixpp::session::Session* session) noexcept {
+    if (session == nullptr) { return; }
+    std::shared_ptr<SessionTimerSlot> released;  // destroyed AFTER lock release
+    {
+        std::scoped_lock g(impl_->m);
+        auto it = impl_->session_slots.find(session);
+        if (it != impl_->session_slots.end()) {
+            released = std::move(it->second);
+            impl_->session_slots.erase(it);
+        }
     }
 }
 

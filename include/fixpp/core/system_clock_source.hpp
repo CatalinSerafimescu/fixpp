@@ -12,9 +12,21 @@
 //
 // The in-flight list + its std::mutex live behind a pimpl (in the .cpp) so
 // they stay OUT of this asio::awaitable-including header ([const §XI.3]),
-// same discipline as mock_clock. The per-Session* reusable steady_timer slot
-// pool keyed by Session* (D-8) is layered on by US6 (T055); T028 ships a
-// correct per-sleep timer.
+// same discipline as mock_clock.
+//
+// sleep_until has TWO paths (T055 / D-8 — shipped, not future):
+//   • Session-scoped: the awaiter's bound executor IS a session_executor;
+//     a per-session steady_timer slot is allocated ONCE from session_arena
+//     at the first sleep, keyed by Session*, and re-armed via expires_at
+//     thereafter (ZERO global heap in steady state).
+//   • Engine-scoped fallback: no session_executor on the awaiter (e.g.
+//     close-timeout machinery, third-party-clock conformance harness) →
+//     per-call shared_ptr<steady_timer> from the global heap (acceptable
+//     cold path; not a §6.2 hot path).
+// Per-timer strand over engine_exec on both paths (D-19 — asio timers are
+// not thread-safe; cancel_sleeps posts cancel() onto the timer's strand).
+// forget_session() (called from Session::~Session) releases a session's
+// slot BEFORE its arena is reclaimed.
 #pragma once
 
 #include <memory>
@@ -28,8 +40,9 @@ namespace fixpp::core {
 class system_clock_source final : public Clock {
 public:
     // Construct with the ENGINE-LEVEL executor (EngineConfig::executor) — NOT
-    // the session strand ([2d §4.2] note).
-    explicit system_clock_source(asio::any_io_executor exec) noexcept;
+    // the session strand ([2d §4.2] note). NOT noexcept: allocates the pimpl
+    // state.
+    explicit system_clock_source(asio::any_io_executor exec);
 
     system_clock_source(const system_clock_source&)            = delete;
     system_clock_source& operator=(const system_clock_source&) = delete;
@@ -43,6 +56,11 @@ public:
     // ([2d §4.1]/§4.2).
     [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point deadline) override;
     void cancel_sleeps() noexcept override;
+
+    // Release per-session timer-slot state under impl_->m, BEFORE the
+    // session's arena memory is reclaimed by ~Session. Idempotent; called
+    // from Session::~Session (D-23). No-op if this session never slept.
+    void forget_session(fixpp::session::Session* session) noexcept override;
 
 private:
     struct state;                     // opaque (intrusive list + mutex; in .cpp)
