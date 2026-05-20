@@ -41,7 +41,7 @@ public:
     // NO expected_t — cancellation via asio::error::operation_aborted
     // ([2d §4.1]/§4.3): the awaiter is removed from the per-deadline list and
     // completes with operation_aborted.
-    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point) override;
+    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point deadline) override;
     void cancel_sleeps() noexcept override;
 
     // ── Test-only API ([2d §4.3]) — not part of the Clock interface ──────

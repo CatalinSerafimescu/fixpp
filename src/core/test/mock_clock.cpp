@@ -13,8 +13,12 @@
 // asio::error::operation_aborted (E1 — NO expected_t return).
 #include <fixpp/core/test/mock_clock.hpp>
 
+#include <fixpp/core/clock.hpp>  // utc_time_point, steady_time_point
+
+#include <chrono>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <system_error>
 #include <utility>
@@ -68,7 +72,7 @@ namespace {
 void complete(asio::any_io_executor ex,
               asio::any_completion_handler<void(std::error_code)> h,
               std::error_code ec) {
-    asio::post(std::move(ex),
+    asio::post(ex,  // NOLINT(performance-move-const-arg) - post accepts const ref
                asio::append(
                    [](asio::any_completion_handler<void(std::error_code)> hh,
                       std::error_code e) { std::move(hh)(e); },
@@ -92,12 +96,12 @@ mock_clock::~mock_clock() {
 }
 
 utc_time_point mock_clock::now() const noexcept {
-    std::lock_guard<std::mutex> g(impl_->m);
+    std::scoped_lock g(impl_->m);
     return impl_->utc + impl_->utc_skew;
 }
 
 steady_time_point mock_clock::steady_now() const noexcept {
-    std::lock_guard<std::mutex> g(impl_->m);
+    std::scoped_lock g(impl_->m);
     return impl_->steady;
 }
 
@@ -115,10 +119,10 @@ asio::awaitable<void> mock_clock::sleep_until(steady_time_point deadline) {
         [this, deadline, bound_ex](auto handler) {
             auto cs = asio::get_associated_cancellation_slot(handler);
 
-            std::uint64_t id;
+            std::uint64_t id{0};
             bool fire_now = false;
             {
-                std::lock_guard<std::mutex> g(impl_->m);
+                std::scoped_lock g(impl_->m);
                 if (deadline <= impl_->steady) {
                     fire_now = true;
                 } else {
@@ -131,10 +135,15 @@ asio::awaitable<void> mock_clock::sleep_until(steady_time_point deadline) {
             if (fire_now) {
                 // Deadline already in the past — complete immediately on the
                 // bound executor (deterministic, no parking).
+                // handler was NOT moved into waiters when fire_now==true (mutually exclusive paths):
+                // fire_now=true iff deadline<=steady in lock block, in which case the else-branch
+                // that moves handler into the map is skipped — so handler is still valid here.
+                // NOLINTBEGIN(bugprone-use-after-move,hicpp-invalid-access-moved,clang-analyzer-core.StackAddressEscape)
                 asio::post(bound_ex,
                            asio::append(
                                [](auto h, std::error_code e) { std::move(h)(e); },
                                std::move(handler), std::error_code{}));
+                // NOLINTEND(bugprone-use-after-move,hicpp-invalid-access-moved,clang-analyzer-core.StackAddressEscape)
                 return;
             }
             if (cs.is_connected()) {
@@ -142,7 +151,7 @@ asio::awaitable<void> mock_clock::sleep_until(steady_time_point deadline) {
                     state::waiter w;
                     bool found = false;
                     {
-                        std::lock_guard<std::mutex> g(impl_->m);
+                        std::scoped_lock g(impl_->m);
                         auto it = impl_->waiters.find(id);
                         if (it != impl_->waiters.end()) {
                             w = std::move(it->second);
@@ -150,9 +159,10 @@ asio::awaitable<void> mock_clock::sleep_until(steady_time_point deadline) {
                             found = true;
                         }
                     }
-                    if (found)
+                    if (found) {
                         complete(std::move(w.ex), std::move(w.h),
                                  asio::error::operation_aborted);
+                    }
                 });
             }
         },
@@ -160,37 +170,42 @@ asio::awaitable<void> mock_clock::sleep_until(steady_time_point deadline) {
     co_return;
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 void mock_clock::cancel_sleeps() noexcept {
     std::vector<state::waiter> all;
     {
-        std::lock_guard<std::mutex> g(impl_->m);
-        for (auto& [id, w] : impl_->waiters) all.push_back(std::move(w));
+        std::scoped_lock g(impl_->m);
+        for (auto& [id, w] : impl_->waiters) { all.push_back(std::move(w)); }
         impl_->waiters.clear();
     }
     // Idempotent + re-entrant-safe: invoked with the lock released, so a
     // completion handler that re-enters cancel_sleeps() finds an empty map
     // (E1 / FR-003 / Edge Case).
-    for (auto& w : all)
+    for (auto& w : all) {
         complete(std::move(w.ex), std::move(w.h),
                  asio::error::operation_aborted);
+    }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 void mock_clock::advance(std::chrono::nanoseconds delta) noexcept {
     std::vector<state::waiter> due;
     {
-        std::lock_guard<std::mutex> g(impl_->m);
+        std::scoped_lock g(impl_->m);
         impl_->steady += delta;
         impl_->utc    += delta;          // wall moves with steady unless skewed
         due = impl_->due_locked();
     }
-    for (auto& w : due)
+    for (auto& w : due) {
         complete(std::move(w.ex), std::move(w.h), std::error_code{});
+    }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 void mock_clock::step_to(steady_time_point point) noexcept {
     std::vector<state::waiter> due;
     {
-        std::lock_guard<std::mutex> g(impl_->m);
+        std::scoped_lock g(impl_->m);
         if (point > impl_->steady) {
             const auto d = point - impl_->steady;
             impl_->steady = point;
@@ -198,12 +213,13 @@ void mock_clock::step_to(steady_time_point point) noexcept {
         }
         due = impl_->due_locked();
     }
-    for (auto& w : due)
+    for (auto& w : due) {
         complete(std::move(w.ex), std::move(w.h), std::error_code{});
+    }
 }
 
 void mock_clock::set_utc_skew(std::chrono::nanoseconds skew) noexcept {
-    std::lock_guard<std::mutex> g(impl_->m);
+    std::scoped_lock g(impl_->m);
     impl_->utc_skew = skew;   // wall-only; steady_now() unaffected (US2 AC-3)
 }
 

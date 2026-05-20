@@ -41,7 +41,7 @@ public:
     [[nodiscard]] steady_time_point steady_now() const noexcept override;
     // NO expected_t — cancellation via asio::error::operation_aborted
     // ([2d §4.1]/§4.2).
-    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point) override;
+    [[nodiscard]] asio::awaitable<void> sleep_until(steady_time_point deadline) override;
     void cancel_sleeps() noexcept override;
 
 private:

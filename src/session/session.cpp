@@ -10,6 +10,7 @@
 #include <fixpp/session/session.hpp>
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -19,6 +20,7 @@
 #include <asio/use_awaitable.hpp>
 
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>             // expected_t, error values
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session_config.hpp>
 
@@ -30,9 +32,10 @@ namespace {
 std::pmr::memory_resource* resolve_session_arena(
     const fixpp::core::EngineConfig& engine,
     const SessionConfig& cfg) noexcept {
-    if (cfg.session_arena != nullptr) return cfg.session_arena;
-    if (engine.default_session_resource != nullptr)
+    if (cfg.session_arena != nullptr) { return cfg.session_arena; }
+    if (engine.default_session_resource != nullptr) {
         return engine.default_session_resource;
+    }
     return std::pmr::get_default_resource();
 }
 }  // namespace
@@ -183,6 +186,7 @@ Session::close(close_mode mode) noexcept {
             co_await asio::post(co_await asio::this_coro::executor,
                                 asio::use_awaitable);
         }
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) - guarded by has_value() above
         co_return **shared;
     }
 

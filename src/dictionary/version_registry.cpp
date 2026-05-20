@@ -26,10 +26,11 @@
 
 namespace fixpp::dict {
 
+namespace {
 // Map session_version to application_version for non-FIXT.1.1 unified
 // sessions. Returns application_version::Unknown for vt11 (session-admin
 // only; skip in registry) and Unknown (not a valid mapping).
-static application_version session_to_application(session_version sv) noexcept {
+application_version session_to_application(session_version sv) noexcept {
     switch (sv) {
         case session_version::v40:     return application_version::v40;
         case session_version::v41:     return application_version::v41;
@@ -39,19 +40,21 @@ static application_version session_to_application(session_version sv) noexcept {
         case session_version::v50:     return application_version::v50;
         case session_version::v50sp1:  return application_version::v50sp1;
         case session_version::v50sp2:  return application_version::v50sp2;
+        // NOLINTNEXTLINE(bugprone-branch-clone) - vt11 and Unknown are distinct semantic cases
         case session_version::vt11:    return application_version::Unknown;  // skip
         case session_version::Unknown: return application_version::Unknown;  // skip
     }
     return application_version::Unknown;
 }
+}  // namespace
 
 version_registry::version_registry(
     const std::vector<std::shared_ptr<const Dictionary>>& dicts) noexcept {
     for (const auto& d : dicts) {
-        if (!d) continue;
+        if (!d) { continue; }
         const auto av = session_to_application(d->which_session_version());
         const auto idx = static_cast<std::size_t>(av);
-        if (idx == 0 || idx >= kTableSize) continue;  // Unknown or out-of-range
+        if (idx == 0 || idx >= kTableSize) { continue; }  // Unknown or out-of-range
         // Last writer wins if two dicts map to the same version.
         entries_[idx] = d;
     }

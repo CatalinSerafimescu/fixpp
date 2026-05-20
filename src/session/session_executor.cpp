@@ -11,17 +11,20 @@
 #include <fixpp/core/session_executor.hpp>
 
 #include <cassert>
+#include <expected>
 #include <memory_resource>
 #include <utility>
 
 #include <asio/strand.hpp>
 
+#include <fixpp/core/error.hpp>               // error enum values
 #include <fixpp/core/trace_context.hpp>       // complete trace_context (bridge return)
 #include <fixpp/session/session.hpp>          // complete Session (session_arena()/trace)
 #include <fixpp/session/session_config.hpp>   // complete threading_mode
 
 namespace fixpp::core {
 
+// NOLINTBEGIN(bugprone-exception-escape)
 expected_t<session_executor>
 make_session_executor(asio::any_io_executor resolved_exec,
                        fixpp::session::threading_mode mode,
@@ -34,7 +37,7 @@ make_session_executor(asio::any_io_executor resolved_exec,
         // The strand wrapping lives INSIDE inner_ ([2d §4.8]); the wrapper is
         // strand_wrapped == true.
         return session_executor{
-            asio::any_io_executor{asio::make_strand(std::move(resolved_exec))},
+            asio::any_io_executor{asio::make_strand(resolved_exec)},
             session,
             /*strand_wrapped=*/true};
 
@@ -51,13 +54,15 @@ make_session_executor(asio::any_io_executor resolved_exec,
     // Unreachable for the closed 2-value enum; defensive (out-of-range cast).
     return std::unexpected(error::invalid_session_config);
 }
+// NOLINTEND(bugprone-exception-escape)
 
 // [2d §6.5]:1153-1154 arena bridge — defined HERE (session TU) so
 // fixpp::session::Session is complete; the core header only declares it.
 std::pmr::memory_resource*
 session_arena_of(const session_executor& exec) noexcept {
-    auto* s = exec.session_ptr();
-    return s ? s->session_arena() : nullptr;
+    auto* const s = exec.session_ptr();
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    return (s != nullptr) ? s->session_arena() : nullptr;
 }
 
 // [2d §4.6] / E8 / I-11 current-trace-context bridge — defined HERE so

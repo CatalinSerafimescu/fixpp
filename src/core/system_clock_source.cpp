@@ -33,7 +33,6 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -45,6 +44,7 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 
+#include <fixpp/core/clock.hpp>              // utc_time_point, steady_time_point
 #include <fixpp/core/session_executor.hpp>  // session_arena_of; target<session_executor>
 
 // fixpp::session::Session is forward-declared via session_executor.hpp —
@@ -63,9 +63,11 @@ namespace fixpp::core {
 // timers are not thread-safe; the strand serialises expires_at / async_wait /
 // cancel across the session strand and any concurrent cancel_sleeps() post.
 // ─────────────────────────────────────────────────────────────────────────────
+namespace {
 struct SessionTimerSlot {
     std::shared_ptr<asio::steady_timer> timer;
 };
+}  // namespace
 
 struct system_clock_source::state {
     asio::any_io_executor                                 engine_exec;
@@ -133,7 +135,7 @@ system_clock_source::sleep_until(steady_time_point deadline) {
         if (sess != nullptr) {
             std::shared_ptr<SessionTimerSlot> slot;
             {
-                std::lock_guard<std::mutex> g(impl_->m);
+                std::scoped_lock g(impl_->m);
                 auto it = impl_->session_slots.find(sess);
                 if (it != impl_->session_slots.end()) {
                     slot = it->second;  // existing slot — zero allocation
@@ -161,7 +163,7 @@ system_clock_source::sleep_until(steady_time_point deadline) {
                         SessionTimerSlot{std::make_shared<asio::steady_timer>(
                             asio::make_strand(impl_->engine_exec))});
 
-                    std::lock_guard<std::mutex> g(impl_->m);
+                    std::scoped_lock g(impl_->m);
                     // Double-check under lock (another coroutine on the same
                     // session could have raced here — under per_session_strand
                     // this cannot happen, but under direct_executor it can if
@@ -194,9 +196,9 @@ system_clock_source::sleep_until(steady_time_point deadline) {
     }
 
     // ── Register in the in-flight list (for cancel_sleeps()) ──────────────
-    std::uint64_t id;
+    std::uint64_t id{0};
     {
-        std::lock_guard<std::mutex> g(impl_->m);
+        std::scoped_lock g(impl_->m);
         id = impl_->next_id++;
         impl_->inflight.emplace(id, std::weak_ptr<asio::steady_timer>(timer));
     }
@@ -204,8 +206,14 @@ system_clock_source::sleep_until(steady_time_point deadline) {
     struct dereg {
         system_clock_source::state* s;
         std::uint64_t               id;
+        dereg(system_clock_source::state* ps, std::uint64_t pid) noexcept
+            : s{ps}, id{pid} {}
+        dereg(const dereg&)            = delete;
+        dereg& operator=(const dereg&) = delete;
+        dereg(dereg&&)                 = delete;
+        dereg& operator=(dereg&&)      = delete;
         ~dereg() {
-            std::lock_guard<std::mutex> g(s->m);
+            std::scoped_lock g(s->m);
             s->inflight.erase(id);
         }
     } guard{impl_.get(), id};
@@ -218,13 +226,14 @@ system_clock_source::sleep_until(steady_time_point deadline) {
     co_return;
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 void system_clock_source::cancel_sleeps() noexcept {
     std::vector<std::shared_ptr<asio::steady_timer>> live;
     {
-        std::lock_guard<std::mutex> g(impl_->m);
+        std::scoped_lock g(impl_->m);
         live.reserve(impl_->inflight.size());
         for (auto& [id, w] : impl_->inflight) {
-            if (auto sp = w.lock()) live.push_back(std::move(sp));
+            if (auto sp = w.lock()) { live.push_back(std::move(sp)); }
         }
     }
     // Cancel each on its OWN executor (asio timers are not thread-safe); the

@@ -47,6 +47,8 @@ public:
     version_registry(const version_registry&)            = delete;
     version_registry& operator=(const version_registry&) = delete;
 
+    ~version_registry() = default;
+
     // Borrowed pointer to the Dictionary for `v`. Errors with
     // dict_no_dictionary_for_application_version when no Dictionary is
     // registered for an otherwise-resolvable version (distinct from

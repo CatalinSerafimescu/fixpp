@@ -88,7 +88,7 @@ public:
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
     // invoked). partial excluded (N-P1-3).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        close(close_mode = close_mode::graceful) noexcept;
+        close(close_mode mode = close_mode::graceful) noexcept;
 
     // ENGINE-INTERNAL accessor (callable from fixpp::session/ ONLY —
     // [arch §2.3] leaf rule; consumed by the merged-006 session-side helper

@@ -79,11 +79,11 @@ public:
             fixpp::otel::trace_context out{};
             for (;;) {
                 const auto s1 = seq_.load(std::memory_order_acquire);
-                if (s1 & 1U) continue;                 // writer mid-update
+                if ((s1 & 1U) != 0U) { continue; }    // writer mid-update
                 std::memcpy(&out, &bytes_, sizeof(out));
                 std::atomic_thread_fence(std::memory_order_acquire);
                 const auto s2 = seq_.load(std::memory_order_relaxed);
-                if (s1 == s2) return out;              // consistent snapshot
+                if (s1 == s2) { return out; }          // consistent snapshot
             }
         }
     }
@@ -96,7 +96,7 @@ private:
 
     // Only one of the two storage paths is ever used (selected at compile
     // time); both are declared so the type stays a single value member.
-    std::atomic<fixpp::otel::trace_context> atom_{};
+    std::atomic<fixpp::otel::trace_context> atom_;
     std::atomic<std::uint32_t>              seq_{0};
     fixpp::otel::trace_context              bytes_{};
 };

@@ -78,7 +78,8 @@ public:
         inner_.execute(std::forward<F>(f));
     }
 
-    asio::execution_context& query(asio::execution::context_t) const noexcept {
+    // NOLINTNEXTLINE(modernize-use-nodiscard,bugprone-exception-escape)
+    asio::execution_context& query(asio::execution::context_t /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context);
     }
 
@@ -90,7 +91,7 @@ public:
     // constrained template SFINAE-rejects it. Explicit forwarding closes the
     // gap (seam 21 — survive erasure into any_io_executor for co_spawn).
     template <class U>
-    U query(asio::execution::context_as_t<U>) const noexcept {
+    U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context_as<U>);
     }
 
@@ -126,7 +127,7 @@ public:
     }
 
 private:
-    asio::any_io_executor    inner_{};
+    asio::any_io_executor    inner_;
     fixpp::session::Session* session_         = nullptr;
     bool                     strand_wrapped_  = false;
 };

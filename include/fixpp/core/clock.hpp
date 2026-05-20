@@ -20,7 +20,12 @@ using steady_time_point = std::chrono::time_point<std::chrono::steady_clock>;
 
 class Clock {
 public:
-    virtual ~Clock() = default;
+    Clock()                        = default;
+    Clock(const Clock&)            = delete;
+    Clock& operator=(const Clock&) = delete;
+    Clock(Clock&&)                 = delete;
+    Clock& operator=(Clock&&)      = delete;
+    virtual ~Clock()               = default;
 
     // Wall-clock UTC; NOT promised monotonic (C-P2-5 / FR-004 / I-02) — used
     // only for wire-formatted and log/OTel timestamps.
@@ -36,7 +41,7 @@ public:
     // standard ASIO path, [const §XI.2]), NOT a returned expected_t. The
     // error::clock_sleeps_cancelled enum value is the OPTIONAL expected_t
     // projection for callers that prefer it ([2d §6.7]), not this return type.
-    [[nodiscard]] virtual asio::awaitable<void> sleep_until(steady_time_point) = 0;
+    [[nodiscard]] virtual asio::awaitable<void> sleep_until(steady_time_point deadline) = 0;
 
     // Signals every in-flight sleep_until awaiter's cancellation slot.
     // Idempotent; safe to call concurrently AND re-entrantly (incl. from
