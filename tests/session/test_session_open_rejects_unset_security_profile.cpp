@@ -26,7 +26,7 @@
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/session/security_profile.hpp>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -81,7 +81,7 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
 
     SessionConfig cfg;
     cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
-    cfg.security_profile = fixpp::tls::SecurityProfile{fixpp::tls::SecurityProfile::kind::unset};
+    cfg.security_profile = fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::unset};
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
@@ -95,9 +95,9 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
 // ── Part 2: Non-sentinel SecurityProfile accepted ─────────────────────────
 // kind::mtls_ca (and other non-unset variants) must NOT be rejected.
 TEST(SeamSessionOpenRejectsUnsetSecurityProfile, NonSentinelAccepted) {
-    for (auto k : {fixpp::tls::SecurityProfile::kind::mtls_ca,
-                   fixpp::tls::SecurityProfile::kind::mtls_pinned,
-                   fixpp::tls::SecurityProfile::kind::one_way_ca}) {
+    for (auto k : {fixpp::session::SecurityProfile::kind::mtls_ca,
+                   fixpp::session::SecurityProfile::kind::mtls_pinned,
+                   fixpp::session::SecurityProfile::kind::one_way_ca}) {
         asio::io_context ioc;
         EngineConfig engine;
         engine.executor = ioc.get_executor();
@@ -105,7 +105,7 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, NonSentinelAccepted) {
 
         SessionConfig cfg;
         cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
-        cfg.security_profile = fixpp::tls::SecurityProfile{k};
+        cfg.security_profile = fixpp::session::SecurityProfile{k};
 
         Session s{engine, cfg};
         auto result = asio::co_spawn(ioc, s.open(), asio::use_future);

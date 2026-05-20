@@ -29,7 +29,7 @@
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/message_store_factory.hpp>  // unique_ptr member ⇒ complete type
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
-#include <fixpp/tls/security_profile.hpp>           // value-typed member ⇒ complete type
+#include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 
 namespace fixpp::core { class Clock; }
 namespace fixpp::dict { class Dictionary; class DialectOverlay; }
@@ -105,7 +105,7 @@ struct SessionConfig {
 
     std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership
     std::shared_ptr<fixpp::tls::cert_source>       cert_source;
-    fixpp::tls::SecurityProfile                    security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects (FR-018)
+    fixpp::session::SecurityProfile                security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects (FR-018; lives in `session` per [arch §6 line 243])
 
     std::shared_ptr<const fixpp::dict::Dictionary>     dictionary;       // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
