@@ -38,6 +38,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -62,7 +63,8 @@ TEST(SeamCancellationFromAppToClose, FlushHookOnceUnderGracefulNeverUnderTermina
         engine.executor = ctx.get_executor();
         engine.clock    = make_mock(ctx.get_executor());
         SessionConfig cfg;
-        cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
+        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
         Session s{engine, cfg};
         asio::co_spawn(ctx, s.open(), asio::detached);
         ctx.run();
@@ -91,7 +93,8 @@ TEST(SeamCancellationFromAppToClose, FlushHookOnceUnderGracefulNeverUnderTermina
         engine.executor = ctx.get_executor();
         engine.clock    = make_mock(ctx.get_executor());
         SessionConfig cfg;
-        cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
+        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
         Session s{engine, cfg};
         asio::co_spawn(ctx, s.open(), asio::detached);
         ctx.run();
@@ -118,7 +121,8 @@ TEST(SeamCancellationFromAppToClose, Phase1FlushResolvesBeforePhase2RootTotal) {
     engine.executor = ctx.get_executor();
     engine.clock    = make_mock(ctx.get_executor());
     SessionConfig cfg;
-    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
     asio::co_spawn(ctx, s.open(), asio::detached);
     ctx.run();
@@ -172,7 +176,8 @@ TEST(SeamCancellationFromAppToClose, FromAppBlockedSleepDrainedByTerminalClose) 
     auto clk        = make_mock(ctx.get_executor());
     engine.clock    = clk;
     SessionConfig cfg;
-    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
     asio::co_spawn(ctx, s.open(), asio::detached);
     ctx.run();
@@ -216,7 +221,8 @@ TEST(SeamCancellationFromAppToClose, IdempotentThreeStateModel) {
     engine.executor = ctx.get_executor();
     engine.clock    = make_mock(ctx.get_executor());
     SessionConfig cfg;
-    cfg.dictionary  = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
 
     // never-opened → session_already_closed, no side effects.
     {

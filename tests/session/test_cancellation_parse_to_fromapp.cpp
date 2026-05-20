@@ -39,6 +39,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -131,7 +132,8 @@ TEST(SeamCancellationParseToFromApp, CloseGracefulPhase2FiresRootTotal) {
     EngineConfig engine;
     engine.executor = ctx.get_executor();
     SessionConfig cfg;
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session sess{engine, cfg};
 
     auto opened = asio::co_spawn(ctx, sess.open(), asio::use_future);

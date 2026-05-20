@@ -28,6 +28,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 #include "support/scripted_fsm.hpp"
 
 namespace {
@@ -65,7 +66,8 @@ void run_combo(asio::any_io_executor ex, threading_mode mode, bool attested,
     SessionConfig cfg;
     cfg.mode = mode;
     cfg.already_serialized_executor = attested;
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
 
     auto of = asio::co_spawn(engine.executor, s.open(), asio::use_future);

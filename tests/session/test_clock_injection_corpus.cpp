@@ -29,6 +29,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 #include "support/scripted_fsm.hpp"
 
 namespace {
@@ -53,8 +54,9 @@ std::vector<std::string> run_corpus() {
         fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
         ioc.get_executor());                       // distinct engine clock
     fixpp::session::SessionConfig cfg;
-    cfg.clock_override = clk;                       // session uses THIS one
-    cfg.dictionary     = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.clock_override   = clk;                     // session uses THIS one
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     fixpp::session::Session s{engine, cfg};
 
     EXPECT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());

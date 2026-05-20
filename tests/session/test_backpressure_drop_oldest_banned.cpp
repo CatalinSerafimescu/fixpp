@@ -31,6 +31,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -123,6 +124,7 @@ TEST(SeamBackpressureDropOldestBanned, LegalValuesAcceptedAtOpen) {
         SessionConfig cfg;
         cfg.app_backpressure = bp;
         cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
 
         Session s{engine, cfg};
         auto result = asio::co_spawn(ioc, s.open(), asio::use_future);

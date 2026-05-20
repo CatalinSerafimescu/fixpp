@@ -28,12 +28,13 @@
 
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/message_store_factory.hpp>  // unique_ptr member ⇒ complete type
+#include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
+#include <fixpp/tls/security_profile.hpp>           // value-typed member ⇒ complete type
 
 namespace fixpp::core { class Clock; }
 namespace fixpp::dict { class Dictionary; class DialectOverlay; }
-namespace fixpp::tls  { class cert_source; struct SecurityProfile; }
+namespace fixpp::tls  { class cert_source; }
 namespace fixpp::log  { class Sink; }
-namespace fixpp::tap  { class TapConsumer; }
 
 namespace fixpp::session {
 
@@ -104,7 +105,7 @@ struct SessionConfig {
 
     std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership
     std::shared_ptr<fixpp::tls::cert_source>       cert_source;
-    fixpp::tls::SecurityProfile*                   security_profile = nullptr;  // N-P2-3 sentinel — enforcement deferred to 2g (D-21; src/session/session.cpp WIRING POINT FOR 2g)
+    fixpp::tls::SecurityProfile                    security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects (FR-018)
 
     std::shared_ptr<const fixpp::dict::Dictionary>     dictionary;       // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
@@ -120,7 +121,7 @@ struct SessionConfig {
 
     fixpp::otel::trace_context        initial_trace_context{}; // value-typed (C-P2-4)
     std::shared_ptr<fixpp::log::Sink> log_sink_override;       // null → engine default
-    fixpp::tap::TapConsumer*          tap_consumer = nullptr;   // default = no tap
+    fixpp::tap::TapConsumer           tap_consumer;             // default = no tap
 
     backpressure_mode app_backpressure = backpressure_mode::block;
 };

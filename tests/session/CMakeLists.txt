@@ -52,3 +52,8 @@ add_threading_test(threading_cancellation_fromapp_to_close test_cancellation_fro
 # ── US5 (Phase 7) seam registrations ────────────────────────────────────────
 add_threading_test(threading_backpressure_drop_oldest_banned     test_backpressure_drop_oldest_banned.cpp)               # seam 13
 add_threading_test(threading_version_registry_missing_dict_layer test_version_registry_missing_routes_to_dict_layer.cpp)  # seam 20
+
+# ── gate-b/r1 RC#1: SecurityProfile sentinel rejection seam ─────────────────
+# FR-018 / N-P2-3 / [const §XII.5] — Session::open() rejects kind::unset.
+add_threading_test(threading_session_open_rejects_unset_security_profile
+  test_session_open_rejects_unset_security_profile.cpp)  # gate-b/r1

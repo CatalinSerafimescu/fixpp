@@ -35,6 +35,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -58,7 +59,8 @@ TEST(SeamSessionLocalLifetime, SlotValidUntilCloseCompletesThenCleared) {
         ctx.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     fixpp::otel::trace_context seed{};
     seed.trace_id[0] = std::byte{0xC7};
     seed.span_id[0]  = std::byte{0x5E};

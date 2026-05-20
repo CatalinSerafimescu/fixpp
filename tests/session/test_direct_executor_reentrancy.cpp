@@ -24,6 +24,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -39,7 +40,8 @@ TEST(SeamDirectExecutorReentrancy, IsStrandWrappedDiscriminator) {
     engine.executor = pool.get_executor();
 
     SessionConfig strand_cfg;  // per_session_strand default
-    strand_cfg.dictionary = dict;              // T050: non-null dict required at open
+    strand_cfg.dictionary       = dict;        // T050: non-null dict required at open
+    strand_cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session a{engine, strand_cfg};
     ASSERT_TRUE(asio::co_spawn(pool, a.open(), asio::use_future).get().has_value());
     EXPECT_TRUE(a.executor().is_strand_wrapped())
@@ -48,7 +50,8 @@ TEST(SeamDirectExecutorReentrancy, IsStrandWrappedDiscriminator) {
     SessionConfig direct_cfg;
     direct_cfg.mode = threading_mode::direct_executor;
     direct_cfg.already_serialized_executor = true;
-    direct_cfg.dictionary = dict;              // T050: non-null dict required at open
+    direct_cfg.dictionary       = dict;        // T050: non-null dict required at open
+    direct_cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session b{engine, direct_cfg};
     ASSERT_TRUE(asio::co_spawn(pool, b.open(), asio::use_future).get().has_value());
     EXPECT_FALSE(b.executor().is_strand_wrapped())
@@ -70,7 +73,8 @@ TEST(SeamDirectExecutorReentrancy, CorrectAttestationDoesNotTripGuard) {
     SessionConfig cfg;
     cfg.mode = threading_mode::direct_executor;
     cfg.already_serialized_executor = true;   // truthful attestation
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
     ASSERT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());
 

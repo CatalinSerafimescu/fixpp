@@ -25,6 +25,7 @@
 #include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 
 namespace {
 
@@ -78,7 +79,8 @@ TEST(SeamSessionExecutorRoundTrip, SecondOpenRejectedSessionAlreadyOpen) {
     EngineConfig engine;
     engine.executor = pool.get_executor();
     SessionConfig cfg;
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
 
     auto first = asio::co_spawn(pool, s.open(), asio::use_future).get();
