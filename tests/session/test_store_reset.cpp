@@ -18,11 +18,18 @@
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <filesystem>
+#include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
+#include <span>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "_fixtures_/test_double_fsm.hpp"
@@ -327,5 +334,74 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
 
     fs::remove_all(dir);
 }
+
+// ── N2 regression: parent-dir fsync failure is fatal (gate-b/r2) ─────────────
+//
+// [2e §6.3.5] mandates that Linux parent-dir fsync after atomic-rename is
+// MANDATORY — not best-effort. If the parent directory cannot be opened,
+// reset() must return store_io_failure rather than silently succeeding.
+//
+// Strategy: after creating a valid store, revoke read permission on the
+// parent directory before calling reset(). ::open(dir, O_RDONLY|O_DIRECTORY)
+// will fail with EACCES, and reset() must propagate store_io_failure.
+//
+// Skipped when running as root (root bypasses POSIX file-permission checks).
+#ifndef _WIN32
+TEST(StoreResetFile, N2_DirOpenFailureReturnsFatalError) {
+    // Skip if root — root ignores permission bits.
+    if (::getuid() == 0) {
+        GTEST_SKIP() << "Skipped: root bypasses POSIX permission checks";
+    }
+
+    asio::thread_pool pool{2};
+    // Create a dedicated sub-directory so we can chmod it without breaking
+    // access to the temp root.
+    auto outer = unique_store_dir("n2_dir_fsync");
+    auto inner = outer / "store";
+    std::filesystem::create_directories(inner);
+
+    bool reset_returned_failure = false;
+
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            FileStore::Config cfg = make_file_config(inner, pool.get_executor());
+            FileStoreFactory factory{cfg};
+            auto minted =
+                factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
+            EXPECT_TRUE(minted.has_value()) << "initial open failed";
+            if (!minted.has_value()) co_return;
+            auto& store = *minted.value();
+
+            // Store a frame so the log has content.
+            auto frame = fixpp::store_test::make_test_frame(1, direction_t::outbound);
+            auto sr = co_await store.store(1, std::span<const std::byte>(frame),
+                                           direction_t::outbound);
+            EXPECT_TRUE(sr.has_value());
+            if (!sr.has_value()) co_return;
+
+            // Revoke read + execute on the parent directory of the log.
+            // ::open(dir, O_RDONLY | O_DIRECTORY) will fail with EACCES.
+            // The store's log lives inside `inner`; revoke on `inner`.
+            ::chmod(inner.c_str(), 0000);
+
+            // reset() must return store_io_failure (dir-open fails → fatal).
+            auto r = co_await store.reset();
+
+            // Restore permissions before any EXPECT (so cleanup doesn't fail).
+            ::chmod(inner.c_str(), 0755);
+
+            reset_returned_failure = !r.has_value() &&
+                r.error() == fixpp::core::error::store_io_failure;
+        },
+        asio::use_future);
+    fut.get();
+
+    EXPECT_TRUE(reset_returned_failure)
+        << "N2: reset() must return store_io_failure when parent-dir open fails";
+
+    std::filesystem::remove_all(outer);
+}
+#endif  // !_WIN32
 
 }  // namespace

@@ -1061,15 +1061,27 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
-    // Linux: parent-dir fsync MANDATORY per I-15 to ensure the rename is durable.
+    // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5] to seal the
+    // atomic-rename durability contract. A crash after rename() but before the
+    // directory inode is flushed can resurrect the pre-reset pathname on most
+    // journaled filesystems. Both directory-open failure AND fsync(dir_fd)
+    // failure are fatal — return store_io_failure rather than silently continuing.
     {
         const std::filesystem::path log_fs_path{impl_->log_path_};
         const auto dir_fs_path = log_fs_path.parent_path();
         const std::string dir_path = dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
         const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
-        if (dir_fd >= 0) {
-            ::fsync(dir_fd);  // best-effort; continue even if fsync fails
-            ::close(dir_fd);
+        if (dir_fd < 0) {
+            // Cannot open parent directory — rename durability cannot be guaranteed.
+            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
+            co_return std::unexpected(fixpp::core::error::store_io_failure);
+        }
+        const int fsync_rc = ::fsync(dir_fd);
+        ::close(dir_fd);
+        if (fsync_rc != 0) {
+            // fsync(dir_fd) failed — rename is NOT durable; report failure.
+            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
+            co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
     }
 
