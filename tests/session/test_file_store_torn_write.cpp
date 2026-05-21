@@ -19,13 +19,16 @@
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fstream>
+#include <span>
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "_fixtures_/test_double_fsm.hpp"
@@ -355,5 +358,106 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
     fs::remove_all(dir);
 }
 #endif  // !_WIN32 (test uses fopen/fwrite; Windows variant is out of scope for Tier-1)
+
+// ── N3 regression: mid-log corrupt record surfaces store_factory_failed ────────
+//
+// [2e §6.3] restart invariant: "only one torn record, at the tail".
+// If a corrupt/oversized header appears BETWEEN two valid frame records,
+// restart_scan() must detect the valid suffix and return false → store_factory_failed.
+//
+// Round-1 RC#3 fixed the cap-check but used uniform torn-tail recovery, which
+// silently discards the valid suffix after a mid-log corrupt record.
+//
+// Test shape:
+//   1. Create a valid store; store 2 outbound frames (seqnums 1, 2).
+//   2. Rewrite the on-disk bytes: keep frame 1 intact, replace frame 2's header
+//      with a corrupt oversized header (len=0xFFFF, which exceeds max_frame_bytes
+//      for the test store), then append a valid frame 3 after it.
+//   3. Re-open: factory.make() must return store_factory_failed (mid-log corruption).
+//
+// We construct the corrupt log directly with fopen/pwrite to get deterministic layout.
+#ifndef _WIN32
+TEST(FileStoreTornWrite, N3_MidLogCorruptRecordSurfacesStoreFactoryFailed) {
+    // max_frame_bytes=4096 in make_config, so len=0xFFFF (65535) triggers cap-check.
+    // But we need len ABOVE max_frame_bytes (4096). Use len=0x8000 (32768) > 4096.
+    // However, we also need a valid frame after it, which means the file must look
+    // like: sentinel | counter | frame1 | corrupt_hdr(16 bytes) | valid_frame3_data
+    //
+    // Strategy: store 1 frame, then raw-write: corrupt_hdr + valid frame2 record.
+    // The corrupt_hdr has len=0x1234 (4660) > max_frame_bytes=4096; after the
+    // header there is more data (the valid frame), so mid-log detection fires.
+
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("n3_mid_log_corrupt");
+
+    // Step 1: create a valid store with 1 outbound frame and capture its bytes.
+    auto valid_frame = fixpp::store_test::make_test_frame(1, direction_t::outbound);
+    {
+        FileStore::Config cfg = make_config(dir, pool.get_executor());
+        FileStoreFactory factory{cfg};
+        auto minted =
+            factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
+        ASSERT_TRUE(minted.has_value()) << "N3 Phase 1 create failed";
+        auto& store = *minted.value();
+        auto fut = asio::co_spawn(
+            pool.get_executor(),
+            [&store, &valid_frame]() -> asio::awaitable<void> {
+                auto r = co_await store.store(1, std::span<const std::byte>(valid_frame),
+                                              direction_t::outbound);
+                EXPECT_TRUE(r.has_value());
+            },
+            asio::use_future);
+        fut.get();
+        // store out of scope: file released
+    }
+
+    // Step 2: append a corrupt header followed by valid-looking frame data.
+    // The corrupt header has len=0x1234 (4660), which exceeds max_frame_bytes=4096.
+    // After it we append a second "frame" record (any bytes) — the key is that
+    // there IS data after the corrupt header, triggering mid-log detection.
+    auto lp = log_path(dir);
+    ASSERT_TRUE(fs::exists(lp));
+    {
+        FILE* f = ::fopen(lp.c_str(), "ab");
+        ASSERT_NE(f, nullptr);
+
+        // Corrupt record header: kind=frame, dir=outbound, seq=2, len=0x1234 (oversized)
+        // crc32=0xDEADBEEF (invalid — doesn't matter because cap-check fires first)
+        std::uint8_t corrupt_hdr[16] = {
+            0x00,                        // kind = frame
+            0x01,                        // dir  = outbound
+            0x00, 0x00,                  // reserved
+            0x02, 0x00, 0x00, 0x00,      // seq = 2 (LE)
+            0x34, 0x12, 0x00, 0x00,      // len = 0x1234 = 4660 > max_frame_bytes (LE)
+            0xEF, 0xBE, 0xAD, 0xDE,     // crc32 = invalid
+        };
+        ::fwrite(corrupt_hdr, 1, sizeof(corrupt_hdr), f);
+
+        // Append a small amount of "suffix data" that looks like it could be a
+        // valid record (a few bytes is enough — the detector only checks fsize).
+        // This simulates the valid suffix records that would follow in a real log.
+        std::uint8_t suffix_data[32] = {};  // 32 zero bytes — enough to be "more data"
+        ::fwrite(suffix_data, 1, sizeof(suffix_data), f);
+        ::fclose(f);
+    }
+
+    // Step 3: re-open — must return store_factory_failed (mid-log corruption detected).
+    FileStore::Config cfg2 = make_config(dir, pool.get_executor());
+    FileStoreFactory factory2{cfg2};
+    auto minted2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
+                                  pool.get_executor());
+    EXPECT_FALSE(minted2.has_value())
+        << "N3: factory.make() must return store_factory_failed for mid-log "
+           "corrupt oversized header with valid suffix data";
+
+    if (!minted2.has_value()) {
+        EXPECT_EQ(minted2.error(), fixpp::core::error::store_factory_failed)
+            << "N3: expected store_factory_failed, got "
+            << static_cast<int>(minted2.error());
+    }
+
+    fs::remove_all(dir);
+}
+#endif  // !_WIN32
 
 }  // namespace

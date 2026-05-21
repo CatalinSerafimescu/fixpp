@@ -609,21 +609,40 @@ struct FileStoreImpl {
             if (n != static_cast<decltype(n)>(kHeaderSize)) break;
 
             const std::size_t payload_len = hdr.len;
-            const std::size_t disk_size = record_disk_size(payload_len);
             const std::int64_t payload_offset = scan_pos + static_cast<std::int64_t>(kHeaderSize);
 
-            // Check that there's enough data for the record
-            if (scan_pos + static_cast<std::int64_t>(disk_size) > fsize) {
-                // Partial record at tail → truncate here
+            // RC#3 + N3 fix: cap-check BEFORE computing disk_size and BEFORE the
+            // partial-record size check. An adversarial or corrupt hdr.len
+            // (e.g. 0xFFFFFFFF) overflows record_disk_size() arithmetic on 32-bit
+            // and produces an incorrect partial-record verdict on 64-bit when it
+            // merely appears to not fit.
+            //
+            // N3: distinguish torn tail from mid-log corruption per [2e §6.3].
+            // The restart invariant "only one torn record, and only at the tail"
+            // means that if a corrupt/oversized header is followed by more file
+            // data, those bytes are a valid suffix that would be silently discarded
+            // — that is mid-log corruption and must surface store_factory_failed.
+            //
+            // If payload_len > max_frame_bytes: corrupt header.
+            //   - If there are bytes after the header (scan_pos + kHeaderSize < fsize):
+            //     mid-log corruption → return false.
+            //   - Otherwise: torn tail → break (truncate to last_good_pos).
+            if (payload_len > cfg.max_frame_bytes) {
+                if (scan_pos + static_cast<std::int64_t>(kHeaderSize) < fsize) {
+                    // Data exists after the corrupt header — mid-log corruption.
+                    return false;
+                }
+                // No data after the header — treat as torn tail, truncate.
                 break;
             }
 
-            // RC#3: cap-check BEFORE allocating — a corrupt or adversarial hdr.len
-            // (e.g. 0xFFFFFFFF) would otherwise cause std::bad_alloc which, inside
-            // a noexcept function, terminates the process instead of returning false.
-            // Treat oversized records the same as a partial tail: stop scan here.
-            if (payload_len > cfg.max_frame_bytes) {
-                break;  // Corrupt or oversized record — truncate to last_good_pos.
+            // payload_len is within bounds; disk_size arithmetic is now safe.
+            const std::size_t disk_size = record_disk_size(payload_len);
+
+            // Check that there's enough data for the record payload + padding.
+            if (scan_pos + static_cast<std::int64_t>(disk_size) > fsize) {
+                // Partial record at tail → truncate here.
+                break;
             }
 
             // Read payload for CRC32 verification
@@ -637,7 +656,14 @@ struct FileStoreImpl {
             const std::uint32_t expected_crc = compute_record_crc32(
                 hdr, payload_buf.data(), static_cast<std::uint32_t>(payload_len));
             if (hdr.crc32 != expected_crc) {
-                // CRC32 mismatch at this position: torn write → truncate here
+                // N3 fix: CRC32 mismatch — determine torn-tail vs mid-log.
+                // disk_size is valid (cap-check passed). If there is file data
+                // AFTER this record's footprint, valid suffix records exist —
+                // that is mid-log corruption, not a torn tail.
+                if (scan_pos + static_cast<std::int64_t>(disk_size) < fsize) {
+                    return false;
+                }
+                // Torn tail: no valid suffix — truncate to last_good_pos.
                 break;
             }
 
