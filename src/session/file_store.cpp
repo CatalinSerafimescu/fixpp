@@ -423,6 +423,15 @@ struct FileStoreImpl {
     // [const §VIII.5]: zero global-heap allocation between parse and fromApp.
     std::pmr::vector<std::byte> store_scratch_;
 
+    // N4: PMR-backed reusable scratch buffer for retrieve() frame reads.
+    // Separate from store_scratch_ because retrieve() releases the writer mutex
+    // before the per-frame disk reads, enabling concurrent store() calls from
+    // within the visitor body — two threads could be in store() and retrieve()
+    // simultaneously, so they must use distinct scratch buffers.
+    // Initialised and reserved at open_log() time alongside store_scratch_.
+    // read_frame_payload() resizes into this buffer (no global-heap alloc per frame).
+    std::pmr::vector<std::byte> retrieve_scratch_;
+
     // Per-direction frame index (rebuilt during open/restart scan).
     // entries are in insertion order (seq ascending, starting from 1).
     std::vector<IndexEntry> inbound_index;
@@ -532,8 +541,11 @@ struct FileStoreImpl {
     // ── Frame record read ──────────────────────────────────────────────────
 
     // Read payload of a frame record at file_offset into dst.
+    // N4: dst is now std::pmr::vector<std::byte> (retrieve_scratch_) so the
+    // resize() does NOT allocate from the global heap when the buffer already
+    // has enough capacity (reserved at open_log() to max_frame_bytes).
     // Returns false on I/O error.
-    bool read_frame_payload(const IndexEntry& ie, std::vector<std::byte>& dst) noexcept {
+    bool read_frame_payload(const IndexEntry& ie, std::pmr::vector<std::byte>& dst) noexcept {
         dst.resize(ie.len);
         const std::int64_t payload_offset = ie.file_offset + static_cast<std::int64_t>(kHeaderSize);
         auto n = file.pread_all(dst.data(), ie.len, payload_offset);
@@ -880,7 +892,14 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
     // T041/US3: acquire mutex to snapshot the index, release BEFORE all
     // visitor.on_frame co_awaits (I-03 / FR-017). The per-frame file-read
     // happens OUTSIDE the mutex so visitor can issue concurrent store() calls.
-    std::vector<IndexEntry> snap;
+    //
+    // N4: snap is std::pmr::vector<IndexEntry> bound to cfg.store_resource so
+    // the index snapshot does NOT allocate from the global heap. retrieve()
+    // releases the writer mutex before disk reads, so concurrent store() calls
+    // use store_scratch_ while retrieve() uses retrieve_scratch_ — no aliasing.
+    auto* snap_mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
+                                              : std::pmr::get_default_resource();
+    std::pmr::vector<IndexEntry> snap{std::pmr::polymorphic_allocator<IndexEntry>{snap_mr}};
     bool gap_hit = false;
     {
         auto guard_result = co_await impl_->mutex_.async_lock();
@@ -913,11 +932,12 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
     // Walk snapshotted index entries: read from disk, call visitor.
     // File reads and visitor calls happen WITHOUT holding the mutex (I-03).
-    std::vector<std::byte> frame_buf;
+    // N4: use retrieve_scratch_ (PMR-backed, reserved to max_frame_bytes at
+    // open_log()) instead of a per-call local std::vector<std::byte>.
     for (const auto& ie : snap) {
         // Post to file_io_executor for the disk read (I-13 / T041).
         co_await asio::post(impl_->cfg.file_io_executor, asio::use_awaitable);
-        if (!impl_->read_frame_payload(ie, frame_buf)) {
+        if (!impl_->read_frame_payload(ie, impl_->retrieve_scratch_)) {
             // RC#4: rebind before returning so the caller continuation runs on the
             // session strand, not the file-I/O executor.
             co_await asio::post(session_ex, asio::use_awaitable);
@@ -931,7 +951,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
         fixpp::core::expected_t<visit_result> vr{visit_result::cont};
         try {
-            vr = co_await visitor.on_frame(ie.seq, std::span<const std::byte>(frame_buf));
+            vr = co_await visitor.on_frame(ie.seq, std::span<const std::byte>(impl_->retrieve_scratch_));
         } catch (...) {
             co_return std::unexpected(fixpp::core::error::store_visitor_aborted);
         }
@@ -1238,16 +1258,24 @@ bool FileStore::open_log(const std::string& log_path) noexcept {
     if (!impl_->file.open(log_path.c_str())) return false;
     if (!impl_->file.try_lock()) return false;
 
-    // RC#6: initialise the PMR scratch buffer now that cfg is fully populated.
+    // RC#6 + N4: initialise PMR scratch buffers now that cfg is fully populated.
     // Uses cfg.store_resource if non-null, else the PMR default resource.
-    // reserve() ensures assign() in store() never reallocates for frames ≤
+    // reserve() ensures resize()/assign() never reallocates for frames ≤
     // max_frame_bytes (the frame-size guard in store() enforces this invariant).
+    //
+    // Two separate buffers (store_scratch_ and retrieve_scratch_) because retrieve()
+    // releases the writer mutex before disk reads, enabling concurrent store() calls
+    // from within the visitor body. Both paths must have their own scratch.
     {
         auto* mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
                                              : std::pmr::get_default_resource();
         impl_->store_scratch_ = std::pmr::vector<std::byte>{
             std::pmr::polymorphic_allocator<std::byte>{mr}};
         impl_->store_scratch_.reserve(impl_->cfg.max_frame_bytes);
+
+        impl_->retrieve_scratch_ = std::pmr::vector<std::byte>{
+            std::pmr::polymorphic_allocator<std::byte>{mr}};
+        impl_->retrieve_scratch_.reserve(impl_->cfg.max_frame_bytes);
     }
 
     const bool ok = impl_->restart_scan(log_path);
