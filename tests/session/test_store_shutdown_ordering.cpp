@@ -2,21 +2,28 @@
 //
 // tests/session/test_store_shutdown_ordering.cpp
 //
-// Seam 18 — session shutdown ordering under concurrent in-flight stores
+// Seam 18 — concurrent store/retrieve/reset under a single async-mutex;
+// orderly teardown of an unbounded MemoryStore without UAF on the slab
 // (I-22 / SC-005).
 //
-// 100 in-flight store() calls + concurrent cancellation (simulating
-// Session::close(terminal)): all 100 awaitables complete (those past the
-// linearisation point with expected_t<void>{}, those before with
-// expected_t::unexpected{store_cancelled}); no UAF on session_arena;
-// ~MessageStore runs before session_arena release.
+// What this file actually tests:
+//   1. HundredSequentialStoresAllSucceed — 100 store() calls on a bounded
+//      store run sequentially on a single-thread pool; all succeed.
+//   2. StoreOutlivesAllCoroutines — two concurrent writers (inbound +
+//      outbound) on an unbounded store; TSan sees 0 data races; store is
+//      destroyed after the pool joins (correct ownership ordering).
+//   3. ResetDuringOperationalPeriodIsClean — store/reset/next_seqnum
+//      round-trip verifies counters rewind to 1 after reset().
+//   4. ConcurrentReadWriteNoDataRace — concurrent retrieve (frames 1..10)
+//      + store (frames 11..30) on unbounded store; TSan must report 0 races.
 //
-// Because Session is complex to instantiate in a unit test, we simulate
-// the ordering using the async_mutex cancel_and_drain() primitive directly:
-// the mutex is drained, all pending acquirers receive sync_lock_drained,
-// and the store is destroyed AFTER all coroutines complete.
+// What this file does NOT test:
+//   - cancel_and_drain() / store_cancelled outcomes (those require a real
+//     Session instance or a direct async_mutex drain harness; deferred to
+//     005-session-establishment-fsm per D-4).
+//   - Session::close(terminal) shutdown ordering.
 //
-// TDD: The data-race protection (TSan) turns RED until T040 ships the mutex.
+// gate-b/r1: RC#7 — comment corrected to match body (test body unchanged).
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -250,6 +257,96 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
     pool.stop();
     pool.join();
     store.reset();
+}
+
+// ── Test 5: RC#1 regression — unbounded retrieve UAF under concurrent append ──
+//
+// Before RC#1, retrieve() on an unbounded MemoryStore would capture
+// unbounded_slab_.data() under the mutex and dereference that pointer AFTER
+// the mutex was released. A concurrent store() could reallocate the vector,
+// invalidating the captured pointer → UAF/OOB read detectable by ASan.
+//
+// This test forces reallocation by starting with a tiny initial capacity (the
+// vector grows from 1 byte), then concurrently calling retrieve() while the
+// writer loop appends enough frames to trigger repeated reallocations.
+//
+// Without the RC#1 fix, ASan should flag a heap-use-after-free in retrieve().
+// With the fix (payload bytes copied under the mutex), the test must pass clean.
+TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
+    // Use a pool large enough that the reader and writer truly run concurrently.
+    asio::thread_pool pool{4};
+
+    // Tiny initial capacity to force immediate reallocation on first store().
+    MemoryStore::Config cfg;
+    cfg.policy            = fixpp::session::capacity_policy::unbounded;
+    cfg.max_frame_bytes   = 1024;
+    auto store = std::make_shared<MemoryStore>(cfg);
+
+    // Pre-populate 1 frame so retrieve(1,1,...) has something to walk.
+    {
+        asio::thread_pool setup{1};
+        auto pre = asio::co_spawn(setup.get_executor(),
+            [store]() -> asio::awaitable<void> {
+                auto frame = make_test_frame(static_cast<seqnum_t>(1),
+                                             direction_t::outbound);
+                co_await store->store(1, std::span<const std::byte>(frame),
+                                      direction_t::outbound);
+            },
+            asio::use_future);
+        pre.get();
+        setup.stop(); setup.join();
+    }
+
+    // Writer: store 200 frames (each ~50 bytes) to force multiple reallocations.
+    auto fut_writer = asio::co_spawn(pool.get_executor(),
+        [store]() -> asio::awaitable<void> {
+            for (int i = 2; i <= 200; ++i) {
+                auto frame = make_test_frame(static_cast<seqnum_t>(i),
+                                             direction_t::outbound);
+                co_await store->store(static_cast<seqnum_t>(i),
+                    std::span<const std::byte>(frame), direction_t::outbound);
+            }
+        },
+        asio::use_future);
+
+    // Reader: repeatedly retrieve frame seq=1 while the writer is growing the slab.
+    // Without RC#1, this triggers the UAF.
+    struct nop_vis final : public fixpp::session::retrieve_visitor {
+        std::size_t count{0};
+        asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
+        on_frame(seqnum_t, std::span<const std::byte> frame) noexcept override {
+            // Touch all bytes to ensure ASan catches use-after-free.
+            volatile std::byte sum{};
+            for (auto b : frame) sum = static_cast<std::byte>(static_cast<uint8_t>(sum) ^
+                                                               static_cast<uint8_t>(b));
+            (void)sum;
+            ++count;
+            co_return fixpp::core::expected_t<fixpp::session::visit_result>{
+                fixpp::session::visit_result::cont};
+        }
+    };
+
+    auto fut_reader = asio::co_spawn(pool.get_executor(),
+        [store]() -> asio::awaitable<void> {
+            for (int round = 0; round < 50; ++round) {
+                nop_vis vis;
+                // Retrieve only frame 1 (which was pre-populated).
+                auto r = co_await store->retrieve(1, 1, direction_t::outbound, vis);
+                // May fail with store_seqnum_gap if the writer hasn't reached
+                // that index yet — both outcomes are acceptable; we only care
+                // that there is no memory corruption.
+                (void)r;
+            }
+        },
+        asio::use_future);
+
+    fut_writer.get();
+    fut_reader.get();
+
+    pool.stop();
+    pool.join();
+    store.reset();
+    // If we reach here without ASan/MSan flags, the RC#1 fix holds.
 }
 
 }  // namespace
