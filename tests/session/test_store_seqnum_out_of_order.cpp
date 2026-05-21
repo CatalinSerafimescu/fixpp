@@ -222,12 +222,27 @@ TEST(StoreSeqnumOutOfOrder, ConcurrentOutOfOrderAndValidStore) {
     fut_valid.get();
     fut_invalid.get();
 
-    // Phase 7 TSan fix: reset the shared_ptr before pool.join() so the store's
-    // destructor (and async_mutex drain) complete on the pool threads before the
-    // pool is destroyed. Without this, the main thread's ~shared_ptr races with
-    // drain_latch_state accessed by the last pool worker completing its handler.
-    store.reset();
+    // Teardown order matches test_store_shutdown_ordering.cpp canonical pattern
+    // (5 sites: lines 84-86, 131-135, 178-180, 257-259, 346-348): drain the pool
+    // FIRST, destroy the store SECOND.
+    //
+    // The previous ordering (reset → join) was wrong. `shared_ptr::reset()` does
+    // NOT post the destructor to the pool — it runs ~MemoryStore (and ~async_mutex,
+    // which frees waiter_record storage) synchronously on the calling thread. By
+    // the time both fut.get() calls return, the captured lambda copies of the
+    // shared_ptr are already destroyed, leaving main as the only strong-ref holder;
+    // reset() then races with any pool worker still inside its scheduler iteration
+    // completing a waiter_record::release_ref continuation
+    // (async_mutex.hpp:705). TSan caught this on PR #77 CI attempt 1 (run
+    // 26237290806, job 77213987837) — local TSan timing happened to mask it.
+    //
+    // pool.stop() signals workers to exit their run loop; pool.join() waits for
+    // all of them to finish their current iteration (including any pending
+    // continuations). After join(), no pool worker can be reading mutex_ state,
+    // so store.reset() is race-free.
+    pool.stop();
     pool.join();
+    store.reset();
 
     EXPECT_TRUE(got_success.load())
         << "Valid store(seq=1) must succeed";
