@@ -26,11 +26,16 @@ class FixppConan(ConanFile):
     # 002-dictionary-xml-loader adds pugixml/1.14 (MIT) for the XML data-
     # dictionary loader (research.md D-1 / D-15). Pinned at a tagged release;
     # user signed off the choice at /plan; Codex Gate A reviews it.
+    # crc32c/1.1.2 added 2026-05-20 for 008-message-store (FileStore per-record
+    #   + sentinel CRC32 over the Castagnoli polynomial 0x1EDC6F41; research D-3).
+    #   BSD-3-Clause, AGPL-compatible per [const §V.3]. FileStore-touching
+    #   targets only (PRIVATE link from fixpp_session).
     requires = [
         "gtest/1.17.0",
         "benchmark/1.9.5",
         "pugixml/1.14",
         "asio/1.36.0",
+        "crc32c/1.1.2",
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────

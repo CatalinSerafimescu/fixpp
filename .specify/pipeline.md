@@ -79,10 +79,15 @@ PHASE 3 — IMPLEMENT
                                       → .specify/decisions/<feature>-verify.md
                                       verdict must be GREEN or YELLOW before continuing
 
-13. Gate-B preconditions              [const §XVII.8] verify non-RED AND the feature-
-                                      completeness audit non-failing AND feature-catalogue.md
-                                      / coverage-index.md updated (these ship as explicit
-                                      tasks.md tasks — nothing automates them)
+13. Gate-B preconditions              [const §XVII.8] /gate-b's pre-flight HARD-BLOCKS the
+                                      loop on all of: verify-record non-RED (4b), feature-
+                                      completeness audit non-failing (4d), Gate A evidence
+                                      present (4c), and the independence rule (5). The
+                                      catalogue + coverage-index ROW WRITES still ship as
+                                      explicit tasks.md tasks (T052/T053/T058 — manual);
+                                      4d verifies their on-disk state matches the diff.
+                                      No separate skill needed — invoke /gate-b directly;
+                                      it refuses to start when any precondition is unmet.
 
 14. /gate-b <branch>                  Codex hostile review of main..HEAD on local branch
                                       → .specify/decisions/<feature>-gateb.md (round 1..N)

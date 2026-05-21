@@ -595,7 +595,7 @@ Each doc must:
 |---|---|---|---|
 | 1 | Eager vs lazy offset table — measurement spike to confirm Instrument-heavy footprint | **2b** | DECIDED hybrid `[SYN §3.1 Q1]`; spike pending |
 | 2 | Coroutine HALO firing on inbound dispatch path across our compiler matrix | **2d**, **2f** | Verify by spike `[SYN §3.2 Q6]` |
-| 3 | QuickFIX-compat shim for synchronous `MessageStore` impls — feasible or document as known incompatibility | **2e** | Phase 2 validates `[SYN §3.2 Q7]` |
+| 3 | QuickFIX-compat shim for synchronous `MessageStore` impls — feasible or document as known incompatibility | **2e** | CLOSED — Path B verdict per `[2e §4.8.A]`; v1.0 ships documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface (no runtime adapter). Disposition applied by `008-message-store` Phase-4 Gate A convergence (2026-05-20) per FR-039. |
 | 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` |
 | 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 |
 | 6 | TestRequestThreshold / SendingTimeThreshold defaults | session-module spec (Phase 4) | DEFERRED `[SYN §3.2 Q10]` |

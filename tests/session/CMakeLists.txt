@@ -57,3 +57,168 @@ add_threading_test(threading_version_registry_missing_dict_layer test_version_re
 # FR-018 / N-P2-3 / [const §XII.5] — Session::open() rejects kind::unset.
 add_threading_test(threading_session_open_rejects_unset_security_profile
   test_session_open_rejects_unset_security_profile.cpp)  # gate-b/r1
+
+# ── 008-message-store seam registrations (T003 helper) ──────────────────────
+# Mirrors add_threading_test pattern; store seams use CTest prefix `store_`
+# (selects 18 of 21 seams that live in tests/session/; corpus replay is under
+# tests/conformance/, alloc-guard under tests/perf/, fuzzer under tests/fuzz/).
+# Registrations are added red-first per TDD ([const §VII.3]) as each seam
+# lands (T012–T019, T027–T029, T033–T039, T044–T045).
+# fixpp_session transitively brings fixpp_core + asio + crc32c (the latter
+# linked PRIVATE on fixpp_session once file_store.cpp ships in T024).
+# Uses fixpp_add_store_test from cmake/fixpp_store_test.cmake (included at root).
+# ── T012–T019 US1 (Phase 3) store seam registrations ────────────────────────
+# T012: scripted test-double FSM fixture is header-only; _fixtures_/test_double_fsm.hpp
+#       is included directly by each seam test (no separate executable).
+#
+# T013 — seam 1: MemoryStore round-trip (SC-001)
+fixpp_add_store_test(store_memory_round_trip SOURCES
+  test_memory_store_round_trip.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T014 — seam 2: FileStore crash survival (SC-002 / [2e §D.4])
+fixpp_add_store_test(store_file_crash_survival SOURCES
+  test_file_store_crash_survival.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T014 (split) — seam 2 CompID-validation sub-cases ([2e §D.4] Gap 1 close)
+fixpp_add_store_test(store_file_compid_validation SOURCES
+  test_file_store_compid_validation.cpp
+)
+
+# T015 — seam 3: FileStore torn-write recovery (FR-012 / I-14)
+fixpp_add_store_test(store_file_torn_write SOURCES
+  test_file_store_torn_write.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T016 — seam 7: Outbound store-after-commit (AC US1 #3 / [2b §4.5])
+fixpp_add_store_test(store_outbound_post_commit SOURCES
+  test_outbound_store_post_commit.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T017 — seam 8: retrieve() with gaps ([FIX-SL §4.8.3] / [FIX-SL §4.8.5])
+fixpp_add_store_test(store_retrieve_with_gaps SOURCES
+  test_retrieve_with_gaps.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T018 — seam 10: reset() happy path (FR-010 / I-15 / SC-003)
+fixpp_add_store_test(store_reset SOURCES
+  test_store_reset.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+# (T019 — seam 17 — store_corpus_replay is registered in tests/conformance/CMakeLists.txt)
+
+# ── T027–T029 US2 (Phase 4) store seam registrations ────────────────────────
+
+# T027 — seam 4: MemoryStore bounded-capacity exhaustion + storage-DoS guard
+#         (FR-006 / FR-014 / I-08 / I-11 / SC-004 / AC US2 #1 / #2 / #2a)
+fixpp_add_store_test(store_memory_capacity SOURCES
+  test_memory_store_capacity.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T028 — seam 15: MemoryStore zero-allocator-calls under bounded policy
+#         (FR-007 / I-10 / SC-007)
+fixpp_add_store_test(store_memory_zero_allocator_calls SOURCES
+  test_memory_store_zero_allocator_calls.cpp
+  _fixtures_/test_double_fsm.cpp
+)
+
+# T029 — seam 19: FileStore::flush_for_session_close() + Session::close(graceful)
+#         A1 dispatch (FR-028 / I-17 / AC US2 #4 / #5)
+#         Uses Session so it needs GTest and the support headers.
+fixpp_add_store_test(store_file_flush_for_session_close SOURCES
+  test_file_store_flush_for_session_close.cpp
+  _fixtures_/test_double_fsm.cpp
+  EXTRA_LIBS fixpp_mock_clock
+  EXTRA_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/support"
+)
+
+# ── T033–T039 US3 (Phase 5) store seam registrations ────────────────────────
+
+# T033 — seam 5: FIFO-fair concurrent writer (FR-015 / FR-016 / I-01 / SC-005)
+fixpp_add_store_test(store_fifo_fair SOURCES
+  test_store_fifo_fair.cpp
+)
+
+# T034 — seam 6: per-method cancellation contract (FR-020 / I-07 / I-13 / SC-006)
+fixpp_add_store_test(store_cancellation_contract SOURCES
+  test_store_cancellation_contract.cpp
+)
+
+# T035 — seam 9: retrieve-visitor span lifetime + no-mutex-across-co_await
+#         (FR-017 / FR-019 / I-03 / I-04 / I-20 / AC US1 #4)
+fixpp_add_store_test(store_retrieve_visitor SOURCES
+  test_retrieve_visitor.cpp
+)
+
+# T036 — seam 10 (crash-cut variants): reset() atomic-rename crash harness
+#         (FR-010 / I-15 / SC-003 / AC US3 #4)
+fixpp_add_store_test(store_reset_crash_cut SOURCES
+  test_store_reset_crash_cut.cpp
+)
+
+# F3 resolution (/speckit-verify 2026-05-21): allow store_file_crash_survival
+# and store_reset_crash_cut to run under TSan. Both tests fork() and the child
+# spawns asio worker threads to drive co_spawn; TSan's default `die_after_fork=1`
+# refuses to run worker threads in a multi-threaded-fork child and kills it
+# (exit 66). Setting `die_after_fork=0` lets the child continue; TSan does NOT
+# instrument post-fork-child races, but the durability invariants these tests
+# verify (atomic-rename + parent-dir-fsync + advisory-flock across SIGKILL)
+# operate at the kernel-syscall level and are already covered by ASan + UBSan +
+# debug runs. The documented limitation is acceptable: the child runs <1s of
+# linear file-I/O before SIGKILL, with no concurrent logic to race-track.
+#
+# OVERWRITE (not APPEND) the ENVIRONMENT property: glibc returns the LAST
+# occurrence of duplicate env vars; appending a second TSAN_OPTIONS would
+# silently lose the suppressions string set by fixpp_add_store_test. Merge
+# die_after_fork=0 with halt_on_error=1 + suppressions into one TSAN_OPTIONS.
+set_tests_properties(store_file_crash_survival store_reset_crash_cut PROPERTIES
+    ENVIRONMENT
+    "TSAN_OPTIONS=die_after_fork=0 halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# T037 — seam 16: PMR poison on retrieve recovery path (I-21 / [2a §4.2])
+fixpp_add_store_test(store_pmr_poison_retrieve SOURCES
+  test_store_pmr_poison_retrieve.cpp
+)
+
+# T038 — seam 18: session shutdown ordering (I-22 / SC-005)
+fixpp_add_store_test(store_shutdown_ordering SOURCES
+  test_store_shutdown_ordering.cpp
+)
+
+# T039 — seam 20: seqnum out-of-order rejection under writer mutex
+#         (FR-018 / I-05 / AC US3 #5)
+fixpp_add_store_test(store_seqnum_out_of_order SOURCES
+  test_store_seqnum_out_of_order.cpp
+)
+# FIXPP_TEST_HOOKS enables test_set_counter() for the overflow test (B3).
+target_compile_definitions(store_seqnum_out_of_order PRIVATE FIXPP_TEST_HOOKS)
+
+# ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
+
+# T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)
+# The build IS the test: static_asserts at file scope fire on regression.
+fixpp_add_store_test(store_quickfix_compat_path_b_guard SOURCES
+  test_quickfix_compat_path_b_guard.cpp
+)
+
+# T045 — seam 12: cfg_loader happy path + CompID-validation defense-in-depth
+# (FR-008 / FR-030 / AC US4 #1 / SC-009 / [2e §D.4] defense-in-depth mirror)
+fixpp_add_store_test(store_quickfix_compat_cfg_loader SOURCES
+  test_quickfix_compat_cfg_loader.cpp
+)
+
+# Coverage uplift — F4.3 remediation: FileStore-specific paths in file_store.cpp
+# not exercised by existing seam tests (which use MemoryStore for generic ops).
+# Covers: next_seqnum(incr=true), retrieve() edge cases, flush_for_session_close(),
+# counter-record recovery, and gap/stop/abort visitor paths on FileStore.
+fixpp_add_store_test(store_file_coverage_uplift SOURCES
+  test_file_store_coverage_uplift.cpp
+  _fixtures_/test_double_fsm.cpp
+)

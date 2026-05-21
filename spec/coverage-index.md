@@ -73,7 +73,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.6.4 | When to terminate without Logout(35=5) (invalid BeginString/CompID cases) | Y | S-016, S-020 | — |
 | §4.7 | Extended features for FIX connection termination | Y | S-031 | — |
 | §4.7.1 | Using NextExpectedMsgSeqNum(789) on invalid MsgSeqNum(34) | Y | S-031 | — |
-| §4.8 | Message recovery | Y | S-014 | — |
+| §4.8 | Message recovery | Y | S-011, S-012, S-013, S-014 | — |
 | §4.8.1 | Ordered message processing | Y | S-009, S-014 | — |
 | §4.8.2 | Request retransmission of messages (ResendRequest) | Y | S-005, S-024 | — |
 | §4.8.3 | Responding to ResendRequest(35=2) | Y | S-005, S-014 | — |

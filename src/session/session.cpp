@@ -22,6 +22,8 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>             // expected_t, error values
 #include <fixpp/core/session_executor.hpp>
+#include <fixpp/session/message_store.hpp>        // 008-message-store — store_ unique_ptr dtor
+#include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 
@@ -164,6 +166,42 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // (survives cross-thread resume — NOT thread_local).
     trace_slot_.store(cfg_.initial_trace_context);
 
+    // ── 008-message-store ownership wire (T011 / FR-005 / FR-025 / FR-026 /
+    //    FR-028 A1 hook) ────────────────────────────────────────────────────
+    // Mint the per-session MessageStore via the factory when configured.
+    // The 007 baseline leaves SessionConfig::store_factory null on smoke
+    // paths; 005's FSM will require it. The engine threads in:
+    //   - sender_comp_id / target_comp_id (4th and 5th positional per
+    //     FR-005; FileStore composes the on-disk log path from them post
+    //     CompID-safety validation per [2e §D.4]),
+    //   - &store_arena_resource_ as the 3rd mr argument — the dedicated
+    //     monotonic_buffer_resource whose lifetime matches the store
+    //     instance (FR-026 peer-not-sub-resource rule),
+    //   - engine_.max_store_memory_per_session as the 4th cap (FR-014a;
+    //     storage-DoS guard binding),
+    //   - engine_.file_io_executor as the 5th file-I/O executor (FR-024a;
+    //     FileStore async pwrite/fdatasync target).
+    // store_factory_failed surfaces verbatim; the store is bound as N1
+    // unique ownership before state_ flips to open (no observable open
+    // session without a usable store when one was requested).
+    if (cfg_.store_factory) {
+        auto minted = cfg_.store_factory->make(
+            cfg_.sender_comp_id,
+            cfg_.target_comp_id,
+            &store_arena_resource_,
+            engine_.max_store_memory_per_session,
+            engine_.file_io_executor);
+        if (!minted) {
+            co_return std::unexpected(minted.error());  // store_factory_failed
+        }
+        store_ = std::move(*minted);
+        // A1 factory-type tag: read the hook ONCE here. Null for impls that
+        // do not satisfy detail::has_flush_for_session_close (MemoryStore /
+        // user impls with no flush method); FileStore returns a typed thunk.
+        // T032 (Phase 4 US2) dispatches this at close(graceful).
+        close_flush_hook_a1_ = store_->flush_hook();
+    }
+
     state_ = lifecycle::open;
     co_return fixpp::core::expected_t<void>{};
 }
@@ -208,9 +246,28 @@ Session::close(close_mode mode) {
     // cancellation_state are 005-owned (no transport / no D-9 timeout value
     // in 007 — D-16); the 2d-owned phase-1 obligation wired here is the
     // call-site + the once/never ordering the seam asserts.
-    if (mode == close_mode::graceful && close_flush_hook_) {
-        const auto flush = close_flush_hook_();
-        (void)flush;  // store_io_failure → logged-then-proceed (I-07)
+    //
+    // T032 (008-message-store / US2 / FR-028 / I-17 / Appendix D §D.2):
+    // A1-pinned graceful-close hook dispatch via the typed thunk stashed at
+    // open(). Non-virtual (concept-shaped, NOT dynamic_cast). Runs OUTSIDE
+    // phase-1's child timeout (the real child timeout for Logout is 005-owned;
+    // this plain co_await runs without a child cancellation_state). terminal
+    // skips this block entirely per the mode guard above.
+    if (mode == close_mode::graceful) {
+        // A1 dispatch: the factory-type-tag typed thunk (non-null for FileStore;
+        // null for MemoryStore / user impls without flush_for_session_close).
+        if (close_flush_hook_a1_ != nullptr && store_ != nullptr) {
+            auto flush_result = co_await (*close_flush_hook_a1_)(*store_);
+            (void)flush_result;  // store_io_failure → logged-then-proceed (I-07)
+        }
+
+        // Scripted seam-5 hook (007's D-16 scripted-test-double; kept for
+        // backward compatibility with seam-5 test assertions). Runs AFTER the
+        // A1 typed-thunk dispatch in phase 1 ordering.
+        if (close_flush_hook_) {
+            const auto flush = close_flush_hook_();
+            (void)flush;  // store_io_failure → logged-then-proceed (I-07)
+        }
     }
 
     // T037/T039 phase 2 — fire root cancellation_type::total ONLY after

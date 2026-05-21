@@ -1,13 +1,13 @@
 # Design Doc 2e — `MessageStore` Async API + QuickFIX-Compat Shim Feasibility
 
-> **Status:** Draft v0.4 — Gate A round 3 converged + post-cap line-edit pass (2c v1.3 / 2d v0.4 precedent)
-> **Date:** 2026-05-08
+> **Status:** Draft v0.5 — post-sign-off targeted gap-closure pass (2026-05-20) added Appendix D §D.4 / §D.5 / §D.6 + cross-references; spine of v0.4 (4-pure-virtual `MessageStore`, awaitable visitor, single-log-per-session on-disk shape, atomic-rename `reset()`, exclusive `async_mutex`, `commit_per_message` default, the §3.1 inherited-primitives table, the §6.3.5 platform-portability table, the 21-seam list with seam 2 extended, the 10-variant §6.7 errors table with operator-doc tightening, the Appendix D §D.1 / §D.2 / §D.3 drop-ins) survives unchanged.
+> **Date:** 2026-05-20 (v0.5; v0.4 dated 2026-05-08)
 > **Owner:** Opus drafts; user approves.
 > **Headers:** `fixpp::session::MessageStore` (`include/fixpp/session/message_store.hpp`); default impls `fixpp::session::MemoryStore` (`include/fixpp/session/memory_store.hpp`), `fixpp::session::FileStore` (`include/fixpp/session/file_store.hpp`); `fixpp::session::MessageStoreFactory` (`include/fixpp/session/message_store_factory.hpp`); `fixpp::session::retrieve_visitor` (`include/fixpp/session/retrieve_visitor.hpp`); `fixpp::session::seqnum_t` consumed via `<fixpp/session/seqnum.hpp>` (placeholder; ownership re-pointed to the Phase-4 session-module spec per §3.1 / §10 Q9 — see N1 below); `<fixpp/session/quickfix_compat/cfg_loader.hpp>` (config-translation only — **no runtime adapter**, no `<…/quickfix_compat/message_store_adapter.hpp>`, **no `<…/quickfix_compat/sync_message_store_adapter.hpp>`** — round 2 retired the templated sync-store adapter per Codex C-R2-P2-1 escalation, see §4.8.B).
 > **Inherits:** `[arch §4.4]` (`session` module surface — `MessageStore` lives here), `[arch §5.1]` (executor model — session-serialisation-domain-bound async ops, per `[2d §4.8]` round-3 wrapper-class shape), `[arch §5.3]` (error model — `expected_t<T>` hot path, no exceptions parse→`fromApp`), `[arch §5.4]` (storage / lifetime classes), `[arch §5.5]` (lifetime contract), `[arch §5.6]` (mid-session reconfiguration ban — store factory frozen at session open; **store ownership is `unique_ptr` per N1**), `[arch §6]` (plugin pattern — ≤5 pure-virtual cap), `[arch §10]` row 2e (handoff), `[arch §11]` Q3 (this doc OWNS the QuickFIX-compat-shim answer for v1.0), `[2a §10] Q3` (raw-frame storage confirmation — answered here), `[2b §4.2]` (frame-byte producer; `frame_view::bytes()`), `[2b §4.5]` (`Writer::commit` finalises BodyLength + CheckSum — load-bearing for outbound store ordering, round-1 root cause #1), `[2b §6.4]` (lifetime contract — flyweights MUST NOT bleed into the store API), `[2b §6.6]` (allocation, exceptions, threading; three-arena pinning; view-escape rule), `[2b §7.4]` (MessageStore consumes raw frames — *not* typed payloads), `[2c §1.1]` / `[2c §7.2]` (typed messages are not the persistence shape; store keeps no `Dictionary&`), `[2d §4.4]` (`EngineConfig::clock`; `EngineConfig::executor`), `[2d §4.5]` (`SessionConfig::store_factory` field — typed `std::shared_ptr<MessageStoreFactory>` in 2d v0.4; **N1 flags this as a sibling-doc inconsistency**: factory ownership should be `unique_ptr` per `[arch §5.6]`. Cross-doc amendment owed — declared in Appendix D §D.1 and applied at 2e sign-off per §10 Q11), `[2d §4.6]` (`fixpp::current_trace_context` — session-domain awaitable + `session_local<T>` storage; not consumed by v1.0 default impls but available to audit-pipeline impls), `[2d §4.7]` (cancellation propagation API — two-phase close; per-mode effect table at 2d §4.7 includes `MessageStore::write` row at line 808 — round-2 RC#2 fixed: 2e's engine-internal `FileStore::flush_for_session_close()` hook is owed to `[2d §4.7]` as Appendix D §D.2 drop-in, applied at 2e sign-off), `[2d §4.8]` (`session_executor` — project-owned wrapper class holding either `asio::strand` (`per_session_strand`) or attested `any_io_executor` (`direct_executor`); store callbacks rebind to this wrapper per `[2d §7.3]`), `[2d §6.5]` (`cancellable_dispatch` — cancellation primitive that returns `awaitable<expected_t<void>>` with `dispatch_aborted` — the model 2e adopts for cancellation surfacing), `[2d §6.7]` (`dispatch_aborted` and `clock_sleeps_cancelled` cancellation variants in the `FIXPP_ERR_CANCELLED` group), `[2d §7.3]` (MessageStore strand-binding handoff), `[2d §7.4]` (executor-compat surface for `async_mutex`), `[2d §7.9]` (`effective_clock` for any persisted timestamps).
 > **Cites:** `[FIX-SL §4.1]` (Sequence numbers — wire `MsgSeqNum(34)` semantics; **does not bound the type**), `[FIX-SL §4.4]` (Sequence reset — S-017 path; reset is operator-driven, not autonomous), `[FIX-SL §4.4.2]` (Using ResetSeqNumFlag(141) for 24-hour connectivity — `ResetSeqNumFlag(141)=Y` Logon recovery path; round-3 post-cap re-anchor per Codex C-R3-P2-1), `[FIX-SL §4.4.3]` (Using ResetSeqNumFlag(141) during connection establishment — `ResetSeqNumFlag(141)=Y` Logon recovery path; round-3 post-cap re-anchor per Codex C-R3-P2-1), `[FIX-SL §4.5.4]` (Rejecting invalid messages — `reset()` truncation semantics tie back here), `[FIX-SL §4.8]` (Message recovery — the wire-side oracle for what the store must persist and replay), `[FIX-SL §4.8.3]` (Responding to ResendRequest — the consumer of `retrieve(begin,end)`), `[FIX-SL §4.8.5]` (Gap-fill process), `[FIX-SL §4.8.6]` (Sequence reset (hard reset, GapFillFlag=N) — `SequenceReset-Reset` (35=4, 123=N) wire-message semantics; round-3 post-cap retitle to coverage-index row per Codex C-R3-P2-1; v0.3's "ResetSeqNumFlag(141)=Y Logon" labelling was a section-mismapping), `[FIX-SL §4.8.8]` (Processing gaps for session layer messages — admin-msg gap-fill rule), `[const §I.1]` (v1.0 version surface), `[const §II.3]` (Tier 2 platform support — Windows/MSVC), `[const §VI.5]` (exact-coverage citations), `[const §VII]` (testing — ≥10 seams), `[const §VIII.5]` (zero global-heap new/delete on the hot path; arena allocations expected — **the correct citation; v0.1 mis-cited `[const §VIII.4]` per N13**), `[const §X.4]` (forwards-compat reserved range), `[const §X.5]` (C-ABI handle invalidation rules), `[const §XI.1]` (coroutines), `[const §XI.2]` (ASIO native cancellation), `[const §XI.3]` (awaitable mutex required in coroutine context), `[const §XI.4]` (callbacks dispatch on session strand), `[const §XI.5]` (store-write path always uses mutex regardless of policy), `[const §XIV.2]` (≤5 pure-virtual cap on plugin interfaces), `[const §XV.1]` (no heap-alloc per message on hot path), `[const §XV.4]` (no synchronous disk-I/O on every send — banned QuickFIX `FileStore` pattern), `[const §XV.9]` (`std::mutex` in coroutine context — banned, **no transitional carve-out** per root cause #3), `[const §XV.15]` (no `drop-oldest` on app/session message path; store path is on the session message path), `[const §XVII.1]` (Codex Gate A required for design docs), `[const §XVIII.5]` (no early shipping of post-v1 protocols — replicated MessageStore stays out), `[SYN §3.2 Q6b]` (`async_shared_mutex` is **out** of v1.0 — root cause #3 dropped 2e's RW-mutex optimisation), `[SYN §3.2 Q7]` (DECIDED async-API shape — `asio::awaitable<...>` writes; QuickFIX-compat shim if feasible, otherwise documented incompatibility), `[SYN §3.2 Q8]` (DECIDED store-write path always uses mutex regardless of policy). Sibling docs at point of use: `[2a §4.2]` (`trap_throw` pattern — the pattern 2e's PMR-throw-to-`expected_t` follows; **the correct citation per N13**), `[2a §6.7]`, `[2a §7.1]` (raw-frame replay decision; this doc confirms), `[2b §4.2]` (`frame_view::bytes()`), `[2b §4.5]` (`Writer::commit` finalises BodyLength + CheckSum), `[2b §6.4]`, `[2b §6.6]`, `[2b §6.7]`, `[2b §7.4]` (MessageStore raw-frame contract), `[2c §6.7]`, `[2c §7.2]` (no `Dictionary&` held by store), `[2d §4.5]`, `[2d §4.7]`, `[2d §4.8]`, `[2d §6.5]`, `[2d §6.7]`, `[2d §7.3]`.
 > **Catalogue rows owned (in part):** **S-011** (Message store interface — `[FIX-SL §4.8]`); **S-012** (In-memory message store implementation — `[FIX-SL §4.8]`); **S-013** (File-based message store implementation — `[FIX-SL §4.8]`); **S-014** (Session recovery — resend flow, GapFill (123=Y) for admin messages — `[FIX-SL §4.8]`) — **store-side contract only**: the `retrieve(begin,end)` query shape and the raw-frame discipline that lets the FSM emit GapFill for admin frames; the FSM itself (`ResendRequest` issue, `SequenceReset-GapFill` emit) is owned by the **Phase-4 session-module spec**. **OSS-002** (QuickFIX `MessageStore` interface — the *interface shape* this doc inherits and re-skins as async; v1.0 ships Path B-only — documented incompatibility + migration recipe per §4.8.A; v0.2's "Path A subset wrapper" was retired in round 2 per Codex C-R2-P2-1 escalation, see §4.8.B). **COM-009** (Replicable MessageStore — **post-v1.0**, P3; this doc must show the async surface does not foreclose a future replicated impl, but does NOT design it; tracked in §10 as a forward-compat invariant only).
-> **Convergence log:** see end-of-doc Appendix C. v0.1 → v0.2 (round 1) addressed Codex review (7 P1 / 4 P2 / 3 P3) and Opus adversarial review (post-judging 11 P1 / 7 P2 / 5 P3, 4 root causes — outbound-store-call-sequence, recovery-visitor-async, supporting-primitive-ownership, FileStore-disk-algorithm). v0.2 → v0.3 (round 2) addresses Codex round 2 (5 P1 / 3 P2 / 1 P3) and Opus adversarial round 2 (post-judging 5 P1 / 5 P2 / 3 P3, 2 root causes — on-disk atomicity extends to §6.3.1 file-pair shape; sibling-doc cross-edits applied/declared). 1 Codex P1 disagreed by Opus (round-2 finding C-R2-P1-1 on outbound cancellation taxonomy — the durable-before-transmit shape was endorsed by Opus round 1 and protects `[const §XV.15]`). v0.3 → v0.4 (round 3, post-cap line-edit pass per 2c v1.3 / 2d v0.4 precedent) addresses Codex round 3 (3 P1 / 1 P2 / 1 P3) and Opus adversarial round 3 (post-judging 3 P1 / 2 P2 / 2 P3, 1 root cause — collateral surfaces of the §6.3 single-log-per-session rewrite were not swept in §4.3 / §1.1 / §6.2.1 / §6.3.5). Round cap hit at round 3; user authorized post-cap line-edit pass to produce v0.4 — text-pinning + 5-site `[FIX-SL §4.8.6]` citation re-anchor + engine→FileStore concept-mechanism specification + 2 editorial nits. See Appendix C.
+> **Convergence log:** see end-of-doc Appendix C. v0.1 → v0.2 (round 1) addressed Codex review (7 P1 / 4 P2 / 3 P3) and Opus adversarial review (post-judging 11 P1 / 7 P2 / 5 P3, 4 root causes — outbound-store-call-sequence, recovery-visitor-async, supporting-primitive-ownership, FileStore-disk-algorithm). v0.2 → v0.3 (round 2) addresses Codex round 2 (5 P1 / 3 P2 / 1 P3) and Opus adversarial round 2 (post-judging 5 P1 / 5 P2 / 3 P3, 2 root causes — on-disk atomicity extends to §6.3.1 file-pair shape; sibling-doc cross-edits applied/declared). 1 Codex P1 disagreed by Opus (round-2 finding C-R2-P1-1 on outbound cancellation taxonomy — the durable-before-transmit shape was endorsed by Opus round 1 and protects `[const §XV.15]`). v0.3 → v0.4 (round 3, post-cap line-edit pass per 2c v1.3 / 2d v0.4 precedent) addresses Codex round 3 (3 P1 / 1 P2 / 1 P3) and Opus adversarial round 3 (post-judging 3 P1 / 2 P2 / 2 P3, 1 root cause — collateral surfaces of the §6.3 single-log-per-session rewrite were not swept in §4.3 / §1.1 / §6.2.1 / §6.3.5). Round cap hit at round 3; user authorized post-cap line-edit pass to produce v0.4 — text-pinning + 5-site `[FIX-SL §4.8.6]` citation re-anchor + engine→FileStore concept-mechanism specification + 2 editorial nits. **v0.4 → v0.5 (2026-05-20, post-sign-off targeted gap-closure pass — NOT a Gate A round; same shape as `[2e §D.3]` self-amendment by `008-message-store` Phase-4 Gate A)** addresses 3 gaps surfaced by adversarial pressure-test of `008-message-store`'s pipeline-step-9 checklist audit waivers (Codex targeted review: CONFIRM P1 / CONFIRM P1 / CONFIRM P2 at `research/reviews/codex_2e_targeted_msgstore_review.md`; Opus adversarial post-judging tally P1 = 2, P2 = 3, P3 = 4, 2 root causes — "scope & trust" primitives in §4.3 / §6.3 (Gap 1 + Gap 2 + N-1 + N-2); store-object-allocation contract silence in §4.4 / §8 (Gap 3 + N-4) — at `research/reviews/opus_2e_targeted_msgstore_adversarial_review.md`). Closes by adding Appendix D §D.4 (CompID filesystem-safety at `FileStoreFactory::make()`), §D.5 (advisory-lock filesystem-type scope-pin), §D.6 (`std::default_delete<MessageStore>` deleter pin + post-v1.0 custom-deleter reservation) plus the 5 propagation actions (N-1 FR-013/I-16/contract docstrings; N-2 §6.7 operator-doc; N-3 seam 2 CompID-validation sub-cases; N-4 forward-compat reservation in §D.6; N-5 `noexcept` impl note in §D.4). No Gate A reset; no spine changes. See Appendix C.
 
 ---
 
@@ -549,6 +549,26 @@ public:
         // per session per §6.3.1; round-3 post-cap pin per Codex C-R3-P1-1
         // — v0.2's `sender__target.<dir>.log` two-files-per-direction
         // shape was retired in v0.3 round-2 RC#1).
+        //
+        // FILESYSTEM-SAFETY VALIDATION (v0.5 per §D.4 — Gap 1 close).
+        // FileStoreFactory::make() MUST validate these CompID values
+        // before composing the filename and before opening any file or
+        // taking the advisory lock: each MUST be non-empty, MUST NOT
+        // contain a path separator ('/' on Linux; '/' or '\\' on
+        // Windows), a NUL byte, a `.` or `..` path segment, a control
+        // character in [0x00, 0x1F] or 0x7F, and the composed path
+        // component MUST NOT exceed NAME_MAX (pathconf(_PC_NAME_MAX) on
+        // Linux; MAX_PATH minus directory prefix on Windows). On
+        // violation, make() returns store_factory_failed before any
+        // file is opened. Validation uses primitive
+        // string_view::find_first_of / find calls; std::filesystem::path
+        // constructors are NOT invoked until validation has passed
+        // (preserves the noexcept contract on make()). The same
+        // validation is mirrored at quickfix_compat::cfg_loader as
+        // defense in depth. FIX-SL §4.3 admits ASCII printables in
+        // Tag 49 / Tag 56 — the protocol does NOT itself constrain
+        // CompIDs to alphanumeric, so the validation is genuinely
+        // load-bearing. See Appendix D §D.4 for the normative bind.
         std::string sender_comp_id;
         std::string target_comp_id;
 
@@ -708,11 +728,35 @@ public:
     //
     // Errors: store_factory_failed (impl reports inability to construct,
     // e.g., FileStore directory unwritable; MemoryStore::Config exceeds
-    // EngineConfig::max_store_memory_per_session per N9).
+    // EngineConfig::max_store_memory_per_session per N9; CompID
+    // filesystem-safety validation failure per §D.4 for FileStoreFactory;
+    // both Config-supplied AND engine-threaded file_io_executor empty for
+    // FileStoreFactory per §4.3.2).
+    //
+    // STORE-OBJECT ALLOCATION CONTRACT (v0.5 per §D.6 — Gap 3 close).
+    // make()'s return type expected_t<std::unique_ptr<MessageStore>>
+    // commits the v1.0 contract to std::default_delete<MessageStore>
+    // destruction (the default unique_ptr deleter): the concrete store
+    // object MUST be destructible via `delete static_cast<MessageStore*>(p)`.
+    // Factory implementations that wish to use a PMR allocator for the
+    // store object itself MUST wrap the deallocation into a
+    // std::default_delete-compatible path (typical pattern: a static
+    // operator delete overload on the concrete store class that routes
+    // back to the PMR resource, paired with
+    // std::pmr::polymorphic_allocator::new_object for the matching
+    // allocation). A std::unique_ptr<MessageStore, CustomDeleter> return
+    // type is NOT supported in v1.0 and is reserved for a possible
+    // post-v1.0 evolution per [const §X.4]. The PMR resources discussed
+    // in §6.1.1 / §8 / FR-026 / FR-027 govern the store's INTERNAL
+    // storage (slab, ring, framing scratch, index, persisted-frame
+    // copy) — they do NOT govern the deleter shape of the store object
+    // itself. See Appendix D §D.6 for the normative bind.
     [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
     make(std::string_view sender_comp_id,
          std::string_view target_comp_id,
-         std::pmr::memory_resource* mr) noexcept = 0;
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,                 // engine-resolved EngineConfig::max_store_memory_per_session per N9 / [2e §1.2]
+         asio::any_io_executor file_io_executor) noexcept = 0;  // engine-resolved EngineConfig::file_io_executor per §4.3.2:665 / :669
 };
 
 // Default factories shipped with v1.0 — thin wrappers over the
@@ -721,14 +765,16 @@ class MemoryStoreFactory final : public MessageStoreFactory {
 public:
     explicit MemoryStoreFactory(MemoryStore::Config c = {}) noexcept;
     expected_t<std::unique_ptr<MessageStore>>
-        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
 };
 
 class FileStoreFactory final : public MessageStoreFactory {
 public:
     explicit FileStoreFactory(FileStore::Config c) noexcept;
     expected_t<std::unique_ptr<MessageStore>>
-        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
 };
 
 }  // namespace fixpp::session
@@ -925,6 +971,7 @@ Per `[arch §4.10]` and the brief: C ABI for `MessageStore` (and the `fixpp_stor
 - **Hot path (corrected per root cause #1).** Inbound: between Parser success and the application callback `fromApp`/`fromAdmin` — the FSM stores the inbound frame after validate, before dispatch. Outbound: between `wire::Writer::commit()` success and `transport::async_write` — the FSM stores the committed frame after `Writer::commit` produces the post-commit span, before transmit. Both windows are `[const §VIII.5]` zero-global-`new`/`delete` discipline.
 - `store(...)`'s per-call scratch comes from `SessionConfig::session_arena` per `[2d §4.5]`; the persisted-byte buffers are pre-allocated in the store-owned `store_arena` per §8.
 - **`MemoryStore::store` performs zero allocator calls (N9 / Codex P2-9).** Fixed-slot + fixed-slab layout per §4.2; the slab is allocated in one PMR call at construction. `store()` is memcpy + index increment.
+- **§6.1.1 governs INTERNAL-storage allocation on the dispatch hot path (v0.5 per §D.6 clarification — Gap 3 close).** The store object's **own** allocation/deallocation is governed by Appendix D §D.6 (`std::default_delete<MessageStore>`-compatible per the `unique_ptr<MessageStore>` return type of `MessageStoreFactory::make()`), NOT by the PMR resources discussed here. The PMR threading discussed in this section governs only the slab / ring / framing-scratch / index allocations *inside* the minted store, not the store object's own allocation.
 
 #### 6.1.2 Exceptions (round-1 N13; round-2 Opus N2-P2-1 refinement)
 
@@ -1060,6 +1107,10 @@ There is no observable "old frames + new counters" or "outbound-truncated + inbo
 
 §9 seam **"FileStore Windows crash-survival"** runs the §9 #2 / #3 / #10 corpus on Windows / MSVC.
 
+**Scope & trust — filesystem-type contract for advisory-lock honoring (NEW v0.5 per Appendix D §D.5 — Gap 2 close; resolves the §10 Q4 "directory contention" closure's reliance on cross-host lock semantics).** `FileStore` is supported only on filesystems where the platform advisory-lock primitive above (Linux: `flock(2)`; Windows: `LockFileEx`) provides effective cross-process exclusive-lock semantics **for every host that may open the live log path**. **Behaviour on filesystems that do not honour those semantics — including but not limited to NFS (any version without an active and correctly-configured lock manager — `rpc.statd` + `rpc.lockd` on Linux; equivalent on other Unixes), SMB / CIFS, FUSE-mounted network filesystems, and cluster filesystems (GPFS, Lustre, GFS2, OCFS2) — is unsupported and outside the v1.0 correctness contract.** `FileStoreFactory::make()` does NOT detect or warn on such deployments (the probe-is-worse-than-nothing argument: a `flock`-then-`flock`-on-a-second-fd same-host probe does not prove multi-host correctness; a `statfs(2)` / `GetVolumeInformationW` filesystem-type probe is non-portable and incomplete — NFSv4 over Kerberos may be fine; NFSv3 over UDP without `lockd` is broken; same `f_type = NFS_SUPER_MAGIC`); operators who deploy on shared storage MUST verify cross-host lock semantics out of band and attest correctness as a deployment precondition. The §10 Q4 single-writer contract holds **only** under this scope restriction. A future v1.x feature may add an opt-in `EngineConfig::store_filesystem_attested = true` flag, but that is post-v1.0 (`[const §X.4]` reserved range). See Appendix D §D.5 for the normative bind and `[2e §6.7]` `store_io_failure` row for the observability propagation (operator note on shared-FS CRC mismatches under N-2).
+
+**Scope & trust — CompID filesystem-safety on `<sender>__<target>.log` (NEW v0.5 per Appendix D §D.4 — Gap 1 close).** `FileStoreFactory::make()` MUST validate the effective `sender` / `target` CompID values before composing `<directory>/<sender>__<target>.log` and before any file is opened or advisory lock taken — rejecting empty CompIDs, path separators, NUL bytes, `.` / `..` segments, control characters `[0x00, 0x1F]` / `0x7F`, and CompIDs that would produce a path component exceeding `NAME_MAX` — with `expected_t::unexpected{store_factory_failed}`. FIX-SL §4.3 admits ASCII printables in Tag 49 / Tag 56; the FIX protocol does NOT itself constrain CompIDs to alphanumeric, so the validation closes a real directory-traversal hazard rather than a hypothetical one. The same validation is mirrored at `fixpp::session::quickfix_compat::cfg_loader::cfg_to_file_store_factory()` as defense in depth. See Appendix D §D.4 for the normative bind and the `noexcept`-safe validation primitive list (`std::string_view::find_first_of` / `find`; `std::filesystem::path` constructors NOT invoked until validation passes).
+
 ### 6.4 Store-write mutex contract per `[SYN §3.2 Q8]` (round-1 root cause #3; round-2 vocabulary alignment per Opus N2-P3-2)
 
 Every `MessageStore` impl carries one per-instance `fixpp::sync::async_mutex` (per `[const §XI.3]`) — the **writer mutex**. **All four methods** (`store`, `retrieve`, `next_seqnum`, `reset`) acquire it (Opus round-2 N2-P2-2: `next_seqnum` is mutexed, the v0.2 "atomic fetch-add" wording is dropped — the mutex is the serialisation primitive). There is **no read lock**, **no `async_shared_mutex`**, **no `std::recursive_mutex` adapter**:
@@ -1109,7 +1160,7 @@ Per the per-doc-prefix discipline established by `[2a §6.7]` (`FIXPP_ERR_DECIMA
 
 | `fixpp::core::error` variant | Source section | Remediation class |
 |---|---|---|
-| `store_io_failure` | §4.3 / §6.3 — FileStore disk I/O error (`pwrite`/`fdatasync`/`FlushFileBuffers`/`SetEndOfFile` returned a system error) | Runtime error — disk full, hardware fault, fs unmounted. Caller's session backpressure policy decides between `block` (retry — NOT recommended for disk faults) and `disconnect_and_recover`. |
+| `store_io_failure` | §4.3 / §6.3 — FileStore disk I/O error (`pwrite`/`fdatasync`/`FlushFileBuffers`/`SetEndOfFile` returned a system error) | Runtime error — disk full, hardware fault, fs unmounted. Caller's session backpressure policy decides between `block` (retry — NOT recommended for disk faults) and `disconnect_and_recover`. **Operator note (v0.5 per Appendix D §D.5 / N-2 — Gap 2 propagation):** if the deployment is on a shared filesystem (NFS / SMB / FUSE / cluster FS) and `store_io_failure` surfaces during the restart scan as a CRC mismatch on otherwise-healthy hardware, the most likely cause is two-host concurrent write under §D.5's unsupported-filesystem scope restriction (the advisory lock per §6.3.5 was taken but not honored cross-host); the operator MUST verify the deployment topology before treating this as a hardware fault. No new error variant is added (the 10-variant freeze per FR-021 holds; adding `store_unsupported_filesystem` is a probe-coupled error that §D.5 explicitly rejects). |
 | `store_seqnum_gap` | §4.1 method 2 — `retrieve()` overlaps a never-persisted seqnum (excluding trailing-edge `end == 0`) | Recovery error — typically `reset()` happened mid-session or seqnum bookkeeping desynced. FSM-side caller decides; common response is Logout. |
 | `store_seqnum_out_of_order` | §4.1 method 1 — `store()` called with a `seq` ≠ `next_seqnum(dir, false)`. Detected inside the writer-mutex critical section (after mutex acquire, before slab memcpy / `pwrite`); on mismatch, the store releases the mutex with no state mutation (Opus round-2 N2-P2-3 close on the v0.2 contract hole) | Programmer error — bug in FSM or user code that bypassed FSM. |
 | `store_capacity_exhausted` | §4.2 — `MemoryStore` ring is full; `drop-oldest` BANNED per `[const §XV.15]` | Runtime error — caller's session backpressure policy applies. |
@@ -1194,6 +1245,7 @@ Two storage classes for 2e-owned data, both rooted in distinct PMR resources fro
 - **`FileStore`'s `store_arena`** holds the in-memory log index and per-write framing buffers; persisted bytes go to disk via `pwrite` and are not retained in memory.
 - **Per `[const §VIII.5]`:** zero `new`/`delete` between parse and `fromApp` on the inbound path applies to `store(...)` — the only allocations are PMR-arena allocations from `session_arena` (HALO fallback) and `store_arena` (fixed at construction). Both are not `new`/`delete`. The `tools/check_alloc.py` post-link symbol scan catches regressions; §9 seam **"MemoryStore::store performs zero allocator calls"** is the per-impl tightening (N9).
 - **`retrieve(...)`** is allowed PMR allocation per the brief's recovery-path carve-out. The visitor itself may allocate from caller-supplied mr.
+- **§8 governs INTERNAL-storage PMR layout (v0.5 per Appendix D §D.6 clarification — Gap 3 close).** The store object's **own** allocation/deallocation is governed by Appendix D §D.6 — `std::default_delete<MessageStore>`-compatible per the `unique_ptr<MessageStore>` return type of `MessageStoreFactory::make()`. The store_arena PMR resource (and the `mr` threaded into `make()`) govern the slab / ring / framing-scratch / index allocations *inside* the minted store; they do NOT replace or override the deleter shape of the store object itself. Custom factory authors who want PMR-allocated store objects MUST wrap deallocation into a `std::default_delete`-compatible path (typical: static `operator delete` overload on the concrete store class) — `unique_ptr<MessageStore, CustomDeleter>` is NOT supported in v1.0 per §D.6.
 
 ## 9. Test seams
 
@@ -1202,7 +1254,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.3 ships **21 seams** (
 (Round-2 numbering note: with seam #12 retired, v0.2's #13 "`quickfix_compat::cfg_to_file_store_factory` sanity" became #12; v0.2's #14–#20 became #13–#19 (with #19 v0.2 "Session shutdown ordering" → #18 v0.3 by reorder); the two NEW seams are #19 "`flush_for_session_close()`" + #20 "`store_seqnum_out_of_order`"; v0.2's #20 "Fuzzer" became #21.)
 
 1. **`MemoryStore` round-trip.** `store(1, frame_a, outbound)` × 3; `retrieve(1, 3, outbound, byte_collecting_visitor)`; verify bytes-for-bytes. Same for `inbound`. `tests/session/test_memory_store_round_trip.cpp`.
-2. **`FileStore` crash-survival.** Spawn child; in child open `FileStore` with `commit_per_message`; `store()` 100 frames; `SIGKILL`; parent re-opens; `retrieve(1, 0, outbound, visitor)`; verify all 100 frames byte-identical. Variant for `commit_batched` and `commit_interval` per the §4.3.1 data-loss-window. `tests/session/test_file_store_crash_survival.cpp`.
+2. **`FileStore` crash-survival.** Spawn child; in child open `FileStore` with `commit_per_message`; `store()` 100 frames; `SIGKILL`; parent re-opens; `retrieve(1, 0, outbound, visitor)`; verify all 100 frames byte-identical. Variant for `commit_batched` and `commit_interval` per the §4.3.1 data-loss-window. **Sub-cases NEW v0.5 per N-3 (Appendix D §D.4 — CompID filesystem-safety validation, Gap 1 close):** verify `FileStoreFactory::make()` returns `store_factory_failed` *before* any file is opened or advisory lock taken when (a) `sender_comp_id` or `target_comp_id` contains a path separator (`/` on Linux; `/` or `\\` on Windows); (b) contains `..`; (c) contains a NUL byte; (d) contains a control character in `[0x00, 0x1F]` or `0x7F`; (e) is empty (`""`); (f) would produce a path component exceeding `NAME_MAX`. FR-033's 21-seam count is preserved (this is a sub-case extension, not a new seam). `tests/session/test_file_store_crash_survival.cpp` and `tests/session/test_file_store_compid_validation.cpp` (split for clarity; both count under seam #2).
 3. **`FileStore` portable torn-write protection.** Open `FileStore`; `store()` N frames (mixed inbound + outbound, exercising the round-2 single-log per-record-direction-tag shape per §6.3.1); programmatically truncate the log mid-record; re-open; verify the truncated record is detected via CRC32 and the log is truncated to last whole record per §6.3.2. **Runs on Linux/Clang Tier 1 AND Windows/MSVC Tier 2** per `[const §II.3]`. `tests/session/test_file_store_torn_write.cpp`.
 4. **`MemoryStore` capacity exhaustion.** Open with `policy = bounded`, `outbound_capacity = 100`; `store()` 100 frames; 101st returns `expected_t::unexpected{store_capacity_exhausted}`; verify state unchanged. Variant for `policy = unbounded`: 10⁵ frames stored without capacity error (no hard cap); the `store_capacity_exhausted` path is unreachable under `unbounded`. `tests/session/test_memory_store_capacity.cpp`.
 5. **FIFO-fair concurrent-writer test.** Open `MemoryStore`; from two `asio::thread_pool`-backed coroutines, invoke `store()` concurrently. Verify the second arrival **suspends and proceeds in FIFO order** (Codex P1-5 fix); verify NEITHER arrival receives `store_concurrent_writer` (variant removed). Run under TSan + ASan. Lives in `tests/session/test_store_fifo_fair.cpp`.
@@ -1221,7 +1273,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.3 ships **21 seams** (
 18. **Session shutdown ordering test (round-1 N7).** Spin a `Session` with `MemoryStore` + `FileStore`; issue 100 in-flight `store()` calls; trigger `Session::close(terminal)`; verify under TSan + ASan: no UAF on `session_arena`; all `store_cancelled` outcomes route correctly; `~MessageStore` runs before `session_arena` release. `tests/session/test_store_shutdown_ordering.cpp`.
 19. **`FileStore::flush_for_session_close()` graceful-close drain (round-2 RC#2 per Codex C-R2-P1-5 — NEW seam).** Open `FileStore` with `policy = commit_batched(N=64)`; `store()` 32 frames (half a batch — under v0.2's no-flush-hook model these would be silently lost on a host crash before the batch boundary). Call `Session::close(graceful)` — engine reaches the concrete `FileStore` and invokes `flush_for_session_close()`. Re-open; `retrieve(1, 32, outbound, visitor)` returns all 32 frames byte-identical. Variant: under `Session::close(terminal)`, verify `flush_for_session_close()` is **NOT** invoked (per Appendix D §D.2 contract); the 32-frame data-loss is the documented `commit_batched` window. `tests/session/test_file_store_flush_for_session_close.cpp`.
 20. **`store_seqnum_out_of_order` detection (Opus N2-P2-3 — NEW seam).** Open `MemoryStore`; via a test-only friend hook, drive `store(seq=5, frame, outbound)` while `next_seqnum(outbound, false) == 1`. Verify the awaitable returns `expected_t::unexpected{store_seqnum_out_of_order}`; verify the entry-array index is unchanged (no slab memcpy, no entry write); verify the writer mutex was acquired and released across the verification. Same for `FileStore`. `tests/session/test_store_seqnum_out_of_order.cpp`.
-21. **Fuzzer.** `tests/fuzz/fuzz_message_store.cpp` — libFuzzer-driven random interleavings of `store/retrieve/reset/next_seqnum` against `MemoryStore` and `FileStore`. ASan + UBSan + TSan invariants. Required by `[const §IX.4]`-extended (the store is on the session message path; fuzzing the surface catches torn-state regressions across the round-2 single-log on-disk algorithm).
+21. **Fuzzer.** `tests/fuzz/fuzz_message_store.cpp` — libFuzzer-driven random interleavings of `store/retrieve/reset/next_seqnum` against `MemoryStore` and `FileStore`. ASan + UBSan + TSan invariants. Required by `[const §VII.7]` (the store is on the session message path; fuzzing the surface catches torn-state regressions across the round-2 single-log on-disk algorithm).
 
 ## 10. Open questions
 
@@ -1253,7 +1305,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.3 ships **21 seams** (
 
 - No new catalogue rows. S-011..S-014, OSS-002, COM-009 are already OFFICIAL.
 - `library/spec/coverage-index.md` line 76 (`§4.8 | Message recovery | Y | S-014 | —`) is amended to **`S-011, S-012, S-013, S-014`** (Codex P2-10 / per Opus confirm) with a note that 2e discharges the **store-side** API + default impls and Phase-4 owns the FSM.
-- `[arch §11]` Q3 disposition is updated from `Phase 2 validates [SYN §3.2 Q7]` to `CLOSED in 2e v0.3: Path B only (documented incompatibility); see [2e §4.8.A]. v0.2's Path A subset wrapper retired in round 2 per Codex C-R2-P2-1 escalation.`
+- `[arch §11]` Q3 disposition is updated from `Phase 2 validates [SYN §3.2 Q7]` to the live FR-039 wording at `architecture.md:598` (Path B verdict, no runtime adapter; documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface; disposition applied by `008-message-store` Phase-4 Gate A convergence). v0.2's Path A subset wrapper retired in round 2 per Codex C-R2-P2-1 escalation; v0.3 verdict is Path B only.
 - **Two `[2d]` sibling-doc amendments via Appendix D drop-ins (round-2 root cause #2 close):**
   - `[2d §4.5]` `SessionConfig::store_factory` field type is amended from `std::shared_ptr<MessageStoreFactory>` to `std::unique_ptr<MessageStoreFactory>` (N1 sibling-doc edit) — **Appendix D §D.1**.
   - `[2d §4.7]` per-mode effect table gains a `FileStore::flush_for_session_close()` row + a one-paragraph contract on the hook's cancellation/error semantics (Codex C-R2-P1-5 / round-2 RC#2) — **Appendix D §D.2**.
@@ -1354,7 +1406,45 @@ Engineering-judgment decisions whose primary driver is design judgment rather th
 
 ## Appendix C — Convergence log
 
-Records the v0.1 → v0.2 Gate A round 1 convergence pass, the v0.2 → v0.3 Gate A round 2 convergence pass, and the v0.3 → v0.4 round-3 post-cap line-edit pass. Per the cumulative-log discipline used by 2c v1.3 / 2d v0.4: round-1 entry is preserved verbatim; round-2 entry is preserved verbatim; round-3 (post-cap) entry is appended at the top of the chronological listing below (newest-first).
+Records the v0.1 → v0.2 Gate A round 1 convergence pass, the v0.2 → v0.3 Gate A round 2 convergence pass, the v0.3 → v0.4 round-3 post-cap line-edit pass, and the v0.4 → v0.5 post-sign-off targeted gap-closure pass. Per the cumulative-log discipline used by 2c v1.3 / 2d v0.4: round-1 entry is preserved verbatim; round-2 entry is preserved verbatim; round-3 (post-cap) entry is preserved verbatim; v0.4 → v0.5 (post-sign-off targeted) entry is appended at the top of the chronological listing below (newest-first).
+
+---
+
+### Post-sign-off targeted gap-closure pass: v0.4 → v0.5 (2026-05-20)
+
+**Reviews input (TARGETED post-sign-off pass — NOT a Gate A round):**
+- Codex targeted review (Gap 1 CONFIRM P1 / Gap 2 CONFIRM P1 / Gap 3 CONFIRM P2): `research/reviews/codex_2e_targeted_msgstore_review.md`
+- Opus adversarial targeted review (post-judging tally `P1 = 2, P2 = 3, P3 = 4`; 5 NEW findings N-1..N-5; 2 root causes — "scope & trust" primitives in §4.3 / §6.3; store-object-allocation contract silence in §4.4 / §8): `research/reviews/opus_2e_targeted_msgstore_adversarial_review.md`
+
+**Origin:** `008-message-store` Phase-4 pipeline-step-9 checklist audit waivers (CHK004 / CHK008 / CHK030 in `specs/008-message-store/checklists/implementation-readiness.md`) had fabricated scope-pinning rationales when adversarially pressure-tested. The 3 gaps trace to design-doc-level silence that v0.4's Gate A round 1–3 convergence missed:
+
+| Gap | Codex | Opus | Resolution |
+|---|---|---|---|
+| Gap 1 — CompID filesystem safety on `<sender>__<target>.log` filename | CONFIRM P1 | CONFIRM P1 (Opus tightens with empty-CompID + control-char + NAME_MAX rejects) | **Appendix D §D.4 NEW** — normative MUST-reject at `FileStoreFactory::make()` before file open / lock take; mirrored at `cfg_loader` as defense-in-depth |
+| Gap 2 — `flock` / `LockFileEx` semantics scope on NFS / SMB / cluster FS | CONFIRM P1 (Codex escalates from initial-framing P2) | CONFIRM P1 (Opus tightens with explicit unsupported-FS enumeration + "no detection or warning" pin) | **Appendix D §D.5 NEW** — scope-pin in §6.3.5; FR-013 / I-16 / `file_store_factory.hpp` docstring cross-reference (N-1); `store_io_failure` operator-doc tightening in §6.7 (N-2) |
+| Gap 3 — `std::unique_ptr<MessageStore>` deleter / store-object allocation contract | CONFIRM P2 | CONFIRM P2 (Opus considered P1 escalation; rejected because type signature is genuinely load-bearing) | **Appendix D §D.6 NEW** — `std::default_delete<MessageStore>` pin in §4.4 with cross-reference in §6.1.1 / §8; forward-compat reservation (`unique_ptr<MessageStore, CustomDeleter>` NOT supported in v1.0; reserved per `[const §X.4]`) per N-4 |
+
+**Disagreement: NONE.** Opus confirms all 3 Codex verdicts at the severities Codex assigned. Per memory `feedback_gate_a_codex_dual_pass`: Codex's review here is the rescue pass only (no second `/codex:adversarial-review`); Opus carries sole adversarial responsibility against Codex's findings — this is a post-sign-off targeted single-round dual-pass per user direction (option A in the orchestrator's path-choice), NOT the full /gate-a-ph2 fresh-design loop.
+
+**Sections edited (v0.4 → v0.5):**
+- §4.3 `FileStore::Config` block-comment — line-edit referencing §D.4 (CompID validation at make() time).
+- §4.4 `MessageStoreFactory::make()` block-comment — line-edit referencing §D.6 (default-deleter pin + post-v1.0 reservation).
+- §6.1.1 — line-edit clarifying object-allocation vs internal-storage-allocation scope (cross-reference §D.6).
+- §6.3.5 platform-portability table area — NEW "scope & trust" paragraph after the platform table referencing §D.5 (FS-type scope) and §D.4 (CompID validation); resolves root cause #1.
+- §6.7 `store_io_failure` row — operator-doc tightening per N-2 (note shared-filesystem CRC mismatch as a likely operator misconfiguration signal under §D.5 scope restriction). FR-021's 10-variant freeze preserved (no new variant).
+- §8 PMR recap — cross-reference §D.6 for object-allocation scope split.
+- §9 seam #2 — extended with CompID-validation reject sub-cases per N-3 (CompIDs containing `/`, `\`, `..`, NUL, control char, empty, NAME_MAX excess MUST surface `store_factory_failed` from `FileStoreFactory::make()` before file open / lock take). FR-033 21-seam count preserved.
+- Appendix D — NEW §D.4 + §D.5 + §D.6 (self-amendments by `008-message-store` Phase-4 step-9 audit, same shape as §D.3 self-amendment by `008-message-store` Phase-4 Gate A).
+
+**Not edited (verified unchanged):** the 4-pure-virtual `MessageStore` interface; the awaitable visitor; the single-log-per-session on-disk shape; atomic-rename `reset()`; exclusive `async_mutex`; `commit_per_message` default; §3.1 inherited-primitives table; §6.1.4 cancellation result-contract; §6.3.4 atomic-rename algorithm; §6.3.5 platform-portability primitives table (the table itself — the new prose is *appended* after it, not rewriting it); the 10-variant §6.7 errors table (variants + groups unchanged); Appendix D §D.1 / §D.2 / §D.3 (drop-ins unchanged).
+
+**Cross-doc propagation owed in this same pass** (the `008-message-store` bundle inherits the v0.5 amendments):
+- `specs/008-message-store/spec.md` — FR-008 tightened with CompID validation per §D.4; FR-013 cross-references §D.5; FR-005 / FR-025 cross-reference §D.6.
+- `specs/008-message-store/data-model.md` — E4 (FileStore) cross-references §D.4 / §D.5; E5 (MessageStoreFactory) cross-references §D.6; I-16 cross-references §D.5.
+- `specs/008-message-store/contracts/` — `file_store.hpp` Config docstring cites §D.4; `file_store_factory.hpp` make() docstring cites §D.5 + §D.4; `message_store_factory.hpp` make() docstring cites §D.6; `cfg_loader.hpp` cites §D.4 defense-in-depth mirror.
+- `specs/008-message-store/checklists/implementation-readiness.md` — CHK004 / CHK008 / CHK030 reclassify to **SPEC-FIXED** citing §D.4 / §D.5 / §D.6; CHK006 / CHK018 reclassify from WAIVED to **DD-DECIDED** with corrected anchors; verdict restored to GREEN; `/speckit-analyze` re-run required per skill step 7.
+
+**Verdict:** v0.5 closes the 3 gaps without re-litigating any Appendix C round 1–3 disposition or touching the v0.4 spine. The post-sign-off targeted pass is sufficient; no Gate A reset; no Phase B Codex re-design; no Phase C comparator.
 
 ---
 
@@ -1596,3 +1686,160 @@ The orchestrator applies this edit at 2e sign-off; the amendment is recorded in 
 > **`FileStore::flush_for_session_close()` hook contract (driven by `[2e §7.6]`).** The engine-internal `FileStore::flush_for_session_close()` is a non-virtual, non-public method on the concrete `FileStore` (NOT on `MessageStore`'s pure-virtual interface — see `[2e §4.1.1]`); the engine reaches it via the session's stored `unique_ptr<MessageStore>` through a friend mechanism. Under `close_mode::graceful` it is invoked once during phase 1, after the FSM's last in-flight `store(...)` awaitable has resumed and before the Logout `async_write` is issued; it drains any pending `commit_batched` / `commit_interval` records to durable storage so the regulator-mandated tail records make it past a host crash that follows close. Cancellation: the hook completes either with success (`expected_t<void>{}`) or with `expected_t::unexpected{store_io_failure}` on a mid-flush `fdatasync`/`FlushFileBuffers` error; the engine logs the failure and proceeds with phase 1's Logout exchange (the durability gap is documented as a `commit_batched` / `commit_interval` data-loss window per `[2e §4.3.1]`). Under `close_mode::terminal` the hook is **not** invoked — terminal close fires root cancellation immediately, and the in-flight `MessageStore::write` row above governs the in-flight state. The hook is **idempotent**: a second invocation is a no-op (returns `expected_t<void>{}` immediately).
 
 The orchestrator applies this edit at 2e sign-off; the amendment is recorded in `[2d-threading.md App C]` as a cross-doc edit driven by 2e's round-2 root cause #2 (Codex C-R2-P1-5).
+
+### D.3 `[2e §4.4] MessageStoreFactory — public-surface factory shape` — `make()` virtual signature extended from 3-param to 5-param (added post-design-doc-sign-off by `008-message-store` Phase-4 Gate A — round-1 RC#1 + fresh-loop round-2 RC#1)
+
+**Tension (NEW post-sign-off):** `[2e §4.4]` lines 712–715 declare the pure-virtual `MessageStoreFactory::make()` with 3 parameters — `(sender_comp_id, target_comp_id, mr)` — and the §4.4 closing paragraph constrains the factory CTOR to be Config-only (no `EngineConfig&` back-channel). The `008-message-store` Phase-4 bundle Gate A surfaced two composition gaps that the 3-param shape cannot satisfy without violating that Config-only CTOR rule:
+
+1. **Cap-construction guard (round-1 RC#1, Codex P1-3 / N9 cluster).** `[2e §1.2]:54` and `§4.4 store_factory_failed` (line 1117) require `MemoryStoreFactory::make()` to reject Configs whose product `(inbound_capacity + outbound_capacity) * max_frame_bytes` exceeds `EngineConfig::max_store_memory_per_session`. Under the 3-param signature the factory has no path to read the engine-resolved cap value at call time, and reading it through an `EngineConfig&` CTOR back-channel breaks `§4.4`'s Config-only CTOR rule. Resolution: thread the engine-resolved value at call time as `make()`'s 4th parameter `std::size_t max_store_memory_bytes` (the engine reads `EngineConfig::max_store_memory_per_session` at session-open and passes it to each `make()` call). The factory CTOR stays Config-only.
+2. **`file_io_executor` injection for path-only `cfg_loader` (fresh-loop round-2 RC#1).** `[2e §4.3.2]:665` requires `FileStore::Config::file_io_executor` at `FileStore` construction; `[2e §4.8.A.2]:869` prescribes the path-only `cfg_loader(const std::filesystem::path&)` reader, which has no `EngineConfig` access. Composing these two contracts on the 3-param `make()` is impossible without either (a) breaking §4.4's Config-only CTOR rule (passing `EngineConfig&` through the factory constructor) or (b) breaking `§4.3.2:665` (constructing `FileStore` without a required field). Resolution: thread the engine-resolved value at call time as `make()`'s 5th parameter `asio::any_io_executor file_io_executor` (the engine reads `EngineConfig::file_io_executor` at session-open and passes it to each `make()` call). `FileStore` itself is constructed inside `make()` after the executor is resolved, preserving `§4.3.2:665`'s required-at-construction contract. **Precedence rule:** Config-supplied wins — if the factory's stored `Config.file_io_executor` is non-empty (caller passed their own at factory construction), that wins; otherwise the engine-threaded 5th-parameter value populates the minted `FileStore::Config::file_io_executor`; both empty → `make()` returns `store_factory_failed` (no "no executor" operating mode for `FileStore`). `MemoryStoreFactory::make()` accepts the 5th parameter and silently discards it (no-op; non-empty values are accepted, not a misuse — `MemoryStore` has no file-I/O work).
+
+Both additions use the same threading pattern: engine-resolved Config-supplied parameters at call time, factory CTOR stays Config-only, design-doc §4.4 frozen-public-surface rule preserved.
+
+**Before** (current `2e-msgstore.md` v0.4 text, `[2e §4.4]` lines 712–715 within the `MessageStoreFactory` block — the existing comment block above the method is not modified):
+
+```cpp
+    [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view sender_comp_id,
+         std::string_view target_comp_id,
+         std::pmr::memory_resource* mr) noexcept = 0;
+```
+
+…and the matching default-factory declarations at lines 723–724 (`MemoryStoreFactory`) and 730–731 (`FileStoreFactory`):
+
+```cpp
+    expected_t<std::unique_ptr<MessageStore>>
+        make(std::string_view, std::string_view, std::pmr::memory_resource*) noexcept override;
+```
+
+**After** (drop-in replacement — the pure-virtual on `MessageStoreFactory` and the `override` declarations on both default factories):
+
+```cpp
+    [[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view sender_comp_id,
+         std::string_view target_comp_id,
+         std::pmr::memory_resource* mr,
+         std::size_t max_store_memory_bytes,                 // engine-resolved EngineConfig::max_store_memory_per_session per N9 / [2e §1.2]
+         asio::any_io_executor file_io_executor) noexcept = 0;  // engine-resolved EngineConfig::file_io_executor per §4.3.2:665 / :669
+```
+
+```cpp
+    expected_t<std::unique_ptr<MessageStore>>
+        make(std::string_view, std::string_view, std::pmr::memory_resource*,
+             std::size_t, asio::any_io_executor) noexcept override;
+```
+
+**Effective:** as of `008-message-store` Phase-4 Gate A convergence (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §4.4]` block at lines 712–732 has been replaced in-place with the 5-param "After" form above, shipping inside the `008-message-store` PR bundle (parallel to the FR-037/038/039 hybrid-ownership pattern recorded in `008-message-store` spec.md Clarifications Q3 + research.md D-8). This contrasts with D.1/D.2 which were pre-applied at 2e v0.4 sign-off and shipped through `007-threading-clock`'s merge. This Appendix D §D.3 entry is retained as the byte-exact diff record of the amendment.
+
+### D.4 `[2e §4.3] FileStore — public-surface knobs (Config + FileStorePolicy + flush_for_session_close())` — `FileStoreFactory::make()` MUST validate CompID filesystem-safety (added post-design-doc-sign-off by `008-message-store` Phase-4 pipeline-step-9 audit — Gap 1, Codex CONFIRM P1 / Opus CONFIRM P1 with empty-CompID + control-char + NAME_MAX tightening)
+
+**Tension (NEW post-sign-off):** `[2e §4.3]` lines 541–568 declare `FileStore::Config::sender_comp_id` / `target_comp_id` as raw `std::string` with no character-set or path-component constraint; `[2e §6.3.1]` lines 1002–1012 write `<sender>__<target>.log` (and the §6.3.4 sibling `<sender>__<target>.log.reset.tmp`) by direct string interpolation. A `cfg_loader`-provisioned (FR-030) or operator-misconfigured CompID containing `/`, `\`, `..`, NUL, control characters, or exceeding `NAME_MAX` produces a path component that **escapes `Config::directory`** — directory traversal outside the configured store directory. The composed filename is **also** the advisory-lock target (FR-013 / I-16); a CompID with a path separator causes `flock` to be taken on an unintended file, defeating the §10 Q4 single-writer contract. This is a real correctness defect, not caller hygiene only — `FileStoreFactory::make()` is the choke point all factory paths pass through (direct Path-B users construct `FileStoreFactory` from a `Config{}` literal and bypass `cfg_loader` entirely), so the bind site is the factory `make()`.
+
+FIX-SL §4.3 (Tag 49 SenderCompID / Tag 56 TargetCompID) admits ASCII printables; it does NOT actually constrain to alphanumeric. So spec-side silence on CompID filesystem-safety is genuinely under-constrained relative to FIX-protocol-legal inputs.
+
+**Before** (current `2e-msgstore.md` v0.4 text, no validation contract — `[2e §4.3]` `FileStore::Config` block at lines 547–553 and `[2e §6.3.1]` filename composition at lines 1002–1012 carry no MUST-reject clause on CompID values; `[2e §4.4]` `FileStoreFactory::make()` at lines 712–732 (post-§D.3) carries no validation hook before file open / lock take):
+
+```cpp
+struct Config {
+    std::filesystem::path directory;
+    std::string           sender_comp_id;       // ← no validation
+    std::string           target_comp_id;       // ← no validation
+    // ...
+};
+```
+
+```text
+File path composition (§6.3.1): "<directory>/<sender>__<target>.log"
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                no constraint on these strings
+```
+
+**After** (drop-in normative addition — pre-applied at this rewrite as `[2e §4.3]` block-comment expansion + `[2e §4.4]` `make()` validation paragraph):
+
+> **CompID filesystem-safety validation (NEW v0.5 per §D.4 — Gap 1 close).** `FileStoreFactory::make(sender, target, mr, max_store_memory_bytes, file_io_executor)` MUST validate the effective `sender` / `target` CompID values **before** composing `<directory>/<sender>__<target>.log` and **before** any file is opened or advisory lock taken. The composed filename stem MUST be exactly one filesystem path component: if either CompID is empty, contains a path separator (`'/'` on Linux; `'/'` or `'\\'` on Windows), a NUL byte, a `.` or `..` path segment, a control character in the range `[0x00, 0x1F]` or `0x7F`, or would cause the composed path component to exceed `NAME_MAX` (Linux: `pathconf(_PC_NAME_MAX)` on the parent directory; Windows: `MAX_PATH` minus the directory prefix), `make()` MUST fail with `expected_t::unexpected{store_factory_failed}` before any file is opened and before any advisory lock is taken. The same validation MUST be mirrored at `fixpp::session::quickfix_compat::cfg_loader::cfg_to_file_store_factory()` as defense in depth so a malformed CFG fails fast at config-load rather than at session-open. The validation is **`noexcept`-safe**: implementations use primitive `std::string_view::find_first_of` / `find` calls and MUST NOT invoke `std::filesystem::path` constructors (which can throw on Windows on long paths) until validation has passed — preserves the `noexcept` contract on `FileStoreFactory::make()` per `[2e §4.4]` and the `contracts/message_store_factory.hpp:76` signature.
+>
+> **Rationale.** FIX-SL §4.3 admits ASCII printables in Tag 49 / Tag 56 — the FIX protocol does NOT constrain CompIDs to alphanumeric. A `cfg_loader`-provisioned (FR-030) `<sender>__<target>.log` composed from an unvalidated CompID can escape `Config::directory` (directory traversal) and/or cause the advisory lock to be taken on an unintended file (defeating the §10 Q4 single-writer contract). The bind site is `FileStoreFactory::make()` (not `cfg_loader`-only) because direct Path-B users construct `FileStoreFactory` from `Config{}` literals; `cfg_loader`-side validation is defense in depth. The empty-CompID reject closes a separate hazard: `__.log` is a valid filename but defeats the `session_triple_hash` discrimination (sentinel record per §6.3.1 / §10 Q7), silently aliasing all empty-CompID sessions to one file.
+
+**Cross-doc propagation (the `008-message-store` PR bundle inherits this amendment):**
+- `specs/008-message-store/spec.md` FR-008 — tightened with the validation requirement and `make()` bind point.
+- `specs/008-message-store/data-model.md` E4 (`FileStore`) — cross-references §D.4 for the CompID validation contract.
+- `specs/008-message-store/contracts/file_store.hpp` (Config block-comment) and `contracts/file_store_factory.hpp` (make() docstring) — cross-reference §D.4.
+- `specs/008-message-store/contracts/cfg_loader.hpp` (docstring) — cross-references §D.4 defense-in-depth mirror.
+- `specs/008-message-store/checklists/implementation-readiness.md` CHK004 — reclassified from WAIVED-with-fabricated-rationale to **SPEC-FIXED §D.4**.
+- `[2e §9 seam #2]` ("FileStore crash-survival") — extended with the CompID-validation reject sub-cases (CompIDs containing `/`, `\`, `..`, NUL, control char, empty, NAME_MAX excess MUST surface `store_factory_failed` from `make()` before file open / lock take). FR-033 21-seam count preserved (this is a sub-case extension, not a new seam).
+
+**Effective:** as of `008-message-store` Phase-4 pipeline-step-9 audit (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §4.3]` block and `[2e §4.4]` `make()` validation paragraph carry the post-amendment shape, shipping inside the `008-message-store` PR bundle (same Path-A precedent as §D.3). This Appendix D §D.4 entry is retained as the normative record of the amendment.
+
+### D.5 `[2e §6.3.5] On-disk algorithm — platform portability + advisory locks` — `FileStore` supported only on filesystems where `flock` / `LockFileEx` semantics are honored (added post-design-doc-sign-off by `008-message-store` Phase-4 pipeline-step-9 audit — Gap 2, Codex CONFIRM P1 / Opus CONFIRM P1 with unsupported-FS enumeration + "no detection or warning" tightening)
+
+**Tension (NEW post-sign-off):** `[2e §6.3.5]` lines 1052–1063 (the platform-portability table) state `flock(fd, LOCK_EX)` / `LockFileEx(...)` as the advisory-lock primitives with **no filesystem-type qualifier**. `[2e §10 Q4]` line 1237 ("`FileStore` directory contention") asserts the advisory lock closes the two-engine race — but that claim only holds on filesystems that honor `flock`/`LockFileEx` cross-process. On NFSv3 without a correctly-configured `rpc.statd`/`rpc.lockd`, `flock` is silently downgraded to a no-op (`man 2 flock` BUGS section: *"flock() does not lock files over NFS"*); on legacy SMB/CIFS mounts and on cluster filesystems (GPFS, Lustre, GFS2, OCFS2), advisory locks are not reliably propagated across hosts. Under those topologies the §10 Q4 contract **silently fails** — two engines on two hosts both acquire "the lock" and proceed to interleave writes into the same log, producing torn records that surface as `store_io_failure` on the next restart's CRC scan (operator's actual fault — deployed on unsupported FS — surfaces as what looks like a hardware fault).
+
+The "local-fs" framing at `[2e §1.1]` line 33 and goal 3 (line 18) reads as descriptive operating-mode framing, NOT as a normative MUST excluding shared mounts. v0.4's `[2e §6.3.5]` / FR-013 / I-16 carry no filesystem-type qualifier and the contract reads as making an unconditional cross-host correctness promise.
+
+**Scope-pin vs runtime probe.** A `flock`-then-`flock`-on-a-second-fd same-host probe does NOT prove multi-host correctness (it tests local kernel support, not multi-host lock-manager propagation). A `statfs(2)` / `GetVolumeInformationW` filesystem-type probe is non-portable, incomplete (NFSv4 over Kerberos may be fine; NFSv3 over UDP without lockd is broken; same `f_type = NFS_SUPER_MAGIC`), and cluster-FS magic numbers are not exhaustively enumerable forwards-compatibly. **The probe is worse than nothing** — it would either give false reassurance on misconfigured shared FS or refuse valid deployments. The cheaper and more honest fix is to **narrow the supported deployment surface in the design contract** and let operators attest correctness out of band.
+
+**Before** (current `2e-msgstore.md` v0.4 text — `[2e §6.3.5]` lines 1052–1063 platform-portability table carries `flock` / `LockFileEx` as the advisory-lock primitive with no filesystem-type qualifier; `[2e §10 Q4]` line 1237 asserts the advisory lock closes the two-engine race unconditionally; FR-013 / I-16 / `contracts/file_store_factory.hpp:34-36` repeat the unconditional shape):
+
+```text
+Advisory exclusive lock at open: flock(fd, LOCK_EX) [Linux]
+                                 LockFileEx(LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY) [Windows]
+                                 ← no filesystem-type qualifier; assumed to work everywhere
+```
+
+**After** (drop-in normative addition — appended to the §6.3.5 platform-portability table closing paragraph as a "Scope & trust" subsection per root cause #1):
+
+> **Scope & trust: filesystem-type contract for advisory-lock honoring (NEW v0.5 per §D.5 — Gap 2 close).** `FileStore` is supported only on filesystems where the platform advisory-lock primitive in §6.3.5 (Linux: `flock(2)`; Windows: `LockFileEx`) provides effective cross-process exclusive-lock semantics for every host that may open the live log path. **Behaviour on filesystems that do not honour those semantics — including but not limited to NFS (any version without an active and correctly-configured lock manager — `rpc.statd` + `rpc.lockd` on Linux; equivalent on other Unixes), SMB/CIFS, FUSE-mounted network filesystems, and cluster filesystems (GPFS, Lustre, GFS2, OCFS2) — is unsupported and outside the v1.0 correctness contract.** `FileStoreFactory::make()` does NOT detect or warn on such deployments (per the probe-is-worse-than-nothing argument above); operators who deploy on shared storage MUST verify cross-host lock semantics out of band and attest correctness as a deployment precondition. The `[2e §10 Q4]` single-writer contract holds **only** under this scope restriction.
+>
+> A future v1.x feature may add an opt-in `EngineConfig::store_filesystem_attested = true` flag for operators who have verified their shared-mount topology, but that is post-v1.0 (`[const §X.4]` reserved range). For v1.0, the default-and-only mode is "local filesystem with kernel-honored advisory locks."
+
+**Observability propagation (N-2 — propagation finding from the Opus targeted review).** Under §D.5, an operator who deploys on an unsupported filesystem and triggers two-host concurrent write sees the corruption surface later as a torn record / CRC mismatch on the restart scan, surfacing through §6.7 as either `store_factory_failed` (sentinel-hash mismatch on re-open) or `store_io_failure` (mid-scan CRC mismatch). That observability path conflates operator-fault (unsupported FS topology) with hardware-fault (legitimate disk error). No new error variant is added — adding `store_unsupported_filesystem` would be a probe-coupled error that §D.5 explicitly rejects, and would touch the 10-variant freeze (FR-021). Instead, `[2e §6.7]`'s `store_io_failure` row remediation column is extended with one sentence:
+
+> *Operator note (per §D.5):* If the deployment is on a shared filesystem (NFS / SMB / FUSE / cluster FS) and `store_io_failure` surfaces during the restart scan as a CRC mismatch, the most likely cause is two-host concurrent write under §D.5's unsupported-filesystem scope restriction; the operator MUST verify the deployment topology before treating this as a hardware fault.
+
+**Cross-doc propagation (the `008-message-store` PR bundle inherits this amendment):**
+- `specs/008-message-store/spec.md` FR-013 — cross-references §D.5 scope restriction.
+- `specs/008-message-store/data-model.md` I-16 — cross-references §D.5.
+- `specs/008-message-store/contracts/file_store_factory.hpp` (make() docstring at lines 34–36) — cross-references §D.5.
+- `specs/008-message-store/checklists/implementation-readiness.md` CHK008 — reclassified from WAIVED-with-fabricated-rationale to **SPEC-FIXED §D.5**.
+
+**Effective:** as of `008-message-store` Phase-4 pipeline-step-9 audit (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §6.3.5]` "Scope & trust" subsection and `[2e §6.7]` `store_io_failure` row operator-note carry the post-amendment shape, shipping inside the `008-message-store` PR bundle. This Appendix D §D.5 entry is retained as the normative record of the amendment.
+
+### D.6 `[2e §4.4] MessageStoreFactory — public-surface factory shape` — `std::unique_ptr<MessageStore>` deleter contract pinned to `std::default_delete` (added post-design-doc-sign-off by `008-message-store` Phase-4 pipeline-step-9 audit — Gap 3, Codex CONFIRM P2 / Opus CONFIRM P2 with forward-compat reservation per N-4)
+
+**Tension (NEW post-sign-off):** `[2e §4.4]` lines 686–717 (post-§D.3) declare `MessageStoreFactory::make()` returning `expected_t<std::unique_ptr<MessageStore>>` — the bare (default-deleter) `unique_ptr` shape. v0.4 is **silent on how the store object itself is allocated/deallocated**. `[2e §6.1.1]` lines 927–931 + `[2e §8]` lines 1192–1199 + FR-026 / FR-027 address the store's **internal storage** (the `store_arena` / `MemoryStore` slab) — they do NOT govern the store object's own allocation. A user-supplied `MessageStoreFactory::make()` could legally execute `auto* p = static_cast<MemoryStore*>(mr->allocate(sizeof(MemoryStore), alignof(MemoryStore))); new (p) MemoryStore(cfg); return std::unique_ptr<MessageStore>(p);` — on destruction, `std::default_delete<MessageStore>` calls global `operator delete`, which does NOT match the PMR allocator → **UB / UAF**.
+
+The type system implicitly implies `std::default_delete<MessageStore>` (the default deduction for `std::unique_ptr<MessageStore>` is exactly that — `delete static_cast<MessageStore*>(p)` invokes the virtual destructor per `contracts/message_store.hpp:36`). But the doc's heavy PMR emphasis everywhere ELSE (FR-026 / FR-027 / §6.1.1 / §8 / FR-007 zero-allocator-calls) creates real ambiguity for custom-factory authors who reach for `std::pmr::polymorphic_allocator<MyStore>::allocate(1)` + placement-new and return `unique_ptr<MessageStore>(p)` expecting it to compose. It does not. The Opus targeted review records that `[const §VIII.5]` (zero global-heap `new`/`delete` on hot path) does NOT subsume this — `[const §VIII.5]` governs the hot path ("between parse and `fromApp`"); `make()` is the cold open path and is exempt. So §D.6 is genuinely needed and is not implied by any upstream constitutional rule.
+
+**Why this is P2 (not P1):** the type signature is genuinely load-bearing — anyone reaching `make()`'s declaration sees `unique_ptr<MessageStore>` without a deleter, and any C++ author who has used `unique_ptr` once knows that means `std::default_delete`. The documentation gap is "one sentence missing," not "wrong type." The shipping default impls (`MemoryStoreFactory::make()` and `FileStoreFactory::make()`) use ordinary `std::make_unique`, which is `default_delete`-compatible — no v1.0 correctness defect; only a custom-impl-author footgun.
+
+**Why this is not P3:** §6.1.1 / §8 / FR-026 / FR-027 / FR-007 emphasize PMR everywhere. A custom-factory author reading those sections WILL reasonably ask: "is the store object itself PMR-allocated, and if so, with what deallocation hook?" The doc never answers. The answer "you can use a custom deleter via `std::unique_ptr<MessageStore, MyDeleter>`" is **false** (the return type fixes the deleter to `std::default_delete`); the answer "you can PMR-allocate the object if you wrap the dealloc into a `default_delete`-compatible path" is **true but undocumented**.
+
+**Before** (current `2e-msgstore.md` v0.4 text, no deleter contract — `[2e §4.4]` lines 686–717 declares `make()` returning `expected_t<std::unique_ptr<MessageStore>>` with no statement on object-allocation discipline; `[2e §6.1.1]` lines 927–931 + `[2e §8]` lines 1192–1199 + FR-026/FR-027 talk only about internal-storage allocation):
+
+```cpp
+[[nodiscard]] virtual expected_t<std::unique_ptr<MessageStore>>
+make(std::string_view sender_comp_id,
+     std::string_view target_comp_id,
+     std::pmr::memory_resource* mr,
+     std::size_t max_store_memory_bytes,
+     asio::any_io_executor file_io_executor) noexcept = 0;
+// ← no statement on how the concrete store object is allocated/deallocated
+```
+
+**After** (drop-in normative addition — pre-applied at this rewrite as `[2e §4.4]` paragraph after the `make()` block, with cross-references in `[2e §6.1.1]` and `[2e §8]`):
+
+> **Store-object allocation contract (NEW v0.5 per §D.6 — Gap 3 close).** `MessageStoreFactory::make()`'s return type `expected_t<std::unique_ptr<MessageStore>>` commits the v1.0 contract to **`std::default_delete<MessageStore>`** destruction (the default `unique_ptr` deleter): the concrete store object MUST be destructible via `delete static_cast<MessageStore*>(p)`. Factory implementations that wish to use a PMR allocator for the store object itself MUST wrap the deallocation into a `std::default_delete`-compatible path — the typical pattern is a static `operator delete` overload on the concrete store class that routes back to the PMR resource (e.g., paired with `std::pmr::polymorphic_allocator::new_object` for the matching allocation). **A `std::unique_ptr<MessageStore, CustomDeleter>` return type is NOT supported in v1.0** and is reserved for a possible post-v1.0 evolution per `[const §X.4]`. The PMR resources discussed in `[2e §6.1.1]` / `[2e §8]` / FR-026 / FR-027 govern the store's **internal storage** (slab, ring, framing scratch, index, persisted-frame copy) — they do NOT govern the deleter shape of the store object itself.
+
+**Forward-compat reservation (N-4 — propagation finding from the Opus targeted review).** A post-v1.0 evolution to `std::unique_ptr<MessageStore, CustomDeleter>` (e.g., to support a future PMR-on-the-object impl, or to enable the `2j` control-plane spec's gRPC `OpenSession`-side store-handle ownership) would be an ABI / API break on the `make()` return type. §D.6 explicitly reserves this evolution per `[const §X.4]` so a v1.x designer can revisit the deleter shape without misreading §D.6 as a permanent lock.
+
+**Cross-references (separating object allocation from internal-storage allocation):**
+- `[2e §6.1.1]` (allocation on the dispatch hot path) gains a line-edit immediately after the `MemoryStore::store` zero-allocator-calls statement: *"§6.1.1 governs **internal-storage** allocation on the dispatch hot path; the store object's **own** allocation/deallocation is governed by §D.6 — `std::default_delete<MessageStore>`-compatible per the `unique_ptr<MessageStore>` return type of `make()`."*
+- `[2e §8]` (PMR recap) gains a line-edit immediately after the store_arena description: *"§8 governs **internal-storage** PMR layout; the store object's **own** allocation/deallocation is governed by §D.6 — `std::default_delete<MessageStore>`-compatible, NOT replaced by the deleter shape."*
+
+**Cross-doc propagation (the `008-message-store` PR bundle inherits this amendment):**
+- `specs/008-message-store/spec.md` FR-005 / FR-025 — cross-reference §D.6.
+- `specs/008-message-store/data-model.md` E5 (`MessageStoreFactory`) — cross-references §D.6.
+- `specs/008-message-store/contracts/message_store_factory.hpp` (make() docstring) — cross-references §D.6.
+- `specs/008-message-store/checklists/implementation-readiness.md` CHK030 — reclassified from WAIVED-with-fabricated-rationale to **SPEC-FIXED §D.6**.
+
+**Effective:** as of `008-message-store` Phase-4 pipeline-step-9 audit (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §4.4]` paragraph + `[2e §6.1.1]` line-edit + `[2e §8]` line-edit carry the post-amendment shape, shipping inside the `008-message-store` PR bundle. This Appendix D §D.6 entry is retained as the normative record of the amendment.
