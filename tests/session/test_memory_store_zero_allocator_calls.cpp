@@ -204,7 +204,11 @@ TEST(MemoryStoreZeroAllocatorCalls, RetrieveDescriptorSnapshotUsesPmr) {
             // perf_store_alloc_guard at the ctest level; this test proves the
             // allocations that DO occur are routed through the counting_resource.
             const long long after = mr.allocate_count();
-            EXPECT_GE(after, baseline) << "allocator count went backwards — something is wrong";
+            // Strict-increase: the snapshot vector IS PMR-allocated for N>0 entries,
+            // so at least one routed allocation MUST occur. EXPECT_GT enforces the
+            // test's claimed invariant ("allocations that DO occur are routed
+            // through counting_resource") — EXPECT_GE would no-op-pass on 0 allocs.
+            EXPECT_GT(after, baseline) << "no PMR allocation observed — retrieve() may bypass mr_";
         },
         asio::use_future)
         .get();

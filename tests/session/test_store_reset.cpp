@@ -349,7 +349,7 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
 #ifndef _WIN32
 TEST(StoreResetFile, N2_DirOpenFailureReturnsFatalError) {
     // Skip if root — root ignores permission bits.
-    if (::getuid() == 0) {
+    if (::geteuid() == 0) {
         GTEST_SKIP() << "Skipped: root bypasses POSIX permission checks";
     }
 
