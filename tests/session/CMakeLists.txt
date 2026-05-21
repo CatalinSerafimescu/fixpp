@@ -241,6 +241,34 @@ add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
 # at T026. Links fixpp_mock_clock for deterministic SendingTime assertions.
 add_threading_test(session_logon_handshake logon_handshake_test.cpp)
 
+# ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
+# Red-first TDD: authored before T031–T036 implementation.
+# session_seqnum_manager: seam #3, SeqnumManager unit tests (T027).
+# session_seqnum_gap_fatal: seam #4, too-high gap fatal FSM tests (T028).
+# session_durable_before_transmit: seam #10, store-before-write ordering (T029).
+
+# Seam #3: SeqnumManager increment/overflow/fatal checks (T027).
+# FIXPP_TEST_HOOKS enables set_counters_for_test() for the overflow test.
+add_executable(session_seqnum_manager seqnum_manager_test.cpp)
+target_link_libraries(session_seqnum_manager PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_seqnum_manager PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_seqnum_manager PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_seqnum_manager COMMAND session_seqnum_manager)
+set_tests_properties(session_seqnum_manager PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# Seam #4: Too-high gap fatal disposition (T028).
+add_threading_test(session_seqnum_gap_fatal seqnum_gap_fatal_test.cpp)
+
+# Seam #10: Durable-before-transmit ordering (T029).
+add_threading_test(session_durable_before_transmit durable_before_transmit_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

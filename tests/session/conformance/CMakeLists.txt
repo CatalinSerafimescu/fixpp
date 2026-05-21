@@ -24,3 +24,20 @@ target_include_directories(tc_establishment_test PRIVATE
 add_test(NAME session_tc_establishment COMMAND tc_establishment_test)
 set_tests_properties(session_tc_establishment PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# ── T030: tc_seqnum — 2a/2c/2q/2r oracle scenarios (NOT 1a/2b — deferred) ────
+# Red-first TDD: authored before T031–T036; turns green at T036.
+# D-10 conformance subset: in-scope seqnum scenarios only.
+add_executable(tc_seqnum_test tc_seqnum_test.cpp)
+target_link_libraries(tc_seqnum_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(tc_seqnum_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_tc_seqnum COMMAND tc_seqnum_test)
+set_tests_properties(session_tc_seqnum PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")

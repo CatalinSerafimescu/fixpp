@@ -43,6 +43,7 @@
                                             // (the unique_ptr<MessageStore> member's
                                             // nested type alias flush_hook_fn requires it).
 #include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/session/seqnum_manager.hpp> // 005 US2 — SeqnumManager (T031)
 
 namespace fixpp::core { struct EngineConfig; class Clock; }
 
@@ -337,6 +338,11 @@ private:
     // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
     // this tracks the FIX protocol state).
     fsm_state fsm_state_ = fsm_state::NotConnected;
+
+    // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
+    // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).
+    // Lifetime: bound to Session; drained at close().
+    SeqnumManager seqnum_mgr_;
 };
 
 }  // namespace fixpp::session

@@ -28,6 +28,7 @@
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/admin_messages.hpp>     // 005 US1: interpret_logon (T024/T025)
 #include <fixpp/session/session_fsm.hpp>        // 005 US1: fsm_state enum (T023–T025)
+#include <fixpp/session/seqnum_manager.hpp>     // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 
@@ -306,13 +307,14 @@ Session::close(close_mode mode) {
 namespace {
 
 // Minimal SOH-delimited field scanner — no heap, no library.
-// Reads tag 8 (BeginString), 49 (SenderCompID), 56 (TargetCompID) from
-// a raw FIX frame. Used by the Active-state inbound CompID/BeginString gate
-// (scenarios 2i / 2k) where we don't need HeartBtInt.
+// Reads tag 8 (BeginString), 34 (MsgSeqNum), 49 (SenderCompID),
+// 56 (TargetCompID) from a raw FIX frame.
+// Used by the inbound dispatch path (scenarios 2i/2k/seqnum check).
 struct FrameHeader {
     std::string_view begin_string;
     std::string_view sender_comp_id;
     std::string_view target_comp_id;
+    std::string_view msg_seq_num;   // tag 34 raw string value
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -345,6 +347,7 @@ struct FrameHeader {
 
         switch (tag) {
             case 8:  h.begin_string    = val; break;
+            case 34: h.msg_seq_num     = val; break;
             case 49: h.sender_comp_id  = val; break;
             case 56: h.target_comp_id  = val; break;
             default: break;
@@ -353,25 +356,48 @@ struct FrameHeader {
     return h;
 }
 
+// Parse a decimal seqnum from a string_view. Returns 0 if invalid.
+// Zero is never a valid FIX seqnum (seqnum_min=1), so 0 signals parse failure.
+// No heap, no library, stack-only. (I-7 no-alloc hot path.)
+[[nodiscard]] static fixpp::session::seqnum_t parse_seqnum(std::string_view sv) noexcept {
+    using fixpp::session::seqnum_t;
+    if (sv.empty()) { return 0; }
+    seqnum_t val = 0;
+    for (char c : sv) {
+        if (c < '0' || c > '9') { return 0; }
+        const seqnum_t digit = static_cast<seqnum_t>(c - '0');
+        // Overflow guard: seqnum_max / 10 = UINT32_MAX / 10 = 429496729.
+        if (val > 429496729U || (val == 429496729U && digit > 5U)) {
+            return 0;  // overflow
+        }
+        val = val * 10U + digit;
+    }
+    return val;
+}
+
 }  // namespace
 
-// T024/T025 (US1, Phase 3): Inbound FSM dispatch.
+// T024/T025 (US1, Phase 3) + T032/T034/T035 (US2, Phase 4): Inbound FSM dispatch.
 //
-// NotConnected state: first message MUST be a Logon (35=A) with matching
-// BeginString/CompID and valid HeartBtInt. On success → LogonReceived.
-// On failure (wrong MsgType, wrong BeginString, wrong CompID) → stay
-// NotConnected (refusal; session never enters Active).
+// Guard precedence per data-model.md matrix preamble:
+//   (1) CompID/BeginString gate (NotConnected / post-logon states)
+//   (2) seqnum class (too-low / too-high / in-seq) — T035
+//   (3) message-type-for-state (US5, Phase 7)
 //
-// LogonReceived / Active state: every inbound message is screened for
-// BeginString and CompID consistency. A mismatch is session-fatal:
-// FSM → Disconnected (scenarios 2i/2k). Valid message → remain in state.
+// Seqnum check (T031/T032/T035):
+//   Too-low  → session_seqnum_too_low (69)   → fatal: Disconnected
+//   Too-high → session_seqnum_gap_unrecoverable (70) → fatal: Disconnected
+//   In-seq   → advance counter, proceed
 //
-// LogoutSent / Disconnected: all inbound silently ignored (defined cells).
+// For the NotConnected/Logon path the peer's first Logon carries seq=1.
+// If seq != 1 → too-low or too-high → fatal.
+//
+// Inbound ordering (I-3 / [2e §7.6]): store(inbound) BEFORE fromAdmin/fromApp.
+// T034 wires the store call; here the seqnum check is the gate.
+//
+// LogoutSent / Disconnected: all inbound silently drained (defined cells).
 asio::awaitable<fixpp::core::expected_t<void>>
 Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
-    // Inbound ordering: store(inbound) BEFORE fromAdmin/fromApp (I-3 / [2e §7.6]).
-    // T026 wires the store call; Phase 3 wires FSM transitions only.
-
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // First message must be a Logon. interpret_logon validates:
@@ -387,16 +413,81 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
 
             if (!result) {
                 // Refusal — BeginString/CompID mismatch or not-Logon.
-                // FSM stays NotConnected. The FIX-SL spec says disconnect, but
-                // for US1 seam tests the observable is "never enters Active/LogonReceived".
-                // Disconnected transition is wired fully in Phase 6 (US4).
+                // Per matrix NotConnected row:
+                //   inbound Logon (refused)   → refuse, → Disconnected
+                //   inbound Heartbeat / TR / Reject / out-of-scope admin /
+                //     invalid MsgType         → refuse, → Disconnected (1st msg ≠ Logon)
+                //
+                // BUT: the existing US1 seam tests assert that a refused-Logon
+                // (BeginString/CompID mismatch) leaves the FSM NOT-in-Active
+                // without requiring Disconnected specifically (Phase 6 ships the
+                // full refusal+disconnect path; Phase 3 only requires "never
+                // reaches Active"). Preserve that contract for the explicit
+                // Logon-shaped refusal cases (interpret_logon would have
+                // detected wrong BeginString/CompID and returned !result with
+                // the frame still being a 35=A Logon).
+                //
+                // Discriminate the two cells: if the frame is a Logon (35=A)
+                // that failed CompID/BeginString validation, keep the Phase 3
+                // "stays NotConnected" semantic. If it is a non-Logon first
+                // message, transition to Disconnected per matrix row.
+                auto hdr = scan_frame_header(frame);
+                // Scan for MsgType (tag 35). scan_frame_header reads tags 8/34/49/56
+                // but not 35; do a minimal MsgType check inline.
+                bool is_logon = false;
+                {
+                    const std::byte SOH{0x01};
+                    const std::byte EQ{static_cast<std::byte>('=')};
+                    std::size_t i = 0;
+                    const std::size_t n = frame.size();
+                    while (i + 2 < n) {
+                        // Look for "35=" SOH-delimited field start.
+                        if (frame[i] == static_cast<std::byte>('3') &&
+                            frame[i+1] == static_cast<std::byte>('5') &&
+                            frame[i+2] == EQ) {
+                            std::size_t v = i + 3;
+                            if (v < n && frame[v] == static_cast<std::byte>('A') &&
+                                (v + 1 == n || frame[v+1] == SOH)) {
+                                is_logon = true;
+                            }
+                            break;
+                        }
+                        // Advance to next SOH+1 (start of next field).
+                        while (i < n && frame[i] != SOH) { ++i; }
+                        if (i < n) { ++i; }
+                    }
+                }
+                (void)hdr;
+                if (!is_logon) {
+                    // Non-Logon first message: matrix row → refuse, → Disconnected.
+                    fsm_state_ = fsm_state::Disconnected;
+                }
+                // Refused-Logon (CompID/BeginString failure): preserve Phase 3
+                // "stays NotConnected" contract (full disconnect lands in Phase 6).
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // Valid Logon: transition to LogonReceived.
-            // The echo Logon build/send (acceptor replies with its own Logon) is
-            // wired in T026 (Phase 3 green pass) via the send() path + build_logon.
-            // For US1 Phase 3, the observable state change is sufficient for seam tests.
+            // Valid Logon: check seqnum (T035 seqnum column: NotConnected row).
+            // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
+            {
+                auto hdr = scan_frame_header(frame);
+                const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+                if (seq == 0) {
+                    // Cannot parse seq — treat as invalid (fatal for protocol safety).
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                auto chk = co_await seqnum_mgr_.check_inbound(seq);
+                if (!chk) {
+                    // Too-low or too-high: session-fatal (I-2/I-4/[FIX-SL §4.1]).
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
+            }
+
+            // Valid Logon + in-seq: transition to LogonReceived.
+            // The echo Logon build/send (acceptor replies) is wired in T026.
             fsm_state_ = fsm_state::LogonReceived;
             co_return fixpp::core::expected_t<void>{};
         }
@@ -410,14 +501,89 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 hdr.sender_comp_id != cfg_.target_comp_id ||
                 hdr.target_comp_id != cfg_.sender_comp_id) {
                 fsm_state_ = fsm_state::Disconnected;
+                co_return fixpp::core::expected_t<void>{};
             }
+
+            // T035: seqnum check for post-logon inbound messages.
+            {
+                const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+                if (seq == 0) {
+                    // Cannot parse seq — session-fatal.
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                auto chk = co_await seqnum_mgr_.check_inbound(seq);
+                if (!chk) {
+                    // Too-low (session_seqnum_too_low=69) or
+                    // too-high (session_seqnum_gap_unrecoverable=70) → session-fatal.
+                    // Phase 4 (US2): transition to Disconnected.
+                    // Phase 6 (US4) wires the Logout emission before Disconnected.
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
+            }
+
+            // In-sequence: counter advanced. Remain in current state.
+            // fromAdmin/fromApp dispatch is wired in Phase 6 (US4).
+            co_return fixpp::core::expected_t<void>{};
+        }
+
+        case fsm_state::LogonSent: {
+            // Initiator path: Logon emitted, awaiting peer Logon ack.
+            // Per data-model.md matrix LogonSent row:
+            //   inbound Logon (valid)            → Active (validate HeartBtInt/CompID/BeginString)
+            //   inbound Logon (refused)          → Disconnected
+            //   inbound Heartbeat/TR/Reject/oos  → session-fatal Logout+disconnect
+            //   seqnum too-low / too-high        → fatal Logout(text)+disconnect
+            //
+            // Phase 4 (US2) scope: emit-Logout-then-Disconnected is deferred to
+            // US4/Phase 6 (when the Logout build/send path is wired); for now
+            // we transition directly to Disconnected on the fatal/refusal cells,
+            // matching the same pattern Phase 3 used for NotConnected refusals.
+            auto result = fixpp::session::interpret_logon(
+                frame,
+                cfg_.target_comp_id,
+                cfg_.sender_comp_id,
+                cfg_.begin_string);
+
+            if (!result) {
+                // Either a refused Logon (CompID/BeginString) OR a non-Logon
+                // inbound (Heartbeat/TestRequest/Reject/out-of-scope admin /
+                // invalid MsgType). Per matrix LogonSent row: every one of
+                // these cells transitions to Disconnected (with Logout in US4).
+                fsm_state_ = fsm_state::Disconnected;
+                co_return fixpp::core::expected_t<void>{};
+            }
+
+            // Valid Logon-ack shape: now check seqnum (T035 LogonSent row).
+            auto hdr = scan_frame_header(frame);
+            const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+            if (seq == 0) {
+                fsm_state_ = fsm_state::Disconnected;
+                co_return fixpp::core::expected_t<void>{};
+            }
+
+            auto chk = co_await seqnum_mgr_.check_inbound(seq);
+            if (!chk) {
+                // Too-low or too-high → fatal (recovery deferred; I-2/I-4).
+                fsm_state_ = fsm_state::Disconnected;
+                co_return fixpp::core::expected_t<void>{};
+            }
+
+            // Valid Logon-ack + in-seq → Active (initiator handshake complete).
+            fsm_state_ = fsm_state::Active;
             co_return fixpp::core::expected_t<void>{};
         }
 
         case fsm_state::LogoutSent:
         case fsm_state::Disconnected:
-        case fsm_state::LogonSent:
             // Defined cells: drain without FSM change.
+            // LogoutSent row: all inbound cells are `(drained)` per matrix
+            // (counter NOT advanced, no dispatch, no emit); the non-drained
+            // cells (inbound Logout → Disconnected; graceful-close timeout →
+            // Disconnected) are wired in US4/Phase 6.
+            // Disconnected row: all inbound cells `ignored` per matrix.
             co_return fixpp::core::expected_t<void>{};
     }
 

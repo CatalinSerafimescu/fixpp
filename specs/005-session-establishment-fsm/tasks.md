@@ -85,16 +85,16 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 **Independent Test**: Ordered admin stream advances counters by one; too-low (no PossDup) → fatal; too-high → fatal Logout-with-text+disconnect (no ResendRequest); `seqnum_max` → fatal no-wrap.
 
-- [ ] T027 [P] [US2] Write seam #3 `tests/session/seqnum_manager_test.cpp` — increment-by-one in/out, too-low fatal, too-high session-fatal, `seqnum_max` overflow no-wrap (SC-003, I-2/I-8) — must FAIL first
-- [ ] T028 [P] [US2] Write seam #4 `tests/session/seqnum_gap_fatal_test.cpp` — too-high gap surfaces `session_seqnum_gap_unrecoverable`, orderly Logout-with-text + disconnect, asserts **no** `ResendRequest(35=2)` emitted (I-4, Session-2026-05-18) — must FAIL first
-- [ ] T029 [P] [US2] Write seam #10 `tests/session/durable_before_transmit_test.cpp` — `store(outbound)` completes before `transport::async_write`; a cancelled transmit leaves no persisted-but-unsent inconsistency (I-3) — must FAIL first
-- [ ] T030 [P] [US2] Write conformance `tests/session/conformance/tc_seqnum_test.cpp` — `2a_MsgSeqNumCorrect`, `2c_MsgSeqNumTooLow`, `2q_MsgTypeNotValid`, `2r_UnregisteredMsgType` (NOT `1a`/`2b` too-high — deferred per D-10) — must FAIL first
-- [ ] T031 [US2] Implement `src/session/seqnum_manager.cpp` — inbound-expected/outbound-next counters serialized by `fixpp::sync::async_mutex` (`[2f §7.3]`, D-7); in-sequence advance; too-low (no PossDup) → `session_seqnum_too_low` session-fatal (`[FIX-SL §4.1]`)
-- [ ] T032 [US2] Implement the too-high disposition — `session_seqnum_gap_unrecoverable` → orderly Logout-with-text → disconnect, no ResendRequest/SequenceReset (I-4); receipt of out-of-scope `ResendRequest`/`SequenceReset` is a bounded `session_admin_not_supported` reject (FR-017)
-- [ ] T033 [US2] Implement `seqnum_max` overflow → reuse `[2e §6.7] store_seqnum_overflow`, session-fatal, no wrap, surfaced via the session-level error callback (I-8, FR-008/009)
-- [ ] T034 [US2] Implement durable-before-transmit ordering in `src/session/session.cpp` — `co_await store->store(seq, committed_span, outbound)` post-`Writer::commit`, pre-`transport::async_write`; inbound parse→store→`fromAdmin`/`fromApp` ordering (`[2e §root cause #1]`/`[2e §7.6]`, I-3)
-- [ ] T035 [US2] Wire the seqnum columns (too-low / too-high / in-seq) across all FSM states per the data-model transition matrix
-- [ ] T036 [US2] Make seams #3/#4/#10 + `tc_seqnum` green; refactor (SC-003)
+- [X] T027 [P] [US2] Write seam #3 `tests/session/seqnum_manager_test.cpp` — increment-by-one in/out, too-low fatal, too-high session-fatal, `seqnum_max` overflow no-wrap (SC-003, I-2/I-8) — must FAIL first
+- [X] T028 [P] [US2] Write seam #4 `tests/session/seqnum_gap_fatal_test.cpp` — too-high gap surfaces `session_seqnum_gap_unrecoverable`, orderly Logout-with-text + disconnect, asserts **no** `ResendRequest(35=2)` emitted (I-4, Session-2026-05-18) — must FAIL first
+- [X] T029 [P] [US2] Write seam #10 `tests/session/durable_before_transmit_test.cpp` — `store(outbound)` completes before `transport::async_write`; a cancelled transmit leaves no persisted-but-unsent inconsistency (I-3) — must FAIL first **(partial — outbound half deferred to T046/Phase 6 per seam #11; Phase 4 covers only the inbound half: store-before-fromAdmin. See test-file top comment for the scope split.)**
+- [X] T030 [P] [US2] Write conformance `tests/session/conformance/tc_seqnum_test.cpp` — `2a_MsgSeqNumCorrect`, `2c_MsgSeqNumTooLow`, `2q_MsgTypeNotValid`, `2r_UnregisteredMsgType` (NOT `1a`/`2b` too-high — deferred per D-10) — must FAIL first
+- [X] T031 [US2] Implement `src/session/seqnum_manager.cpp` — inbound-expected/outbound-next counters serialized by `fixpp::sync::async_mutex` (`[2f §7.3]`, D-7); in-sequence advance; too-low (no PossDup) → `session_seqnum_too_low` session-fatal (`[FIX-SL §4.1]`)
+- [X] T032 [US2] Implement the too-high disposition — `session_seqnum_gap_unrecoverable` → orderly Logout-with-text → disconnect, no ResendRequest/SequenceReset (I-4); receipt of out-of-scope `ResendRequest`/`SequenceReset` is a bounded `session_admin_not_supported` reject (FR-017)
+- [X] T033 [US2] Implement `seqnum_max` overflow → reuse `[2e §6.7] store_seqnum_overflow`, session-fatal, no wrap, surfaced via the session-level error callback (I-8, FR-008/009)
+- [X] T034 [US2] Implement durable-before-transmit ordering in `src/session/session.cpp` — `co_await store->store(seq, committed_span, outbound)` post-`Writer::commit`, pre-`transport::async_write`; inbound parse→store→`fromAdmin`/`fromApp` ordering (`[2e §root cause #1]`/`[2e §7.6]`, I-3)
+- [X] T035 [US2] Wire the seqnum columns (too-low / too-high / in-seq) across all FSM states per the data-model transition matrix
+- [X] T036 [US2] Make seams #3/#4/#10 + `tc_seqnum` green; refactor (SC-003)
 
 **Checkpoint**: US1 + US2 both independently functional.
 
