@@ -20,10 +20,12 @@
 namespace fixpp::session {
 
 [[nodiscard]] fixpp::core::expected_t<std::span<char>>
-    stamp_sending_time(fixpp::core::utc_time_point /*now*/,
-                       std::span<char> /*buf*/) noexcept {
-    // PLACEHOLDER — body lands T022 (Phase 3 / US1).
-    return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    stamp_sending_time(fixpp::core::utc_time_point now,
+                       std::span<char> buf) noexcept {
+    // T022 (Phase 3 / US1): format effective_clock.now() as FIX UTCTimestamp
+    // at millis precision (FIX 4.x default, D-3). Round-trips losslessly (I-6).
+    return fixpp::core::utc_time_to_fix_string(
+        now, fixpp::core::fix_time_precision::millis, buf);
 }
 
 [[nodiscard]] fixpp::core::expected_t<void>

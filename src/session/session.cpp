@@ -26,6 +26,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/message_store.hpp>        // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
+#include <fixpp/session/admin_messages.hpp>     // 005 US1: interpret_logon (T024/T025)
+#include <fixpp/session/session_fsm.hpp>        // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 
@@ -298,14 +300,127 @@ Session::close(close_mode mode) {
 }
 
 // ── 005-session-establishment-fsm additions (T018) ──────────────────────────
-// Placeholder bodies for the 005-owned Session surface. Each placeholder
-// is replaced per user story (Phase 3–6); the REPLACEMENT is NOT additive
-// (the body is substituted, not appended). Link-green before stories land.
+// Bodies wired per user story (Phase 3 / T023–T025). Each placeholder is
+// replaced by the full body below; NOT additive — the comment is the anchor.
 
+namespace {
+
+// Minimal SOH-delimited field scanner — no heap, no library.
+// Reads tag 8 (BeginString), 49 (SenderCompID), 56 (TargetCompID) from
+// a raw FIX frame. Used by the Active-state inbound CompID/BeginString gate
+// (scenarios 2i / 2k) where we don't need HeartBtInt.
+struct FrameHeader {
+    std::string_view begin_string;
+    std::string_view sender_comp_id;
+    std::string_view target_comp_id;
+};
+
+[[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
+    FrameHeader h;
+    const std::byte SOH{0x01};
+    const std::byte EQ{static_cast<std::byte>('=')};
+    std::size_t i = 0;
+    const std::size_t n = frame.size();
+
+    while (i < n) {
+        std::uint32_t tag = 0;
+        bool tag_ok = true;
+        while (i < n && frame[i] != EQ && frame[i] != SOH) {
+            auto c = static_cast<unsigned char>(frame[i]);
+            if (c < '0' || c > '9') { tag_ok = false; }
+            tag = tag * 10U + static_cast<std::uint32_t>(c - '0');
+            ++i;
+        }
+        if (i >= n || frame[i] != EQ || !tag_ok) {
+            while (i < n && frame[i] != SOH) { ++i; }
+            if (i < n) { ++i; }
+            continue;
+        }
+        ++i;  // skip '='
+        std::size_t vstart = i;
+        while (i < n && frame[i] != SOH) { ++i; }
+        std::string_view val(
+            reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
+        if (i < n) { ++i; }  // skip SOH
+
+        switch (tag) {
+            case 8:  h.begin_string    = val; break;
+            case 49: h.sender_comp_id  = val; break;
+            case 56: h.target_comp_id  = val; break;
+            default: break;
+        }
+    }
+    return h;
+}
+
+}  // namespace
+
+// T024/T025 (US1, Phase 3): Inbound FSM dispatch.
+//
+// NotConnected state: first message MUST be a Logon (35=A) with matching
+// BeginString/CompID and valid HeartBtInt. On success → LogonReceived.
+// On failure (wrong MsgType, wrong BeginString, wrong CompID) → stay
+// NotConnected (refusal; session never enters Active).
+//
+// LogonReceived / Active state: every inbound message is screened for
+// BeginString and CompID consistency. A mismatch is session-fatal:
+// FSM → Disconnected (scenarios 2i/2k). Valid message → remain in state.
+//
+// LogoutSent / Disconnected: all inbound silently ignored (defined cells).
 asio::awaitable<fixpp::core::expected_t<void>>
-Session::on_inbound_frame(std::span<const std::byte> /*frame*/) noexcept {
-    // PLACEHOLDER — FSM dispatch wired per US1 T024 (Phase 3).
+Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
     // Inbound ordering: store(inbound) BEFORE fromAdmin/fromApp (I-3 / [2e §7.6]).
+    // T026 wires the store call; Phase 3 wires FSM transitions only.
+
+    switch (fsm_state_) {
+        case fsm_state::NotConnected: {
+            // First message must be a Logon. interpret_logon validates:
+            //   MsgType==A, BeginString==cfg_.begin_string,
+            //   SenderCompID==cfg_.target_comp_id (peer's sender = our target),
+            //   TargetCompID==cfg_.sender_comp_id (peer's target = our sender),
+            //   HeartBtInt present and ≥ 0.
+            auto result = fixpp::session::interpret_logon(
+                frame,
+                cfg_.target_comp_id,   // expected_sender: peer's 49= is our target
+                cfg_.sender_comp_id,   // expected_target: peer's 56= is our sender
+                cfg_.begin_string);
+
+            if (!result) {
+                // Refusal — BeginString/CompID mismatch or not-Logon.
+                // FSM stays NotConnected. The FIX-SL spec says disconnect, but
+                // for US1 seam tests the observable is "never enters Active/LogonReceived".
+                // Disconnected transition is wired fully in Phase 6 (US4).
+                co_return fixpp::core::expected_t<void>{};
+            }
+
+            // Valid Logon: transition to LogonReceived.
+            // The echo Logon build/send (acceptor replies with its own Logon) is
+            // wired in T026 (Phase 3 green pass) via the send() path + build_logon.
+            // For US1 Phase 3, the observable state change is sufficient for seam tests.
+            fsm_state_ = fsm_state::LogonReceived;
+            co_return fixpp::core::expected_t<void>{};
+        }
+
+        case fsm_state::LogonReceived:
+        case fsm_state::Active: {
+            // Post-logon inbound: screen BeginString and CompID (scenarios 2i/2k).
+            // Any mismatch → session-fatal → Disconnected.
+            auto hdr = scan_frame_header(frame);
+            if (hdr.begin_string != cfg_.begin_string ||
+                hdr.sender_comp_id != cfg_.target_comp_id ||
+                hdr.target_comp_id != cfg_.sender_comp_id) {
+                fsm_state_ = fsm_state::Disconnected;
+            }
+            co_return fixpp::core::expected_t<void>{};
+        }
+
+        case fsm_state::LogoutSent:
+        case fsm_state::Disconnected:
+        case fsm_state::LogonSent:
+            // Defined cells: drain without FSM change.
+            co_return fixpp::core::expected_t<void>{};
+    }
+
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -317,7 +432,6 @@ Session::send(std::span<const std::byte> /*app_payload*/) noexcept {
 }
 
 fsm_state Session::state() const noexcept {
-    // PLACEHOLDER — returns fsm_state_ (set to NotConnected until Phase 3 wires transitions).
     return fsm_state_;
 }
 

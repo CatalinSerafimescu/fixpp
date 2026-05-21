@@ -236,7 +236,11 @@ add_threading_test(session_seqnum_t_handoff seqnum_t_handoff_test.cpp)
 # (fix_time.cpp compiled into fixpp_core at T011 / src/core/CMakeLists.txt).
 add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
 
+# ── 005 Phase 3 (US1) — seam #2: Logon handshake test (T019) ────────────────
+# Red-first TDD: authored before T021–T026 implementation; must turn green
+# at T026. Links fixpp_mock_clock for deterministic SendingTime assertions.
+add_threading_test(session_logon_handshake logon_handshake_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
-# Placeholder for Phase 2: tc_establishment/seqnum/liveness/reject/logout/
-# sendingtime_test.cpp authored from the QuickFIX/J .def oracle (research D-10).
+# Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

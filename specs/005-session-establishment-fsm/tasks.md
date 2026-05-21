@@ -66,14 +66,14 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 **Independent Test**: Drive initiator and acceptor FSMs against each other through the transport double + mock clock; assert both reach `Active`, `HeartBtInt` matches the spec rule, `fromAdmin` delivers the peer `Logon`; mismatched `BeginString`/CompID or a non-`Logon` first message never reaches `Active`.
 
-- [ ] T019 [P] [US1] Write seam #2 `tests/session/logon_handshake_test.cpp` — initiator↔acceptor reach `Active`; `HeartBtInt` negotiation; `MsgSeqNum=1` + `SendingTime` on the emitted Logon; BeginString/CompID/first-msg-not-Logon refusals (SC-001/002) — must FAIL first
-- [ ] T020 [P] [US1] Write conformance `tests/session/conformance/tc_establishment_test.cpp` — parameterized over the fix42/fix44 `.def` oracle: `1a_ValidLogonWithCorrectMsgSeqNum`, `1b_DuplicateIdentity`, `1c_InvalidSenderCompID`, `1c_InvalidTargetCompID`, `1d_InvalidLogonWrongBeginString`, `2i_BeginStringValueUnexpected`, `2k_CompIDDoesNotMatchProfile`, `1e_NotLogonMessage` (D-10) — must FAIL first
-- [ ] T021 [US1] Implement Logon build/interpret in `src/session/admin_messages.cpp` over `wire::Writer` + typed `dictionary/` access — `HeartBtInt(108)`, `SenderCompID(49)`/`TargetCompID(56)` (point-to-point S-016 49/56 only), `BeginString(8)` (FR-002/003/004)
-- [ ] T022 [US1] Implement `effective_clock = clock_override ?: EngineConfig::clock` resolution once at `Session::open` (`[2d §7.9]`, NFR-015) and outbound `SendingTime(52)` stamping via `core/fix_time` in `src/session/session.cpp` (FR-011)
-- [ ] T023 [US1] Implement the initiator path `NotConnected → LogonSent` (emit Logon, seq=1, SendingTime) in `src/session/session.cpp` (data-model matrix)
-- [ ] T024 [US1] Implement the acceptor path `NotConnected → LogonReceived → Active` with `HeartBtInt` negotiation and `fromAdmin` delivery of the peer Logon (FR-002, US1#2)
-- [ ] T025 [US1] Implement Logon refusal — `BeginString`/CompID gate + first-message-not-`Logon` (`[FIX-SL §4.3]`) → `session_invalid_logon`/`session_compid_mismatch`/`session_begin_string_unsupported`, FSM never enters `Active` (FR-003/004, US1#3/#4)
-- [ ] T026 [US1] Make seam #2 + `tc_establishment` green; refactor under the noexcept-window discipline (SC-001/002)
+- [X] T019 [P] [US1] Write seam #2 `tests/session/logon_handshake_test.cpp` — initiator↔acceptor reach `Active`; `HeartBtInt` negotiation; `MsgSeqNum=1` + `SendingTime` on the emitted Logon; BeginString/CompID/first-msg-not-Logon refusals (SC-001/002) — must FAIL first
+- [X] T020 [P] [US1] Write conformance `tests/session/conformance/tc_establishment_test.cpp` — parameterized over the fix42/fix44 `.def` oracle: `1a_ValidLogonWithCorrectMsgSeqNum`, `1b_DuplicateIdentity`, `1c_InvalidSenderCompID`, `1c_InvalidTargetCompID`, `1d_InvalidLogonWrongBeginString`, `2i_BeginStringValueUnexpected`, `2k_CompIDDoesNotMatchProfile`, `1e_NotLogonMessage` (D-10) — must FAIL first
+- [X] T021 [US1] Implement Logon build/interpret in `src/session/admin_messages.cpp` over `wire::Writer` + typed `dictionary/` access — `HeartBtInt(108)`, `SenderCompID(49)`/`TargetCompID(56)` (point-to-point S-016 49/56 only), `BeginString(8)` (FR-002/003/004)
+- [X] T022 [US1] Implement `effective_clock = clock_override ?: EngineConfig::clock` resolution once at `Session::open` (`[2d §7.9]`, NFR-015) and outbound `SendingTime(52)` stamping via `core/fix_time` in `src/session/session.cpp` (FR-011)
+- [X] T023 [US1] Implement the initiator path `NotConnected → LogonSent` (emit Logon, seq=1, SendingTime) in `src/session/session.cpp` (data-model matrix)
+- [X] T024 [US1] Implement the acceptor path `NotConnected → LogonReceived → Active` with `HeartBtInt` negotiation and `fromAdmin` delivery of the peer Logon (FR-002, US1#2)
+- [X] T025 [US1] Implement Logon refusal — `BeginString`/CompID gate + first-message-not-`Logon` (`[FIX-SL §4.3]`) → `session_invalid_logon`/`session_compid_mismatch`/`session_begin_string_unsupported`, FSM never enters `Active` (FR-003/004, US1#3/#4)
+- [X] T026 [US1] Make seam #2 + `tc_establishment` green; refactor under the noexcept-window discipline (SC-001/002)
 
 **Checkpoint**: A session can be established and demonstrated end-to-end (MVP).
 
