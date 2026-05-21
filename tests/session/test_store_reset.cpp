@@ -244,4 +244,88 @@ TEST(StoreResetFile, AfterResetNewOpenSeesCounterOne) {
     fs::remove_all(dir);
 }
 
+// RC#2 regression: Reset_ThenStore_ThenReopen_RetrieveSucceeds
+//
+// Before RC#2 the reset() path set write_pos=0 after initialise_fresh(),
+// causing the next store() to overwrite the sentinel byte at offset 0 and
+// corrupt the log. On the subsequent reopen, restart_scan() would fail (wrong
+// magic at sentinel) and return store_factory_failed.
+//
+// With the fix, write_pos is set to the correct post-fresh-init tail offset,
+// so store(seq=1) appends AFTER the sentinel+counter records, and the log is
+// correctly recovered on the next open.
+TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("file_rc2_regression");
+
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
+        [&dir, &pool]() -> asio::awaitable<void> {
+            // Phase 1: open, store 3 frames, reset, then store 1 frame, close.
+            {
+                FileStore::Config cfg = make_file_config(dir, pool.get_executor());
+                FileStoreFactory factory{cfg};
+                auto minted =
+                    factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
+                                 pool.get_executor());
+                EXPECT_TRUE(minted.has_value()) << "Phase 1 open failed";
+                if (!minted.has_value()) co_return;
+                auto& store = *minted.value();
+
+                // Store 3 outbound frames (seqnums 1,2,3)
+                auto script = make_store_script(3, direction_t::outbound);
+                for (const auto& step : script) {
+                    auto r = co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                    EXPECT_TRUE(r.has_value()) << "pre-reset store() failed at seq=" << step.seq;
+                    if (!r.has_value()) co_return;
+                }
+
+                // Reset: the log is replaced with a fresh sentinel+counter file.
+                auto rr = co_await store.reset();
+                EXPECT_TRUE(rr.has_value()) << "reset() failed";
+                if (!rr.has_value()) co_return;
+
+                // Post-reset store: seq=1 (counters rewound). Without RC#2 fix
+                // this write overwrites the sentinel at offset 0.
+                auto frame1 = fixpp::store_test::make_test_frame(1, direction_t::outbound);
+                auto rs = co_await store.store(1, std::span<const std::byte>(frame1),
+                                               direction_t::outbound);
+                EXPECT_TRUE(rs.has_value()) << "post-reset store(seq=1) failed";
+                if (!rs.has_value()) co_return;
+                // store goes out of scope: advisory lock released
+            }
+
+            // Phase 2: reopen the same log — restart_scan() must succeed.
+            // Without the RC#2 fix, the sentinel at offset 0 is overwritten by the
+            // post-reset store() and restart_scan() returns false → factory_failed.
+            FileStore::Config cfg2 = make_file_config(dir, pool.get_executor());
+            FileStoreFactory factory2{cfg2};
+            auto minted2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
+                                          pool.get_executor());
+            EXPECT_TRUE(minted2.has_value()) << "Phase 2 reopen failed (sentinel corrupt?)";
+            if (!minted2.has_value()) co_return;
+            auto& store2 = *minted2.value();
+
+            // Phase 3: retrieve(1, 0, outbound) — must see exactly frame seq=1.
+            struct collecting_vis final : public fixpp::session::retrieve_visitor {
+                std::vector<fixpp::session::seqnum_t> seqs;
+                asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
+                on_frame(fixpp::session::seqnum_t s, std::span<const std::byte>) noexcept override {
+                    seqs.push_back(s);
+                    co_return fixpp::core::expected_t<fixpp::session::visit_result>{
+                        fixpp::session::visit_result::cont};
+                }
+            } vis;
+            auto rv = co_await store2.retrieve(1, 0, direction_t::outbound, vis);
+            EXPECT_TRUE(rv.has_value()) << "retrieve() after reset+reopen failed";
+            EXPECT_EQ(vis.seqs.size(), 1u) << "expected 1 frame after reset+store(1)+reopen";
+            if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1u) << "frame seqnum must be 1";
+        },
+        asio::use_future);
+    fut.get();
+
+    fs::remove_all(dir);
+}
+
 }  // namespace
