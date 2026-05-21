@@ -9,11 +9,13 @@
 // each replaces the marked placeholder body, it is not additive guesswork.
 #include <fixpp/session/session.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include <asio/this_coro.hpp>
@@ -293,6 +295,30 @@ Session::close(close_mode mode) {
     *close_result_ = fixpp::core::expected_t<void>{};
     state_         = lifecycle::closed_drained;
     co_return **close_result_;
+}
+
+// ── 005-session-establishment-fsm additions (T018) ──────────────────────────
+// Placeholder bodies for the 005-owned Session surface. Each placeholder
+// is replaced per user story (Phase 3–6); the REPLACEMENT is NOT additive
+// (the body is substituted, not appended). Link-green before stories land.
+
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::on_inbound_frame(std::span<const std::byte> /*frame*/) noexcept {
+    // PLACEHOLDER — FSM dispatch wired per US1 T024 (Phase 3).
+    // Inbound ordering: store(inbound) BEFORE fromAdmin/fromApp (I-3 / [2e §7.6]).
+    co_return fixpp::core::expected_t<void>{};
+}
+
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::send(std::span<const std::byte> /*app_payload*/) noexcept {
+    // PLACEHOLDER — durable-before-transmit path wired per US1 T023 (Phase 3).
+    // Outbound ordering: store(seq, committed, outbound) BEFORE transport::async_write (I-3).
+    co_return fixpp::core::expected_t<void>{};
+}
+
+fsm_state Session::state() const noexcept {
+    // PLACEHOLDER — returns fsm_state_ (set to NotConnected until Phase 3 wires transitions).
+    return fsm_state_;
 }
 
 }  // namespace fixpp::session

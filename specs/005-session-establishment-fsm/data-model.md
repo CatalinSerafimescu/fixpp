@@ -51,27 +51,27 @@ The 4-pure-virtual `store`/`retrieve`/`next_seqnum`/`reset` + `retrieve_visitor`
 
 ## E9 — SessionConfig (CONSUMED — `[2d §4.5]`; values 005 owns per D-8)
 
-Consumed fields: `executor_override`/`mode`/`locks` (threading), `clock_override` (E7), `sender_comp_id`/`target_comp_id`/`begin_string` (identity — owned by session-module spec = 005), `store_factory` (`unique_ptr<MessageStoreFactory>`), `dictionary`/`dialect_overlay`. **Values 005 owns** (D-8): `heartbeat_interval`=30 s, `test_request_threshold`=1×HeartBtInt, `sending_time_threshold`(MaxLatency)=120 s, `reject_policy`=`strict_reject_then_logout`. `std::nullopt` ⇒ engine substitutes the 005 fallback at `Session::open`. Additionally 005 owns the **graceful-close (Logout) timeout** as a fixed bound (**2 s**, QuickFIX `LogoutTimeout` default; *not* a `[2d §4.5]` optional, D-6/D-8) — the phase-1 `Clock::sleep_until` close window; on expiry the session force-disconnects → `Disconnected` and surfaces `session_logout_timeout` (slot 50, `[FIX-SL §4.6]`). 005 consumes the config shape; it does not redesign it (FR — Key Entities).
+Consumed fields: `executor_override`/`mode`/`locks` (threading), `clock_override` (E7), `sender_comp_id`/`target_comp_id`/`begin_string` (identity — owned by session-module spec = 005), `store_factory` (`unique_ptr<MessageStoreFactory>`), `dictionary`/`dialect_overlay`. **Values 005 owns** (D-8): `heartbeat_interval`=30 s, `test_request_threshold`=1×HeartBtInt, `sending_time_threshold`(MaxLatency)=120 s, `reject_policy`=`strict_reject_then_logout`. `std::nullopt` ⇒ engine substitutes the 005 fallback at `Session::open`. Additionally 005 owns the **graceful-close (Logout) timeout** as a fixed bound (**2 s**, QuickFIX `LogoutTimeout` default; *not* a `[2d §4.5]` optional, D-6/D-8) — the phase-1 `Clock::sleep_until` close window; on expiry the session force-disconnects → `Disconnected` and surfaces `session_logout_timeout` (slot 73, `[FIX-SL §4.6]`). 005 consumes the config shape; it does not redesign it (FR — Key Entities).
 
-## Error mapping — `fixpp::core::error` slots 43..N (D-9; `[const §X.4]`)
+## Error mapping — `fixpp::core::error` slots 66..N (D-9; `[const §X.4]`)
 
-Occupied before this PR: 1, 10–13, 20–29, 30–42 → first free = **43**. Appended non-renumbering, per-doc-prefix `FIXPP_ERR_SESSION_*` (C-ABI coalescing owned by 2i):
+Occupied before T005 (006/007/008 already pinned): 1, 10–13, 20–29, 30–42 (core/wire/dictionary), 43–46 (006 sync), 47–55 (007 threading incl. the `[2d §6.5]/[2d §6.7]` cross-doc set `clock_sleeps_cancelled=49`, `session_already_open=51`, `session_already_closed=52`, `invalid_session_config=53`, `dispatch_aborted=55`), 56–65 (008 store) → first free contiguous slot for 005's session_* set = **66**. Appended non-renumbering, per-doc-prefix `FIXPP_ERR_SESSION_*` (C-ABI coalescing owned by 2i):
 
 | Variant | Slot | Source | Class |
 |---|---|---|---|
-| `session_invalid_logon` | 43 | FR-003/004, US1#3/#4, `[FIX-SL §4.2]`/`§4.3` | refusal — no Active |
-| `session_compid_mismatch` | 44 | FR-004, `[FIX-SL §4.2.2]` | refusal |
-| `session_begin_string_unsupported` | 45 | FR-003, `[FIX-SL §4.2.1]` | refusal |
-| `session_seqnum_too_low` | 46 | FR-008, `[FIX-SL §4.1]` | session-fatal (no PossDup) |
-| `session_seqnum_gap_unrecoverable` | 47 | FR-008/FR-001, Session-2026-05-18 (recovery deferred) | session-fatal (too-high; replaces the removed `session_recovery_pending`) |
-| `session_sending_time_accuracy` | 48 | Clarification Q3, FR-013, `[FIX-SL §4.2.3]` | `SessionRejectReason=10` |
-| `session_msg_type_invalid_for_state` | 49 | FR-007, `[FIX-SL §4.5.4]` | session-reject |
-| `session_logout_timeout` | 50 | FR-005, `[FIX-SL §4.6.2]` | graceful-close force-disconnect |
-| `session_test_request_unanswered` | 51 | FR-006, `[FIX-SL §4.5.5]` | liveness unhealthy → disconnect |
-| `session_admin_not_supported` | 52 | FR-017, `[FIX-SL §4.10]` | deferred admin (RR/SeqReset) bounded reject |
-| `session_invalid_config` | 53 | `[2d §4.5]` N-P2-3 / Session::open validation | configuration |
+| `session_invalid_logon` | 66 | FR-003/004, US1#3/#4, `[FIX-SL §4.2]`/`§4.3` | refusal — no Active |
+| `session_compid_mismatch` | 67 | FR-004, `[FIX-SL §4.2.2]` | refusal |
+| `session_begin_string_unsupported` | 68 | FR-003, `[FIX-SL §4.2.1]` | refusal |
+| `session_seqnum_too_low` | 69 | FR-008, `[FIX-SL §4.1]` | session-fatal (no PossDup) |
+| `session_seqnum_gap_unrecoverable` | 70 | FR-008/FR-001, Session-2026-05-18 (recovery deferred) | session-fatal (too-high; replaces the removed `session_recovery_pending`) |
+| `session_sending_time_accuracy` | 71 | Clarification Q3, FR-013, `[FIX-SL §4.2.3]` | `SessionRejectReason=10` |
+| `session_msg_type_invalid_for_state` | 72 | FR-007, `[FIX-SL §4.5.4]` | session-reject |
+| `session_logout_timeout` | 73 | FR-005, `[FIX-SL §4.6.2]` | graceful-close force-disconnect |
+| `session_test_request_unanswered` | 74 | FR-006, `[FIX-SL §4.5.5]` | liveness unhealthy → disconnect |
+| `session_admin_not_supported` | 75 | FR-017, `[FIX-SL §4.10]` | deferred admin (RR/SeqReset) bounded reject |
+| `session_invalid_config` | 76 | `[2d §4.5]` N-P2-3 / Session::open validation | configuration |
 
-**This table is a *planned* allocation, NOT yet published** (pre-implementation design bundle; no tagged C-ABI release). Slot numbers 43–53 above plus the cross-doc-coordinated `[2d §6.5]`/`[2d §6.7]` variants (`session_already_closed`, `dispatch_aborted`, `clock_sleeps_cancelled`) at the next contiguous slots **54..N** are the proposed allocation; the exact numbers and the 2d-reuse-vs-introduce ownership question (D-9 cross-doc note) are **decided at Gate A / pinned at `/speckit-tasks`**, before any C-ABI release freezes them under `[const §X.4]`. 005 (first threading consumer) introduces only the minimal `[2d §6.5/§6.7]` set it actually exercises (`dispatch_aborted`, `clock_sleeps_cancelled`, `session_already_closed`). Overflow ⇒ **reuse** `[2e §6.7] store_seqnum_overflow` (no new variant). Once published in a tagged C-ABI release a numeric value never changes meaning (`[const §X.4]`); until then this remains a Gate-A-confirmable open allocation, not a frozen fact.
+**Slot allocation pinned at T005** (Phase 2 /speckit-implement, 2026-05-21). Pre-implementation drafts of this table cited 43..53 + 54..N; that range was already occupied by 006/007/008 merges, so the 005 set landed at 66..76 per `[const §X.4]` non-renumbering. The cross-doc-coordinated `[2d §6.5]/[2d §6.7]` triple (`session_already_closed=52`, `dispatch_aborted=55`, `clock_sleeps_cancelled=49`) was already pinned by 007/2d — 005 reuses, does not duplicate. Overflow ⇒ **reuse** `[2e §6.7] store_seqnum_overflow` (no new variant). Pre-v1.0 the table remains revisable subject to `[const §X.4]`; on a tagged C-ABI release the numeric values freeze permanently.
 
 ## Invariants
 

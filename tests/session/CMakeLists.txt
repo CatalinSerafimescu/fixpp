@@ -223,6 +223,19 @@ fixpp_add_store_test(store_file_coverage_uplift SOURCES
   _fixtures_/test_double_fsm.cpp
 )
 
+# ── 005-session-establishment-fsm seam registrations (T007/T009) ─────────────
+# Seam #13: seqnum_t consumer/build check (T007 red → T008 green).
+# Seam #9:  fix_time format↔parse roundtrip corpus (T009 red → T011 green).
+# Both use add_threading_test (fixpp_session + GTest; no mock_clock needed for
+# these two scaffolding seams — they test pure-value types).
+
+# Seam #13: T007 seqnum_t handoff test.
+add_threading_test(session_seqnum_t_handoff seqnum_t_handoff_test.cpp)
+
+# Seam #9: T009 fix_time roundtrip test. fixpp_core provides the implementation
+# (fix_time.cpp compiled into fixpp_core at T011 / src/core/CMakeLists.txt).
+add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Placeholder for Phase 2: tc_establishment/seqnum/liveness/reject/logout/
 # sendingtime_test.cpp authored from the QuickFIX/J .def oracle (research D-10).

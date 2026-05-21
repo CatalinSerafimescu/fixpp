@@ -2,26 +2,22 @@
 //
 // include/fixpp/session/seqnum.hpp
 //
-// fixpp::session::seqnum_t — placeholder FIX-wire sequence-number type.
+// fixpp::session::seqnum_t — 005-OWNED canonical FIX-wire sequence-number type.
 //
-// Anchor: .specify/2e-msgstore.md v0.5 §3.1 / §4.7 / §10 Q9. FR-003.
-// Entity E9. Research D-1.
+// Anchor: data-model.md E4; research D-1; .specify/2e-msgstore.md v0.5 §3.1/
+// §4.7/§10 Q9 ([2e §10 Q9] handoff CLOSED). FR-003. SC-010.
 //
-// PLACEHOLDER (cross-doc handoff). The canonical seqnum_t type is owned by
-// the deferred Phase-4 session-module spec (`005-session-establishment-fsm`).
-// This feature authors the header FRESH (no existing
-// <fixpp/session/seqnum.hpp> on the 007 baseline — Clarifications Session
-// 2026-05-20 Q2). When the Phase-4 spec lands, the header is either
-// re-exported from there or deleted with includes repointed (single-line
-// edit per [const §VI.5]).
+// 005-session-establishment-fsm OWNS this type (T008). The 008-message-store
+// placeholder is promoted in-place per D-1/[2e §10 Q9]: the alias and constants
+// remain byte-identical to the 008 placeholder so every existing 008/007
+// `#include <fixpp/session/seqnum.hpp>` resolves to this canonical type with
+// zero edits ([const §VI.5] single-edit handoff — mechanism: in-place promotion).
 //
-// Width choice (uint32_t vs uint64_t) is Phase-4-owned per [2e §10 Q9];
-// 008 MUST consume the convention, not foreclose it. uint32_t matches the
-// observed FIX convention; switching to uint64_t at Phase-4 doubles
-// counter-record + index-entry memory but eliminates store_seqnum_overflow
-// for never-reset use cases (audit-trail sessions running 24/7 for years).
-//
-// Mirror of specs/008-message-store/contracts/seqnum.hpp (shape oracle).
+// Width: uint32_t — matches observed FIX-engine convention (QuickFIX C++/J,
+// fix8) and the 008 placeholder. Overflow at seqnum_max is session-fatal with
+// no wrap, surfaced via [2e §6.7] store_seqnum_overflow (D-1 / FR-008 / I-8).
+// uint64_t widening is a clean post-v1.0 option (single-file edit, no 2i ABI
+// freeze yet) — see D-1 alternatives. Seam #13 (tests/session/seqnum_t_handoff_test.cpp).
 #pragma once
 
 #include <cstdint>

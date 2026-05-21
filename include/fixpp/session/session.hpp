@@ -22,11 +22,13 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include <asio/awaitable.hpp>
@@ -40,6 +42,7 @@
 #include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
                                             // (the unique_ptr<MessageStore> member's
                                             // nested type alias flush_hook_fn requires it).
+#include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core { struct EngineConfig; class Clock; }
 
@@ -181,6 +184,40 @@ public:
         return root_cancel_.slot();
     }
 
+    // ── 005-session-establishment-fsm scaffold (T016) ─────────────────────────
+    //
+    // These methods complete the [FIX-SL §4.10] Session lifecycle surface.
+    // Bodies land per user story (Phase 3–6); Phase 2 ships declarations only.
+    //
+    // Reentrancy contract (documented per entry point, [const §X.5] / FR-016):
+    //   on_inbound_frame() — session-strand; engine's transport feeds it after
+    //                        parse/frame-validate; inbound ordering: store(inbound)
+    //                        completes BEFORE fromAdmin/fromApp is dispatched.
+    //   send()             — session-strand; durable-before-transmit (I-3):
+    //                        store(seq, committed, outbound) BEFORE transport write.
+    //   state()            — session-strand; single-writer on the per-session strand.
+    //   fromAdmin/fromApp  — user callbacks dispatched via cancellable_dispatch
+    //                        ([2d §6.5]) on the per-session strand (default mode).
+    // All public surfaces noexcept across the inbound-process / timer-fire window;
+    // a throwing user callback TRAPS (core::detail::trap_throw) — FR-015.
+
+    // Engine feeds a verified inbound FIX frame (post-Framer/Parser, [2e]
+    // inbound ordering). Returns the FSM-defined disposition.
+    // PLACEHOLDER — body wired per US1/T024 (Phase 3).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+        on_inbound_frame(std::span<const std::byte> frame) noexcept;
+
+    // User output. Stamps SendingTime(52) from effective_clock, assigns
+    // MsgSeqNum(34), Writer::commit, store(seq, committed, outbound) BEFORE
+    // transport::async_write (durable-before-transmit, I-3).
+    // PLACEHOLDER — body wired per US1/T023 (Phase 3).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+        send(std::span<const std::byte> app_payload) noexcept;
+
+    // Current FSM state (read-only; single-writer on the per-session strand).
+    // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
+    [[nodiscard]] fsm_state state() const noexcept;
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto
@@ -293,6 +330,13 @@ private:
     // effects) by awaiting this shared slot rather than re-running phase 1/2.
     std::shared_ptr<std::optional<fixpp::core::expected_t<void>>>
         close_result_;
+
+    // ── 005-session-establishment-fsm FSM state field (T016) ─────────────────
+    // Current FSM state; single-writer on the per-session strand (data-model E2).
+    // Initialised to NotConnected; transitions wired per user story (Phase 3–6).
+    // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
+    // this tracks the FIX protocol state).
+    fsm_state fsm_state_ = fsm_state::NotConnected;
 };
 
 }  // namespace fixpp::session
