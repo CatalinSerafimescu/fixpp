@@ -176,6 +176,18 @@ fixpp::core::expected_t<std::unique_ptr<MessageStore>> FileStoreFactory::make(
         (void)max_store_memory_bytes;  // accepted; not applicable to FileStore disk model
     }
 
+    // ── RC#5: gate commit_interval out of v1.0 ────────────────────────────────
+    // commit_interval is enumerated in FileStorePolicy for ABI forward-compatibility
+    // (no ABI break when the timer-driven flush worker lands in v0.6). The timer
+    // integration depends on core::Clock-backed infrastructure deferred to v0.6
+    // alongside `005-session-establishment-fsm`. Operators must use
+    // commit_per_message or commit_batched(N) until then.
+    // Gate B PR #77 RC#5 disposition: return store_factory_failed; document
+    // deferral in specs/008-message-store/research.md D-18.
+    if (cfg_.policy.which == FileStorePolicy::kind::commit_interval) {
+        return std::unexpected(fixpp::core::error::store_factory_failed);
+    }
+
     // ── (1) CompID filesystem-safety validation (BEFORE any file op) ──────────
     // Per [2e §D.4] Gap 1 close. Uses primitive string_view operations only (N-5).
 

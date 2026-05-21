@@ -402,6 +402,26 @@ Also: verify the `MALLOCNESIA_MAX_ALLOCS` env knob is left unset (so the default
 
 ---
 
+## D-18 — commit_interval gated out of v1.0 (Gate B PR #77 RC#5 disposition)
+
+**Status:** **Resolved — gated out 2026-05-21 (Gate B round 1).**
+
+**Finding (Gate B Codex F5 / Opus RC#5):** `FileStorePolicy::kind::commit_interval` is enumerated in the public `FileStorePolicy` API and documented as a supported durability mode (`FR-011` data-loss window table: "ms-bounded loss window"). The implementation silently no-ops: there is no timer-driven flush worker, so operators selecting `commit_interval` get an unbounded loss window (data durability only on graceful close). No test exists for this policy mode.
+
+**Disposition (v1.0 gate):** `commit_interval` requires a timer-driven flush worker tied to `core::Clock`-backed timer infrastructure (`007-threading-clock`). Integrating a properly-lifecycle'd co_spawn worker alongside `flush_for_session_close()` and `cancel_and_drain()` is estimated at ≥1 day and depends on `005-session-establishment-fsm`'s session teardown primitives being stable. Gate-B disposition: **GATE** — reject at `FileStoreFactory::make()` with `store_factory_failed` when `cfg.policy.which == commit_interval`. The enumerator is retained in the header for ABI forward-compatibility (no break when the implementation lands in v0.6).
+
+**Fix:** In `src/session/file_store_factory.cpp`, `FileStoreFactory::make()` now returns `store_factory_failed` early when `cfg_.policy.which == FileStorePolicy::kind::commit_interval`. The `commit_interval` comment in `src/session/file_store.cpp:store()` is preserved (the fall-through for the not-yet-active timer path).
+
+**Follow-up (v0.6):** Implement the timer flush worker. The worker must:
+1. `co_spawn` a cancellable coroutine in `FileStore::open_log()` tied to a `core::Clock`-backed `steady_timer`.
+2. Issue `fdatasync` (Linux) / `FlushFileBuffers` (Windows) at each `cfg.policy.interval` tick.
+3. Be cancelled by `flush_for_session_close()` and by the FileStore destructor (mutual lifetime ordering).
+4. Register `commit_interval` as a supported policy in `book/migration_from_quickfix.md` with the actual loss-window guarantee.
+
+**Test added:** `FileStoreCoverageUplift.FactoryRejectsCommitInterval` in `tests/session/test_file_store_coverage_uplift.cpp` — verifies `factory.make()` returns `store_factory_failed` for `commit_interval` policy.
+
+---
+
 ## Best-practices references (consulted)
 
 - **ASIO file I/O cancellation under io_uring.** `[asio 1.36.0]` release notes + asio-users discussion 2025-09-* confirm `posix::stream_descriptor`'s cancellation semantics are stable; the newer `random_access_file` is best-effort cancellable but `fdatasync` is not cancellable mid-syscall (the kernel runs it to completion). The 2e contract per `[2e §6.1.4]` (cancellation before `fdatasync` returns success → `store_cancelled`; after → durable) is consistent with this — the asio surface gives us "interrupted before kernel call entered" semantics, the kernel gives us atomic-from-our-perspective `fdatasync`. T-impl can use either descriptor flavour; the contract is the same.

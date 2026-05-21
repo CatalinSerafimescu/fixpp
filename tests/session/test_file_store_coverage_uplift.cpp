@@ -444,4 +444,40 @@ TEST(FileStoreCoverageUplift, RetrieveBeginBeyondTailSucceedsEmpty) {
     fs::remove_all(dir);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RC#5: FactoryRejectsCommitInterval
+// commit_interval is gated out of v1.0: factory.make() must return
+// store_factory_failed when the policy is commit_interval.
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(FileStoreCoverageUplift, FactoryRejectsCommitInterval) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("rc5_commit_interval");
+
+    FileStorePolicy policy;
+    policy.which = FileStorePolicy::kind::commit_interval;
+    policy.interval = std::chrono::milliseconds{100};
+
+    fixpp::session::FileStore::Config cfg;
+    cfg.directory = dir;
+    cfg.sender_comp_id = "SENDER";
+    cfg.target_comp_id = "TARGET";
+    cfg.policy = policy;
+    cfg.max_frame_bytes = 4096;
+    cfg.file_io_executor = pool.get_executor();
+
+    FileStoreFactory factory{cfg};
+    auto r = factory.make("SENDER", "TARGET", nullptr, 1ULL << 30, pool.get_executor());
+
+    EXPECT_FALSE(r.has_value())
+        << "RC#5: factory.make() with commit_interval must return store_factory_failed";
+    if (!r.has_value()) {
+        EXPECT_EQ(r.error(), fixpp::core::error::store_factory_failed)
+            << "RC#5: expected error is store_factory_failed";
+    }
+
+    pool.join();
+    fs::remove_all(dir);
+}
+
 }  // namespace
