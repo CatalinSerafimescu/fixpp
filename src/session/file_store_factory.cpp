@@ -72,8 +72,8 @@ namespace detail {
 //   - Does NOT throw (noexcept-safe for make() noexcept contract)
 [[nodiscard]] std::optional<fixpp::core::error> validate_compid_filesystem_safety(
     std::string_view compid,
-    std::string_view directory_native,             // native path string for NAME_MAX calc
-    std::string_view other_compid  // used to compute composed name length
+    std::string_view directory_native,  // native path string for NAME_MAX calc
+    std::string_view other_compid       // used to compute composed name length
     ) noexcept {
     // (1) Empty check
     if (compid.empty()) {
@@ -113,7 +113,7 @@ namespace detail {
     // The composed component for the current compid (whether sender or target)
     // contributes: compid.size() (+ "__" (2) + other_compid.size() + ".log" (4))
     // other_compid.size() is the other component's length.
-    const std::size_t composed_len = compid.size() + 2 +                       // "__"
+    const std::size_t composed_len = compid.size() + 2 +       // "__"
                                      other_compid.size() + 4;  // ".log"
 
 #ifndef _WIN32

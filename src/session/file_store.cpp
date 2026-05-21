@@ -664,8 +664,7 @@ struct FileStoreImpl {
         } else {
             // Infer from index: vectors are built in seqnum-monotonic order,
             // so back().seq is the maximum (O(1) per direction).
-            const seqnum_t max_in =
-                inbound_index.empty() ? seqnum_t{0} : inbound_index.back().seq;
+            const seqnum_t max_in = inbound_index.empty() ? seqnum_t{0} : inbound_index.back().seq;
             const seqnum_t max_out =
                 outbound_index.empty() ? seqnum_t{0} : outbound_index.back().seq;
             next_inbound = (max_in > 0) ? max_in + 1 : seqnum_min;
@@ -705,7 +704,7 @@ FileStore::FileStore(Config c) noexcept
         session_triple_hash(impl_->cfg.sender_comp_id, impl_->cfg.target_comp_id);
 }
 
-FileStore::~FileStore() {
+FileStore::~FileStore() noexcept {
     // Advisory lock is released when OsFile destructs (close() releases flock)
 }
 
@@ -1002,10 +1001,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     {
         const std::filesystem::path log_fs_path{impl_->log_path_};
         const auto dir_fs_path = log_fs_path.parent_path();
-        const std::string dir_path =
-            dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
-        const int dir_fd =
-            ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
+        const std::string dir_path = dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+        const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
         if (dir_fd >= 0) {
             ::fsync(dir_fd);  // best-effort; continue even if fsync fails
             ::close(dir_fd);

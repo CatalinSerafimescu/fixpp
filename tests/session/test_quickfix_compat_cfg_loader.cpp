@@ -317,4 +317,244 @@ TEST(CfgLoaderEdgeCases, NonExistentFileRejected) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage uplift tests — F4.1 (F1..F12 below)
+// Target: cfg_loader.cpp ≥90% line / ≥80% branch
+// ─────────────────────────────────────────────────────────────────────────────
+
+// F1: [SESSION] section overrides [DEFAULT] value.
+// Exercises the SESSION branch (line 65 in cfg_loader.cpp) and the SESSION
+// merge path (line 135 ses target + merge logic).
+TEST(CfgLoaderCoverageUplift, SessionSectionOverridesDefault) {
+    auto scratch = make_scratch_dir("session_override");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=/tmp/default_ignored\n"
+        "SenderCompID=DEFAULT_SENDER\n"
+        "TargetCompID=DEFAULT_TARGET\n"
+        "[SESSION]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SESSION_SENDER\n"
+        "TargetCompID=SESSION_TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    // Expected: SESSION values win the merge
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "[SESSION] override: expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F2: [session] (lowercase) → case-insensitive fallback path.
+// Exercises parse_section_tag lines 67-78 (case-fold loop for size-7 tags).
+TEST(CfgLoaderCoverageUplift, LowercaseSessionSectionRecognised) {
+    auto scratch = make_scratch_dir("lc_session");
+    const std::string cfg_content =
+        "[default]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "[default] (lowercase): expected success (case-insensitive) but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F3: [session] lowercase SESSION section overrides DEFAULT.
+// Also exercises the SESSION case-fold branch.
+TEST(CfgLoaderCoverageUplift, LowercaseSessionOverrideRecognised) {
+    auto scratch = make_scratch_dir("lc_session_override");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=/tmp/default_ignored\n"
+        "SenderCompID=DEFAULT_SENDER\n"
+        "TargetCompID=DEFAULT_TARGET\n"
+        "[session]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SESSION_SND\n"
+        "TargetCompID=SESSION_TGT\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "[session] lowercase override: expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F4: Unknown section → keys inside it must be ignored; result depends
+// on whether DEFAULT keys were provided. Here DEFAULT has all keys, so
+// success is expected (unknown section keys are ignored).
+// Exercises Section::other branch (lines 123-125).
+TEST(CfgLoaderCoverageUplift, UnknownSectionKeysIgnored) {
+    auto scratch = make_scratch_dir("unknown_section");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n"
+        "[STORE]\n"
+        "FileStorePath=/tmp/ignored_by_unknown_section\n"
+        "SenderCompID=IGNORED\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "Unknown section keys ignored: expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F5: Key without '=' → parser skips it via eq == npos branch (line 129).
+// DEFAULT section has all required keys so result is success.
+TEST(CfgLoaderCoverageUplift, KeyWithoutEqualsIgnored) {
+    auto scratch = make_scratch_dir("no_equals");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n"
+        "SomeKeyWithoutEquals\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "Key-without-equals ignored: expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F6: Empty file → all keys missing → store_factory_failed.
+TEST(CfgLoaderCoverageUplift, EmptyFileRejected) {
+    auto scratch = make_scratch_dir("empty_file");
+    fs::path cfg_path = write_cfg(scratch, "");
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Empty file: expected store_factory_failed.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
+// F7: Comment-only file → no keys → store_factory_failed.
+TEST(CfgLoaderCoverageUplift, CommentOnlyFileRejected) {
+    auto scratch = make_scratch_dir("comment_only");
+    const std::string cfg_content =
+        "# This is a comment\n"
+        "; Another comment style\n"
+        "# No actual config here\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Comment-only file: expected store_factory_failed.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
+// F8: Missing SenderCompID → store_factory_failed.
+TEST(CfgLoaderCoverageUplift, MissingSenderCompIDRejected) {
+    auto scratch = make_scratch_dir("missing_sender");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "TargetCompID=TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Missing SenderCompID: expected store_factory_failed.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
+// F9: Missing TargetCompID → store_factory_failed.
+TEST(CfgLoaderCoverageUplift, MissingTargetCompIDRejected) {
+    auto scratch = make_scratch_dir("missing_target");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Missing TargetCompID: expected store_factory_failed.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
+// F10: Whitespace-only FileStorePath value → trimmed to empty → store_factory_failed.
+TEST(CfgLoaderCoverageUplift, WhitespaceOnlyFileStorePathRejected) {
+    auto scratch = make_scratch_dir("ws_fsp");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=   \n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Whitespace-only FileStorePath: expected store_factory_failed.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
+// F11: Duplicate FileStorePath key — last value wins per QuickFIX convention
+// (simple linear scan; second value overwrites first in the struct).
+TEST(CfgLoaderCoverageUplift, DuplicateFileStorePathLastWins) {
+    auto scratch = make_scratch_dir("dup_fsp");
+    const std::string cfg_content =
+        "[DEFAULT]\n"
+        "FileStorePath=/tmp/first_ignored\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_TRUE(result.has_value())
+        << "Duplicate FileStorePath (last wins): expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    fs::remove_all(scratch);
+}
+
+// F12: Malformed section header (missing ']') → treated as Section::other
+// per parse_section_tag (line.back() != ']' → Section::other).
+// DEFAULT key is absent so result is store_factory_failed.
+TEST(CfgLoaderCoverageUplift, MalformedSectionHeaderRejected) {
+    auto scratch = make_scratch_dir("malformed_section");
+    const std::string cfg_content =
+        "[DEFAULT\n"
+        "FileStorePath=" + scratch.string() + "\n"
+        "SenderCompID=SENDER\n"
+        "TargetCompID=TARGET\n";
+    fs::path cfg_path = write_cfg(scratch, cfg_content);
+
+    // The section is not recognised → keys are in Section::none context → ignored.
+    auto result = cfg_to_file_store_factory(cfg_path);
+    EXPECT_FALSE(result.has_value())
+        << "Malformed section header: expected store_factory_failed "
+           "(keys outside a valid section are ignored).";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::store_factory_failed);
+    }
+    fs::remove_all(scratch);
+}
+
 }  // namespace

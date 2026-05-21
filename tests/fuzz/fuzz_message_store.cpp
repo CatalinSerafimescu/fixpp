@@ -140,8 +140,11 @@ static void run_coro(asio::io_context& ioc, Coro coro) {
 
 static void fuzz_memory_store(const std::uint8_t* data, std::size_t size) {
     // PMR slab: pre-allocated for bounded capacity.
+    // Post-/gate-a slab footprint: each direction stores kCapacity frames of up
+    // to kMaxFrameBytes each; plus index-vector reserve headroom (64 KiB).
     constexpr std::size_t kCapacity = 256;
-    constexpr std::size_t kSlabBytes = kCapacity * 512;
+    constexpr std::size_t kMaxFrameBytes = 1024;
+    constexpr std::size_t kSlabBytes = (2 * kCapacity * kMaxFrameBytes) + (64 * 1024);
     static thread_local std::array<std::byte, kSlabBytes> slab_buf;
     std::pmr::monotonic_buffer_resource pmr{slab_buf.data(), slab_buf.size(),
                                             std::pmr::null_memory_resource()};

@@ -26,18 +26,15 @@
 // referenced by message_store.hpp's flush_thunk_for<Self>() per FR-028).
 #pragma once
 
-#include <concepts>
-
 #include <asio/awaitable.hpp>
-
-#include <fixpp/core/error.hpp>           // expected_t
+#include <concepts>
+#include <fixpp/core/error.hpp>  // expected_t
 
 namespace fixpp::session::detail {
 
 template <class S>
 concept has_flush_for_session_close = requires(S& s) {
-    { s.flush_for_session_close() } -> std::same_as<
-        asio::awaitable<fixpp::core::expected_t<void>>>;
+    { s.flush_for_session_close() } -> std::same_as<asio::awaitable<fixpp::core::expected_t<void>>>;
 };
 
 }  // namespace fixpp::session::detail

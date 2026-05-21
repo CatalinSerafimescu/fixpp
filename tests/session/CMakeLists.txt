@@ -163,6 +163,25 @@ fixpp_add_store_test(store_reset_crash_cut SOURCES
   test_store_reset_crash_cut.cpp
 )
 
+# F3 resolution (/speckit-verify 2026-05-21): allow store_file_crash_survival
+# and store_reset_crash_cut to run under TSan. Both tests fork() and the child
+# spawns asio worker threads to drive co_spawn; TSan's default `die_after_fork=1`
+# refuses to run worker threads in a multi-threaded-fork child and kills it
+# (exit 66). Setting `die_after_fork=0` lets the child continue; TSan does NOT
+# instrument post-fork-child races, but the durability invariants these tests
+# verify (atomic-rename + parent-dir-fsync + advisory-flock across SIGKILL)
+# operate at the kernel-syscall level and are already covered by ASan + UBSan +
+# debug runs. The documented limitation is acceptable: the child runs <1s of
+# linear file-I/O before SIGKILL, with no concurrent logic to race-track.
+#
+# OVERWRITE (not APPEND) the ENVIRONMENT property: glibc returns the LAST
+# occurrence of duplicate env vars; appending a second TSAN_OPTIONS would
+# silently lose the suppressions string set by fixpp_add_store_test. Merge
+# die_after_fork=0 with halt_on_error=1 + suppressions into one TSAN_OPTIONS.
+set_tests_properties(store_file_crash_survival store_reset_crash_cut PROPERTIES
+    ENVIRONMENT
+    "TSAN_OPTIONS=die_after_fork=0 halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
 # T037 — seam 16: PMR poison on retrieve recovery path (I-21 / [2a §4.2])
 fixpp_add_store_test(store_pmr_poison_retrieve SOURCES
   test_store_pmr_poison_retrieve.cpp
@@ -193,4 +212,13 @@ fixpp_add_store_test(store_quickfix_compat_path_b_guard SOURCES
 # (FR-008 / FR-030 / AC US4 #1 / SC-009 / [2e §D.4] defense-in-depth mirror)
 fixpp_add_store_test(store_quickfix_compat_cfg_loader SOURCES
   test_quickfix_compat_cfg_loader.cpp
+)
+
+# Coverage uplift — F4.3 remediation: FileStore-specific paths in file_store.cpp
+# not exercised by existing seam tests (which use MemoryStore for generic ops).
+# Covers: next_seqnum(incr=true), retrieve() edge cases, flush_for_session_close(),
+# counter-record recovery, and gap/stop/abort visitor paths on FileStore.
+fixpp_add_store_test(store_file_coverage_uplift SOURCES
+  test_file_store_coverage_uplift.cpp
+  _fixtures_/test_double_fsm.cpp
 )

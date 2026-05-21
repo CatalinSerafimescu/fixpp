@@ -23,10 +23,9 @@
 // bind points per the US4 contract.
 #pragma once
 
+#include <fixpp/core/error.hpp>  // fixpp::core::error
 #include <optional>
 #include <string_view>
-
-#include <fixpp/core/error.hpp>  // fixpp::core::error
 
 namespace fixpp::session::detail {
 
@@ -50,10 +49,8 @@ namespace fixpp::session::detail {
 //   - Uses ONLY std::string_view::find_first_of / find / size()
 //   - Does NOT call std::filesystem::path constructors at validation time
 //   - noexcept — safe to call from any noexcept context
-[[nodiscard]] std::optional<fixpp::core::error>
-validate_compid_filesystem_safety(
-    std::string_view compid,
-    std::string_view directory_native,
+[[nodiscard]] std::optional<fixpp::core::error> validate_compid_filesystem_safety(
+    std::string_view compid, std::string_view directory_native,
     std::string_view other_compid) noexcept;
 
 }  // namespace fixpp::session::detail

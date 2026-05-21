@@ -98,20 +98,20 @@ public:
         // Validation uses primitive string_view::find_first_of / find;
         // std::filesystem::path constructors are NOT invoked until
         // validation passes (preserves noexcept on make()).
-        std::string sender_comp_id;
-        std::string target_comp_id;
+        std::string sender_comp_id{};
+        std::string target_comp_id{};
 
         // Durability knob.
         FileStorePolicy policy = {};
 
         // Maximum frame size accepted on store(). Per-record cap; the log
         // file itself has no size limit other than fs free space.
-        std::size_t max_frame_bytes = 256 * 1024;
+        std::size_t max_frame_bytes = std::size_t{256} * 1024;
 
         // Executor for the file-I/O work (§4.3.2).
         // REQUIRED at construction per [2e §4.3.2]:665. FileStoreFactory::make()
         // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
-        asio::any_io_executor file_io_executor;
+        asio::any_io_executor file_io_executor{};
 
         // PMR resource for store-owned scratch.
         std::pmr::memory_resource* store_resource = nullptr;
@@ -121,7 +121,15 @@ public:
     // Passes flush_thunk_for<FileStore>() to the MessageStore base — the A1
     // concept gate selects the typed thunk at compile time (T009).
     explicit FileStore(Config c) noexcept;
-    ~FileStore() override;
+    ~FileStore() noexcept override;
+
+    // Rule-of-5: FileStore owns a unique file handle + advisory lock via pimpl;
+    // non-copyable, non-movable (copying an open advisory lock / file descriptor
+    // is undefined behaviour and violates I-14 / FR-009 durability contract).
+    FileStore(const FileStore&) = delete;
+    FileStore& operator=(const FileStore&) = delete;
+    FileStore(FileStore&&) = delete;
+    FileStore& operator=(FileStore&&) = delete;
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],

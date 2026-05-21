@@ -254,4 +254,50 @@ TEST(MemoryStoreCapacity, DoSGuardRejectsMaxFrameBytesExceedingFramerCap) {
         << "max_frame_bytes > Framer::Config::max_frame_bytes must be rejected";
 }
 
+// ── G. Coverage uplift: DoS guard (a) — actual addition overflow ──────────────
+//
+// ic = SIZE_MAX - 1, oc = 2 → ic > SIZE_MAX - oc (SIZE_MAX-1 > SIZE_MAX-2) → true
+// This exercises the overflow-detection branch that the existing test D misses:
+// test D uses SIZE_MAX/2-1 + 2 which doesn't overflow size_t, and falls to
+// guard (b) instead.
+TEST(MemoryStoreCapacity, DoSGuardDetectsActualAdditionOverflow) {
+    MemoryStore::Config cfg;
+    cfg.policy = capacity_policy::bounded;
+    cfg.inbound_capacity = SIZE_MAX - 1;  // ic + oc = SIZE_MAX + 1 → overflows
+    cfg.outbound_capacity = 2;
+    cfg.max_frame_bytes = 8;
+    cfg.store_resource = nullptr;
+
+    MemoryStoreFactory factory{cfg};
+    constexpr std::size_t kCap1GiB = 1ULL << 30;
+    auto result = factory.make("SND", "TGT", nullptr, kCap1GiB, asio::any_io_executor{});
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), error::store_factory_failed)
+        << "guard (a) must reject ic + oc overflow";
+}
+
+// ── H. Coverage uplift: engine-provided mr applied when Config.store_resource is nullptr
+//
+// make() with mr != nullptr and cfg.store_resource == nullptr → resolved_cfg uses mr.
+// Exercises the branch at line 110 (resolved_cfg.store_resource = mr).
+TEST(MemoryStoreCapacity, EngineMrAppliedWhenConfigResourceIsNull) {
+    // Use a small bounded config that passes the DoS guard.
+    MemoryStore::Config cfg;
+    cfg.policy = capacity_policy::bounded;
+    cfg.inbound_capacity = 1;
+    cfg.outbound_capacity = 1;
+    cfg.max_frame_bytes = 64;
+    cfg.store_resource = nullptr;  // no config-level resource
+
+    MemoryStoreFactory factory{cfg};
+    std::pmr::monotonic_buffer_resource mr{std::pmr::new_delete_resource()};
+    constexpr std::size_t kCap1GiB = 1ULL << 30;
+
+    // Pass a non-null engine mr — the factory must accept it and use it.
+    auto result = factory.make("SND", "TGT", &mr, kCap1GiB, asio::any_io_executor{});
+    EXPECT_TRUE(result.has_value())
+        << "engine-mr applied: expected success but got error: "
+        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+}
+
 }  // namespace

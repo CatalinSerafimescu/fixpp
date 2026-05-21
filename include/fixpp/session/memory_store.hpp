@@ -74,16 +74,18 @@ public:
 
     explicit MemoryStore(Config cfg)
         : MessageStore(MessageStore::flush_thunk_for<MemoryStore>())  // nullptr per FR-029
-        , cfg_(cfg)
-        , mr_(cfg_.store_resource ? cfg_.store_resource : std::pmr::get_default_resource())
-        // mr_ is declared before these members, so it is initialized when their ctors run.
-        , unbounded_slab_(std::pmr::polymorphic_allocator<std::byte>{mr_})
-        , inbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_})
-        , outbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}) {
+          ,
+          cfg_(cfg),
+          mr_(cfg_.store_resource ? cfg_.store_resource : std::pmr::get_default_resource())
+          // mr_ is declared before these members, so it is initialized when their ctors run.
+          ,
+          unbounded_slab_(std::pmr::polymorphic_allocator<std::byte>{mr_}),
+          inbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}),
+          outbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}) {
         if (cfg_.policy == capacity_policy::bounded) {
             // ONE PMR allocation for the fixed payload slab ([2e §4.2] line 486).
-            // Layout: first inbound_capacity slots are inbound; next outbound_capacity slots are outbound.
-            // Each slot is max_frame_bytes bytes.
+            // Layout: first inbound_capacity slots are inbound; next outbound_capacity slots are
+            // outbound. Each slot is max_frame_bytes bytes.
             slab_total_bytes_ =
                 (cfg_.inbound_capacity + cfg_.outbound_capacity) * cfg_.max_frame_bytes;
             if (slab_total_bytes_ > 0) {
@@ -242,7 +244,7 @@ public:
         // copied before the gap (spec: "already-visited frames are not re-visited;
         // iteration stops at the original end"), then gap error is returned.
         std::vector<Entry> snapshots;
-        bool gap_hit = false;  // true if a gap was detected during bulk-copy
+        bool gap_hit = false;                       // true if a gap was detected during bulk-copy
         const std::byte* unbounded_base = nullptr;  // captured for unbounded after mutex release
         {
             auto guard_result = co_await mutex_.async_lock();
@@ -394,18 +396,18 @@ private:
         std::size_t bytes_len{};    // payload length in slab
         std::size_t slab_offset{};  // byte offset into the slab buffer
     };
-    static_assert(sizeof(Entry) <= 32,
-                  "Entry must stay <= 32 B per [2e §4.2] (16 B canonical, 24 B actual with size_t fields)");
+    static_assert(
+        sizeof(Entry) <= 32,
+        "Entry must stay <= 32 B per [2e §4.2] (16 B canonical, 24 B actual with size_t fields)");
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     // Compute the slab offset for the next entry slot in the given direction's vector.
     // Called under the mutex during store().
     [[nodiscard]] std::size_t slab_offset_for(std::size_t local_idx,
-                                               direction_t dir) const noexcept {
-        const std::size_t global_slot = (dir == direction_t::inbound)
-                                            ? local_idx
-                                            : cfg_.inbound_capacity + local_idx;
+                                              direction_t dir) const noexcept {
+        const std::size_t global_slot =
+            (dir == direction_t::inbound) ? local_idx : cfg_.inbound_capacity + local_idx;
         return global_slot * cfg_.max_frame_bytes;
     }
 
@@ -443,6 +445,7 @@ public:
             next_outbound_ = value;
         }
     }
+
 private:
 #endif  // FIXPP_TEST_HOOKS
 

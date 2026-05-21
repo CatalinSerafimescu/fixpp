@@ -133,7 +133,7 @@ public:
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept = 0;
 
 private:
-    flush_hook_fn flush_hook_;  // A1 stash; set once by ctor, read by flush_hook()
+    flush_hook_fn flush_hook_{nullptr};  // A1 stash; set once by ctor, read by flush_hook()
 };
 
 }  // namespace fixpp::session

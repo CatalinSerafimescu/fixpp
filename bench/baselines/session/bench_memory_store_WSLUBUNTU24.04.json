@@ -1,8 +1,8 @@
 {
   "context": {
-    "date": "2026-05-21T12:04:52+03:00",
+    "date": "2026-05-21T14:36:11+03:00",
     "host_name": "WSLUBUNTU24.04",
-    "executable": "build/linux-clang-debug/bin/bench_memory_store",
+    "executable": "./build/linux-clang-release/bin/bench_memory_store",
     "num_cpus": 10,
     "mhz_per_cpu": 3593,
     "cpu_scaling_enabled": false,
@@ -33,9 +33,9 @@
         "num_sharing": 10
       }
     ],
-    "load_avg": [1.28711,0.816406,0.636719],
+    "load_avg": [2.52393,3.09717,1.93164],
     "library_version": "v1.9.5",
-    "library_build_type": "debug",
+    "library_build_type": "release",
     "json_schema_version": 1
   },
   "benchmarks": [
@@ -48,12 +48,12 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 63014,
-      "real_time": 1.0899970149623288e+04,
-      "cpu_time": 1.0899391167042242e+04,
+      "iterations": 325889,
+      "real_time": 2.2186529769328340e+03,
+      "cpu_time": 2.2184901300749643e+03,
       "time_unit": "ns",
-      "bytes_per_second": 1.8349648795499995e+07,
-      "items_per_second": 9.1748243977499980e+04
+      "bytes_per_second": 9.0151404006129995e+07,
+      "items_per_second": 4.5075702003064996e+05
     },
     {
       "name": "BM_MemoryStore_Store_1KiB",
@@ -64,12 +64,12 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 60377,
-      "real_time": 1.1792857959124081e+04,
-      "cpu_time": 1.1792516984944596e+04,
+      "iterations": 190552,
+      "real_time": 3.9229214807586573e+03,
+      "cpu_time": 3.9226557212729326e+03,
       "time_unit": "ns",
-      "bytes_per_second": 8.6834727591008082e+07,
-      "items_per_second": 8.4799538663093830e+04
+      "bytes_per_second": 2.6104763526575917e+08,
+      "items_per_second": 2.5492933131421794e+05
     },
     {
       "name": "BM_MemoryStore_NextSeqnum",
@@ -80,11 +80,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 69790,
-      "real_time": 1.0058471786816684e+04,
-      "cpu_time": 1.0058037369250609e+04,
+      "iterations": 407871,
+      "real_time": 1.7245944306136298e+03,
+      "cpu_time": 1.7243597240303916e+03,
       "time_unit": "ns",
-      "items_per_second": 9.9422975207588315e+04
+      "items_per_second": 5.7992539843291719e+05
     },
     {
       "name": "BM_MemoryStore_Retrieve100",
@@ -95,11 +95,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 14505,
-      "real_time": 4.8106469905231199e+04,
-      "cpu_time": 4.8105697001034139e+04,
+      "iterations": 170693,
+      "real_time": 4.1526128664123098e+03,
+      "cpu_time": 4.1523353564586732e+03,
       "time_unit": "ns",
-      "items_per_second": 2.0787558695563702e+06
+      "items_per_second": 2.4082833252968557e+07
     },
     {
       "name": "BM_MemoryStore_Reset",
@@ -110,9 +110,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 34882,
-      "real_time": 2.0370001997653169e+04,
-      "cpu_time": 1.9960505762284542e+04,
+      "iterations": 232184,
+      "real_time": 3.0500247321427951e+03,
+      "cpu_time": 3.0048936102395332e+03,
       "time_unit": "ns"
     }
   ]

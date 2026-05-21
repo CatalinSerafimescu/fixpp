@@ -1,8 +1,8 @@
 {
   "context": {
-    "date": "2026-05-21T12:05:52+03:00",
+    "date": "2026-05-21T14:36:52+03:00",
     "host_name": "WSLUBUNTU24.04",
-    "executable": "build/linux-clang-debug/bin/bench_file_store",
+    "executable": "./build/linux-clang-release/bin/bench_file_store",
     "num_cpus": 10,
     "mhz_per_cpu": 3593,
     "cpu_scaling_enabled": false,
@@ -33,9 +33,9 @@
         "num_sharing": 10
       }
     ],
-    "load_avg": [0.97998,0.828613,0.650879],
+    "load_avg": [1.64844,2.81299,1.88477],
     "library_version": "v1.9.5",
-    "library_build_type": "debug",
+    "library_build_type": "release",
     "json_schema_version": 1
   },
   "benchmarks": [
@@ -48,12 +48,12 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 339,
-      "real_time": 1.9219824580673489e+06,
-      "cpu_time": 3.7371682890855422e+05,
+      "iterations": 416,
+      "real_time": 1.6924545821334156e+06,
+      "cpu_time": 2.8042965865384496e+05,
       "time_unit": "ns",
-      "bytes_per_second": 1.0405922237246127e+05,
-      "items_per_second": 5.2029611186230636e+02
+      "bytes_per_second": 1.1817156106363042e+05,
+      "items_per_second": 5.9085780531815203e+02
     },
     {
       "name": "BM_FileStore_Reset/real_time",
@@ -64,9 +64,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 189,
-      "real_time": 3.6972459847915666e+06,
-      "cpu_time": 6.2462889417988923e+05,
+      "iterations": 215,
+      "real_time": 3.3486868244011044e+06,
+      "cpu_time": 5.3857314883721154e+05,
       "time_unit": "ns"
     }
   ]
