@@ -104,3 +104,6 @@ book/
 !.claude/skills/speckit-implement/
 .claude/skills/speckit-implement/*
 !.claude/skills/speckit-implement/SKILL.md
+
+# libFuzzer corpus (regenerated on each fuzz run; not source of truth)
+tests/fuzz/corpus/message_store/

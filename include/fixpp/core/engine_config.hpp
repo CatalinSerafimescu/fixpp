@@ -120,6 +120,26 @@ struct EngineConfig {
     std::shared_ptr<fixpp::tls::cert_source>             default_cert_source;
     std::shared_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
 
+    // ── 008-message-store: per-session storage-DoS cap (FR-014a) and the
+    //    shared file-I/O executor for FileStore async pwrite/fdatasync
+    //    (FR-024a). Both are threaded into MessageStoreFactory::make() at
+    //    session-open per [2e §D.6] / FR-005 (4th + 5th parameters). Non-
+    //    breaking append; do NOT renumber or relocate the fields above.
+    //
+    //    max_store_memory_per_session = 1 GiB default per [2e §1.2]:54;
+    //      a default MemoryStore::Config (10_000-per-direction × default
+    //      max_frame_bytes) intentionally exceeds this so the storage-DoS
+    //      guard fires under AC US2 #2a — operators set capacities AND raise
+    //      the cap deliberately, no implicit silent oversize ([const §XV.15]
+    //      sibling rule).
+    //
+    //    file_io_executor = default-constructed empty per [2e §4.3.2]:669;
+    //      MemoryStore impls silently discard it. FileStoreFactory rejects
+    //      with store_factory_failed when both the Config-supplied executor
+    //      AND this threaded-in value are empty (FR-024 / I-13).
+    std::size_t              max_store_memory_per_session = 1ULL << 30;
+    asio::any_io_executor    file_io_executor;
+
     // Seed value; the engine publishes/reads it via the atomic snapshot below
     // (the engine-fallback trace-context path — FR-015 / I-12).
     fixpp::otel::trace_context engine_trace_context{};

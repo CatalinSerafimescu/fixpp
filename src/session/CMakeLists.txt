@@ -39,3 +39,26 @@ target_link_libraries(fixpp_session PUBLIC
   fixpp_otel
   asio::asio
 )
+
+# 008-message-store: Crc32c::crc32c is added PRIVATE in T024 when file_store.cpp
+# ships (per-record + sentinel CRC32 over Castagnoli polynomial 0x1EDC6F41;
+# research D-3; tasks.md T003 "FileStore-touching targets only"). The find_package
+# at the top-level CMakeLists.txt is already in place.
+
+# T021 (008-message-store / US1): MemoryStore is header-only.
+# NO src/session/memory_store.cpp ships. Decision rationale: hot-path
+# primitives benefit from HALO-elision ([const §XI.6]) — the same
+# rationale that kept 006/007 async_mutex/Clock header-inline. The
+# 007 precedent for header-inline session primitives is canonical.
+# See include/fixpp/session/memory_store.hpp for the full implementation.
+
+# T024 (008-message-store / US1): FileStore compiled translation unit.
+# T026 (008-message-store / US1): FileStoreFactory compiled translation unit.
+# Both are added to the fixpp_session STATIC target below once T024 ships.
+target_sources(fixpp_session PRIVATE
+  file_store.cpp
+  file_store_factory.cpp
+  quickfix_compat/cfg_loader.cpp  # T047 (008-message-store / US4): QuickFIX .cfg → FileStoreFactory config translation
+)
+
+target_link_libraries(fixpp_session PRIVATE Crc32c::crc32c)

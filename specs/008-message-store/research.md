@@ -345,6 +345,63 @@ The `FakeQuickFixStore` is a **test-only type** in the test file's anonymous nam
 
 ---
 
+## D-16 — `MemoryStore::Entry::bytes` is non-PMR (DEFERRED to /gate-a re-touch before /speckit-verify)
+
+**Status:** **Open — deferred to a pre-`/speckit-verify` /gate-a re-touch** (2026-05-21).
+
+**Decision:** `MemoryStore::Entry::bytes` is currently `std::vector<std::byte>` with the default allocator (header comment at `include/fixpp/session/memory_store.hpp:339-340`: "inner bytes use std::vector<std::byte> (non-PMR) for simplicity in US1 — US3 T040 may tune this"). This means every `store()` call invokes `e.bytes.assign(frame.begin(), frame.end())` which heap-allocates through the global `operator new` / `malloc`, regardless of the configured `cfg_.store_resource`. Same leak in the `retrieve()` snapshot path (`std::vector<std::byte>(entries[idx].bytes.begin(), …)` at line 233-234 inside the mutex-held copy loop).
+
+**Why this matters:** This **silently violates `[const §VIII.5]` zero global-`new`/`delete` discipline and FR-007 / I-10 zero-allocator-calls-on-hot-path under bounded policy**. The `tests/perf/test_store_alloc_guard.cpp` SC-007 verification (T050) currently passes vacuously — see D-17 for the wiring reason.
+
+**Why deferred to /gate-a, not /simplify:**
+
+Per `[[project_006_simplify_deferred_push_residual]]`: algorithmic / data-model changes to converged code paths carry with a `/gate-a` re-touch alongside their corresponding research-doc D-row update, never as a loose `/simplify` edit. F6 is exactly that pattern — it touches:
+
+- `Entry` struct shape (`std::vector<std::byte>` → `std::pmr::vector<std::byte>` OR a fixed-size slab arena under the `MemoryStore::Config::max_frame_bytes` ceiling).
+- Per-frame allocation path (changes the I-02 / FR-019 "deep-copy frame BEFORE any suspension" invariant boundary).
+- The `EntryVec::mr_` plumbing (currently set-but-never-passed-to-the-inner-vector; cleanly resolves alongside).
+- `[2e §4.4]` data-model: the design-doc-frozen "slot-pool" wording is consistent with a slab-arena reading; clarify in the next /gate-a pass.
+
+**Remediation plan (separate /gate-a re-touch, blocks /speckit-verify):**
+
+1. Convert `Entry::bytes` to `std::pmr::vector<std::byte>` allocator-aware, OR allocate `cfg_.inbound_capacity + cfg_.outbound_capacity` slabs of `cfg_.max_frame_bytes` from the PMR resource at ctor time and keep `Entry` as `{seqnum_t seq, std::span<std::byte> bytes;}` indexing into the slab.
+2. Wire D-17's mallocnesia `LD_PRELOAD` ctest environment so SC-007 actually fires.
+3. Re-run T050 with mallocnesia active; assert 0 allocations in the guarded window.
+4. Verify the `retrieve()` snapshot path likewise uses PMR storage (or coalesces into a single `std::pmr::vector<std::byte>` blob with a parallel offsets vector).
+
+**Surfaced by:** `/simplify` R1 (F6) + R2 (S3) post-Phase-7, 2026-05-21. Verified false-pass mechanism via D-17.
+
+**Resolution (2026-05-21):** Impl conformance fix applied. `MemoryStore` now uses the fixed-slab layout per `[2e §4.2]` line 486. Under `capacity_policy::bounded`, the ctor performs ONE PMR allocation for the combined payload slab (`(inbound_capacity + outbound_capacity) × max_frame_bytes` bytes), reserves the two index vectors to capacity (no future realloc), and `store()` performs ZERO allocator calls thereafter (verified by T028 / `counting_resource` which now routes all allocs through the tracked PMR resource). The old `std::vector<std::byte>` per-entry path (which leaked through global `operator new`) is gone under bounded; the per-entry unbounded path (`unbounded_slab_` growing PMR vector) is retained as permitted by FR-007. Entry struct uses `size_t` fields (24 B actual; design doc "16 B canonical" was a soft target with `uint32_t` assumptions; 32 B static_assert passes).
+
+---
+
+## D-17 — Alloc-guard ctest wiring: mallocnesia LD_PRELOAD missing (paired with D-16 /gate-a re-touch)
+
+**Status:** **Open — wired in alongside D-16's /gate-a re-touch** (2026-05-21).
+
+**Decision:** `tests/perf/CMakeLists.txt`'s `add_store_perf_test(perf_store_alloc_guard …)` registration does NOT set the `ENVIRONMENT` property with `LD_PRELOAD=tools/mallocnesia/libmallocnesia.so`. The `alloc_guard_start` / `alloc_guard_end` symbols in the test are `__attribute__((weak))` no-ops (`tests/perf/test_store_alloc_guard.cpp:54-57`); without the `LD_PRELOAD` they resolve to no-ops at link time and the test "passes" trivially.
+
+**Why this matters:** SC-007 verification is currently meaningless. The ctest run reports 21/21 store tests pass, but `perf_store_alloc_guard` is one of them only because mallocnesia is not active.
+
+**Why paired with D-16:** Fixing the wiring alone (without fixing the PMR leak) would convert a paper pass into a real failure with no remediation. The two land together.
+
+**Remediation plan** (alongside D-16's re-touch):
+
+```cmake
+# tests/perf/CMakeLists.txt
+add_store_perf_test(perf_store_alloc_guard test_store_alloc_guard.cpp)
+set_tests_properties(perf_store_alloc_guard PROPERTIES
+    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+```
+
+Also: verify the `MALLOCNESIA_MAX_ALLOCS` env knob is left unset (so the default `g_max = 0` strict gate binds).
+
+**Surfaced by:** `/simplify` R1 close-analysis 2026-05-21 — the ctest invocation was inspected to validate F6's "false-pass" claim.
+
+**Resolution (2026-05-21):** LD_PRELOAD wired. `tests/perf/CMakeLists.txt` now appends `LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so` to the `perf_store_alloc_guard` test properties via `set_property(TEST ... APPEND PROPERTY ENVIRONMENT ...)` (APPEND preserves the TSAN_OPTIONS already set by `fixpp_add_store_test`). T050 also switched from `capacity_policy::unbounded` to `capacity_policy::bounded` with properly sized capacity (`kWarmupIter + kMeasuredIter + 200` outbound slots, `max_frame_bytes = 1024`) so the zero-alloc contract actually applies. ctest verbose output confirms both `TSAN_OPTIONS` and `LD_PRELOAD` are active; mallocnesia reports 0 allocations in the measured window and the test passes.
+
+---
+
 ## Best-practices references (consulted)
 
 - **ASIO file I/O cancellation under io_uring.** `[asio 1.36.0]` release notes + asio-users discussion 2025-09-* confirm `posix::stream_descriptor`'s cancellation semantics are stable; the newer `random_access_file` is best-effort cancellable but `fdatasync` is not cancellable mid-syscall (the kernel runs it to completion). The 2e contract per `[2e §6.1.4]` (cancellation before `fdatasync` returns success → `store_cancelled`; after → durable) is consistent with this — the asio surface gives us "interrupted before kernel call entered" semantics, the kernel gives us atomic-from-our-perspective `fdatasync`. T-impl can use either descriptor flavour; the contract is the same.

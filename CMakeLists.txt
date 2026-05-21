@@ -23,6 +23,7 @@ include(cmake/ProjectOptions.cmake)
 include(cmake/Helpers.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Coverage.cmake)
+include(cmake/fixpp_store_test.cmake)  # 008-message-store unified test helper
 
 # ── Conan-generated toolchain (present only after `conan install`) ───────────
 # The CMakePresets each point CMAKE_TOOLCHAIN_FILE to
@@ -35,6 +36,11 @@ find_package(benchmark CONFIG QUIET)
 # asio/1.36.0 — 006-async-mutex (first async/coroutine feature; user-approved
 # new Conan row per [const §III.2], conanfile.py).
 find_package(asio CONFIG QUIET)
+# crc32c/1.1.2 — 008-message-store FileStore per-record + sentinel CRC32
+# (Castagnoli polynomial 0x1EDC6F41; research D-3 / [const §III.2]).
+# QUIET so the symbol exists for src/session even if the toolchain hasn't been
+# regenerated yet (linker fail surfaces the real issue if the dep is missing).
+find_package(Crc32c CONFIG QUIET)
 
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -119,6 +125,8 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/oracle)
   add_subdirectory(tests/link)
   add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
+  add_subdirectory(tests/conformance)  # 008-message-store — seam 17 store-side corpus replay (T019)
+  add_subdirectory(tests/perf)         # 008-message-store — seam 14 mallocnesia alloc-guard (T050)
 endif()
 
 if(FIXPP_BUILD_FUZZ)

@@ -37,6 +37,9 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
+                                            // (the unique_ptr<MessageStore> member's
+                                            // nested type alias flush_hook_fn requires it).
 
 namespace fixpp::core { struct EngineConfig; class Clock; }
 
@@ -242,9 +245,43 @@ private:
     lifecycle state_ = lifecycle::never_opened;
 
     // Phase-1 flush seam (D-16). Default-empty: a graceful close with no
-    // installed hook simply skips phase-1 flush (no store wired yet — the
-    // real unique_ptr<MessageStore> friend call is 005/2e's).
+    // installed hook simply skips phase-1 flush. 007 placeholder retained
+    // here for the scripted seam-5 test double; 008's A1 close-path dispatch
+    // (via `store_->flush_hook()` returning a typed `flush_hook_fn`) is wired
+    // by T032 in Phase 4 alongside this field, NOT in place of it (the
+    // typed-thunk pointer captured below is the live mechanism; the
+    // `close_flush_hook_` std::function remains for 007's scripted scoping).
     close_flush_hook close_flush_hook_;
+
+    // ── 008-message-store ownership wiring (T011 / FR-005 / FR-025 /
+    //    FR-026) ────────────────────────────────────────────────────────────
+    //
+    // store_arena_resource_ is the engine-provided dedicated PMR resource
+    // whose lifetime matches the store instance — peer of session_arena_,
+    // NOT a sub-resource (FR-026 "persisted bytes outlive any per-session-
+    // arena reset cadence"). Default upstream is std::pmr::get_default_resource().
+    // Used as the 3rd `mr` argument to MessageStoreFactory::make() at open()
+    // when the caller's MemoryStore::Config::store_resource is null.
+    //
+    // store_ is bound at open() if cfg_.store_factory is non-null (the
+    // 007-baseline smoke path leaves it null; 005's FSM open() will require
+    // it). N1 unique ownership: no sharing across sessions, no mid-session
+    // swap (FR-025; [arch §5.6]).
+    //
+    // DESTRUCTION ORDER (CRITICAL): store_ MUST destruct BEFORE
+    // store_arena_resource_ — the store frees back to this resource on its
+    // own dtor. Member declaration order dictates the destruction order
+    // (reverse of declaration); store_ is declared AFTER store_arena_resource_
+    // here.
+    std::pmr::monotonic_buffer_resource store_arena_resource_;
+    std::unique_ptr<MessageStore>       store_;
+
+    // A1-pinned graceful-close hook (FR-028 / I-17 / Opus N3-P2-1). Read
+    // ONCE from store_->flush_hook() at open() — engine-internal factory-
+    // type tag. Null when no store wired OR when the concrete impl does
+    // not satisfy detail::has_flush_for_session_close (MemoryStore path).
+    // Dispatched at close(graceful) by T032; close(terminal) skips entirely.
+    MessageStore::flush_hook_fn close_flush_hook_a1_ = nullptr;
 
     // Root cancellation signal (T039). Phase 2 fires cancellation_type::total
     // on this; in-flight work bound to root_cancellation_slot() unwinds.

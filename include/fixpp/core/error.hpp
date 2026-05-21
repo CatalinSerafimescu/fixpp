@@ -160,6 +160,73 @@ enum class error : std::uint8_t {
                                       //   picked up; handler reaped (not invoked).
                                       //   Expected on the §4.7 phase-2 close path.
                                       //   Joins FIXPP_ERR_CANCELLED (reused).
+
+    // ── 008-message-store: 10 store_* variants per [2e §6.7] / FR-021 /
+    //    FR-023 / research D-6. Non-renumbering append at unused slots 56–65,
+    //    pre-publication per [const §X.4]. Design-doc table order. Cursor
+    //    after this block ends at slot 66 (next downstream feature).
+    //
+    //    C-ABI prefix-group coalescing (documented for `2i`; no extern "C"
+    //    surface added by this feature — research D-6):
+    //      FIXPP_ERR_STORE_RUNTIME      ← { store_io_failure,
+    //                                       store_capacity_exhausted,
+    //                                       store_seqnum_overflow }
+    //      FIXPP_ERR_STORE_CONSISTENCY  ← { store_seqnum_gap,
+    //                                       store_seqnum_out_of_order,
+    //                                       store_seqnum_invalid,
+    //                                       store_invalid_range }
+    //      FIXPP_ERR_STORE_CONFIG       ← { store_factory_failed }
+    //      FIXPP_ERR_STORE_VISITOR      ← { store_visitor_aborted }
+    //      FIXPP_ERR_CANCELLED          ← { store_cancelled }   (reused; joins
+    //                                                            dispatch_aborted /
+    //                                                            clock_sleeps_cancelled).
+    //
+    //    NOT introduced (recorded for future readers / 2i):
+    //      store_concurrent_writer — REMOVED v0.2 per Codex P1-5 (FIFO-fair
+    //        async_mutex makes the variant impossible).
+    //      store_shim_timeout      — REMOVED v0.3 per Codex C-R2-P2-1
+    //        ([2e §4.8.B] Path A retired; no runtime adapter).
+    store_io_failure           = 56,  // FileStore I/O fault (disk full, hardware
+                                      //   fault, ENOSPC, EACCES, mid-flush error
+                                      //   from flush_for_session_close()).
+                                      //   → FIXPP_ERR_STORE_RUNTIME
+    store_seqnum_gap           = 57,  // retrieve over a never-persisted gap
+                                      //   (unless trailing edge of end == 0).
+                                      //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_seqnum_out_of_order  = 58,  // store(seq, ...) with seq !=
+                                      //   next_seqnum(dir, false) inside the
+                                      //   writer-mutex CS (I-05; Opus N2-P2-3).
+                                      //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_capacity_exhausted   = 59,  // MemoryStore::store under bounded policy
+                                      //   at per-direction cap (I-08).
+                                      //   → FIXPP_ERR_STORE_RUNTIME
+    store_seqnum_overflow      = 60,  // next_seqnum(dir, true) when current
+                                      //   == seqnum_max (session-fatal; I-18).
+                                      //   → FIXPP_ERR_STORE_RUNTIME
+    store_factory_failed       = 61,  // MessageStoreFactory::make() validation
+                                      //   failure (CompID filesystem safety
+                                      //   per [2e §D.4], storage-DoS, sentinel
+                                      //   mismatch, advisory lock contention,
+                                      //   OOM at config validation, empty
+                                      //   resolved file_io_executor).
+                                      //   → FIXPP_ERR_STORE_CONFIG
+    store_visitor_aborted      = 62,  // retrieve_visitor::on_frame returned
+                                      //   visit_result::abort (default
+                                      //   abort_error()); PMR poison routed
+                                      //   via trap_throw (I-20 / I-21).
+                                      //   → FIXPP_ERR_STORE_VISITOR
+    store_seqnum_invalid       = 63,  // retrieve(begin=0, ...) — FIX wire
+                                      //   seqnums start at 1 per [FIX-SL §4.1].
+                                      //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_invalid_range        = 64,  // retrieve(begin, end, ...) with
+                                      //   end != 0 && end < begin.
+                                      //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_cancelled            = 65,  // Cancellation winning before a method's
+                                      //   linearisation point per [2e §6.1.4]
+                                      //   (I-07).
+                                      //   → FIXPP_ERR_CANCELLED (reused; joins
+                                      //     dispatch_aborted /
+                                      //     clock_sleeps_cancelled).
 };
 
 template <class T>
