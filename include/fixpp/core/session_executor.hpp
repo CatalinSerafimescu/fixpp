@@ -48,8 +48,13 @@ class session_executor {
 public:
     session_executor() noexcept = default;
 
-    // Construction by the make_session_executor helper ([2d §4.8]:913-915).
-    // Internal sites should not construct directly.
+    // Direct constructor — bypasses the threading_mode-vs-attestation
+    // validation done by `make_session_executor` ([2d §4.8]:913-915 / I-06 /
+    // FR-009 / slot 48). Prefer the factory for any new construction: it
+    // enforces the `direct_executor && !already_serialized_executor` →
+    // `error::executor_not_serialised` invariant. This constructor exists
+    // for copy / require / prefer re-wrap on the dispatch hot path (round-3
+    // RC#1 survival) and for default construction.
     session_executor(asio::any_io_executor inner,
                      fixpp::session::Session* session,
                      bool strand_wrapped) noexcept
@@ -149,6 +154,37 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
 // error::executor_not_serialised. Called from Session::open() with the
 // resolved SessionConfig::executor_override.value_or(EngineConfig::executor).
 // DEFINITION lands in US1 (T019); declared here so Phase-2 consumers link.
+//
+// ── CLIENT USE — trace_context Pattern B ──────────────────────────────────
+//
+// `make_session_executor` is the supported public primitive for binding a
+// foreign executor (a background `asio::thread_pool`, a custom `io_context`,
+// a `strand`) to a Session for trace_context propagation. See the Pattern B
+// example in `fixpp::current_trace_context()`
+// (`include/fixpp/core/trace_context.hpp`) — short form:
+//
+//     auto bg_se = fixpp::core::make_session_executor(
+//         bg.get_executor(),                                   // foreign exec
+//         fixpp::session::threading_mode::direct_executor,     // OR
+//         //                                  ::per_session_strand for multi-thread
+//         /*already_serialized_executor=*/false,
+//         &sess);
+//     // co_await asio::post(*bg_se, asio::use_awaitable) — resume runs on
+//     // `bg`'s thread, UNDER a session_executor for &sess →
+//     // current_trace_context() recovers the session's context.
+//
+// Pick `threading_mode`:
+//   • `per_session_strand` (recommended for multi-thread foreign pools)
+//     wraps the foreign executor in `asio::make_strand(...)`. Safe by
+//     construction; `already_serialized_executor` is ignored.
+//   • `direct_executor` with `already_serialized_executor=true` is the
+//     attestation path — use ONLY when the foreign executor is intrinsically
+//     serialized (a single-thread `io_context`, an explicit `strand`, a
+//     1-worker `thread_pool`). `direct_executor && !attested` returns
+//     `error::executor_not_serialised` (slot 48).
+//
+// Cf. the book chapter `book/concurrency_model.md` for the full topology
+// + worked examples + A-vs-B selection guidance.
 [[nodiscard]] expected_t<session_executor>
 make_session_executor(asio::any_io_executor resolved_exec,
                        fixpp::session::threading_mode mode,
