@@ -244,7 +244,12 @@ public:
         // record the gap_hit flag. The visitor is still called for all frames
         // copied before the gap (spec: "already-visited frames are not re-visited;
         // iteration stops at the original end"), then gap error is returned.
-        std::vector<Entry> snapshots;
+        // N1 fix: bind snapshots to mr_ (the session PMR resource) so the
+        // descriptor snapshot respects allocator discipline on the retrieve()
+        // hot path. mr_ is already used by the slab and entry arrays; using it
+        // here avoids a default-allocator heap allocation on each retrieve() call.
+        // [const §VIII.5]: zero global-heap allocation between parse and fromApp.
+        std::pmr::vector<Entry> snapshots{std::pmr::polymorphic_allocator<Entry>{mr_}};
         bool gap_hit = false;
         // RC#1 fix: for unbounded policy, copy raw payload bytes under the mutex
         // into this flat buffer. This eliminates the UAF/OOB hazard from the previous
