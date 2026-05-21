@@ -185,8 +185,9 @@ public:
             // ── Unbounded path: growing PMR slab (allocs permitted) ───────
             e.slab_offset = unbounded_slab_.size();
             // insert() may reallocate the vector; existing offsets remain valid
-            // because retrieve() always recomputes unbounded_slab_.data() at
-            // read time (pointer arithmetic from base, not cached pointers).
+            // for concurrent retrieve() calls because retrieve() now snapshots
+            // the raw payload bytes UNDER the mutex (RC#1 fix) — it no longer
+            // holds a raw pointer into unbounded_slab_ after mutex release.
             unbounded_slab_.insert(unbounded_slab_.end(), frame.begin(), frame.end());
             entries.push_back(e);
         }
@@ -244,8 +245,14 @@ public:
         // copied before the gap (spec: "already-visited frames are not re-visited;
         // iteration stops at the original end"), then gap error is returned.
         std::vector<Entry> snapshots;
-        bool gap_hit = false;                       // true if a gap was detected during bulk-copy
-        const std::byte* unbounded_base = nullptr;  // captured for unbounded after mutex release
+        bool gap_hit = false;
+        // RC#1 fix: for unbounded policy, copy raw payload bytes under the mutex
+        // into this flat buffer. This eliminates the UAF/OOB hazard from the previous
+        // approach of caching unbounded_slab_.data() before mutex release:
+        // a concurrent store() may reallocate the vector, invalidating the pointer.
+        // PMR allocations are permitted for unbounded policy (FR-007).
+        std::pmr::vector<std::byte> unbounded_payload_copy{
+            std::pmr::polymorphic_allocator<std::byte>{mr_}};
         {
             auto guard_result = co_await mutex_.async_lock();
             if (!guard_result) {
@@ -264,6 +271,13 @@ public:
 
             const auto& entries = entries_for(dir);
             snapshots.reserve(static_cast<std::size_t>(tail_end - begin + 1));
+
+            if (cfg_.policy == capacity_policy::unbounded) {
+                // Reserve to avoid repeated reallocations during the copy loop.
+                const std::size_t range = static_cast<std::size_t>(tail_end - begin + 1);
+                unbounded_payload_copy.reserve(range * cfg_.max_frame_bytes);
+            }
+
             for (seqnum_t s = begin; s <= tail_end; ++s) {
                 std::size_t idx = static_cast<std::size_t>(s - 1);
                 if (idx >= entries.size() || entries[idx].seq != s) {
@@ -272,12 +286,18 @@ public:
                     gap_hit = true;
                     break;
                 }
-                snapshots.push_back(entries[idx]);
-            }
-            // Capture unbounded_slab_ base pointer while mutex is held (safe: vector base
-            // is stable for reads at existing offsets once captured under the mutex).
-            if (cfg_.policy == capacity_policy::unbounded) {
-                unbounded_base = unbounded_slab_.data();
+                Entry e = entries[idx];
+                if (cfg_.policy == capacity_policy::unbounded) {
+                    // RC#1: copy payload bytes now while the mutex is held and the
+                    // slab pointer is guaranteed stable. Reuse e.slab_offset to
+                    // record the byte offset into unbounded_payload_copy.
+                    const std::byte* src = unbounded_slab_.data() + entries[idx].slab_offset;
+                    const std::size_t copy_start = unbounded_payload_copy.size();
+                    unbounded_payload_copy.insert(unbounded_payload_copy.end(),
+                                                  src, src + e.bytes_len);
+                    e.slab_offset = copy_start;
+                }
+                snapshots.push_back(e);
             }
             // guard releases mutex here — BEFORE all visitor co_awaits (I-03)
         }
@@ -286,9 +306,12 @@ public:
         //   allows concurrent store() calls from within the visitor body.
         // T043: wrap visitor call in try/catch → store_visitor_aborted (I-21).
         for (const auto& e : snapshots) {
-            // Resolve payload span from slab (no per-frame alloc).
-            const std::byte* payload_base =
-                (cfg_.policy == capacity_policy::bounded) ? slab_ : unbounded_base;
+            // Resolve payload span from stable storage (no per-frame alloc after this).
+            // For bounded: slab_ is a fixed PMR allocation that is never reallocated.
+            // For unbounded: unbounded_payload_copy holds the bytes snapshotted under mutex.
+            const std::byte* payload_base = (cfg_.policy == capacity_policy::bounded)
+                                                ? slab_
+                                                : unbounded_payload_copy.data();
             std::span<const std::byte> frame_view{payload_base + e.slab_offset, e.bytes_len};
 
             fixpp::core::expected_t<visit_result> vr{visit_result::cont};
@@ -473,8 +496,10 @@ private:
     // ── Unbounded-policy slab ─────────────────────────────────────────────
     // Growing PMR-backed byte vector; empty under bounded policy.
     // Allocs permitted per FR-007 bounded-only contract.
-    // store() appends to tail; retrieve() reads from captured base pointer
-    // (safe: bytes at existing offsets are immutable once written).
+    // store() appends to tail; retrieve() copies payload bytes under the
+    // mutex (RC#1 fix) rather than dereferencing a stale base pointer —
+    // a concurrent store() can reallocate this vector via insert(), invalidating
+    // any data() pointer captured before mutex release.
     // Initialized in ctor initializer list with mr_ allocator.
     std::pmr::vector<std::byte> unbounded_slab_;
 
