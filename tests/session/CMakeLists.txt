@@ -338,6 +338,15 @@ add_threading_test(session_send_path send_path_test.cpp
 add_threading_test(session_test_request_id_cross_session_race
   test_test_request_id_cross_session_race.cpp)
 
+# T021 — SeqnumManager::drain() called in close() (FR-011 / SC-004).
+# Tests: CloseWithHolderDoesNotTerminate + NeverOpenedDestructionSafe +
+#        OpenThenCloseTerminalIdempotent + DrainCalledByClose.
+# RED before T022 (close() does not call drain); GREEN after T022.
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session and
+# mutex_test_access() on SeqnumManager (needed for holder-during-drain scenario).
+add_threading_test(session_seqnum_drain_on_close
+  test_seqnum_drain_on_close.cpp)
+target_compile_definitions(session_seqnum_drain_on_close PRIVATE FIXPP_TEST_HOOKS)
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.

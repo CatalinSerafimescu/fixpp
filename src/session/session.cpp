@@ -396,8 +396,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // a destroyed slot — the slot lives in the Session, drained, not freed).
     trace_slot_.clear();
 
+    // T022 (009 Phase 6 / FR-011 / RC#7 / D-2):
+    // Drain the SeqnumManager's async_mutex before state_ = closed_drained.
+    // Satisfies the async_mutex destructor's not_locked precondition:
+    // any in-flight check_inbound / assign_outbound that was suspended
+    // (e.g., waiting for the mutex under concurrent access) is cancelled
+    // and completes before SeqnumManager is destroyed with Session.
+    //
+    // Policy (research.md D-2 / I-07): drain failures (sync_lock_aborted
+    // if the reaper's own cancellation slot fired) are logged-then-proceed;
+    // the close still completes successfully.
+    //
+    // Safe on never-locked mutexes (session never reached check_inbound):
+    // cancel_and_drain() on an idle mutex is a no-op that returns ok.
+    {
+        auto drain_r = co_await seqnum_mgr_.drain();
+        (void)drain_r;  // D-2 logged-then-proceed: drain failure does not abort close.
+    }
+
     // Completed: both phases drained (transport closed / arenas reset /
-    // trace slot cleared above). Cancellation surfaces as
+    // trace slot cleared above / seqnum mutex drained). Cancellation surfaces as
     // operation_aborted/dispatch_aborted on the in-flight work, never a
     // thrown exception across parse→fromApp (I-09); close() itself
     // completes expected_t<void>{}.

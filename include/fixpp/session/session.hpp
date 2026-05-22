@@ -265,6 +265,17 @@ public:
         });
     }
 
+#ifdef FIXPP_TEST_HOOKS
+    // TEST-ONLY accessor: expose SeqnumManager for drain-contract tests
+    // (009 T021 FR-011 — CloseWithHolderDoesNotTerminate). Allows tests to
+    // directly acquire the internal async_mutex to manufacture a genuine holder
+    // that is in-flight when close() calls seqnum_mgr_.drain(). NOT for
+    // production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
+    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept {
+        return seqnum_mgr_;
+    }
+#endif
+
 private:
     const fixpp::core::EngineConfig& engine_;
     const SessionConfig& cfg_;
