@@ -192,6 +192,59 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   every internal "step N" cross-reference and the [B]/[C]/[D]/[E]/[F]
   references above were updated to the integer scheme. No step semantics
   changed; this is a label-only normalization plus the executor binding.
+- **[H] APPLIED (user-directed 2026-05-22).** Per-phase Sonnet implementer
+  is now backed by a bound agent: `.claude/agents/phase-implementer-sonnet.md`
+  (at the parent root, beside `gate-*.md` commands). The orchestrator
+  invokes it as `subagent_type=phase-implementer-sonnet` and passes only
+  the per-call delta (task IDs / fix queue, feature context, anchor
+  paths). The recurring brief — anchor citation, TDD ordering, scope
+  discipline, constitutional bindings, the anti-pattern library from
+  memory (placeholder tests, FSM-end-state false-pass, counting-PMR
+  alloc-guard escapes, fork-inherited asio pools, asio post-resume
+  executor bouncing, co_spawn terminal-only cancellation default,
+  codegen emitter staleness, lcov DA/BRDA coverage basis, profraw
+  staleness), commit-message convention, `no-EnterWorktree/no-push`
+  constraints, and the CodeGraph lookup/sync rules — lives in the
+  agent file, not in each brief. Two callsites: step 10
+  (`/speckit-implement` per-phase Sonnet subagent per
+  `[[feedback_speckit_subagent_phasing]]`) and step 14 (`/gate-b`
+  Sonnet fixer rounds 1–2). The orchestrator's parent-verification step
+  does NOT go away — it shifts from re-checking persona-line compliance
+  to spot-checking dispositions and report claims against
+  `[[feedback_subagent_phase_verification_two_traps]]` /
+  `[[feedback_tracking_pmr_resource_false_pass]]`. Same date: `gate-b.md`
+  added a `## CodeGraph — sub-agent expectations` section that every
+  reviewer/triage/fixer brief references; `gate-a.md` added a `##
+  CodeGraph — when it applies in Gate A` section scoping Gate-A's
+  bundle-only review (no `codegraph sync` in Gate A — no code changes).
+- **[I] APPLIED (user-directed 2026-05-22).** Two new bound agents
+  carry the analysis steps out of the main session into subagent
+  context (the heaviest cross-artifact reasoning was burning the
+  orchestrator's context budget):
+    * `.claude/agents/checklist-auditor.md` — canonical executor for
+      step 9 (`/speckit-checklist-audit`). Walks every domain checklist
+      CHK item, dispositions PASS / SPEC-FIXED / DD-DECIDED §X /
+      WAIVED:<reason> with the realizability sub-check from
+      `[[feedback_checklist_audit_realizability]]`, spot-verifies
+      design-doc anchors, edits checklists in place. SPEC-FIXED
+      autonomous (orchestrator diffs to verify); Completeness/Clarity/
+      Consistency MAY NEVER be WAIVED.
+    * `.claude/agents/spec-analyzer.md` — canonical executor for step 6
+      (`/speckit-analyze`). Read-only; runs detection passes A–F
+      (Duplication / Ambiguity / Underspecification / Constitution
+      Alignment / Coverage Gaps / Inconsistency); CRITICAL / HIGH /
+      MEDIUM / LOW severity; returns a structured report inline. No
+      file writes (the upstream skill mandates read-only).
+  Both use CodeGraph lightweight tools (`codegraph_search` / `node`
+  for symbol-existence checks; `callers` when a referenced shape might
+  break consumers) with explicit `projectPath`. Neither runs
+  `codegraph sync` — analyze is read-only, audit edits checklists/
+  spec.md only (no library code).
+  Orchestrator's parent-verification gate carries forward: spot-check
+  dispositions (auditor) and finding severities (analyzer); a
+  subagent's "all green" or "0 CRITICAL" does NOT replace the
+  spot-check, by the same memory-grounded reasoning that applies to
+  `phase-implementer-sonnet` (per [H]).
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
 `/tasks` (§XVII.1), `/speckit-verify` mandatory + non-RED (§XVII.8),
