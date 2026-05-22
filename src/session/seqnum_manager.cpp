@@ -22,10 +22,12 @@
 //   The async_mutex fast path (uncontended CAS) does not suspend on the session strand.
 //   Per-thread recycler handles the cancellation-handler closure (E-4 pattern).
 
-#include <fixpp/session/seqnum_manager.hpp>
-
+#include <asio/awaitable.hpp>
+#include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
+#include <utility>
 
 namespace fixpp::session {
 
@@ -42,8 +44,7 @@ namespace fixpp::session {
 // Under the per-session-strand discipline the fast-path CAS always succeeds;
 // no suspension in the common case.
 
-asio::awaitable<fixpp::core::expected_t<void>>
-SeqnumManager::check_inbound(seqnum_t seq) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqnum_t seq) noexcept {
     using fixpp::core::error;
 
     // Acquire mutex — RAII scoped_lock, unlocks on scope exit.
@@ -83,8 +84,7 @@ SeqnumManager::check_inbound(seqnum_t seq) noexcept {
 // Per I-8: detect before assigning, return store_seqnum_overflow (slot 60).
 // The counter is NOT advanced on overflow.
 
-asio::awaitable<fixpp::core::expected_t<seqnum_t>>
-SeqnumManager::assign_outbound() noexcept {
+asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outbound() noexcept {
     using fixpp::core::error;
 
     auto lk_result = co_await mutex_.async_lock();

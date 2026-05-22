@@ -20,10 +20,19 @@
 //   open()  config-validation rejections     → T050 (US5)
 #pragma once
 
+#include <asio/awaitable.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/post.hpp>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
+#include <fixpp/core/error.hpp>  // expected_t
+#include <fixpp/core/session_executor.hpp>
+#include <fixpp/core/session_local.hpp>
+#include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -31,24 +40,16 @@
 #include <span>
 #include <string>
 #include <utility>
-#include <vector>
+// (the unique_ptr<MessageStore> member's
+// nested type alias flush_hook_fn requires it).
+#include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
+#include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
+#include <fixpp/session/session_fsm.hpp>     // 005-session-establishment-fsm — fsm_state enum
 
-#include <asio/awaitable.hpp>
-#include <asio/cancellation_signal.hpp>
-#include <asio/post.hpp>
-
-#include <fixpp/core/clock.hpp>           // steady_time_point (T041 US3 liveness)
-#include <fixpp/core/error.hpp>          // expected_t
-#include <fixpp/core/session_executor.hpp>
-#include <fixpp/core/session_local.hpp>
-#include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
-                                            // (the unique_ptr<MessageStore> member's
-                                            // nested type alias flush_hook_fn requires it).
-#include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
-#include <fixpp/session/seqnum_manager.hpp> // 005 US2 — SeqnumManager (T031)
-
-namespace fixpp::core { struct EngineConfig; class Clock; }
+namespace fixpp::core {
+struct EngineConfig;
+class Clock;
+}  // namespace fixpp::core
 
 namespace fixpp::session {
 
@@ -60,19 +61,19 @@ struct SessionConfig;
 // (hook NOT invoked). partial is NOT in the v1.0 surface (N-P1-3).
 enum class close_mode : std::uint8_t { graceful = 0, terminal = 1 };
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — Session is heap-allocated once per session; the 39-byte padding doesn't fit on a hot path. Field order tracks the FSM/handshake/seqnum/store/clock/exec/state groupings; reordering for tight packing would obscure that structure. Defer to a dedicated perf pass if profiling shows it matters.
 class Session {
 public:
     // The ctor pre-conditions a non-null session_arena via the [2d §4.5]
     // resolution chain so session_arena()'s never-null contract holds for
     // the whole session lifetime (I-18). engine/cfg are borrowed and MUST
     // outlive the Session (engine-owned lifetime — [arch §4.4]).
-    Session(const fixpp::core::EngineConfig& engine,
-            const SessionConfig& cfg) noexcept;
+    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept;
 
-    Session(const Session&)            = delete;
+    Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
-    Session(Session&&)                 = delete;
-    Session& operator=(Session&&)      = delete;
+    Session(Session&&) = delete;
+    Session& operator=(Session&&) = delete;
     ~Session();
 
     // Minimal 2d-OWNED open() shape (D-4). The FIX establishment FSM is
@@ -86,8 +87,7 @@ public:
     // (4) reject null dictionary / null EngineConfig::executor / sentinel
     // security_profile / incompatible combo → invalid_session_config
     // (FR-018); (5) reject a second open() → session_already_open (slot 51).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        open() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> open() noexcept;
 
     // Two-phase close ([2d §4.7]:833-834 frozen shape). Idempotent
     // THREE-STATE model (I-10): already-closing → SAME in-flight awaitable,
@@ -119,8 +119,8 @@ public:
     // policy a bad_alloc from make_shared on the cold path would terminate;
     // the hook's exception guarantee is the hook author's responsibility. The
     // C-ABI thunk (2i) wraps the call in try/catch as its projection.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        close(close_mode mode = close_mode::graceful);
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> close(
+        close_mode mode = close_mode::graceful);
 
     // ENGINE-INTERNAL accessor (callable from fixpp::session/ ONLY —
     // [arch §2.3] leaf rule; consumed by the merged-006 session-side helper
@@ -134,9 +134,7 @@ public:
     // ENGINE-INTERNAL (fixpp::session/ + test seams). The resolved
     // session_executor binding (FR-007/FR-009). Valid only after a
     // successful open(); precondition: state_ == open.
-    [[nodiscard]] const fixpp::core::session_executor& executor() const noexcept {
-        return exec_;
-    }
+    [[nodiscard]] const fixpp::core::session_executor& executor() const noexcept { return exec_; }
     [[nodiscard]] bool is_open() const noexcept { return state_ == lifecycle::open; }
 
     // ENGINE-INTERNAL (fixpp::session/ + the session_trace_context_of
@@ -146,8 +144,7 @@ public:
     // (T045). Read through the borrowed stable Session* by
     // current_trace_context — survives cross-thread coroutine resume because
     // it is plain value ownership, NOT thread_local (E7/E8).
-    [[nodiscard]] const fixpp::otel::trace_context&
-    trace_context_value() const noexcept {
+    [[nodiscard]] const fixpp::otel::trace_context& trace_context_value() const noexcept {
         return trace_slot_.load();
     }
 
@@ -155,8 +152,7 @@ public:
     // SessionConfig::clock_override ?: EngineConfig::clock, bound to the
     // session lifetime. Every session-scoped consumer reads this; valid only
     // after a successful open().
-    [[nodiscard]] const std::shared_ptr<fixpp::core::Clock>&
-    effective_clock() const noexcept {
+    [[nodiscard]] const std::shared_ptr<fixpp::core::Clock>& effective_clock() const noexcept {
         return effective_clock_;
     }
 
@@ -170,8 +166,7 @@ public:
     // in phase 1 (after the last in-flight store(...) resumes, before the
     // Logout step); close(terminal) NEVER invokes it. A hook returning
     // unexpected{store_io_failure} is logged and close proceeds (I-07).
-    using close_flush_hook =
-        std::function<fixpp::core::expected_t<void>()>;
+    using close_flush_hook = std::function<fixpp::core::expected_t<void>()>;
     void set_close_flush_hook(close_flush_hook hook) noexcept {
         close_flush_hook_ = std::move(hook);
     }
@@ -208,15 +203,15 @@ public:
     // Engine feeds a verified inbound FIX frame (post-Framer/Parser, [2e]
     // inbound ordering). Returns the FSM-defined disposition.
     // PLACEHOLDER — body wired per US1/T024 (Phase 3).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        on_inbound_frame(std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_frame(
+        std::span<const std::byte> frame) noexcept;
 
     // User output. Stamps SendingTime(52) from effective_clock, assigns
     // MsgSeqNum(34), Writer::commit, store(seq, committed, outbound) BEFORE
     // transport::async_write (durable-before-transmit, I-3).
     // PLACEHOLDER — body wired per US1/T023 (Phase 3).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        send(std::span<const std::byte> app_payload) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
+        std::span<const std::byte> app_payload) noexcept;
 
     // Current FSM state (read-only; single-writer on the per-session strand).
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
@@ -234,54 +229,59 @@ public:
     // SessionConfig::executor_override.value_or(EngineConfig::executor).
     template <class F>
     void dispatch_app_callback(F&& f) const {
-        asio::post(exec_,
-                   [this, g = std::forward<F>(f)]() mutable {
+        asio::post(exec_, [this, g = std::forward<F>(f)]() mutable {
 #ifndef NDEBUG
-                       // Seam 16 / Edge Case: in DEBUG builds a detected
-                       // concurrent session-callback entry trips the
-                       // strand-invariant assert (the symptom of
-                       // direct_executor attested over a genuinely
-                       // non-serialised executor). RELEASE builds compile
-                       // this out — that misuse is documented
-                       // user-contract-violation UB, not a runtime guard.
-                       //
-                       // RC#2 P2.3 (gate-b/r1): RAII guard so the flag is
-                       // always cleared on scope exit, even if the callback
-                       // throws. Without this, a throwing callback left
-                       // in_dispatch_ permanently set and false-positived the
-                       // next otherwise-serial dispatch assertion.
-                       struct dispatch_guard {
-                           std::atomic<bool>& flag;
-                           ~dispatch_guard() noexcept {
-                               flag.store(false, std::memory_order_release);
-                           }
-                       };
-                       const bool prev =
-                           in_dispatch_.exchange(true, std::memory_order_acq_rel);
-                       assert(!prev &&
-                              "concurrent session callback entry: strand "
-                              "invariant violated (direct_executor attested "
-                              "over a non-serialised executor?)");
-                       [[maybe_unused]] dispatch_guard guard{in_dispatch_};
+            // Seam 16 / Edge Case: in DEBUG builds a detected
+            // concurrent session-callback entry trips the
+            // strand-invariant assert (the symptom of
+            // direct_executor attested over a genuinely
+            // non-serialised executor). RELEASE builds compile
+            // this out — that misuse is documented
+            // user-contract-violation UB, not a runtime guard.
+            //
+            // RC#2 P2.3 (gate-b/r1): RAII guard so the flag is
+            // always cleared on scope exit, even if the callback
+            // throws. Without this, a throwing callback left
+            // in_dispatch_ permanently set and false-positived the
+            // next otherwise-serial dispatch assertion.
+            struct dispatch_guard {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard binds to the caller's flag for clear-on-scope-exit.
+                std::atomic<bool>& flag;
+                explicit dispatch_guard(std::atomic<bool>& f) noexcept : flag(f) {}
+                ~dispatch_guard() noexcept { flag.store(false, std::memory_order_release); }
+                dispatch_guard(const dispatch_guard&) = delete;
+                dispatch_guard(dispatch_guard&&) = delete;
+                dispatch_guard& operator=(const dispatch_guard&) = delete;
+                dispatch_guard& operator=(dispatch_guard&&) = delete;
+            };
+            const bool prev = in_dispatch_.exchange(true, std::memory_order_acq_rel);
+            assert(!prev &&
+                   "concurrent session callback entry: strand "
+                   "invariant violated (direct_executor attested "
+                   "over a non-serialised executor?)");
+            [[maybe_unused]] dispatch_guard guard{in_dispatch_};
 #endif
-                       g();
-                   });
+            g();
+        });
     }
 
 private:
     const fixpp::core::EngineConfig& engine_;
-    const SessionConfig&             cfg_;
-    std::pmr::memory_resource*       session_arena_;   // resolved in ctor, never null
+    const SessionConfig& cfg_;
+    std::pmr::memory_resource* session_arena_;  // resolved in ctor, never null
 
-    fixpp::core::session_executor    exec_;            // bound at open() (T020)
+    fixpp::core::session_executor exec_;                   // bound at open() (T020)
     std::shared_ptr<fixpp::core::Clock> effective_clock_;  // resolved at open() (T030)
-    mutable std::atomic<bool>        in_dispatch_{false};  // debug strand-invariant guard (seam 16)
+    mutable std::atomic<bool> in_dispatch_{false};         // debug strand-invariant guard (seam 16)
     fixpp::core::session_local<fixpp::otel::trace_context> trace_slot_;  // [2d §4.6]
 
     // Lifecycle state for the idempotent three-state close model (I-10);
     // never-opened vs open vs closing vs closed(drained).
     enum class lifecycle : std::uint8_t {
-        never_opened = 0, open = 1, closing = 2, closed_drained = 3,
+        never_opened = 0,
+        open = 1,
+        closing = 2,
+        closed_drained = 3,
     };
     lifecycle state_ = lifecycle::never_opened;
 
@@ -315,7 +315,7 @@ private:
     // (reverse of declaration); store_ is declared AFTER store_arena_resource_
     // here.
     std::pmr::monotonic_buffer_resource store_arena_resource_;
-    std::unique_ptr<MessageStore>       store_;
+    std::unique_ptr<MessageStore> store_;
 
     // A1-pinned graceful-close hook (FR-028 / I-17 / Opus N3-P2-1). Read
     // ONCE from store_->flush_hook() at open() — engine-internal factory-
@@ -332,8 +332,7 @@ private:
     // and caches its result here; a concurrent/subsequent call while
     // state_==closing observes the SAME in-flight result (no error, no side
     // effects) by awaiting this shared slot rather than re-running phase 1/2.
-    std::shared_ptr<std::optional<fixpp::core::expected_t<void>>>
-        close_result_;
+    std::shared_ptr<std::optional<fixpp::core::expected_t<void>>> close_result_;
 
     // ── 005-session-establishment-fsm FSM state field (T016) ─────────────────
     // Current FSM state; single-writer on the per-session strand (data-model E2).
@@ -367,7 +366,7 @@ private:
     // timer loop to compute the inbound-silence elapsed time. Initialised to
     // the epoch; updated on every inbound frame in Active. Single-writer on the
     // per-session strand.
-    fixpp::core::steady_time_point last_inbound_steady_{};
+    fixpp::core::steady_time_point last_inbound_steady_;
 
     // pending_test_req_id_ — the TestReqID of the most recently emitted
     // TestRequest that has not yet been acknowledged by an inbound Heartbeat.
@@ -401,14 +400,13 @@ private:
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // seq: the outbound MsgSeqNum to store with; span: the committed frame bytes.
     // Returns ok on success; propagates store errors (logs + continues per I-07).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        store_then_emit(std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
+        std::span<const std::byte> frame) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        run_logout_phase1() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 };
 
 }  // namespace fixpp::session

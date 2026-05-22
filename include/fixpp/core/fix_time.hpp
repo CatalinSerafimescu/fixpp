@@ -27,9 +27,8 @@
 
 #include <chrono>
 #include <cstdint>
-#include <span>
-
 #include <fixpp/core/error.hpp>  // expected_t / error
+#include <span>
 
 namespace fixpp::core {
 
@@ -41,9 +40,9 @@ using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
 // ── Precision selector ───────────────────────────────────────────────────────
 
 enum class fix_time_precision : std::uint8_t {
-    seconds = 0,   // YYYYMMDD-HH:MM:SS          (15 chars)
-    millis  = 1,   // YYYYMMDD-HH:MM:SS.sss       (19 chars, FIX 4.x default)
-    micros  = 2,   // YYYYMMDD-HH:MM:SS.ssssss    (23 chars, where version permits)
+    seconds = 0,  // YYYYMMDD-HH:MM:SS          (15 chars)
+    millis = 1,   // YYYYMMDD-HH:MM:SS.sss       (19 chars, FIX 4.x default)
+    micros = 2,   // YYYYMMDD-HH:MM:SS.ssssss    (23 chars, where version permits)
 };
 
 // ── Format ───────────────────────────────────────────────────────────────────
@@ -61,10 +60,9 @@ enum class fix_time_precision : std::uint8_t {
 // All arithmetic is on the chrono types; no snprintf / no heap.
 // noexcept: all chrono arithmetic + integer division is noexcept on all
 // supported platforms (no IEEE 754 exceptions from integers).
-[[nodiscard]] expected_t<std::span<char>>
-    utc_time_to_fix_string(utc_time_point tp,
-                           fix_time_precision prec,
-                           std::span<char> out) noexcept;
+[[nodiscard]] expected_t<std::span<char>> utc_time_to_fix_string(utc_time_point tp,
+                                                                 fix_time_precision prec,
+                                                                 std::span<char> out) noexcept;
 
 // ── Parse ────────────────────────────────────────────────────────────────────
 
@@ -82,7 +80,6 @@ enum class fix_time_precision : std::uint8_t {
 //
 // Round-trip guarantee: fix_string_to_utc_time(utc_time_to_fix_string(tp, P, buf))
 // == time_point_cast<duration_for(P)>(tp) — lossless at emitted precision.
-[[nodiscard]] expected_t<utc_time_point>
-    fix_string_to_utc_time(std::span<const char> s) noexcept;
+[[nodiscard]] expected_t<utc_time_point> fix_string_to_utc_time(std::span<const char> s) noexcept;
 
 }  // namespace fixpp::core

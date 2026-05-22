@@ -19,18 +19,18 @@
 //
 // Anchors: data-model.md E5; contracts/admin_messages.hpp; spec FR-002..007;
 // [FIX-SL §4.2]–§4.6.
-#include <fixpp/session/admin_messages.hpp>
-
-#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <expected>
+#include <fixpp/core/error.hpp>
+#include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/wire/writer.hpp>
+#include <memory_resource>
 #include <span>
 #include <string_view>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/session/seqnum.hpp>
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/writer.hpp>
+#include <utility>
 
 namespace fixpp::session {
 
@@ -40,7 +40,9 @@ namespace {
 // Returns a string_view into `buf` covering the rendered digits.
 // buf must be at least 10 chars.
 [[nodiscard]] std::string_view render_u32(std::uint32_t v, char* buf, std::size_t n) noexcept {
-    if (n == 0) { return {}; }
+    if (n == 0) {
+        return {};
+    }
     // Special case: 0.
     if (v == 0) {
         buf[0] = '0';
@@ -52,7 +54,9 @@ namespace {
         buf[--pos] = static_cast<char>('0' + static_cast<int>(v % 10U));
         v /= 10U;
     }
-    if (v != 0) { return {}; }  // overflow
+    if (v != 0) {
+        return {};
+    }  // overflow
     return {buf + pos, n - pos};
 }
 
@@ -77,13 +81,11 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────────
 // FR-002/003/004/011, [FIX-SL §4.2]/§4.3. S-001/S-015/S-016/S-020.
 
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_logon(std::span<std::byte> out,
-                seqnum_t seq,
-                std::string_view sender_comp_id,
-                std::string_view target_comp_id,
-                std::string_view begin_string,
-                int heartbt_int) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender_comp_id / target_comp_id / begin_string); strong typedefs would churn 21 test binaries' call sites.
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view begin_string, int heartbt_int) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
@@ -104,7 +106,9 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -148,9 +152,11 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
     // 108=HeartBtInt
     {
         char nbuf[12];
-        auto sv = render_u32(static_cast<std::uint32_t>(heartbt_int < 0 ? 0 : heartbt_int),
-                             nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        auto sv = render_u32(static_cast<std::uint32_t>(heartbt_int < 0 ? 0 : heartbt_int), nbuf,
+                             sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(108, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -158,15 +164,17 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 
     // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
     auto committed = std::move(w).commit();
-    if (!committed) { return std::unexpected(committed.error()); }
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
     return out.subspan(0, *committed);
 }
 
-[[nodiscard]] fixpp::core::expected_t<int>
-    interpret_logon(std::span<const std::byte> frame,
-                    std::string_view expected_sender,
-                    std::string_view expected_target,
-                    std::string_view expected_begin) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / begin matches the on-wire field order).
+[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+    std::span<const std::byte> frame, std::string_view expected_sender,
+    std::string_view expected_target, std::string_view expected_begin) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     // Parse using the dict-free Iter mode: no heap, no dictionary required.
     // Fields of interest:
     //   8=BeginString, 35=MsgType (must be "A"), 49=SenderCompID, 56=TargetCompID,
@@ -196,51 +204,74 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
     while (i < n) {
         // Parse tag digits.
         std::uint32_t tag = 0;
-        while (i < n && frame[i] != static_cast<std::byte>('=') &&
-               frame[i] != SOH) {
+        while (i < n && frame[i] != static_cast<std::byte>('=') && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
-            if (c < '0' || c > '9') { goto next_field; }
-            tag = tag * 10U + static_cast<std::uint32_t>(c - '0');
+            if (c < '0' || c > '9') {
+                goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — manual SOH-scanner skip-malformed-field; refactoring to nested-flag/break-stack inflates the parser for no behavioral win.
+            }
+            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }
-        if (i >= n || frame[i] != static_cast<std::byte>('=')) { goto next_field; }
+        if (i >= n || frame[i] != static_cast<std::byte>('=')) {
+            goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — same skip-malformed-field path; see above.
+        }
         ++i;  // skip '='
 
         {
             // Parse value until SOH.
             std::size_t vstart = i;
-            while (i < n && frame[i] != SOH) { ++i; }
+            while (i < n && frame[i] != SOH) {
+                ++i;
+            }
             std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
 
             switch (tag) {
-                case 8:  begin_string_found = val; break;
-                case 35: msg_type_found     = val; break;
-                case 49: sender_found       = val; break;
-                case 56: target_found       = val; break;
+                case 8:
+                    begin_string_found = val;
+                    break;
+                case 35:
+                    msg_type_found = val;
+                    break;
+                case 49:
+                    sender_found = val;
+                    break;
+                case 56:
+                    target_found = val;
+                    break;
                 case 108:
                     // Parse HeartBtInt as integer.
                     {
                         int v = 0;
                         for (char ch : val) {
-                            if (ch < '0' || ch > '9') { v = -1; break; }
-                            v = v * 10 + static_cast<int>(ch - '0');
+                            if (ch < '0' || ch > '9') {
+                                v = -1;
+                                break;
+                            }
+                            v = (v * 10) + static_cast<int>(ch - '0');
                         }
                         heartbt_int_found = v;
                         has_heartbt = true;
                     }
                     break;
-                default: break;
+                default:
+                    break;
             }
         }
 
         // Skip trailing SOH.
-        if (i < n && frame[i] == SOH) { ++i; }
+        if (i < n && frame[i] == SOH) {
+            ++i;
+        }
         continue;
 
-next_field:
+    next_field:
         // Skip to next SOH.
-        while (i < n && frame[i] != SOH) { ++i; }
-        if (i < n) { ++i; }
+        while (i < n && frame[i] != SOH) {
+            ++i;
+        }
+        if (i < n) {
+            ++i;
+        }
     }
 
     // ── Validation ──────────────────────────────────────────────────────────────
@@ -277,12 +308,11 @@ next_field:
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────
 // FR-005, [FIX-SL §4.6]. S-002.
 
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_logout(std::span<std::byte> out,
-                 seqnum_t seq,
-                 std::string_view sender_comp_id,
-                 std::string_view target_comp_id,
-                 std::string_view text) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / text).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view text) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     // T046 (Phase 6 / US4): build a Logout(35=5) frame.
     // Fields: 8=BeginString (fixed FIX.4.2 — session layer stamps from config),
     //         35=5, 34=seq, 49=SenderCompID, 52=SendingTime (placeholder),
@@ -320,7 +350,9 @@ next_field:
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -352,7 +384,9 @@ next_field:
 
     // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
     auto committed = std::move(w).commit();
-    if (!committed) { return std::unexpected(committed.error()); }
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
     return out.subspan(0, *committed);
 }
 
@@ -362,12 +396,11 @@ next_field:
 // When test_req_id is non-empty, includes TestReqID(112) echoing the value.
 // When test_req_id is empty, omits tag 112 ([FIX-SL §4.5.1] — optional field).
 
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_heartbeat(std::span<std::byte> out,
-                    seqnum_t seq,
-                    std::string_view sender_comp_id,
-                    std::string_view target_comp_id,
-                    std::string_view test_req_id) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / test_req_id).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view test_req_id) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
     // 8=BeginString placeholder — we do not have begin_string here.
@@ -398,7 +431,9 @@ next_field:
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -431,7 +466,9 @@ next_field:
     }
 
     auto committed = std::move(w).commit();
-    if (!committed) { return std::unexpected(committed.error()); }
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
     return out.subspan(0, *committed);
 }
 
@@ -440,12 +477,11 @@ next_field:
 // T040 (Phase 5 / US3): build TestRequest(35=1) frame carrying TestReqID(112).
 // test_req_id must be non-empty ([FIX-SL §4.5.5]: "a unique TestReqID").
 
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_test_request(std::span<std::byte> out,
-                       seqnum_t seq,
-                       std::string_view sender_comp_id,
-                       std::string_view target_comp_id,
-                       std::string_view test_req_id) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / test_req_id).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view test_req_id) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
     // 8=BeginString
@@ -467,7 +503,9 @@ next_field:
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -496,7 +534,9 @@ next_field:
     }
 
     auto committed = std::move(w).commit();
-    if (!committed) { return std::unexpected(committed.error()); }
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
     return out.subspan(0, *committed);
 }
 
@@ -511,15 +551,12 @@ next_field:
 // The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
 // This builder is dumb: it emits whatever is passed.
 
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_reject(std::span<std::byte> out,
-                 seqnum_t seq,
-                 std::string_view sender_comp_id,
-                 std::string_view target_comp_id,
-                 seqnum_t ref_seq_num,
-                 int ref_tag_id,
-                 std::string_view ref_msg_type,
-                 int session_reject_reason) noexcept {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target before the Ref* group).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
+    std::string_view ref_msg_type, int session_reject_reason) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
     // 8=BeginString placeholder (same convention as other builders).
@@ -541,7 +578,9 @@ next_field:
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -568,7 +607,9 @@ next_field:
     {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(ref_seq_num), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(45, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -578,7 +619,9 @@ next_field:
     if (ref_tag_id > 0) {
         char nbuf[12];
         auto sv = render_u32(static_cast<std::uint32_t>(ref_tag_id), nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(371, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -594,10 +637,12 @@ next_field:
     // 373=SessionRejectReason
     {
         char nbuf[12];
-        auto sv = render_u32(static_cast<std::uint32_t>(
-            session_reject_reason < 0 ? 0 : session_reject_reason),
-            nbuf, sizeof(nbuf));
-        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        auto sv = render_u32(
+            static_cast<std::uint32_t>(session_reject_reason < 0 ? 0 : session_reject_reason), nbuf,
+            sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
         if (auto r = w.append_raw(373, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
@@ -605,7 +650,9 @@ next_field:
 
     // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
     auto committed = std::move(w).commit();
-    if (!committed) { return std::unexpected(committed.error()); }
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
     return out.subspan(0, *committed);
 }
 

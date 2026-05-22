@@ -24,13 +24,10 @@
 // No asio::awaitable. No std::mutex. ([const §XV.9] grep gate: safe.)
 #pragma once
 
-#include <array>
 #include <chrono>
-#include <cstddef>
-#include <span>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
+#include <span>
 
 namespace fixpp::session {
 
@@ -41,9 +38,8 @@ namespace fixpp::session {
 // Fills `buf` (caller must supply ≥ 19 bytes). Returns the written view.
 // noexcept; no heap (uses the caller-supplied buffer, [const §VIII.5]).
 // PLACEHOLDER — outbound stamping wired T022 (Phase 3 / US1).
-[[nodiscard]] fixpp::core::expected_t<std::span<char>>
-    stamp_sending_time(fixpp::core::utc_time_point now,
-                       std::span<char> buf) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<char>> stamp_sending_time(
+    fixpp::core::utc_time_point now, std::span<char> buf) noexcept;
 
 // ── Inbound SendingTime check (MaxLatency) ────────────────────────────────────
 
@@ -54,9 +50,8 @@ namespace fixpp::session {
 // disconnect, or Logon-path → logout-with-error) — this function only
 // evaluates the time condition. noexcept; no heap.
 // PLACEHOLDER — inbound check wired T055 (Phase 7 / US5).
-[[nodiscard]] fixpp::core::expected_t<void>
-    check_sending_time(fixpp::core::utc_time_point inbound_sending_time,
-                       fixpp::core::utc_time_point effective_now,
-                       std::chrono::seconds max_latency) noexcept;
+[[nodiscard]] fixpp::core::expected_t<void> check_sending_time(
+    fixpp::core::utc_time_point inbound_sending_time, fixpp::core::utc_time_point effective_now,
+    std::chrono::seconds max_latency) noexcept;
 
 }  // namespace fixpp::session

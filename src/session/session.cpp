@@ -7,51 +7,57 @@
 // resolution chain + linkable open()/close() placeholders. The 2d-owned
 // BEHAVIOUR is wired per user story (T020/T030/T037/T038/T039/T045/T050) —
 // each replaces the marked placeholder body, it is not additive guesswork.
-#include <fixpp/session/session.hpp>
-
 #include <array>
+#include <asio/awaitable.hpp>
+#include <asio/any_io_executor.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_state.hpp>
+#include <asio/cancellation_type.hpp>
+#include <asio/detached.hpp>
+#include <asio/post.hpp>
+#include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>     // expected_t, error values
+#include <fixpp/core/fix_time.hpp>  // 005 US5: fix_string_to_utc_time (T055/T056)
+#include <fixpp/core/session_executor.hpp>
+#include <fixpp/session/admin_messages.hpp>         // 005 US1: interpret_logon / T046: build_logout
+#include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
+#include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
+#include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
+#include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
+#include <fixpp/session/sending_time.hpp>    // 005 US5: check_sending_time (T055)
+#include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
-
-#include <asio/bind_cancellation_slot.hpp>
-#include <asio/cancellation_state.hpp>
-#include <asio/co_spawn.hpp>
-#include <asio/detached.hpp>
-#include <asio/this_coro.hpp>
-#include <asio/use_awaitable.hpp>
-
-#include <fixpp/core/clock.hpp>              // Clock::steady_now / sleep_until
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>             // expected_t, error values
-#include <fixpp/core/session_executor.hpp>
-#include <fixpp/session/message_store.hpp>        // 008-message-store — store_ unique_ptr dtor
-#include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
-#include <fixpp/session/admin_messages.hpp>     // 005 US1: interpret_logon / T046: build_logout
-#include <fixpp/session/direction.hpp>          // 005 US4: direction_t (store outbound)
-#include <fixpp/session/session_fsm.hpp>        // 005 US1: fsm_state enum (T023–T025)
-#include <fixpp/session/seqnum_manager.hpp>     // 005 US2: SeqnumManager (T031)
-#include <fixpp/session/sending_time.hpp>       // 005 US5: check_sending_time (T055)
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
-#include <fixpp/core/fix_time.hpp>             // 005 US5: fix_string_to_utc_time (T055/T056)
+#include "fixpp/session/seqnum.hpp"
 
 namespace fixpp::session {
 
 namespace {
 // [2d §4.5] never-null resolution chain: SessionConfig::session_arena ?:
 // EngineConfig::default_session_resource ?: std::pmr::get_default_resource().
-std::pmr::memory_resource* resolve_session_arena(
-    const fixpp::core::EngineConfig& engine,
-    const SessionConfig& cfg) noexcept {
-    if (cfg.session_arena != nullptr) { return cfg.session_arena; }
+std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig& engine,
+                                                 const SessionConfig& cfg) noexcept {
+    if (cfg.session_arena != nullptr) {
+        return cfg.session_arena;
+    }
     if (engine.default_session_resource != nullptr) {
         return engine.default_session_resource;
     }
@@ -59,11 +65,8 @@ std::pmr::memory_resource* resolve_session_arena(
 }
 }  // namespace
 
-Session::Session(const fixpp::core::EngineConfig& engine,
-                 const SessionConfig& cfg) noexcept
-    : engine_(engine),
-      cfg_(cfg),
-      session_arena_(resolve_session_arena(engine, cfg)) {
+Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept
+    : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)) {
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
 }
@@ -102,8 +105,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 
     // (1) executor resolution — the uniform resolved =
     // override.value_or(engine_anchor) pattern (FR-016/FR-018).
-    asio::any_io_executor resolved =
-        cfg_.executor_override.value_or(engine_.executor);
+    asio::any_io_executor resolved = cfg_.executor_override.value_or(engine_.executor);
 
     // (4a) null EngineConfig::executor (no override either) →
     // invalid_session_config (slot 53 / FR-018). any_io_executor is
@@ -116,8 +118,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // attested (slot 53 / I-06 / FR-009). [const §XI.5]: the store-write
     // path is always mutex; spin under a bare attested executor has no
     // engine-internal serialisation to fall back on.
-    if (cfg_.mode == threading_mode::direct_executor
-        && cfg_.locks == lock_policy::spin) {
+    if (cfg_.mode == threading_mode::direct_executor && cfg_.locks == lock_policy::spin) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
@@ -151,8 +152,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // as a complete value type with a sentinel discriminant (kind::unset).
     // 2g extends with the concrete TLS binding; the field SHAPE is now
     // correct and the constitutional no-implicit-default rule is enforced.
-    if (cfg_.security_profile.k ==
-            fixpp::session::SecurityProfile::kind::unset) {
+    if (cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::unset) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
@@ -161,8 +161,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // make_strand under per_session_strand, carries the bare attested
     // executor under direct_executor, and rejects direct_executor && !attested.
     // This is the first observable mutation; all config rejections are above.
-    auto bound = fixpp::core::make_session_executor(
-        std::move(resolved), cfg_.mode, cfg_.already_serialized_executor, this);
+    auto bound = fixpp::core::make_session_executor(std::move(resolved), cfg_.mode,
+                                                    cfg_.already_serialized_executor, this);
     if (!bound) {
         co_return std::unexpected(bound.error());
     }
@@ -173,8 +173,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // (FR-005 / I-03). The clock_not_set engine-level gate (FR-006) is
     // validate_engine_config() at Engine::open — independent of per-session
     // overrides; Session::open only resolves.
-    effective_clock_ = cfg_.clock_override ? cfg_.clock_override
-                                           : engine_.clock;
+    effective_clock_ = cfg_.clock_override ? cfg_.clock_override : engine_.clock;
 
     // (3) T045: populate the session_local<trace_context> slot from
     // SessionConfig::initial_trace_context (FR-014). Stored in-domain at
@@ -202,11 +201,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // session without a usable store when one was requested).
     if (cfg_.store_factory) {
         auto minted = cfg_.store_factory->make(
-            cfg_.sender_comp_id,
-            cfg_.target_comp_id,
-            &store_arena_resource_,
-            engine_.max_store_memory_per_session,
-            engine_.file_io_executor);
+            cfg_.sender_comp_id, cfg_.target_comp_id, &store_arena_resource_,
+            engine_.max_store_memory_per_session, engine_.file_io_executor);
         if (!minted) {
             co_return std::unexpected(minted.error());  // store_factory_failed
         }
@@ -243,15 +239,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     co_return fixpp::core::expected_t<void>{};
 }
 
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::close(close_mode mode) {
+asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     using fixpp::core::error;
 
     // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]:830-832,863) ──
     // never-opened OR already-closed(drained) → session_already_closed
     // (slot 52); no side effects.
-    if (state_ == lifecycle::never_opened ||
-        state_ == lifecycle::closed_drained) {
+    if (state_ == lifecycle::never_opened || state_ == lifecycle::closed_drained) {
         co_return std::unexpected(error::session_already_closed);
     }
     // already-closing (in-flight) → the SAME in-flight result, NO error, NO
@@ -261,17 +255,15 @@ Session::close(close_mode mode) {
     if (state_ == lifecycle::closing) {
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
-            co_await asio::post(co_await asio::this_coro::executor,
-                                asio::use_awaitable);
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         }
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access) - guarded by has_value() above
         co_return **shared;
     }
 
     // ── First close() on an OPEN session: run the two-phase body once ──────
-    state_       = lifecycle::closing;
-    close_result_ = std::make_shared<
-        std::optional<fixpp::core::expected_t<void>>>();
+    state_ = lifecycle::closing;
+    close_result_ = std::make_shared<std::optional<fixpp::core::expected_t<void>>>();
 
     // T037 phase 1 — graceful ONLY (terminal skips phase 1 entirely; the
     // hook is NOT invoked). Invoked EXACTLY ONCE, after the (scripted) last
@@ -368,7 +360,7 @@ Session::close(close_mode mode) {
     // thrown exception across parse→fromApp (I-09); close() itself
     // completes expected_t<void>{}.
     *close_result_ = fixpp::core::expected_t<void>{};
-    state_         = lifecycle::closed_drained;
+    state_ = lifecycle::closed_drained;
     co_return **close_result_;
 }
 
@@ -406,31 +398,55 @@ struct FrameHeader {
         bool tag_ok = true;
         while (i < n && frame[i] != EQ && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
-            if (c < '0' || c > '9') { tag_ok = false; }
-            tag = tag * 10U + static_cast<std::uint32_t>(c - '0');
+            if (c < '0' || c > '9') {
+                tag_ok = false;
+            }
+            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }
         if (i >= n || frame[i] != EQ || !tag_ok) {
-            while (i < n && frame[i] != SOH) { ++i; }
-            if (i < n) { ++i; }
+            while (i < n && frame[i] != SOH) {
+                ++i;
+            }
+            if (i < n) {
+                ++i;
+            }
             continue;
         }
         ++i;  // skip '='
         std::size_t vstart = i;
-        while (i < n && frame[i] != SOH) { ++i; }
-        std::string_view val(
-            reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
-        if (i < n) { ++i; }  // skip SOH
+        while (i < n && frame[i] != SOH) {
+            ++i;
+        }
+        std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
+        if (i < n) {
+            ++i;
+        }  // skip SOH
 
         switch (tag) {
-            case 8:   h.begin_string    = val; break;
-            case 34:  h.msg_seq_num     = val; break;
-            case 35:  h.msg_type        = val; break;  // T041 US3
-            case 49:  h.sender_comp_id  = val; break;
-            case 52:  h.sending_time    = val; break;  // T055 US5 SendingTime
-            case 56:  h.target_comp_id  = val; break;
-            case 112: h.test_req_id     = val; break;  // T041 US3
-            default: break;
+            case 8:
+                h.begin_string = val;
+                break;
+            case 34:
+                h.msg_seq_num = val;
+                break;
+            case 35:
+                h.msg_type = val;
+                break;  // T041 US3
+            case 49:
+                h.sender_comp_id = val;
+                break;
+            case 52:
+                h.sending_time = val;
+                break;  // T055 US5 SendingTime
+            case 56:
+                h.target_comp_id = val;
+                break;
+            case 112:
+                h.test_req_id = val;
+                break;  // T041 US3
+            default:
+                break;
         }
     }
     return h;
@@ -439,18 +455,22 @@ struct FrameHeader {
 // Parse a decimal seqnum from a string_view. Returns 0 if invalid.
 // Zero is never a valid FIX seqnum (seqnum_min=1), so 0 signals parse failure.
 // No heap, no library, stack-only. (I-7 no-alloc hot path.)
-[[nodiscard]] static fixpp::session::seqnum_t parse_seqnum(std::string_view sv) noexcept {
+[[nodiscard]] fixpp::session::seqnum_t parse_seqnum(std::string_view sv) noexcept {
     using fixpp::session::seqnum_t;
-    if (sv.empty()) { return 0; }
+    if (sv.empty()) {
+        return 0;
+    }
     seqnum_t val = 0;
     for (char c : sv) {
-        if (c < '0' || c > '9') { return 0; }
-        const seqnum_t digit = static_cast<seqnum_t>(c - '0');
+        if (c < '0' || c > '9') {
+            return 0;
+        }
+        const auto digit = static_cast<seqnum_t>(c - '0');
         // Overflow guard: seqnum_max / 10 = UINT32_MAX / 10 = 429496729.
         if (val > 429496729U || (val == 429496729U && digit > 5U)) {
             return 0;  // overflow
         }
-        val = val * 10U + digit;
+        val = (val * 10U) + digit;
     }
     return val;
 }
@@ -483,8 +503,8 @@ struct FrameHeader {
 // T034 wires the store call; here the seqnum check is the gate.
 //
 // LogoutSent / Disconnected: all inbound silently drained (defined cells).
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
+    std::span<const std::byte> frame) noexcept {
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // First message must be a Logon. interpret_logon validates:
@@ -494,8 +514,8 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             //   HeartBtInt present and ≥ 0.
             auto result = fixpp::session::interpret_logon(
                 frame,
-                cfg_.target_comp_id,   // expected_sender: peer's 49= is our target
-                cfg_.sender_comp_id,   // expected_target: peer's 56= is our sender
+                cfg_.target_comp_id,  // expected_sender: peer's 49= is our target
+                cfg_.sender_comp_id,  // expected_target: peer's 56= is our sender
                 cfg_.begin_string);
 
             if (!result) {
@@ -530,18 +550,21 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                     while (i + 2 < n) {
                         // Look for "35=" SOH-delimited field start.
                         if (frame[i] == static_cast<std::byte>('3') &&
-                            frame[i+1] == static_cast<std::byte>('5') &&
-                            frame[i+2] == EQ) {
+                            frame[i + 1] == static_cast<std::byte>('5') && frame[i + 2] == EQ) {
                             std::size_t v = i + 3;
                             if (v < n && frame[v] == static_cast<std::byte>('A') &&
-                                (v + 1 == n || frame[v+1] == SOH)) {
+                                (v + 1 == n || frame[v + 1] == SOH)) {
                                 is_logon = true;
                             }
                             break;
                         }
                         // Advance to next SOH+1 (start of next field).
-                        while (i < n && frame[i] != SOH) { ++i; }
-                        if (i < n) { ++i; }
+                        while (i < n && frame[i] != SOH) {
+                            ++i;
+                        }
+                        if (i < n) {
+                            ++i;
+                        }
                     }
                 }
                 (void)hdr;
@@ -605,20 +628,17 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             // this check per I-5 (a malformed Reject is never itself rejected).
             // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
             // Note: the Logon-path special case (D-3) is handled in LogonSent below.
-            if (hdr.msg_type != "3" && hdr.msg_type != "5" &&
-                !hdr.sending_time.empty() && effective_clock_) {
+            if (hdr.msg_type != "3" && hdr.msg_type != "5" && !hdr.sending_time.empty() &&
+                effective_clock_) {
                 auto parse_r = fixpp::core::fix_string_to_utc_time(
-                    std::span<const char>{hdr.sending_time.data(),
-                                         hdr.sending_time.size()});
+                    std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
                 if (parse_r) {
                     const auto max_lat = cfg_.sending_time_threshold.has_value()
-                        ? std::chrono::duration_cast<std::chrono::seconds>(
-                              *cfg_.sending_time_threshold)
-                        : std::chrono::seconds{120};  // D-8 default 120 s
+                                             ? std::chrono::duration_cast<std::chrono::seconds>(
+                                                   *cfg_.sending_time_threshold)
+                                             : std::chrono::seconds{120};  // D-8 default 120 s
                     auto chk_st = fixpp::session::check_sending_time(
-                        *parse_r,
-                        effective_clock_->now(),
-                        max_lat);
+                        *parse_r, effective_clock_->now(), max_lat);
                     if (!chk_st) {
                         // Q3 established-session path: Reject → Logout → Disconnect.
                         // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
@@ -627,13 +647,11 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                             const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                             auto rj_result = fixpp::session::build_reject(
                                 std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                                next_outbound_seq_++,
-                                cfg_.sender_comp_id,
-                                cfg_.target_comp_id,
+                                next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
                                 ref_seq,
-                                52,        // RefTagID = 52 (SendingTime)
+                                52,  // RefTagID = 52 (SendingTime)
                                 hdr.msg_type,
-                                10);       // SessionRejectReason = 10 (SendingTime accuracy)
+                                10);  // SessionRejectReason = 10 (SendingTime accuracy)
                             if (rj_result) {
                                 auto emit_r = co_await store_then_emit(*rj_result);
                                 (void)emit_r;
@@ -644,10 +662,7 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                             std::array<std::byte, 256> lo_buf{};
                             auto lo_result = fixpp::session::build_logout(
                                 std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                                next_outbound_seq_++,
-                                cfg_.sender_comp_id,
-                                cfg_.target_comp_id,
-                                {});
+                                next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id, {});
                             if (lo_result) {
                                 auto emit_r = co_await store_then_emit(*lo_result);
                                 (void)emit_r;
@@ -690,11 +705,8 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                     // Use a stack buffer (I-7: no heap on inbound-dispatch path).
                     std::array<std::byte, 256> buf{};
                     auto logout_result = fixpp::session::build_logout(
-                        std::span<std::byte>{buf.data(), buf.size()},
-                        next_outbound_seq_++,
-                        cfg_.sender_comp_id,
-                        cfg_.target_comp_id,
-                        {});
+                        std::span<std::byte>{buf.data(), buf.size()}, next_outbound_seq_++,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, {});
                     if (logout_result) {
                         auto emit_r = co_await store_then_emit(*logout_result);
                         (void)emit_r;  // errors logged-then-proceed (I-07)
@@ -738,11 +750,8 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 if (hdr.msg_type == "1") {  // TestRequest (35=1)
                     std::array<std::byte, 256> hb_buf{};
                     auto hb_result = fixpp::session::build_heartbeat(
-                        std::span<std::byte>{hb_buf.data(), hb_buf.size()},
-                        next_outbound_seq_++,
-                        cfg_.sender_comp_id,
-                        cfg_.target_comp_id,
-                        hdr.test_req_id);
+                        std::span<std::byte>{hb_buf.data(), hb_buf.size()}, next_outbound_seq_++,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id);
                     if (hb_result) {
                         auto emit_r = co_await store_then_emit(*hb_result);
                         (void)emit_r;
@@ -763,13 +772,13 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                     // 2/4 (RR/SeqReset) are deferred admin; they still get a Reject
                     // per data-model matrix (session_admin_not_supported, slot 75).
                     const bool is_session_admin =
-                        (hdr.msg_type == "A" ||   // Logon (dup in Active)
-                         hdr.msg_type == "0" ||   // Heartbeat
-                         hdr.msg_type == "1" ||   // TestRequest
-                         hdr.msg_type == "2" ||   // ResendRequest (deferred → Reject)
-                         hdr.msg_type == "3" ||   // Reject (handled above)
-                         hdr.msg_type == "4" ||   // SequenceReset-GapFill (deferred → Reject)
-                         hdr.msg_type == "5");    // Logout (handled above)
+                        (hdr.msg_type == "A" ||  // Logon (dup in Active)
+                         hdr.msg_type == "0" ||  // Heartbeat
+                         hdr.msg_type == "1" ||  // TestRequest
+                         hdr.msg_type == "2" ||  // ResendRequest (deferred → Reject)
+                         hdr.msg_type == "3" ||  // Reject (handled above)
+                         hdr.msg_type == "4" ||  // SequenceReset-GapFill (deferred → Reject)
+                         hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {
                         // Unknown / app-type MsgType in Active →
@@ -779,13 +788,10 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         auto rj_result = fixpp::session::build_reject(
                             std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            next_outbound_seq_++,
-                            cfg_.sender_comp_id,
-                            cfg_.target_comp_id,
-                            ref_seq,
-                            0,                // RefTagID: n/a for MsgType rejection
-                            hdr.msg_type,     // RefMsgType: the offending MsgType
-                            3);               // SessionRejectReason = 3 (invalid MsgType)
+                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                            0,             // RefTagID: n/a for MsgType rejection
+                            hdr.msg_type,  // RefMsgType: the offending MsgType
+                            3);            // SessionRejectReason = 3 (invalid MsgType)
                         if (rj_result) {
                             auto emit_r = co_await store_then_emit(*rj_result);
                             (void)emit_r;
@@ -807,7 +813,7 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
             auto hdr = scan_frame_header(frame);
             if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
-                fsm_state_        = fsm_state::Disconnected;
+                fsm_state_ = fsm_state::Disconnected;
                 logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
                 // Wake up the sleep_until in run_logout_phase1 so it can
                 // detect the confirmation and return early (before the 2s timeout).
@@ -832,11 +838,8 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             // US4/Phase 6 (when the Logout build/send path is wired); for now
             // we transition directly to Disconnected on the fatal/refusal cells,
             // matching the same pattern Phase 3 used for NotConnected refusals.
-            auto result = fixpp::session::interpret_logon(
-                frame,
-                cfg_.target_comp_id,
-                cfg_.sender_comp_id,
-                cfg_.begin_string);
+            auto result = fixpp::session::interpret_logon(frame, cfg_.target_comp_id,
+                                                          cfg_.sender_comp_id, cfg_.begin_string);
 
             if (!result) {
                 // Either a refused Logon (CompID/BeginString) OR a non-Logon
@@ -856,26 +859,20 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             // Reject, because no session is established yet).
             if (!hdr.sending_time.empty() && effective_clock_) {
                 auto parse_r = fixpp::core::fix_string_to_utc_time(
-                    std::span<const char>{hdr.sending_time.data(),
-                                         hdr.sending_time.size()});
+                    std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
                 if (parse_r) {
                     const auto max_lat = cfg_.sending_time_threshold.has_value()
-                        ? std::chrono::duration_cast<std::chrono::seconds>(
-                              *cfg_.sending_time_threshold)
-                        : std::chrono::seconds{120};  // D-8 default 120 s
+                                             ? std::chrono::duration_cast<std::chrono::seconds>(
+                                                   *cfg_.sending_time_threshold)
+                                             : std::chrono::seconds{120};  // D-8 default 120 s
                     auto chk_st = fixpp::session::check_sending_time(
-                        *parse_r,
-                        effective_clock_->now(),
-                        max_lat);
+                        *parse_r, effective_clock_->now(), max_lat);
                     if (!chk_st) {
                         // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
                         std::array<std::byte, 256> lo_buf{};
                         auto lo_result = fixpp::session::build_logout(
                             std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                            next_outbound_seq_++,
-                            cfg_.sender_comp_id,
-                            cfg_.target_comp_id,
-                            {});
+                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id, {});
                         if (lo_result) {
                             auto emit_r = co_await store_then_emit(*lo_result);
                             (void)emit_r;
@@ -916,12 +913,9 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             // ([feedback_asio_cospawn_total_cancellation_default]).
             {
                 auto ex = co_await asio::this_coro::executor;
-                asio::co_spawn(
-                    ex,
-                    run_liveness_loop(),
-                    asio::bind_cancellation_slot(
-                        root_cancel_.slot(),
-                        asio::detached));
+                // NOLINTNEXTLINE(misc-include-cleaner) — asio::co_spawn provided by <asio/co_spawn.hpp> at the top of this file; clang-tidy doesn't see the include through template machinery.
+                asio::co_spawn(ex, run_liveness_loop(),
+                               asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
             }
 
             co_return fixpp::core::expected_t<void>{};
@@ -935,16 +929,15 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
     co_return fixpp::core::expected_t<void>{};
 }
 
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::send(std::span<const std::byte> /*app_payload*/) noexcept {
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static) — placeholder body doesn't reference *this yet; real impl wired per US1 T023 will use seqnum_mgr_/store_/transport_send_.
+asio::awaitable<fixpp::core::expected_t<void>> Session::send(
+    std::span<const std::byte> /*app_payload*/) noexcept {
     // PLACEHOLDER — durable-before-transmit path wired per US1 T023 (Phase 3).
     // Outbound ordering: store(seq, committed, outbound) BEFORE transport::async_write (I-3).
     co_return fixpp::core::expected_t<void>{};
 }
 
-fsm_state Session::state() const noexcept {
-    return fsm_state_;
-}
+fsm_state Session::state() const noexcept { return fsm_state_; }
 
 // ── T039/T041 (US3): Liveness loop ───────────────────────────────────────────
 //
@@ -986,8 +979,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // cancellation filter to accept total cancellation. The root slot was bound
     // at co_spawn time (via bind_cancellation_slot), so this only changes the
     // filter — it does not reassign the slot's backing storage.
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation{});
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
 
     // Resolve HeartBtInt from config (D-8 default: 30s; 0 = disabled).
     std::chrono::seconds heartbt_int{30};
@@ -1035,21 +1027,22 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // No inbound data for heartbt_int: emit TestRequest.
             // Generate a unique TestReqID (simple sequential counter).
             static std::uint32_t tr_counter = 0;
-            char id_buf[32];
-            std::snprintf(id_buf, sizeof(id_buf), "TR%u", ++tr_counter);
-            pending_test_req_id_ = id_buf;
-            unanswered_tr_       = false;
+            std::array<char, 32> id_buf{};
+            id_buf[0] = 'T';
+            id_buf[1] = 'R';
+            auto [end, ec] =
+                std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(), ++tr_counter);
+            (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
+            pending_test_req_id_.assign(id_buf.data(), end);
+            unanswered_tr_ = false;
 
             // T042 (US4 retirement): emit the TestRequest frame via
             // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
             {
                 std::array<std::byte, 256> tr_buf{};
                 auto tr_result = fixpp::session::build_test_request(
-                    std::span<std::byte>{tr_buf.data(), tr_buf.size()},
-                    next_outbound_seq_++,
-                    cfg_.sender_comp_id,
-                    cfg_.target_comp_id,
-                    pending_test_req_id_);
+                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, next_outbound_seq_++,
+                    cfg_.sender_comp_id, cfg_.target_comp_id, pending_test_req_id_);
                 if (tr_result) {
                     auto emit_r = co_await store_then_emit(*tr_result);
                     (void)emit_r;
@@ -1083,7 +1076,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
         // [feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
         // Convert to clean return — not a fatal error.
         (void)e;
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15: a throwing user callback must trap, not propagate; nothing else to do here.
         // Any other exception: absorb (noexcept window).
     }
 }
@@ -1096,13 +1089,13 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // Errors from store(): logged-then-proceed (I-07); close still completes.
 // The outbound seqnum counter (next_outbound_seq_) is already advanced by
 // the caller before passing the committed frame.
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::store_then_emit(std::span<const std::byte> frame) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
+    std::span<const std::byte> frame) noexcept {
     // Step 1: store (durable-before-transmit).
     if (store_) {
         // The outbound seqnum was already stamped into the frame by the builder;
         // pass next_outbound_seq_ - 1 (the value that was stamped).
-        const seqnum_t stamped_seq = next_outbound_seq_ - 1u;
+        const seqnum_t stamped_seq = next_outbound_seq_ - 1U;
         auto store_r = co_await store_->store(stamped_seq, frame, direction_t::outbound);
         (void)store_r;  // store errors → logged-then-proceed (I-07)
     }
@@ -1113,7 +1106,8 @@ Session::store_then_emit(std::span<const std::byte> frame) noexcept {
         // Durable-before-transmit is already satisfied → log-then-proceed.
         try {
             transport_send_(frame);
-        } catch (...) {
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — FR-15 noexcept window absorption: durable-before-transmit already satisfied; the transport-send throw is not a recoverable signal here.
+            // Absorbed; FR-15 noexcept window per comment above.
         }
     }
 
@@ -1139,19 +1133,15 @@ Session::store_then_emit(std::span<const std::byte> frame) noexcept {
 // already bound to the root slot. We do NOT reset here — the caller (close)
 // controls the root slot. Instead we use a loop-and-check polling pattern
 // for the logout confirmation, which is safe on the single-strand session.
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::run_logout_phase1() noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noexcept {
     using namespace std::chrono_literals;
     using std::chrono::seconds;
 
     // Build the Logout frame into a stack buffer.
     std::array<std::byte, 256> buf{};
-    auto logout_result = fixpp::session::build_logout(
-        std::span<std::byte>{buf.data(), buf.size()},
-        next_outbound_seq_++,
-        cfg_.sender_comp_id,
-        cfg_.target_comp_id,
-        {});
+    auto logout_result = fixpp::session::build_logout(std::span<std::byte>{buf.data(), buf.size()},
+                                                      next_outbound_seq_++, cfg_.sender_comp_id,
+                                                      cfg_.target_comp_id, {});
 
     if (!logout_result) {
         // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
@@ -1163,7 +1153,7 @@ Session::run_logout_phase1() noexcept {
     }
 
     // Transition to LogoutSent.
-    fsm_state_        = fsm_state::LogoutSent;
+    fsm_state_ = fsm_state::LogoutSent;
     logout_confirmed_ = false;
 
     if (!effective_clock_) {
@@ -1180,10 +1170,10 @@ Session::run_logout_phase1() noexcept {
     auto deadline = effective_clock_->steady_now() + seconds{2};
     try {
         co_await effective_clock_->sleep_until(deadline);
-    } catch (const std::system_error&) {
+    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — wake-early signal: the `logout_confirmed_` flag check after this block is the actual control-flow decision; no action needed in the handler itself.
         // Woken early: either peer confirmed (logout_confirmed_=true)
         // or root cancellation fired (phase 2). Check the flag.
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15.
         // Any other exception: absorb (noexcept window).
     }
 

@@ -28,21 +28,21 @@ namespace fixpp::session {
 // ── FSM state ─────────────────────────────────────────────────────────────────
 
 enum class fsm_state : std::uint8_t {
-    NotConnected  = 0,  // Initial / reset state. open() transitions to LogonSent
+    NotConnected = 0,   // Initial / reset state. open() transitions to LogonSent
                         // (initiator) or waits for inbound Logon (acceptor).
-    LogonSent     = 1,  // Initiator: Logon emitted, awaiting peer Logon (ack).
+    LogonSent = 1,      // Initiator: Logon emitted, awaiting peer Logon (ack).
                         // [FIX-SL §4.3.2].
     LogonReceived = 2,  // Acceptor: peer Logon received, own Logon replied.
                         // Transitions to Active on any normal post-Logon message.
                         // [FIX-SL §4.3.10].
-    Active        = 3,  // Session established. Heartbeat / TestRequest timers
+    Active = 3,         // Session established. Heartbeat / TestRequest timers
                         // armed. MsgSeqNum counters advance. fromAdmin/fromApp
                         // dispatched via cancellable_dispatch. [FIX-SL §4.5].
-    LogoutSent    = 4,  // Logout initiated (either side). Inbound messages are
+    LogoutSent = 4,     // Logout initiated (either side). Inbound messages are
                         // drained without advancing counters or dispatching
                         // fromAdmin/fromApp. Awaiting peer Logout or
                         // graceful-close timeout. [FIX-SL §4.6].
-    Disconnected  = 5,  // Terminal. All further open()/send()/inbound ignored
+    Disconnected = 5,   // Terminal. All further open()/send()/inbound ignored
                         // (session_already_closed / defined cell). [FIX-SL §4.7].
 };
 

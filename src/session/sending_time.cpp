@@ -13,23 +13,25 @@
 //
 // Anchors: data-model.md E8; research D-3/D-5/D-8; contracts/sending_time.hpp;
 // spec FR-011/FR-013; [FIX-SL §4.2.3].
+#include <chrono>
+#include <expected>
 #include <fixpp/session/sending_time.hpp>
+#include "fixpp/core/error.hpp"
+#include <span>
+#include "fixpp/core/fix_time.hpp"
 
 namespace fixpp::session {
 
-[[nodiscard]] fixpp::core::expected_t<std::span<char>>
-    stamp_sending_time(fixpp::core::utc_time_point now,
-                       std::span<char> buf) noexcept {
+[[nodiscard]] fixpp::core::expected_t<std::span<char>> stamp_sending_time(
+    fixpp::core::utc_time_point now, std::span<char> buf) noexcept {
     // T022 (Phase 3 / US1): format effective_clock.now() as FIX UTCTimestamp
     // at millis precision (FIX 4.x default, D-3). Round-trips losslessly (I-6).
-    return fixpp::core::utc_time_to_fix_string(
-        now, fixpp::core::fix_time_precision::millis, buf);
+    return fixpp::core::utc_time_to_fix_string(now, fixpp::core::fix_time_precision::millis, buf);
 }
 
-[[nodiscard]] fixpp::core::expected_t<void>
-    check_sending_time(fixpp::core::utc_time_point inbound_sending_time,
-                       fixpp::core::utc_time_point effective_now,
-                       std::chrono::seconds max_latency) noexcept {
+[[nodiscard]] fixpp::core::expected_t<void> check_sending_time(
+    fixpp::core::utc_time_point inbound_sending_time, fixpp::core::utc_time_point effective_now,
+    std::chrono::seconds max_latency) noexcept {
     // T055 (Phase 7 / US5): check |inbound_sending_time - effective_now| <= max_latency.
     // Compute the absolute difference (handles both future and past sending times).
     // Uses std::chrono arithmetic only — noexcept; no heap.

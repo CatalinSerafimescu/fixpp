@@ -19,11 +19,10 @@
 #pragma once
 
 #include <cstddef>
-#include <span>
-#include <string_view>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <span>
+#include <string_view>
 
 namespace fixpp::session {
 
@@ -36,58 +35,43 @@ namespace fixpp::session {
 // Build an outbound Logon frame into `out`. Stamps SeqNum(34), SenderCompID(49)/
 // TargetCompID(56), HeartBtInt(108), SendingTime(52).
 // PLACEHOLDER — body lands T021 (Phase 3 / US1).
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_logon(std::span<std::byte> out,
-                seqnum_t seq,
-                std::string_view sender_comp_id,
-                std::string_view target_comp_id,
-                std::string_view begin_string,
-                int heartbt_int) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view begin_string, int heartbt_int) noexcept;
 
 // Interpret an inbound Logon frame; validate BeginString/CompID/HeartBtInt.
 // Returns the negotiated HeartBtInt on success.
 // PLACEHOLDER — body lands T024/T025 (Phase 3 / US1).
-[[nodiscard]] fixpp::core::expected_t<int>
-    interpret_logon(std::span<const std::byte> frame,
-                    std::string_view expected_sender,
-                    std::string_view expected_target,
-                    std::string_view expected_begin) noexcept;
+[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+    std::span<const std::byte> frame, std::string_view expected_sender,
+    std::string_view expected_target, std::string_view expected_begin) noexcept;
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────
 // FR-005, [FIX-SL §4.6]. S-002.
 
 // Build an outbound Logout frame (optional text field).
 // PLACEHOLDER — body lands T046 (Phase 6 / US4).
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_logout(std::span<std::byte> out,
-                 seqnum_t seq,
-                 std::string_view sender_comp_id,
-                 std::string_view target_comp_id,
-                 std::string_view text = {}) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view text = {}) noexcept;
 
 // ── Heartbeat (35=0) ─────────────────────────────────────────────────────────
 // FR-006, [FIX-SL §4.5.1]. S-003.
 
 // Build an outbound Heartbeat (optionally echoing TestReqID(112)).
 // PLACEHOLDER — body lands T040 (Phase 5 / US3).
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_heartbeat(std::span<std::byte> out,
-                    seqnum_t seq,
-                    std::string_view sender_comp_id,
-                    std::string_view target_comp_id,
-                    std::string_view test_req_id = {}) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view test_req_id = {}) noexcept;
 
 // ── TestRequest (35=1) ───────────────────────────────────────────────────────
 // FR-006, [FIX-SL §4.5.5]. S-004.
 
 // Build an outbound TestRequest with a unique TestReqID(112).
 // PLACEHOLDER — body lands T040 (Phase 5 / US3).
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_test_request(std::span<std::byte> out,
-                       seqnum_t seq,
-                       std::string_view sender_comp_id,
-                       std::string_view target_comp_id,
-                       std::string_view test_req_id) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view test_req_id) noexcept;
 
 // ── Reject (35=3) ────────────────────────────────────────────────────────────
 // FR-007, [FIX-SL §4.5.4]. S-007.
@@ -96,14 +80,9 @@ namespace fixpp::session {
 
 // Build an outbound session-level Reject.
 // PLACEHOLDER — body lands T054 (Phase 7 / US5).
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_reject(std::span<std::byte> out,
-                 seqnum_t seq,
-                 std::string_view sender_comp_id,
-                 std::string_view target_comp_id,
-                 seqnum_t ref_seq_num,
-                 int ref_tag_id,
-                 std::string_view ref_msg_type,
-                 int session_reject_reason) noexcept;
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
+    std::string_view ref_msg_type, int session_reject_reason) noexcept;
 
 }  // namespace fixpp::session
