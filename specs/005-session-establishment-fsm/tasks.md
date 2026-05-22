@@ -158,17 +158,17 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 **Purpose**: FR-001 whole-matrix verification, the no-alloc/noexcept discipline, benches, the Tier-1 matrix, and the close-out bookkeeping the project memory requires.
 
-- [ ] T058 Write seam #1 `tests/session/fsm_transition_matrix_test.cpp` — assert every `[FIX-SL §4.10]` state×event cell in the FR-001 event alphabet has a defined transition (no UB, no silent no-op), incl. out-of-scope admin → `session_admin_not_supported` (FR-001, I-1) — green only after US1–US5
-- [ ] T059 Write seam #12 `tests/session/alloc_discipline_test.cpp` under `mallocnesia` (`tools/mallocnesia/libmallocnesia.so`) + `tools/check_alloc.py` — zero global `new`/`delete` on inbound-dispatch / timer-fire / seqnum paths (SC-009, I-7)
-- [ ] T060 [P] Verify the `noexcept` window + throwing-user-callback trap (`core::detail::trap_throw`) across the inbound-process / timer-fire window, **and assert the no-C++-across-C-ABI layering check** (`nm` confirms zero `extern "C"` session symbols; no session type appears in `<fix/c_api.h>`) (FR-015, SC-009)
-- [ ] T061 [P] Add `bench/session/{fsm,seqnum,fix_time,heartbeat}_bench.cpp` + `bench/baselines/session/*.json` enforcing the plan.md Technical-Context ceilings at ±5% (`[const §VIII.1]`/`[const §VIII.2]`)
-- [ ] T062 Run the full Tier-1 preset matrix serially per quickstart §3 (debug / release / asan / ubsan / tsan / coverage + gcc-release sanity); resolve any failure (`[const §IX.2]`/`[const §IX.6]`)
-- [ ] T063 Confirm ≥95% line / ≥85% branch on `include/fixpp/session/*`, `src/session/*`, `include/fixpp/core/fix_time.*` on the lcov DA/BRDA basis; any uncovered line/branch carries a recorded Opus risk note (`[const §IX.1]`)
-- [ ] T064 [P] clang-tidy / clang-format / cppcheck / IWYU + the `[const §XV.9]` mutex-in-coroutine grep gate clean across all session/fix_time headers and sources
-- [ ] T065 [P] Finalize the **005 scope-deferral ledger** in `spec/coverage-index.md` — deferred-with-traceability pointers (too-high + recovery-dependent TC cases, FIXT/5.0SP2 + 4.0/4.1/4.3/5.0 version scope, S-016 115/128, scenario-14 `14h`/`14i`/`14j`) + per-row delivery-coverage for the owned FIX.4.2/4.4 rows
-- [ ] T066 [P] Update `spec/feature-catalogue.md` rows S-001/2/3/4/7/8/9/15/16/19/20 to the delivered FIX.4.2/4.4 point-to-point establishment slice with the explicit version/third-party-addressing deferral notes
-- [ ] T067 Feature-completeness audit (memory `feedback_feature_completeness_gate`): every FR-001..018 + SC-001..010 ↔ task ↔ catalogue row mapped 100% (or explicitly waived) — a `/gate-b` precondition
-- [ ] T068 Run quickstart.md end-to-end validation incl. recording the `core/` time-helper #4 module-exit closure (close `core/` README row #4 + `core/` exit checkbox at merge per pipeline step 16, memory `feedback_pipeline_mark_done_step`)
+- [X] T058 Write seam #1 `tests/session/fsm_transition_matrix_test.cpp` — assert every `[FIX-SL §4.10]` state×event cell in the FR-001 event alphabet has a defined transition (no UB, no silent no-op), incl. out-of-scope admin → `session_admin_not_supported` (FR-001, I-1) — green only after US1–US5
+- [X] T059 Write seam #12 `tests/session/alloc_discipline_test.cpp` under `mallocnesia` (`tools/mallocnesia/libmallocnesia.so`) + `tools/check_alloc.py` — zero global `new`/`delete` on inbound-dispatch / timer-fire / seqnum paths (SC-009, I-7)
+- [X] T060 [P] Verify the `noexcept` window + throwing-user-callback trap (`core::detail::trap_throw`) across the inbound-process / timer-fire window, **and assert the no-C++-across-C-ABI layering check** (`nm` confirms zero `extern "C"` session symbols; no session type appears in `<fix/c_api.h>`) (FR-015, SC-009)
+- [X] T061 [P] Add `bench/session/{fsm,seqnum,fix_time,heartbeat}_bench.cpp` + `bench/baselines/session/*.json` enforcing the plan.md Technical-Context ceilings at ±5% (`[const §VIII.1]`/`[const §VIII.2]`)
+- [X] T062 Run the full Tier-1 preset matrix serially per quickstart §3 (debug / release / asan / ubsan / tsan / coverage + gcc-release sanity); resolve any failure (`[const §IX.2]`/`[const §IX.6]`)
+- [X] T063 Confirm ≥95% line / ≥85% branch on `include/fixpp/session/*`, `src/session/*`, `include/fixpp/core/fix_time.*` on the lcov DA/BRDA basis; any uncovered line/branch carries a recorded Opus risk note (`[const §IX.1]`)
+- [X] T064 [P] clang-tidy / clang-format / cppcheck / IWYU + the `[const §XV.9]` mutex-in-coroutine grep gate clean across all session/fix_time headers and sources
+- [X] T065 [P] Finalize the **005 scope-deferral ledger** in `spec/coverage-index.md` — deferred-with-traceability pointers (too-high + recovery-dependent TC cases, FIXT/5.0SP2 + 4.0/4.1/4.3/5.0 version scope, S-016 115/128, scenario-14 `14h`/`14i`/`14j`) + per-row delivery-coverage for the owned FIX.4.2/4.4 rows
+- [X] T066 [P] Update `spec/feature-catalogue.md` rows S-001/2/3/4/7/8/9/15/16/19/20 to the delivered FIX.4.2/4.4 point-to-point establishment slice with the explicit version/third-party-addressing deferral notes
+- [X] T067 Feature-completeness audit (memory `feedback_feature_completeness_gate`): every FR-001..018 + SC-001..010 ↔ task ↔ catalogue row mapped 100% (or explicitly waived) — a `/gate-b` precondition
+- [X] T068 Run quickstart.md end-to-end validation incl. recording the `core/` time-helper #4 module-exit closure (close `core/` README row #4 + `core/` exit checkbox at merge per pipeline step 16, memory `feedback_pipeline_mark_done_step`)
 
 ---
 
