@@ -1,6 +1,16 @@
 # tests/session/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
+# ── 009-session-fsm-finalize T005 — shared test helper ──────────────────────
+# OBJECT library so executables can absorb the helper without an install/link
+# step; consumed via $<TARGET_OBJECTS:session_test_support> in test sources.
+add_library(session_test_support OBJECT
+  support/frame_field_extract.cpp
+)
+target_include_directories(session_test_support PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 add_executable(session_smoke_test session_smoke_test.cpp)
 target_link_libraries(session_smoke_test PRIVATE
   fixpp_session
@@ -309,6 +319,12 @@ add_threading_test(session_layering test_session_layering.cpp)
 target_compile_definitions(session_layering PRIVATE
   FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# ── 009-session-fsm-finalize T006 — Session::send path test (US1 FR-001) ────
+# TDD red: T006 authors RED (compile + fail); T007 + T008 turn GREEN.
+# Uses session_test_support OBJECT library (T005 frame_field_extract helper).
+add_threading_test(session_send_path send_path_test.cpp
+  $<TARGET_OBJECTS:session_test_support>)
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
