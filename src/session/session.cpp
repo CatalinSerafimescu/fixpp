@@ -890,36 +890,48 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             auto hdr = scan_frame_header(frame);
 
             // ── Guard (3): SendingTime MaxLatency — Logon-path special case ───
-            // D-3 / FR-013: if the inbound Logon's own SendingTime is stale,
-            // the response is a logout-with-error (Logout only — no standalone
-            // Reject, because no session is established yet).
-            if (!hdr.sending_time.empty() && effective_clock_) {
-                auto parse_r = fixpp::core::fix_string_to_utc_time(
-                    std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
-                if (parse_r) {
-                    const auto max_lat = cfg_.sending_time_threshold.has_value()
-                                             ? std::chrono::duration_cast<std::chrono::seconds>(
-                                                   *cfg_.sending_time_threshold)
-                                             : std::chrono::seconds{120};  // D-8 default 120 s
-                    auto chk_st = fixpp::session::check_sending_time(
-                        *parse_r, effective_clock_->now(), max_lat);
-                    if (!chk_st) {
-                        // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
-                        std::array<std::byte, 256> lo_buf{};
-                        const auto st52 = stamp_sending_time(*effective_clock_);
-                        auto lo_result = fixpp::session::build_logout(
-                            std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            {}, cfg_.begin_string, st52.value);
-                        if (lo_result) {
-                            auto emit_r = co_await store_then_emit(*lo_result);
-                            (void)emit_r;
+            // D-3 / FR-009 / RC#5: if the inbound Logon's SendingTime is absent,
+            // malformed, or stale, emit Logout-with-error only (NO standalone Reject —
+            // no session established yet per [FIX-SL §4.3]).
+            // FR-009: empty OR parse-failure OR stale → all go to Logout-only path.
+            // T018 [US3]: remove lenient fall-through for missing/malformed SendingTime.
+            if (effective_clock_) {
+                std::string_view sending_time_error;
+                if (hdr.sending_time.empty()) {
+                    sending_time_error = "SendingTime(52) missing";
+                } else {
+                    auto parse_r = fixpp::core::fix_string_to_utc_time(
+                        std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
+                    if (!parse_r) {
+                        sending_time_error = "SendingTime(52) malformed";
+                    } else {
+                        const auto max_lat = cfg_.sending_time_threshold.has_value()
+                                                 ? std::chrono::duration_cast<std::chrono::seconds>(
+                                                       *cfg_.sending_time_threshold)
+                                                 : std::chrono::seconds{120};  // D-8 default 120 s
+                        auto chk_st = fixpp::session::check_sending_time(
+                            *parse_r, effective_clock_->now(), max_lat);
+                        if (!chk_st) {
+                            sending_time_error = "SendingTime(52) accuracy";
                         }
-                        fsm_state_ = fsm_state::Disconnected;
-                        co_return fixpp::core::expected_t<void>{};
                     }
                 }
-                // parse failure: accept the Logon (lenient on malformed timestamp)
+
+                if (!sending_time_error.empty()) {
+                    // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
+                    std::array<std::byte, 256> lo_buf{};
+                    const auto st52 = stamp_sending_time(*effective_clock_);
+                    auto lo_result = fixpp::session::build_logout(
+                        std::span<std::byte>{lo_buf.data(), lo_buf.size()},
+                        next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                        sending_time_error, cfg_.begin_string, st52.value);
+                    if (lo_result) {
+                        auto emit_r = co_await store_then_emit(*lo_result);
+                        (void)emit_r;
+                    }
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // ── Guard (4): seqnum check (T035 LogonSent row) ─────────────────
