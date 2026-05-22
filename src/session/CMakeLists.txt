@@ -63,7 +63,6 @@ target_sources(fixpp_session PRIVATE
   # Phase 2 scaffold: link-green before user-story bodies land (Phase 3–7).
   seqnum_manager.cpp   # T018: Phase 2 stub; full impl T031/T032/T033 (Phase 4 / US2)
   admin_messages.cpp   # T018: Phase 2 stub; full impl T021/T040/T046/T054 (Phase 3-7)
-  heartbeat.cpp        # T018: Phase 2 stub; full impl T039/T040/T047 (Phase 5-6)
   sending_time.cpp     # T018: Phase 2 stub; full impl T022/T055 (Phase 3/7)
 )
 

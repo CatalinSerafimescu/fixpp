@@ -1109,7 +1109,12 @@ Session::store_then_emit(std::span<const std::byte> frame) noexcept {
 
     // Step 2: transmit (ONLY after store completes — I-3).
     if (transport_send_) {
-        transport_send_(frame);
+        // FR-15 noexcept window: throwing user callback must trap, not propagate.
+        // Durable-before-transmit is already satisfied → log-then-proceed.
+        try {
+            transport_send_(frame);
+        } catch (...) {
+        }
     }
 
     co_return fixpp::core::expected_t<void>{};

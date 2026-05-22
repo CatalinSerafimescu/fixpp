@@ -256,6 +256,103 @@ TEST(FixTimeRoundtrip, ParseBadHourReturnsError) {
     EXPECT_FALSE(r.has_value());
 }
 
+// ── Negative-grammar corpus: parse-error branch coverage (Phase 8 /simplify) ─
+
+TEST(FixTimeRoundtrip, ParseNonDigitYearReturnsError) {
+    const std::string_view bad = "AAAA0101-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseMonthZeroReturnsError) {
+    const std::string_view bad = "20200001-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseDayZeroReturnsError) {
+    const std::string_view bad = "20200100-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+// Feb 30 in a non-leap year → days_in_month rejection branch.
+TEST(FixTimeRoundtrip, ParseDayBeyondMonthReturnsError) {
+    const std::string_view bad = "20210230-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseMissingDateTimeDashReturnsError) {
+    const std::string_view bad = "20200101X00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseBadMinuteReturnsError) {
+    const std::string_view bad = "20200101-00:60:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+// 61 > leap-second-permitted 60.
+TEST(FixTimeRoundtrip, ParseBadSecondReturnsError) {
+    const std::string_view bad = "20200101-00:00:61";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseMissingHourColonReturnsError) {
+    const std::string_view bad = "20200101-00X00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseMissingMinuteColonReturnsError) {
+    const std::string_view bad = "20200101-00:00X00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+// 21-char input with non-'.' at the ms separator slot.
+TEST(FixTimeRoundtrip, ParseMissingMillisDotReturnsError) {
+    const std::string_view bad = "20200101-00:00:00X123";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+// 24-char input with non-'.' at the µs separator slot.
+TEST(FixTimeRoundtrip, ParseMissingMicrosDotReturnsError) {
+    const std::string_view bad = "20200101-00:00:00X123456";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseNonDigitMillisReturnsError) {
+    const std::string_view bad = "20200101-00:00:00.A23";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, ParseNonDigitMicrosReturnsError) {
+    const std::string_view bad = "20200101-00:00:00.A23456";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value());
+}
+
 TEST(FixTimeRoundtrip, FormatOutputBufferFitsIn32Chars) {
     // Maximum length: "YYYYMMDD-HH:MM:SS.ssssss" = 17+7 = 24 chars; well within 32.
     utc_time_point tp{};

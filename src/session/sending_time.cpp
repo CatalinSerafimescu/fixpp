@@ -15,8 +15,6 @@
 // spec FR-011/FR-013; [FIX-SL §4.2.3].
 #include <fixpp/session/sending_time.hpp>
 
-#include <fixpp/session/errors.hpp>
-
 namespace fixpp::session {
 
 [[nodiscard]] fixpp::core::expected_t<std::span<char>>

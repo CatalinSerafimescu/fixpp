@@ -151,7 +151,6 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/admin_messages.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/sending_time.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/seqnum_manager.hpp"
-    "${CMAKE_SOURCE_DIR}/include/fixpp/session/heartbeat.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/session_fsm.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/session.hpp"
 )
