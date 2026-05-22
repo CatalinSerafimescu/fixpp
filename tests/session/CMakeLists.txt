@@ -291,6 +291,19 @@ add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cp
 add_threading_test(session_reject      session_reject_test.cpp)
 add_threading_test(session_sending_time sending_time_test.cpp)
 
+# ── 005 Phase 8 — T058: Seam #1 FSM transition matrix (FR-001 / I-1) ────────
+# Meta-attestation that every state×event cell is defined (no UB / no silent
+# no-op). Detailed per-cell behaviour is the per-US seam suite's coverage.
+add_threading_test(session_fsm_transition_matrix fsm_transition_matrix_test.cpp)
+
+# ── 005 Phase 8 — T060: noexcept window + no-C++-across-C-ABI layering ──────
+# Compile-time static_assert + nm/grep checks for FR-015 / [const §X.2].
+# Needs FIXPP_TEST_BINARY_DIR + FIXPP_TEST_SOURCE_DIR for the nm/grep probes.
+add_threading_test(session_layering test_session_layering.cpp)
+target_compile_definitions(session_layering PRIVATE
+  FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

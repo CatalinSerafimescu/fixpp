@@ -83,3 +83,26 @@ set_target_properties(test_clock_sleep_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 add_test(NAME alloc_guard_clock_sleep COMMAND test_clock_sleep_alloc_guard)
+
+# 005-session-establishment-fsm T059 (Seam #12 / SC-009 / I-7):
+# zero-global-heap on the 005-owned hot paths — SeqnumManager
+# (assign_outbound + check_inbound) and the admin builders
+# (build_heartbeat / build_test_request). The cancellable_dispatch + clock
+# sleep paths are covered upstream by 007's alloc-guards above; this binary
+# focuses on the 005-specific surface. Same mallocnesia harness.
+# CTest NAME deliberately NOT `session_`-prefixed (driven by tools/check_alloc.py
+# under LD_PRELOAD, not the ^session_ ctest selection — same convention as
+# alloc_guard_dispatch above).
+add_executable(test_session_alloc_guard test_session_alloc_guard.cpp)
+target_link_libraries(test_session_alloc_guard PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_session_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(test_session_alloc_guard PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME alloc_guard_session COMMAND test_session_alloc_guard)
