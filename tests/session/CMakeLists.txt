@@ -326,6 +326,19 @@ target_compile_definitions(session_layering PRIVATE
 add_threading_test(session_send_path send_path_test.cpp
   $<TARGET_OBJECTS:session_test_support>)
 
+# ── 009-session-fsm-finalize Phase 6 (US4) — T019/T021 ──────────────────────
+
+# T019 — cross-session TestReqID disjointness + monotonicity (FR-010 / SC-003).
+# Registered under BOTH debug (assertion-level checks) AND tsan (data-race check).
+# The tsan preset selection is handled by the preset's toolchain; both CTest entries
+# exist unconditionally and the TSan-specific race detection fires only on the
+# linux-clang-tsan build.
+#
+# CTest label `session_` picks this test up with `-R 'session_|tc_'`.
+add_threading_test(session_test_request_id_cross_session_race
+  test_test_request_id_cross_session_race.cpp)
+
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

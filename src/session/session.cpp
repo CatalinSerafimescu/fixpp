@@ -1217,13 +1217,15 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             }
 
             // No inbound data for heartbt_int: emit TestRequest.
-            // Generate a unique TestReqID (simple sequential counter).
-            static std::uint32_t tr_counter = 0;
+            // Generate a unique TestReqID using the per-session counter
+            // (FR-010 / RC#6): ++next_test_request_id_ replaces the prior
+            // process-global `static tr_counter`. Single-writer on the session
+            // strand; wrap-around at UINT32_MAX is acceptable per research.md D-3.
             std::array<char, 32> id_buf{};
             id_buf[0] = 'T';
             id_buf[1] = 'R';
             auto [end, ec] =
-                std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(), ++tr_counter);
+                std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(), ++next_test_request_id_);
             (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
             pending_test_req_id_.assign(id_buf.data(), end);
             unanswered_tr_ = false;
