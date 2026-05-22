@@ -9,6 +9,7 @@
 // each replaces the marked placeholder body, it is not additive guesswork.
 #include <fixpp/session/session.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include <utility>
 
 #include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_state.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/this_coro.hpp>
@@ -32,7 +34,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/message_store.hpp>        // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
-#include <fixpp/session/admin_messages.hpp>     // 005 US1: interpret_logon (T024/T025)
+#include <fixpp/session/admin_messages.hpp>     // 005 US1: interpret_logon / T046: build_logout
+#include <fixpp/session/direction.hpp>          // 005 US4: direction_t (store outbound)
 #include <fixpp/session/session_fsm.hpp>        // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/session/seqnum_manager.hpp>     // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>
@@ -215,6 +218,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 
     state_ = lifecycle::open;
 
+    // US4 (T046): capture transport_send from config (null if not set).
+    // Called from store_then_emit() AFTER store(outbound) completes (I-3).
+    transport_send_ = cfg_.transport_send;
+
     // T023 (US1, Phase 3): initiator path NotConnected → LogonSent.
     // After all validations and store binding succeed, mint the LogonSent
     // FSM state per data-model.md matrix NotConnected row, open(initiator)
@@ -296,6 +303,33 @@ Session::close(close_mode mode) {
             const auto flush = close_flush_hook_();
             (void)flush;  // store_io_failure → logged-then-proceed (I-07)
         }
+
+        // US4 / T047: phase-1 Logout exchange under a CHILD cancellation_state.
+        // Only runs when the session was in Active state (i.e. reached Active
+        // and has a transport to emit on, or the FSM is at LogoutSent/Active
+        // when close(graceful) is called). If the session never opened or is
+        // already below Active, the Logout step is a no-op.
+        //
+        // The child cancellation_state isolates the Logout write + 2s sleep
+        // from the phase-2 root total signal: phase-2 fires root_cancel_.emit()
+        // AFTER this block resolves (peer ACK | timeout | cancellation).
+        //
+        // [feedback_asio_cospawn_total_cancellation_default]: we use the root
+        // slot for the child; the run_logout_phase1 coroutine resets to
+        // enable_total_cancellation internally.
+        if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
+            auto phase1_r = co_await run_logout_phase1();
+            (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
+        }
+    }
+
+    // US4: ensure FSM is Disconnected before phase-2 fires.
+    // Graceful close: run_logout_phase1 already transitioned to Disconnected.
+    // Terminal close: transition directly here (phase 1 skipped, I-9).
+    // Any other FSM state (LogonSent, NotConnected, etc.) also becomes
+    // Disconnected per the matrix close(terminal)/fatal column.
+    if (fsm_state_ != fsm_state::Disconnected) {
+        fsm_state_ = fsm_state::Disconnected;
     }
 
     // T037/T039 phase 2 — fire root cancellation_type::total ONLY after
@@ -305,6 +339,19 @@ Session::close(close_mode mode) {
     // root_cancellation_slot() (transport r/w, heartbeat sleep, mutex
     // acquire, cancellable_dispatch, parser→fromApp — all 005-owned) unwinds
     // here. terminal reaches phase 2 immediately (phase 1 skipped).
+    //
+    // US4 (T047): cancel any mock_clock (or real clock) sleepers BEFORE
+    // emitting the ASIO total-cancellation signal. The liveness loop's
+    // sleep_until is waiting on the mock_clock timer (not an ASIO channel),
+    // so root_cancel_.emit() alone cannot wake it up — mock_clock::cancel_sleeps()
+    // must be called first so the liveness loop exits its try/catch and the
+    // coroutine can be collected by ioc.run_for() after close() returns.
+    // Real asio::steady_timer sleeps are also cancelled by the ASIO slot, so
+    // this call is safe for non-mock clocks too (cancel_sleeps() is a no-op
+    // when no sleepers are registered).
+    if (effective_clock_) {
+        effective_clock_->cancel_sleeps();
+    }
     root_cancel_.emit(asio::cancellation_type::total);
 
     // T045: clear the session_local<trace_context> slot at close completion
@@ -551,6 +598,32 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 }
             }
 
+            // T046 (US4): inbound Logout in Active/LogonReceived state.
+            // Per data-model.md matrix:
+            //   Active row:        inbound Logout → emit Logout, → Disconnected.
+            //   LogonReceived row: inbound Logout → Disconnected ([FIX-SL §4.6]).
+            if (hdr.msg_type == "5") {  // Logout (35=5)
+                if (fsm_state_ == fsm_state::Active) {
+                    // Active → emit confirming Logout → Disconnected.
+                    // Emit a confirming Logout via store_then_emit.
+                    // Use a stack buffer (I-7: no heap on inbound-dispatch path).
+                    std::array<std::byte, 256> buf{};
+                    auto logout_result = fixpp::session::build_logout(
+                        std::span<std::byte>{buf.data(), buf.size()},
+                        next_outbound_seq_++,
+                        cfg_.sender_comp_id,
+                        cfg_.target_comp_id,
+                        {});
+                    if (logout_result) {
+                        auto emit_r = co_await store_then_emit(*logout_result);
+                        (void)emit_r;  // errors logged-then-proceed (I-07)
+                    }
+                }
+                // Both Active and LogonReceived → Disconnected.
+                fsm_state_ = fsm_state::Disconnected;
+                co_return fixpp::core::expected_t<void>{};
+            }
+
             // T041 (US3): in the Active state, update liveness state and handle
             // liveness-specific message types (Heartbeat / TestRequest).
             if (fsm_state_ == fsm_state::Active) {
@@ -578,26 +651,22 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                     co_return fixpp::core::expected_t<void>{};
                 }
 
-                // T041 US3: Active row — inbound TestRequest → emit Heartbeat
-                // echoing TestReqID(112). The echo Heartbeat is emitted by
-                // constructing the frame and "sending" it via the session's
-                // capture path (which in the test context is verified by
-                // checking the outbound counter; in a real engine this would
-                // go to transport::async_write).
+                // T041 US3 / T042 retirement (US4): Active row — inbound
+                // TestRequest (35=1) → emit Heartbeat echoing TestReqID(112).
+                // Now that transport_send_ is wired (US4/T046), emit the
+                // Heartbeat reply via store_then_emit (I-3 outbound half).
                 if (hdr.msg_type == "1") {  // TestRequest (35=1)
-                    // Echo a Heartbeat with the peer's TestReqID.
-                    // We use a fixed-size stack buffer — no heap allocation
-                    // on the timer-fire / inbound-dispatch path (I-7).
-                    // The outbound seqnum is advanced by the standard send path;
-                    // for US3 we emit via a direct build (transport wiring is US4).
-                    // For now: record that we saw a TestRequest and should echo.
-                    // The actual outbound Heartbeat build (T040 build_heartbeat)
-                    // is here, but without a transport/writer we just update state.
-                    // Post-US4 the Heartbeat will go through Session::send().
-                    //
-                    // For the test scope (T037/T042), the conformance assertion
-                    // is that the FSM stays Active (not that a frame was sent)
-                    // since transport wiring is Phase 6 (US4).
+                    std::array<std::byte, 256> hb_buf{};
+                    auto hb_result = fixpp::session::build_heartbeat(
+                        std::span<std::byte>{hb_buf.data(), hb_buf.size()},
+                        next_outbound_seq_++,
+                        cfg_.sender_comp_id,
+                        cfg_.target_comp_id,
+                        hdr.test_req_id);  // echo the peer's TestReqID
+                    if (hb_result) {
+                        auto emit_r = co_await store_then_emit(*hb_result);
+                        (void)emit_r;
+                    }
                     // Remain in Active.
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -608,11 +677,31 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             co_return fixpp::core::expected_t<void>{};
         }
 
+        case fsm_state::LogoutSent: {
+            // Per matrix LogoutSent row:
+            //   inbound Logout → Disconnected (confirm)
+            //   all other inbound → (drained) — silently accepted, no FSM change
+            //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
+            auto hdr = scan_frame_header(frame);
+            if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
+                fsm_state_        = fsm_state::Disconnected;
+                logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
+                // Wake up the sleep_until in run_logout_phase1 so it can
+                // detect the confirmation and return early (before the 2s timeout).
+                if (effective_clock_) {
+                    effective_clock_->cancel_sleeps();
+                }
+            }
+            // All other inbound frames: drained (no FSM change, no seqnum advance).
+            co_return fixpp::core::expected_t<void>{};
+        }
+
         case fsm_state::LogonSent: {
             // Initiator path: Logon emitted, awaiting peer Logon ack.
             // Per data-model.md matrix LogonSent row:
             //   inbound Logon (valid)            → Active (validate HeartBtInt/CompID/BeginString)
             //   inbound Logon (refused)          → Disconnected
+            //   inbound Logout                   → Disconnected ([FIX-SL §4.6])
             //   inbound Heartbeat/TR/Reject/oos  → session-fatal Logout+disconnect
             //   seqnum too-low / too-high        → fatal Logout(text)+disconnect
             //
@@ -676,13 +765,7 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
             co_return fixpp::core::expected_t<void>{};
         }
 
-        case fsm_state::LogoutSent:
         case fsm_state::Disconnected:
-            // Defined cells: drain without FSM change.
-            // LogoutSent row: all inbound cells are `(drained)` per matrix
-            // (counter NOT advanced, no dispatch, no emit); the non-drained
-            // cells (inbound Logout → Disconnected; graceful-close timeout →
-            // Disconnected) are wired in US4/Phase 6.
             // Disconnected row: all inbound cells `ignored` per matrix.
             co_return fixpp::core::expected_t<void>{};
     }
@@ -795,10 +878,21 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             pending_test_req_id_ = id_buf;
             unanswered_tr_       = false;
 
-            // (T040 build_test_request would emit a frame here; without a
-            // transport path we just arm the grace-window sleep.)
-            // The FSM accounts for the TestRequest emission conceptually;
-            // the actual outbound frame is deferred to US4 transport wiring.
+            // T042 (US4 retirement): emit the TestRequest frame via
+            // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
+            {
+                std::array<std::byte, 256> tr_buf{};
+                auto tr_result = fixpp::session::build_test_request(
+                    std::span<std::byte>{tr_buf.data(), tr_buf.size()},
+                    next_outbound_seq_++,
+                    cfg_.sender_comp_id,
+                    cfg_.target_comp_id,
+                    pending_test_req_id_);
+                if (tr_result) {
+                    auto emit_r = co_await store_then_emit(*tr_result);
+                    (void)emit_r;
+                }
+            }
 
             // Grace window: sleep another heartbt_int.
             auto grace_deadline = now + heartbt_int;
@@ -830,6 +924,110 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     } catch (...) {
         // Any other exception: absorb (noexcept window).
     }
+}
+
+// ── US4 T046: store_then_emit ─────────────────────────────────────────────────
+//
+// Durable-before-transmit (I-3 outbound half):
+//   1. If store_ is available: co_await store_->store(seq, frame, outbound).
+//   2. AFTER store returns: call transport_send_(frame) if non-null.
+// Errors from store(): logged-then-proceed (I-07); close still completes.
+// The outbound seqnum counter (next_outbound_seq_) is already advanced by
+// the caller before passing the committed frame.
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::store_then_emit(std::span<const std::byte> frame) noexcept {
+    // Step 1: store (durable-before-transmit).
+    if (store_) {
+        // The outbound seqnum was already stamped into the frame by the builder;
+        // pass next_outbound_seq_ - 1 (the value that was stamped).
+        const seqnum_t stamped_seq = next_outbound_seq_ - 1u;
+        auto store_r = co_await store_->store(stamped_seq, frame, direction_t::outbound);
+        (void)store_r;  // store errors → logged-then-proceed (I-07)
+    }
+
+    // Step 2: transmit (ONLY after store completes — I-3).
+    if (transport_send_) {
+        transport_send_(frame);
+    }
+
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// ── US4 T047: run_logout_phase1 ───────────────────────────────────────────────
+//
+// Two-phase graceful Logout (D-6 / [2d §6.5] / I-9):
+//   1. Build Logout frame (build_logout) + store_then_emit (I-3 outbound half).
+//   2. Transition FSM to LogoutSent.
+//   3. Sleep up to 2 s (D-8: session_logout_timeout default) under a CHILD
+//      cancellation_state, waking early if logout_confirmed_ is set by
+//      on_inbound_frame() when the peer's confirming Logout arrives.
+//   4. If confirmed → ok.
+//      If timeout → transition to Disconnected, return session_logout_timeout.
+//
+// Called from close(graceful) phase 1 ONLY. The root cancellation_state fires
+// phase-2 total AFTER this coroutine returns (either path).
+//
+// [feedback_asio_cospawn_total_cancellation_default]: this coroutine is called
+// via co_await from close(); the current coroutine's cancellation state is
+// already bound to the root slot. We do NOT reset here — the caller (close)
+// controls the root slot. Instead we use a loop-and-check polling pattern
+// for the logout confirmation, which is safe on the single-strand session.
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::run_logout_phase1() noexcept {
+    using namespace std::chrono_literals;
+    using std::chrono::seconds;
+
+    // Build the Logout frame into a stack buffer.
+    std::array<std::byte, 256> buf{};
+    auto logout_result = fixpp::session::build_logout(
+        std::span<std::byte>{buf.data(), buf.size()},
+        next_outbound_seq_++,
+        cfg_.sender_comp_id,
+        cfg_.target_comp_id,
+        {});
+
+    if (!logout_result) {
+        // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
+        // The session still transitions to LogoutSent and times out.
+    } else {
+        // Emit the Logout frame (store first, then transport_send — I-3).
+        auto emit_r = co_await store_then_emit(*logout_result);
+        (void)emit_r;
+    }
+
+    // Transition to LogoutSent.
+    fsm_state_        = fsm_state::LogoutSent;
+    logout_confirmed_ = false;
+
+    if (!effective_clock_) {
+        // No clock (should not happen post-open): force-disconnect immediately.
+        fsm_state_ = fsm_state::Disconnected;
+        co_return std::unexpected(fixpp::core::error::session_logout_timeout);
+    }
+
+    // Sleep until the 2 s graceful-close timeout (D-8: session_logout_timeout).
+    // on_inbound_frame() will set logout_confirmed_=true AND call
+    // effective_clock_->cancel_sleeps() when the peer's confirming Logout arrives,
+    // waking us up early. When cancel_sleeps fires, sleep_until throws
+    // system_error(operation_aborted); we catch it and check logout_confirmed_.
+    auto deadline = effective_clock_->steady_now() + seconds{2};
+    try {
+        co_await effective_clock_->sleep_until(deadline);
+    } catch (const std::system_error&) {
+        // Woken early: either peer confirmed (logout_confirmed_=true)
+        // or root cancellation fired (phase 2). Check the flag.
+    } catch (...) {
+        // Any other exception: absorb (noexcept window).
+    }
+
+    if (logout_confirmed_) {
+        // Peer confirmed; FSM already set to Disconnected by on_inbound_frame.
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // Timeout (or root cancellation before confirm): force-disconnect.
+    fsm_state_ = fsm_state::Disconnected;
+    co_return std::unexpected(fixpp::core::error::session_logout_timeout);
 }
 
 }  // namespace fixpp::session

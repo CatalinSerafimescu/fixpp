@@ -19,9 +19,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <string>
 
 #include <asio/any_io_executor.hpp>
@@ -124,6 +126,15 @@ struct SessionConfig {
     fixpp::tap::TapConsumer           tap_consumer;             // default = no tap
 
     backpressure_mode app_backpressure = backpressure_mode::block;
+
+    // Out-of-band test/transport sink (US4 / T046 / seam #11).
+    // Called with the committed outbound frame span AFTER store(outbound)
+    // completes (durable-before-transmit, I-3). If null, outbound frames are
+    // silently dropped (mirrors today's "no transport" state for earlier phases).
+    // The 2d::TransportFactory replaces this in the transport/ feature (deferred).
+    // NO std::mutex — must only be called from the session executor strand.
+    // ([const §XV.9] grep gate: this field is a std::function, not std::mutex.)
+    std::function<void(std::span<const std::byte>)> transport_send;
 };
 
 }  // namespace fixpp::session

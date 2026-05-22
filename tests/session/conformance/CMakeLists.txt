@@ -42,16 +42,42 @@ add_test(NAME session_tc_seqnum COMMAND tc_seqnum_test)
 set_tests_properties(session_tc_seqnum PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
 
-# ── T038: tc_liveness — DEFERRED to US4 (Phase 6) ───────────────────────────
-# The 4a/4b [FIX-TC] liveness oracle scenarios require asserting engine-
-# emitted Heartbeat frames against the oracle's E= lines. That requires the
-# outbound transport binding (Session::send via the Session transport member)
-# which is scoped to US4 (Phase 6 / T046 seam #11 + follow-ups). No Session
-# transport member exists yet; without it there is no observable outbound
-# frame and no honest conformance assertion is possible.
+# ── T045: tc_logout — TC-009 subset (13b_UnsolicitedLogoutMessage + timeout) ─
+# Red-first TDD: authored before T046–T048; turns green at T049.
+# Scenarios: 13b_UnsolicitedLogoutMessage (fix42/fix44); GracefulLogoutTimeout;
+# GracefulLogoutBothDirections.
+add_executable(tc_logout_test tc_logout_test.cpp)
+target_link_libraries(tc_logout_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(tc_logout_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_tc_logout COMMAND tc_logout_test)
+set_tests_properties(session_tc_logout PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# ── T038/T042: tc_liveness — US4 Phase 6 retirement (partial) ────────────────
+# 4b_ReceivedTestRequest: inbound TestRequest → engine echoes Heartbeat(112=)
+# is now assertable because transport_send_ is wired (US4/T046). The 4a
+# outbound-idle Heartbeat scenario requires tracking last_outbound_steady_
+# which is deferred to a follow-up phase. Ships 4b GREEN; 4a deferred with
+# traceability in tc_liveness_test.cpp.
 #
-# tc_liveness_test.cpp is retained as a documented header-only source file
-# explaining the deferral. It is NOT compiled into a test executable here —
-# CI cleanly reports 0 conformance tests under this name until US4 wires it.
-#
-# Task tracking: tasks.md T038 + T042 carry the inline deferred-note.
+# Task tracking: tasks.md T038 + T042 closed-partial (4b done, 4a deferred).
+add_executable(tc_liveness_test tc_liveness_test.cpp)
+target_link_libraries(tc_liveness_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(tc_liveness_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_tc_liveness COMMAND tc_liveness_test)
+set_tests_properties(session_tc_liveness PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")

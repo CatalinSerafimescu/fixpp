@@ -275,6 +275,15 @@ add_threading_test(session_durable_before_transmit durable_before_transmit_test.
 # HeartBtInt=0 disable; unanswered-TR disconnect; inbound Heartbeat liveness.
 add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
 
+# ── 005 Phase 6 (US4) — seam #6/#11: Logout exchange + cancellation (T043/T044)
+# Red-first TDD: authored before T046–T048; turns green at T049.
+# seam #6: Logout exchange — graceful both-directions; never-confirmed timeout;
+#          non-Active Logout transitions; outbound store-before-transmit (T029 retire).
+# seam #11: Two-phase cancellation — child cancellation_state; close idempotent;
+#           close(terminal) skips phase 1.
+add_threading_test(session_logout_exchange logout_exchange_test.cpp)
+add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

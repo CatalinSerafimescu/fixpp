@@ -31,6 +31,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
@@ -379,6 +380,35 @@ private:
     // When true the liveness loop transitions the session to Disconnected with
     // session_test_request_unanswered (error slot 74). Single-writer.
     bool unanswered_tr_ = false;
+
+    // ── US4 / T046 transport surface ─────────────────────────────────────────
+    // transport_send_ — captured from cfg_.transport_send at open(). Called
+    // from store_then_emit() AFTER the outbound store() call completes (I-3).
+    // Non-null only when SessionConfig::transport_send was set.
+    // Always called from the session strand (single-writer, no races).
+    std::function<void(std::span<const std::byte>)> transport_send_;
+
+    // Outbound seqnum counter for building admin messages. Advances with every
+    // frame stored to the outbound store. Starts at 1 (seqnum_min).
+    fixpp::session::seqnum_t next_outbound_seq_ = fixpp::session::seqnum_min;
+
+    // logout_confirmed_: set to true when an inbound Logout is received while
+    // in LogoutSent state (the peer is confirming our Logout). The
+    // run_logout_phase1 coroutine polls this to determine whether the
+    // graceful-close completes normally or times out. Single-writer on strand.
+    bool logout_confirmed_ = false;
+
+    // store_then_emit: store(outbound) BEFORE transport_send (I-3).
+    // seq: the outbound MsgSeqNum to store with; span: the committed frame bytes.
+    // Returns ok on success; propagates store errors (logs + continues per I-07).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+        store_then_emit(std::span<const std::byte> frame) noexcept;
+
+    // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
+    // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
+    // CHILD cancellation_state. Called from close(graceful) phase 1.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+        run_logout_phase1() noexcept;
 };
 
 }  // namespace fixpp::session
