@@ -491,4 +491,153 @@ TEST(AdminMessagesInterpret, NonLogonMsgTypeRejectsAsInvalidLogon) {
     EXPECT_FALSE(r.has_value());
 }
 
+// Helper used by the per-validation-arm tests below.
+namespace {
+std::vector<std::byte> build_raw_logon(std::string_view begin,
+                                       std::string_view sender,
+                                       std::string_view target,
+                                       int heartbt_int,
+                                       bool include_108 = true) {
+    const std::byte SOH{0x01};
+    std::vector<std::byte> frame;
+    auto push = [&](std::string_view s) {
+        for (char c : s) frame.push_back(static_cast<std::byte>(c));
+    };
+    push("8="); push(begin); frame.push_back(SOH);
+    push("35=A"); frame.push_back(SOH);
+    push("34=1"); frame.push_back(SOH);
+    push("49="); push(sender); frame.push_back(SOH);
+    push("52=20200101-00:00:00.000"); frame.push_back(SOH);
+    push("56="); push(target); frame.push_back(SOH);
+    push("98=0"); frame.push_back(SOH);
+    if (include_108) {
+        push("108=");
+        char nbuf[12];
+        std::snprintf(nbuf, sizeof(nbuf), "%d", heartbt_int);
+        push(nbuf);
+        frame.push_back(SOH);
+    }
+    return frame;
+}
+}  // namespace
+
+TEST(AdminMessagesInterpret, BeginStringMismatchReturnsError) {
+    auto frame = build_raw_logon("FIX.4.2", "SENDER", "TARGET", 30);
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_begin_string_unsupported);
+}
+
+TEST(AdminMessagesInterpret, SenderCompIdMismatchReturnsError) {
+    auto frame = build_raw_logon("FIX.4.4", "WRONG_SENDER", "TARGET", 30);
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_compid_mismatch);
+}
+
+TEST(AdminMessagesInterpret, TargetCompIdMismatchReturnsError) {
+    auto frame = build_raw_logon("FIX.4.4", "SENDER", "WRONG_TARGET", 30);
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_compid_mismatch);
+}
+
+TEST(AdminMessagesInterpret, MissingHeartBtIntReturnsInvalidLogon) {
+    // include_108=false omits the 108= field entirely.
+    auto frame = build_raw_logon("FIX.4.4", "SENDER", "TARGET", 0, /*include_108=*/false);
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
+}
+
+TEST(AdminMessagesInterpret, NonNumericHeartBtIntReturnsInvalidLogon) {
+    // Manually craft a 108=XYZ field that fails int parse.
+    const std::byte SOH{0x01};
+    std::vector<std::byte> frame;
+    auto push = [&](std::string_view s) {
+        for (char c : s) frame.push_back(static_cast<std::byte>(c));
+    };
+    push("8=FIX.4.4");      frame.push_back(SOH);
+    push("35=A");           frame.push_back(SOH);
+    push("34=1");           frame.push_back(SOH);
+    push("49=SENDER");      frame.push_back(SOH);
+    push("52=20200101-00:00:00.000"); frame.push_back(SOH);
+    push("56=TARGET");      frame.push_back(SOH);
+    push("98=0");           frame.push_back(SOH);
+    push("108=XYZ");        frame.push_back(SOH);
+
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
+}
+
+// ── Calibrated buffer sizes covering each build_logon error-propagation arm ─
+//
+// build_logon writes 8 fields sequentially. Different out-buffer sizes fail
+// the Writer at different positions, hitting distinct error-propagation arms
+// in admin_messages.cpp (lines 80-82 / 87-89 / 97-99 / 103-105 / 120-122 /
+// 126-128 / 132-135 / 143-146). This parametric test calibrates several
+// sizes that progressively fail at different points.
+
+class BuildLogonCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
+
+TEST_P(BuildLogonCalibratedBufferSizes, AllSizesFailGracefully) {
+    const std::size_t sz = GetParam();
+    std::vector<std::byte> buf(sz);
+    auto r = fixpp::session::build_logon(
+        std::span<std::byte>{buf}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30);
+    EXPECT_FALSE(r.has_value())
+        << "build_logon with " << sz << "-byte buffer must fail";
+}
+
+// Sweep buffer sizes from too-small (1 byte) up through partial-success ranges
+// to just-below the minimum (~70 bytes). Each tier hits a different writer-
+// internal append failure arm.
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
+                         BuildLogonCalibratedBufferSizes,
+                         ::testing::Values(1, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72));
+
+class BuildLogoutCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
+TEST_P(BuildLogoutCalibratedBufferSizes, AllSizesFailGracefully) {
+    const std::size_t sz = GetParam();
+    std::vector<std::byte> buf(sz);
+    auto r = fixpp::session::build_logout(
+        std::span<std::byte>{buf}, /*seq=*/2, "SENDER", "TARGET", "explanatory");
+    EXPECT_FALSE(r.has_value());
+}
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
+                         BuildLogoutCalibratedBufferSizes,
+                         ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
+
+class BuildHeartbeatCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
+TEST_P(BuildHeartbeatCalibratedBufferSizes, AllSizesFailGracefully) {
+    const std::size_t sz = GetParam();
+    std::vector<std::byte> buf(sz);
+    auto r = fixpp::session::build_heartbeat(
+        std::span<std::byte>{buf}, /*seq=*/3, "SENDER", "TARGET",
+        std::string_view{"TR-LONG-TEST-REQ-ID"});
+    EXPECT_FALSE(r.has_value());
+}
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
+                         BuildHeartbeatCalibratedBufferSizes,
+                         ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
+
+class BuildRejectCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
+TEST_P(BuildRejectCalibratedBufferSizes, AllSizesFailGracefully) {
+    const std::size_t sz = GetParam();
+    std::vector<std::byte> buf(sz);
+    auto r = fixpp::session::build_reject(
+        std::span<std::byte>{buf}, /*seq=*/4, "SENDER", "TARGET",
+        seqnum_t{1}, 371, "D", 3);
+    EXPECT_FALSE(r.has_value());
+}
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
+                         BuildRejectCalibratedBufferSizes,
+                         ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
+
 }  // namespace fixpp::session::test

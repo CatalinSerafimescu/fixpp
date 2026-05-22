@@ -388,6 +388,47 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_NonLogonFirstMessage_TransitionsToD
         << "(session.cpp:548-550; matrix row 1)";
 }
 
+// Acceptor-shaped NotConnected: a fresh session (no open() called) receives a
+// valid peer Logon (BeginString + CompID + seqnum=1 all match cfg). Per the
+// matrix row NotConnected×Logon(valid), the FSM transitions to LogonReceived
+// (session.cpp:578).
+TEST_F(FsmTransitionMatrixTest, NotConnected_ValidLogonFromPeer_LandsInLogonReceived) {
+    auto cfg = make_initiator_cfg();
+    Session sess(engine, cfg);
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    // Build a peer Logon: peer's 49=ISLD = our target, peer's 56=TW = our sender,
+    // BeginString=FIX.4.2 matches cfg, seqnum=1.
+    auto peer_logon = make_admin_frame("A", 1, "ISLD", "TW");
+    // make_admin_frame doesn't include 98=0 + 108=N, so this might not parse as
+    // a valid Logon by interpret_logon's strict criteria. Build it manually.
+    const std::string body =
+        "8=FIX.4.2\x01"
+        "9=74\x01"
+        "35=A\x01"
+        "34=1\x01"
+        "49=ISLD\x01"
+        "52=20200101-00:00:00.000\x01"
+        "56=TW\x01"
+        "98=0\x01"
+        "108=30\x01";
+    std::uint32_t cs = 0;
+    for (char c : body) cs = (cs + static_cast<unsigned char>(c)) & 0xFFU;
+    char csbuf[4];
+    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+    const std::string full = body + "10=" + csbuf + "\x01";
+
+    std::vector<std::byte> frame;
+    frame.reserve(full.size());
+    for (char c : full) frame.push_back(static_cast<std::byte>(c));
+
+    (void)feed_sync(sess, frame);
+
+    EXPECT_EQ(sess.state(), fsm_state::LogonReceived)
+        << "NotConnected + valid peer Logon (acceptor first message) must "
+        << "transition to LogonReceived (session.cpp:578)";
+}
+
 TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_StaysInNotConnected) {
     // Feed a Logon (35=A) with wrong BeginString — interpret_logon refuses.
     // Phase 3 contract: session stays in NotConnected (does NOT reach Active);

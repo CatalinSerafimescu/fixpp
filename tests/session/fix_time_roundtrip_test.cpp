@@ -391,6 +391,37 @@ TEST(FixTimeRoundtrip, FormatPreEpochTimestampRoundtripsCorrectly) {
     EXPECT_TRUE(r.equal) << "pre-epoch must roundtrip; got " << r.formatted;
 }
 
+// ── Leap-year branches (Phase 8 /simplify finding 4-branch follow-up) ──────
+//
+// is_leap() has 3 sub-branches: y%4==0 && y%100!=0, y%400==0, fall-through.
+// days_in_month(2, year) calls is_leap; only the non-leap path is exercised
+// by the existing corpus. These three tests cover all three sub-branches +
+// the days_in_month leap-year True arm.
+
+// 2024 = ordinary leap year (y%4==0 && y%100!=0). Feb 29 2024 must parse OK.
+TEST(FixTimeRoundtrip, ParseFeb29InOrdinaryLeapYearSucceeds) {
+    const std::string_view ok = "20240229-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(ok.data(), ok.size()));
+    EXPECT_TRUE(r.has_value()) << "Feb 29 2024 is valid (leap year)";
+}
+
+// 2000 = centennial leap year (y%400==0). Feb 29 2000 must parse OK.
+TEST(FixTimeRoundtrip, ParseFeb29InCentennialLeapYearSucceeds) {
+    const std::string_view ok = "20000229-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(ok.data(), ok.size()));
+    EXPECT_TRUE(r.has_value()) << "Feb 29 2000 is valid (centennial leap year)";
+}
+
+// 1900 = centennial non-leap (y%100==0 && y%400!=0). Feb 29 1900 must fail.
+TEST(FixTimeRoundtrip, ParseFeb29InCentennialNonLeapYearReturnsError) {
+    const std::string_view bad = "19000229-00:00:00";
+    auto r = fix_string_to_utc_time(
+        std::span<const char>(bad.data(), bad.size()));
+    EXPECT_FALSE(r.has_value()) << "Feb 29 1900 invalid (centennial non-leap)";
+}
+
 TEST(FixTimeRoundtrip, FormatDeepPreEpochTimestampRoundtripsCorrectly) {
     // 1969-01-15T12:34:56Z — well before epoch, exercises the day-boundary
     // adjustment fully.
