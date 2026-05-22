@@ -48,14 +48,14 @@ Default-initialization of `SessionConfig::role` to `initiator` preserves all exi
 
 ### `admin_messages` builders (005-owned; this slice extends signatures)
 
-The 5 admin builders (`build_logon`, `build_logout`, `build_heartbeat`, `build_test_request`, `build_reject`) in `include/fixpp/session/admin_messages.hpp` + `src/session/admin_messages.cpp` gain two parameters:
+The 5 admin builders (`build_logon`, `build_logout`, `build_heartbeat`, `build_test_request`, `build_reject`) in `include/fixpp/session/admin_messages.hpp` + `src/session/admin_messages.cpp` gain parameters per the table below. **Note (analyze finding C1):** `build_logon` (line 40 of `admin_messages.hpp`) already has `begin_string` in its signature — it gains only `sending_time` here. The other 4 builders gain both `begin_string` AND `sending_time`.
 
 | Parameter | Type | Source | Notes |
 |---|---|---|---|
-| `begin_string` | `std::string_view` | FR-002 / RC#4 | Threaded from `cfg_.begin_string` at the call site. Replaces the hardcoded `kBeginStringDefault = "FIX.4.2"`. |
-| `sending_time` | `std::string_view` | FR-003 / RC#4 | Pre-formatted via `core::utc_time_to_fix_string(effective_clock_->now())` at the call site. Replaces the hardcoded `kSendingTimePlaceholder = "00000000-00:00:00.000"`. |
+| `begin_string` | `std::string_view` | FR-002 / RC#4 | Threaded from `cfg_.begin_string` at the call site. Replaces the hardcoded `kBeginStringDefault = "FIX.4.2"`. **Added to 4 builders** (`build_logout`, `build_heartbeat`, `build_test_request`, `build_reject`); `build_logon` already has it. |
+| `sending_time` | `std::string_view` | FR-003 / RC#4 | Pre-formatted via `core::utc_time_to_fix_string(effective_clock_->now())` at the call site. Replaces the hardcoded `kSendingTimePlaceholder = "00000000-00:00:00.000"`. **Added to all 5 builders.** |
 
-Constants `kBeginStringDefault` and `kSendingTimePlaceholder` are **removed**. All 9 call sites in `src/session/session.cpp` (lines per Opus triage: 322, 657, 671, 715, 880, 1054, plus `run_logout_phase1` etc.) are updated to pass both arguments.
+Constants `kBeginStringDefault` and `kSendingTimePlaceholder` are **removed**. All 9 call sites in `src/session/session.cpp` (lines per Opus triage: 322, 657, 671, 715, 880, 1054, plus `run_logout_phase1` etc.) are updated to pass the appropriate arguments per builder.
 
 ## Unmodified entities (inherited from 005)
 

@@ -155,6 +155,38 @@ No new entities. This slice modifies existing entities (`Session`, `SessionConfi
 - **Test-quality binding.** The completeness audit at 009 close-out MUST adopt the audit-test-bodies rule from `[[project_005_phase8_completeness_false_pass]]` — existence-mapping (file named, FR listed, task `[X]`) is INSUFFICIENT for any FR whose primary deliverable is a runtime behavior; the audit MUST grep test bodies for the contract assertion content.
 - **No interop-gate dependency.** This slice is independent of the per-release interop work (Phase 9 in the parent's planning files per `[[project_release_interop_quickfix_fix8]]`). The two share the "Phase 9" naming only by coincidence — different scope, different cadence.
 
+## Normative References
+
+Per `[const §VI.5]` (applies per-artifact). All entries below are referenced inline in the FRs and acceptance scenarios above; this section consolidates them.
+
+**FIX specification:**
+- `[FIX-SL §4.10]` *FIX Session Layer §4.10 — State transitions* — binding for FR-005 / FR-006 (matrix cells).
+- `[FIX-SL §4.5.4]` *FIX Session Layer §4.5.4 — SendingTime validation* — binding for FR-007 / FR-008 / FR-009.
+- `[FIX-SL §4.5]` *FIX Session Layer §4.5 — TestRequest / Heartbeat* — binding for FR-010 (TestReqID semantics).
+- `[FIX-SL §4.2.3]` *FIX Session Layer §4.2.3 — Logon validation* — binding for FR-004 / FR-006.
+- `[FIX-SL §4.3]` *FIX Session Layer §4.3 — Logout exchange* — binding for FR-009 (LogonSent-special logout-with-error).
+
+**Project Phase-2 design anchors:**
+- `[2e §4.1]` *2e-msgstore §4.1 — MessageStore consumed interface* — binding for FR-001 (durable-before-transmit).
+- `[2e §3.1]` *2e-msgstore §3.1 — Phase-4 FSM handoff* — referenced for "no `RecoveryPending`" inheritance from 005.
+- `[2d §7.9]` *2d-threading §7.9 — effective_clock resolution* — binding for FR-002 / FR-003 / FR-011.
+- `[2d §4.5]` *2d-threading §4.5 — SessionConfig fields* — binding for FR-004.
+- `[2f §7.3]` *2f-async-mutex §7.3 — async_mutex lifecycle + teardown* — binding for FR-011.
+
+**Source contracts (binding, 005-owned, unchanged):**
+- `005/contracts/session.hpp:46-50` — `Session::send` outbound pipeline contract — binding for FR-001.
+- `005/contracts/sending_time.hpp:8-18,23-24` — outbound stamp + inbound validation — binding for FR-002 / FR-003 / FR-007 / FR-008 / FR-009.
+- `005/contracts/admin_messages.hpp` — admin builder semantics — binding for FR-002 / FR-003.
+- `005/contracts/session_fsm.hpp` — FSM transition matrix — binding for FR-005 / FR-006.
+- `005/data-model.md:19` — `[FIX-SL §4.10]` transition table — binding for FR-005 / FR-006.
+
+**Constitutional invariants:**
+- `[const §VIII.5]` (zero-alloc parse-to-fromApp), `[const §X.2]` (no C++ across C ABI), `[const §XI.1-7]` (coroutines + per-session strand + async_mutex + threading-affecting controls), `[const §XV.9]` (no `std::mutex` in awaitable headers), `[arch §5.3]` (no exceptions in noexcept window) — all inherited from 005 unchanged.
+
+**Source-layer invariants:**
+- `library/include/fixpp/core/sync/async_mutex.hpp:155-160,683-690` — `async_mutex` destructor teardown precondition (terminate if held / waiters present) — binding for FR-011.
+- `library/include/fixpp/session/seqnum_manager.hpp:50-53,96-100` — documented drain lifecycle — binding for FR-011.
+
 ## Dependencies
 
 - The 005 Gate-A-converged bundle (`specs/005-session-establishment-fsm/{spec,plan,research,data-model,tasks,quickstart,contracts/*}.md`) is the binding design input. Read it FIRST.
