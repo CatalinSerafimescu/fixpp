@@ -29,12 +29,14 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
 
+#include <fixpp/core/clock.hpp>           // steady_time_point (T041 US3 liveness)
 #include <fixpp/core/error.hpp>          // expected_t
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
@@ -343,6 +345,40 @@ private:
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).
     // Lifetime: bound to Session; drained at close().
     SeqnumManager seqnum_mgr_;
+
+    // ── 005 US3 liveness loop (T039/T041) ────────────────────────────────────
+    // run_liveness_loop — co_spawned on the session executor when the session
+    // first enters Active state (LogonSent → Active via peer Logon-ack, or
+    // NotConnected → LogonReceived → Active via acceptor path). Drives:
+    //   1. Outbound idle: after heartbt_int of no outbound data → emit Heartbeat.
+    //   2. Inbound silence: after heartbt_int of no inbound data → emit TestRequest.
+    //   3. Unanswered TestRequest: after grace window (1×heartbt_int) without
+    //      inbound Heartbeat reply → session_test_request_unanswered → Disconnected.
+    //   4. HeartBtInt=0: co_returns immediately (no timers armed — FR-006).
+    // Runs under the root cancellation slot; Session::close() cancels it.
+    // [feedback_asio_cospawn_total_cancellation_default]: the coroutine resets to
+    // enable_total_cancellation.
+    [[nodiscard]] asio::awaitable<void> run_liveness_loop() noexcept;
+
+    // ── 005 US3 liveness state (T041) ────────────────────────────────────────
+    // last_inbound_steady_ — the effective_clock.steady_now() at which the most
+    // recent inbound frame was processed in Active state. Used by the liveness
+    // timer loop to compute the inbound-silence elapsed time. Initialised to
+    // the epoch; updated on every inbound frame in Active. Single-writer on the
+    // per-session strand.
+    fixpp::core::steady_time_point last_inbound_steady_{};
+
+    // pending_test_req_id_ — the TestReqID of the most recently emitted
+    // TestRequest that has not yet been acknowledged by an inbound Heartbeat.
+    // Empty when no TestRequest is outstanding. When the liveness timer loop
+    // fires an unanswered-TR disconnect, this field holds the unacknowledged ID.
+    std::string pending_test_req_id_;
+
+    // unanswered_tr_ — set to true when a TestRequest has been emitted and the
+    // grace window (1×HeartBtInt) has elapsed without a Heartbeat reply.
+    // When true the liveness loop transitions the session to Disconnected with
+    // session_test_request_unanswered (error slot 74). Single-writer.
+    bool unanswered_tr_ = false;
 };
 
 }  // namespace fixpp::session

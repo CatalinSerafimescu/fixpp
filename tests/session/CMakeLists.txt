@@ -269,6 +269,12 @@ add_threading_test(session_seqnum_gap_fatal seqnum_gap_fatal_test.cpp)
 # Seam #10: Durable-before-transmit ordering (T029).
 add_threading_test(session_durable_before_transmit durable_before_transmit_test.cpp)
 
+# ── 005 Phase 5 (US3) — seam #5: Heartbeat/TestRequest test (T037) ───────────
+# Red-first TDD: authored before T039–T042 implementation; turns green at T042.
+# Tests: build_heartbeat/build_test_request builders; inbound TestRequest echo;
+# HeartBtInt=0 disable; unanswered-TR disconnect; inbound Heartbeat liveness.
+add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

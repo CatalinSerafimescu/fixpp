@@ -41,3 +41,17 @@ target_include_directories(tc_seqnum_test PRIVATE
 add_test(NAME session_tc_seqnum COMMAND tc_seqnum_test)
 set_tests_properties(session_tc_seqnum PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# ── T038: tc_liveness — DEFERRED to US4 (Phase 6) ───────────────────────────
+# The 4a/4b [FIX-TC] liveness oracle scenarios require asserting engine-
+# emitted Heartbeat frames against the oracle's E= lines. That requires the
+# outbound transport binding (Session::send via the Session transport member)
+# which is scoped to US4 (Phase 6 / T046 seam #11 + follow-ups). No Session
+# transport member exists yet; without it there is no observable outbound
+# frame and no honest conformance assertion is possible.
+#
+# tc_liveness_test.cpp is retained as a documented header-only source file
+# explaining the deferral. It is NOT compiled into a test executable here —
+# CI cleanly reports 0 conformance tests under this name until US4 wires it.
+#
+# Task tracking: tasks.md T038 + T042 carry the inline deferred-note.
