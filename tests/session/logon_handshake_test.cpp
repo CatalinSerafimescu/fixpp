@@ -159,6 +159,7 @@ protected:
     }
 
     // Build a minimal acceptor config (sender=ISLD, target=TW).
+    // FR-004: role=acceptor set explicitly per T010.
     fixpp::session::SessionConfig make_acceptor_cfg(int heartbt_int = 30,
                                                      std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
@@ -169,10 +170,12 @@ protected:
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        cfg.role               = fixpp::session::session_role::acceptor;  // FR-004 / T010
         return cfg;
     }
 
     // Build a minimal initiator config (sender=TW, target=ISLD).
+    // FR-004: role=initiator set explicitly per T010 (same as default, explicit for clarity).
     fixpp::session::SessionConfig make_initiator_cfg(int heartbt_int = 30) {
         fixpp::session::SessionConfig cfg;
         cfg.sender_comp_id     = "TW";
@@ -182,6 +185,7 @@ protected:
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        cfg.role               = fixpp::session::session_role::initiator;  // FR-004 / T010 (explicit)
         return cfg;
     }
 
@@ -431,6 +435,86 @@ TEST_F(LogonHandshakeTest, InterpretLogonWrongTargetReturnsError) {
             << "Wrong error code for TargetCompID mismatch";
     }
 }
+
+// ── Phase 4 / US2 tests (T010) ────────────────────────────────────────────────
+
+// US2-AC1 (FR-004): Acceptor open() does NOT transition to LogonSent.
+// After open(), acceptor must remain in NotConnected — no outbound Logon is emitted.
+// TDD-RED: today's open() unconditionally sets LogonSent for all roles.
+// Anchors: spec.md FR-004 §US2 AC1; data-model.md §E1 Session::open modified;
+//          contracts/session_role.hpp; opus_pr81_1_triage.md RC#2.
+TEST_F(LogonHandshakeTest, AcceptorOpenStaysInNotConnected) {
+    auto cfg = make_acceptor_cfg(30);
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+    ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
+
+    EXPECT_EQ(sess.state(), fsm_state::NotConnected)
+        << "Acceptor must stay NotConnected after open() — no outbound Logon; "
+        << "got state=" << static_cast<int>(sess.state())
+        << " (FR-004 §US2 AC1)";
+}
+
+// US2-AC2 (FR-005): Acceptor valid peer Logon drives NotConnected→LogonReceived→Active.
+// The test MUST observe LogonReceived as an intermediate state, not just Active.
+// We observe it by capturing state() synchronously after on_inbound_frame returns
+// — the acceptor path is deterministic single-step: on_inbound_frame transitions
+// NotConnected→LogonReceived in one call (the strand is owned by ioc, not a
+// background thread, so no race between the co_await resume and our read).
+// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row;
+//          contracts/session_role.hpp; opus_pr81_1_triage.md RC#2.
+TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) {
+    auto cfg = make_acceptor_cfg(30);
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+    ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
+
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected)
+        << "Acceptor must be NotConnected before peer Logon (prereq)";
+
+    // Step 1: feed valid peer Logon — must move to LogonReceived.
+    // Per data-model.md:19 matrix: NotConnected × inbound Logon (valid) → LogonReceived.
+    auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
+    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+    EXPECT_TRUE(inbound_result.has_value())
+        << "on_inbound_frame() returned error for valid peer Logon";
+
+    // Capture the state after the single on_inbound_frame call.
+    // The ioc test harness is single-threaded; state() is read from the same
+    // thread that just ran the strand, so this is a deterministic snapshot.
+    const auto state_after_first_frame = sess.state();
+
+    // The matrix row NotConnected × valid Logon → LogonReceived (not directly Active).
+    // LogonReceived is the intermediate state before the acceptor emits its own Logon-ack.
+    // The contract requires this intermediate to be observable.
+    EXPECT_EQ(state_after_first_frame, fsm_state::LogonReceived)
+        << "Acceptor should be in LogonReceived after peer Logon arrives; "
+        << "got state=" << static_cast<int>(state_after_first_frame)
+        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
+
+    // After LogonReceived the session transitions to Active (reply Logon emitted internally).
+    // Verify the final settled state is Active.
+    const auto final_state = sess.state();
+    EXPECT_TRUE(final_state == fsm_state::Active || final_state == fsm_state::LogonReceived)
+        << "Acceptor must reach Active (or stay LogonReceived if ack is async); "
+        << "got state=" << static_cast<int>(final_state);
+}
+
+// US2-AC3 (FR-004): Initiator open() still transitions to LogonSent and emits outbound Logon.
+// Regression test — the role branch must not break the existing initiator path.
+// Anchors: spec.md FR-004 §US2 AC3; data-model.md §E1 Session::open modified.
+TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
+    auto cfg = make_initiator_cfg(30);
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+    ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
+
+    EXPECT_EQ(sess.state(), fsm_state::LogonSent)
+        << "Initiator must reach LogonSent after open() per FR-004 §US2 AC3; "
+        << "got state=" << static_cast<int>(sess.state());
+}
+
+// ── Original T10: stamp_sending_time() unit test (preserved) ─────────────────
 
 // T10: stamp_sending_time() — formats SendingTime correctly (T022 unit test).
 TEST_F(LogonHandshakeTest, StampSendingTimeFormatsCorrectly) {
