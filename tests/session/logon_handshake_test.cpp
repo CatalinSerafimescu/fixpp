@@ -217,12 +217,13 @@ TEST_F(LogonHandshakeTest, InitiatorOpenEntersLogonSent) {
     auto open_result = open_sync(sess);
     ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
 
-    // After T023 wires the initiator path the state should be LogonSent.
-    const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Disconnected)
-        << "Initiator should not be Disconnected after open()";
-    // Once T023 is wired:
-    // EXPECT_EQ(s, fsm_state::LogonSent);
+    // T023 (US1, Phase 3) wires the initiator NotConnected → LogonSent
+    // transition at the tail of Session::open(). The matrix-strict outcome
+    // is `LogonSent`; assert it directly.
+    EXPECT_EQ(sess.state(), fsm_state::LogonSent)
+        << "Initiator should transition NotConnected → LogonSent after open() "
+        << "per data-model.md matrix; got state="
+        << static_cast<int>(sess.state());
 }
 
 // T2: Acceptor: valid inbound Logon → FSM reaches Active or LogonReceived.

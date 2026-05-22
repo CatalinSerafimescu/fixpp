@@ -208,6 +208,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     }
 
     state_ = lifecycle::open;
+
+    // T023 (US1, Phase 3): initiator path NotConnected → LogonSent.
+    // After all validations and store binding succeed, mint the LogonSent
+    // FSM state per data-model.md matrix NotConnected row, open(initiator)
+    // cell. The actual Logon emission (build + transport::async_write +
+    // SendingTime stamping) is wired in US1/US4 via the Session::send()
+    // path; this assignment is the FSM half of the transition required by
+    // the matrix so subsequent inbound dispatch (on_inbound_frame()) hits
+    // the LogonSent row instead of the NotConnected row.
+    fsm_state_ = fsm_state::LogonSent;
+
     co_return fixpp::core::expected_t<void>{};
 }
 
