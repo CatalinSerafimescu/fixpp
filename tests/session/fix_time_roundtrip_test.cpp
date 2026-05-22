@@ -4,9 +4,6 @@
 //
 // Seam #9 — FIX UTCTimestamp format↔parse roundtrip (005-session-establishment-fsm T009).
 //
-// Must FAIL until T010 (include/fixpp/core/fix_time.hpp) and T011
-// (src/core/fix_time.cpp) are authored. After T011 this turns green.
-//
 // Corpus: epoch, leap-second-adjacent timestamps, and sub-second variants at
 // ms (FIX 4.x default) and µs precision (FR-012, SC-007/SC-010, I-6, D-3).
 // Grammar: YYYYMMDD-HH:MM:SS[.sss[sss]] — never coarser than seconds;
@@ -353,7 +350,7 @@ TEST(FixTimeRoundtrip, ParseNonDigitMicrosReturnsError) {
     EXPECT_FALSE(r.has_value());
 }
 
-// ── Format-side branches (Phase 8 /simplify finding 4 — branch coverage) ────
+// ── Format-side branches (buffer-too-small + negative-epoch handling) ──────
 
 TEST(FixTimeRoundtrip, FormatBufferTooSmallSecondsReturnsError) {
     // 17-char minimum for seconds precision; pass 16.
@@ -391,7 +388,7 @@ TEST(FixTimeRoundtrip, FormatPreEpochTimestampRoundtripsCorrectly) {
     EXPECT_TRUE(r.equal) << "pre-epoch must roundtrip; got " << r.formatted;
 }
 
-// ── Leap-year branches (Phase 8 /simplify finding 4-branch follow-up) ──────
+// ── Leap-year branches (is_leap + days_in_month, all three sub-paths) ─────
 //
 // is_leap() has 3 sub-branches: y%4==0 && y%100!=0, y%400==0, fall-through.
 // days_in_month(2, year) calls is_leap; only the non-leap path is exercised

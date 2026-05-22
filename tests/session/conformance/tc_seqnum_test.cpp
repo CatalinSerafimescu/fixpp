@@ -5,9 +5,6 @@
 // [FIX-TC] Seqnum conformance subset — 005-session-establishment-fsm T030
 // US2 Phase 4.
 //
-// TDD red-first: authored BEFORE T031–T036 implementation.
-// Must FAIL until T031–T036 wire the US2 path. After T036: GREEN.
-//
 // Scenarios from the QuickFIX oracle (research D-10):
 //   2a_MsgSeqNumCorrect     — in-sequence message accepted; counter advances.
 //   2c_MsgSeqNumTooLow      — too-low (no PossDup) → session-fatal ([FIX-SL §4.1]).

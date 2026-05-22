@@ -5,10 +5,6 @@
 // Seam #8 — SendingTime(52) MaxLatency enforcement (Q3).
 // (005-session-establishment-fsm T051 / Phase 7 / US5)
 //
-// TDD red-first: authored BEFORE T055/T056 implementation. Must FAIL until
-// those tasks wire the MaxLatency check and the guard-precedence ordering.
-// After T057 must be GREEN.
-//
 // Scenarios (FR-013, SC-007, Clarification Q3, D-3/D-8):
 //
 //  1. check_sending_time: within MaxLatency → returns ok (expected_t<void>{}).

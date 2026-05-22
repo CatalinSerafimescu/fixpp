@@ -61,6 +61,17 @@ namespace {
     return {reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
 }
 
+// 52=SendingTime placeholder. The session layer stamps the real value via
+// stamp_sending_time post-build; this fixed 21-char ms-precision value is
+// emitted by every admin builder so the wire layout is grammar-conforming.
+// The QFJ acceptance corpus is lenient on this field (matches <TIME> token).
+constexpr std::string_view kSendingTimePlaceholder{"00000000-00:00:00.000"};
+
+// 8=BeginString default emitted by every non-Logon admin builder. Sessions
+// embed the correct FIX version via the session config; this default keeps
+// the unit-test path runnable when build_xxx is called without a session.
+constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
+
 }  // namespace
 
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────────
@@ -116,8 +127,7 @@ namespace {
     // a zero-epoch placeholder consistent with how the oracle .def files use
     // <TIME> (any value is acceptable to the oracle comparison at the 52= field).
     {
-        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
-        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -293,8 +303,7 @@ next_field:
 
     // 8=BeginString (placeholder — sessions pass "FIX.4.2" or "FIX.4.4").
     {
-        constexpr std::string_view kBegin{"FIX.4.2"};
-        if (auto r = w.append_raw(8, sv_to_bytes(kBegin)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -324,8 +333,7 @@ next_field:
 
     // 52=SendingTime (placeholder — zero-epoch; session stamps the real time).
     {
-        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
-        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -373,8 +381,7 @@ next_field:
     // begin_string is NOT a parameter because the existing contract (admin_messages.hpp)
     // does not carry it; we use a fixed "FIX.4.2" (matches the test oracle context).
     {
-        constexpr std::string_view kBegin{"FIX.4.2"};
-        if (auto r = w.append_raw(8, sv_to_bytes(kBegin)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -404,8 +411,7 @@ next_field:
 
     // 52=SendingTime (zero-epoch placeholder — session stamps the real time)
     {
-        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
-        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -444,8 +450,7 @@ next_field:
 
     // 8=BeginString
     {
-        constexpr std::string_view kBegin{"FIX.4.2"};
-        if (auto r = w.append_raw(8, sv_to_bytes(kBegin)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -475,8 +480,7 @@ next_field:
 
     // 52=SendingTime
     {
-        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
-        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -520,8 +524,7 @@ next_field:
 
     // 8=BeginString placeholder (same convention as other builders).
     {
-        constexpr std::string_view kBegin{"FIX.4.2"};
-        if (auto r = w.append_raw(8, sv_to_bytes(kBegin)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -551,8 +554,7 @@ next_field:
 
     // 52=SendingTime (zero-epoch placeholder — session stamps the real time).
     {
-        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
-        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
             return std::unexpected(r.error());
         }
     }

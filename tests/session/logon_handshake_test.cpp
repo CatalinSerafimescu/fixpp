@@ -4,9 +4,6 @@
 //
 // Seam #2 — Logon handshake (005-session-establishment-fsm T019 / Phase 3 / US1).
 //
-// TDD red-first: authored BEFORE T021–T026 implementation; must FAIL until
-// T021–T026 wire the US1 path. After T026 must be GREEN.
-//
 // Scenarios covered:
 //   1. Initiator open() → FSM enters LogonSent (not Disconnected/NotConnected).
 //   2. Acceptor inbound valid Logon → reply emitted, FSM → Active/LogonReceived.

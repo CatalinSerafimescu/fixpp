@@ -4,10 +4,6 @@
 //
 // Seam #6 — Logout exchange (005-session-establishment-fsm T043 / Phase 6 / US4).
 //
-// TDD red-first: authored BEFORE T046/T047 implementation. Must FAIL until
-// those tasks wire the Logout build/send + two-phase close path.
-// After T049 must be GREEN.
-//
 // Scenarios covered (FR-005 / SC-005 / [FIX-SL §4.6]):
 //
 //  1. GracefulBothDirections: Active → initiate Logout → outbound Logout emitted

@@ -5,10 +5,6 @@
 // Seam #7 — Session-level Reject (35=3) shape + no-reject-loop invariant.
 // (005-session-establishment-fsm T050 / Phase 7 / US5)
 //
-// TDD red-first: authored BEFORE T054/T056 implementation. Must FAIL until
-// those tasks wire the Reject build and the guard-precedence ordering.
-// After T057 must be GREEN.
-//
 // Scenarios (FR-007, SC-006, I-5):
 //
 //  1. build_reject produces a well-formed Reject(35=3) frame with:
@@ -353,7 +349,7 @@ TEST(SessionReject, AppMessageInActiveTriggersReject) {
         << "Session must remain Active after emitting Reject for invalid MsgType";
 }
 
-// ── Phase 8 /simplify finding 5 — admin_messages.cpp buffer + fan-out arms ──
+// ── admin_messages.cpp buffer-overflow + SessionRejectReason fan-out arms ──
 //
 // admin_messages.cpp has ~89 uncovered lines / ~81 uncovered branches; the
 // bulk are wire::Writer::append_raw error-propagation arms triggered when the

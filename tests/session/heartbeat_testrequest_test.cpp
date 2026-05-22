@@ -5,9 +5,6 @@
 // Seam #5 — Heartbeat / TestRequest liveness (005-session-establishment-fsm
 // T037 / Phase 5 / US3).
 //
-// TDD red-first: authored BEFORE T039–T041 implementation. Must FAIL until
-// those tasks wire US3. After T042 must be GREEN.
-//
 // Scenarios covered (SC-004 / FR-006 / [FIX-SL §4.5.1]/§4.5.5):
 //
 //   1. build_heartbeat — produces a well-formed 35=0 FIX frame that contains
@@ -241,7 +238,7 @@ protected:
 // ──────────────────────────────────────────────────────────────────────────────
 // T037 Test 1: build_heartbeat — 35=0, TestReqID(112) present when supplied
 // ──────────────────────────────────────────────────────────────────────────────
-TEST_F(HbTrTest, BuildHeartbeatCarriesTestReqID) {
+TEST(HbTrBuilders, BuildHeartbeatCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
     auto result = fixpp::session::build_heartbeat(
@@ -264,7 +261,7 @@ TEST_F(HbTrTest, BuildHeartbeatCarriesTestReqID) {
 // ──────────────────────────────────────────────────────────────────────────────
 // T037 Test 2: build_heartbeat — empty TestReqID → no tag 112 in frame
 // ──────────────────────────────────────────────────────────────────────────────
-TEST_F(HbTrTest, BuildHeartbeatNoTestReqID) {
+TEST(HbTrBuilders, BuildHeartbeatNoTestReqID) {
     std::array<std::byte, 512> buf{};
 
     auto result = fixpp::session::build_heartbeat(
@@ -283,7 +280,7 @@ TEST_F(HbTrTest, BuildHeartbeatNoTestReqID) {
 // ──────────────────────────────────────────────────────────────────────────────
 // T037 Test 3: build_test_request — 35=1, TestReqID(112) carried through
 // ──────────────────────────────────────────────────────────────────────────────
-TEST_F(HbTrTest, BuildTestRequestCarriesTestReqID) {
+TEST(HbTrBuilders, BuildTestRequestCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
     auto result = fixpp::session::build_test_request(
@@ -305,7 +302,7 @@ TEST_F(HbTrTest, BuildTestRequestCarriesTestReqID) {
 // ──────────────────────────────────────────────────────────────────────────────
 // T037 Test 4: TestReqID distinctness — distinct caller-supplied IDs
 // ──────────────────────────────────────────────────────────────────────────────
-TEST_F(HbTrTest, TestReqIDDistinctness) {
+TEST(HbTrBuilders, TestReqIDDistinctness) {
     std::array<std::byte, 512> buf1{};
     std::array<std::byte, 512> buf2{};
 

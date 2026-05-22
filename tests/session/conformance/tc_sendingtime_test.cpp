@@ -5,9 +5,6 @@
 // [FIX-TC] SendingTime conformance subset — 005-session-establishment-fsm T053
 // Phase 7 / US5.
 //
-// TDD red-first: authored BEFORE T055/T056 implementation.
-// Must FAIL until T057 wires the MaxLatency path. After T057: GREEN.
-//
 // Scenarios from the QuickFIX oracle (research D-10, version-coverage ledger):
 //
 //   1d_InvalidLogonBadSendingTime (fix42 + fix44):

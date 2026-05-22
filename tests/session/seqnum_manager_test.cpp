@@ -4,9 +4,6 @@
 //
 // Seam #3 — SeqnumManager unit tests (005-session-establishment-fsm T027 / US2 Phase 4).
 //
-// TDD red-first: authored BEFORE T031 (seqnum_manager.cpp body).
-// Must FAIL until T031 wires the implementation. After T031/T036 must be GREEN.
-//
 // Scenarios:
 //   1. Increment-by-one inbound: many accepted messages advance counter exactly
 //      (I-2 zero-drift over a long run).
@@ -239,7 +236,7 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
     run_sync(ioc, mgr.drain());
 }
 
-// ── Drained-mutex paths (Phase 8 /simplify finding 3) ────────────────────────
+// ── Drained-mutex paths (seqnum_manager.cpp:51 / :91 — session_already_closed)
 //
 // After drain() the async_mutex's next async_lock() resolves to the unexpected
 // branch — the seqnum manager surfaces session_already_closed on both

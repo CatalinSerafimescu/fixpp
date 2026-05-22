@@ -10,10 +10,6 @@
 // been promoted to the 005-owned form, the static_asserts below fire at
 // compile time, and/or the TEST assertions fail at runtime.
 //
-// Must FAIL until T008 promotes seqnum.hpp (strips the PLACEHOLDER block and
-// confirms the type+constant declarations are 005-owned). After T008 this test
-// turns green and stays green permanently ([const §VI.5] single-edit handoff).
-//
 // Anchor: data-model.md E4, research D-1, contracts/seqnum.hpp.
 // FR: SC-010 (consumer-side build check).
 #include <cstdint>

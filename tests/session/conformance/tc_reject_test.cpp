@@ -5,9 +5,6 @@
 // [FIX-TC] Reject conformance subset — 005-session-establishment-fsm T052
 // Phase 7 / US5.
 //
-// TDD red-first: authored BEFORE T054/T056 implementation.
-// Must FAIL until T057 wires the full Reject path. After T057: GREEN.
-//
 // Scenarios from the QuickFIX oracle (research D-10):
 //
 //   TC-005 — Scenario 7 (Receive Reject):

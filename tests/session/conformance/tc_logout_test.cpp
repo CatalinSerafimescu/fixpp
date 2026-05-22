@@ -5,9 +5,6 @@
 // [FIX-TC] TC-009 Logout subset — 005-session-establishment-fsm T045 /
 // Phase 6 / US4.
 //
-// TDD red-first: authored BEFORE T046/T047/T048 implementation.
-// Must FAIL until T049 wires the full path. After T049: GREEN.
-//
 // Oracle: QuickFIX/J + QuickFIX-CPP server definitions @ fix42 / fix44.
 // Scenarios (TC-009, research D-10):
 //

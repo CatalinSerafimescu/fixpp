@@ -38,10 +38,6 @@ namespace fixpp::core {
 // pull of clock.hpp and its asio dependency from the session/core path).
 using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
 
-// Monotonic duration alias (mirrors [2d §4.1] steady_time_point's underlying
-// duration). Used by session-level MaxLatency computations (D-3/D-8).
-using duration = std::chrono::system_clock::duration;
-
 // ── Precision selector ───────────────────────────────────────────────────────
 
 enum class fix_time_precision : std::uint8_t {

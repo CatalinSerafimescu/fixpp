@@ -361,7 +361,7 @@ TEST_F(FsmTransitionMatrixTest, Disconnected_CloseTerminalIsIdempotentAndStaysDi
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 }
 
-// ── NotConnected refused-Logon arms (Phase 8 /simplify finding 6) ───────────
+// ── NotConnected refused-Logon arms (session.cpp:489-554) ──────────────────
 //
 // Matrix row NotConnected has two refusal cells (session.cpp:489-554):
 //   1. Non-Logon first message → refuse, transition to Disconnected.

@@ -5,10 +5,6 @@
 // Seam #11 — Two-phase cancellation (005-session-establishment-fsm T044 /
 // Phase 6 / US4).
 //
-// TDD red-first: authored BEFORE T047/T048 implementation. Must FAIL until
-// those tasks wire the two-phase close + child-cancellation path.
-// After T049 must be GREEN.
-//
 // Scenarios covered ([2d §6.5] / I-9 / SC-005 / FR-005):
 //
 //  1. CancellableDispatchThreeCases (carried from existing seam 4 patterns):

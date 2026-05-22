@@ -92,7 +92,7 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
     EXPECT_EQ(val.error(), error::invalid_session_config);
 }
 
-// ── Phase 8 /simplify finding 6 — additional open() validation arms ────────
+// ── Additional Session::open() validation arms (session.cpp:100-145) ──────
 //
 // Each of the open() validation arms in src/session/session.cpp must be
 // independently exercised so the error-branch coverage of session.cpp is

@@ -5,9 +5,6 @@
 // Seam #4 — Too-high gap: session-fatal Logout + disconnect, no ResendRequest
 // (005-session-establishment-fsm T028 / US2 Phase 4).
 //
-// TDD red-first: authored BEFORE T032 (session.cpp gap disposition).
-// Must FAIL until T032/T035/T036 implement the fatal path. After T036: GREEN.
-//
 // Scenarios covered (I-4 / FR-008 / Session-2026-05-18):
 //   1. Active-state inbound with too-high MsgSeqNum:
 //      → FSM transitions to Disconnected (session-fatal).
