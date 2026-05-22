@@ -183,8 +183,15 @@ protected:
     fixpp::core::EngineConfig engine;
 
     void SetUp() override {
+        // Clock must be anchored at 2024-01-01 00:00:00 UTC (= unix epoch +
+        // 1704067200 s) to match the "52=20240101-00:00:00.000" timestamps
+        // that every frame builder in this file embeds.  Using utc_time_point{}
+        // (epoch = 0) caused a ~1.7 × 10⁹ s delta that triggered Q3
+        // SendingTime/MaxLatency checks and sent sessions to Disconnected.
+        using sc = std::chrono::system_clock;
+        auto utc_2024 = sc::time_point{} + std::chrono::seconds{1704067200};
         clock = std::make_shared<fixpp::core::mock_clock>(
-            fixpp::core::utc_time_point{},
+            utc_2024,
             fixpp::core::steady_time_point{},
             ioc.get_executor());
         engine.clock    = clock;

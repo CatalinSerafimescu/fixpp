@@ -141,14 +141,14 @@ C++23 single-project library, `session/` module (first feature). Headers under `
 
 **Independent Test**: Missing field / out-of-range / type-invalid-for-state → correct `Reject`; stale `SendingTime` → Reject(10)→Logout→disconnect (Logon→logout-with-error); every outbound `SendingTime` grammar-exact and round-trip-lossless.
 
-- [ ] T050 [P] [US5] Write seam #7 `tests/session/session_reject_test.cpp` — `RefSeqNum`/`RefTagID`/`RefMsgType`/`SessionRejectReason`; no reject loop (I-5, SC-006) — must FAIL first
-- [ ] T051 [P] [US5] Write seam #8 `tests/session/sending_time_test.cpp` — MaxLatency breach → `Reject`(reason 10)→`Logout`→disconnect; `Logon`→logout-with-error, no standalone reject (Q3, SC-007) — must FAIL first
-- [ ] T052 [P] [US5] Write conformance `tests/session/conformance/tc_reject_test.cpp` — scenario 7 Receive Reject + scenario 14 `14a`–`14g` (`14h`/`14i`/`14j` deferred per D-10) — must FAIL first
-- [ ] T053 [P] [US5] Write conformance `tests/session/conformance/tc_sendingtime_test.cpp` — `1d_InvalidLogonBadSendingTime`, `2o_SendingTimeValueOutOfRange` + BeginString version gating (D-10) — must FAIL first
-- [ ] T054 [US5] Implement `Reject(35=3)` build/interpret with `RefSeqNum(45)`/`RefTagID(371)`/`RefMsgType(372)`/`SessionRejectReason(373)`; the no-reject-loop guard (a malformed `Reject`/`Logout` is not itself rejected, I-5); `session_msg_type_invalid_for_state` (FR-007)
-- [ ] T055 [US5] Implement `include/fixpp/session/sending_time.hpp` + logic — inbound `SendingTime(52)` vs `effective_clock.now()` within `MaxLatency` (D-8 default 120 s); Q3 disposition `Reject`(`SessionRejectReason=10`, ref tag 52)→`Logout`→disconnect, except Logon→logout-with-error (D-3, FR-013)
-- [ ] T056 [US5] Wire the guard-precedence ordering (parse/type → CompID/BeginString → SendingTime/MaxLatency → seqnum class → message-type-for-state) per the data-model matrix preamble
-- [ ] T057 [US5] Make seams #7/#8 + `tc_reject`/`tc_sendingtime` green; refactor (SC-006/007)
+- [X] T050 [P] [US5] Write seam #7 `tests/session/session_reject_test.cpp` — `RefSeqNum`/`RefTagID`/`RefMsgType`/`SessionRejectReason`; no reject loop (I-5, SC-006) — must FAIL first
+- [X] T051 [P] [US5] Write seam #8 `tests/session/sending_time_test.cpp` — MaxLatency breach → `Reject`(reason 10)→`Logout`→disconnect; `Logon`→logout-with-error, no standalone reject (Q3, SC-007) — must FAIL first
+- [X] T052 [P] [US5] Write conformance `tests/session/conformance/tc_reject_test.cpp` — scenario 7 Receive Reject + scenario 14 `14a`–`14g` (`14h`/`14i`/`14j` deferred per D-10) — must FAIL first
+- [X] T053 [P] [US5] Write conformance `tests/session/conformance/tc_sendingtime_test.cpp` — `1d_InvalidLogonBadSendingTime`, `2o_SendingTimeValueOutOfRange` + BeginString version gating (D-10) — must FAIL first
+- [X] T054 [US5] Implement `Reject(35=3)` build/interpret with `RefSeqNum(45)`/`RefTagID(371)`/`RefMsgType(372)`/`SessionRejectReason(373)`; the no-reject-loop guard (a malformed `Reject`/`Logout` is not itself rejected, I-5); `session_msg_type_invalid_for_state` (FR-007)
+- [X] T055 [US5] Implement `include/fixpp/session/sending_time.hpp` + logic — inbound `SendingTime(52)` vs `effective_clock.now()` within `MaxLatency` (D-8 default 120 s); Q3 disposition `Reject`(`SessionRejectReason=10`, ref tag 52)→`Logout`→disconnect, except Logon→logout-with-error (D-3, FR-013)
+- [X] T056 [US5] Wire the guard-precedence ordering (parse/type → CompID/BeginString → SendingTime/MaxLatency → seqnum class → message-type-for-state) per the data-model matrix preamble
+- [X] T057 [US5] Make seams #7/#8 + `tc_reject`/`tc_sendingtime` green; refactor (SC-006/007)
 
 **Checkpoint**: All five user stories independently functional.
 

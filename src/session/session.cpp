@@ -38,8 +38,10 @@
 #include <fixpp/session/direction.hpp>          // 005 US4: direction_t (store outbound)
 #include <fixpp/session/session_fsm.hpp>        // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/session/seqnum_manager.hpp>     // 005 US2: SeqnumManager (T031)
+#include <fixpp/session/sending_time.hpp>       // 005 US5: check_sending_time (T055)
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
+#include <fixpp/core/fix_time.hpp>             // 005 US5: fix_string_to_utc_time (T055/T056)
 
 namespace fixpp::session {
 
@@ -378,14 +380,17 @@ namespace {
 
 // Minimal SOH-delimited field scanner — no heap, no library.
 // Reads tag 8 (BeginString), 34 (MsgSeqNum), 35 (MsgType),
-// 49 (SenderCompID), 56 (TargetCompID), 112 (TestReqID) from a raw FIX frame.
-// Used by the inbound dispatch path (scenarios 2i/2k/seqnum check + US3 liveness).
+// 49 (SenderCompID), 52 (SendingTime), 56 (TargetCompID), 112 (TestReqID)
+// from a raw FIX frame.
+// Used by the inbound dispatch path (scenarios 2i/2k/seqnum check + US3 liveness
+// + US5 SendingTime MaxLatency check).
 struct FrameHeader {
     std::string_view begin_string;
     std::string_view sender_comp_id;
     std::string_view target_comp_id;
     std::string_view msg_seq_num;   // tag 34 raw string value
     std::string_view msg_type;      // tag 35 raw string value (T041 US3)
+    std::string_view sending_time;  // tag 52 raw string value (T055 US5)
     std::string_view test_req_id;   // tag 112 raw string value (T041 US3)
 };
 
@@ -422,6 +427,7 @@ struct FrameHeader {
             case 34:  h.msg_seq_num     = val; break;
             case 35:  h.msg_type        = val; break;  // T041 US3
             case 49:  h.sender_comp_id  = val; break;
+            case 52:  h.sending_time    = val; break;  // T055 US5 SendingTime
             case 56:  h.target_comp_id  = val; break;
             case 112: h.test_req_id     = val; break;  // T041 US3
             default: break;
@@ -451,12 +457,19 @@ struct FrameHeader {
 
 }  // namespace
 
-// T024/T025 (US1, Phase 3) + T032/T034/T035 (US2, Phase 4): Inbound FSM dispatch.
+// T024/T025 (US1, Phase 3) + T032/T034/T035 (US2, Phase 4) +
+// T056 (US5, Phase 7): Inbound FSM dispatch.
 //
-// Guard precedence per data-model.md matrix preamble:
-//   (1) CompID/BeginString gate (NotConnected / post-logon states)
-//   (2) seqnum class (too-low / too-high / in-seq) — T035
-//   (3) message-type-for-state (US5, Phase 7)
+// Guard precedence per data-model.md matrix preamble (T056 adds steps 1/3/5):
+//   (1) parse/type recognised → else session Reject; no-loop-guard exempts
+//       Reject(35=3) and Logout(35=5) from triggering a Reject.
+//   (2) CompID/BeginString gate (post-logon states)
+//   (3) SendingTime(52) MaxLatency vs effective clock (Q3):
+//       established session → Reject(reason=10, refTag=52) → Logout → Disconnect
+//       Logon path         → logout-with-error, no standalone Reject (D-3)
+//   (4) seqnum class (too-low / too-high / in-seq) — T035
+//   (5) message-type-for-state: unrecognized app msg type → session Reject;
+//       session stays Active (no loop for Reject/Logout).
 //
 // Seqnum check (T031/T032/T035):
 //   Too-low  → session_seqnum_too_low (69)   → fatal: Disconnected
@@ -568,9 +581,17 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
 
         case fsm_state::LogonReceived:
         case fsm_state::Active: {
-            // Post-logon inbound: screen BeginString and CompID (scenarios 2i/2k).
-            // Any mismatch → session-fatal → Disconnected.
+            // T056 (US5) guard-precedence ordering:
+            // (1) parse/type recognised → else session Reject (no-loop-guard)
+            // (2) CompID/BeginString gate
+            // (3) SendingTime MaxLatency (Q3)
+            // (4) seqnum class
+            // (5) message-type-for-state
+
             auto hdr = scan_frame_header(frame);
+
+            // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
+            // Any mismatch → session-fatal → Disconnected.
             if (hdr.begin_string != cfg_.begin_string ||
                 hdr.sender_comp_id != cfg_.target_comp_id ||
                 hdr.target_comp_id != cfg_.sender_comp_id) {
@@ -578,7 +599,69 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // T035: seqnum check for post-logon inbound messages.
+            // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
+            // Check |inbound_sending_time − effective_now| ≤ MaxLatency (D-8: 120 s).
+            // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt from
+            // this check per I-5 (a malformed Reject is never itself rejected).
+            // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
+            // Note: the Logon-path special case (D-3) is handled in LogonSent below.
+            if (hdr.msg_type != "3" && hdr.msg_type != "5" &&
+                !hdr.sending_time.empty() && effective_clock_) {
+                auto parse_r = fixpp::core::fix_string_to_utc_time(
+                    std::span<const char>{hdr.sending_time.data(),
+                                         hdr.sending_time.size()});
+                if (parse_r) {
+                    const auto max_lat = cfg_.sending_time_threshold.has_value()
+                        ? std::chrono::duration_cast<std::chrono::seconds>(
+                              *cfg_.sending_time_threshold)
+                        : std::chrono::seconds{120};  // D-8 default 120 s
+                    auto chk_st = fixpp::session::check_sending_time(
+                        *parse_r,
+                        effective_clock_->now(),
+                        max_lat);
+                    if (!chk_st) {
+                        // Q3 established-session path: Reject → Logout → Disconnect.
+                        // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
+                        {
+                            std::array<std::byte, 512> rj_buf{};
+                            const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                            auto rj_result = fixpp::session::build_reject(
+                                std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                                next_outbound_seq_++,
+                                cfg_.sender_comp_id,
+                                cfg_.target_comp_id,
+                                ref_seq,
+                                52,        // RefTagID = 52 (SendingTime)
+                                hdr.msg_type,
+                                10);       // SessionRejectReason = 10 (SendingTime accuracy)
+                            if (rj_result) {
+                                auto emit_r = co_await store_then_emit(*rj_result);
+                                (void)emit_r;
+                            }
+                        }
+                        // Step 2: emit Logout(35=5).
+                        {
+                            std::array<std::byte, 256> lo_buf{};
+                            auto lo_result = fixpp::session::build_logout(
+                                std::span<std::byte>{lo_buf.data(), lo_buf.size()},
+                                next_outbound_seq_++,
+                                cfg_.sender_comp_id,
+                                cfg_.target_comp_id,
+                                {});
+                            if (lo_result) {
+                                auto emit_r = co_await store_then_emit(*lo_result);
+                                (void)emit_r;
+                            }
+                        }
+                        // Step 3: Disconnect.
+                        fsm_state_ = fsm_state::Disconnected;
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                }
+                // parse failure: accept the message (lenient on malformed timestamp)
+            }
+
+            // ── Guard (4): seqnum check (T035) ────────────────────────────────
             {
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
@@ -591,8 +674,6 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 if (!chk) {
                     // Too-low (session_seqnum_too_low=69) or
                     // too-high (session_seqnum_gap_unrecoverable=70) → session-fatal.
-                    // Phase 4 (US2): transition to Disconnected.
-                    // Phase 6 (US4) wires the Logout emission before Disconnected.
                     fsm_state_ = fsm_state::Disconnected;
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -624,6 +705,13 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 co_return fixpp::core::expected_t<void>{};
             }
 
+            // I-5: inbound Reject(35=3) is logged and accepted; never re-rejected.
+            if (hdr.msg_type == "3") {  // Reject (35=3)
+                // Active row: session-level log, no Reject-of-a-Reject (I-5).
+                // Remain in current state.
+                co_return fixpp::core::expected_t<void>{};
+            }
+
             // T041 (US3): in the Active state, update liveness state and handle
             // liveness-specific message types (Heartbeat / TestRequest).
             if (fsm_state_ == fsm_state::Active) {
@@ -637,13 +725,7 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 // (liveness). If we had an outstanding TestRequest and this
                 // Heartbeat echoes it (same TestReqID), clear the outstanding flag.
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
-                    // Clear the pending TestRequest state if this Heartbeat
-                    // is a reply (its TestReqID matches our outstanding request,
-                    // or it is a keep-alive with no TestReqID).
                     if (!pending_test_req_id_.empty()) {
-                        // A Heartbeat is accepted as the reply regardless of
-                        // whether its TestReqID matches exactly — the session
-                        // is considered live by any inbound Heartbeat.
                         pending_test_req_id_.clear();
                         unanswered_tr_ = false;
                     }
@@ -653,8 +735,6 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
 
                 // T041 US3 / T042 retirement (US4): Active row — inbound
                 // TestRequest (35=1) → emit Heartbeat echoing TestReqID(112).
-                // Now that transport_send_ is wired (US4/T046), emit the
-                // Heartbeat reply via store_then_emit (I-3 outbound half).
                 if (hdr.msg_type == "1") {  // TestRequest (35=1)
                     std::array<std::byte, 256> hb_buf{};
                     auto hb_result = fixpp::session::build_heartbeat(
@@ -662,7 +742,7 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                         next_outbound_seq_++,
                         cfg_.sender_comp_id,
                         cfg_.target_comp_id,
-                        hdr.test_req_id);  // echo the peer's TestReqID
+                        hdr.test_req_id);
                     if (hb_result) {
                         auto emit_r = co_await store_then_emit(*hb_result);
                         (void)emit_r;
@@ -670,10 +750,53 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                     // Remain in Active.
                     co_return fixpp::core::expected_t<void>{};
                 }
+
+                // ── Guard (5): message-type-for-state (T056 US5) ─────────────
+                // Session admin types known to Active: 0/1/3/5/A (handled above).
+                // Any other MsgType in Active → session-level Reject(35=3) with
+                // SessionRejectReason and RefMsgType. Session stays Active.
+                // No-reject-loop: guard (type == "3" || type == "5") exempted above.
+                {
+                    // Known session admin MsgTypes (all others → Reject).
+                    // "A" = Logon, "0" = Heartbeat, "1" = TestRequest,
+                    // "2" = ResendRequest, "3" = Reject, "4" = SeqReset, "5" = Logout.
+                    // 2/4 (RR/SeqReset) are deferred admin; they still get a Reject
+                    // per data-model matrix (session_admin_not_supported, slot 75).
+                    const bool is_session_admin =
+                        (hdr.msg_type == "A" ||   // Logon (dup in Active)
+                         hdr.msg_type == "0" ||   // Heartbeat
+                         hdr.msg_type == "1" ||   // TestRequest
+                         hdr.msg_type == "2" ||   // ResendRequest (deferred → Reject)
+                         hdr.msg_type == "3" ||   // Reject (handled above)
+                         hdr.msg_type == "4" ||   // SequenceReset-GapFill (deferred → Reject)
+                         hdr.msg_type == "5");    // Logout (handled above)
+
+                    if (!is_session_admin) {
+                        // Unknown / app-type MsgType in Active →
+                        // Reject(reason=session_msg_type_invalid_for_state=3).
+                        // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
+                        std::array<std::byte, 512> rj_buf{};
+                        const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                        auto rj_result = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                            next_outbound_seq_++,
+                            cfg_.sender_comp_id,
+                            cfg_.target_comp_id,
+                            ref_seq,
+                            0,                // RefTagID: n/a for MsgType rejection
+                            hdr.msg_type,     // RefMsgType: the offending MsgType
+                            3);               // SessionRejectReason = 3 (invalid MsgType)
+                        if (rj_result) {
+                            auto emit_r = co_await store_then_emit(*rj_result);
+                            (void)emit_r;
+                        }
+                        // Remain in Active — session stays after sending Reject.
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                }
             }
 
             // In-sequence: counter advanced. Remain in current state.
-            // fromAdmin/fromApp dispatch is wired in Phase 6 (US4).
             co_return fixpp::core::expected_t<void>{};
         }
 
@@ -724,8 +847,47 @@ Session::on_inbound_frame(std::span<const std::byte> frame) noexcept {
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // Valid Logon-ack shape: now check seqnum (T035 LogonSent row).
+            // Valid Logon-ack shape: scan header fields (SendingTime + seqnum).
             auto hdr = scan_frame_header(frame);
+
+            // ── Guard (3): SendingTime MaxLatency — Logon-path special case ───
+            // D-3 / FR-013: if the inbound Logon's own SendingTime is stale,
+            // the response is a logout-with-error (Logout only — no standalone
+            // Reject, because no session is established yet).
+            if (!hdr.sending_time.empty() && effective_clock_) {
+                auto parse_r = fixpp::core::fix_string_to_utc_time(
+                    std::span<const char>{hdr.sending_time.data(),
+                                         hdr.sending_time.size()});
+                if (parse_r) {
+                    const auto max_lat = cfg_.sending_time_threshold.has_value()
+                        ? std::chrono::duration_cast<std::chrono::seconds>(
+                              *cfg_.sending_time_threshold)
+                        : std::chrono::seconds{120};  // D-8 default 120 s
+                    auto chk_st = fixpp::session::check_sending_time(
+                        *parse_r,
+                        effective_clock_->now(),
+                        max_lat);
+                    if (!chk_st) {
+                        // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
+                        std::array<std::byte, 256> lo_buf{};
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()},
+                            next_outbound_seq_++,
+                            cfg_.sender_comp_id,
+                            cfg_.target_comp_id,
+                            {});
+                        if (lo_result) {
+                            auto emit_r = co_await store_then_emit(*lo_result);
+                            (void)emit_r;
+                        }
+                        fsm_state_ = fsm_state::Disconnected;
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                }
+                // parse failure: accept the Logon (lenient on malformed timestamp)
+            }
+
+            // ── Guard (4): seqnum check (T035 LogonSent row) ─────────────────
             const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
             if (seq == 0) {
                 fsm_state_ = fsm_state::Disconnected;

@@ -29,10 +29,24 @@ namespace fixpp::session {
 }
 
 [[nodiscard]] fixpp::core::expected_t<void>
-    check_sending_time(fixpp::core::utc_time_point /*inbound_sending_time*/,
-                       fixpp::core::utc_time_point /*effective_now*/,
-                       std::chrono::seconds /*max_latency*/) noexcept {
-    // PLACEHOLDER — body lands T055 (Phase 7 / US5).
+    check_sending_time(fixpp::core::utc_time_point inbound_sending_time,
+                       fixpp::core::utc_time_point effective_now,
+                       std::chrono::seconds max_latency) noexcept {
+    // T055 (Phase 7 / US5): check |inbound_sending_time - effective_now| <= max_latency.
+    // Compute the absolute difference (handles both future and past sending times).
+    // Uses std::chrono arithmetic only — noexcept; no heap.
+    // Returns ok if within range; returns session_sending_time_accuracy (slot 71)
+    // on breach. The CALLER is responsible for the Q3 downstream action.
+    auto delta = inbound_sending_time - effective_now;
+    // Take absolute value of the duration without relying on std::abs overload.
+    if (delta.count() < 0) {
+        delta = -delta;
+    }
+    // Convert max_latency to the same duration type for comparison.
+    auto max_dur = std::chrono::duration_cast<decltype(delta)>(max_latency);
+    if (delta > max_dur) {
+        return std::unexpected(fixpp::core::error::session_sending_time_accuracy);
+    }
     return {};
 }
 

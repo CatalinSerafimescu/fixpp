@@ -60,6 +60,39 @@ add_test(NAME session_tc_logout COMMAND tc_logout_test)
 set_tests_properties(session_tc_logout PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
 
+# ── T052: tc_reject — TC-005 scenario 7 + TC-010 scenarios 14a–14g ─────────
+# Red-first TDD: authored before T054/T056; turns green at T057.
+# 14h/14i/14j deferred per D-10 (repeating-group — not authored).
+add_executable(tc_reject_test tc_reject_test.cpp)
+target_link_libraries(tc_reject_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(tc_reject_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_tc_reject COMMAND tc_reject_test)
+set_tests_properties(session_tc_reject PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# ── T053: tc_sendingtime — 1d_InvalidLogonBadSendingTime + 2o_SendingTimeValueOutOfRange ─
+# fix42 + fix44 oracle coverage (D-10). FIXT/5.0SP2 deferred per D-10.
+add_executable(tc_sendingtime_test tc_sendingtime_test.cpp)
+target_link_libraries(tc_sendingtime_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(tc_sendingtime_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_tc_sendingtime COMMAND tc_sendingtime_test)
+set_tests_properties(session_tc_sendingtime PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
 # ── T038/T042: tc_liveness — US4 Phase 6 retirement (partial) ────────────────
 # 4b_ReceivedTestRequest: inbound TestRequest → engine echoes Heartbeat(112=)
 # is now assertable because transport_send_ is wired (US4/T046). The 4a

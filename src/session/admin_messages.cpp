@@ -498,18 +498,113 @@ next_field:
 
 // ── Reject (35=3) ────────────────────────────────────────────────────────────────
 // FR-007, [FIX-SL §4.5.4]. S-007.
+// T054 (Phase 7 / US5): build Reject(35=3) with the four reject-specific fields:
+//   RefSeqNum(45)            — the offending message's MsgSeqNum
+//   RefTagID(371)            — the offending field tag (0 if not applicable → omit)
+//   RefMsgType(372)          — the offending message's MsgType (empty → omit)
+//   SessionRejectReason(373) — the reject reason code
+// Header fields: 8/9/35/49/56/34/52 + trailer 10= per [FIX-SL §4.5.4].
+// The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
+// This builder is dumb: it emits whatever is passed.
 
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>>
-    build_reject(std::span<std::byte> /*out*/,
-                 seqnum_t /*seq*/,
-                 std::string_view /*sender_comp_id*/,
-                 std::string_view /*target_comp_id*/,
-                 seqnum_t /*ref_seq_num*/,
-                 int /*ref_tag_id*/,
-                 std::string_view /*ref_msg_type*/,
-                 int /*session_reject_reason*/) noexcept {
-    // PLACEHOLDER — body lands T054 (Phase 7 / US5).
-    return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    build_reject(std::span<std::byte> out,
+                 seqnum_t seq,
+                 std::string_view sender_comp_id,
+                 std::string_view target_comp_id,
+                 seqnum_t ref_seq_num,
+                 int ref_tag_id,
+                 std::string_view ref_msg_type,
+                 int session_reject_reason) noexcept {
+    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+
+    // 8=BeginString placeholder (same convention as other builders).
+    {
+        constexpr std::string_view kBegin{"FIX.4.2"};
+        if (auto r = w.append_raw(8, sv_to_bytes(kBegin)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 35=3 (MsgType: Session-level Reject)
+    {
+        std::byte val[] = {static_cast<std::byte>('3')};
+        if (auto r = w.append_raw(35, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 34=seq (MsgSeqNum)
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
+        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 49=SenderCompID
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 52=SendingTime (zero-epoch placeholder — session stamps the real time).
+    {
+        constexpr std::string_view kPlaceholder{"00000000-00:00:00.000"};
+        if (auto r = w.append_raw(52, sv_to_bytes(kPlaceholder)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 56=TargetCompID
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 45=RefSeqNum — the MsgSeqNum of the message being rejected.
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(ref_seq_num), nbuf, sizeof(nbuf));
+        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (auto r = w.append_raw(45, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 371=RefTagID (optional — only emit when non-zero; 0 = "not applicable").
+    if (ref_tag_id > 0) {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(ref_tag_id), nbuf, sizeof(nbuf));
+        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (auto r = w.append_raw(371, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 372=RefMsgType (optional — only emit when non-empty).
+    if (!ref_msg_type.empty()) {
+        if (auto r = w.append_raw(372, sv_to_bytes(ref_msg_type)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 373=SessionRejectReason
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(
+            session_reject_reason < 0 ? 0 : session_reject_reason),
+            nbuf, sizeof(nbuf));
+        if (sv.empty()) { return std::unexpected(fixpp::core::error::wire_field_value_truncated); }
+        if (auto r = w.append_raw(373, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
+    auto committed = std::move(w).commit();
+    if (!committed) { return std::unexpected(committed.error()); }
+    return out.subspan(0, *committed);
 }
 
 }  // namespace fixpp::session

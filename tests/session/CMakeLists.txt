@@ -284,6 +284,13 @@ add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
 add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cpp)
 
+# ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────
+# Red-first TDD: authored before T054/T056 implementation; turns green at T057.
+# seam #7: session_reject — build_reject shape; no-reject-loop (I-5); type-invalid-for-state.
+# seam #8: sending_time  — check_sending_time unit tests; Q3 integration (Active + Logon paths).
+add_threading_test(session_reject      session_reject_test.cpp)
+add_threading_test(session_sending_time sending_time_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
