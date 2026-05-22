@@ -241,6 +241,12 @@ add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
 # at T026. Links fixpp_mock_clock for deterministic SendingTime assertions.
 add_threading_test(session_logon_handshake logon_handshake_test.cpp)
 
+# ── 005 Phase 8 /speckit-verify Step 4 coverage uplift ──────────────────────
+# Adversarial-input tests for defensive code paths that the well-formed
+# seam corpus doesn't exercise: builder buffer-too-small, parser malformed
+# field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
+add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
+
 # ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
 # Red-first TDD: authored before T031–T036 implementation.
 # session_seqnum_manager: seam #3, SeqnumManager unit tests (T027).
