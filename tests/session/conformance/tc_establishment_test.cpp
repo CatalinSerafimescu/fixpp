@@ -170,40 +170,66 @@ struct Harness {
 // ══════════════════════════════════════════════════════════════════════════════
 // 1a_ValidLogonWithCorrectMsgSeqNum (fix42)
 // Oracle: acceptor receives valid Logon(seq=1, HBI=30) → replies → Active.
+// T012 rewrite per FR-005 §US2 AC2: configure role=acceptor; open() stays in
+// NotConnected; on_inbound_frame(peer_logon) drives NotConnected→LogonReceived.
+// The test MUST observe LogonReceived as an intermediate state.
+// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row;
+//          opus_pr81_1_triage.md RC#2; contracts/session_role.hpp.
 // ══════════════════════════════════════════════════════════════════════════════
 
 TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
     Harness h;
     auto cfg = h.make_cfg("ISLD", "TW", "FIX.4.2", 30);
+    cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
-    ASSERT_TRUE(h.open_session(sess).has_value()) << "open() failed";
 
+    // open() with role=acceptor: lifecycle transitions to open, FSM stays NotConnected.
+    ASSERT_TRUE(h.open_session(sess).has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected)
+        << "1a_fix42: acceptor must be NotConnected after open()";
+
+    // Feed valid peer Logon — drives NotConnected → LogonReceived (data-model.md:19).
     auto frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
     auto r = h.feed_frame(sess, std::span<const std::byte>{frame});
     EXPECT_TRUE(r.has_value()) << "1a_fix42: valid Logon rejected";
 
-    const auto s = sess.state();
-    EXPECT_TRUE(s == fsm_state::Active || s == fsm_state::LogonReceived)
-        << "1a_fix42: expected Active/LogonReceived, got " << static_cast<int>(s);
+    // Deterministic snapshot: ioc is single-threaded; state() is read from the
+    // same thread that ran the strand, so this is a stable intermediate observation.
+    const auto state_after_logon = sess.state();
+
+    // FR-005: the intermediate LogonReceived state MUST be observed (matrix row
+    // NotConnected × valid Logon → LogonReceived). This is not end-state-only.
+    EXPECT_EQ(state_after_logon, fsm_state::LogonReceived)
+        << "1a_fix42: acceptor must be in LogonReceived after peer Logon; "
+        << "got state=" << static_cast<int>(state_after_logon)
+        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1a_ValidLogonWithCorrectMsgSeqNum (fix44) — same, FIX.4.4
+// T012 rewrite per FR-005 §US2 AC2 (same as fix42 above, FIX.4.4 variant).
 // ══════════════════════════════════════════════════════════════════════════════
 
 TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
     Harness h;
     auto cfg = h.make_cfg("ISLD", "TW", "FIX.4.4", 30);
+    cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
+
     ASSERT_TRUE(h.open_session(sess).has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected)
+        << "1a_fix44: acceptor must be NotConnected after open()";
 
     auto frame = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30);
     auto r = h.feed_frame(sess, std::span<const std::byte>{frame});
     EXPECT_TRUE(r.has_value()) << "1a_fix44: valid Logon rejected";
 
-    const auto s = sess.state();
-    EXPECT_TRUE(s == fsm_state::Active || s == fsm_state::LogonReceived)
-        << "1a_fix44: expected Active/LogonReceived, got " << static_cast<int>(s);
+    const auto state_after_logon = sess.state();
+
+    EXPECT_EQ(state_after_logon, fsm_state::LogonReceived)
+        << "1a_fix44: acceptor must be in LogonReceived after peer Logon; "
+        << "got state=" << static_cast<int>(state_after_logon)
+        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

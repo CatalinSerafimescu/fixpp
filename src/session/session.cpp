@@ -227,15 +227,50 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // Called from store_then_emit() AFTER store(outbound) completes (I-3).
     transport_send_ = cfg_.transport_send;
 
-    // T023 (US1, Phase 3): initiator path NotConnected → LogonSent.
-    // After all validations and store binding succeed, mint the LogonSent
-    // FSM state per data-model.md matrix NotConnected row, open(initiator)
-    // cell. The actual Logon emission (build + transport::async_write +
-    // SendingTime stamping) is wired in US1/US4 via the Session::send()
-    // path; this assignment is the FSM half of the transition required by
-    // the matrix so subsequent inbound dispatch (on_inbound_frame()) hits
-    // the LogonSent row instead of the NotConnected row.
-    fsm_state_ = fsm_state::LogonSent;
+    // T011 (US2, Phase 4): branch on cfg_.role per FR-004 + Opus triage RC#2.
+    // Initiator arm: NotConnected → LogonSent; emit initial Logon frame via
+    //   build_logon + store_then_emit (admin-builder path, NOT Session::send).
+    //   [spec.md FR-004 §US2 AC3; data-model.md §E1; opus_pr81_1_triage.md RC#2]
+    // Acceptor arm:  stay NotConnected; emit NO outbound Logon; wait for peer
+    //   Logon via on_inbound_frame (NotConnected → LogonReceived → Active).
+    //   [spec.md FR-004 §US2 AC1; contracts/session_role.hpp]
+    if (cfg_.role == session_role::initiator) {
+        fsm_state_ = fsm_state::LogonSent;
+
+        // Emit the initial Logon via build_logon + store_then_emit.
+        // This is the SAME admin-builder emission path used by other admin
+        // frames (build_heartbeat, build_test_request, etc.) — NOT the
+        // Session::send() path which is for opaque application payloads.
+        // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
+        // stamp_sending_time internal helper is defined after open() in this TU;
+        // use the public two-arg form from sending_time.hpp with a local buffer.
+        std::array<std::byte, 256> logon_buf{};
+        std::array<char, 32> time_buf{};
+        std::string_view sending_time_view;
+        if (effective_clock_) {
+            auto fmt_r = fixpp::session::stamp_sending_time(
+                effective_clock_->now(),
+                std::span<char>{time_buf.data(), time_buf.size()});
+            if (fmt_r) {
+                sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+            }
+        }
+        const int heartbt_sec = cfg_.heartbeat_interval.has_value()
+            ? static_cast<int>(cfg_.heartbeat_interval->count())
+            : 30;  // D-8 default 30 s
+        auto logon_result = fixpp::session::build_logon(
+            std::span<std::byte>{logon_buf.data(), logon_buf.size()},
+            next_outbound_seq_++,
+            cfg_.sender_comp_id, cfg_.target_comp_id,
+            cfg_.begin_string, heartbt_sec, sending_time_view);
+        if (logon_result) {
+            auto emit_r = co_await store_then_emit(*logon_result);
+            (void)emit_r;
+        }
+    } else {
+        // Acceptor: stay in NotConnected, emit nothing.
+        // fsm_state_ remains fsm_state::NotConnected (its default constructed value).
+    }
 
     // T041 (US3): seed last_inbound_steady_ at open() so the liveness loop
     // starts measuring from session-open, not the epoch.

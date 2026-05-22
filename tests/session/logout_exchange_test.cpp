@@ -238,10 +238,11 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     ioc.run_for(100ms);
     ioc.restart();
 
-    // There must be at least one outbound frame (the Logout, 35=5).
-    ASSERT_GE(td.sent_count(), 1u) << "Expected outbound Logout frame";
-    EXPECT_EQ(extract_field(td.sent(0), 35), "5")
-        << "First outbound frame after close() should be Logout(35=5)";
+    // There must be at least two outbound frames: Logon(from open) + Logout(from close).
+    // T011 (US2): open() emits Logon as sent(0); Logout from close() is sent(1).
+    ASSERT_GE(td.sent_count(), 2u) << "Expected Logon(from open) + Logout(from close) frames";
+    EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
+        << "Last outbound frame after close() should be Logout(35=5)";
 
     // Session should be in LogoutSent now.
     EXPECT_EQ(sess.state(), fsm_state::LogoutSent);
@@ -480,9 +481,10 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     ioc.run_for(100ms);
     ioc.restart();
 
-    // Logout should have been emitted.
-    ASSERT_GE(td.sent_count(), 1u) << "Logout frame must be emitted on graceful close";
-    EXPECT_EQ(extract_field(td.sent(0), 35), "5")
+    // Logout should have been emitted. T011 (US2): open() emits Logon first.
+    // sent(0) = Logon (from open), sent(1) = Logout (from close).
+    ASSERT_GE(td.sent_count(), 2u) << "Logout frame must be emitted on graceful close";
+    EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
         << "Emitted frame must be Logout(35=5)";
     // FSM should be LogoutSent.
     EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
