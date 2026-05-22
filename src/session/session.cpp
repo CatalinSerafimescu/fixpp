@@ -8,18 +8,22 @@
 // BEHAVIOUR is wired per user story (T020/T030/T037/T038/T039/T045/T050) —
 // each replaces the marked placeholder body, it is not additive guesswork.
 #include <array>
-#include <asio/awaitable.hpp>
 #include <asio/any_io_executor.hpp>
+#include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
+#include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
+#include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
 #include <asio/detached.hpp>
 #include <asio/post.hpp>
-#include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <charconv>
 #include <chrono>
+#include <compare>  // NOLINT(misc-include-cleaner) — IWYU: strong_ordering/operator> via chrono spaceship
+#include <coroutine>  // NOLINT(misc-include-cleaner) — IWYU: coroutine_handle via awaitable machinery
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -28,16 +32,20 @@
 #include <fixpp/core/error.hpp>     // expected_t, error values
 #include <fixpp/core/fix_time.hpp>  // 005 US5: fix_string_to_utc_time (T055/T056)
 #include <fixpp/core/session_executor.hpp>
+#include <fixpp/core/session_local.hpp>
+#include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/admin_messages.hpp>         // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
-#include <fixpp/session/sending_time.hpp>    // 005 US5: check_sending_time (T055)
+#include <fixpp/session/sending_time.hpp>  // 005 US5: check_sending_time (T055)
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -46,7 +54,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include "fixpp/session/seqnum.hpp"
 
 namespace fixpp::session {
 
@@ -913,7 +920,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // ([feedback_asio_cospawn_total_cancellation_default]).
             {
                 auto ex = co_await asio::this_coro::executor;
-                // NOLINTNEXTLINE(misc-include-cleaner) — asio::co_spawn provided by <asio/co_spawn.hpp> at the top of this file; clang-tidy doesn't see the include through template machinery.
+                // asio::co_spawn provided by <asio/co_spawn.hpp> at the top of this file;
+                // clang-tidy doesn't see the include through template machinery.
+                // NOLINTNEXTLINE(misc-include-cleaner)
                 asio::co_spawn(ex, run_liveness_loop(),
                                asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
             }
@@ -929,7 +938,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     co_return fixpp::core::expected_t<void>{};
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static) — placeholder body doesn't reference *this yet; real impl wired per US1 T023 will use seqnum_mgr_/store_/transport_send_.
+// Placeholder body doesn't reference *this yet; real impl wired per US1 T023 will use
+// seqnum_mgr_/store_/transport_send_.
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> /*app_payload*/) noexcept {
     // PLACEHOLDER — durable-before-transmit path wired per US1 T023 (Phase 3).
@@ -1076,7 +1087,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
         // [feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
         // Convert to clean return — not a fatal error.
         (void)e;
-    } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15: a throwing user callback must trap, not propagate; nothing else to do here.
+    } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15: a
+                     // throwing user callback must trap, not propagate; nothing else to do here.
         // Any other exception: absorb (noexcept window).
     }
 }
@@ -1106,7 +1118,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // Durable-before-transmit is already satisfied → log-then-proceed.
         try {
             transport_send_(frame);
-        } catch (...) {  // NOLINT(bugprone-empty-catch) — FR-15 noexcept window absorption: durable-before-transmit already satisfied; the transport-send throw is not a recoverable signal here.
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — FR-15 noexcept window absorption:
+                         // durable-before-transmit already satisfied; the transport-send throw is
+                         // not a recoverable signal here.
             // Absorbed; FR-15 noexcept window per comment above.
         }
     }
@@ -1170,7 +1184,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     auto deadline = effective_clock_->steady_now() + seconds{2};
     try {
         co_await effective_clock_->sleep_until(deadline);
-    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — wake-early signal: the `logout_confirmed_` flag check after this block is the actual control-flow decision; no action needed in the handler itself.
+    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — wake-early signal: the
+                                          // `logout_confirmed_` flag check after this block is the
+                                          // actual control-flow decision; no action needed in the
+                                          // handler itself.
         // Woken early: either peer confirmed (logout_confirmed_=true)
         // or root cancellation fired (phase 2). Check the flag.
     } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15.

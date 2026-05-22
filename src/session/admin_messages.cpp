@@ -21,7 +21,6 @@
 // [FIX-SL §4.2]–§4.6.
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/admin_messages.hpp>
@@ -29,6 +28,7 @@
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
 #include <span>
+#include <string>  // NOLINT(misc-include-cleaner) — IWYU: std::char_traits via string_view ops
 #include <string_view>
 #include <utility>
 
@@ -81,7 +81,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────────
 // FR-002/003/004/011, [FIX-SL §4.2]/§4.3. S-001/S-015/S-016/S-020.
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender_comp_id / target_comp_id / begin_string); strong typedefs would churn 21 test binaries' call sites.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender_comp_id
+// / target_comp_id / begin_string); strong typedefs would churn 21 test binaries' call sites.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int) noexcept {
@@ -170,7 +171,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
     return out.subspan(0, *committed);
 }
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / begin matches the on-wire field order).
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / begin matches the on-wire field order).
 [[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin) noexcept {
@@ -207,13 +209,17 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         while (i < n && frame[i] != static_cast<std::byte>('=') && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
             if (c < '0' || c > '9') {
-                goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — manual SOH-scanner skip-malformed-field; refactoring to nested-flag/break-stack inflates the parser for no behavioral win.
+                goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — manual
+                                  // SOH-scanner skip-malformed-field; refactoring to
+                                  // nested-flag/break-stack inflates the parser for no behavioral
+                                  // win.
             }
             tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }
         if (i >= n || frame[i] != static_cast<std::byte>('=')) {
-            goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — same skip-malformed-field path; see above.
+            goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — same
+                              // skip-malformed-field path; see above.
         }
         ++i;  // skip '='
 
@@ -308,7 +314,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────
 // FR-005, [FIX-SL §4.6]. S-002.
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / text).
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / text).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view text) noexcept {
@@ -396,7 +403,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // When test_req_id is non-empty, includes TestReqID(112) echoing the value.
 // When test_req_id is empty, omits tag 112 ([FIX-SL §4.5.1] — optional field).
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / test_req_id).
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / test_req_id).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view test_req_id) noexcept {
@@ -477,7 +485,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // T040 (Phase 5 / US3): build TestRequest(35=1) frame carrying TestReqID(112).
 // test_req_id must be non-empty ([FIX-SL §4.5.5]: "a unique TestReqID").
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target / test_req_id).
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / test_req_id).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view test_req_id) noexcept {
@@ -551,7 +560,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
 // This builder is dumb: it emits whatever is passed.
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target before the Ref* group).
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// before the Ref* group).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,

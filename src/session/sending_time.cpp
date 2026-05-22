@@ -14,10 +14,12 @@
 // Anchors: data-model.md E8; research D-3/D-5/D-8; contracts/sending_time.hpp;
 // spec FR-011/FR-013; [FIX-SL §4.2.3].
 #include <chrono>
+#include <compare>  // NOLINT(misc-include-cleaner) — IWYU: strong_ordering/operator> via chrono spaceship
 #include <expected>
 #include <fixpp/session/sending_time.hpp>
-#include "fixpp/core/error.hpp"
 #include <span>
+
+#include "fixpp/core/error.hpp"
 #include "fixpp/core/fix_time.hpp"
 
 namespace fixpp::session {

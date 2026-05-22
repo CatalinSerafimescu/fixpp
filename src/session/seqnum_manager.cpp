@@ -23,8 +23,11 @@
 //   Per-thread recycler handles the cancellation-handler closure (E-4 pattern).
 
 #include <asio/awaitable.hpp>
+#include <asio/cancellation_type.hpp>  // NOLINT(misc-include-cleaner) — IWYU: operator! via cancellation_slot
+#include <coroutine>  // NOLINT(misc-include-cleaner) — IWYU: coroutine_handle/suspend_never via awaitable machinery
 #include <expected>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <utility>
