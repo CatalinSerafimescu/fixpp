@@ -333,11 +333,12 @@ TEST_F(LogonHandshakeTest, BuildLogonProducesValidFrame) {
     std::array<std::byte, 256> buf{};
     auto result = fixpp::session::build_logon(
         std::span<std::byte>{buf},
-        1,           // seq
-        "TW",        // sender
-        "ISLD",      // target
-        "FIX.4.2",   // begin_string
-        30           // heartbt_int
+        1,                            // seq
+        "TW",                         // sender
+        "ISLD",                       // target
+        "FIX.4.2",                    // begin_string
+        30,                           // heartbt_int
+        "20240101-00:00:00.000"       // sending_time
     );
     ASSERT_TRUE(result.has_value())
         << "build_logon() returned error; T021 not yet wired";

@@ -210,7 +210,14 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
         if (mt == "3") { found_reject = true; }
-        if (mt == "5") { found_logout = true; }
+        if (mt == "5") {
+            found_logout = true;
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2")
+                << "1d fix42: Logout must carry 8=FIX.4.2 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "1d fix42: Logout must carry 52=<mock_clock_now>";
+        }
     }
     EXPECT_FALSE(found_reject)
         << "1d fix42: stale Logon SendingTime must NOT trigger Reject(35=3) (D-3)";
@@ -245,7 +252,14 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
         if (mt == "3") { found_reject = true; }
-        if (mt == "5") { found_logout = true; }
+        if (mt == "5") {
+            found_logout = true;
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4")
+                << "1d fix44: Logout must carry 8=FIX.4.4 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "1d fix44: Logout must carry 52=<mock_clock_now>";
+        }
     }
     EXPECT_FALSE(found_reject) << "1d fix44: stale Logon must NOT trigger Reject";
     EXPECT_TRUE(found_logout)  << "1d fix44: stale Logon must trigger Logout";
@@ -287,8 +301,20 @@ TEST(TCSendingTime, Fix42_2o_SendingTimeValueOutOfRange) {
                 << "2o fix42: SessionRejectReason(373) must be 10 (SendingTime accuracy)";
             EXPECT_EQ(extract_field(f.transport.sent(i), 371), "52")
                 << "2o fix42: RefTagID(371) must be 52 (SendingTime tag)";
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Reject.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2")
+                << "2o fix42: Reject must carry 8=FIX.4.2 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "2o fix42: Reject must carry 52=<mock_clock_now>";
         }
-        if (mt == "5") { found_logout = true; }
+        if (mt == "5") {
+            found_logout = true;
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Logout.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2")
+                << "2o fix42: Logout must carry 8=FIX.4.2";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "2o fix42: Logout must carry 52=<mock_clock_now>";
+        }
     }
     EXPECT_TRUE(found_reject)  << "2o fix42: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout)  << "2o fix42: stale established SendingTime must emit Logout";
@@ -319,8 +345,20 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
             found_reject = true;
             EXPECT_EQ(extract_field(f.transport.sent(i), 373), "10");
             EXPECT_EQ(extract_field(f.transport.sent(i), 371), "52");
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Reject.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4")
+                << "2o fix44: Reject must carry 8=FIX.4.4";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "2o fix44: Reject must carry 52=<mock_clock_now>";
         }
-        if (mt == "5") { found_logout = true; }
+        if (mt == "5") {
+            found_logout = true;
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Logout.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4")
+                << "2o fix44: Logout must carry 8=FIX.4.4";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "2o fix44: Logout must carry 52=<mock_clock_now>";
+        }
     }
     EXPECT_TRUE(found_reject)  << "2o fix44: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout)  << "2o fix44: stale established SendingTime must emit Logout";

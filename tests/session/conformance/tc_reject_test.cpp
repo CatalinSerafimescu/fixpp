@@ -305,6 +305,11 @@ TEST(TC010Reject, Fix42_14a_BadField_UnknownMsgTypeTriggersReject) {
             found_reject = true;
             EXPECT_EQ(extract_field(f.transport.sent(i), 372), "D")
                 << "RefMsgType(372) must be the offending MsgType=D";
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Reject.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2")
+                << "Reject must carry 8=FIX.4.2 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "Reject must carry 52=<mock_clock_now>";
         }
     }
     EXPECT_TRUE(found_reject) << "Must emit Reject(35=3)";
@@ -329,6 +334,11 @@ TEST(TC010Reject, Fix44_14a_BadField_UnknownMsgTypeTriggersReject) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
             EXPECT_EQ(extract_field(f.transport.sent(i), 372), "D");
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound Reject.
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4")
+                << "Reject must carry 8=FIX.4.4 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000")
+                << "Reject must carry 52=<mock_clock_now>";
         }
     }
     EXPECT_TRUE(found_reject);
@@ -349,7 +359,11 @@ TEST(TC010Reject, Fix42_14b_RequiredFieldMissing) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject) << "14b: must emit Reject for invalid MsgType";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -367,7 +381,11 @@ TEST(TC010Reject, Fix44_14b_RequiredFieldMissing) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -386,7 +404,11 @@ TEST(TC010Reject, Fix42_14c_TagNotDefinedForMsgType) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -404,7 +426,11 @@ TEST(TC010Reject, Fix44_14c_TagNotDefinedForMsgType) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -423,7 +449,11 @@ TEST(TC010Reject, Fix42_14d_TagSpecifiedWithoutValue) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -441,7 +471,11 @@ TEST(TC010Reject, Fix44_14d_TagSpecifiedWithoutValue) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -461,7 +495,11 @@ TEST(TC010Reject, Fix42_14e_IncorrectEnumValue) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -479,7 +517,11 @@ TEST(TC010Reject, Fix44_14e_IncorrectEnumValue) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -498,7 +540,11 @@ TEST(TC010Reject, Fix42_14f_IncorrectDataFormat) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -516,7 +562,11 @@ TEST(TC010Reject, Fix44_14f_IncorrectDataFormat) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -535,7 +585,11 @@ TEST(TC010Reject, Fix42_14g_HeaderBodyTrailerFieldsOutOfOrder) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -553,7 +607,11 @@ TEST(TC010Reject, Fix44_14g_HeaderBodyTrailerFieldsOutOfOrder) {
 
     bool found_reject = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        if (extract_field(f.transport.sent(i), 35) == "3") { found_reject = true; }
+        if (extract_field(f.transport.sent(i), 35) == "3") {
+            found_reject = true;
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
+        }
     }
     EXPECT_TRUE(found_reject);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);

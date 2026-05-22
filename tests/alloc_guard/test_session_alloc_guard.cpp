@@ -139,11 +139,13 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
     // touch lazy-init data in the wire::Writer / dictionary lookup tables;
     // we don't want those one-shots counted.
     {
-        auto r = fixpp::session::build_heartbeat(hb_buf, seqnum_t{1}, kSender, kTarget, {});
+        auto r = fixpp::session::build_heartbeat(hb_buf, seqnum_t{1}, kSender, kTarget, {},
+                                                 "FIX.4.2", "20240101-00:00:00.000");
         ASSERT_TRUE(r.has_value()) << "warmup build_heartbeat failed";
     }
     {
-        auto r = fixpp::session::build_test_request(tr_buf, seqnum_t{1}, kSender, kTarget, kTestId);
+        auto r = fixpp::session::build_test_request(tr_buf, seqnum_t{1}, kSender, kTarget, kTestId,
+                                                    "FIX.4.2", "20240101-00:00:00.000");
         ASSERT_TRUE(r.has_value()) << "warmup build_test_request failed";
     }
 
@@ -154,10 +156,12 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
     alloc_guard_start();
     for (int i = 0; i < kCorpus; ++i) {
         auto hb = fixpp::session::build_heartbeat(hb_buf, static_cast<seqnum_t>(seqnum_min + i),
-                                                  kSender, kTarget, {});
+                                                  kSender, kTarget, {},
+                                                  "FIX.4.2", "20240101-00:00:00.000");
         if (hb.has_value()) ++hb_ok;
         auto tr = fixpp::session::build_test_request(tr_buf, static_cast<seqnum_t>(seqnum_min + i),
-                                                     kSender, kTarget, kTestId);
+                                                     kSender, kTarget, kTestId,
+                                                     "FIX.4.2", "20240101-00:00:00.000");
         if (tr.has_value()) ++tr_ok;
     }
     alloc_guard_end();

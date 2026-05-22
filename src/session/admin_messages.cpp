@@ -65,17 +65,6 @@ namespace {
     return {reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
 }
 
-// 52=SendingTime placeholder. The session layer stamps the real value via
-// stamp_sending_time post-build; this fixed 21-char ms-precision value is
-// emitted by every admin builder so the wire layout is grammar-conforming.
-// The QFJ acceptance corpus is lenient on this field (matches <TIME> token).
-constexpr std::string_view kSendingTimePlaceholder{"00000000-00:00:00.000"};
-
-// 8=BeginString default emitted by every non-Logon admin builder. Sessions
-// embed the correct FIX version via the session config; this default keeps
-// the unit-test path runnable when build_xxx is called without a session.
-constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
-
 }  // namespace
 
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────────
@@ -85,7 +74,8 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // / target_comp_id / begin_string); strong typedefs would churn 21 test binaries' call sites.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view begin_string, int heartbt_int) noexcept {
+    std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
+    std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -120,19 +110,10 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         return std::unexpected(r.error());
     }
 
-    // 52=SendingTime — use a placeholder all-zeros timestamp.
-    // T022 wires the effective_clock stamp; build_logon receives a pre-formatted
-    // timestamp via the session's stamp_sending_time call, but for direct unit
-    // tests we accept a default. The session layer stamps the time before calling
-    // build_logon by passing a pre-formatted string. For this implementation we
-    // use a fixed placeholder that satisfies the grammar (19 chars / millis).
-    // In production, Session::open() formats the time and passes it; this function
-    // is a pure builder that accepts the formatted string from its caller.
-    // Since the current signature doesn't carry a SendingTime parameter, we emit
-    // a zero-epoch placeholder consistent with how the oracle .def files use
-    // <TIME> (any value is acceptable to the oracle comparison at the 52= field).
+    // 52=SendingTime — use the pre-formatted sending_time from effective_clock.now().
+    // FR-003/RC#4: kSendingTimePlaceholder removed; caller supplies the real timestamp.
     {
-        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -315,32 +296,21 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // FR-005, [FIX-SL §4.6]. S-002.
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
-// / text).
+// / text / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view text) noexcept {
+    std::string_view target_comp_id, std::string_view text,
+    std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    // T046 (Phase 6 / US4): build a Logout(35=5) frame.
-    // Fields: 8=BeginString (fixed FIX.4.2 — session layer stamps from config),
-    //         35=5, 34=seq, 49=SenderCompID, 52=SendingTime (placeholder),
+    // Build a Logout(35=5) frame.
+    // Fields: 8=begin_string, 35=5, 34=seq, 49=SenderCompID, 52=sending_time,
     //         56=TargetCompID, [58=text (optional)].
-    // The caller (Session) supplies the begin_string via the outbound buffer;
-    // for admin_messages the begin_string is fixed at the canonical "FIX.4.2"
-    // for unit-test builds. Production sessions call with the correct prefix
-    // already embedded via the buffer they pass in, or the session layer
-    // pre-fills it. For THIS builder we follow the same pattern as build_logon:
-    // emit "FIX.4.2" as the placeholder begin_string (sessions may override at
-    // the write layer; the oracle comparison is lenient on begin_string).
-    //
-    // NOTE: The session-layer caller (store_then_emit) passes the begin_string
-    // via the cfg_.begin_string context. For build_logout, we accept it as an
-    // implicit compile-time default consistent with build_heartbeat/build_logon.
-    // A future refactor can add begin_string as a parameter.
+    // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
-    // 8=BeginString (placeholder — sessions pass "FIX.4.2" or "FIX.4.4").
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
-        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -370,9 +340,9 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         return std::unexpected(r.error());
     }
 
-    // 52=SendingTime (placeholder — zero-epoch; session stamps the real time).
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
     {
-        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -404,25 +374,18 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // When test_req_id is empty, omits tag 112 ([FIX-SL §4.5.1] — optional field).
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
-// / test_req_id).
+// / test_req_id / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id) noexcept {
+    std::string_view target_comp_id, std::string_view test_req_id,
+    std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
+    // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
-    // 8=BeginString placeholder — we do not have begin_string here.
-    // The session wires the begin_string from SessionConfig; the admin_messages
-    // builder receives it as part of the overall wire write. For now emit
-    // "FIX.4.2" as the canonical default (the test double overrides at the
-    // session layer; for direct unit tests this satisfies the grammar).
-    // NOTE: The session layer calls build_heartbeat with the actual begin_string;
-    // for the US3 unit test the begin_string is verified separately. The builder's
-    // contract is: emit a syntactically valid frame with the supplied fields.
-    // begin_string is NOT a parameter because the existing contract (admin_messages.hpp)
-    // does not carry it; we use a fixed "FIX.4.2" (matches the test oracle context).
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
-        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -452,9 +415,9 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         return std::unexpected(r.error());
     }
 
-    // 52=SendingTime (zero-epoch placeholder — session stamps the real time)
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
     {
-        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -486,16 +449,18 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // test_req_id must be non-empty ([FIX-SL §4.5.5]: "a unique TestReqID").
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
-// / test_req_id).
+// / test_req_id / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id) noexcept {
+    std::string_view target_comp_id, std::string_view test_req_id,
+    std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
+    // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
-    // 8=BeginString
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
-        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -525,9 +490,9 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         return std::unexpected(r.error());
     }
 
-    // 52=SendingTime
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
     {
-        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -561,17 +526,19 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
 // This builder is dumb: it emits whatever is passed.
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
-// before the Ref* group).
+// before the Ref* group; begin_string / sending_time last).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
-    std::string_view ref_msg_type, int session_reject_reason) noexcept {
+    std::string_view ref_msg_type, int session_reject_reason,
+    std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
+    // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
 
-    // 8=BeginString placeholder (same convention as other builders).
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
-        if (auto r = w.append_raw(8, sv_to_bytes(kBeginStringDefault)); !r) {
+        if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -601,9 +568,9 @@ constexpr std::string_view kBeginStringDefault{"FIX.4.2"};
         return std::unexpected(r.error());
     }
 
-    // 52=SendingTime (zero-epoch placeholder — session stamps the real time).
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
     {
-        if (auto r = w.append_raw(52, sv_to_bytes(kSendingTimePlaceholder)); !r) {
+        if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
             return std::unexpected(r.error());
         }
     }

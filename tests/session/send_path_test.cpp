@@ -236,6 +236,7 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
     auto cfg = make_cfg("FIX.4.4");
     cfg.store_factory = std::make_unique<OrderingStoreFactory>(call_log, store_seqs);
     cfg.transport_send = [&](std::span<const std::byte> frame) {
+        call_log.push_back("transport_send");  // also in shared log for ordering check
         transport_log.push_back("transport_send");
         transport_frames.emplace_back(frame.begin(), frame.end());
     };

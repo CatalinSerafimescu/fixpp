@@ -56,7 +56,7 @@ void BM_Session_OutboundAdminEmit(benchmark::State& state) {
     constexpr std::string_view kTarget = "TARGET";
     seqnum_t seq = seqnum_min;
     for (auto _ : state) {
-        auto r = build_heartbeat(buf, seq, kSender, kTarget, {});
+        auto r = build_heartbeat(buf, seq, kSender, kTarget, {}, "FIX.4.2", "20240101-00:00:00.000");
         benchmark::DoNotOptimize(r);
         ++seq;
     }

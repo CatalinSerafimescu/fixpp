@@ -242,7 +242,8 @@ TEST(HbTrBuilders, BuildHeartbeatCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
     auto result = fixpp::session::build_heartbeat(
-        std::span<std::byte>(buf), 1, "SENDER", "TARGET", "TR001");
+        std::span<std::byte>(buf), 1, "SENDER", "TARGET", "TR001",
+        "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_heartbeat must succeed";
     auto frame = *result;
@@ -266,7 +267,8 @@ TEST(HbTrBuilders, BuildHeartbeatNoTestReqID) {
 
     auto result = fixpp::session::build_heartbeat(
         std::span<std::byte>(buf), 2, "SENDER", "TARGET",
-        /*test_req_id=*/{});
+        /*test_req_id=*/{},
+        "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_heartbeat (no TestReqID) must succeed";
     auto frame = *result;
@@ -284,7 +286,8 @@ TEST(HbTrBuilders, BuildTestRequestCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
     auto result = fixpp::session::build_test_request(
-        std::span<std::byte>(buf), 3, "SENDER", "TARGET", "REQ-42");
+        std::span<std::byte>(buf), 3, "SENDER", "TARGET", "REQ-42",
+        "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_test_request must succeed";
     auto frame = *result;
@@ -307,9 +310,11 @@ TEST(HbTrBuilders, TestReqIDDistinctness) {
     std::array<std::byte, 512> buf2{};
 
     auto r1 = fixpp::session::build_test_request(
-        std::span<std::byte>(buf1), 1, "S", "T", "ID-A");
+        std::span<std::byte>(buf1), 1, "S", "T", "ID-A",
+        "FIX.4.2", "20240101-00:00:00.000");
     auto r2 = fixpp::session::build_test_request(
-        std::span<std::byte>(buf2), 2, "S", "T", "ID-B");
+        std::span<std::byte>(buf2), 2, "S", "T", "ID-B",
+        "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(r1.has_value());
     ASSERT_TRUE(r2.has_value());

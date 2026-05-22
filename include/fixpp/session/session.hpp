@@ -380,6 +380,12 @@ private:
     // session_test_request_unanswered (error slot 74). Single-writer.
     bool unanswered_tr_ = false;
 
+    // Per-session TestRequest ID counter (FR-010, RC#6). Replaces the prior
+    // process-global `static tr_counter` in run_liveness_loop. Single-writer
+    // on the session strand; wrap-around at UINT32_MAX is acceptable
+    // (within-session uniqueness contract per spec.md §Edge Cases / research.md D-3).
+    std::uint32_t next_test_request_id_ = 0;
+
     // ── US4 / T046 transport surface ─────────────────────────────────────────
     // transport_send_ — captured from cfg_.transport_send at open(). Called
     // from store_then_emit() AFTER the outbound store() call completes (I-3).

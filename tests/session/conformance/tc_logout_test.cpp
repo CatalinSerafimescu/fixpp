@@ -236,8 +236,16 @@ TEST(TC009Logout, Fix42_13b_UnsolicitedLogoutMessage) {
     // The last outbound frame on the transport must be Logout(35=5).
     ASSERT_GE(f.transport.sent_count(), 1u)
         << "Server must emit a confirming Logout (E:Logout in oracle)";
-    EXPECT_EQ(extract_field(f.transport.sent(f.transport.sent_count() - 1), 35), "5")
-        << "Confirming Logout must have MsgType=5";
+    {
+        const auto last = f.transport.sent(f.transport.sent_count() - 1);
+        EXPECT_EQ(extract_field(last, 35), "5")
+            << "Confirming Logout must have MsgType=5";
+        // FR-013 / FR-002 / FR-003: tag 8 and tag 52 must be present on every outbound frame.
+        EXPECT_EQ(extract_field(last, 8), "FIX.4.2")
+            << "Confirming Logout must carry 8=FIX.4.2 (negotiated begin_string)";
+        EXPECT_EQ(extract_field(last, 52), "20240101-00:00:00.000")
+            << "Confirming Logout must carry 52=<mock_clock_now>";
+    }
 
     // Oracle step: eDISCONNECT — session is Disconnected.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -258,8 +266,16 @@ TEST(TC009Logout, Fix44_13b_UnsolicitedLogoutMessage) {
 
     ASSERT_GE(f.transport.sent_count(), 1u)
         << "Server must emit confirming Logout";
-    EXPECT_EQ(extract_field(f.transport.sent(f.transport.sent_count() - 1), 35), "5")
-        << "Confirming Logout must have MsgType=5";
+    {
+        const auto last = f.transport.sent(f.transport.sent_count() - 1);
+        EXPECT_EQ(extract_field(last, 35), "5")
+            << "Confirming Logout must have MsgType=5";
+        // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
+        EXPECT_EQ(extract_field(last, 8), "FIX.4.4")
+            << "Confirming Logout must carry 8=FIX.4.4 (negotiated begin_string)";
+        EXPECT_EQ(extract_field(last, 52), "20240101-00:00:00.000")
+            << "Confirming Logout must carry 52=<mock_clock_now>";
+    }
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 }
 
@@ -316,7 +332,15 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     f.ioc.restart();
 
     ASSERT_GE(f.transport.sent_count(), 1u);
-    EXPECT_EQ(extract_field(f.transport.sent(f.transport.sent_count() - 1), 35), "5");
+    {
+        const auto last = f.transport.sent(f.transport.sent_count() - 1);
+        EXPECT_EQ(extract_field(last, 35), "5");
+        // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
+        EXPECT_EQ(extract_field(last, 8), "FIX.4.2")
+            << "Graceful Logout initiation must carry 8=FIX.4.2";
+        EXPECT_EQ(extract_field(last, 52), "20240101-00:00:00.000")
+            << "Graceful Logout initiation must carry 52=<mock_clock_now>";
+    }
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent);
 
     // Peer confirms with Logout.

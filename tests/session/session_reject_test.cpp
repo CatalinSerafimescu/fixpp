@@ -217,7 +217,9 @@ TEST(SessionReject, BuildRejectShape) {
         /*ref_seq_num=*/  seqnum_t{1},
         /*ref_tag_id=*/   371,
         /*ref_msg_type=*/ "D",
-        /*reason=*/       3);
+        /*reason=*/       3,
+        /*begin_string=*/ "FIX.4.2",
+        /*sending_time=*/ "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value())
         << "build_reject must succeed";
@@ -362,14 +364,16 @@ TEST(AdminMessagesBufferGuard, BuildLogonBufferTooSmallReturnsError) {
     // 16 bytes is unconditionally insufficient — Writer fails on the first append.
     std::array<std::byte, 16> tiny{};
     auto r = fixpp::session::build_logon(
-        std::span<std::byte>{tiny}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30);
+        std::span<std::byte>{tiny}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30,
+        "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildLogoutBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
     auto r = fixpp::session::build_logout(
-        std::span<std::byte>{tiny}, /*seq=*/2, "SENDER", "TARGET");
+        std::span<std::byte>{tiny}, /*seq=*/2, "SENDER", "TARGET", {},
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -379,14 +383,16 @@ TEST(AdminMessagesBufferGuard, BuildLogoutWithTextBufferTooSmallReturnsError) {
     std::array<std::byte, 32> small{};
     auto r = fixpp::session::build_logout(
         std::span<std::byte>{small}, /*seq=*/3, "SENDER", "TARGET",
-        "explanatory text that pushes past the 32-byte ceiling");
+        "explanatory text that pushes past the 32-byte ceiling",
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildHeartbeatBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
     auto r = fixpp::session::build_heartbeat(
-        std::span<std::byte>{tiny}, /*seq=*/4, "SENDER", "TARGET", {});
+        std::span<std::byte>{tiny}, /*seq=*/4, "SENDER", "TARGET", {},
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -395,14 +401,16 @@ TEST(AdminMessagesBufferGuard, BuildHeartbeatWithTestReqIDBufferTooSmallReturnsE
     std::array<std::byte, 32> small{};
     auto r = fixpp::session::build_heartbeat(
         std::span<std::byte>{small}, /*seq=*/5, "SENDER", "TARGET",
-        std::string_view{"TR-LONG-TEST-REQ-ID-PUSHES-PAST-32"});
+        std::string_view{"TR-LONG-TEST-REQ-ID-PUSHES-PAST-32"},
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildTestRequestBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
     auto r = fixpp::session::build_test_request(
-        std::span<std::byte>{tiny}, /*seq=*/6, "SENDER", "TARGET", "TR-1");
+        std::span<std::byte>{tiny}, /*seq=*/6, "SENDER", "TARGET", "TR-1",
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -411,7 +419,8 @@ TEST(AdminMessagesBufferGuard, BuildRejectBufferTooSmallReturnsError) {
     auto r = fixpp::session::build_reject(
         std::span<std::byte>{tiny}, /*seq=*/7, "SENDER", "TARGET",
         /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
-        /*ref_msg_type=*/"D", /*reason=*/3);
+        /*ref_msg_type=*/"D", /*reason=*/3,
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -430,7 +439,8 @@ TEST_P(BuildRejectAllReasons, ProducesValidRejectForReason) {
     auto r = fixpp::session::build_reject(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW",
         /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
-        /*ref_msg_type=*/"D", reason);
+        /*ref_msg_type=*/"D", reason,
+        "FIX.4.2", "20240101-00:00:00.000");
     ASSERT_TRUE(r.has_value()) << "build_reject must succeed for reason=" << reason;
 
     // SessionRejectReason(373) carries the requested reason in ASCII.
@@ -586,7 +596,8 @@ TEST_P(BuildLogonCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
     auto r = fixpp::session::build_logon(
-        std::span<std::byte>{buf}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30);
+        std::span<std::byte>{buf}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30,
+        "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value())
         << "build_logon with " << sz << "-byte buffer must fail";
 }
@@ -603,7 +614,8 @@ TEST_P(BuildLogoutCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
     auto r = fixpp::session::build_logout(
-        std::span<std::byte>{buf}, /*seq=*/2, "SENDER", "TARGET", "explanatory");
+        std::span<std::byte>{buf}, /*seq=*/2, "SENDER", "TARGET", "explanatory",
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
@@ -616,7 +628,8 @@ TEST_P(BuildHeartbeatCalibratedBufferSizes, AllSizesFailGracefully) {
     std::vector<std::byte> buf(sz);
     auto r = fixpp::session::build_heartbeat(
         std::span<std::byte>{buf}, /*seq=*/3, "SENDER", "TARGET",
-        std::string_view{"TR-LONG-TEST-REQ-ID"});
+        std::string_view{"TR-LONG-TEST-REQ-ID"},
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
@@ -629,7 +642,8 @@ TEST_P(BuildRejectCalibratedBufferSizes, AllSizesFailGracefully) {
     std::vector<std::byte> buf(sz);
     auto r = fixpp::session::build_reject(
         std::span<std::byte>{buf}, /*seq=*/4, "SENDER", "TARGET",
-        seqnum_t{1}, 371, "D", 3);
+        seqnum_t{1}, 371, "D", 3,
+        "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,

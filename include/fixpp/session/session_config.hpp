@@ -60,6 +60,15 @@ enum class lock_policy : std::uint8_t {
     spin = 1,   // opt-in; store-write path always mutex ([const §XI.5])
 };
 
+// Selects the role for a Session at construction time; drives Session::open()
+// initial-state choice (specs/009-session-fsm-finalize/contracts/session_role.hpp).
+// - initiator: open() sets fsm_state_ = LogonSent + emits initial Logon.
+// - acceptor:  open() sets fsm_state_ = NotConnected + waits for peer Logon.
+enum class session_role : std::uint8_t {
+    initiator = 0,
+    acceptor = 1,
+};
+
 // Portable "closed enum" attribute (no-op where unsupported). Placed after
 // the enum name per the Clang spelling; a static_assert at every switch site
 // (T048) enumerates exactly the 2 values and a runtime out-of-range cast is
@@ -111,6 +120,8 @@ struct SessionConfig {
     std::string sender_comp_id;  // identity owned by 005
     std::string target_comp_id;
     std::string begin_string;
+
+    session_role role = session_role::initiator;  // FR-004; default preserves 005 behavior
 
     std::unique_ptr<MessageStoreFactory> store_factory;  // unique ownership
     std::shared_ptr<fixpp::tls::cert_source> cert_source;

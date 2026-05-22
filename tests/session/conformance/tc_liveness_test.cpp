@@ -229,6 +229,11 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
         if (extract_field(td.sent(i), 35) == "0") {  // 35=0 = Heartbeat
             found_hb = true;
             hb_test_req_id = extract_field(td.sent(i), 112);
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 must be on every outbound frame.
+            EXPECT_EQ(extract_field(td.sent(i), 8), "FIX.4.2")
+                << "Heartbeat reply must carry 8=FIX.4.2 (negotiated begin_string)";
+            EXPECT_EQ(extract_field(td.sent(i), 52), "20240101-00:00:00.000")
+                << "Heartbeat reply must carry 52=<mock_clock_now>";
             break;
         }
     }
@@ -271,6 +276,11 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     for (std::size_t i = before; i < td.sent_count(); ++i) {
         if (extract_field(td.sent(i), 35) == "0") {
             echoed_id = extract_field(td.sent(i), 112);
+            // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
+            EXPECT_EQ(extract_field(td.sent(i), 8), "FIX.4.2")
+                << "Heartbeat reply must carry 8=FIX.4.2";
+            EXPECT_EQ(extract_field(td.sent(i), 52), "20240101-00:00:00.000")
+                << "Heartbeat reply must carry 52=<mock_clock_now>";
             break;
         }
     }

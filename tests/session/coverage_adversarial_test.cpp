@@ -88,31 +88,36 @@ std::vector<std::byte> wrap_frame(std::string_view body) {
 
 TEST(AdversarialBuilderBufferTooSmall, BuildLogonZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_logon(std::span<std::byte>{buf}, 1, "TW", "ISLD", "FIX.4.2", 30);
+    auto r = build_logon(std::span<std::byte>{buf}, 1, "TW", "ISLD", "FIX.4.2", 30,
+                         "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildLogoutZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_logout(std::span<std::byte>{buf}, 1, "TW", "ISLD", "");
+    auto r = build_logout(std::span<std::byte>{buf}, 1, "TW", "ISLD", "",
+                          "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildHeartbeatZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_heartbeat(std::span<std::byte>{buf}, 1, "TW", "ISLD", "");
+    auto r = build_heartbeat(std::span<std::byte>{buf}, 1, "TW", "ISLD", "",
+                             "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildTestRequestZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_test_request(std::span<std::byte>{buf}, 1, "TW", "ISLD", "TR1");
+    auto r = build_test_request(std::span<std::byte>{buf}, 1, "TW", "ISLD", "TR1",
+                                "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildRejectZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_reject(std::span<std::byte>{buf}, 1, "TW", "ISLD", 2, 35, "0", 5);
+    auto r = build_reject(std::span<std::byte>{buf}, 1, "TW", "ISLD", 2, 35, "0", 5,
+                          "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -120,7 +125,8 @@ TEST(AdversarialBuilderBufferTooSmall, BuildRejectZeroBuf) {
 // the full body. Exercises a different append_raw failure site than size-0.
 TEST(AdversarialBuilderBufferTooSmall, BuildLogonMidFailure) {
     std::array<std::byte, 30> buf{};
-    auto r = build_logon(std::span<std::byte>{buf}, 1, "TW", "ISLD", "FIX.4.2", 30);
+    auto r = build_logon(std::span<std::byte>{buf}, 1, "TW", "ISLD", "FIX.4.2", 30,
+                         "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
