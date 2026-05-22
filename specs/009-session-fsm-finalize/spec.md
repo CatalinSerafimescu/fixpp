@@ -130,7 +130,7 @@ Every FR below traces to an existing 005 contract anchor (the design is unchange
 
 ### Key Entities *(unchanged from 005)*
 
-No new entities. This slice modifies existing entities (`Session`, `SessionConfig`, `SeqnumManager`, the admin-builder helpers); they remain owned by 005 contracts and data-model.
+No new domain entities. (`session_role` is a new enum type declared as part of E2 `SessionConfig` — a value type with no independent lifecycle, not a standalone domain entity.) This slice modifies existing entities (`Session`, `SessionConfig`, `SeqnumManager`, the admin-builder helpers); they remain owned by 005 contracts and data-model.
 
 ## Success Criteria *(mandatory)*
 
