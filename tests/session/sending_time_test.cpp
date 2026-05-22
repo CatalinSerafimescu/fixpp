@@ -329,5 +329,274 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
         << "Q3 Logon-path: session must be Disconnected after stale-Logon logout-with-error";
 }
 
+// ── T015 [US3] — FR-007/FR-008: missing/malformed SendingTime in Active/LogonReceived ──
+//
+// Each test: feed an inbound frame with tag 52 absent (missing) or malformed.
+// Expected path: outbound Reject(35=3, 371=52, 373=10) then outbound Logout(35=5)
+// then session → Disconnected.
+//
+// Assertions use extract_field(frame, 371) == "52" and extract_field(frame, 373) == "10"
+// per the anti-pattern guard: "371=52" in FIX wire grammar means the VALUE of tag 371
+// is the string "52" (the SendingTime tag number), NOT "tag 371 equals tag 52".
+//
+// Anchors: spec.md FR-007 + FR-008; opus_pr81_1_triage.md RC#5; tasks.md T015.
+
+// Build a FIX frame with tag 52 ABSENT (no SendingTime field at all).
+static std::vector<std::byte> make_frame_missing_sending_time(
+        std::string_view begin_string,
+        std::string_view msg_type,
+        std::uint32_t seq,
+        std::string_view sender,
+        std::string_view target,
+        std::string_view extra_body = {}) {
+    std::string body;
+    body += "35=" + std::string(msg_type) + "\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
+    body += "49=" + std::string(sender) + "\x01";
+    // Tag 52 deliberately omitted.
+    body += "56=" + std::string(target) + "\x01";
+    if (!extra_body.empty()) { body += extra_body; }
+
+    std::string hdr;
+    hdr += "8=" + std::string(begin_string) + "\x01";
+    hdr += "9=" + std::to_string(body.size()) + "\x01";
+
+    std::string full = hdr + body;
+    unsigned int cs  = 0;
+    for (unsigned char c : full) { cs += c; }
+    cs &= 0xFFU;
+    char csbuf[4];
+    snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+    full += "10=" + std::string(csbuf) + "\x01";
+
+    std::vector<std::byte> frame;
+    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    return frame;
+}
+
+// Helper: assert Reject(35=3, 371=52, 373=10) + Logout(35=5) in outbound frames
+// and session state == Disconnected.
+// Verifies the ordering guarantee: Reject is emitted before Logout.
+static void assert_reject_then_logout_then_disconnected(
+        const TransportDouble& transport,
+        std::size_t before,
+        const fixpp::session::Session& sess,
+        const char* context) {
+    bool found_reject = false;
+    bool found_logout = false;
+    int  reject_pos   = -1;
+    int  logout_pos   = -1;
+
+    for (std::size_t i = before; i < transport.sent_count(); ++i) {
+        auto mt = extract_field(transport.sent(i), 35);
+        if (mt == "3" && !found_reject) {
+            found_reject = true;
+            reject_pos   = static_cast<int>(i);
+            EXPECT_EQ(extract_field(transport.sent(i), 371), "52")
+                << context << ": RefTagID(371) value must be \"52\" (SendingTime tag number)";
+            EXPECT_EQ(extract_field(transport.sent(i), 373), "10")
+                << context << ": SessionRejectReason(373) value must be \"10\" (SendingTime accuracy)";
+        } else if (mt == "5" && !found_logout) {
+            found_logout = true;
+            logout_pos   = static_cast<int>(i);
+        }
+    }
+
+    EXPECT_TRUE(found_reject)
+        << context << ": must emit Reject(35=3, 373=10, 371=52) for missing/malformed SendingTime";
+    EXPECT_TRUE(found_logout)
+        << context << ": must emit Logout(35=5) after Reject";
+
+    if (found_reject && found_logout) {
+        EXPECT_LT(reject_pos, logout_pos)
+            << context << ": Reject must be emitted before Logout";
+    }
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << context << ": session must be Disconnected after Reject+Logout path";
+}
+
+// T015 test 1: MissingSendingTimeInActiveRejects
+// Active state + inbound Heartbeat with tag 52 absent → Reject+Logout+Disconnected.
+// Anchors: spec.md FR-007.
+TEST(SendingTimeIntegration, MissingSendingTimeInActiveRejects) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    const std::size_t before = f.transport.sent_count();
+
+    // Heartbeat (35=0) seq=2, tag 52 absent.
+    auto frame = make_frame_missing_sending_time("FIX.4.2", "0", 2, "TW", "ISLD");
+    f.feed(sess, frame);
+
+    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+        "MissingSendingTimeInActiveRejects");
+}
+
+// T015 test 2: MalformedSendingTimeInActiveRejects
+// Active state + inbound Heartbeat with tag 52=abc (non-parseable) → Reject+Logout+Disconnected.
+// Anchors: spec.md FR-008.
+TEST(SendingTimeIntegration, MalformedSendingTimeInActiveRejects) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    const std::size_t before = f.transport.sent_count();
+
+    // Heartbeat (35=0) seq=2, tag 52=abc (not a valid FIX timestamp).
+    auto frame = make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", "abc");
+    f.feed(sess, frame);
+
+    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+        "MalformedSendingTimeInActiveRejects");
+}
+
+// T015 test 3: MissingSendingTimeInLogonReceivedRejects
+// LogonReceived state (acceptor, received peer Logon, not yet Active) + inbound
+// Heartbeat with tag 52 absent → Reject+Logout+Disconnected.
+// Anchors: spec.md FR-007 (applies to both Active and LogonReceived rows per §US3 AC).
+TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
+    SendingTimeFixture f;
+    // Use acceptor role to reach LogonReceived without completing handshake.
+    auto cfg = f.make_cfg("FIX.4.2");
+    cfg.role = fixpp::session::session_role::acceptor;
+    Session sess(f.engine, cfg);
+
+    // open() as acceptor → NotConnected (stays).
+    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    // Feed valid peer Logon → NotConnected → LogonReceived.
+    auto peer_logon = make_frame_with_sending_time(
+        "FIX.4.2", "A", 1, "TW", "ISLD",
+        "20240101-00:00:00.000",
+        "98=0\x01""108=30\x01");
+    f.feed(sess, peer_logon);
+    ASSERT_EQ(sess.state(), fsm_state::LogonReceived)
+        << "acceptor must be in LogonReceived after valid peer Logon";
+
+    const std::size_t before = f.transport.sent_count();
+
+    // Heartbeat (35=0) seq=2 with tag 52 absent.
+    auto frame = make_frame_missing_sending_time("FIX.4.2", "0", 2, "TW", "ISLD");
+    f.feed(sess, frame);
+
+    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+        "MissingSendingTimeInLogonReceivedRejects");
+}
+
+// ── T017 [US3] — FR-009: missing/malformed SendingTime on inbound Logon (LogonSent) ──
+//
+// D-3 LogonSent-special path: NO standalone Reject before establishment.
+// Response is Logout(58=<error text>) ONLY. No Reject(35=3) must be emitted.
+// Session → Disconnected.
+//
+// Anchors: spec.md FR-009; research.md D-3; [FIX-SL §4.3]; tasks.md T017.
+
+// T017 test 1: MissingSendingTimeOnLogonEmitsLogoutOnly
+// LogonSent state + inbound Logon with tag 52 absent → Logout only (no Reject) + Disconnected.
+TEST(SendingTimeIntegration, MissingSendingTimeOnLogonEmitsLogoutOnly) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+
+    // open() as initiator → LogonSent.
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    ASSERT_TRUE(fut.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    const std::size_t before = f.transport.sent_count();
+
+    // Peer Logon with tag 52 absent (no SendingTime field).
+    auto stale_logon = make_frame_missing_sending_time(
+        "FIX.4.2", "A", 1, "TW", "ISLD", "98=0\x01""108=30\x01");
+    f.feed(sess, stale_logon);
+
+    // Must NOT emit Reject(35=3). MUST emit Logout(35=5). Session → Disconnected.
+    bool found_reject = false;
+    bool found_logout = false;
+    bool found_logout_text = false;
+    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
+        auto mt = extract_field(f.transport.sent(i), 35);
+        if (mt == "3") { found_reject = true; }
+        if (mt == "5") {
+            found_logout = true;
+            // Tag 58 (Text) must be present with an error description.
+            auto text = extract_field(f.transport.sent(i), 58);
+            if (!text.empty()) { found_logout_text = true; }
+        }
+    }
+
+    EXPECT_FALSE(found_reject)
+        << "MissingSendingTimeOnLogonEmitsLogoutOnly: D-3 LogonSent-special: "
+           "NO standalone Reject(35=3) before establishment";
+    EXPECT_TRUE(found_logout)
+        << "MissingSendingTimeOnLogonEmitsLogoutOnly: must emit Logout(35=5) "
+           "as logout-with-error response";
+    EXPECT_TRUE(found_logout_text)
+        << "MissingSendingTimeOnLogonEmitsLogoutOnly: Logout must carry Text(58) error";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "MissingSendingTimeOnLogonEmitsLogoutOnly: session must be Disconnected";
+}
+
+// T017 test 2: MalformedSendingTimeOnLogonEmitsLogoutOnly
+// LogonSent state + inbound Logon with tag 52=abc (malformed) → Logout only + Disconnected.
+TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+
+    // open() as initiator → LogonSent.
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    ASSERT_TRUE(fut.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    const std::size_t before = f.transport.sent_count();
+
+    // Peer Logon with tag 52=abc (not a valid FIX timestamp).
+    auto malformed_logon = make_frame_with_sending_time(
+        "FIX.4.2", "A", 1, "TW", "ISLD",
+        "abc",  // malformed timestamp
+        "98=0\x01""108=30\x01");
+    f.feed(sess, malformed_logon);
+
+    // Must NOT emit Reject(35=3). MUST emit Logout(35=5). Session → Disconnected.
+    bool found_reject = false;
+    bool found_logout = false;
+    bool found_logout_text = false;
+    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
+        auto mt = extract_field(f.transport.sent(i), 35);
+        if (mt == "3") { found_reject = true; }
+        if (mt == "5") {
+            found_logout = true;
+            auto text = extract_field(f.transport.sent(i), 58);
+            if (!text.empty()) { found_logout_text = true; }
+        }
+    }
+
+    EXPECT_FALSE(found_reject)
+        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: D-3 LogonSent-special: "
+           "NO standalone Reject(35=3) before establishment";
+    EXPECT_TRUE(found_logout)
+        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: must emit Logout(35=5) "
+           "as logout-with-error response";
+    EXPECT_TRUE(found_logout_text)
+        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: Logout must carry Text(58) error";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: session must be Disconnected";
+}
+
 }  // namespace (anonymous)
 }  // namespace fixpp::session::test

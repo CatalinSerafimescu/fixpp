@@ -429,10 +429,12 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_ValidLogonFromPeer_LandsInLogonRece
         << "transition to LogonReceived (session.cpp:578)";
 }
 
-TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_StaysInNotConnected) {
+// T013 [US3] — FR-006: refused Logon on NotConnected row → Disconnected (not preserved).
+// Anchors: spec.md FR-006, data-model.md:19 matrix row, opus_pr81_1_triage.md RC#3.
+TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_ReachesDisconnected) {
     // Feed a Logon (35=A) with wrong BeginString — interpret_logon refuses.
-    // Phase 3 contract: session stays in NotConnected (does NOT reach Active);
-    // the disconnect-on-refused-logon lands in a later phase per session.cpp:552.
+    // FR-006 contract: every refusal on the NotConnected row → Disconnected
+    // (no MsgType discrimination; Phase-3 compromise removed by T014).
     auto cfg = make_initiator_cfg();  // expects FIX.4.2
     Session sess(engine, cfg);
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
@@ -463,9 +465,9 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_StaysInNo
 
     (void)feed_sync(sess, frame);
 
-    EXPECT_EQ(sess.state(), fsm_state::NotConnected)
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "NotConnected + Logon-shaped frame with BeginString mismatch must "
-        << "preserve NotConnected (session.cpp:552 Phase 3 contract)";
+        << "transition to Disconnected per FR-006 / data-model.md:19 matrix row";
 }
 
 }  // namespace fixpp::session::test
