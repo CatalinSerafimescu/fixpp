@@ -31,19 +31,16 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <atomic>
-#include <cstddef>
-
-#include <future>
-
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <cstddef>
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
+#include <future>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 extern "C" {
@@ -53,9 +50,9 @@ __attribute__((weak)) void alloc_guard_end() {}
 
 namespace {
 
-using fixpp::session::SeqnumManager;
-using fixpp::session::seqnum_t;
 using fixpp::session::seqnum_min;
+using fixpp::session::seqnum_t;
+using fixpp::session::SeqnumManager;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // (A) SeqnumPathNoGlobalHeapAlloc — SeqnumManager hot path
@@ -92,8 +89,7 @@ TEST(SessionAllocGuard, SeqnumPathNoGlobalHeapAlloc) {
     for (int i = 0; i < kWarmup; ++i) {
         auto a = run_sync(ioc, mgr.assign_outbound());
         ASSERT_TRUE(a.has_value()) << "warmup assign_outbound i=" << i;
-        auto c = run_sync(ioc, mgr.check_inbound(
-            static_cast<seqnum_t>(seqnum_min + i)));
+        auto c = run_sync(ioc, mgr.check_inbound(static_cast<seqnum_t>(seqnum_min + i)));
         ASSERT_TRUE(c.has_value()) << "warmup check_inbound i=" << i;
     }
 
@@ -101,20 +97,19 @@ TEST(SessionAllocGuard, SeqnumPathNoGlobalHeapAlloc) {
     // After warm-up: next_outbound == seqnum_min + kWarmup, next_inbound == same.
     constexpr int kCorpus = 10'000;
     int assigned_count = 0;
-    int checked_count  = 0;
+    int checked_count = 0;
 
     alloc_guard_start();
     for (int i = 0; i < kCorpus; ++i) {
         auto a = run_sync(ioc, mgr.assign_outbound());
         if (a.has_value()) ++assigned_count;
-        auto c = run_sync(ioc, mgr.check_inbound(
-            static_cast<seqnum_t>(seqnum_min + kWarmup + i)));
+        auto c = run_sync(ioc, mgr.check_inbound(static_cast<seqnum_t>(seqnum_min + kWarmup + i)));
         if (c.has_value()) ++checked_count;
     }
     alloc_guard_end();
 
     EXPECT_EQ(assigned_count, kCorpus);
-    EXPECT_EQ(checked_count,  kCorpus);
+    EXPECT_EQ(checked_count, kCorpus);
 
     // Drain async_mutex before dtor (terminate-precondition).
     run_sync(ioc, mgr.drain());
@@ -144,13 +139,11 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
     // touch lazy-init data in the wire::Writer / dictionary lookup tables;
     // we don't want those one-shots counted.
     {
-        auto r = fixpp::session::build_heartbeat(
-            hb_buf, seqnum_t{1}, kSender, kTarget, {});
+        auto r = fixpp::session::build_heartbeat(hb_buf, seqnum_t{1}, kSender, kTarget, {});
         ASSERT_TRUE(r.has_value()) << "warmup build_heartbeat failed";
     }
     {
-        auto r = fixpp::session::build_test_request(
-            tr_buf, seqnum_t{1}, kSender, kTarget, kTestId);
+        auto r = fixpp::session::build_test_request(tr_buf, seqnum_t{1}, kSender, kTarget, kTestId);
         ASSERT_TRUE(r.has_value()) << "warmup build_test_request failed";
     }
 
@@ -160,13 +153,11 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
 
     alloc_guard_start();
     for (int i = 0; i < kCorpus; ++i) {
-        auto hb = fixpp::session::build_heartbeat(
-            hb_buf, static_cast<seqnum_t>(seqnum_min + i),
-            kSender, kTarget, {});
+        auto hb = fixpp::session::build_heartbeat(hb_buf, static_cast<seqnum_t>(seqnum_min + i),
+                                                  kSender, kTarget, {});
         if (hb.has_value()) ++hb_ok;
-        auto tr = fixpp::session::build_test_request(
-            tr_buf, static_cast<seqnum_t>(seqnum_min + i),
-            kSender, kTarget, kTestId);
+        auto tr = fixpp::session::build_test_request(tr_buf, static_cast<seqnum_t>(seqnum_min + i),
+                                                     kSender, kTarget, kTestId);
         if (tr.has_value()) ++tr_ok;
     }
     alloc_guard_end();

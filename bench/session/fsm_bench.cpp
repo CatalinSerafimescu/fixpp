@@ -39,17 +39,16 @@
 
 #include <array>
 #include <cstddef>
+#include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <span>
 #include <string_view>
 
-#include <fixpp/session/admin_messages.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 namespace {
 
-using fixpp::session::seqnum_t;
-using fixpp::session::seqnum_min;
 using fixpp::session::build_heartbeat;
+using fixpp::session::seqnum_min;
+using fixpp::session::seqnum_t;
 
 void BM_Session_OutboundAdminEmit(benchmark::State& state) {
     std::array<std::byte, 512> buf{};

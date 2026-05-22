@@ -31,18 +31,16 @@
 //     T060 assertion.
 
 #include <gtest/gtest.h>
-
-#include <cstdio>
-#include <cstdlib>
-#include <span>
-#include <string>
-#include <type_traits>
 #include <unistd.h>
 
 #include <asio/awaitable.hpp>
-
-#include <fixpp/session/session.hpp>
+#include <cstdio>
+#include <cstdlib>
 #include <fixpp/session/seqnum_manager.hpp>
+#include <fixpp/session/session.hpp>
+#include <span>
+#include <string>
+#include <type_traits>
 
 namespace {
 
@@ -52,51 +50,41 @@ namespace {
 // the impl that removes `noexcept` from a covered surface fails this TU's
 // compile, surfacing the FR-015 violation at build time rather than runtime.
 
-using ::fixpp::session::Session;
-using ::fixpp::session::SeqnumManager;
 using ::fixpp::session::seqnum_t;
+using ::fixpp::session::SeqnumManager;
+using ::fixpp::session::Session;
 
 // Session::on_inbound_frame — inbound-process window (FR-015).
-static_assert(
-    noexcept(std::declval<Session&>().on_inbound_frame(
-        std::span<const std::byte>{})),
-    "Session::on_inbound_frame must be noexcept (FR-015 inbound window)");
+static_assert(noexcept(std::declval<Session&>().on_inbound_frame(std::span<const std::byte>{})),
+              "Session::on_inbound_frame must be noexcept (FR-015 inbound window)");
 
 // Session::send — outbound durable-before-transmit path (I-3 / FR-015).
-static_assert(
-    noexcept(std::declval<Session&>().send(std::span<const std::byte>{})),
-    "Session::send must be noexcept (FR-015 outbound window)");
+static_assert(noexcept(std::declval<Session&>().send(std::span<const std::byte>{})),
+              "Session::send must be noexcept (FR-015 outbound window)");
 
 // Session::state — single-writer FSM read (FR-016 / FR-015).
-static_assert(
-    noexcept(std::declval<const Session&>().state()),
-    "Session::state must be noexcept (FR-015 / FR-016)");
+static_assert(noexcept(std::declval<const Session&>().state()),
+              "Session::state must be noexcept (FR-015 / FR-016)");
 
 // Session::open — admin lifecycle; declared noexcept per plan.md `Constraints`.
-static_assert(
-    noexcept(std::declval<Session&>().open()),
-    "Session::open must be noexcept (FR-015)");
+static_assert(noexcept(std::declval<Session&>().open()), "Session::open must be noexcept (FR-015)");
 
 // Session::session_arena — engine-internal accessor (I-18).
-static_assert(
-    noexcept(std::declval<const Session&>().session_arena()),
-    "Session::session_arena must be noexcept");
+static_assert(noexcept(std::declval<const Session&>().session_arena()),
+              "Session::session_arena must be noexcept");
 
 // Session::root_cancellation_slot — engine-internal accessor (T039 / I-07).
-static_assert(
-    noexcept(std::declval<Session&>().root_cancellation_slot()),
-    "Session::root_cancellation_slot must be noexcept");
+static_assert(noexcept(std::declval<Session&>().root_cancellation_slot()),
+              "Session::root_cancellation_slot must be noexcept");
 
 // SeqnumManager::check_inbound / assign_outbound — timer-fire-adjacent paths
 // (the SeqnumManager is the counter back-end for the inbound advance / outbound
 // stamp; FR-015 noexcept window covers it).
-static_assert(
-    noexcept(std::declval<SeqnumManager&>().check_inbound(seqnum_t{1})),
-    "SeqnumManager::check_inbound must be noexcept (FR-015)");
+static_assert(noexcept(std::declval<SeqnumManager&>().check_inbound(seqnum_t{1})),
+              "SeqnumManager::check_inbound must be noexcept (FR-015)");
 
-static_assert(
-    noexcept(std::declval<SeqnumManager&>().assign_outbound()),
-    "SeqnumManager::assign_outbound must be noexcept (FR-015)");
+static_assert(noexcept(std::declval<SeqnumManager&>().assign_outbound()),
+              "SeqnumManager::assign_outbound must be noexcept (FR-015)");
 
 // NOTE — `Session::close()` is intentionally NOT noexcept per the gate-b/r1
 // RC#2/P2.1 carve-out documented at include/fixpp/session/session.hpp:115-121
@@ -111,12 +99,11 @@ static_assert(
 // The C-ABI coalescing target is 2i-owned per [const §X.2] / FR-015.
 
 #ifndef FIXPP_TEST_BINARY_DIR
-#  error "FIXPP_TEST_BINARY_DIR must be defined (set by tests/session/CMakeLists.txt)"
+#error "FIXPP_TEST_BINARY_DIR must be defined (set by tests/session/CMakeLists.txt)"
 #endif
 
 TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
-    const std::string lib_path =
-        std::string{FIXPP_TEST_BINARY_DIR} + "/lib/libfixpp_session.a";
+    const std::string lib_path = std::string{FIXPP_TEST_BINARY_DIR} + "/lib/libfixpp_session.a";
 
     // Use mkstemp for a unique temp output (avoids tmpnam deprecation warning
     // and concurrent-CTest collisions).
@@ -125,11 +112,14 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
     ASSERT_GE(tmp_fd, 0) << "mkstemp failed";
     ::close(tmp_fd);  // close the fd; we reuse the path via shell redirection.
     const std::string tmp{tmp_template};
-    const std::string cmd =
-        "nm --extern-only --defined-only '" + lib_path + "' "
-        "| grep -E '^[0-9a-f]+\\s+[A-Z]\\s+fixpp_session_' "
-        "> '" + tmp + "' 2>&1; "
-        "wc -l < '" + tmp + "'";
+    const std::string cmd = "nm --extern-only --defined-only '" + lib_path +
+                            "' "
+                            "| grep -E '^[0-9a-f]+\\s+[A-Z]\\s+fixpp_session_' "
+                            "> '" +
+                            tmp +
+                            "' 2>&1; "
+                            "wc -l < '" +
+                            tmp + "'";
 
     FILE* pipe = ::popen(cmd.c_str(), "r");
     ASSERT_NE(pipe, nullptr) << "popen(nm) failed";
@@ -139,10 +129,9 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
     (void)std::remove(tmp.c_str());
 
     ASSERT_EQ(WEXITSTATUS(rc), 0) << "nm pipeline exited non-zero";
-    EXPECT_EQ(matches, 0)
-        << "libfixpp_session.a exports " << matches << " extern-C "
-        << "fixpp_session_* symbol(s); 005 must add ZERO C-ABI symbols "
-        << "([const §X.2] / FR-015) — those belong to 2i.";
+    EXPECT_EQ(matches, 0) << "libfixpp_session.a exports " << matches << " extern-C "
+                          << "fixpp_session_* symbol(s); 005 must add ZERO C-ABI symbols "
+                          << "([const §X.2] / FR-015) — those belong to 2i.";
 }
 
 // ── (3) `<fix/c_api.h>` no-leakage grep ─────────────────────────────────────
@@ -152,16 +141,15 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
 // ABI ([const §X.2]).
 
 #ifndef FIXPP_TEST_SOURCE_DIR
-#  error "FIXPP_TEST_SOURCE_DIR must be defined (set by tests/session/CMakeLists.txt)"
+#error "FIXPP_TEST_SOURCE_DIR must be defined (set by tests/session/CMakeLists.txt)"
 #endif
 
 TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
-    const std::string inc_root =
-        std::string{FIXPP_TEST_SOURCE_DIR} + "/include/fix";
+    const std::string inc_root = std::string{FIXPP_TEST_SOURCE_DIR} + "/include/fix";
 
-    const std::string cmd =
-        "grep -rEl 'fixpp::session|fixpp_session_' '" + inc_root + "' "
-        "| wc -l";
+    const std::string cmd = "grep -rEl 'fixpp::session|fixpp_session_' '" + inc_root +
+                            "' "
+                            "| wc -l";
 
     FILE* pipe = ::popen(cmd.c_str(), "r");
     ASSERT_NE(pipe, nullptr) << "popen(grep) failed";
@@ -170,10 +158,9 @@ TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
     const int rc = ::pclose(pipe);
 
     ASSERT_EQ(WEXITSTATUS(rc), 0) << "grep pipeline exited non-zero";
-    EXPECT_EQ(matches, 0)
-        << "<fix/c_api.h> subtree contains " << matches
-        << " file(s) referencing fixpp::session — 005 ships no C-ABI "
-        << "surface ([const §X.2] / FR-015); the 2i feature owns it.";
+    EXPECT_EQ(matches, 0) << "<fix/c_api.h> subtree contains " << matches
+                          << " file(s) referencing fixpp::session — 005 ships no C-ABI "
+                          << "surface ([const §X.2] / FR-015); the 2i feature owns it.";
 }
 
 }  // namespace

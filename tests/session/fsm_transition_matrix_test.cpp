@@ -24,43 +24,41 @@
 // invariant I-1; [FIX-SL §4.10]. Per-cell behaviour anchors: see header
 // comment of each per-US seam test.
 
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <future>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 namespace fixpp::session::test {
 
 // ── Compile-time invariants on the fsm_state enum (E2 / D-2) ────────────────
 
-static_assert(static_cast<std::uint8_t>(fsm_state::NotConnected)  == 0);
-static_assert(static_cast<std::uint8_t>(fsm_state::LogonSent)     == 1);
+static_assert(static_cast<std::uint8_t>(fsm_state::NotConnected) == 0);
+static_assert(static_cast<std::uint8_t>(fsm_state::LogonSent) == 1);
 static_assert(static_cast<std::uint8_t>(fsm_state::LogonReceived) == 2);
-static_assert(static_cast<std::uint8_t>(fsm_state::Active)        == 3);
-static_assert(static_cast<std::uint8_t>(fsm_state::LogoutSent)    == 4);
-static_assert(static_cast<std::uint8_t>(fsm_state::Disconnected)  == 5);
+static_assert(static_cast<std::uint8_t>(fsm_state::Active) == 3);
+static_assert(static_cast<std::uint8_t>(fsm_state::LogoutSent) == 4);
+static_assert(static_cast<std::uint8_t>(fsm_state::Disconnected) == 5);
 
 // "No `RecoveryPending`" (D-2 / Session-2026-05-18) is enforced structurally
 // by the enum: any reference to `fsm_state::RecoveryPending` in code would
@@ -74,12 +72,10 @@ namespace {
 // and the default SENDER/TARGET CompIDs. Identical wire shape to the per-US
 // seam tests' make_*_frame builders.
 
-std::vector<std::byte> make_admin_frame(
-        std::string_view msg_type,
-        std::uint32_t msg_seq_num,
-        std::string_view sender = "TW",
-        std::string_view target = "ISLD",
-        std::string_view extra_fields = {}) {
+std::vector<std::byte> make_admin_frame(std::string_view msg_type, std::uint32_t msg_seq_num,
+                                        std::string_view sender = "TW",
+                                        std::string_view target = "ISLD",
+                                        std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -93,8 +89,10 @@ std::vector<std::byte> make_admin_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -102,7 +100,9 @@ std::vector<std::byte> make_admin_frame(
 
     std::vector<std::byte> frame;
     frame.reserve(full.size());
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -125,29 +125,28 @@ bool is_valid_fsm_state(fsm_state s) noexcept {
 
 class FsmTransitionMatrixTest : public ::testing::Test {
 protected:
-    asio::io_context                          ioc;
-    std::shared_ptr<fixpp::core::mock_clock>  clock;
-    fixpp::core::EngineConfig                 engine{};
+    asio::io_context ioc;
+    std::shared_ptr<fixpp::core::mock_clock> clock;
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         using namespace std::chrono;
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
-        clock = std::make_shared<fixpp::core::mock_clock>(
-            utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_initiator_cfg() {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "TW";
-        cfg.target_comp_id     = "ISLD";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{30};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         return cfg;
     }
 
@@ -158,10 +157,8 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed_sync(Session& s,
-                                             std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(
-            ioc, s.on_inbound_frame(frame), asio::use_future);
+    fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
+        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(std::chrono::milliseconds{200});
         ioc.restart();
         return fut.get();
@@ -220,8 +217,7 @@ TEST_F(FsmTransitionMatrixTest, LogonSent_InboundHeartbeat_LandsInValidState) {
         << "got " << static_cast<int>(sess.state());
 }
 
-TEST_F(FsmTransitionMatrixTest,
-       LogonSent_InboundResendRequestIsDefinedBoundedTransition) {
+TEST_F(FsmTransitionMatrixTest, LogonSent_InboundResendRequestIsDefinedBoundedTransition) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
@@ -233,7 +229,8 @@ TEST_F(FsmTransitionMatrixTest,
     // valid fsm_state value (the exact disposition is the per-US seam test's
     // concern; here we attest only that the cell is defined and exits cleanly).
     auto rr = make_admin_frame("2", 1, "TW", "ISLD",
-                               "7=1\x01" "16=0\x01");  // BeginSeqNo / EndSeqNo
+                               "7=1\x01"
+                               "16=0\x01");  // BeginSeqNo / EndSeqNo
     (void)feed_sync(sess, rr);
     EXPECT_TRUE(is_valid_fsm_state(sess.state()));
 }
@@ -247,8 +244,7 @@ TEST_F(FsmTransitionMatrixTest,
 // for the Active row is the inbound-out-of-scope-admin cell — FR-017
 // asserts it is a defined bounded reject, not a silent no-op nor UB.
 
-TEST_F(FsmTransitionMatrixTest,
-       Active_InboundResendRequestIsDefinedBoundedTransition) {
+TEST_F(FsmTransitionMatrixTest, Active_InboundResendRequestIsDefinedBoundedTransition) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
@@ -256,9 +252,9 @@ TEST_F(FsmTransitionMatrixTest,
     // Drive LogonSent → Active via a peer Logon-ack with the negotiated
     // HeartBtInt. Seam #2 (logon_handshake_test) exercises this in depth; we
     // re-use the same shape.
-    auto peer_logon = make_admin_frame(
-        "A", 1, "ISLD", "TW",
-        "98=0\x01" "108=30\x01");  // EncryptMethod / HeartBtInt
+    auto peer_logon = make_admin_frame("A", 1, "ISLD", "TW",
+                                       "98=0\x01"
+                                       "108=30\x01");  // EncryptMethod / HeartBtInt
     auto fr = feed_sync(sess, peer_logon);
     // We don't require Active here (the negotiated path may vary per US1
     // impl); we DO require a defined fsm_state and that the test does not
@@ -270,7 +266,8 @@ TEST_F(FsmTransitionMatrixTest,
     // state we landed in. FR-017: defined bounded reject — never UB / never
     // silent no-op.
     auto rr = make_admin_frame("2", 2, "ISLD", "TW",
-                               "7=1\x01" "16=0\x01");
+                               "7=1\x01"
+                               "16=0\x01");
     (void)feed_sync(sess, rr);
     EXPECT_TRUE(is_valid_fsm_state(sess.state()));
 }
@@ -283,16 +280,15 @@ TEST_F(FsmTransitionMatrixTest,
 // advanced, no fromAdmin/fromApp dispatch, no emit. I-1 attestation: a
 // HB/TR/RR fed into LogoutSent must leave state == LogoutSent.
 
-TEST_F(FsmTransitionMatrixTest,
-       LogoutSent_InboundNonLogoutEventsAreDrainedCellRemainsLogoutSent) {
+TEST_F(FsmTransitionMatrixTest, LogoutSent_InboundNonLogoutEventsAreDrainedCellRemainsLogoutSent) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
 
     // Drive into Active first.
-    auto peer_logon = make_admin_frame(
-        "A", 1, "ISLD", "TW",
-        "98=0\x01" "108=30\x01");
+    auto peer_logon = make_admin_frame("A", 1, "ISLD", "TW",
+                                       "98=0\x01"
+                                       "108=30\x01");
     (void)feed_sync(sess, peer_logon);
 
     // Initiate Logout → LogoutSent (we don't ioc.run() to completion of the
@@ -326,8 +322,7 @@ TEST_F(FsmTransitionMatrixTest,
 // in Disconnected, no emit, no counter effect). I-1 attestation: a HB fed
 // into Disconnected must leave state == Disconnected.
 
-TEST_F(FsmTransitionMatrixTest,
-       Disconnected_InboundIsIgnoredCellRemainsDisconnected) {
+TEST_F(FsmTransitionMatrixTest, Disconnected_InboundIsIgnoredCellRemainsDisconnected) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
@@ -353,8 +348,7 @@ TEST_F(FsmTransitionMatrixTest,
 // from Disconnected returns session_already_closed and leaves state ==
 // Disconnected. Defined-cell attestation for the close-after-close case.
 
-TEST_F(FsmTransitionMatrixTest,
-       Disconnected_CloseTerminalIsIdempotentAndStaysDisconnected) {
+TEST_F(FsmTransitionMatrixTest, Disconnected_CloseTerminalIsIdempotentAndStaysDisconnected) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());

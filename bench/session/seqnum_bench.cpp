@@ -19,19 +19,17 @@
 
 #include <benchmark/benchmark.h>
 
-#include <future>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
+#include <future>
 
 namespace {
 
-using fixpp::session::SeqnumManager;
 using fixpp::session::seqnum_t;
+using fixpp::session::SeqnumManager;
 
 void BM_Session_SeqnumNextWithIncrement(benchmark::State& state) {
     asio::io_context ioc;
