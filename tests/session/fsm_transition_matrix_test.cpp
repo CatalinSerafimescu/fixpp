@@ -361,4 +361,70 @@ TEST_F(FsmTransitionMatrixTest, Disconnected_CloseTerminalIsIdempotentAndStaysDi
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 }
 
+// ── NotConnected refused-Logon arms (Phase 8 /simplify finding 6) ───────────
+//
+// Matrix row NotConnected has two refusal cells (session.cpp:489-554):
+//   1. Non-Logon first message → refuse, transition to Disconnected.
+//   2. Logon-shaped but BeginString/CompID mismatch → refuse, stay in
+//      NotConnected (Phase 3 "never reaches Active" contract; full refuse+
+//      disconnect lands in a later phase).
+//
+// Coverage gap: existing tests drive NotConnected via open() into LogonSent
+// (initiator path); none feed a refused frame to an acceptor-shaped session
+// still in NotConnected. These two tests close that arm.
+
+TEST_F(FsmTransitionMatrixTest, NotConnected_NonLogonFirstMessage_TransitionsToDisconnected) {
+    // Acceptor-shaped: do NOT call open() (no initiator Logon emitted).
+    // Session is in NotConnected; feed a Heartbeat (35=0) as the first frame.
+    auto cfg = make_initiator_cfg();
+    Session sess(engine, cfg);
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    auto hb = make_admin_frame("0", 1, "ISLD", "TW");
+    (void)feed_sync(sess, hb);
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "NotConnected + non-Logon first frame must transition to Disconnected "
+        << "(session.cpp:548-550; matrix row 1)";
+}
+
+TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_StaysInNotConnected) {
+    // Feed a Logon (35=A) with wrong BeginString — interpret_logon refuses.
+    // Phase 3 contract: session stays in NotConnected (does NOT reach Active);
+    // the disconnect-on-refused-logon lands in a later phase per session.cpp:552.
+    auto cfg = make_initiator_cfg();  // expects FIX.4.2
+    Session sess(engine, cfg);
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    // Wrong BeginString ("FIX.4.4" instead of cfg's "FIX.4.2").
+    // The full frame still has MsgType=A (35=A); interpret_logon rejects on
+    // BeginString mismatch.
+    const std::string body =
+        "8=FIX.4.4\x01"
+        "9=64\x01"
+        "35=A\x01"
+        "34=1\x01"
+        "49=ISLD\x01"
+        "52=20200101-00:00:00.000\x01"
+        "56=TW\x01"
+        "98=0\x01"
+        "108=30\x01";
+    // Compute checksum.
+    std::uint32_t cs = 0;
+    for (char c : body) cs = (cs + static_cast<unsigned char>(c)) & 0xFFU;
+    char csbuf[4];
+    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+    const std::string full = body + "10=" + csbuf + "\x01";
+
+    std::vector<std::byte> frame;
+    frame.reserve(full.size());
+    for (char c : full) frame.push_back(static_cast<std::byte>(c));
+
+    (void)feed_sync(sess, frame);
+
+    EXPECT_EQ(sess.state(), fsm_state::NotConnected)
+        << "NotConnected + Logon-shaped frame with BeginString mismatch must "
+        << "preserve NotConnected (session.cpp:552 Phase 3 contract)";
+}
+
 }  // namespace fixpp::session::test

@@ -353,4 +353,142 @@ TEST(SessionReject, AppMessageInActiveTriggersReject) {
         << "Session must remain Active after emitting Reject for invalid MsgType";
 }
 
+// ── Phase 8 /simplify finding 5 — admin_messages.cpp buffer + fan-out arms ──
+//
+// admin_messages.cpp has ~89 uncovered lines / ~81 uncovered branches; the
+// bulk are wire::Writer::append_raw error-propagation arms triggered when the
+// caller passes an undersized `out` buffer. These tests exercise each
+// builder under buffer-too-small conditions so the error-propagation arms
+// fire.
+
+TEST(AdminMessagesBufferGuard, BuildLogonBufferTooSmallReturnsError) {
+    // Minimum Logon frame is ~80 bytes (8/9/35/34/49/52/56/98/108/10).
+    // 16 bytes is unconditionally insufficient — Writer fails on the first append.
+    std::array<std::byte, 16> tiny{};
+    auto r = fixpp::session::build_logon(
+        std::span<std::byte>{tiny}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30);
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildLogoutBufferTooSmallReturnsError) {
+    std::array<std::byte, 16> tiny{};
+    auto r = fixpp::session::build_logout(
+        std::span<std::byte>{tiny}, /*seq=*/2, "SENDER", "TARGET");
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildLogoutWithTextBufferTooSmallReturnsError) {
+    // Even a buffer that fits a Logout-without-text might be too small with
+    // a long text field — covers the optional-text branch + its error arm.
+    std::array<std::byte, 32> small{};
+    auto r = fixpp::session::build_logout(
+        std::span<std::byte>{small}, /*seq=*/3, "SENDER", "TARGET",
+        "explanatory text that pushes past the 32-byte ceiling");
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildHeartbeatBufferTooSmallReturnsError) {
+    std::array<std::byte, 16> tiny{};
+    auto r = fixpp::session::build_heartbeat(
+        std::span<std::byte>{tiny}, /*seq=*/4, "SENDER", "TARGET", {});
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildHeartbeatWithTestReqIDBufferTooSmallReturnsError) {
+    // Forces the optional-TestReqID branch in build_heartbeat with too-small buf.
+    std::array<std::byte, 32> small{};
+    auto r = fixpp::session::build_heartbeat(
+        std::span<std::byte>{small}, /*seq=*/5, "SENDER", "TARGET",
+        std::string_view{"TR-LONG-TEST-REQ-ID-PUSHES-PAST-32"});
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildTestRequestBufferTooSmallReturnsError) {
+    std::array<std::byte, 16> tiny{};
+    auto r = fixpp::session::build_test_request(
+        std::span<std::byte>{tiny}, /*seq=*/6, "SENDER", "TARGET", "TR-1");
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesBufferGuard, BuildRejectBufferTooSmallReturnsError) {
+    std::array<std::byte, 16> tiny{};
+    auto r = fixpp::session::build_reject(
+        std::span<std::byte>{tiny}, /*seq=*/7, "SENDER", "TARGET",
+        /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
+        /*ref_msg_type=*/"D", /*reason=*/3);
+    EXPECT_FALSE(r.has_value());
+}
+
+// ── SessionRejectReason fan-out (admin_messages.cpp:build_reject) ───────────
+//
+// The Reject builder accepts an int reason field; the call site in
+// session.cpp picks the SessionRejectReason value (0–10 in the standard
+// dictionary). These parametric tests exercise the full reason range so
+// the build_reject arms that switch on `reason` are uniformly hit.
+
+class BuildRejectAllReasons : public ::testing::TestWithParam<int> {};
+
+TEST_P(BuildRejectAllReasons, ProducesValidRejectForReason) {
+    const int reason = GetParam();
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW",
+        /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
+        /*ref_msg_type=*/"D", reason);
+    ASSERT_TRUE(r.has_value()) << "build_reject must succeed for reason=" << reason;
+
+    // SessionRejectReason(373) carries the requested reason in ASCII.
+    auto frame = *r;
+    EXPECT_EQ(extract_field(frame, 373), std::to_string(reason));
+}
+
+INSTANTIATE_TEST_SUITE_P(SessionRejectReasonFanOut,
+                         BuildRejectAllReasons,
+                         ::testing::Values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
+
+// ── interpret_logon: malformed input arms ───────────────────────────────────
+//
+// The SOH-delimited scanner inside interpret_logon has a `goto next_field`
+// label for tags that fail to parse (non-digit tag, missing '='). Feeding a
+// malformed Logon-shaped frame exercises that branch.
+
+TEST(AdminMessagesInterpret, MalformedTagDigitReturnsError) {
+    // Frame containing a non-digit tag — the scanner skips it via next_field;
+    // the absence of 35= then fails validation → session_invalid_logon.
+    const std::byte SOH{0x01};
+    std::vector<std::byte> bad;
+    bad.reserve(64);
+    auto push = [&](std::string_view s) {
+        for (char c : s) bad.push_back(static_cast<std::byte>(c));
+    };
+    push("8=FIX.4.4");
+    bad.push_back(SOH);
+    push("X=garbage");  // non-digit tag triggers next_field goto
+    bad.push_back(SOH);
+    push("49=SENDER");
+    bad.push_back(SOH);
+
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{bad}, "TARGET", "SENDER", "FIX.4.4");
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST(AdminMessagesInterpret, NonLogonMsgTypeRejectsAsInvalidLogon) {
+    // Frame with 35=A missing → session_invalid_logon.
+    const std::byte SOH{0x01};
+    std::vector<std::byte> frame;
+    auto push = [&](std::string_view s) {
+        for (char c : s) frame.push_back(static_cast<std::byte>(c));
+    };
+    push("8=FIX.4.4");                frame.push_back(SOH);
+    push("35=0");                     frame.push_back(SOH);  // Heartbeat, not Logon
+    push("49=SENDER");                frame.push_back(SOH);
+    push("56=TARGET");                frame.push_back(SOH);
+    push("108=30");                   frame.push_back(SOH);
+
+    auto r = fixpp::session::interpret_logon(
+        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    EXPECT_FALSE(r.has_value());
+}
+
 }  // namespace fixpp::session::test

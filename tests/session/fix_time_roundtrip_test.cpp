@@ -353,6 +353,54 @@ TEST(FixTimeRoundtrip, ParseNonDigitMicrosReturnsError) {
     EXPECT_FALSE(r.has_value());
 }
 
+// ── Format-side branches (Phase 8 /simplify finding 4 — branch coverage) ────
+
+TEST(FixTimeRoundtrip, FormatBufferTooSmallSecondsReturnsError) {
+    // 17-char minimum for seconds precision; pass 16.
+    utc_time_point tp{};
+    std::array<char, 16> buf{};
+    auto r = utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf});
+    ASSERT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, FormatBufferTooSmallMillisReturnsError) {
+    // 21-char minimum for millis precision; pass 20.
+    utc_time_point tp{};
+    std::array<char, 20> buf{};
+    auto r = utc_time_to_fix_string(tp, fix_time_precision::millis, std::span<char>{buf});
+    ASSERT_FALSE(r.has_value());
+}
+
+TEST(FixTimeRoundtrip, FormatBufferTooSmallMicrosReturnsError) {
+    // 24-char minimum for micros precision; pass 23.
+    utc_time_point tp{};
+    std::array<char, 23> buf{};
+    auto r = utc_time_to_fix_string(tp, fix_time_precision::micros, std::span<char>{buf});
+    ASSERT_FALSE(r.has_value());
+}
+
+// Negative-epoch handling: before-1970 timestamp should still format correctly
+// (fix_time.cpp:133 `if (time_of_day < 0)` branch — the seconds-modulo-negative
+// adjustment for dates before Unix epoch).
+TEST(FixTimeRoundtrip, FormatPreEpochTimestampRoundtripsCorrectly) {
+    // 1969-12-31T23:59:59Z — one second before epoch.
+    utc_time_point tp{std::chrono::seconds{-1}};
+    auto r = roundtrip(tp, fix_time_precision::seconds);
+    EXPECT_TRUE(r.format_ok);
+    EXPECT_TRUE(r.parse_ok);
+    EXPECT_TRUE(r.equal) << "pre-epoch must roundtrip; got " << r.formatted;
+}
+
+TEST(FixTimeRoundtrip, FormatDeepPreEpochTimestampRoundtripsCorrectly) {
+    // 1969-01-15T12:34:56Z — well before epoch, exercises the day-boundary
+    // adjustment fully.
+    utc_time_point tp{std::chrono::seconds{-30240244}};  // computed: about Jan 15 1969 12:34:56
+    auto r = roundtrip(tp, fix_time_precision::seconds);
+    EXPECT_TRUE(r.format_ok);
+    EXPECT_TRUE(r.parse_ok);
+    EXPECT_TRUE(r.equal);
+}
+
 TEST(FixTimeRoundtrip, FormatOutputBufferFitsIn32Chars) {
     // Maximum length: "YYYYMMDD-HH:MM:SS.ssssss" = 17+7 = 24 chars; well within 32.
     utc_time_point tp{};
