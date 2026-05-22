@@ -250,6 +250,8 @@ TEST(TcEstablishment, Scenario1c_InvalidSenderCompID) {
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active)       << "1c_InvalidSenderCompID: must not enter Active";
     EXPECT_NE(s, fsm_state::LogonReceived) << "1c_InvalidSenderCompID: must not enter LogonReceived";
+    // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
+    EXPECT_EQ(s, fsm_state::Disconnected) << "1c_InvalidSenderCompID: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -269,6 +271,8 @@ TEST(TcEstablishment, Scenario1c_InvalidTargetCompID) {
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active)       << "1c_InvalidTargetCompID: must not enter Active";
     EXPECT_NE(s, fsm_state::LogonReceived) << "1c_InvalidTargetCompID: must not enter LogonReceived";
+    // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
+    EXPECT_EQ(s, fsm_state::Disconnected) << "1c_InvalidTargetCompID: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -288,6 +292,8 @@ TEST(TcEstablishment, Scenario1d_WrongBeginString) {
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active)       << "1d_WrongBeginString: must not enter Active";
     EXPECT_NE(s, fsm_state::LogonReceived) << "1d_WrongBeginString: must not enter LogonReceived";
+    // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
+    EXPECT_EQ(s, fsm_state::Disconnected) << "1d_WrongBeginString: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

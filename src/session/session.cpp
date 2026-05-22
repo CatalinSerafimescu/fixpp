@@ -583,60 +583,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             if (!result) {
                 // Refusal — BeginString/CompID mismatch or not-Logon.
-                // Per matrix NotConnected row:
-                //   inbound Logon (refused)   → refuse, → Disconnected
-                //   inbound Heartbeat / TR / Reject / out-of-scope admin /
-                //     invalid MsgType         → refuse, → Disconnected (1st msg ≠ Logon)
-                //
-                // BUT: the existing US1 seam tests assert that a refused-Logon
-                // (BeginString/CompID mismatch) leaves the FSM NOT-in-Active
-                // without requiring Disconnected specifically (Phase 6 ships the
-                // full refusal+disconnect path; Phase 3 only requires "never
-                // reaches Active"). Preserve that contract for the explicit
-                // Logon-shaped refusal cases (interpret_logon would have
-                // detected wrong BeginString/CompID and returned !result with
-                // the frame still being a 35=A Logon).
-                //
-                // Discriminate the two cells: if the frame is a Logon (35=A)
-                // that failed CompID/BeginString validation, keep the Phase 3
-                // "stays NotConnected" semantic. If it is a non-Logon first
-                // message, transition to Disconnected per matrix row.
-                auto hdr = scan_frame_header(frame);
-                // Scan for MsgType (tag 35). scan_frame_header reads tags 8/34/49/56
-                // but not 35; do a minimal MsgType check inline.
-                bool is_logon = false;
-                {
-                    const std::byte SOH{0x01};
-                    const std::byte EQ{static_cast<std::byte>('=')};
-                    std::size_t i = 0;
-                    const std::size_t n = frame.size();
-                    while (i + 2 < n) {
-                        // Look for "35=" SOH-delimited field start.
-                        if (frame[i] == static_cast<std::byte>('3') &&
-                            frame[i + 1] == static_cast<std::byte>('5') && frame[i + 2] == EQ) {
-                            std::size_t v = i + 3;
-                            if (v < n && frame[v] == static_cast<std::byte>('A') &&
-                                (v + 1 == n || frame[v + 1] == SOH)) {
-                                is_logon = true;
-                            }
-                            break;
-                        }
-                        // Advance to next SOH+1 (start of next field).
-                        while (i < n && frame[i] != SOH) {
-                            ++i;
-                        }
-                        if (i < n) {
-                            ++i;
-                        }
-                    }
-                }
-                (void)hdr;
-                if (!is_logon) {
-                    // Non-Logon first message: matrix row → refuse, → Disconnected.
-                    fsm_state_ = fsm_state::Disconnected;
-                }
-                // Refused-Logon (CompID/BeginString failure): preserve Phase 3
-                // "stays NotConnected" contract (full disconnect lands in Phase 6).
+                // Per matrix NotConnected row (data-model.md:19):
+                //   inbound Logon (refused)   → Disconnected (FR-006 / RC#3)
+                //   inbound non-Logon (first) → Disconnected
+                // No MsgType discrimination: every refusal on this row lands in
+                // Disconnected. Phase-3 "stays NotConnected" compromise removed
+                // by T014 [US3] per spec.md FR-006 + opus_pr81_1_triage.md RC#3.
+                fsm_state_ = fsm_state::Disconnected;
                 co_return fixpp::core::expected_t<void>{};
             }
 
