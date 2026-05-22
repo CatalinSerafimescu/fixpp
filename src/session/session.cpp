@@ -640,60 +640,67 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
             // Check |inbound_sending_time − effective_now| ≤ MaxLatency (D-8: 120 s).
-            // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt from
-            // this check per I-5 (a malformed Reject is never itself rejected).
+            // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt per I-5.
             // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
+            // FR-007: missing SendingTime (empty) → Reject-Logout-Disconnect.
+            // FR-008: malformed SendingTime (parse failure) → Reject-Logout-Disconnect.
+            // T016 [US3] RC#5: both empty AND parse-failure fall through to the path.
             // Note: the Logon-path special case (D-3) is handled in LogonSent below.
-            if (hdr.msg_type != "3" && hdr.msg_type != "5" && !hdr.sending_time.empty() &&
-                effective_clock_) {
-                auto parse_r = fixpp::core::fix_string_to_utc_time(
-                    std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
-                if (parse_r) {
-                    const auto max_lat = cfg_.sending_time_threshold.has_value()
-                                             ? std::chrono::duration_cast<std::chrono::seconds>(
-                                                   *cfg_.sending_time_threshold)
-                                             : std::chrono::seconds{120};  // D-8 default 120 s
-                    auto chk_st = fixpp::session::check_sending_time(
-                        *parse_r, effective_clock_->now(), max_lat);
-                    if (!chk_st) {
-                        // Q3 established-session path: Reject → Logout → Disconnect.
-                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                           : SendingTimeStamp{};
-                        // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
-                        {
-                            std::array<std::byte, 512> rj_buf{};
-                            const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
-                            auto rj_result = fixpp::session::build_reject(
-                                std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                                next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
-                                ref_seq,
-                                52,  // RefTagID = 52 (SendingTime)
-                                hdr.msg_type,
-                                10,  // SessionRejectReason = 10 (SendingTime accuracy)
-                                cfg_.begin_string, st52.value);
-                            if (rj_result) {
-                                auto emit_r = co_await store_then_emit(*rj_result);
-                                (void)emit_r;
-                            }
-                        }
-                        // Step 2: emit Logout(35=5).
-                        {
-                            std::array<std::byte, 256> lo_buf{};
-                            auto lo_result = fixpp::session::build_logout(
-                                std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                                next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
-                                {}, cfg_.begin_string, st52.value);
-                            if (lo_result) {
-                                auto emit_r = co_await store_then_emit(*lo_result);
-                                (void)emit_r;
-                            }
-                        }
-                        // Step 3: Disconnect.
-                        fsm_state_ = fsm_state::Disconnected;
-                        co_return fixpp::core::expected_t<void>{};
+            if (hdr.msg_type != "3" && hdr.msg_type != "5" && effective_clock_) {
+                // Determine if SendingTime is valid: present AND parseable AND in-range.
+                bool sending_time_ok = false;
+                if (!hdr.sending_time.empty()) {
+                    auto parse_r = fixpp::core::fix_string_to_utc_time(
+                        std::span<const char>{hdr.sending_time.data(), hdr.sending_time.size()});
+                    if (parse_r) {
+                        const auto max_lat = cfg_.sending_time_threshold.has_value()
+                                                 ? std::chrono::duration_cast<std::chrono::seconds>(
+                                                       *cfg_.sending_time_threshold)
+                                                 : std::chrono::seconds{120};  // D-8 default 120 s
+                        auto chk_st = fixpp::session::check_sending_time(
+                            *parse_r, effective_clock_->now(), max_lat);
+                        sending_time_ok = chk_st.has_value();
                     }
+                    // parse failure: !parse_r → sending_time_ok stays false → path fires.
                 }
-                // parse failure: accept the message (lenient on malformed timestamp)
+                // sending_time absent (empty) → sending_time_ok stays false → path fires.
+
+                if (!sending_time_ok) {
+                    // Q3 established-session path: Reject(reason=10, refTag=52) → Logout → Disconnect.
+                    const auto st52 = stamp_sending_time(*effective_clock_);
+                    // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
+                    {
+                        std::array<std::byte, 512> rj_buf{};
+                        const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                        auto rj_result = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                            ref_seq,
+                            52,  // RefTagID = 52 (SendingTime)
+                            hdr.msg_type,
+                            10,  // SessionRejectReason = 10 (SendingTime accuracy)
+                            cfg_.begin_string, st52.value);
+                        if (rj_result) {
+                            auto emit_r = co_await store_then_emit(*rj_result);
+                            (void)emit_r;
+                        }
+                    }
+                    // Step 2: emit Logout(35=5).
+                    {
+                        std::array<std::byte, 256> lo_buf{};
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()},
+                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                            {}, cfg_.begin_string, st52.value);
+                        if (lo_result) {
+                            auto emit_r = co_await store_then_emit(*lo_result);
+                            (void)emit_r;
+                        }
+                    }
+                    // Step 3: Disconnect.
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // ── Guard (4): seqnum check (T035) ────────────────────────────────
