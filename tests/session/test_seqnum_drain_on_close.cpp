@@ -204,11 +204,13 @@ struct MinimalSession {
 // Skip Test 1 in NDEBUG, ASan, and UBSan builds (synthetic
 // FIXPP_TEST_HOOKS parked-detached-coroutine pattern is fragile to
 // optimization + sanitizer instrumentation; the contract is fully
-// verified by Tests 2/3/4 in all builds).
+// verified by Tests 2/3/4 in all builds). __SANITIZE_ADDRESS__ /
+// __SANITIZE_UNDEFINED__ are defined by both GCC and Clang under
+// -fsanitize=*, which covers every compiler this project supports;
+// the Clang-only __has_feature() check was removed because GCC's
+// preprocessor errors on it ("missing binary operator before token (").
 #if !defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && \
-    !defined(__SANITIZE_UNDEFINED__) &&                  \
-    !(__has_feature(address_sanitizer)) &&               \
-    !(__has_feature(undefined_behavior_sanitizer))
+    !defined(__SANITIZE_UNDEFINED__)
 TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
     // ── RED sub-test: EXPECT_DEATH shows the exact terminate drain() prevents ──
     //
