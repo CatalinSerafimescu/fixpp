@@ -31,8 +31,8 @@ This slice is a waiver-closure ride-along. It introduces **no new design space**
 ## D-2 — F-04 LogonReceived observability seam mechanism
 
 **Decision:** **`Session` exposes a public `fsm_visit_history() const noexcept` accessor returning `std::span<const fsm_state>` over a fixed-capacity (16-entry) `std::array<fsm_state, 16>` ring-buffer member.** Every assignment to `fsm_state_` in `src/session/session.cpp` (/speckit-analyze verified: **37 sites** spread across `Session::open`, the message-handler `switch` cascade, the close path, and the logout-timer handler) is routed through a new private `record_state_transition_(fsm_state) noexcept` helper that:
-1. Writes `fsm_visit_history_[fsm_visit_count_ % 16] = new_state;`
-2. Increments `fsm_visit_count_` (saturates at `std::numeric_limits<std::uint8_t>::max()` to avoid wrap-around for the read pattern; in practice the count is bounded by `[FIX-SL §4.10]` cells ≤ 30 per session lifetime).
+1. Writes `fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;` — `fsm_visit_write_idx_` is a separate `std::uint32_t` monotonic write-index (modular arithmetic gives 0..15 cycling indefinitely). It is distinct from `fsm_visit_count_` so the ring keeps rotating after the saturating count caps; the `[gate-b/r1 F-13 fix]` separated these two when round-1 review found that combining them froze the write slot at 15 after the count saturated.
+2. Increments `fsm_visit_count_` (saturates at `std::numeric_limits<std::uint8_t>::max()` to avoid wrap-around for the read pattern; in practice the count is bounded by `[FIX-SL §4.10]` cells ≤ 30 per session lifetime — well below the 16-slot ring's wrap point AND the count's saturation point).
 3. Performs the actual `fsm_state_ = new_state;` assignment.
 
 Tests assert that `LogonReceived` appears in `session.fsm_visit_history()` after the acceptor reply-Logon path runs, without needing the test to observe the FSM mid-transition. The synchronous-transient state is recorded *as it happens* — observable after.
