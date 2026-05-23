@@ -20,6 +20,7 @@
 //   open()  config-validation rejections     → T050 (US5)
 #pragma once
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
@@ -44,7 +45,8 @@
 // nested type alias flush_hook_fn requires it).
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
-#include <fixpp/session/session_fsm.hpp>     // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
+#include <fixpp/session/session_fsm.hpp>  // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core {
 struct EngineConfig;
@@ -53,22 +55,37 @@ class Clock;
 
 namespace fixpp::session {
 
-struct SessionConfig;
-
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
 // hook once → Logout exchange under a CHILD asio::cancellation_state below
 // the root) → phase 2 (root cancellation_type::total). terminal: skip phase 1
 // (hook NOT invoked). partial is NOT in the v1.0 surface (N-P1-3).
 enum class close_mode : std::uint8_t { graceful = 0, terminal = 1 };
 
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — Session is heap-allocated once per session; the 39-byte padding doesn't fit on a hot path. Field order tracks the FSM/handshake/seqnum/store/clock/exec/state groupings; reordering for tight packing would obscure that structure. Defer to a dedicated perf pass if profiling shows it matters.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — Session is heap-allocated once per
+// session; the 39-byte padding doesn't fit on a hot path. Field order tracks the
+// FSM/handshake/seqnum/store/clock/exec/state groupings; reordering for tight packing would obscure
+// that structure. Defer to a dedicated perf pass if profiling shows it matters.
 class Session {
 public:
     // The ctor pre-conditions a non-null session_arena via the [2d §4.5]
     // resolution chain so session_arena()'s never-null contract holds for
-    // the whole session lifetime (I-18). engine/cfg are borrowed and MUST
-    // outlive the Session (engine-owned lifetime — [arch §4.4]).
-    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept;
+    // the whole session lifetime (I-18). engine is borrowed and MUST
+    // outlive the Session (engine-owned lifetime — [arch §4.4]). cfg is
+    // COPIED into cfg_ by value (FR-001 / D-1 / W-5 lifetime fix); the
+    // caller may freely drop or mutate the config after the ctor returns.
+    //
+    // NOT noexcept (W3.1 / /simplify B-1, 010-session-cfg-lifetime): the
+    // SessionConfig copy-ctor invoked in the initializer list can throw
+    // — std::string (sender_comp_id / target_comp_id / begin_string) may
+    // allocate when above the SSO threshold; std::function<void(span)>
+    // transport_send may allocate for non-SBO captures; std::shared_ptr
+    // copies bump a refcount whose atomic op is noexcept but whose enclosing
+    // copy ctor is not annotated noexcept by the standard. Declaring this
+    // ctor `noexcept` while constructing `SessionConfig cfg_;` from a
+    // potentially-throwing copy would call std::terminate on any thrown
+    // copy — UB-class hazard. Matches the close() precedent below (NOT
+    // noexcept because std::make_shared allocates).
+    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg);
 
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -217,6 +234,21 @@ public:
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
     [[nodiscard]] fsm_state state() const noexcept;
 
+    // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
+    // Returns a std::span view over the underlying std::array<fsm_state, 16>
+    // in PHYSICAL-BUFFER ORDER (index 0..15).
+    //
+    // CONTRACT: containment / membership-witness only. The returned span gives
+    // the set of transitions recorded over the most recent ≤16
+    // record_state_transition_() calls. Tests assert membership via Contains /
+    // std::find / history_contains; callers MUST NOT infer event order from
+    // index position (the buffer is NOT chronologically ordered).
+    //
+    // Always-on, zero-cost-when-unread (~1ns push per transition). Used by
+    // FR-004 observability tests and FR-006 matrix witness per-cell checks.
+    // Empty before the first record_state_transition_() call.
+    [[nodiscard]] std::span<const fsm_state> fsm_visit_history() const noexcept;
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto
@@ -245,7 +277,8 @@ public:
             // in_dispatch_ permanently set and false-positived the
             // next otherwise-serial dispatch assertion.
             struct dispatch_guard {
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard binds to the caller's flag for clear-on-scope-exit.
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard
+                // binds to the caller's flag for clear-on-scope-exit.
                 std::atomic<bool>& flag;
                 explicit dispatch_guard(std::atomic<bool>& f) noexcept : flag(f) {}
                 ~dispatch_guard() noexcept { flag.store(false, std::memory_order_release); }
@@ -271,14 +304,13 @@ public:
     // directly acquire the internal async_mutex to manufacture a genuine holder
     // that is in-flight when close() calls seqnum_mgr_.drain(). NOT for
     // production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
-    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept {
-        return seqnum_mgr_;
-    }
+    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
 #endif
 
 private:
     const fixpp::core::EngineConfig& engine_;
-    const SessionConfig& cfg_;
+    SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
+                         // mutate the config after the ctor returns without causing UAF
     std::pmr::memory_resource* session_arena_;  // resolved in ctor, never null
 
     fixpp::core::session_executor exec_;                   // bound at open() (T020)
@@ -351,6 +383,20 @@ private:
     // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
     // this tracks the FIX protocol state).
     fsm_state fsm_state_ = fsm_state::NotConnected;
+
+    // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
+    // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
+    // Written exclusively via record_state_transition_; ring wraps at index 16.
+    // fsm_visit_count_ saturates at UINT8_MAX to avoid overflow; the write index
+    // is tracked separately (fsm_visit_write_idx_) so the ring keeps rotating
+    // even after fsm_visit_count_ saturates (F-13 fix).
+    std::array<fsm_state, 16> fsm_visit_history_{};
+    std::uint8_t  fsm_visit_count_     = 0;
+    std::uint32_t fsm_visit_write_idx_ = 0;
+
+    // FR-004 / D-2 — route every FSM transition through this helper so the
+    // ring-buffer is always in sync with fsm_state_.
+    void record_state_transition_(fsm_state new_state) noexcept;
 
     // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).

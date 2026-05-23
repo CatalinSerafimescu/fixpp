@@ -7,10 +7,17 @@
 //
 // History: 007 shipped the MINIMAL polymorphic-bind-target stub (deleted
 // move/copy + virtual destructor only) so SessionConfig's
-// unique_ptr<MessageStoreFactory> at session_config.hpp:106 could carry a
+// shared_ptr<MessageStoreFactory> at session_config.hpp:127 could carry a
 // complete type ([2d §4.5] Appendix D §D.1). 008 EXTENDS the class in place
 // (preserving the class identity, the deleted move/copy, the virtual
-// destructor) by adding the make() pure-virtual.
+// destructor) by adding the make() pure-virtual. 010 FR-001a amended
+// SessionConfig::store_factory from unique_ptr to shared_ptr (W-5 enabler:
+// makes SessionConfig copy-constructible for the by-value Session::cfg_
+// membership decided at /speckit-clarify); the factory is stateless and
+// the per-Session MessageStore uniqueness invariant is preserved because
+// each Session calls make() to mint its own store. See specs/010-session-
+// cfg-lifetime/spec.md FR-001a and the Gate A inheritance addendum at
+// library/.specify/decisions/010-session-cfg-lifetime-gatea.md (T027b).
 //
 // Anchor: .specify/2e-msgstore.md v0.5 §4.4 (N1 — unique_ptr ownership) +
 // Appendix D §D.6 (Gap 3 close — store-object deleter contract). FR-005 /
@@ -19,25 +26,23 @@
 // Mirror of specs/008-message-store/contracts/message_store_factory.hpp.
 #pragma once
 
+#include <asio/any_io_executor.hpp>
+#include <fixpp/core/error.hpp>             // expected_t
+#include <fixpp/session/message_store.hpp>  // MessageStore
 #include <memory>
 #include <memory_resource>
 #include <string_view>
-
-#include <asio/any_io_executor.hpp>
-
-#include <fixpp/core/error.hpp>                  // expected_t
-#include <fixpp/session/message_store.hpp>       // MessageStore
 
 namespace fixpp::session {
 
 class MessageStoreFactory {
 public:
-    MessageStoreFactory()                                       = default;
-    MessageStoreFactory(const MessageStoreFactory&)             = delete;
-    MessageStoreFactory& operator=(const MessageStoreFactory&)  = delete;
-    MessageStoreFactory(MessageStoreFactory&&)                  = delete;
-    MessageStoreFactory& operator=(MessageStoreFactory&&)       = delete;
-    virtual ~MessageStoreFactory()                              = default;
+    MessageStoreFactory() = default;
+    MessageStoreFactory(const MessageStoreFactory&) = delete;
+    MessageStoreFactory& operator=(const MessageStoreFactory&) = delete;
+    MessageStoreFactory(MessageStoreFactory&&) = delete;
+    MessageStoreFactory& operator=(MessageStoreFactory&&) = delete;
+    virtual ~MessageStoreFactory() = default;
 
     // make: mint a MessageStore for the given <sender, target> identity.
     //
@@ -95,12 +100,9 @@ public:
     // sentinel record's session_triple_hash on re-open — mismatch →
     // store_factory_failed; rejects with store_factory_failed if the
     // resolved file_io_executor (Config-supplied OR threaded-in) is empty.
-    [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>>
-    make(std::string_view sender,
-         std::string_view target,
-         std::pmr::memory_resource* mr,
-         std::size_t max_store_memory_bytes,
-         asio::any_io_executor file_io_executor) noexcept = 0;
+    [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
+        std::size_t max_store_memory_bytes, asio::any_io_executor file_io_executor) noexcept = 0;
 };
 
 }  // namespace fixpp::session

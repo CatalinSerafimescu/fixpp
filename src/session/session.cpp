@@ -7,17 +7,18 @@
 // resolution chain + linkable open()/close() placeholders. The 2d-owned
 // BEHAVIOUR is wired per user story (T020/T030/T037/T038/T039/T045/T050) —
 // each replaces the marked placeholder body, it is not additive guesswork.
+#include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
 #include <asio/awaitable.hpp>
-#include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
 #include <asio/detached.hpp>
+#include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -47,6 +48,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
 #include <functional>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -73,7 +75,7 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
 }
 }  // namespace
 
-Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept
+Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
     : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)) {
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
@@ -94,6 +96,26 @@ Session::~Session() {
 
 std::pmr::memory_resource* Session::session_arena() const noexcept {
     return session_arena_;  // I-18: frozen at ctor, never null, never swapped
+}
+
+// ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
+// record_state_transition_: write new_state into the 16-slot ring and advance
+// fsm_state_. The write index (fsm_visit_write_idx_) is a separate uint32 that
+// always advances; the public count (fsm_visit_count_) saturates at UINT8_MAX
+// to signal "≥255 transitions" without freezing the ring rotation.
+void Session::record_state_transition_(fsm_state new_state) noexcept {
+    fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;
+    if (fsm_visit_count_ < std::numeric_limits<std::uint8_t>::max()) {
+        ++fsm_visit_count_;
+    }
+    fsm_state_ = new_state;
+}
+
+// fsm_visit_history: membership-witness view over the last ≤16 recorded
+// transitions (physical-buffer order; NOT chronologically meaningful — see header).
+std::span<const fsm_state> Session::fsm_visit_history() const noexcept {
+    return std::span<const fsm_state>{fsm_visit_history_.data(),
+                                      std::min<std::size_t>(fsm_visit_count_, 16)};
 }
 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
@@ -236,7 +258,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //   Logon via on_inbound_frame (NotConnected → LogonReceived → Active).
     //   [spec.md FR-004 §US2 AC1; contracts/session_role.hpp]
     if (cfg_.role == session_role::initiator) {
-        fsm_state_ = fsm_state::LogonSent;
+        record_state_transition_(fsm_state::LogonSent);
 
         // Emit the initial Logon via build_logon + store_then_emit.
         // This is the SAME admin-builder emission path used by other admin
@@ -250,41 +272,50 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         std::string_view sending_time_view;
         if (effective_clock_) {
             auto fmt_r = fixpp::session::stamp_sending_time(
-                effective_clock_->now(),
-                std::span<char>{time_buf.data(), time_buf.size()});
+                effective_clock_->now(), std::span<char>{time_buf.data(), time_buf.size()});
             if (fmt_r) {
                 sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
             }
         }
         const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-            ? static_cast<int>(cfg_.heartbeat_interval->count())
-            : 30;  // D-8 default 30 s
+                                    ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                    : 30;  // D-8 default 30 s
         // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
         // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
         // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
         // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
         const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
-        auto logon_result = fixpp::session::build_logon(
-            std::span<std::byte>{logon_buf.data(), logon_buf.size()},
-            logon_seq,
-            cfg_.sender_comp_id, cfg_.target_comp_id,
-            cfg_.begin_string, heartbt_sec, sending_time_view);
+        auto logon_result =
+            fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
+                                        logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                        cfg_.begin_string, heartbt_sec, sending_time_view);
         if (!logon_result) {
             // build_logon failed (oversized IDs → wire_frame_too_large).
-            // Propagate as an open() error; seqnum NOT consumed. [F6 drift fix]
+            // Session-fatal — initiator handshake never reached the wire; transition
+            // to Disconnected to match the acceptor send-throw symmetry promised by
+            // FR-009 + the "session-fatal → Disconnected" precedent set by the
+            // liveness loop (assign_outbound failure at session.cpp:~1466) and the
+            // Active send-throw witness in send_path_test.
+            // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
+            //  [FIX-SL §4.3] initiator handshake failure semantics]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(logon_result.error());
         }
         // Advance outbound counter through manager ONLY on build success.
         // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            // Seqnum overflow — same disposition as build_logon failure above.
+            // [W3.4 / /simplify B-8 fix]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());  // overflow (I-8)
         }
         auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
         if (!emit_r) {
-            // store_then_emit failed (store I/O or transport error).
-            // Propagate error; seqnum was advanced but no message was delivered.
-            // [F7 drift fix; spec.md FR-001(e)]
+            // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
+            // Same disposition: session-fatal → Disconnected.
+            // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(emit_r.error());
         }
     } else {
@@ -385,7 +416,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // Any other FSM state (LogonSent, NotConnected, etc.) also becomes
     // Disconnected per the matrix close(terminal)/fatal column.
     if (fsm_state_ != fsm_state::Disconnected) {
-        fsm_state_ = fsm_state::Disconnected;
+        record_state_transition_(fsm_state::Disconnected);
     }
 
     // T037/T039 phase 2 — fire root cancellation_type::total ONLY after
@@ -567,9 +598,9 @@ struct SendingTimeStamp {
 
 [[nodiscard]] SendingTimeStamp stamp_sending_time(fixpp::core::Clock& clock) noexcept {
     SendingTimeStamp s;
-    auto fmt_r = fixpp::core::utc_time_to_fix_string(
-        clock.now(), fixpp::core::fix_time_precision::millis,
-        std::span<char>{s.buf.data(), s.buf.size()});
+    auto fmt_r =
+        fixpp::core::utc_time_to_fix_string(clock.now(), fixpp::core::fix_time_precision::millis,
+                                            std::span<char>{s.buf.data(), s.buf.size()});
     if (fmt_r) {
         s.value = std::string_view{fmt_r->data(), fmt_r->size()};
     }
@@ -627,7 +658,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // No MsgType discrimination: every refusal on this row lands in
                 // Disconnected. Phase-3 "stays NotConnected" compromise removed
                 // by T014 [US3] per spec.md FR-006 + opus_pr81_1_triage.md RC#3.
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -638,14 +669,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — treat as invalid (fatal for protocol safety).
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
 
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
                     // Too-low or too-high: session-fatal (I-2/I-4/[FIX-SL §4.1]).
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -655,8 +686,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
             // RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on
             // successful reply build AND emit. Build/emit failure → Disconnected.
-            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed HeartBtInt"]
-            fsm_state_ = fsm_state::LogonReceived;
+            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed
+            // HeartBtInt"]
+            record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
             // as the initiator's open() Logon. [spec.md FR-005 line 112]
@@ -673,33 +705,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                 }
                 const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-                    ? static_cast<int>(cfg_.heartbeat_interval->count())
-                    : 30;  // D-8 default 30 s
+                                            ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                            : 30;  // D-8 default 30 s
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
                 // RC#B: gate the advance on build success; gate Active on emit success.
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 auto reply_logon = fixpp::session::build_logon(
-                    std::span<std::byte>{reply_buf.data(), reply_buf.size()},
-                    reply_seq,
-                    cfg_.sender_comp_id, cfg_.target_comp_id,
-                    cfg_.begin_string, heartbt_sec, reply_sending_time_view);
+                    std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
+                    cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
+                    reply_sending_time_view);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(reply_logon.error());
                 }
                 // Advance outbound counter through manager (RC#A: was ++next_outbound_seq_).
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (!assign_r) {
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(assign_r.error());
                 }
                 auto emit_r = co_await store_then_emit(reply_seq, *reply_logon);
                 if (!emit_r) {
                     // Emit failed (transport error). RC#B: Disconnected, not Active.
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(emit_r.error());
                 }
             }
@@ -709,7 +740,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (effective_clock_) {
                 last_inbound_steady_ = effective_clock_->steady_now();
             }
-            fsm_state_ = fsm_state::Active;
+            record_state_transition_(fsm_state::Active);
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
@@ -736,7 +767,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (hdr.begin_string != cfg_.begin_string ||
                 hdr.sender_comp_id != cfg_.target_comp_id ||
                 hdr.target_comp_id != cfg_.sender_comp_id) {
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -768,7 +799,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // sending_time absent (empty) → sending_time_ok stays false → path fires.
 
                 if (!sending_time_ok) {
-                    // Q3 established-session path: Reject(reason=10, refTag=52) → Logout → Disconnect.
+                    // Q3 established-session path: Reject(reason=10, refTag=52) → Logout →
+                    // Disconnect.
                     const auto st52 = stamp_sending_time(*effective_clock_);
                     // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
                     {
@@ -776,9 +808,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            ref_seq,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             52,  // RefTagID = 52 (SendingTime)
                             hdr.msg_type,
                             10,  // SessionRejectReason = 10 (SendingTime accuracy)
@@ -786,7 +817,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (rj_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
-                                fsm_state_ = fsm_state::Disconnected;
+                                record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
                             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
@@ -798,13 +829,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         std::array<std::byte, 256> lo_buf{};
                         const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                         auto lo_result = fixpp::session::build_logout(
-                            std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                            lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            {}, cfg_.begin_string, st52.value);
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
+                            st52.value);
                         if (lo_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
-                                fsm_state_ = fsm_state::Disconnected;
+                                record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
                             auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
@@ -812,7 +843,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                     }
                     // Step 3: Disconnect.
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -822,7 +853,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — session-fatal.
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -830,7 +861,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!chk) {
                     // Too-low (session_seqnum_too_low=69) or
                     // too-high (session_seqnum_gap_unrecoverable=70) → session-fatal.
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -850,12 +881,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
                     auto logout_result = fixpp::session::build_logout(
                         std::span<std::byte>{buf.data(), buf.size()}, logout_seq,
-                        cfg_.sender_comp_id, cfg_.target_comp_id,
-                        {}, cfg_.begin_string, st52.value);
+                        cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
+                        st52.value);
                     if (logout_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
-                            fsm_state_ = fsm_state::Disconnected;
+                            record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(assign_r.error());
                         }
                         auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
@@ -863,7 +894,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                 }
                 // Both Active and LogonReceived → Disconnected.
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -911,7 +942,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!assign_r) {
                             // Overflow or closed: session-fatal per data-model.md:30 E3.
                             // Do NOT emit with unassigned seq — skip and disconnect.
-                            fsm_state_ = fsm_state::Disconnected;
+                            record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(assign_r.error());
                         }
                         auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
@@ -922,24 +953,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
 
                 // ── Guard (5): message-type-for-state (T056 US5) ─────────────
-                // Session admin types known to Active: 0/1/3/5/A (handled above).
-                // Any other MsgType in Active → session-level Reject(35=3) with
-                // SessionRejectReason and RefMsgType. Session stays Active.
-                // No-reject-loop: guard (type == "3" || type == "5") exempted above.
+                // Session admin types silently passed-through in Active: 0/1/3/5
+                // (Heartbeat / TestRequest / Reject / Logout — handled above OR
+                // dispatched via the in-seq path). Any other MsgType in Active →
+                // session-level Reject(35=3) with SessionRejectReason and RefMsgType.
+                // Session stays Active. No-reject-loop: guard (type == "3" || type
+                // == "5") exempted above.
+                //
+                // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
+                // 2026-05-23): "A" (dup-Logon), "2" (RR), "4" (SeqReset) ARE NOT in
+                // is_session_admin — per 005 data-model row 22 + FR-017 "never silent
+                // no-op" they must emit a Reject. The pre-010 impl silently ignored
+                // all three; the post-fix impl routes them through the !is_session_admin
+                // Reject branch below (SessionRejectReason=3 / invalid MsgType).
+                //
+                // TODO(2e-recovery): when the deferred session-recovery feature lands,
+                // UPGRADE the "2" (ResendRequest) and "4" (SequenceReset) cells from
+                // Reject → Process (gap-fill via the message store), matching QuickFIX-
+                // cpp Session::nextResendRequest / nextSequenceReset and QuickFIX/J
+                // Session.java:1325 / :1539. The "A" (dup-Logon) cell stays Reject
+                // per 005's intentional defensive divergence from QuickFIX convention
+                // (QuickFIX engines treat dup-Logon as a refresh/reset trigger; 005
+                // requires explicit Logout→Disconnect→Logon sequencing instead).
                 {
                     // Known session admin MsgTypes (all others → Reject).
-                    // "A" = Logon, "0" = Heartbeat, "1" = TestRequest,
-                    // "2" = ResendRequest, "3" = Reject, "4" = SeqReset, "5" = Logout.
-                    // 2/4 (RR/SeqReset) are deferred admin; they still get a Reject
-                    // per data-model matrix (session_admin_not_supported, slot 75).
-                    const bool is_session_admin =
-                        (hdr.msg_type == "A" ||  // Logon (dup in Active)
-                         hdr.msg_type == "0" ||  // Heartbeat
-                         hdr.msg_type == "1" ||  // TestRequest
-                         hdr.msg_type == "2" ||  // ResendRequest (deferred → Reject)
-                         hdr.msg_type == "3" ||  // Reject (handled above)
-                         hdr.msg_type == "4" ||  // SequenceReset-GapFill (deferred → Reject)
-                         hdr.msg_type == "5");   // Logout (handled above)
+                    // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
+                    // "A" (dup-Logon-in-Active), "2" (RR), "4" (SeqReset) deliberately
+                    // EXCLUDED — they fall through to the Reject branch per 005 FR-017.
+                    const bool is_session_admin = (hdr.msg_type == "0" ||  // Heartbeat
+                                                   hdr.msg_type == "1" ||  // TestRequest
+                                                   hdr.msg_type == "3" ||  // Reject (handled above)
+                                                   hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {
                         // Unknown / app-type MsgType in Active →
@@ -951,8 +995,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                            : SendingTimeStamp{};
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             0,             // RefTagID: n/a for MsgType rejection
                             hdr.msg_type,  // RefMsgType: the offending MsgType
                             3,             // SessionRejectReason = 3 (invalid MsgType)
@@ -961,7 +1005,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 // Overflow or closed: session-fatal per data-model.md:30 E3.
-                                fsm_state_ = fsm_state::Disconnected;
+                                record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
                             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
@@ -984,7 +1028,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
             auto hdr = scan_frame_header(frame);
             if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
                 // Wake up the sleep_until in run_logout_phase1 so it can
                 // detect the confirmation and return early (before the 2s timeout).
@@ -1017,7 +1061,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // inbound (Heartbeat/TestRequest/Reject/out-of-scope admin /
                 // invalid MsgType). Per matrix LogonSent row: every one of
                 // these cells transitions to Disconnected (with Logout in US4).
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -1058,19 +1102,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     const auto st52 = stamp_sending_time(*effective_clock_);
                     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                     auto lo_result = fixpp::session::build_logout(
-                        std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                        lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                        sending_time_error, cfg_.begin_string, st52.value);
+                        std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, sending_time_error,
+                        cfg_.begin_string, st52.value);
                     if (lo_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
-                            fsm_state_ = fsm_state::Disconnected;
+                            record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(assign_r.error());
                         }
                         auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
                         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
-                    fsm_state_ = fsm_state::Disconnected;
+                    record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -1078,19 +1122,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // ── Guard (4): seqnum check (T035 LogonSent row) ─────────────────
             const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
             if (seq == 0) {
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
             auto chk = co_await seqnum_mgr_.check_inbound(seq);
             if (!chk) {
                 // Too-low or too-high → fatal (recovery deferred; I-2/I-4).
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
-            fsm_state_ = fsm_state::Active;
+            record_state_transition_(fsm_state::Active);
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
             if (effective_clock_) {
@@ -1143,40 +1187,42 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
     using fixpp::core::error;
 
-    // F4 (Round-A drift): FSM precondition — Session::send is only valid in Active.
+    // FR-005 / D-3: FSM precondition — Session::send is only valid in Active.
     // spec.md US1 ACs all premise Active; sending while in LogonSent/NotConnected/
     // LogonReceived/LogoutSent/Disconnected is a programmer error.
-    // [spec.md US1; data-model.md §E1 Session::send; F4 drift fix]
+    // Returns session_invalid_state_for_send (=77) — not session_invalid_logon —
+    // to give the caller a semantically distinct diagnosis. [FR-005 / D-3]
     if (fsm_state_ != fsm_state::Active) {
-        co_return std::unexpected(error::session_invalid_logon);
+        co_return std::unexpected(error::session_invalid_state_for_send);
     }
 
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
     // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
     // The noexcept window on this coroutine must never let an uncaught exception
-    // propagate (std::terminate). [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+    // propagate (std::terminate). [F5 drift fix;
+    // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
         auto impl_r = co_await send_impl(app_payload);
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
         // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
         if (!impl_r && impl_r.error() == error::dispatch_aborted) {
-            fsm_state_ = fsm_state::Disconnected;  // [spec.md US1 AC3; F9 drift fix]
+            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix]
         }
         co_return impl_r;
     } catch (const asio::system_error& e) {
         if (e.code() == asio::error::operation_aborted) {
             // Uncaught operation_aborted from a co_await inside send_impl —
             // transition to Disconnected per US1 AC3. [spec.md US1 AC3; F5+F9 drift fix]
-            fsm_state_ = fsm_state::Disconnected;
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(error::dispatch_aborted);
         }
         // Unexpected system_error — still transition to Disconnected (I-09).
-        fsm_state_ = fsm_state::Disconnected;
+        record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(error::dispatch_aborted);
     } catch (...) {
         // Unexpected exception from send_impl — transition to Disconnected (I-09).
-        fsm_state_ = fsm_state::Disconnected;
+        record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(error::dispatch_aborted);
     }
 }
@@ -1422,8 +1468,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             std::array<char, 32> id_buf{};
             id_buf[0] = 'T';
             id_buf[1] = 'R';
-            auto [end, ec] =
-                std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(), ++next_test_request_id_);
+            auto [end, ec] = std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(),
+                                           ++next_test_request_id_);
             (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
             pending_test_req_id_.assign(id_buf.data(), end);
             unanswered_tr_ = false;
@@ -1435,16 +1481,15 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 const auto st52 = stamp_sending_time(*effective_clock_);
                 const seqnum_t tr_seq = seqnum_mgr_.peek_outbound();
                 auto tr_result = fixpp::session::build_test_request(
-                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq,
-                    cfg_.sender_comp_id, cfg_.target_comp_id, pending_test_req_id_,
-                    cfg_.begin_string, st52.value);
+                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
+                    cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
                 if (tr_result) {
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         // Overflow or closed: session-fatal per data-model.md:30 E3.
                         // Liveness loop is fire-and-forget (no expected_t return):
                         // log by transitioning to Disconnected and stopping the loop.
-                        fsm_state_ = fsm_state::Disconnected;
+                        record_state_transition_(fsm_state::Disconnected);
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
@@ -1466,7 +1511,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 // Per data-model Active row + [FIX-SL §4.5.5]:
                 // session_test_request_unanswered (slot 74) → Disconnected.
                 unanswered_tr_ = true;
-                fsm_state_ = fsm_state::Disconnected;
+                record_state_transition_(fsm_state::Disconnected);
                 // (Phase 6 US4 wires the Logout emission before Disconnected.)
                 co_return;
             }
@@ -1562,10 +1607,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     std::array<std::byte, 256> buf{};
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
-    auto logout_result = fixpp::session::build_logout(std::span<std::byte>{buf.data(), buf.size()},
-                                                      logout_seq, cfg_.sender_comp_id,
-                                                      cfg_.target_comp_id,
-                                                      {}, cfg_.begin_string, st52.value);
+    auto logout_result = fixpp::session::build_logout(
+        std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,
+        cfg_.target_comp_id, {}, cfg_.begin_string, st52.value);
 
     if (!logout_result) {
         // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
@@ -1576,7 +1620,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         if (!assign_r) {
             // Overflow or closed: session-fatal per data-model.md:30 E3.
             // Abort logout, force-disconnect with propagated error.
-            fsm_state_ = fsm_state::Disconnected;
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
@@ -1584,12 +1628,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     }
 
     // Transition to LogoutSent.
-    fsm_state_ = fsm_state::LogoutSent;
+    record_state_transition_(fsm_state::LogoutSent);
     logout_confirmed_ = false;
 
     if (!effective_clock_) {
         // No clock (should not happen post-open): force-disconnect immediately.
-        fsm_state_ = fsm_state::Disconnected;
+        record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(fixpp::core::error::session_logout_timeout);
     }
 
@@ -1617,7 +1661,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     }
 
     // Timeout (or root cancellation before confirm): force-disconnect.
-    fsm_state_ = fsm_state::Disconnected;
+    record_state_transition_(fsm_state::Disconnected);
     co_return std::unexpected(fixpp::core::error::session_logout_timeout);
 }
 

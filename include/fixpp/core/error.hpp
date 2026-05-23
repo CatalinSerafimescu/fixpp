@@ -315,6 +315,14 @@ enum class error : std::uint8_t {
                                               //   which catches threading/executor/security_profile
                                               //   config errors at Session::open level.
                                               //   → FIXPP_ERR_SESSION_LIFECYCLE
+    session_invalid_state_for_send =
+        77,  // FR-005 (010), [FIX-SL §4.5.4] — Session::send(...) called
+             //   while the FSM is not in `Active` (e.g. NotConnected,
+             //   LogonSent, Disconnected). Replaces the 005-era reuse
+             //   of `session_invalid_logon` at this site (semantic
+             //   near-fit; the caller's state mismatch is distinct
+             //   from a Logon refusal). No reject loop (I-5).
+             //   → FIXPP_ERR_SESSION_REJECT
 };
 
 template <class T>

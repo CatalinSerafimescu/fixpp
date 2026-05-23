@@ -256,17 +256,23 @@ add_threading_test(session_logon_handshake logon_handshake_test.cpp)
 # seam corpus doesn't exercise: builder buffer-too-small, parser malformed
 # field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
 add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
-# W-5 waiver carry-forward: pre-existing 005-baseline stack-use-after-scope
-# at src/session/session.cpp:116 (cfg_ const-ref dereferenced after the
-# fixture-local SessionConfig leaves scope). Verified pre-009 via
-# `git show 4e621e1:src/session/session.cpp`; the cfg_ lifetime refactor
-# (by-value member / owning shared_ptr / arena-tracked) is the explicit
-# subject of follow-on slice 010-session-cfg-lifetime. Skip under ASan
-# until 010 lands so CI doesn't re-fire the documented baseline; non-ASan
-# presets keep running the 14 adversarial-input scenarios as before.
-if(FIXPP_ENABLE_ASAN)
-  set_tests_properties(session_coverage_adversarial PROPERTIES DISABLED TRUE)
-endif()
+# FR-003 (010-session-cfg-lifetime): W-5 ASan skip removed. The
+# stack-use-after-scope at cfg_ is fixed by the by-value member change
+# (T008/T009). session_coverage_adversarial now runs under ASan clean.
+
+# ── 010-session-cfg-lifetime T012 — FR-004 / D-2: LogonReceived observability ──
+add_threading_test(session_logon_received_observability logon_received_observability_test.cpp)
+
+# ── 010-session-cfg-lifetime T013/T014 — FR-005 / D-3: send invalid-state gate ─
+add_threading_test(session_send_invalid_state session_send_invalid_state_test.cpp)
+
+# ── 010-session-cfg-lifetime T007 — FR-001 / FR-002 / SC-001 ─────────────────
+# Lifetime safety tests for by-value SessionConfig cfg_ member (W-5 fix).
+# Three runtime contracts verified under both debug and ASan:
+#   A. CallerCfgDropsAfterCtor_SessionContinuesWithoutUAF
+#   B. CallerMutatesCfgAfterCtor_SessionUnaffected
+#   C. MultipleSessionsFromSameCfgEvolveIndependently
+add_threading_test(session_cfg_lifetime_safety cfg_lifetime_safety_test.cpp)
 
 # ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
 # Red-first TDD: authored before T031–T036 implementation.
@@ -362,6 +368,31 @@ add_threading_test(session_test_request_id_cross_session_race
 add_threading_test(session_seqnum_drain_on_close
   test_seqnum_drain_on_close.cpp)
 target_compile_definitions(session_seqnum_drain_on_close PRIVATE FIXPP_TEST_HOOKS)
+
+# ── 010-session-cfg-lifetime Phase 5 (US3) — T016/T017/T018/T019/T020 ────────
+
+# T016+T017 — FSM matrix per-cell witness (FR-006 / SC-002).
+# One TEST per enumerated (state×event) cell; uses fsm_visit_history() to
+# confirm intermediate and final state transitions.
+add_threading_test(session_fsm_matrix_witness fsm_matrix_witness_test.cpp)
+
+# T018 — admin builders per-message-distinct SendingTime (FR-007 / SC-006).
+# Exercises the branch where clock advances between two emits yield distinct
+# SendingTime(52) values for Heartbeat / Reject / Logout / Logon builders.
+add_threading_test(session_admin_builder_distinct_now admin_builder_distinct_now_test.cpp)
+
+# T019 — admin emit mixed-path permutations (FR-008 / SC-005 / RC#G).
+# Exercises gated-emit success/failure combinations at Site 1 (Q3 path) and
+# Site 2 (Active×Logout confirming emit). Requires FIXPP_TEST_HOOKS for
+# SeqnumManager::set_counters_for_test() overflow injection.
+add_threading_test(session_admin_emit_mixed_path admin_emit_mixed_path_test.cpp)
+target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOKS)
+
+# T021 — Initiator transport-throw witness (FR-009 / SC-007).
+# Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
+# Exercises Session::open() when transport.send() throws during Logon emit;
+# asserts dispatch_aborted return and LogonSent FSM end-state per 005 design.
+add_threading_test(session_initiator_transport_throw initiator_transport_throw_test.cpp)
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
