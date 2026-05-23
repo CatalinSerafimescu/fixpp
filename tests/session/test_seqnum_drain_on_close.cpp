@@ -54,16 +54,7 @@
 //   mutex_test_access() on SeqnumManager. The CMakeLists.txt for this target
 //   compiles with -DFIXPP_TEST_HOOKS.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -71,20 +62,27 @@
 #include <asio/post.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -94,13 +92,9 @@ namespace {
 
 // ── Build a minimal inbound FIX Logon frame ──────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target,
-    int heartbt = 30) {
-
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -116,7 +110,9 @@ static std::vector<std::byte> make_logon_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -124,7 +120,9 @@ static std::vector<std::byte> make_logon_frame(
 
     std::vector<std::byte> result;
     result.reserve(full.size());
-    for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
     return result;
 }
 
@@ -143,15 +141,15 @@ struct MinimalSession {
             utc_2024, fixpp::core::steady_time_point{}, ioc.get_executor());
 
         engine.executor = ioc.get_executor();
-        engine.clock    = clock;
+        engine.clock = clock;
 
-        cfg.sender_comp_id     = "SENDER";
-        cfg.target_comp_id     = "TARGET";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "SENDER";
+        cfg.target_comp_id = "TARGET";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
     }
 
     template <class Coro>
@@ -208,10 +206,10 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
             // The async_lock_guard lives in H's coroutine frame (on the heap).
             // H's resume (which destructs the guard) is posted to the ioc queue
             // but NOT run — we run_one() just to get H to the park point.
-            asio::co_spawn(death_ioc,
+            asio::co_spawn(
+                death_ioc,
                 [&mgr]() -> asio::awaitable<void> {
-                    auto guard_r =
-                        co_await mgr.mutex_test_access().async_lock();
+                    auto guard_r = co_await mgr.mutex_test_access().async_lock();
                     if (!guard_r.has_value()) co_return;  // already drained
                     // Park: post the resume back to the ioc, then suspend.
                     // The guard lives in this frame until this coroutine resumes.
@@ -248,7 +246,8 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
 
     // Spawn H: acquires seqnum mutex directly, parks while holding.
     std::atomic<bool> holder_acquired{false};
-    asio::co_spawn(ioc,
+    asio::co_spawn(
+        ioc,
         [&]() -> asio::awaitable<void> {
             auto& mtx = session->seqnum_mgr_test_access().mutex_test_access();
             auto guard_r = co_await mtx.async_lock();
@@ -262,9 +261,8 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
         asio::detached);
 
     // Spawn close(terminal): drain() waits for H.
-    auto close_future = asio::co_spawn(ioc,
-        session->close(fixpp::session::close_mode::terminal),
-        asio::use_future);
+    auto close_future =
+        asio::co_spawn(ioc, session->close(fixpp::session::close_mode::terminal), asio::use_future);
 
     // Run: H acquires → parks → drain waits → H resumes → unlocks → drain
     // completes → close finishes.
@@ -276,8 +274,7 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
 
     auto close_r = close_future.get();
     (void)close_r;
-    EXPECT_FALSE(session->is_open())
-        << "Session must not be open after close(terminal)";
+    EXPECT_FALSE(session->is_open()) << "Session must not be open after close(terminal)";
 
     // Destruct session. drain() already quiesced the mutex (draining_=true,
     // state_=not_locked, next_drain_head_=nullptr). Destructor passes.
@@ -348,9 +345,8 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
 
     // Pre-drain: check_inbound(seq=2) must succeed (seq=1 consumed by Logon-ack).
     {
-        auto fut = asio::co_spawn(ioc,
-            session.seqnum_mgr_test_access().check_inbound(2),
-            asio::use_future);
+        auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(2),
+                                  asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
         auto result = fut.get();
@@ -360,9 +356,8 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
 
     // close(terminal): after T022, calls co_await seqnum_mgr_.drain().
     {
-        auto fut = asio::co_spawn(ioc,
-            session.close(fixpp::session::close_mode::terminal),
-            asio::use_future);
+        auto fut = asio::co_spawn(ioc, session.close(fixpp::session::close_mode::terminal),
+                                  asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         (void)fut.get();
@@ -376,9 +371,8 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
     // If this assertion fails (check_inbound returns ok), drain() was NOT called
     // by close() — that is the RED (pre-T022) behaviour.
     {
-        auto fut = asio::co_spawn(ioc,
-            session.seqnum_mgr_test_access().check_inbound(3),
-            asio::use_future);
+        auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(3),
+                                  asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
         auto result = fut.get();

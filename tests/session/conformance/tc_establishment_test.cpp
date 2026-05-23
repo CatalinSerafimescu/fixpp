@@ -238,6 +238,15 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
                 EXPECT_EQ(*tag8, "FIX.4.2")
                     << "1a_fix42: reply Logon tag 8 must be FIX.4.2 (FR-013)";
             }
+            // FR-013: tag 52 must be present (the mock_clock-stamped SendingTime).
+            // T027-audit close-out: the F8 fix asserted tag 8 but not tag 52.
+            auto tag52 = extract_field(fv, 52);
+            EXPECT_TRUE(tag52.has_value())
+                << "1a_fix42: reply Logon missing tag 52 (SendingTime) per FR-013";
+            if (tag52) {
+                EXPECT_FALSE(tag52->empty())
+                    << "1a_fix42: tag 52 must be non-empty (mock_clock_now formatted) per FR-003/FR-013";
+            }
             break;
         }
     }
@@ -284,6 +293,13 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
             if (tag8) {
                 EXPECT_EQ(*tag8, "FIX.4.4")
                     << "1a_fix44: reply Logon tag 8 must be FIX.4.4 (FR-013)";
+            }
+            auto tag52 = extract_field(fv, 52);
+            EXPECT_TRUE(tag52.has_value())
+                << "1a_fix44: reply Logon missing tag 52 (SendingTime) per FR-013";
+            if (tag52) {
+                EXPECT_FALSE(tag52->empty())
+                    << "1a_fix44: tag 52 must be non-empty (mock_clock_now formatted) per FR-003/FR-013";
             }
             break;
         }

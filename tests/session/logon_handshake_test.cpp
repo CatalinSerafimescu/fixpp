@@ -519,7 +519,16 @@ TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) 
 // Regression test — the role branch must not break the existing initiator path.
 // Anchors: spec.md FR-004 §US2 AC3; data-model.md §E1 Session::open modified.
 TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
+    // T027-audit close-out: assert BOTH state == LogonSent AND an outbound Logon
+    // frame (35=A) was actually emitted. The original test only checked state —
+    // body didn't match test name. Spec.md FR-004 + §US2 AC3: "open() sets state
+    // and emits initial Logon."
     auto cfg = make_initiator_cfg(30);
+    std::vector<std::vector<std::byte>> captured;
+    cfg.transport_send = [&captured](std::span<const std::byte> f) {
+        captured.emplace_back(f.begin(), f.end());
+    };
+
     fixpp::session::Session sess(engine, cfg);
     auto open_result = open_sync(sess);
     ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
@@ -527,6 +536,22 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
     EXPECT_EQ(sess.state(), fsm_state::LogonSent)
         << "Initiator must reach LogonSent after open() per FR-004 §US2 AC3; "
         << "got state=" << static_cast<int>(sess.state());
+
+    // FR-004: outbound Logon (35=A) MUST be emitted by open() on the initiator path.
+    ASSERT_GE(captured.size(), 1u)
+        << "Initiator open() must emit at least one outbound frame";
+    bool found_logon = false;
+    for (const auto& frame : captured) {
+        // Use the file-local extract_field at line 133 (returns std::string; "" on miss).
+        const auto mt = extract_field(std::span<const std::byte>{frame}, 35);
+        if (mt == "A") {
+            found_logon = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_logon)
+        << "Initiator open() must emit an outbound Logon (35=A); captured "
+        << captured.size() << " frame(s) but none had 35=A.";
 }
 
 // ── F6 (RED): Seqnum hole on open()'s initiator emit — open() must return error

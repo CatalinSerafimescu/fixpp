@@ -20,22 +20,15 @@
 //
 // TDD: T006 is authored RED (compile+fail); T007+T008 turn it GREEN.
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <system_error>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/error.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
@@ -49,12 +42,17 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 #include "support/frame_field_extract.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -64,10 +62,8 @@ namespace fixpp::session::test {
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 // Build a minimal Logon frame for the peer (inbound to drive session Active).
-static std::vector<std::byte> make_peer_logon(std::string_view begin_string,
-                                              std::uint32_t seq,
-                                              std::string_view sender,
-                                              std::string_view target) {
+static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
+                                              std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -105,13 +101,11 @@ static std::vector<std::byte> make_peer_logon(std::string_view begin_string,
 // assert the exact seqnum that was stamped in the frame.
 class OrderingStore final : public MessageStore {
 public:
-    explicit OrderingStore(std::vector<std::string>& log,
-                           std::vector<seqnum_t>& seqs) noexcept
+    explicit OrderingStore(std::vector<std::string>& log, std::vector<seqnum_t>& seqs) noexcept
         : MessageStore(flush_thunk_for<OrderingStore>()), log_(log), seqs_(seqs) {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
-        seqnum_t seq, std::span<const std::byte> /*frame*/,
-        direction_t dir) noexcept override {
+        seqnum_t seq, std::span<const std::byte> /*frame*/, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
             log_.push_back("store_out");
             seqs_.push_back(seq);
@@ -122,8 +116,7 @@ public:
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
-        seqnum_t, seqnum_t, direction_t,
-        retrieve_visitor&) noexcept override {
+        seqnum_t, seqnum_t, direction_t, retrieve_visitor&) noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -156,8 +149,8 @@ public:
         : log_(log), seqs_(seqs) {}
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view, std::string_view, std::pmr::memory_resource*,
-        std::size_t, asio::any_io_executor) noexcept override {
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
         return std::make_unique<OrderingStore>(log_, seqs_);
     }
 
@@ -256,7 +249,8 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
 
     // Call Session::send with a dummy application payload.
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto result = fut.get();
@@ -265,10 +259,8 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
     ASSERT_TRUE(result.has_value()) << "Session::send must return ok when transport succeeds";
 
     // There must be exactly one new store_out entry and one new transport_send entry.
-    ASSERT_GT(call_log.size(), store_calls_before)
-        << "send() must invoke store(outbound)";
-    ASSERT_GT(transport_log.size(), transport_calls_before)
-        << "send() must invoke transport_send";
+    ASSERT_GT(call_log.size(), store_calls_before) << "send() must invoke store(outbound)";
+    ASSERT_GT(transport_log.size(), transport_calls_before) << "send() must invoke transport_send";
 
     // I-3 / [2e §4.1]: store BEFORE transport in the call_log.
     // Find the new entries after the baseline.
@@ -323,7 +315,8 @@ TEST_F(SendPathTest, Fix42_Active_Send_CarriesNegotiatedBeginString) {
     drive_to_active(sess, "FIX.4.2");
 
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto result = fut.get();
@@ -364,11 +357,11 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
     drive_to_active(sess, "FIX.4.4");
 
     const std::size_t store_out_count_before =
-        static_cast<std::size_t>(
-            std::count(call_log.begin(), call_log.end(), "store_out"));
+        static_cast<std::size_t>(std::count(call_log.begin(), call_log.end(), "store_out"));
 
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     // The result may be ok or error depending on implementation, but must not hang.
@@ -376,8 +369,7 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
 
     // I-3: store was called BEFORE transport (regardless of transport outcome).
     const std::size_t store_out_count_after =
-        static_cast<std::size_t>(
-            std::count(call_log.begin(), call_log.end(), "store_out"));
+        static_cast<std::size_t>(std::count(call_log.begin(), call_log.end(), "store_out"));
     EXPECT_GT(store_out_count_after, store_out_count_before)
         << "store(outbound) must be called even when transport throws";
     EXPECT_TRUE(transport_called) << "Transport must be attempted after store";
@@ -393,9 +385,9 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
     // Format mock_clock's now() to FIX UTC string.
     std::array<char, 32> time_buf{};
     auto now_tp = clock->now();
-    auto fmt_r = fixpp::core::utc_time_to_fix_string(
-        now_tp, fixpp::core::fix_time_precision::millis,
-        std::span<char>{time_buf.data(), time_buf.size()});
+    auto fmt_r =
+        fixpp::core::utc_time_to_fix_string(now_tp, fixpp::core::fix_time_precision::millis,
+                                            std::span<char>{time_buf.data(), time_buf.size()});
     ASSERT_TRUE(fmt_r.has_value()) << "mock_clock.now() must format successfully";
     const std::string now_str(fmt_r->data(), fmt_r->size());
 
@@ -407,8 +399,8 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
     // build_logon (has begin_string already; T007 adds sending_time)
     {
         std::array<std::byte, 512> buf{};
-        auto r = fixpp::session::build_logon(
-            std::span<std::byte>(buf), 1, "ISLD", "TW", kBegin44, 30, now_str);
+        auto r = fixpp::session::build_logon(std::span<std::byte>(buf), 1, "ISLD", "TW", kBegin44,
+                                             30, now_str);
         ASSERT_TRUE(r.has_value()) << "build_logon must succeed";
         EXPECT_EQ(extract_field(*r, 8), std::string(kBegin44))
             << "build_logon: tag 8 must be negotiated begin_string (FIX.4.4)";
@@ -419,20 +411,19 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
     // build_logout (T007 adds both begin_string and sending_time)
     {
         std::array<std::byte, 256> buf{};
-        auto r = fixpp::session::build_logout(
-            std::span<std::byte>(buf), 2, "ISLD", "TW", {}, kBegin44, now_str);
+        auto r = fixpp::session::build_logout(std::span<std::byte>(buf), 2, "ISLD", "TW", {},
+                                              kBegin44, now_str);
         ASSERT_TRUE(r.has_value()) << "build_logout must succeed";
         EXPECT_EQ(extract_field(*r, 8), std::string(kBegin44))
             << "build_logout: tag 8 must be FIX.4.4";
-        EXPECT_EQ(extract_field(*r, 52), now_str)
-            << "build_logout: tag 52 must be mock_clock_now";
+        EXPECT_EQ(extract_field(*r, 52), now_str) << "build_logout: tag 52 must be mock_clock_now";
     }
 
     // build_heartbeat (T007 adds both begin_string and sending_time)
     {
         std::array<std::byte, 256> buf{};
-        auto r = fixpp::session::build_heartbeat(
-            std::span<std::byte>(buf), 3, "ISLD", "TW", {}, kBegin42, now_str);
+        auto r = fixpp::session::build_heartbeat(std::span<std::byte>(buf), 3, "ISLD", "TW", {},
+                                                 kBegin42, now_str);
         ASSERT_TRUE(r.has_value()) << "build_heartbeat must succeed";
         // Assert FIX.4.2 (second distinct begin_string per FR-002 audit).
         EXPECT_EQ(extract_field(*r, 8), std::string(kBegin42))
@@ -444,8 +435,8 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
     // build_test_request (T007 adds both begin_string and sending_time)
     {
         std::array<std::byte, 256> buf{};
-        auto r = fixpp::session::build_test_request(
-            std::span<std::byte>(buf), 4, "ISLD", "TW", "TR001", kBegin44, now_str);
+        auto r = fixpp::session::build_test_request(std::span<std::byte>(buf), 4, "ISLD", "TW",
+                                                    "TR001", kBegin44, now_str);
         ASSERT_TRUE(r.has_value()) << "build_test_request must succeed";
         EXPECT_EQ(extract_field(*r, 8), std::string(kBegin44))
             << "build_test_request: tag 8 must be FIX.4.4";
@@ -456,13 +447,12 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
     // build_reject (T007 adds both begin_string and sending_time)
     {
         std::array<std::byte, 512> buf{};
-        auto r = fixpp::session::build_reject(
-            std::span<std::byte>(buf), 5, "ISLD", "TW", 1, 52, "A", 10, kBegin44, now_str);
+        auto r = fixpp::session::build_reject(std::span<std::byte>(buf), 5, "ISLD", "TW", 1, 52,
+                                              "A", 10, kBegin44, now_str);
         ASSERT_TRUE(r.has_value()) << "build_reject must succeed";
         EXPECT_EQ(extract_field(*r, 8), std::string(kBegin44))
             << "build_reject: tag 8 must be FIX.4.4";
-        EXPECT_EQ(extract_field(*r, 52), now_str)
-            << "build_reject: tag 52 must be mock_clock_now";
+        EXPECT_EQ(extract_field(*r, 52), now_str) << "build_reject: tag 52 must be mock_clock_now";
     }
 }
 
@@ -493,7 +483,8 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
 
     // Call send() while in LogonSent (not Active).
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto result = fut.get();
@@ -528,14 +519,13 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
 // would prevent open() from completing).
 class ThrowingStore final : public MessageStore {
 public:
-    explicit ThrowingStore(std::vector<std::string>& log,
-                           std::shared_ptr<bool> throw_flag) noexcept
-        : MessageStore(flush_thunk_for<ThrowingStore>()), log_(log),
+    explicit ThrowingStore(std::vector<std::string>& log, std::shared_ptr<bool> throw_flag) noexcept
+        : MessageStore(flush_thunk_for<ThrowingStore>()),
+          log_(log),
           throw_flag_(std::move(throw_flag)) {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
-        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
-        direction_t dir) noexcept override {
+        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/, direction_t dir) noexcept override {
         if (dir == direction_t::outbound && throw_flag_ && *throw_flag_) {
             log_.push_back("store_throw");
             throw asio::system_error(asio::error::operation_aborted);
@@ -544,8 +534,7 @@ public:
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
-        seqnum_t, seqnum_t, direction_t,
-        retrieve_visitor&) noexcept override {
+        seqnum_t, seqnum_t, direction_t, retrieve_visitor&) noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -553,7 +542,9 @@ public:
         direction_t dir, bool increment) noexcept override {
         auto& c = (dir == direction_t::outbound) ? next_out_ : next_in_;
         const seqnum_t curr = c;
-        if (increment) { ++c; }
+        if (increment) {
+            ++c;
+        }
         co_return curr;
     }
 
@@ -576,10 +567,11 @@ public:
         : log_(log), throw_flag_(std::move(throw_flag)) {}
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view, std::string_view, std::pmr::memory_resource*,
-        std::size_t, asio::any_io_executor) noexcept override {
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
         return std::make_unique<ThrowingStore>(log_, throw_flag_);
     }
+
 private:
     std::vector<std::string>& log_;
     std::shared_ptr<bool> throw_flag_;
@@ -600,7 +592,8 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
     *throw_flag = true;
 
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
 
@@ -610,7 +603,8 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
     auto result = fut.get();
     EXPECT_FALSE(result.has_value())
         << "Session::send must return defined error when store throws operation_aborted; "
-        << "not std::terminate. [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]";
+        << "not std::terminate. [F5 drift fix; "
+           "[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]";
 }
 
 // ── F9 (RED): US1 AC3 — after cancelled transport/store, session must be Disconnected.
@@ -632,7 +626,8 @@ TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
     *throw_flag = true;
 
     std::array<std::byte, 4> payload{};
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     (void)fut.get();
@@ -675,14 +670,16 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     // First send.
     std::array<std::byte, 4> payload{};
     {
-        auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut.get().has_value()) << "First send failed";
     }
     // Second send.
     {
-        auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut.get().has_value()) << "Second send failed";
@@ -694,8 +691,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     const seqnum_t mgr_after = sess.seqnum_mgr_test_access().next_outbound_unsafe();
     EXPECT_EQ(mgr_after, mgr_before + seqnum_t{2})
         << "SeqnumManager outbound counter must advance by 2 after two sends; "
-        << "before=" << mgr_before << " after=" << mgr_after
-        << " (expected " << (mgr_before + seqnum_t{2}) << "). "
+        << "before=" << mgr_before << " after=" << mgr_after << " (expected "
+        << (mgr_before + seqnum_t{2}) << "). "
         << "Current bug: send() uses next_outbound_seq_++ not assign_outbound() "
         << "[F3 drift; spec.md FR-001(a)]";
 
@@ -711,11 +708,10 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
         const auto tag34 = extract_field(frame_span, 34);
         ASSERT_TRUE(tag34.has_value()) << "Frame must have tag 34 (MsgSeqNum)";
         const seqnum_t frame_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34)));
-        EXPECT_EQ(frame_seq, store_seq)
-            << "Frame tag 34 must match store seqnum for send #" << i;
+        EXPECT_EQ(frame_seq, store_seq) << "Frame tag 34 must match store seqnum for send #" << i;
     }
     // Consecutive seqnums check.
-    const seqnum_t seq_first  = store_seqs[m - 2];
+    const seqnum_t seq_first = store_seqs[m - 2];
     const seqnum_t seq_second = store_seqs[m - 1];
     EXPECT_EQ(seq_second, seq_first + seqnum_t{1})
         << "Second send must use seqnum one higher than first send [F3]";

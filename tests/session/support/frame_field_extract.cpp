@@ -30,8 +30,7 @@ std::optional<std::string_view> extract_field(std::span<const std::byte> frame,
         const auto* digits = reinterpret_cast<const char*>(frame.data() + tag_begin);
         const std::size_t digit_len = i - tag_begin;
         std::uint32_t parsed_tag = 0;
-        const auto [ptr, ec] =
-            std::from_chars(digits, digits + digit_len, parsed_tag);
+        const auto [ptr, ec] = std::from_chars(digits, digits + digit_len, parsed_tag);
         const bool tag_ok = (ec == std::errc{} && ptr == digits + digit_len);
         ++i;  // step past '='
 

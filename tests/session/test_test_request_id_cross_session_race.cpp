@@ -37,11 +37,23 @@
 //   [const §XI.4] per-session strand isolation
 //   research.md D-3 (wrap-around at UINT32_MAX acceptable)
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/thread_pool.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -52,22 +64,8 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/thread_pool.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -95,12 +93,9 @@ static std::string extract_tag(std::span<const std::byte> frame, std::uint32_t t
 }
 
 // ── Build a minimal Logon frame for feeding into a session ────────────────────
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target,
-    int heartbt = 1) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 1) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -190,47 +185,42 @@ struct SessionFixture {
     CaptureTransport transport;
     std::unique_ptr<fixpp::session::Session> session;
 
-    SessionFixture(asio::any_io_executor ex,
-                   std::shared_ptr<fixpp::core::mock_clock> clk,
-                   std::string_view sender,
-                   std::string_view target) {
+    SessionFixture(asio::any_io_executor ex, std::shared_ptr<fixpp::core::mock_clock> clk,
+                   std::string_view sender, std::string_view target) {
         engine.executor = ex;
-        engine.clock    = clk;
+        engine.clock = clk;
 
-        cfg.sender_comp_id     = std::string(sender);
-        cfg.target_comp_id     = std::string(target);
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = std::string(sender);
+        cfg.target_comp_id = std::string(target);
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{1};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ex;
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
-            transport.capture(frame);
-        };
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ex;
+        cfg.transport_send = [this](std::span<const std::byte> frame) { transport.capture(frame); };
 
         session = std::make_unique<fixpp::session::Session>(engine, cfg);
     }
 
     // Open the session (initiator: emits Logon, waits for Logon-ack).
     // Returns the future for the open() awaitable.
-    [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_open(
-        asio::thread_pool& pool) {
+    [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_open(asio::thread_pool& pool) {
         return asio::co_spawn(pool, session->open(), asio::use_future);
     }
 
     // Feed a peer Logon-ack to drive session into Active state.
     [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_feed_logon(
         asio::thread_pool& pool) {
-        auto logon_bytes = make_logon_frame("FIX.4.2", 1,
-                                            cfg.target_comp_id, cfg.sender_comp_id, 1);
+        auto logon_bytes =
+            make_logon_frame("FIX.4.2", 1, cfg.target_comp_id, cfg.sender_comp_id, 1);
         return asio::co_spawn(pool,
-                              session->on_inbound_frame(std::span<const std::byte>{logon_bytes.data(), logon_bytes.size()}),
+                              session->on_inbound_frame(std::span<const std::byte>{
+                                  logon_bytes.data(), logon_bytes.size()}),
                               asio::use_future);
     }
 
     // Close the session.
-    [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_close(
-        asio::thread_pool& pool) {
+    [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_close(asio::thread_pool& pool) {
         return asio::co_spawn(pool, session->close(fixpp::session::close_mode::terminal),
                               asio::use_future);
     }
@@ -256,9 +246,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     using sc = std::chrono::system_clock;
     auto utc_2024 = sc::time_point{} + std::chrono::seconds{1704067200};
     auto clock = std::make_shared<fixpp::core::mock_clock>(
-        utc_2024,
-        fixpp::core::steady_time_point{},
-        ioc.get_executor());
+        utc_2024, fixpp::core::steady_time_point{}, ioc.get_executor());
 
     SessionFixture sA{ioc.get_executor(), clock, "SENDER_A", "TARGET_A"};
     SessionFixture sB{ioc.get_executor(), clock, "SENDER_B", "TARGET_B"};
@@ -278,7 +266,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     {
         auto logon_a = make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1);
         auto fut_a = asio::co_spawn(ioc,
-                                    sA.session->on_inbound_frame(std::span<const std::byte>{logon_a.data(), logon_a.size()}),
+                                    sA.session->on_inbound_frame(
+                                        std::span<const std::byte>{logon_a.data(), logon_a.size()}),
                                     asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
@@ -287,7 +276,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     {
         auto logon_b = make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1);
         auto fut_b = asio::co_spawn(ioc,
-                                    sB.session->on_inbound_frame(std::span<const std::byte>{logon_b.data(), logon_b.size()}),
+                                    sB.session->on_inbound_frame(
+                                        std::span<const std::byte>{logon_b.data(), logon_b.size()}),
                                     asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
@@ -308,9 +298,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // both sessions → repeat 50 times. Each session emits one TR per iteration → 50 each.
     //
     // Heartbeat frame (35=0) with TestReqID (112) to clear the pending TR.
-    auto make_heartbeat = [](std::string_view bs,
-                             std::uint32_t seq,
-                             std::string_view sender,
+    auto make_heartbeat = [](std::string_view bs, std::uint32_t seq, std::string_view sender,
                              std::string_view target,
                              std::string_view tr_id) -> std::vector<std::byte> {
         std::string body;
@@ -327,14 +315,18 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         hdr += "9=" + std::to_string(body.size()) + "\x01";
         std::string full = hdr + body;
         unsigned int cs = 0;
-        for (unsigned char c : full) { cs += c; }
+        for (unsigned char c : full) {
+            cs += c;
+        }
         cs &= 0xFFu;
         char csbuf[8];
         std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
         full += "10=" + std::string(csbuf) + "\x01";
         std::vector<std::byte> result;
         result.reserve(full.size());
-        for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+        for (char c : full) {
+            result.push_back(static_cast<std::byte>(c));
+        }
         return result;
     };
 
@@ -357,9 +349,9 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         if (!tr_ids_a.empty()) {
             std::string latest_a = tr_ids_a.back();
             auto hb = make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a);
-            auto fut = asio::co_spawn(ioc,
-                                      sA.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
-                                      asio::use_future);
+            auto fut = asio::co_spawn(
+                ioc, sA.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
+                asio::use_future);
             ioc.run_for(20ms);
             ioc.restart();
             (void)fut.get();
@@ -368,9 +360,9 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         if (!tr_ids_b.empty()) {
             std::string latest_b = tr_ids_b.back();
             auto hb = make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b);
-            auto fut = asio::co_spawn(ioc,
-                                      sB.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
-                                      asio::use_future);
+            auto fut = asio::co_spawn(
+                ioc, sB.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
+                asio::use_future);
             ioc.run_for(20ms);
             ioc.restart();
             (void)fut.get();
@@ -379,13 +371,15 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
     // Close both sessions before analysis.
     {
-        auto fut_a = asio::co_spawn(ioc, sA.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+        auto fut_a = asio::co_spawn(ioc, sA.session->close(fixpp::session::close_mode::terminal),
+                                    asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
         (void)fut_a.get();
     }
     {
-        auto fut_b = asio::co_spawn(ioc, sB.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+        auto fut_b = asio::co_spawn(ioc, sB.session->close(fixpp::session::close_mode::terminal),
+                                    asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
         (void)fut_b.get();
@@ -396,8 +390,10 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     auto ids_b = sB.transport.collect_test_req_ids();
 
     // Assertion: both sessions must have emitted at least some TestRequests.
-    ASSERT_GT(ids_a.size(), 0u) << "Session A emitted no TestRequests — check clock/liveness wiring";
-    ASSERT_GT(ids_b.size(), 0u) << "Session B emitted no TestRequests — check clock/liveness wiring";
+    ASSERT_GT(ids_a.size(), 0u)
+        << "Session A emitted no TestRequests — check clock/liveness wiring";
+    ASSERT_GT(ids_b.size(), 0u)
+        << "Session B emitted no TestRequests — check clock/liveness wiring";
 
     // ── Assertion (a): per-session isolation — sequences are contiguous ───────
     //
@@ -419,12 +415,16 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         // Extract numeric values and verify they form a contiguous sequence 1..N.
         auto check_contiguous = [](const std::vector<std::string>& ids,
                                    const char* session_name) -> bool {
-            if (ids.empty()) { return true; }
+            if (ids.empty()) {
+                return true;
+            }
             std::vector<std::uint32_t> ns;
             ns.reserve(ids.size());
             for (const auto& id : ids) {
                 std::uint32_t n = parse_tr_id(id);
-                if (n == 0) { return false; }
+                if (n == 0) {
+                    return false;
+                }
                 ns.push_back(n);
             }
             // Sequence must start at 1 and be strictly increasing by 1.
@@ -462,8 +462,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
             }
             prev = n;
         }
-        EXPECT_TRUE(monotone)
-            << "Session A's TestReqID sequence is not strictly increasing";
+        EXPECT_TRUE(monotone) << "Session A's TestReqID sequence is not strictly increasing";
     }
     {
         std::uint32_t prev = 0;
@@ -476,8 +475,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
             }
             prev = n;
         }
-        EXPECT_TRUE(monotone)
-            << "Session B's TestReqID sequence is not strictly increasing";
+        EXPECT_TRUE(monotone) << "Session B's TestReqID sequence is not strictly increasing";
     }
 }
 
@@ -526,15 +524,17 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     {
         auto logon_a = make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1);
         auto fa = asio::co_spawn(pool,
-                                  sA.session->on_inbound_frame(std::span<const std::byte>{logon_a.data(), logon_a.size()}),
-                                  asio::use_future);
+                                 sA.session->on_inbound_frame(
+                                     std::span<const std::byte>{logon_a.data(), logon_a.size()}),
+                                 asio::use_future);
         fa.get();
     }
     {
         auto logon_b = make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1);
         auto fb = asio::co_spawn(pool,
-                                  sB.session->on_inbound_frame(std::span<const std::byte>{logon_b.data(), logon_b.size()}),
-                                  asio::use_future);
+                                 sB.session->on_inbound_frame(
+                                     std::span<const std::byte>{logon_b.data(), logon_b.size()}),
+                                 asio::use_future);
         fb.get();
     }
 
@@ -560,11 +560,13 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
 
     // Close both sessions cleanly (sequential to avoid concurrent close races).
     {
-        auto fa = asio::co_spawn(pool, sA.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+        auto fa = asio::co_spawn(pool, sA.session->close(fixpp::session::close_mode::terminal),
+                                 asio::use_future);
         fa.get();
     }
     {
-        auto fb = asio::co_spawn(pool, sB.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+        auto fb = asio::co_spawn(pool, sB.session->close(fixpp::session::close_mode::terminal),
+                                 asio::use_future);
         fb.get();
     }
 
@@ -576,7 +578,9 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
 
     // Per-session isolation: each session's sequence must be contiguous 1..N.
     auto check_contiguous = [](const std::vector<std::string>& ids) -> bool {
-        if (ids.empty()) { return true; }
+        if (ids.empty()) {
+            return true;
+        }
         for (std::size_t i = 0; i < ids.size(); ++i) {
             if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
                 return false;
@@ -600,8 +604,13 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         bool ok = true;
         for (const auto& id : ids_a) {
             auto n = parse_tr_id(id);
-            if (n > 0 && n <= prev) { ok = false; break; }
-            if (n > 0) { prev = n; }
+            if (n > 0 && n <= prev) {
+                ok = false;
+                break;
+            }
+            if (n > 0) {
+                prev = n;
+            }
         }
         EXPECT_TRUE(ok) << "Session A TestReqID sequence is not monotone";
     }
@@ -610,8 +619,13 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         bool ok = true;
         for (const auto& id : ids_b) {
             auto n = parse_tr_id(id);
-            if (n > 0 && n <= prev) { ok = false; break; }
-            if (n > 0) { prev = n; }
+            if (n > 0 && n <= prev) {
+                ok = false;
+                break;
+            }
+            if (n > 0) {
+                prev = n;
+            }
         }
         EXPECT_TRUE(ok) << "Session B TestReqID sequence is not monotone";
     }
