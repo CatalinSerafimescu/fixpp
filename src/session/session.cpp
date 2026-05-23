@@ -978,11 +978,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
                     // "A" (dup-Logon-in-Active), "2" (RR), "4" (SeqReset) deliberately
                     // EXCLUDED — they fall through to the Reject branch per 005 FR-017.
-                    const bool is_session_admin =
-                        (hdr.msg_type == "0" ||  // Heartbeat
-                         hdr.msg_type == "1" ||  // TestRequest
-                         hdr.msg_type == "3" ||  // Reject (handled above)
-                         hdr.msg_type == "5");   // Logout (handled above)
+                    const bool is_session_admin = (hdr.msg_type == "0" ||  // Heartbeat
+                                                   hdr.msg_type == "1" ||  // TestRequest
+                                                   hdr.msg_type == "3" ||  // Reject (handled above)
+                                                   hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {
                         // Unknown / app-type MsgType in Active →
