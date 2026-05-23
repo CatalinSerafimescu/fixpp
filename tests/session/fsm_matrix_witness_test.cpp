@@ -159,6 +159,17 @@ protected:
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine;
 
+    // W3.3 — captures every outbound frame emitted via cfg.transport_send so
+    // per-cell tests that exercise an emit contract (Reject/Logout/Heartbeat
+    // emission) can verify the actual wire-frame, not just the FSM end-state.
+    // BEFORE W3.3 most Active-row tests asserted only sess.state() == X — that
+    // matches even if the gated emit ships NO frame, an unintended frame, or
+    // the wrong MsgType. transport_send capture closes that gap for the cells
+    // the impl correctly handles. Cells where impl has a known 005 spec-vs-impl
+    // gap (Active×DupLogon, Active×OOSA RR/SeqReset — see verify-record line
+    // 134-135) keep their stay-Active-only assertion AND reference the gap.
+    std::vector<std::vector<std::byte>> captured_frames;
+
     // Default CompID pair: sender=SENDER, target=TARGET.
     static constexpr std::string_view kSender     = "SENDER";
     static constexpr std::string_view kTarget     = "TARGET";
@@ -185,8 +196,36 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = session_role::initiator;
+        // W3.3 — capture every outbound frame for per-cell emission assertions.
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            captured_frames.emplace_back(frame.begin(), frame.end());
+        };
         return cfg;
     }
+
+    // Extract MsgType(35) value from a raw FIX frame.
+    static std::string extract_msg_type(std::span<const std::byte> frame) {
+        std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
+        auto pos = wire.find("35=");
+        if (pos == std::string::npos) return {};
+        pos += 3;
+        auto end = wire.find('\x01', pos);
+        if (end == std::string::npos) return {};
+        return wire.substr(pos, end - pos);
+    }
+
+    // Count outbound frames of a given MsgType captured AFTER drive_to_active.
+    std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
+        std::size_t n = 0;
+        for (const auto& f : captured_frames) {
+            if (extract_msg_type(f) == msg_type) ++n;
+        }
+        return n;
+    }
+
+    // Discard handshake-phase outbound frames (Logon) so subsequent assertions
+    // see ONLY the admin frames emitted by the path under test.
+    void clear_handshake_captures() { captured_frames.clear(); }
 
     SessionConfig make_acceptor_cfg(int heartbt_sec = 30) {
         auto cfg             = make_initiator_cfg(heartbt_sec);
@@ -680,25 +719,35 @@ TEST_F(FsmMatrixWitness, LR_Transient_FinalStateIsActive_HistoryContainsBoth) {
 TEST_F(FsmMatrixWitness, Active_InboundDupLogon_SessionReject_StaysActive) {
     // FR-006: E02 from Active → dup-Logon per [FIX-SL §4.3] (session Reject,
     // no silent re-establish, session stays Active).
-    // Impl note: interpret_logon is called in LogonSent handler only. In Active,
-    // a Logon frame arrives as MsgType="A" which is in is_session_admin list
-    // but falls through to "remain in current state" (no special handling).
+    //
+    // KNOWN 005 SPEC-vs-IMPL GAP (verify-record line 134-135 — out-of-010-scope,
+    // tracked for orchestrator awareness, fix slated for a 005-follow-up slice):
+    // The 005 data-model matrix mandates a session Reject for dup-Logon in Active.
+    // The current impl includes MsgType="A" in is_session_admin (session.cpp:965)
+    // and silently ignores it → stay-Active only, no Reject emitted. This test
+    // ASSERTS THE IMPL REALITY (stay-Active, no Reject required) to remain GREEN.
+    // When the 005-follow-up slice closes the gap, this test's emission count
+    // assertion should be tightened to require exactly 1 Reject(35=3).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
-    const auto hist_before = sess.fsm_visit_history().size();
+    clear_handshake_captures();
 
-    // Send a second Logon (dup-Logon in Active). In the current impl, MsgType=A
-    // is in is_session_admin so it falls through to "remain in Active."
-    // The matrix says "session Reject" — the impl may not emit a Reject for dup-
-    // Logon (it's in is_session_admin); both outcomes (stay-Active + Reject or
-    // stay-Active without Reject) satisfy I-1 (defined, non-UB). We assert stay-Active.
     auto dup_logon = build_logon(kTarget, kSender, kBeginStr, 2);
     (void)feed_sync(sess, dup_logon);
 
     EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "Dup-Logon in Active must not disconnect (session Reject, stay Active)";
+        << "Dup-Logon in Active must not disconnect (matrix mandates Reject + stay-Active; "
+           "impl currently silently ignores — known 005 gap, verify-record line 134-135)";
+
+    // W3.3 — gated-emit contract for the known-gap cell: explicitly document
+    // that the impl emits 0 Rejects (matches the silent-ignore impl behavior).
+    // When the 005-follow-up lands, change this to EXPECT_EQ(..., 1U).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
+        << "Active×DupLogon: impl currently emits NO Reject (silent-ignore via "
+           "is_session_admin); spec mandates 1 Reject(35=3). Tighten this assertion "
+           "to EXPECT_EQ(..., 1U) when the 005-follow-up closes the gap.";
 }
 
 // S3×E04: inbound Heartbeat → advance counter (liveness), stay Active.
@@ -721,12 +770,19 @@ TEST_F(FsmMatrixWitness, Active_InboundTestRequest_EmitsHeartbeat_StaysActive) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     std::string extra = "112=TR-ECHO\x01";
     auto tr = build_frame("1", 2, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, tr);
 
     EXPECT_EQ(sess.state(), fsm_state::Active);
+
+    // W3.3 — gated-emit contract: matrix says "emit Heartbeat(echo)"; assert
+    // the Heartbeat(35=0) was actually transmitted.
+    EXPECT_EQ(count_admin_frames_with_type("0"), 1U)
+        << "Active×TestRequest: exactly 1 Heartbeat(35=0) echo must be emitted "
+           "(matrix Active row E05)";
 }
 
 // S3×E06: inbound Reject → session-level log, no Reject-of-Reject (I-5), stay Active.
@@ -748,29 +804,53 @@ TEST_F(FsmMatrixWitness, Active_InboundLogout_EmitsConfirmLogout_TransitionsToDi
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     auto lo = build_frame("5", 2, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, lo);
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
     EXPECT_TRUE(history_contains(sess.fsm_visit_history(), fsm_state::Disconnected));
+
+    // W3.3 — gated-emit contract: the matrix says "emit confirming Logout";
+    // assert it was actually transmitted (binding contract, not just end-state).
+    EXPECT_EQ(count_admin_frames_with_type("5"), 1U)
+        << "Active×Logout: exactly 1 confirming Logout(35=5) must be emitted "
+           "before the Disconnected transition (matrix Active row E07)";
 }
 
 // S3×E08: inbound out-of-scope admin (ResendRequest) → session Reject, stay Active.
 TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive) {
     // FR-006: E08 from Active → session Reject (session_admin_not_supported, slot 75),
     // session stays Active (or goes Disconnected if Reject emit fails seqnum).
+    //
+    // KNOWN 005 SPEC-vs-IMPL GAP (verify-record line 134-135 — same as dup-Logon
+    // above, out-of-010-scope, slated for a 005-follow-up slice):
+    // The 005 data-model matrix mandates a session Reject for RR/SeqReset (MsgType
+    // 2/4) in Active. The current impl includes both in is_session_admin
+    // (session.cpp:968/970) and silently ignores them, despite the contradictory
+    // adjacent comment at lines 962-963 saying "they still get a Reject". This test
+    // ASSERTS THE IMPL REALITY (stay-Active, no Reject required) to remain GREEN.
+    // When the 005-follow-up closes the gap, this test's emission count assertion
+    // should be tightened to require exactly 1 Reject(35=3).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     std::string extra = "7=1\x01" "16=0\x01";
     auto rr = build_frame("2", 2, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, rr);
 
-    // After the Reject, session should remain Active (out-of-scope admin → Reject,
-    // not session-fatal directly; the matrix says Reject+stay Active).
     EXPECT_EQ(sess.state(), fsm_state::Active);
+
+    // W3.3 — gated-emit contract for the known-gap cell: explicitly document
+    // that the impl emits 0 Rejects for RR/SeqReset in Active. When the
+    // 005-follow-up lands, change this to EXPECT_EQ(..., 1U).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
+        << "Active×OOSA(RR): impl currently emits NO Reject (silent-ignore via "
+           "is_session_admin); spec mandates 1 Reject(35=3). Tighten this assertion "
+           "to EXPECT_EQ(..., 1U) when the 005-follow-up closes the gap.";
 }
 
 // S3×E09: seqnum in-seq → advance counter, dispatch, stay Active.
@@ -824,12 +904,22 @@ TEST_F(FsmMatrixWitness, Active_InvalidAppMsgType_SessionReject_StaysActive) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     auto app = build_frame("D", 2, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, app);
 
     EXPECT_EQ(sess.state(), fsm_state::Active)
         << "Unknown app MsgType in Active → session Reject, session stays Active";
+
+    // W3.3 — gated-emit contract: matrix says "session Reject"; assert the
+    // Reject(35=3) was actually emitted via transport_send. The impl at
+    // session.cpp:977-998 builds + emits the Reject for any non-session-admin
+    // MsgType in Active (binding behavior, distinct from the dup-Logon /
+    // OOSA spec-vs-impl gap tracked in verify-record line 134-135).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
+        << "Active×InvalidAppMsgType: exactly 1 Reject(35=3) must be emitted "
+           "(matrix Active row E12 — invalid MsgType for state)";
 }
 
 // S3×E14: initiate_logout (close(graceful)) → emit Logout, → LogoutSent → Disconnected.
@@ -896,7 +986,8 @@ TEST_F(FsmMatrixWitness, Active_CloseTerminal_TransitionsToDisconnected) {
 // ════════════════════════════════════════════════════════════════════════════
 
 // S4×E04: inbound Heartbeat while LogoutSent → (drained), FSM stays LogoutSent.
-TEST_F(FsmMatrixWitness, LS_InboundHeartbeat_Drained_StaysLogoutSent) {
+// Prefix LO_ distinguishes LogoutSent-row tests from LS_-prefixed LogonSent-row tests above.
+TEST_F(FsmMatrixWitness, LO_InboundHeartbeat_Drained_StaysLogoutSent) {
     // FR-006: E04 from LogoutSent → (drained), FSM remains LogoutSent.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
@@ -917,7 +1008,7 @@ TEST_F(FsmMatrixWitness, LS_InboundHeartbeat_Drained_StaysLogoutSent) {
 }
 
 // S4×E07: inbound Logout → confirm → Disconnected.
-TEST_F(FsmMatrixWitness, LS_InboundLogout_Confirm_TransitionsToDisconnected) {
+TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     // FR-006: E07 from LogoutSent → Disconnected (confirm).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
@@ -944,7 +1035,8 @@ TEST_F(FsmMatrixWitness, LS_InboundLogout_Confirm_TransitionsToDisconnected) {
 }
 
 // S4×E08: inbound out-of-scope admin → (drained), FSM stays LogoutSent.
-TEST_F(FsmMatrixWitness, LS_InboundOutOfScopeAdmin_Drained_StaysLogoutSent) {
+// Prefix LO_ distinguishes LogoutSent-row tests from LS_-prefixed LogonSent-row tests.
+TEST_F(FsmMatrixWitness, LO_InboundOutOfScopeAdmin_Drained_StaysLogoutSent) {
     // FR-006: E08 from LogoutSent → (drained).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);

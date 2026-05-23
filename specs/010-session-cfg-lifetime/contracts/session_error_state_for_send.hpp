@@ -39,7 +39,7 @@ namespace fixpp::core {
 //   (e.g. NotConnected, LogonSent, LogonReceived-transient, Disconnected).
 //
 //   Replaces the 005-era reuse of `session_invalid_logon` at the one outbound
-//   send site in src/session/session.cpp:1151 (Session::send, /speckit-analyze
+//   send site in src/session/session.cpp:1181 (Session::send, /speckit-analyze
 //   verified exactly one site). The reuse was a semantic near-fit: `invalid_logon` is
 //   meant for FSM-side Logon-refusal handling, but the outbound-send not-Active
 //   case is a *caller* error (the integrator called send before the session

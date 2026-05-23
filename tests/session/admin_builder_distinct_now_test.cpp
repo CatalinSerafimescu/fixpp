@@ -8,19 +8,25 @@
 // SendingTime(52) branch: clock advance between two emits yields distinct
 // SendingTime values.
 //
-// Tests (one per admin builder):
+// Tests cover the 4 FR-007 admin builders + Logon as bonus coverage:
 //   HB_DistinctNow  — Heartbeat (35=0): inbound TestRequest twice with
 //                     clock advance between them; echos carry distinct SendingTime.
-//   TR_DistinctNow  — TestRequest (35=1): triggered by liveness loop via two
-//                     timer advances; frames carry distinct SendingTime.
+//   TR_DistinctNow  — TestRequest (35=1): triggered by liveness loop with
+//                     heartbt_int=1s; advance clock past two silence windows
+//                     and capture both emitted TestRequests' SendingTime.
 //   Logout_DistinctNow — Logout (35=5): two distinct graceful-close cycles are
-//                        impractical (session is terminal after close). Covered
-//                        via the Q3 SendingTime-fatal path which emits Logout +
-//                        Reject; a clock advance before a second Q3 trigger on
-//                        a fresh session gives distinct Logout SendingTime.
-//   Reject_DistinctNow — Reject (35=3): two inbound out-of-scope admin frames
-//                        in Active with clock advance between them; two Reject
-//                        frames carry distinct SendingTime values.
+//                        impractical (session is terminal after close). Two
+//                        sessions feed inbound Logout with a clock advance between
+//                        them; each session emits a confirming Logout with distinct
+//                        SendingTime.
+//   Reject_DistinctNow — Reject (35=3): two inbound app-level frames (35=D) in
+//                        Active with clock advance between them; two Reject frames
+//                        carry distinct SendingTime values.
+//   Logon_DistinctNow  — Logon (35=A) [BONUS, not part of FR-007's named admin
+//                        builders]: two initiator open() calls with clock advance
+//                        between them; outbound Logon frames carry distinct
+//                        SendingTime. Retained as additional coverage of the
+//                        Logon stamp-then-emit path.
 //
 // Approach: a transport-capture callback on SessionConfig::transport_send captures
 // all outbound frames. Field 52 (SendingTime) is extracted from each frame and
@@ -273,7 +279,76 @@ TEST_F(AdminDistinctNowTest, HB_DistinctNow_TwoHeartbeatsHaveDistinctSendingTime
     (void)close_sync(sess, close_mode::terminal);
 }
 
-// ── T018 Test 2: Reject (35=3) — per-message-distinct SendingTime ────────────
+// ── T018 Test 2 (FR-007 admin builder): TestRequest (35=1) — per-message-distinct ──
+//
+// Trigger: liveness loop fires TestRequest after heartbt_int silence
+// (session.cpp:1437+). Advance mock_clock past two consecutive heartbt_int
+// windows (with peer Heartbeat echo between to satisfy the liveness contract
+// and avoid the unanswered-TR Disconnected branch). Both emitted TestRequest
+// frames must carry distinct SendingTime(52) values.
+//
+// heartbt_int chosen = 1 s (smallest std::chrono::seconds value); advances of 2 s
+// per window give comfortable margin over the deadline + grace boundaries.
+TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctSendingTime) {
+    // FR-007: TestRequest builder stamps SendingTime from effective_clock.now()
+    // each time the liveness loop emits one.
+    auto cfg = make_cfg(1);  // heartbt_int = 1 s
+    Session sess(engine, cfg);
+    ASSERT_TRUE(drive_to_active(sess));
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    // Discard Logon-handshake frames so find_frame_with_type("1") returns the
+    // first TestRequest emitted by the liveness loop, not anything earlier.
+    captured_frames.clear();
+
+    // Window 1: silence past heartbt_int → liveness loop emits TR1.
+    clock->advance(2s);
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    const auto* tr1 = find_frame_with_type("1");
+    ASSERT_NE(tr1, nullptr)
+        << "First TestRequest must have been emitted by liveness loop after heartbt_int silence";
+    std::string st1 = extract_sending_time(*tr1);
+    ASSERT_FALSE(st1.empty()) << "First TestRequest must contain SendingTime(52)";
+
+    // Extract TestReqID(112) from TR1 and echo it in a Heartbeat so the
+    // liveness loop's grace-window check finds pending_test_req_id_ cleared
+    // and continues looping (instead of taking the unanswered-TR → Disconnected branch).
+    std::string tr1_wire(reinterpret_cast<const char*>(tr1->data()), tr1->size());
+    auto tid_pos = tr1_wire.find("112=");
+    ASSERT_NE(tid_pos, std::string::npos) << "TR1 must contain TestReqID(112)";
+    tid_pos += 4;
+    auto tid_end = tr1_wire.find('\x01', tid_pos);
+    ASSERT_NE(tid_end, std::string::npos);
+    std::string test_req_id = tr1_wire.substr(tid_pos, tid_end - tid_pos);
+
+    std::string hb_extra = "112=" + test_req_id + "\x01";
+    auto hb_reply = build_frame("0", 2, kTarget, kSender, kBeginStr,
+                                "20240101-00:00:02.000", hb_extra);
+    (void)feed_sync(sess, hb_reply);
+
+    // Window 2: advance past another heartbt_int (deadline = new last_inbound +
+    // heartbt_int). 2 s gives margin over the deadline + grace boundary.
+    clock->advance(2s);
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    const auto* tr2 = find_frame_with_type("1", 1);
+    ASSERT_NE(tr2, nullptr)
+        << "Second TestRequest must have been emitted after second silence window";
+    std::string st2 = extract_sending_time(*tr2);
+    ASSERT_FALSE(st2.empty()) << "Second TestRequest must contain SendingTime(52)";
+
+    EXPECT_NE(st1, st2)
+        << "Two TestRequests emitted by liveness loop 2 s apart must have distinct "
+        << "SendingTime(52) values (FR-007 per-message-distinct branch). First=" << st1
+        << " Second=" << st2;
+
+    (void)close_sync(sess, close_mode::terminal);
+}
+
+// ── T018 Test 3 (FR-007 admin builder): Reject (35=3) — per-message-distinct ──
 //
 // Trigger: inbound unknown application MsgType "D" in Active → Session emits
 // Reject(35=3, reason=3 unsupported MsgType). Advance clock by 1 s between

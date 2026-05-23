@@ -22,7 +22,7 @@ This slice is a waiver-closure ride-along. It introduces **no new design space**
 - PMR-arena-tracked (FR-001 Option C) — rejected at /clarify; over-engineered for a refactor that's fundamentally "store the config inside Session."
 - `[[clang::lifetimebound]]` (FR-001 Option D) — rejected at /clarify; doesn't actually fix the UAF, just narrows where it can occur, and only on Clang.
 
-**Implementation impact:** ~1-line flip in `include/fixpp/session/session.hpp:281`; the ctor body change in `src/session/session.cpp:116` from `cfg_{cfg}` (reference-binding initializer) to `cfg_{cfg}` (copy-construction) — note: the initializer-list syntax is identical, only the declared member type changes. Read sites unchanged.
+**Implementation impact:** ~1-line flip in `include/fixpp/session/session.hpp:312`; the ctor body change in `src/session/session.cpp:116` from `cfg_{cfg}` (reference-binding initializer) to `cfg_{cfg}` (copy-construction) — note: the initializer-list syntax is identical, only the declared member type changes. Read sites unchanged.
 
 **Risk:** If `SessionConfig` later grows a non-copyable member (e.g. a `std::unique_ptr` to a session-scoped resource), this decision must be revisited. Today no such member exists. Flag in /speckit-tasks as a /speckit-verify hygiene check: confirm `static_assert(std::is_copy_constructible_v<SessionConfig>);` at the top of `session_config.hpp`.
 

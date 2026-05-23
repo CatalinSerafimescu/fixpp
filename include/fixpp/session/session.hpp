@@ -73,7 +73,19 @@ public:
     // outlive the Session (engine-owned lifetime — [arch §4.4]). cfg is
     // COPIED into cfg_ by value (FR-001 / D-1 / W-5 lifetime fix); the
     // caller may freely drop or mutate the config after the ctor returns.
-    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept;
+    //
+    // NOT noexcept (W3.1 / /simplify B-1, 010-session-cfg-lifetime): the
+    // SessionConfig copy-ctor invoked in the initializer list can throw
+    // — std::string (sender_comp_id / target_comp_id / begin_string) may
+    // allocate when above the SSO threshold; std::function<void(span)>
+    // transport_send may allocate for non-SBO captures; std::shared_ptr
+    // copies bump a refcount whose atomic op is noexcept but whose enclosing
+    // copy ctor is not annotated noexcept by the standard. Declaring this
+    // ctor `noexcept` while constructing `SessionConfig cfg_;` from a
+    // potentially-throwing copy would call std::terminate on any thrown
+    // copy — UB-class hazard. Matches the close() precedent below (NOT
+    // noexcept because std::make_shared allocates).
+    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg);
 
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -223,7 +235,17 @@ public:
     [[nodiscard]] fsm_state state() const noexcept;
 
     // FR-004 / D-2 — ordered FSM transition log (ring-buffer, capacity 16).
-    // Returns a view of the fsm_visit_history_ ring-buffer (oldest first,
+    // Returns a std::span view over the underlying std::array<fsm_state, 16>
+    // in PHYSICAL-BUFFER ORDER (index 0..15). Semantics:
+    //   - Before wrap (<= 16 transitions): index 0 is the oldest, last written
+    //     index is the most recent. fsm_visit_count() == number of valid slots.
+    //   - After wrap (> 16 transitions): the oldest entry is at index
+    //     (fsm_visit_count() % 16); the next-oldest is at (fsm_visit_count()+1) % 16,
+    //     and so on. Callers wanting chronological order must rotate using
+    //     fsm_visit_count() as the wrap index. fsm_visit_count_ saturates at
+    //     UINT8_MAX so callers can detect "≥255 transitions, exact order unknown".
+    // Always-on, zero-cost-when-unread (~1ns push per transition). Used by FR-004
+    // observability tests and FR-006 matrix witness per-cell checks.
     // up to 16 entries). Empty before the first record_state_transition_ call.
     [[nodiscard]] std::span<const fsm_state> fsm_visit_history() const noexcept;
 

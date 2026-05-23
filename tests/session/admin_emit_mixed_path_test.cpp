@@ -133,6 +133,13 @@ protected:
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine;
 
+    // Captures every outbound frame emitted via cfg.transport_send so per-test
+    // assertions can verify the gated-emit contract (W3.3 / /simplify B-5+C-1 fix).
+    // BEFORE W3.3 the tests asserted only sess.state() == Disconnected — that
+    // matches even if the gated emit ships NO frame OR an unintended frame; it
+    // could not catch a contract violation. transport_send capture closes that gap.
+    std::vector<std::vector<std::byte>> captured_frames;
+
     static constexpr std::string_view kSender   = "SENDER";
     static constexpr std::string_view kTarget   = "TARGET";
     static constexpr std::string_view kBeginStr = "FIX.4.2";
@@ -159,8 +166,37 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = session_role::initiator;
+        // W3.3 — capture every outbound frame for per-test gated-emit assertions.
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            captured_frames.emplace_back(frame.begin(), frame.end());
+        };
         return cfg;
     }
+
+    // Extract MsgType(35) value from a raw FIX frame.
+    static std::string extract_msg_type(std::span<const std::byte> frame) {
+        std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
+        auto pos = wire.find("35=");
+        if (pos == std::string::npos) return {};
+        pos += 3;
+        auto end = wire.find('\x01', pos);
+        if (end == std::string::npos) return {};
+        return wire.substr(pos, end - pos);
+    }
+
+    // Count outbound frames of a given MsgType captured AFTER `drive_to_active`.
+    // Filters out the Logon-handshake frame (35=A) the initiator emits in open().
+    std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
+        std::size_t n = 0;
+        for (const auto& f : captured_frames) {
+            if (extract_msg_type(f) == msg_type) ++n;
+        }
+        return n;
+    }
+
+    // Discard handshake-phase outbound frames (Logon) so subsequent assertions
+    // see ONLY the admin frames emitted by the path under test.
+    void clear_handshake_captures() { captured_frames.clear(); }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
@@ -220,6 +256,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutOk_Disconnected) {
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Feed a Heartbeat with stale SendingTime (epoch) → triggers Q3 path.
     // next-expected inbound seq = 2 (Logon was seq=1).
@@ -229,6 +266,13 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutOk_Disconnected) {
     // Both Reject and Logout emitted; session transitions to Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Site1 Reject-ok/Logout-ok: session must reach Disconnected via Q3 path";
+
+    // W3.3 — gated-emit contract: BOTH Reject (35=3) and Logout (35=5) frames
+    // must have been emitted via transport_send (assign_outbound succeeded for both).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
+        << "Site1 Reject-ok/Logout-ok: exactly 1 Reject(35=3) must be emitted";
+    EXPECT_EQ(count_admin_frames_with_type("5"), 1U)
+        << "Site1 Reject-ok/Logout-ok: exactly 1 Logout(35=5) must be emitted after Reject";
 }
 
 // Site1: Reject-fail → Logout-skip → Disconnected (early return at assign failure).
@@ -238,6 +282,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectFail_LogoutSkipped_Disconnected) {
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Inject overflow: next assign_outbound fails immediately.
     inject_overflow_at(sess, 0);
@@ -248,6 +293,15 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectFail_LogoutSkipped_Disconnected) {
     // Session must reach Disconnected via the early-return path.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Site1 Reject-fail: early return at assign, Logout skipped, still Disconnected";
+
+    // W3.3 — gated-emit contract: NEITHER Reject (35=3) NOR Logout (35=5) may be
+    // emitted (assign_outbound failed BEFORE Reject was built; early-return skips
+    // Logout entirely). This guards against the failure mode where a frame is
+    // emitted without a successful assign_outbound.
+    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
+        << "Site1 Reject-fail: Reject(35=3) must NOT be emitted (assign failed pre-build)";
+    EXPECT_EQ(count_admin_frames_with_type("5"), 0U)
+        << "Site1 Reject-fail: Logout(35=5) must NOT be emitted (early return)";
 }
 
 // Site1: Reject-ok + Logout-fail → Disconnected.
@@ -257,6 +311,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutFail_Disconnected) {
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Inject: allow exactly one assign_outbound to succeed, then fail on the second.
     inject_overflow_at(sess, 1);
@@ -267,10 +322,23 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutFail_Disconnected) {
     // Session reaches Disconnected regardless of which step fails.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Site1 Reject-ok/Logout-fail: Disconnected via second assign failure";
+
+    // W3.3 — gated-emit contract: Reject (35=3) IS emitted (first assign succeeded);
+    // Logout (35=5) must NOT be emitted (second assign failed before Logout was built).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
+        << "Site1 Reject-ok/Logout-fail: exactly 1 Reject(35=3) must be emitted "
+           "(first assign succeeded)";
+    EXPECT_EQ(count_admin_frames_with_type("5"), 0U)
+        << "Site1 Reject-ok/Logout-fail: Logout(35=5) must NOT be emitted "
+           "(second assign failed pre-build)";
 }
 
 // Site1: Reject-fail + Logout-fail semantically = same as Reject-fail (first
 // assign fails, second is never reached). Disconnected either way.
+//
+// Retained as a separate test (rather than merged with Site1_RejectFail_LogoutSkipped)
+// to provide an explicit property-test "the RejectFail path is identical regardless
+// of what subsequent Logout-step injection would say" — equivalence-class witness.
 TEST_F(AdminEmitMixedPathTest, Site1_RejectFail_LogoutFail_SameAsRejectFail_Disconnected) {
     // FR-008: when Reject fails, the early return prevents reaching the Logout
     // step. The session reaches Disconnected via the early-return path, not via
@@ -278,6 +346,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectFail_LogoutFail_SameAsRejectFail_Disc
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Same injection as Reject-fail (next_outbound = seqnum_max).
     inject_overflow_at(sess, 0);
@@ -286,6 +355,13 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectFail_LogoutFail_SameAsRejectFail_Disc
     (void)feed_sync(sess, stale_hb);
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+
+    // W3.3 — gated-emit contract: equivalence-class witness vs RejectFail_LogoutSkipped.
+    // Neither frame is emitted (early return at first assign).
+    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
+        << "Site1 Reject-fail equivalence class: Reject(35=3) must NOT be emitted";
+    EXPECT_EQ(count_admin_frames_with_type("5"), 0U)
+        << "Site1 Reject-fail equivalence class: Logout(35=5) must NOT be emitted";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -300,6 +376,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutOk_Disconnected) {
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Inbound Logout from peer (seq=2, matching clock timestamp).
     auto lo = build_frame("5", 2, kTarget, kSender, kBeginStr, kSendingTime);
@@ -307,6 +384,10 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutOk_Disconnected) {
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Site2 Logout-ok: confirming Logout emitted, session reaches Disconnected";
+
+    // W3.3 — gated-emit contract: exactly 1 confirming Logout (35=5) emitted.
+    EXPECT_EQ(count_admin_frames_with_type("5"), 1U)
+        << "Site2 Logout-ok: exactly 1 confirming Logout(35=5) must be emitted";
 }
 
 // Site2: Logout-fail → Disconnected (assign_outbound fails for confirming Logout).
@@ -317,6 +398,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutFail_Disconnected) {
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    clear_handshake_captures();
 
     // Inject overflow: next assign_outbound fails immediately.
     inject_overflow_at(sess, 0);
@@ -327,6 +409,13 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutFail_Disconnected) {
     // Confirming Logout NOT emitted (assign failed) but session still Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Site2 Logout-fail: assign_outbound fails, session still reaches Disconnected";
+
+    // W3.3 — gated-emit contract: confirming Logout(35=5) must NOT be emitted
+    // (assign_outbound failed pre-build; the Disconnected transition fires in the
+    // !assign_r branch but no outbound frame goes through transport_send).
+    EXPECT_EQ(count_admin_frames_with_type("5"), 0U)
+        << "Site2 Logout-fail: confirming Logout(35=5) must NOT be emitted "
+           "(assign failed pre-build); state-transition-only path";
 }
 
 }  // namespace fixpp::session::test

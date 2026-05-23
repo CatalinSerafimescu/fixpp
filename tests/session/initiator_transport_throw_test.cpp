@@ -9,8 +9,11 @@
 // Exercises Session::open() when transport.send() throws during the initiator
 // outbound Logon emit:
 //   - open() must return the documented error (dispatch_aborted).
-//   - FSM must end in the documented state (LogonSent — set before emit, not
-//     reverted on failure per the 005 design).
+//   - FSM must end in Disconnected (symmetric to acceptor send-throw witness +
+//     the "session-fatal → Disconnected" precedent from the liveness loop
+//     assign-failure branch). Post W3.4 / /simplify B-8: Session::open() now
+//     transitions to Disconnected on all 3 initiator emit-failure branches
+//     (build_logon, assign_outbound, store_then_emit).
 //
 // Anchors: FR-009, SC-007; [FIX-SL §4.3]; 005 data-model.md §E1 Session::open;
 //          store_then_emit transport-throw → dispatch_aborted (session.cpp).
@@ -70,12 +73,15 @@ protected:
 // Configures an initiator session whose transport.send() always throws.
 // Calls co_await session.open() and asserts:
 //   (a) result is std::unexpected(dispatch_aborted)     [FR-009 / SC-007]
-//   (b) FSM end-state is LogonSent (set before emit;    [FR-009 / 005 data-model.md §E1]
-//       not reverted on transport failure)
+//   (b) FSM end-state is Disconnected (symmetric to    [FR-009 / W3.4]
+//       acceptor send-throw witness; session-fatal
+//       failure during initiator handshake → Disconnected)
 //
 // The contract is wired in store_then_emit: transport throw → dispatch_aborted
 // (session.cpp); open() propagates via emit_r.error(). The FSM transitions
-// NotConnected → LogonSent before the emit, and is not reverted on failure.
+// NotConnected → LogonSent before the emit; on transport failure the W3.4 fix
+// adds an explicit transition to Disconnected before the co_return so the
+// caller observes the session-fatal end-state, matching the acceptor witness.
 TEST_F(InitiatorTransportThrowTest, InitiatorOpen_TransportThrowsOnLogonEmit_ReturnsDocumentedError) {
     auto cfg = make_initiator_cfg();
     // Transport always throws — simulates a network send failure during Logon emit.
@@ -102,15 +108,30 @@ TEST_F(InitiatorTransportThrowTest, InitiatorOpen_TransportThrowsOnLogonEmit_Ret
             << ". [FR-009; SC-007; store_then_emit transport-throw contract]";
     }
 
-    // (b) FR-009 / 005 data-model.md §E1: FSM is set to LogonSent before the
-    // emit attempt; on transport failure it is NOT reverted. The documented
-    // end-state is therefore LogonSent (symmetric knowledge: the acceptor path
-    // transitions to Disconnected because send_path_test exercises send() after
-    // Active, which gates via a different FSM path).
-    EXPECT_EQ(sess.state(), fsm_state::LogonSent)
-        << "FSM must be LogonSent after open() fails on transport throw; "
-           "NotConnected → LogonSent is set before emit and not reverted. "
-           "[FR-009; 005 data-model.md §E1; [FIX-SL §4.3]]";
+    // (b) FR-009 / W3.4: FSM end-state is Disconnected, symmetric to the
+    // acceptor send-throw witness. NotConnected → LogonSent fires before the
+    // emit; on transport throw, the W3.4 fix transitions LogonSent → Disconnected
+    // before co_return so the caller observes session-fatal failure. Matches the
+    // pattern set by the liveness loop assign-failure branch (Disconnected on
+    // session-fatal outbound failure) and the Active send-throw witness.
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "FSM must be Disconnected after open() fails on transport throw "
+           "(symmetric to acceptor send-throw witness; session-fatal handshake "
+           "failure). [FR-009; W3.4 / /simplify B-8 fix; [FIX-SL §4.3]]";
+
+    // The visit-history must record the LogonSent → Disconnected sequence
+    // (LogonSent set before emit; Disconnected set after transport throw).
+    auto hist = sess.fsm_visit_history();
+    bool saw_logon_sent = false;
+    bool saw_disconnected = false;
+    for (auto s : hist) {
+        if (s == fsm_state::LogonSent) saw_logon_sent = true;
+        if (s == fsm_state::Disconnected) saw_disconnected = true;
+    }
+    EXPECT_TRUE(saw_logon_sent)
+        << "visit history must record LogonSent (set before emit attempt)";
+    EXPECT_TRUE(saw_disconnected)
+        << "visit history must record Disconnected (set after transport throw)";
 }
 
 }  // namespace fixpp::session::test

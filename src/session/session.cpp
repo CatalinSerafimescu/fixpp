@@ -75,7 +75,7 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
 }
 }  // namespace
 
-Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept
+Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
     : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)) {
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
@@ -289,20 +289,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
                                         cfg_.begin_string, heartbt_sec, sending_time_view);
         if (!logon_result) {
             // build_logon failed (oversized IDs → wire_frame_too_large).
-            // Propagate as an open() error; seqnum NOT consumed. [F6 drift fix]
+            // Session-fatal — initiator handshake never reached the wire; transition
+            // to Disconnected to match the acceptor send-throw symmetry promised by
+            // FR-009 + the "session-fatal → Disconnected" precedent set by the
+            // liveness loop (assign_outbound failure at session.cpp:~1466) and the
+            // Active send-throw witness in send_path_test.
+            // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
+            //  [FIX-SL §4.3] initiator handshake failure semantics]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(logon_result.error());
         }
         // Advance outbound counter through manager ONLY on build success.
         // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            // Seqnum overflow — same disposition as build_logon failure above.
+            // [W3.4 / /simplify B-8 fix]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());  // overflow (I-8)
         }
         auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
         if (!emit_r) {
-            // store_then_emit failed (store I/O or transport error).
-            // Propagate error; seqnum was advanced but no message was delivered.
-            // [F7 drift fix; spec.md FR-001(e)]
+            // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
+            // Same disposition: session-fatal → Disconnected.
+            // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
+            record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(emit_r.error());
         }
     } else {

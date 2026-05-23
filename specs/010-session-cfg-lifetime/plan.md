@@ -5,7 +5,7 @@
 
 ## Summary
 
-Close the **6 residual P2/P3 + 4 coverage-carry-forward waivers** recorded against PR #82 Gate B (`library/.specify/decisions/009-session-fsm-finalize-gateb.md`, tracked audit `phases/phase-4/session/009-session-fsm-finalize.md`) **plus** the load-bearing **W-5 pre-existing 005-baseline ASan use-after-scope** on the `cfg_` reference at `src/session/session.cpp:116` (declaration `include/fixpp/session/session.hpp:281`, `const SessionConfig& cfg_;`).
+Close the **6 residual P2/P3 + 4 coverage-carry-forward waivers** recorded against PR #82 Gate B (`library/.specify/decisions/009-session-fsm-finalize-gateb.md`, tracked audit `phases/phase-4/session/009-session-fsm-finalize.md`) **plus** the load-bearing **W-5 pre-existing 005-baseline ASan use-after-scope** on the `cfg_` reference at `src/session/session.cpp:116` (declaration `include/fixpp/session/session.hpp:312`, `const SessionConfig& cfg_;`).
 
 W-5 is the primary subject — every other bundled item lives at the same touch surface (`session.cpp` / `session.hpp` / `tests/session/`) and rides along to avoid a second slice. The W-5 mechanism was settled at `/speckit-clarify` (2026-05-23, see `spec.md ## Clarifications`): **by-value `SessionConfig cfg_;`** — the `Session` constructor copies the caller's config into a same-typed member. No sharing across sessions; caller may freely drop or mutate their config after the ctor returns. Each `Session` owns its own snapshot.
 
@@ -172,7 +172,7 @@ Intentionally empty — no constitutional violations introduced. The existing 00
 
 ## Citation verification pass
 
-Run against `library/.specify/constitution.md` (v0.1, 2026-05-10) and the 005 / 008 Phase-2 anchors. Every `[const §X.Y]` cited above resolves to an extant article/section. The new `error::session_invalid_state_for_send` variant slot (77) is one past the highest occupied session-class slot (`session_invalid_config = 76`) per `include/fixpp/core/error.hpp:310`. The cross-doc citations (PR #82 W-5 location in `src/session/session.cpp:116` declaration `include/fixpp/session/session.hpp:281`) are verified against the live tree at `ba2222d`.
+Run against `library/.specify/constitution.md` (v0.1, 2026-05-10) and the 005 / 008 Phase-2 anchors. Every `[const §X.Y]` cited above resolves to an extant article/section. The new `error::session_invalid_state_for_send` variant slot (77) is one past the highest occupied session-class slot (`session_invalid_config = 76`) per `include/fixpp/core/error.hpp:310`. The cross-doc citations (PR #82 W-5 location in `src/session/session.cpp:116` declaration `include/fixpp/session/session.hpp:312`) are verified against the live tree at `ba2222d`.
 
 ## Pipeline progress
 
