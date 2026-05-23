@@ -26,25 +26,23 @@
 // Mirror of specs/008-message-store/contracts/message_store_factory.hpp.
 #pragma once
 
+#include <asio/any_io_executor.hpp>
+#include <fixpp/core/error.hpp>             // expected_t
+#include <fixpp/session/message_store.hpp>  // MessageStore
 #include <memory>
 #include <memory_resource>
 #include <string_view>
-
-#include <asio/any_io_executor.hpp>
-
-#include <fixpp/core/error.hpp>                  // expected_t
-#include <fixpp/session/message_store.hpp>       // MessageStore
 
 namespace fixpp::session {
 
 class MessageStoreFactory {
 public:
-    MessageStoreFactory()                                       = default;
-    MessageStoreFactory(const MessageStoreFactory&)             = delete;
-    MessageStoreFactory& operator=(const MessageStoreFactory&)  = delete;
-    MessageStoreFactory(MessageStoreFactory&&)                  = delete;
-    MessageStoreFactory& operator=(MessageStoreFactory&&)       = delete;
-    virtual ~MessageStoreFactory()                              = default;
+    MessageStoreFactory() = default;
+    MessageStoreFactory(const MessageStoreFactory&) = delete;
+    MessageStoreFactory& operator=(const MessageStoreFactory&) = delete;
+    MessageStoreFactory(MessageStoreFactory&&) = delete;
+    MessageStoreFactory& operator=(MessageStoreFactory&&) = delete;
+    virtual ~MessageStoreFactory() = default;
 
     // make: mint a MessageStore for the given <sender, target> identity.
     //
@@ -102,12 +100,9 @@ public:
     // sentinel record's session_triple_hash on re-open — mismatch →
     // store_factory_failed; rejects with store_factory_failed if the
     // resolved file_io_executor (Config-supplied OR threaded-in) is empty.
-    [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>>
-    make(std::string_view sender,
-         std::string_view target,
-         std::pmr::memory_resource* mr,
-         std::size_t max_store_memory_bytes,
-         asio::any_io_executor file_io_executor) noexcept = 0;
+    [[nodiscard]] virtual fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
+        std::size_t max_store_memory_bytes, asio::any_io_executor file_io_executor) noexcept = 0;
 };
 
 }  // namespace fixpp::session

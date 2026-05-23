@@ -12,13 +12,13 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
 #include <asio/awaitable.hpp>
-#include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
 #include <asio/detached.hpp>
+#include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -29,7 +29,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <limits>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>     // expected_t, error values
@@ -49,6 +48,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
 #include <functional>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -113,7 +113,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
 // fsm_visit_history: return a view of the oldest ≤16 recorded transitions.
 std::span<const fsm_state> Session::fsm_visit_history() const noexcept {
     return std::span<const fsm_state>{fsm_visit_history_.data(),
-                                     std::min<std::size_t>(fsm_visit_count_, 16)};
+                                      std::min<std::size_t>(fsm_visit_count_, 16)};
 }
 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
@@ -270,25 +270,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         std::string_view sending_time_view;
         if (effective_clock_) {
             auto fmt_r = fixpp::session::stamp_sending_time(
-                effective_clock_->now(),
-                std::span<char>{time_buf.data(), time_buf.size()});
+                effective_clock_->now(), std::span<char>{time_buf.data(), time_buf.size()});
             if (fmt_r) {
                 sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
             }
         }
         const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-            ? static_cast<int>(cfg_.heartbeat_interval->count())
-            : 30;  // D-8 default 30 s
+                                    ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                    : 30;  // D-8 default 30 s
         // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
         // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
         // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
         // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
         const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
-        auto logon_result = fixpp::session::build_logon(
-            std::span<std::byte>{logon_buf.data(), logon_buf.size()},
-            logon_seq,
-            cfg_.sender_comp_id, cfg_.target_comp_id,
-            cfg_.begin_string, heartbt_sec, sending_time_view);
+        auto logon_result =
+            fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
+                                        logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                        cfg_.begin_string, heartbt_sec, sending_time_view);
         if (!logon_result) {
             // build_logon failed (oversized IDs → wire_frame_too_large).
             // Propagate as an open() error; seqnum NOT consumed. [F6 drift fix]
@@ -587,9 +585,9 @@ struct SendingTimeStamp {
 
 [[nodiscard]] SendingTimeStamp stamp_sending_time(fixpp::core::Clock& clock) noexcept {
     SendingTimeStamp s;
-    auto fmt_r = fixpp::core::utc_time_to_fix_string(
-        clock.now(), fixpp::core::fix_time_precision::millis,
-        std::span<char>{s.buf.data(), s.buf.size()});
+    auto fmt_r =
+        fixpp::core::utc_time_to_fix_string(clock.now(), fixpp::core::fix_time_precision::millis,
+                                            std::span<char>{s.buf.data(), s.buf.size()});
     if (fmt_r) {
         s.value = std::string_view{fmt_r->data(), fmt_r->size()};
     }
@@ -675,7 +673,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
             // RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on
             // successful reply build AND emit. Build/emit failure → Disconnected.
-            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed HeartBtInt"]
+            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed
+            // HeartBtInt"]
             record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
@@ -693,17 +692,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                 }
                 const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-                    ? static_cast<int>(cfg_.heartbeat_interval->count())
-                    : 30;  // D-8 default 30 s
+                                            ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                            : 30;  // D-8 default 30 s
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
                 // RC#B: gate the advance on build success; gate Active on emit success.
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 auto reply_logon = fixpp::session::build_logon(
-                    std::span<std::byte>{reply_buf.data(), reply_buf.size()},
-                    reply_seq,
-                    cfg_.sender_comp_id, cfg_.target_comp_id,
-                    cfg_.begin_string, heartbt_sec, reply_sending_time_view);
+                    std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
+                    cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
+                    reply_sending_time_view);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
@@ -788,7 +786,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // sending_time absent (empty) → sending_time_ok stays false → path fires.
 
                 if (!sending_time_ok) {
-                    // Q3 established-session path: Reject(reason=10, refTag=52) → Logout → Disconnect.
+                    // Q3 established-session path: Reject(reason=10, refTag=52) → Logout →
+                    // Disconnect.
                     const auto st52 = stamp_sending_time(*effective_clock_);
                     // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
                     {
@@ -796,9 +795,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            ref_seq,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             52,  // RefTagID = 52 (SendingTime)
                             hdr.msg_type,
                             10,  // SessionRejectReason = 10 (SendingTime accuracy)
@@ -818,9 +816,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         std::array<std::byte, 256> lo_buf{};
                         const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                         auto lo_result = fixpp::session::build_logout(
-                            std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                            lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            {}, cfg_.begin_string, st52.value);
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
+                            st52.value);
                         if (lo_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
@@ -870,8 +868,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
                     auto logout_result = fixpp::session::build_logout(
                         std::span<std::byte>{buf.data(), buf.size()}, logout_seq,
-                        cfg_.sender_comp_id, cfg_.target_comp_id,
-                        {}, cfg_.begin_string, st52.value);
+                        cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
+                        st52.value);
                     if (logout_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
@@ -971,8 +969,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                            : SendingTimeStamp{};
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             0,             // RefTagID: n/a for MsgType rejection
                             hdr.msg_type,  // RefMsgType: the offending MsgType
                             3,             // SessionRejectReason = 3 (invalid MsgType)
@@ -1078,9 +1076,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     const auto st52 = stamp_sending_time(*effective_clock_);
                     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                     auto lo_result = fixpp::session::build_logout(
-                        std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                        lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                        sending_time_error, cfg_.begin_string, st52.value);
+                        std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, sending_time_error,
+                        cfg_.begin_string, st52.value);
                     if (lo_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
@@ -1176,7 +1174,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
     // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
     // The noexcept window on this coroutine must never let an uncaught exception
-    // propagate (std::terminate). [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+    // propagate (std::terminate). [F5 drift fix;
+    // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
         auto impl_r = co_await send_impl(app_payload);
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
@@ -1443,8 +1442,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             std::array<char, 32> id_buf{};
             id_buf[0] = 'T';
             id_buf[1] = 'R';
-            auto [end, ec] =
-                std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(), ++next_test_request_id_);
+            auto [end, ec] = std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(),
+                                           ++next_test_request_id_);
             (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
             pending_test_req_id_.assign(id_buf.data(), end);
             unanswered_tr_ = false;
@@ -1456,9 +1455,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 const auto st52 = stamp_sending_time(*effective_clock_);
                 const seqnum_t tr_seq = seqnum_mgr_.peek_outbound();
                 auto tr_result = fixpp::session::build_test_request(
-                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq,
-                    cfg_.sender_comp_id, cfg_.target_comp_id, pending_test_req_id_,
-                    cfg_.begin_string, st52.value);
+                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
+                    cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
                 if (tr_result) {
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
@@ -1583,10 +1581,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     std::array<std::byte, 256> buf{};
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
-    auto logout_result = fixpp::session::build_logout(std::span<std::byte>{buf.data(), buf.size()},
-                                                      logout_seq, cfg_.sender_comp_id,
-                                                      cfg_.target_comp_id,
-                                                      {}, cfg_.begin_string, st52.value);
+    auto logout_result = fixpp::session::build_logout(
+        std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,
+        cfg_.target_comp_id, {}, cfg_.begin_string, st52.value);
 
     if (!logout_result) {
         // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.

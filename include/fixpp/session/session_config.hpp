@@ -21,7 +21,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
@@ -32,6 +31,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 
 namespace fixpp::core {
 class Clock;
@@ -124,7 +124,10 @@ struct SessionConfig {
 
     session_role role = session_role::initiator;  // FR-004; default preserves 005 behavior
 
-    std::shared_ptr<MessageStoreFactory> store_factory;  // FR-001a — shared ownership (was unique_ptr pre-010); stateless factory may be shared across Sessions, each calling make() to mint its own MessageStore (per-Session uniqueness invariant preserved)
+    std::shared_ptr<MessageStoreFactory>
+        store_factory;  // FR-001a — shared ownership (was unique_ptr pre-010); stateless factory
+                        // may be shared across Sessions, each calling make() to mint its own
+                        // MessageStore (per-Session uniqueness invariant preserved)
     std::shared_ptr<fixpp::tls::cert_source> cert_source;
     fixpp::session::SecurityProfile
         security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects

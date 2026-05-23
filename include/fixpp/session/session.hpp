@@ -20,12 +20,12 @@
 //   open()  config-validation rejections     → T050 (US5)
 #pragma once
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
 #include <atomic>
 #include <cassert>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
@@ -46,7 +46,7 @@
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
-#include <fixpp/session/session_fsm.hpp>     // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/session/session_fsm.hpp>  // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core {
 struct EngineConfig;
@@ -61,7 +61,10 @@ namespace fixpp::session {
 // (hook NOT invoked). partial is NOT in the v1.0 surface (N-P1-3).
 enum class close_mode : std::uint8_t { graceful = 0, terminal = 1 };
 
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — Session is heap-allocated once per session; the 39-byte padding doesn't fit on a hot path. Field order tracks the FSM/handshake/seqnum/store/clock/exec/state groupings; reordering for tight packing would obscure that structure. Defer to a dedicated perf pass if profiling shows it matters.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — Session is heap-allocated once per
+// session; the 39-byte padding doesn't fit on a hot path. Field order tracks the
+// FSM/handshake/seqnum/store/clock/exec/state groupings; reordering for tight packing would obscure
+// that structure. Defer to a dedicated perf pass if profiling shows it matters.
 class Session {
 public:
     // The ctor pre-conditions a non-null session_arena via the [2d §4.5]
@@ -252,7 +255,8 @@ public:
             // in_dispatch_ permanently set and false-positived the
             // next otherwise-serial dispatch assertion.
             struct dispatch_guard {
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard binds to the caller's flag for clear-on-scope-exit.
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard
+                // binds to the caller's flag for clear-on-scope-exit.
                 std::atomic<bool>& flag;
                 explicit dispatch_guard(std::atomic<bool>& f) noexcept : flag(f) {}
                 ~dispatch_guard() noexcept { flag.store(false, std::memory_order_release); }
@@ -278,14 +282,13 @@ public:
     // directly acquire the internal async_mutex to manufacture a genuine holder
     // that is in-flight when close() calls seqnum_mgr_.drain(). NOT for
     // production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
-    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept {
-        return seqnum_mgr_;
-    }
+    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
 #endif
 
 private:
     const fixpp::core::EngineConfig& engine_;
-    SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or mutate the config after the ctor returns without causing UAF
+    SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
+                         // mutate the config after the ctor returns without causing UAF
     std::pmr::memory_resource* session_arena_;  // resolved in ctor, never null
 
     fixpp::core::session_executor exec_;                   // bound at open() (T020)
