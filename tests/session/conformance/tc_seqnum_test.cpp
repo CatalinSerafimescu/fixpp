@@ -202,8 +202,7 @@ protected:
         auto feed_r = feed_sync(s, logon);
         (void)feed_r;
         const auto st = s.state();
-        return st == fixpp::session::fsm_state::Active ||
-               st == fixpp::session::fsm_state::LogonReceived;
+        return st == fixpp::session::fsm_state::Active;
     }
 };
 
@@ -229,8 +228,7 @@ TEST_F(TcSeqnumTest, Tc2a_MsgSeqNumCorrect) {
 
     // Session must remain Active (or LogonReceived).
     const auto st = sess.state();
-    EXPECT_TRUE(st == fixpp::session::fsm_state::Active ||
-                st == fixpp::session::fsm_state::LogonReceived)
+    EXPECT_EQ(st, fixpp::session::fsm_state::Active)
         << "2a: Session should remain Active after in-sequence message";
 }
 

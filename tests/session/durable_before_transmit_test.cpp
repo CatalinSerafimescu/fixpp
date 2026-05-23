@@ -138,8 +138,8 @@ TEST_F(DurableBeforeTransmitTest, InboundStoreBeforeFromAdminDispatch) {
     // Disconnected; if either had not yet run, the FSM would still be
     // NotConnected.)
     const auto st = sess.state();
-    EXPECT_TRUE(st == fsm_state::LogonReceived || st == fsm_state::Active)
-        << "Post-Logon dispatch must transition past NotConnected; got state="
+    EXPECT_EQ(st, fsm_state::Active)
+        << "Post-Logon dispatch must reach Active after valid Logon; got state="
         << static_cast<int>(st);
 }
 

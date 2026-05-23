@@ -298,6 +298,7 @@ add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
 # seam #11: Two-phase cancellation — child cancellation_state; close idempotent;
 #           close(terminal) skips phase 1.
 add_threading_test(session_logout_exchange logout_exchange_test.cpp)
+target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cpp)
 
 # ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────

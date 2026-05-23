@@ -94,6 +94,7 @@ target_link_libraries(tc_sendingtime_test PRIVATE
 target_include_directories(tc_sendingtime_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
+target_compile_definitions(tc_sendingtime_test PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_tc_sendingtime COMMAND tc_sendingtime_test)
 set_tests_properties(session_tc_sendingtime PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")

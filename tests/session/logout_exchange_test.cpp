@@ -432,6 +432,38 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
     EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5");
 }
 
+TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
+    auto cfg = make_cfg();
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) {
+        td.capture_outbound(frame);
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active_initiator(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    const std::size_t frames_before = td.sent_count();
+
+    auto& mgr = sess.seqnum_mgr_test_access();
+    const seqnum_t next_inbound = mgr.next_inbound_unsafe();
+    mgr.set_counters_for_test(next_inbound, seqnum_max);
+
+    auto peer_logout = make_logout_frame("FIX.4.2", next_inbound, "TW", "ISLD");
+    auto inbound_r = feed_inbound(sess, peer_logout);
+
+    EXPECT_FALSE(inbound_r.has_value())
+        << "Active inbound Logout must surface assign_outbound() overflow; "
+        << "got ok (bug: session.cpp site 3 returns success after Disconnect).";
+    ASSERT_FALSE(inbound_r.has_value());
+    EXPECT_EQ(inbound_r.error(), fixpp::core::error::store_seqnum_overflow)
+        << "Active inbound Logout must return store_seqnum_overflow on outbound seqnum overflow.";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "Active inbound Logout overflow must transition to Disconnected.";
+    EXPECT_EQ(td.sent_count(), frames_before)
+        << "No confirming Logout must be emitted when assign_outbound() overflows.";
+}
+
 // ── Test 7: Disconnected + inbound Logout → ignored ───────────────────────────
 TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
     auto cfg = make_cfg();

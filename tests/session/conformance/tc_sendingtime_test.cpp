@@ -266,6 +266,44 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 }
 
+TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesError) {
+    SendingTimeConformanceFixture f;
+    auto cfg = f.make_cfg("FIX.4.4");
+    fixpp::session::Session sess(f.engine, cfg);
+
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    ASSERT_TRUE(fut.get().has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    const std::size_t before = f.transport.sent_count();
+
+    auto& mgr = sess.seqnum_mgr_test_access();
+    const seqnum_t next_inbound = mgr.next_inbound_unsafe();
+    mgr.set_counters_for_test(next_inbound, seqnum_max);
+
+    auto stale_logon = make_frame_with_sending_time(
+        "FIX.4.4", "A", next_inbound, "TW", "ISLD",
+        "20231231-23:55:00.000",
+        "98=0\x01""108=30\x01");
+    auto fut2 = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_logon), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    auto inbound_r = fut2.get();
+
+    EXPECT_FALSE(inbound_r.has_value())
+        << "Bad-SendingTime Logon in LogonSent must surface assign_outbound() overflow; "
+        << "got ok (bug: session.cpp site 6 returns success after Disconnect).";
+    ASSERT_FALSE(inbound_r.has_value());
+    EXPECT_EQ(inbound_r.error(), fixpp::core::error::store_seqnum_overflow)
+        << "Bad-SendingTime Logon must return store_seqnum_overflow on outbound seqnum overflow.";
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "Bad-SendingTime Logon overflow must transition to Disconnected.";
+    EXPECT_EQ(f.transport.sent_count(), before)
+        << "No Logout must be emitted when assign_outbound() overflows on the LogonSent path.";
+}
+
 // ── 2o_SendingTimeValueOutOfRange (fix42) ────────────────────────────────────
 //
 // Oracle: "If an established message has SendingTime out of range, send Reject then Logout."
@@ -363,6 +401,39 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
     EXPECT_TRUE(found_reject)  << "2o fix44: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout)  << "2o fix44: stale established SendingTime must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
+}
+
+TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesError) {
+    SendingTimeConformanceFixture f;
+    auto cfg = f.make_cfg("FIX.4.4");
+    fixpp::session::Session sess(f.engine, cfg);
+    f.open_to_active(sess, "FIX.4.4");
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    const std::size_t before = f.transport.sent_count();
+
+    auto& mgr = sess.seqnum_mgr_test_access();
+    const seqnum_t next_inbound = mgr.next_inbound_unsafe();
+    mgr.set_counters_for_test(next_inbound, seqnum_max);
+
+    auto stale_hb = make_frame_with_sending_time(
+        "FIX.4.4", "0", next_inbound, "TW", "ISLD",
+        "20231231-23:55:00.000");
+    auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_hb), asio::use_future);
+    f.ioc.run_for(200ms);
+    f.ioc.restart();
+    auto inbound_r = fut.get();
+
+    EXPECT_FALSE(inbound_r.has_value())
+        << "Established bad-SendingTime path must surface assign_outbound() overflow; "
+        << "got ok (bug: session.cpp sites 1/2 disconnect and return success).";
+    ASSERT_FALSE(inbound_r.has_value());
+    EXPECT_EQ(inbound_r.error(), fixpp::core::error::store_seqnum_overflow)
+        << "Established bad-SendingTime path must return store_seqnum_overflow on outbound seqnum overflow.";
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "Established bad-SendingTime overflow must transition to Disconnected.";
+    EXPECT_EQ(f.transport.sent_count(), before)
+        << "Neither Reject nor Logout must be emitted when the first assign_outbound() overflows.";
 }
 
 // ── DEFERRED: FIXT/5.0SP2 variants ───────────────────────────────────────────

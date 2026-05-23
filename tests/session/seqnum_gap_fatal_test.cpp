@@ -200,7 +200,7 @@ protected:
         auto feed_r = feed_sync(s, logon);
         (void)feed_r;
         const auto st = s.state();
-        return st == fsm_state::Active || st == fsm_state::LogonReceived;
+        return st == fsm_state::Active;
     }
 };
 
