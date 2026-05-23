@@ -100,7 +100,16 @@ If W3.4 (B-8 FR-009 design call) becomes contested between 005-source-of-truth a
 
 ## Open items (post-Wave-3 / pre-Wave-4)
 
-- [ ] W3.4 design call resolved (impl vs spec amend)
-- [ ] If W3.3 amends spec rather than tightens tests, FR-008 reword must propagate to checklists/requirements.md
-- [ ] If W3.2 tags any cells design-forbidden, spec.md Edge Cases must enumerate them
-- [ ] Wave 4 re-verify reads: SC-002 100% real; SC-005 4 permutations matched; FR-007 4 admin types; FR-008 emission-contract evidence; FR-009 either-or recorded
+- [x] W3.4 design call resolved (impl fix — Disconnected on emit-failure)
+- [x] W3.3 / FR-008 — assertions tightened with transport_send capture (no spec amend needed)
+- [x] W3.2 — spec accurately enumerates LR row as synchronous-transient (subsumed by FR-004), no Edge Cases amend
+- [x] **F4 / W3.3-final (post-codex-Position-A + QuickFIX survey 2026-05-23)** — Active×DupLogon + Active×OOSA(RR/SeqReset) cells now emit Reject per 005 FR-017; `is_session_admin` at `src/session/session.cpp` excludes `"A"`, `"2"`, `"4"`. Pre-existing 005 spec-vs-impl gap (previously tracked in verify-record line 134-135 as out-of-010-scope) is CLOSED IN-SLICE. Codex review: `specs/010-session-cfg-lifetime/codex_f4_review.md`.
+- [ ] Wave 4 re-verify reads: SC-002 100% real; SC-005 4 permutations matched; FR-007 4 admin types; FR-008 emission-contract evidence; FR-009 Disconnected end-state evidence; F4 Reject(35=3) emission evidence for DupLogon + OOSA cells
+
+## Forward upgrade obligations (handed off to future slices)
+
+- **2e-recovery / session-recovery feature** (catalogue row 400 in `library/spec/coverage-index.md` — "ResendRequest / SequenceReset-GapFill / SequenceReset-Reset / synchronize-seqnums ... Recovery-dependent ... discharged by later session-recovery feature"): when implemented, the `Active×OOSA(RR)` cell and the `Active×SeqReset` cell must UPGRADE from `Reject` → `Process` (gap-fill via the message store retrieve API). The dup-Logon-in-Active cell stays as `Reject` per 005's intentional defensive divergence from QuickFIX refresh-on-dup-Logon convention. Reference engines for the Process upgrade: QuickFIX-cpp `Session::nextResendRequest` (`Session.cpp:364`) and `Session::nextSequenceReset` (`Session.cpp:339`); QuickFIX/J `Session.nextResendRequest` (`Session.java:1325`) and `Session.nextSequenceReset` (`Session.java:1539`). Traceability surfaces (all carry TODO(2e-recovery) markers):
+  - `src/session/session.cpp` — comment block at the Active-state `is_session_admin` declaration
+  - `tests/session/fsm_matrix_witness_test.cpp` — `Active_InboundOutOfScopeAdmin_SessionReject_StaysActive` test body
+  - `library/spec/coverage-index.md` — 010 /simplify close-out paragraph + row 400 of the deferral table
+  - `.specify/decisions/010-session-cfg-lifetime-verify.md` — SC-002 row

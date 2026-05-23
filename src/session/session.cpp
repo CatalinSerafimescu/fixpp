@@ -951,23 +951,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
 
                 // ── Guard (5): message-type-for-state (T056 US5) ─────────────
-                // Session admin types known to Active: 0/1/3/5/A (handled above).
-                // Any other MsgType in Active → session-level Reject(35=3) with
-                // SessionRejectReason and RefMsgType. Session stays Active.
-                // No-reject-loop: guard (type == "3" || type == "5") exempted above.
+                // Session admin types silently passed-through in Active: 0/1/3/5
+                // (Heartbeat / TestRequest / Reject / Logout — handled above OR
+                // dispatched via the in-seq path). Any other MsgType in Active →
+                // session-level Reject(35=3) with SessionRejectReason and RefMsgType.
+                // Session stays Active. No-reject-loop: guard (type == "3" || type
+                // == "5") exempted above.
+                //
+                // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
+                // 2026-05-23): "A" (dup-Logon), "2" (RR), "4" (SeqReset) ARE NOT in
+                // is_session_admin — per 005 data-model row 22 + FR-017 "never silent
+                // no-op" they must emit a Reject. The pre-010 impl silently ignored
+                // all three; the post-fix impl routes them through the !is_session_admin
+                // Reject branch below (SessionRejectReason=3 / invalid MsgType).
+                //
+                // TODO(2e-recovery): when the deferred session-recovery feature lands,
+                // UPGRADE the "2" (ResendRequest) and "4" (SequenceReset) cells from
+                // Reject → Process (gap-fill via the message store), matching QuickFIX-
+                // cpp Session::nextResendRequest / nextSequenceReset and QuickFIX/J
+                // Session.java:1325 / :1539. The "A" (dup-Logon) cell stays Reject
+                // per 005's intentional defensive divergence from QuickFIX convention
+                // (QuickFIX engines treat dup-Logon as a refresh/reset trigger; 005
+                // requires explicit Logout→Disconnect→Logon sequencing instead).
                 {
                     // Known session admin MsgTypes (all others → Reject).
-                    // "A" = Logon, "0" = Heartbeat, "1" = TestRequest,
-                    // "2" = ResendRequest, "3" = Reject, "4" = SeqReset, "5" = Logout.
-                    // 2/4 (RR/SeqReset) are deferred admin; they still get a Reject
-                    // per data-model matrix (session_admin_not_supported, slot 75).
+                    // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
+                    // "A" (dup-Logon-in-Active), "2" (RR), "4" (SeqReset) deliberately
+                    // EXCLUDED — they fall through to the Reject branch per 005 FR-017.
                     const bool is_session_admin =
-                        (hdr.msg_type == "A" ||  // Logon (dup in Active)
-                         hdr.msg_type == "0" ||  // Heartbeat
+                        (hdr.msg_type == "0" ||  // Heartbeat
                          hdr.msg_type == "1" ||  // TestRequest
-                         hdr.msg_type == "2" ||  // ResendRequest (deferred → Reject)
                          hdr.msg_type == "3" ||  // Reject (handled above)
-                         hdr.msg_type == "4" ||  // SequenceReset-GapFill (deferred → Reject)
                          hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {

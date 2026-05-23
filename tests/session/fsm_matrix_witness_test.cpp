@@ -720,14 +720,17 @@ TEST_F(FsmMatrixWitness, Active_InboundDupLogon_SessionReject_StaysActive) {
     // FR-006: E02 from Active → dup-Logon per [FIX-SL §4.3] (session Reject,
     // no silent re-establish, session stays Active).
     //
-    // KNOWN 005 SPEC-vs-IMPL GAP (verify-record line 134-135 — out-of-010-scope,
-    // tracked for orchestrator awareness, fix slated for a 005-follow-up slice):
-    // The 005 data-model matrix mandates a session Reject for dup-Logon in Active.
-    // The current impl includes MsgType="A" in is_session_admin (session.cpp:965)
-    // and silently ignores it → stay-Active only, no Reject emitted. This test
-    // ASSERTS THE IMPL REALITY (stay-Active, no Reject required) to remain GREEN.
-    // When the 005-follow-up slice closes the gap, this test's emission count
-    // assertion should be tightened to require exactly 1 Reject(35=3).
+    // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey 2026-05-23):
+    // 005 spec mandates Reject for dup-Logon-in-Active (data-model row 22 +
+    // FR-017 "never silent no-op"). The pre-010 impl included MsgType="A" in
+    // is_session_admin and silently ignored it. Post-fix: "A" is EXCLUDED from
+    // is_session_admin → falls through to the Reject branch at session.cpp
+    // !is_session_admin → emits Reject(35=3) with SessionRejectReason=3.
+    //
+    // 005's design DELIBERATELY DIVERGES from QuickFIX convention here: QuickFIX-cpp
+    // Session::nextLogon and QuickFIX/J Session.java:2167 treat dup-Logon as a
+    // refresh/reset trigger (process, not Reject). 005's Reject posture is the
+    // defensive choice — require explicit Logout→Disconnect→Logon sequencing.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
@@ -738,16 +741,12 @@ TEST_F(FsmMatrixWitness, Active_InboundDupLogon_SessionReject_StaysActive) {
     (void)feed_sync(sess, dup_logon);
 
     EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "Dup-Logon in Active must not disconnect (matrix mandates Reject + stay-Active; "
-           "impl currently silently ignores — known 005 gap, verify-record line 134-135)";
+        << "Dup-Logon in Active must not disconnect (matrix mandates Reject + stay-Active)";
 
-    // W3.3 — gated-emit contract for the known-gap cell: explicitly document
-    // that the impl emits 0 Rejects (matches the silent-ignore impl behavior).
-    // When the 005-follow-up lands, change this to EXPECT_EQ(..., 1U).
-    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
-        << "Active×DupLogon: impl currently emits NO Reject (silent-ignore via "
-           "is_session_admin); spec mandates 1 Reject(35=3). Tighten this assertion "
-           "to EXPECT_EQ(..., 1U) when the 005-follow-up closes the gap.";
+    // W3.3-final — gated-emit contract: matrix row 22 + FR-017 mandate Reject.
+    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
+        << "Active×DupLogon: exactly 1 Reject(35=3) must be emitted "
+           "(matrix Active row E02 — dup-Logon per [FIX-SL §4.3])";
 }
 
 // S3×E04: inbound Heartbeat → advance counter (liveness), stay Active.
@@ -824,15 +823,18 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
     // FR-006: E08 from Active → session Reject (session_admin_not_supported, slot 75),
     // session stays Active (or goes Disconnected if Reject emit fails seqnum).
     //
-    // KNOWN 005 SPEC-vs-IMPL GAP (verify-record line 134-135 — same as dup-Logon
-    // above, out-of-010-scope, slated for a 005-follow-up slice):
-    // The 005 data-model matrix mandates a session Reject for RR/SeqReset (MsgType
-    // 2/4) in Active. The current impl includes both in is_session_admin
-    // (session.cpp:968/970) and silently ignores them, despite the contradictory
-    // adjacent comment at lines 962-963 saying "they still get a Reject". This test
-    // ASSERTS THE IMPL REALITY (stay-Active, no Reject required) to remain GREEN.
-    // When the 005-follow-up closes the gap, this test's emission count assertion
-    // should be tightened to require exactly 1 Reject(35=3).
+    // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey 2026-05-23):
+    // 005 spec mandates Reject for RR/SeqReset (MsgType 2/4) in Active — recovery
+    // is deferred per [2e §3.1], so the bounded-failure response is to Reject with
+    // SessionRejectReason=3 (invalid MsgType). The pre-010 impl silently ignored
+    // both; post-fix: "2" and "4" are EXCLUDED from is_session_admin → Reject path.
+    //
+    // TODO(2e-recovery): when the deferred session-recovery feature lands, UPGRADE
+    // this cell from Reject → Process (gap-fill via the message store), matching
+    // QuickFIX-cpp Session::nextResendRequest (Session.cpp:364) and QuickFIX/J
+    // Session.nextResendRequest (Session.java:1325). At that point this test will
+    // need to assert frame emission of the resend (not a Reject) and the
+    // session-cfg-lifetime 005 data-model row 22 cell will need updating.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
@@ -844,13 +846,11 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
 
     EXPECT_EQ(sess.state(), fsm_state::Active);
 
-    // W3.3 — gated-emit contract for the known-gap cell: explicitly document
-    // that the impl emits 0 Rejects for RR/SeqReset in Active. When the
-    // 005-follow-up lands, change this to EXPECT_EQ(..., 1U).
-    EXPECT_EQ(count_admin_frames_with_type("3"), 0U)
-        << "Active×OOSA(RR): impl currently emits NO Reject (silent-ignore via "
-           "is_session_admin); spec mandates 1 Reject(35=3). Tighten this assertion "
-           "to EXPECT_EQ(..., 1U) when the 005-follow-up closes the gap.";
+    // W3.3-final — gated-emit contract: matrix row 22 + FR-017 mandate Reject for
+    // RR (and SeqReset) until the 2e recovery feature upgrades to Process.
+    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
+        << "Active×OOSA(RR): exactly 1 Reject(35=3) must be emitted "
+           "(matrix Active row E08 — recovery deferred per [2e §3.1])";
 }
 
 // S3×E09: seqnum in-seq → advance counter, dispatch, stay Active.
