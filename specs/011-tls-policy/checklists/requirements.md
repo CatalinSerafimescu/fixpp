@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No `[NEEDS CLARIFICATION]` markers remain — none in the spec body. Three /clarify-candidate probes are flagged in **Assumptions** (TLS-version negotiation order, `mtls_pinned` empty-pinset bootstrap, `verify_peer` multi-violation ordering) with explicit defaults the /clarify pass will probe.
+- [x] No `[NEEDS CLARIFICATION]` markers remain — none in the spec body. The `/clarify` pass completed 2026-05-23 with 5 questions resolved (TLS-version negotiation order → FR-014; `mtls_pinned` empty-pinset bootstrap → FR-025 + US3 AC5; `verify_peer` multi-violation evaluation order → FR-020a; pin lookup key SHA-256-of-DER → FR-006 + FR-008; per-counterparty Pinset granularity → FR-009a). See `spec.md ## Clarifications Session 2026-05-23` for the answers. (Codex P3-1 close — the v0.1 checklist's future-tense framing for the three pre-clarify probes is updated to past tense.)
 - [x] Requirements are testable and unambiguous — each FR maps to a verifiable check (compile-time failure, specific `error::tls_*` variant, latency bound, attribute presence at declaration site, etc.).
 - [x] Success criteria are measurable — SC-001 (zero disconnects across rotation), SC-002 (100% refusal rate against out-of-envelope peers), SC-003 (build fails), SC-007 (≤ 130 ns p99 hot-path lookup), etc.
 - [x] Success criteria are technology-agnostic — describe operator-observable outcomes. SC-007 cites the design-doc latency anchor `[2g §6.3]`, not an implementation detail.
@@ -32,8 +32,10 @@
 ## Notes
 
 - All items pass first-iteration validation.
-- The `/clarify` pass (mandatory per `[const §XVI.3]` for security features) will probe the three flagged Assumptions:
-  1. TLS-version negotiation order (1.3-only vs. 1.3 preferred / 1.2 fallback) — operator-visible against counterparties not on 1.3 yet.
-  2. `mtls_pinned` bootstrap semantics — fail-closed at session-open with empty pinset (default) vs. deferred-populate.
-  3. `verify_peer` multi-violation ordering — short-circuit first hit (default) vs. aggregate report for observability.
+- The `/clarify` pass (mandatory per `[const §XVI.3]` for security features) **completed 2026-05-23**. Five questions resolved, recorded in `spec.md ## Clarifications Session 2026-05-23`:
+  1. TLS-version negotiation order — TLS 1.3 preferred; TLS 1.2 ECDHE-AEAD admitted as fallback (`SSL_CTX_set_min_proto_version = TLS1_2_VERSION`, `set_max = TLS1_3_VERSION`). → FR-014.
+  2. `mtls_pinned` empty-pinset bootstrap — fail-EARLY at session-open with distinct variant `tls_pin_empty_at_open`. → FR-025 + US3 AC5.
+  3. `verify_peer` multi-violation ordering — short-circuit first hit in a documented evaluation order. → FR-020a.
+  4. Pin lookup key for `Pinset::find` / `add` / `remove` — SHA-256 fingerprint of leaf cert's DER encoding (32 bytes). → FR-006 + FR-008.
+  5. Pinset granularity — per-counterparty recommended; engine does not enforce. → FR-009a + US1 Independent Test.
 - Spec inherits the signed-off `.specify/2g-tls.md` v0.4 — design decisions are settled upstream, this spec codifies the user-visible contract only.

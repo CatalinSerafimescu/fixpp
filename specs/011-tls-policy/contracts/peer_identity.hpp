@@ -3,8 +3,11 @@
 // Contract shape oracle for 011-tls-policy FR-018 + Key Entity E-12 +
 // T-041 cross-cut handoff to the session/ Phase-4 module.
 //
-// Design anchor: .specify/2g-tls.md v0.4 §4.5 (peer_identity value type) +
-// Appendix A row T-041.
+// Design anchor: .specify/2g-tls.md v0.4 §4.5 lines 706-724 (peer_identity
+// value type — owning per RC#1 / N-P2-2 close) + Appendix A row T-041.
+// Shape re-emitted to mirror 2g §4.5 verbatim — owning std::pmr::string
+// subject_dn + owning vectors for SAN DNS names / URIs + 32-byte
+// leaf_fingerprint.
 // Spec anchors: spec.md FR-018 (this feature owns the VALUE; session
 // Phase-4 owns the CompID-to-TLS-identity BINDING); data-model.md E-12.
 
@@ -27,20 +30,32 @@
 // namespace fixpp::tls {
 //
 // struct peer_identity {
-//     // Owning storage — PMR-allocated so caller controls the allocator.
-//     // SAN vectors are bounded ≤ max_san_entries (D-10 default 64).
+//     // Owning storage — PMR-allocated so caller controls the allocator
+//     // through cfg.mr at verify_peer time. SAN vectors are bounded ≤
+//     // max_san_entries (D-10 default 64).
+//     //
+//     // Field shape mirrors 2g §4.5 lines 706-710 verbatim.
+//     std::pmr::string                            subject_dn;            // owned, PMR-allocated.
+//     std::pmr::vector<std::pmr::string>          san_dns_names_owned;   // owned, PMR-allocated; bounded by max_san_entries.
+//     std::pmr::vector<std::pmr::string>          san_uris_owned;        // owned, PMR-allocated; bounded by max_san_entries.
+//     std::array<std::byte, 32>                   leaf_fingerprint;      // owned (32 bytes); SHA-256 of the leaf's DER.
 //
-//     std::pmr::string                            subject_dn_owned;
-//     std::pmr::vector<std::pmr::string>          san_dns_names_owned;
-//     std::pmr::vector<std::pmr::string>          san_uris_owned;
+//     // Convenience views — bounded by *this. The owning vectors above are
+//     // the storage; these accessors carry [[clang::lifetimebound]] at the
+//     // declaration site mirroring the [2c §4.8] owning_message_t<>
+//     // accessor pattern (2g §4.5 lines 714-723 verbatim).
+//     [[nodiscard]] std::string_view
+//         subject_dn_view() const noexcept [[clang::lifetimebound]];
 //
-//     // The leaf's SHA-256-of-DER fingerprint (the Pinset key per Clarify
-//     // Q4) — carried so the session FSM can log / record / re-pin if it
-//     // chooses (the rotation API itself is on Pinset, not on peer_identity).
-//     pin_fingerprint                             sha256;
+//     [[nodiscard]] std::span<const std::pmr::string>
+//         san_dns_names() const noexcept [[clang::lifetimebound]];
+//
+//     [[nodiscard]] std::span<const std::pmr::string>
+//         san_uris() const noexcept [[clang::lifetimebound]];
 //
 //     // Carried for the session FSM's effective-clock-aware expiry checks
-//     // (D-9 / [2d §7.9]).
+//     // (D-9 / [2d §7.9]). Not in 2g §4.5 verbatim but additive — does not
+//     // contradict the upstream surface.
 //     std::chrono::system_clock::time_point       not_after;
 // };
 //

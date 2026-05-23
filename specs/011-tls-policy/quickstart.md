@@ -33,20 +33,24 @@ using namespace fixpp;
 // 1. Wire the file-based cert source.
 auto pmr = std::pmr::new_delete_resource();
 
-tls::cert_source::Config cs_cfg{
-    .leaf_path        = "/etc/fixpp/tls/our_leaf.pem",
-    .chain_path       = "/etc/fixpp/tls/our_chain.pem",
-    .ca_bundle_path   = "/etc/fixpp/tls/counterparty_ca_bundle.pem",
-    .password_callback = nullptr,    // unencrypted PEM
-    .max_rsa_key_bits = 8192,
+// file_cert_source::Config per [2g §4.2] (the abstract base cert_source does
+// NOT publish Config; file_cert_source::Config is impl-specific per data-model
+// E-1 / E-1a — round-2 P1-1 propagation close).
+tls::file_cert_source::Config cs_cfg{
+    .leaf_path          = "/etc/fixpp/tls/our_leaf.pem",
+    .chain_path         = "/etc/fixpp/tls/our_chain.pem",
+    .private_key_path   = "/etc/fixpp/tls/our_leaf_key.pem",  // [2g §4.2] line 319 — required field for mTLS local-cert signing.
+    .ca_bundle_path     = "/etc/fixpp/tls/counterparty_ca_bundle.pem",
+    .password_cb        = nullptr,    // unencrypted PEM; field name per [2g §4.2] line 320 / data-model E-1a.
+    .max_rsa_key_bits   = 8192,
     .max_cert_der_bytes = 16 * 1024,
-    .max_san_entries  = 64,
-    .max_chain_depth  = 8,
+    .max_san_entries    = 64,
+    .max_chain_depth    = 8,
 };
 
 auto cs = tls::make_file_cert_source(cs_cfg, pmr);
 if (!cs) {
-    // tls_load_failed: file missing / unreadable / malformed PEM / wrong password
+    // tls_cert_load_failed: file missing / unreadable / malformed PEM / wrong password (per [2g §6.6])
     log_fatal("cert source load failed", cs.error());
     return EXIT_FAILURE;
 }
@@ -54,12 +58,13 @@ if (!cs) {
 // 2. Build the SSL_CTX config. No Pinset under mtls_ca → null pinset is OK.
 auto clock = std::make_shared<core::system_clock_source>();
 
+// Parameter order per [2g §4.5] lines 681-686 (NEW-P1-2 close):
+// (profile, cs, clock, pinset = nullptr, mr = nullptr).
 auto ssl_cfg = tls::make_ssl_ctx_config(
     tls::SecurityProfile::mtls_ca,
     cs.value(),
-    /*pinset=*/ nullptr,
     clock,
-    cs_cfg);
+    /*pinset=*/ nullptr);
 
 if (!ssl_cfg) {
     log_fatal("SSL ctx config rejected", ssl_cfg.error());
@@ -77,25 +82,28 @@ engine_cfg.default_ssl_ctx_config = std::move(ssl_cfg.value());
 ```cpp
 #include <fixpp/tls/pinset.hpp>
 
-// 1. Compute the fingerprint of your counterparty's current leaf cert.
-//    (Out-of-band: openssl x509 -in counterparty_leaf.pem -outform DER | sha256sum)
-constexpr tls::pin_fingerprint kCounterpartyXLeafSha256 = { /* 32 bytes */ };
+// 1. Obtain your counterparty's current leaf certificate (out-of-band).
+//    Pinset::add consumes the Certificate for its SHA-256 + subject_dn + SAN
+//    list at add() time per [2g §4.3] line 487 (Codex P1-2 close).
+tls::Certificate counterparty_X_current_leaf = /* parsed Certificate value */;
+auto kCounterpartyXOldSha256 = counterparty_X_current_leaf.sha256();
 
 // 2. Build a Pinset for counterparty X (per-counterparty granularity per
 //    FR-009a / Clarify Q5).
 auto cp_x_pins = std::make_shared<tls::Pinset>();
-if (auto r = cp_x_pins->add(kCounterpartyXLeafSha256); !r) {
+if (auto r = cp_x_pins->add(counterparty_X_current_leaf); !r) {
     log_fatal("pin add failed", r.error());
     return EXIT_FAILURE;
 }
 
 // 3. Build the SSL_CTX config with mtls_pinned + the populated Pinset.
+//    Parameter order per [2g §4.5] lines 681-686 (NEW-P1-2 close):
+//    (profile, cs, clock, pinset = nullptr, mr = nullptr).
 auto ssl_cfg = tls::make_ssl_ctx_config(
     tls::SecurityProfile::mtls_pinned,
     cs.value(),
-    cp_x_pins,                       // non-null AND non-empty (else tls_pin_empty_at_open per Clarify Q2)
     clock,
-    cs_cfg);
+    cp_x_pins);   // non-null AND non-empty (else tls_pin_empty_at_open per Clarify Q2)
 
 if (!ssl_cfg) {
     // E.g. tls_pin_empty_at_open if the pinset was empty when we got here.
@@ -114,10 +122,12 @@ SessionConfig session_b{ .counterparty_id = "X", .pinset = cp_x_pins, .ssl_ctx_c
 //    use whichever snapshot was current when their find() ran (no torn read).
 //
 //    Note: add+remove are SEPARATE calls; there is no atomic-swap shortcut.
-constexpr tls::pin_fingerprint kCounterpartyXNewLeafSha256 = { /* 32 bytes */ };
-cp_x_pins->add(kCounterpartyXNewLeafSha256);
+//    add() takes a Certificate (consumed for diagnostic fields);
+//    remove() takes a SHA-256 fingerprint (32 bytes).
+tls::Certificate counterparty_X_new_leaf = /* parsed Certificate value */;
+cp_x_pins->add(counterparty_X_new_leaf);
 // ... counterparty cuts over to the new cert ...
-cp_x_pins->remove(kCounterpartyXLeafSha256);
+cp_x_pins->remove(kCounterpartyXOldSha256);
 ```
 
 ---
@@ -137,34 +147,51 @@ class hsm_cert_source final : public tls::cert_source {
     load_credentials() override {
         // Cold-path: read the cert chain from HSM-attached storage (or
         // wherever your HSM puts the cert metadata). May allocate.
-        // Honour cancellation per [2d §6.5] / FR-021.
+        // Honour cancellation per the [2g §6.4] / FR-021 recipe verbatim
+        // (the recipe body shape is published in contracts/cert_source.hpp).
 
-        if (co_await this_coro::cancellation_state().cancelled()) {
-            co_return std::unexpected(error::tls_load_cancelled);
+        auto exec = co_await asio::this_coro::executor;
+        auto cs   = co_await asio::this_coro::cancellation_state;
+
+        // Reap pre-I/O cancellation (recipe step 3 — the load-bearing
+        // "between-call-and-first-suspension" reap).
+        if (cs.cancelled() != asio::cancellation_type::none) {
+            co_return core::expected_t<tls::local_credentials>{
+                unexpect, error::tls_load_cancelled };
         }
 
+        // local_credentials::leaf is a value Certificate; ::chain is a
+        // std::span<const Certificate> VIEW into impl-owned storage per
+        // [2g §4.1] lines 251-255 (Codex P1-1 sub-finding 3 close).
         tls::local_credentials creds;
-        // ... fill creds.leaf, creds.chain ...
+        creds.leaf  = parsed_leaf_;                                  // impl-owned Certificate value
+        creds.chain = std::span<const tls::Certificate>{chain_};     // view into impl-owned vector
 
-        // The signer is async — signing operations will run on signing_exec_,
-        // NOT on the session strand (per [2d §7.5]).
+        // The signer is async — signing operations will run via
+        // cancellable_dispatch on signing_exec_, NOT on the session strand
+        // (per [2d §6.5] / [2d §7.5]). Per [2g §4.1] the async_signer_ref
+        // carries `sign_fn`, an awaitable callable that the impl supplies.
         creds.signer = tls::async_signer_ref{
-            .impl     = std::make_shared<my_hsm_signer>(hsm_),
-            .executor = signing_exec_,
-            .alg      = tls::signature_algorithm::ecdsa_p256,
+            .sign = [this](tls::sign_request const& req)
+                        -> asio::awaitable<core::expected_t<tls::sign_response>> {
+                // Hop to signing_exec_ via cancellable_dispatch per [2d §6.5].
+                co_return co_await this->sign_on_hsm(req);
+            },
         };
 
         co_return creds;
     }
 
-    std::span<const tls::Certificate>
-    load_trust_anchors() const noexcept override {
-        return trust_anchors_;       // populated at construction
+    core::expected_t<std::span<const tls::Certificate>>
+    load_trust_anchors() override {
+        return std::span<const tls::Certificate>{trust_anchors_};   // populated at construction
     }
 
  private:
     my_hsm_handle                       hsm_;
     asio::any_io_executor               signing_exec_;
+    tls::Certificate                    parsed_leaf_;
+    std::vector<tls::Certificate>       chain_;
     std::vector<tls::Certificate>       trust_anchors_;
 };
 
@@ -172,12 +199,12 @@ class hsm_cert_source final : public tls::cert_source {
 auto signing_ctx = asio::thread_pool{ /* 2 threads */ };
 auto cs = std::make_shared<hsm_cert_source>(hsm_open("/dev/hsm0"), signing_ctx.get_executor());
 
+// Parameter order per [2g §4.5] lines 681-686 (NEW-P1-2 close):
+// (profile, cs, clock, pinset = nullptr, mr = nullptr).
 auto ssl_cfg = tls::make_ssl_ctx_config(
     tls::SecurityProfile::mtls_ca,
     cs,
-    /*pinset=*/ nullptr,
-    clock,
-    /*caps=*/ {});
+    clock);
 
 // During handshake, OpenSSL invokes the signing callback on signing_exec_ —
 // not on the session strand. The session strand stays available to dispatch
@@ -255,4 +282,4 @@ static_assert( tls::CipherPolicy::is_allowed("ECDHE-RSA-AES128-CBC-SHA")      ==
 - Data model: [`data-model.md`](data-model.md)
 - Contracts: [`contracts/`](contracts/)
 - Constitution: [`.specify/constitution.md`](../../.specify/constitution.md) Article XII (Security & TLS)
-- Architecture: [`spec/architecture.md`](../../spec/architecture.md) §4.6 (`tls/` surface), §5.6 (mid-session-mutable carve-out)
+- Architecture: [`.specify/architecture.md`](../../.specify/architecture.md) §4.6 (`tls/` surface), §5.6 (mid-session-mutable carve-out) (Codex P3-2 close)

@@ -29,7 +29,8 @@
 //     p256        = 1,
 //     p384        = 2,
 //     // Note: p521 etc. NOT enumerated — verify_peer rejects with
-//     // tls_cert_invalid (curve sub-reason) at the curve-check step.
+//     // tls_handshake_failed (diagnostic sub-reason "ecdsa_curve" per
+//     // 2g §6.6 line 995) at the curve-check step.
 // };
 //
 // class Certificate {
@@ -52,6 +53,16 @@
 //
 //     // ── X.509 metadata ──────────────────────────────────────────
 //     [[nodiscard]] int                       x509_version() const noexcept;  // 1, 2, or 3
+//
+//     // NEW-P2-4 close: not_before / not_after are X.509-ENVELOPE absolute
+//     // wall-clock times — they are extracted from the cert's DER bytes at
+//     // PARSE time, NOT captured against cfg.clock. The comparison
+//     // `leaf.not_before_ ≤ cfg.clock->now() ≤ leaf.not_after_` in verify_peer
+//     // (security_profile.hpp / D-9) is therefore well-defined regardless of
+//     // any session-scoped clock override: the LHS / RHS are absolute X.509
+//     // times; cfg.clock provides the comparison reference. Implementer
+//     // note: a parser that ROUTED parse-time clock reads through cfg.clock
+//     // would be wrong — the absolute X.509 times must be returned as-is.
 //     [[nodiscard]] std::chrono::system_clock::time_point  not_before() const noexcept;
 //     [[nodiscard]] std::chrono::system_clock::time_point  not_after()  const noexcept;
 //
@@ -88,4 +99,6 @@
 //   4. x509_version_ ∈ {1, 2, 3} (v1 is parsed but rejected at verify_peer).
 //   5. san_dns_names() + san_uris() combined cardinality ≤ max_san_entries
 //      after parse (the cert_source parser enforces; verify_peer re-checks
-//      with the cfg.validation_caps bounds).
+//      with the cert_source's Config::max_san_entries — reachable via
+//      cs->config(), NOT via a duplicated SslCtxConfig field per 2g §4.2
+//      line 320-326 / NEW-P1-2 close).
