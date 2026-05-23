@@ -234,19 +234,19 @@ public:
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
     [[nodiscard]] fsm_state state() const noexcept;
 
-    // FR-004 / D-2 — ordered FSM transition log (ring-buffer, capacity 16).
+    // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
     // Returns a std::span view over the underlying std::array<fsm_state, 16>
-    // in PHYSICAL-BUFFER ORDER (index 0..15). Semantics:
-    //   - Before wrap (<= 16 transitions): index 0 is the oldest, last written
-    //     index is the most recent. fsm_visit_count() == number of valid slots.
-    //   - After wrap (> 16 transitions): the oldest entry is at index
-    //     (fsm_visit_count() % 16); the next-oldest is at (fsm_visit_count()+1) % 16,
-    //     and so on. Callers wanting chronological order must rotate using
-    //     fsm_visit_count() as the wrap index. fsm_visit_count_ saturates at
-    //     UINT8_MAX so callers can detect "≥255 transitions, exact order unknown".
-    // Always-on, zero-cost-when-unread (~1ns push per transition). Used by FR-004
-    // observability tests and FR-006 matrix witness per-cell checks.
-    // up to 16 entries). Empty before the first record_state_transition_ call.
+    // in PHYSICAL-BUFFER ORDER (index 0..15).
+    //
+    // CONTRACT: containment / membership-witness only. The returned span gives
+    // the set of transitions recorded over the most recent ≤16
+    // record_state_transition_() calls. Tests assert membership via Contains /
+    // std::find / history_contains; callers MUST NOT infer event order from
+    // index position (the buffer is NOT chronologically ordered).
+    //
+    // Always-on, zero-cost-when-unread (~1ns push per transition). Used by
+    // FR-004 observability tests and FR-006 matrix witness per-cell checks.
+    // Empty before the first record_state_transition_() call.
     [[nodiscard]] std::span<const fsm_state> fsm_visit_history() const noexcept;
 
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):

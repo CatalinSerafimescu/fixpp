@@ -111,7 +111,8 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
     fsm_state_ = new_state;
 }
 
-// fsm_visit_history: return a view of the oldest ≤16 recorded transitions.
+// fsm_visit_history: membership-witness view over the last ≤16 recorded
+// transitions (physical-buffer order; NOT chronologically meaningful — see header).
 std::span<const fsm_state> Session::fsm_visit_history() const noexcept {
     return std::span<const fsm_state>{fsm_visit_history_.data(),
                                       std::min<std::size_t>(fsm_visit_count_, 16)};
