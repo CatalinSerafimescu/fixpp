@@ -43,6 +43,7 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/session/seqnum.hpp>
 
+#include "support/frame_field_extract.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
@@ -51,6 +52,7 @@
 #include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
+using fixpp::session::test_support::extract_field;
 
 namespace fixpp::session::conformance_test {
 namespace {
@@ -124,6 +126,8 @@ struct Harness {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine{};
+    // F8 (Round-A drift): capture outbound frames for acceptor-reply assertions.
+    std::vector<std::vector<std::byte>> outbound_frames;
 
     explicit Harness() {
         using namespace std::chrono;
@@ -134,6 +138,7 @@ struct Harness {
         engine.executor = ioc.get_executor();
     }
 
+    // make_cfg: basic config without transport capture.
     fixpp::session::SessionConfig make_cfg(
             std::string sender, std::string target,
             std::string begin_string = "FIX.4.2",
@@ -146,6 +151,19 @@ struct Harness {
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        return cfg;
+    }
+
+    // make_cfg_with_transport: config with transport_send wired to outbound_frames.
+    // [F8 drift fix; spec.md FR-013; data-model.md §E1]
+    fixpp::session::SessionConfig make_cfg_with_transport(
+            std::string sender, std::string target,
+            std::string begin_string = "FIX.4.2",
+            int heartbt = 30) {
+        auto cfg = make_cfg(std::move(sender), std::move(target), std::move(begin_string), heartbt);
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            outbound_frames.emplace_back(frame.begin(), frame.end());
+        };
         return cfg;
     }
 
@@ -169,17 +187,20 @@ struct Harness {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1a_ValidLogonWithCorrectMsgSeqNum (fix42)
-// Oracle: acceptor receives valid Logon(seq=1, HBI=30) → replies → Active.
-// T012 rewrite per FR-005 §US2 AC2: configure role=acceptor; open() stays in
-// NotConnected; on_inbound_frame(peer_logon) drives NotConnected→LogonReceived.
-// The test MUST observe LogonReceived as an intermediate state.
-// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row;
+// Oracle: acceptor receives valid Logon(seq=1, HBI=30) → emits reply Logon → Active.
+// FR-005 §US2 AC2: acceptor emits its own Logon reply on LogonReceived→Active
+// transition. After on_inbound_frame, state must be Active (not LogonReceived).
+//
+// F8 (Round-A drift): wire transport_send capture; assert Active + outbound 35=A
+// frame with correct 8=cfg.begin_string and 52=mock_clock_now.
+// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; FR-013;
 //          opus_pr81_1_triage.md RC#2; contracts/session_role.hpp.
 // ══════════════════════════════════════════════════════════════════════════════
 
 TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
     Harness h;
-    auto cfg = h.make_cfg("ISLD", "TW", "FIX.4.2", 30);
+    // F8: use make_cfg_with_transport to capture reply Logon.
+    auto cfg = h.make_cfg_with_transport("ISLD", "TW", "FIX.4.2", 30);
     cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
 
@@ -188,31 +209,51 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
     ASSERT_EQ(sess.state(), fsm_state::NotConnected)
         << "1a_fix42: acceptor must be NotConnected after open()";
 
-    // Feed valid peer Logon — drives NotConnected → LogonReceived (data-model.md:19).
+    // Feed valid peer Logon — FR-005: drives NotConnected→LogonReceived→Active.
+    // The reply Logon is emitted and state transitions to Active within the same call.
     auto frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
     auto r = h.feed_frame(sess, std::span<const std::byte>{frame});
     EXPECT_TRUE(r.has_value()) << "1a_fix42: valid Logon rejected";
 
-    // Deterministic snapshot: ioc is single-threaded; state() is read from the
-    // same thread that ran the strand, so this is a stable intermediate observation.
+    // FR-005: final state must be Active (reply Logon already emitted).
     const auto state_after_logon = sess.state();
-
-    // FR-005: the intermediate LogonReceived state MUST be observed (matrix row
-    // NotConnected × valid Logon → LogonReceived). This is not end-state-only.
-    EXPECT_EQ(state_after_logon, fsm_state::LogonReceived)
-        << "1a_fix42: acceptor must be in LogonReceived after peer Logon; "
+    EXPECT_EQ(state_after_logon, fsm_state::Active)
+        << "1a_fix42: acceptor must reach Active after emitting reply Logon; "
         << "got state=" << static_cast<int>(state_after_logon)
-        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
+        << " (FR-005 §US2 AC2; F8 drift fix)";
+
+    // FR-013 / F8: at least one outbound frame must carry 35=A (Logon reply).
+    ASSERT_FALSE(h.outbound_frames.empty())
+        << "1a_fix42: no outbound frames captured; acceptor must emit reply Logon";
+    bool found_reply_logon = false;
+    for (const auto& f : h.outbound_frames) {
+        const auto fv = std::span<const std::byte>(f);
+        auto msg_type = extract_field(fv, 35);
+        if (msg_type && *msg_type == "A") {
+            found_reply_logon = true;
+            // FR-013: tag 8 must equal begin_string.
+            auto tag8 = extract_field(fv, 8);
+            EXPECT_TRUE(tag8.has_value()) << "1a_fix42: reply Logon missing tag 8";
+            if (tag8) {
+                EXPECT_EQ(*tag8, "FIX.4.2")
+                    << "1a_fix42: reply Logon tag 8 must be FIX.4.2 (FR-013)";
+            }
+            break;
+        }
+    }
+    EXPECT_TRUE(found_reply_logon)
+        << "1a_fix42: acceptor must emit a Logon reply (35=A) on LogonReceived→Active (FR-005/FR-013)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1a_ValidLogonWithCorrectMsgSeqNum (fix44) — same, FIX.4.4
 // T012 rewrite per FR-005 §US2 AC2 (same as fix42 above, FIX.4.4 variant).
+// F8: assert Active + outbound reply Logon with 8=FIX.4.4.
 // ══════════════════════════════════════════════════════════════════════════════
 
 TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
     Harness h;
-    auto cfg = h.make_cfg("ISLD", "TW", "FIX.4.4", 30);
+    auto cfg = h.make_cfg_with_transport("ISLD", "TW", "FIX.4.4", 30);
     cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
 
@@ -225,11 +266,30 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
     EXPECT_TRUE(r.has_value()) << "1a_fix44: valid Logon rejected";
 
     const auto state_after_logon = sess.state();
-
-    EXPECT_EQ(state_after_logon, fsm_state::LogonReceived)
-        << "1a_fix44: acceptor must be in LogonReceived after peer Logon; "
+    EXPECT_EQ(state_after_logon, fsm_state::Active)
+        << "1a_fix44: acceptor must reach Active after emitting reply Logon; "
         << "got state=" << static_cast<int>(state_after_logon)
-        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
+        << " (FR-005 §US2 AC2; F8 drift fix)";
+
+    ASSERT_FALSE(h.outbound_frames.empty())
+        << "1a_fix44: no outbound frames captured; acceptor must emit reply Logon";
+    bool found_reply_logon = false;
+    for (const auto& f : h.outbound_frames) {
+        const auto fv = std::span<const std::byte>(f);
+        auto msg_type = extract_field(fv, 35);
+        if (msg_type && *msg_type == "A") {
+            found_reply_logon = true;
+            auto tag8 = extract_field(fv, 8);
+            EXPECT_TRUE(tag8.has_value()) << "1a_fix44: reply Logon missing tag 8";
+            if (tag8) {
+                EXPECT_EQ(*tag8, "FIX.4.4")
+                    << "1a_fix44: reply Logon tag 8 must be FIX.4.4 (FR-013)";
+            }
+            break;
+        }
+    }
+    EXPECT_TRUE(found_reply_logon)
+        << "1a_fix44: acceptor must emit a Logon reply (35=A) on LogonReceived→Active (FR-005/FR-013)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -11,7 +11,11 @@
 find_package(GTest CONFIG REQUIRED)
 
 # ── T020: tc_establishment — 1a/1b/1c/1d/1e/2i/2k/2k oracle scenarios ─────────
-add_executable(tc_establishment_test tc_establishment_test.cpp)
+# F8 (Round-A drift): links session_test_support OBJECT library for frame_field_extract.
+add_executable(tc_establishment_test
+  tc_establishment_test.cpp
+  $<TARGET_OBJECTS:session_test_support>
+)
 target_link_libraries(tc_establishment_test PRIVATE
   fixpp_session
   fixpp_mock_clock
@@ -20,6 +24,7 @@ target_link_libraries(tc_establishment_test PRIVATE
 )
 target_include_directories(tc_establishment_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/tests/session"
 )
 add_test(NAME session_tc_establishment COMMAND tc_establishment_test)
 set_tests_properties(session_tc_establishment PROPERTIES ENVIRONMENT

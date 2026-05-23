@@ -28,9 +28,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <asio/co_spawn.hpp>
+#include <asio/error.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 
@@ -43,6 +45,7 @@
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -461,6 +464,242 @@ TEST_F(SendPathTest, AdminBuilders_CarryNegotiatedBeginStringAndMockClockTime) {
         EXPECT_EQ(extract_field(*r, 52), now_str)
             << "build_reject: tag 52 must be mock_clock_now";
     }
+}
+
+// ── F4 (RED): Session::send must return error when session is not in Active state.
+// US1 ACs all premise Active; calling send() before reaching Active must not
+// advance the seqnum counter and must not deliver any frame to transport.
+// [Drift F4; spec.md US1; data-model.md §E1 Session::send]
+TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsumed) {
+    std::vector<std::string> call_log;
+    std::vector<seqnum_t> store_seqs;
+    std::vector<std::vector<std::byte>> transport_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.store_factory = std::make_unique<OrderingStoreFactory>(call_log, store_seqs);
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        transport_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    // open() → LogonSent (initiator role); do NOT drive to Active.
+    auto open_r = open_sync(sess);
+    ASSERT_TRUE(open_r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent)
+        << "Initiator should be in LogonSent after open()";
+
+    const std::size_t frames_before = transport_frames.size();
+    const std::size_t store_calls_before = call_log.size();
+
+    // Call send() while in LogonSent (not Active).
+    std::array<std::byte, 4> payload{};
+    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    auto result = fut.get();
+
+    // F4: must return an error (not ok) when not in Active state.
+    EXPECT_FALSE(result.has_value())
+        << "Session::send must return error when state is LogonSent (not Active); "
+        << "spec.md US1 ACs premise Active; [F4 drift fix]";
+
+    // No frame must reach transport.
+    EXPECT_EQ(transport_frames.size(), frames_before)
+        << "No outbound frame must be emitted when session is not Active";
+
+    // Seqnum counter must not have advanced beyond what open() consumed.
+    // (We only compare transport frames — if no frame was sent, seqnum was not consumed.)
+    const std::size_t store_calls_after = call_log.size();
+    EXPECT_EQ(store_calls_after, store_calls_before)
+        << "No outbound store call must be made when session is not Active";
+}
+
+// ── F5 (RED): Session::send noexcept window must absorb thrown operation_aborted.
+// When the store's awaitable throws asio::system_error{operation_aborted}, the
+// noexcept Session::send must return a defined error instead of std::terminate.
+// [Drift F5; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+//
+// ThrowingStore: throws asio::system_error(operation_aborted) from store().
+// This simulates the async_mutex awaitable throwing on cancellation.
+class ThrowingStore final : public MessageStore {
+public:
+    explicit ThrowingStore(std::vector<std::string>& log) noexcept
+        : MessageStore(flush_thunk_for<ThrowingStore>()), log_(log) {}
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
+        direction_t dir) noexcept override {
+        if (dir == direction_t::outbound) {
+            log_.push_back("store_throw");
+            throw asio::system_error(asio::error::operation_aborted);
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t, seqnum_t, direction_t,
+        retrieve_visitor&) noexcept override {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        auto& c = (dir == direction_t::outbound) ? next_out_ : next_in_;
+        const seqnum_t curr = c;
+        if (increment) { ++c; }
+        co_return curr;
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        next_in_ = next_out_ = seqnum_min;
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+private:
+    std::vector<std::string>& log_;
+    seqnum_t next_out_ = seqnum_min;
+    seqnum_t next_in_ = seqnum_min;
+};
+
+class ThrowingStoreFactory final : public MessageStoreFactory {
+public:
+    explicit ThrowingStoreFactory(std::vector<std::string>& log) noexcept : log_(log) {}
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*,
+        std::size_t, asio::any_io_executor) noexcept override {
+        return std::make_unique<ThrowingStore>(log_);
+    }
+private:
+    std::vector<std::string>& log_;
+};
+
+TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerminate) {
+    std::vector<std::string> store_log;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log);
+    cfg.transport_send = [](std::span<const std::byte> /*frame*/) {};
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+
+    std::array<std::byte, 4> payload{};
+    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    // F5: must return a defined error (not std::terminate, not hang).
+    // If the noexcept window is broken, fut.get() rethrows std::terminate-induced
+    // exception — the test itself will crash before reaching the EXPECT.
+    auto result = fut.get();
+    EXPECT_FALSE(result.has_value())
+        << "Session::send must return defined error when store throws operation_aborted; "
+        << "not std::terminate. [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]";
+}
+
+// ── F9 (RED): US1 AC3 — after cancelled transport/store, session must be Disconnected.
+// The existing CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitted test does
+// not assert state. spec.md US1 AC3 says "session reaches Disconnected" on cancellation.
+// [Drift F9; spec.md US1 AC3]
+TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
+    std::vector<std::string> store_log;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log);
+    cfg.transport_send = [](std::span<const std::byte> /*frame*/) {};
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+
+    std::array<std::byte, 4> payload{};
+    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    (void)fut.get();
+
+    // F9: after a cancellation/abort from store, session must reach Disconnected.
+    // spec.md US1 AC3: "session reaches Disconnected".
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "Session must reach Disconnected after store throws operation_aborted; "
+        << "spec.md US1 AC3. [F9 drift fix]";
+}
+
+// ── F3 (RED): Session::send must use SeqnumManager::assign_outbound() instead of
+// bare next_outbound_seq_++. After two sends, the SeqnumManager's outbound counter
+// must equal seqnum_min + 2 (i.e. two seqnums were assigned through the manager).
+//
+// Currently Session::send uses next_outbound_seq_++ directly and never calls
+// seqnum_mgr_.assign_outbound(). So after two sends, seqnum_mgr_.next_outbound_
+// is still seqnum_min (no outbound was registered through the manager) — the
+// counter diverges from the wire seqnums. This is the F3 bug.
+//
+// Requires FIXPP_TEST_HOOKS for seqnum_mgr_test_access().
+// [Drift F3; spec.md FR-001(a); data-model.md §E1 Session::send]
+TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
+    std::vector<std::string> call_log;
+    std::vector<seqnum_t> store_seqs;
+    std::vector<std::vector<std::byte>> transport_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.store_factory = std::make_unique<OrderingStoreFactory>(call_log, store_seqs);
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        transport_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+
+    // Record the manager's outbound counter before any sends.
+    const seqnum_t mgr_before = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+
+    // First send.
+    std::array<std::byte, 4> payload{};
+    {
+        auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        ioc.run_for(200ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "First send failed";
+    }
+    // Second send.
+    {
+        auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        ioc.run_for(200ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "Second send failed";
+    }
+
+    // F3: SeqnumManager's outbound counter must have advanced by 2 (two assigns).
+    // Currently (bug): the counter does NOT advance because assign_outbound() is
+    // never called; the counter stays at mgr_before.
+    const seqnum_t mgr_after = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    EXPECT_EQ(mgr_after, mgr_before + seqnum_t{2})
+        << "SeqnumManager outbound counter must advance by 2 after two sends; "
+        << "before=" << mgr_before << " after=" << mgr_after
+        << " (expected " << (mgr_before + seqnum_t{2}) << "). "
+        << "Current bug: send() uses next_outbound_seq_++ not assign_outbound() "
+        << "[F3 drift; spec.md FR-001(a)]";
+
+    // Also verify that the frame seqnums match the manager's assignments.
+    ASSERT_GE(transport_frames.size(), 2u) << "Expected at least 2 transport frames";
+    ASSERT_GE(store_seqs.size(), 2u) << "Expected at least 2 store seqnum records";
+    const std::size_t n = transport_frames.size();
+    const std::size_t m = store_seqs.size();
+    for (std::size_t i = 1; i <= 2u; ++i) {
+        const auto& frame = transport_frames[n - i];
+        const seqnum_t store_seq = store_seqs[m - i];
+        const auto frame_span = std::span<const std::byte>(frame);
+        const auto tag34 = extract_field(frame_span, 34);
+        ASSERT_TRUE(tag34.has_value()) << "Frame must have tag 34 (MsgSeqNum)";
+        const seqnum_t frame_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34)));
+        EXPECT_EQ(frame_seq, store_seq)
+            << "Frame tag 34 must match store seqnum for send #" << i;
+    }
+    // Consecutive seqnums check.
+    const seqnum_t seq_first  = store_seqs[m - 2];
+    const seqnum_t seq_second = store_seqs[m - 1];
+    EXPECT_EQ(seq_second, seq_first + seqnum_t{1})
+        << "Second send must use seqnum one higher than first send [F3]";
 }
 
 }  // namespace fixpp::session::test

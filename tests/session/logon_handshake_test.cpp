@@ -456,15 +456,22 @@ TEST_F(LogonHandshakeTest, AcceptorOpenStaysInNotConnected) {
 }
 
 // US2-AC2 (FR-005): Acceptor valid peer Logon drives NotConnected→LogonReceived→Active.
-// The test MUST observe LogonReceived as an intermediate state, not just Active.
-// We observe it by capturing state() synchronously after on_inbound_frame returns
-// — the acceptor path is deterministic single-step: on_inbound_frame transitions
-// NotConnected→LogonReceived in one call (the strand is owned by ioc, not a
-// background thread, so no race between the co_await resume and our read).
+// FR-005 requires the acceptor to emit its own Logon reply on the LogonReceived→Active
+// transition. After on_inbound_frame returns the session must be in Active (the reply
+// Logon is emitted synchronously within the same coroutine invocation).
+//
+// Drift F1+F2 fix (Round-A): strict Active assertion + outbound Logon capture.
 // Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row;
 //          contracts/session_role.hpp; opus_pr81_1_triage.md RC#2.
 TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) {
+    // Wire transport capture BEFORE constructing the session so the callback
+    // is set in the config (transport_send_ is captured from cfg at open() time).
+    std::vector<std::vector<std::byte>> outbound_frames;
     auto cfg = make_acceptor_cfg(30);
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        outbound_frames.emplace_back(frame.begin(), frame.end());
+    };
+
     fixpp::session::Session sess(engine, cfg);
     auto open_result = open_sync(sess);
     ASSERT_TRUE(open_result.has_value()) << "Session::open() failed";
@@ -472,32 +479,40 @@ TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) 
     ASSERT_EQ(sess.state(), fsm_state::NotConnected)
         << "Acceptor must be NotConnected before peer Logon (prereq)";
 
-    // Step 1: feed valid peer Logon — must move to LogonReceived.
-    // Per data-model.md:19 matrix: NotConnected × inbound Logon (valid) → LogonReceived.
+    // Feed valid peer Logon — FR-005: acceptor emits its own reply Logon and
+    // transitions LogonReceived→Active within the same on_inbound_frame call.
     auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
     EXPECT_TRUE(inbound_result.has_value())
         << "on_inbound_frame() returned error for valid peer Logon";
 
-    // Capture the state after the single on_inbound_frame call.
-    // The ioc test harness is single-threaded; state() is read from the same
-    // thread that just ran the strand, so this is a deterministic snapshot.
-    const auto state_after_first_frame = sess.state();
-
-    // The matrix row NotConnected × valid Logon → LogonReceived (not directly Active).
-    // LogonReceived is the intermediate state before the acceptor emits its own Logon-ack.
-    // The contract requires this intermediate to be observable.
-    EXPECT_EQ(state_after_first_frame, fsm_state::LogonReceived)
-        << "Acceptor should be in LogonReceived after peer Logon arrives; "
-        << "got state=" << static_cast<int>(state_after_first_frame)
-        << " (FR-005 §US2 AC2; data-model.md:19 matrix row)";
-
-    // After LogonReceived the session transitions to Active (reply Logon emitted internally).
-    // Verify the final settled state is Active.
+    // FR-005: after the reply Logon is emitted, state MUST be Active.
+    // The LogonReceived→Active transition is internal and synchronous;
+    // state() after feed_sync must read Active, not LogonReceived.
+    // [F1+F2 drift fix; spec.md FR-005; data-model.md:19 matrix row]
     const auto final_state = sess.state();
-    EXPECT_TRUE(final_state == fsm_state::Active || final_state == fsm_state::LogonReceived)
-        << "Acceptor must reach Active (or stay LogonReceived if ack is async); "
-        << "got state=" << static_cast<int>(final_state);
+    EXPECT_EQ(final_state, fsm_state::Active)
+        << "Acceptor must reach Active after emitting reply Logon; "
+        << "got state=" << static_cast<int>(final_state)
+        << " (FR-005 §US2 AC2; spec.md line 112)";
+
+    // FR-005: at least one outbound frame must have been emitted AND it must
+    // carry MsgType 35=A (Logon reply). Transport was wired above.
+    ASSERT_FALSE(outbound_frames.empty())
+        << "Acceptor must have emitted at least one outbound frame (the reply Logon)";
+    bool found_logon_reply = false;
+    for (const auto& frame : outbound_frames) {
+        const auto sv = std::span<const std::byte>(frame);
+        const std::string msg_type = extract_field(sv, 35);
+        if (msg_type == "A") {
+            found_logon_reply = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_logon_reply)
+        << "Acceptor must emit a Logon reply (35=A) on the LogonReceived→Active transition; "
+        << "no such frame found in " << outbound_frames.size() << " captured outbound frames"
+        << " (FR-005; spec.md line 112)";
 }
 
 // US2-AC3 (FR-004): Initiator open() still transitions to LogonSent and emits outbound Logon.
@@ -512,6 +527,31 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
     EXPECT_EQ(sess.state(), fsm_state::LogonSent)
         << "Initiator must reach LogonSent after open() per FR-004 §US2 AC3; "
         << "got state=" << static_cast<int>(sess.state());
+}
+
+// ── F6 (RED): Seqnum hole on open()'s initiator emit — open() must return error
+// when build_logon fails rather than silently succeeding with a consumed seqnum.
+// The 256-byte logon_buf overflows when sender_comp_id is large enough.
+// After F6 fix: open() returns unexpected when build_logon fails.
+// Before F6 fix: open() silently ignores build failure and returns ok.
+// [Drift F6; spec.md FR-001(e); open() code path session.cpp:263]
+TEST_F(LogonHandshakeTest, InitiatorOpen_BuildLogonOverflow_ReturnsError_NotSilentOk) {
+    // A sender_comp_id of 220 characters overflows the 256-byte logon_buf.
+    // The Logon frame minimum overhead is ~80 bytes (headers, fixed fields, etc.)
+    // so 200+ char sender_comp_id triggers wire_frame_too_large from build_logon.
+    auto cfg = make_initiator_cfg(30);
+    cfg.sender_comp_id = std::string(220, 'X');  // overflows 256-byte logon_buf
+
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+
+    // F6: build_logon failure must propagate out of open() as an error.
+    // Currently open() silently returns ok despite not sending a Logon.
+    // After F6 fix: returns unexpected(wire_frame_too_large).
+    EXPECT_FALSE(open_result.has_value())
+        << "open() must return error when build_logon fails (buffer overflow); "
+        << "silently succeeding with a consumed seqnum is the F6 bug; "
+        << "[spec.md FR-001(e); session.cpp:263]";
 }
 
 // ── Original T10: stamp_sending_time() unit test (preserved) ─────────────────

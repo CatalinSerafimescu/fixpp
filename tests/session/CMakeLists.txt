@@ -323,8 +323,11 @@ target_compile_definitions(session_layering PRIVATE
 # ── 009-session-fsm-finalize T006 — Session::send path test (US1 FR-001) ────
 # TDD red: T006 authors RED (compile + fail); T007 + T008 turn GREEN.
 # Uses session_test_support OBJECT library (T005 frame_field_extract helper).
+# F3 (Round-A drift): FIXPP_TEST_HOOKS enables seqnum_mgr_test_access() on Session
+# so tests can verify SeqnumManager counter consistency after send().
 add_threading_test(session_send_path send_path_test.cpp
   $<TARGET_OBJECTS:session_test_support>)
+target_compile_definitions(session_send_path PRIVATE FIXPP_TEST_HOOKS)
 
 # ── 009-session-fsm-finalize Phase 6 (US4) — T019/T021 ──────────────────────
 
