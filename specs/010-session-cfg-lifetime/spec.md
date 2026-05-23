@@ -41,13 +41,13 @@ A test author writing matrix coverage for the session FSM, and an integrator cat
 
 **Why this priority**: P2. The matrix cell is reachable from production today (PR #82 closed RC#B), but the test seam to **observe** it is missing — auditors must infer from downstream behavior. The error variant reuse is a semantic near-fit, not a contract break — a dedicated variant cleans up caller diagnostics without changing the wire.
 
-**Independent Test**: (a) Add a production-shaped test that drives the acceptor reply-Logon path and observes `LogonReceived` via the new seam (clock gate / fence / inspector — chosen at /plan). (b) Add a test that calls `Session::send` when the FSM is in `NotConnected`, `LogonSent`, or `Disconnected`, and asserts the new dedicated error variant rather than `session_invalid_logon`.
+**Independent Test**: (a) Add a production-shaped test that drives the acceptor reply-Logon path and observes `LogonReceived` via the always-on `Session::fsm_visit_history()` ring-buffer accessor (research D-2). (b) Add a test that calls `Session::send` when the FSM is in `NotConnected`, `LogonSent`, or `Disconnected`, and asserts the new dedicated error variant rather than `session_invalid_logon`.
 
 **Acceptance Scenarios**:
 
 1. **Given** an acceptor receives a valid inbound Logon, **When** the FSM passes through `LogonReceived` on its way to `Active`, **Then** a test can observe the `LogonReceived` state via the new seam.
 2. **Given** an integrator calls `Session::send(...)` while the FSM is not in `Active`, **When** the call returns, **Then** the error is a new `session_invalid_state_for_send` variant (or equivalent name decided at /plan), not `session_invalid_logon`.
-3. **Given** the existing tests that asserted `session_invalid_logon` at the two `Session::send` sites (`src/session/session.cpp:1150-1151`), **When** the variant rename lands, **Then** those tests are updated to assert the new variant and continue to pass.
+3. **Given** the existing one `Session::send` site that returns `error::session_invalid_logon` (`src/session/session.cpp:1151` — the analyzer step verified only one site exists, not two as the early draft assumed), **When** the variant rename lands, **Then** any test that asserts against this exact variant at the send path is updated to assert the new variant; the FSM-side Logon-refusal tests that legitimately assert `session_invalid_logon` are NOT touched.
 
 ---
 
@@ -95,14 +95,14 @@ A team auditor wants symmetric coverage between initiator and acceptor open-path
 
 **SessionConfig lifetime (W-5):**
 
-- **FR-001**: `Session` MUST store its `SessionConfig` by value as a member (`SessionConfig cfg_;`) populated by copy at construction time. The caller's `SessionConfig` may go out of scope or be mutated after the `Session` is constructed without affecting the `Session`'s behavior. The declaration at `include/fixpp/session/session.hpp:281` MUST change from `const SessionConfig& cfg_;` to `SessionConfig cfg_;` (or equivalent, e.g. `const SessionConfig cfg_;` to preserve immutability post-ctor).
+- **FR-001**: `Session` MUST store its `SessionConfig` by value as a non-const member (`SessionConfig cfg_;`) populated by copy at construction time. The caller's `SessionConfig` may go out of scope or be mutated after the `Session` is constructed without affecting the `Session`'s behavior. The declaration at `include/fixpp/session/session.hpp:281` MUST change from `const SessionConfig& cfg_;` to `SessionConfig cfg_;`. The member is NOT declared `const` — the contract "no code mutates `cfg_` post-ctor" is convention-enforced, not type-enforced, to preserve future refactoring flexibility (e.g. config-hot-reload follow-on slices).
 - **FR-002**: All FSM sites that read `cfg_.*` (executor override, role, BeginString, heartbeat interval, comp IDs, send/recv reset policy, drain policy, persistence, etc.) MUST continue to read consistent values for the lifetime of the `Session`.
 - **FR-003**: The `set_tests_properties(session_coverage_adversarial PROPERTIES DISABLED TRUE)` block added in PR #82 under `if(FIXPP_ENABLE_ASAN)` (`tests/session/CMakeLists.txt`) MUST be removed; the test MUST run and pass under ASan.
 
 **FSM observability (F-04) + error precision (F-07 + E1):**
 
-- **FR-004**: A test seam MUST exist that lets a production-shaped test directly observe the `LogonReceived` FSM state during the synchronous-transient acceptor reply-Logon transition. The seam mechanism (clock gate / fence / inspector callback) is decided at /plan; it MUST NOT change production behavior on the default (test-disabled) path.
-- **FR-005**: `Session::send(...)` MUST return a dedicated `session_invalid_state_for_send` error variant (final name decided at /plan) when the FSM is not in `Active`, replacing the current reuse of `session_invalid_logon` at `src/session/session.cpp:1150-1151`. Tests that asserted `session_invalid_logon` at those sites MUST be updated.
+- **FR-004**: A test seam MUST exist that lets a production-shaped test directly observe the `LogonReceived` FSM state during the synchronous-transient acceptor reply-Logon transition. The seam mechanism is the always-on `Session::fsm_visit_history() const noexcept` accessor returning `std::span<const fsm_state>` over a 16-entry ring buffer (research D-2); it MUST be populated synchronously on every `fsm_state_` transition. Production-default behavior is unchanged: the ring buffer is always written but never read in production code; there is no `#ifdef`-gated divergence between production and test builds.
+- **FR-005**: `Session::send(...)` MUST return the dedicated `session_invalid_state_for_send` error variant (research D-3, slot 77) when the FSM is not in `Active`, replacing the current reuse of `session_invalid_logon` at `src/session/session.cpp:1151` (one site, /speckit-analyze verified). Any test that asserts against the specific variant at this site MUST be updated; /speckit-analyze verified the existing tests assert `EXPECT_FALSE(has_value())` only at this site, so the expected update count is 0 — the new `session_send_invalid_state_test.cpp` (T013) provides AC3 coverage going forward.
 
 **FSM matrix coverage (F-06) + admin builder coverage (F-05) + RC#G mixed-path (PR #82 round-2 carry-forward):**
 
@@ -125,7 +125,7 @@ A team auditor wants symmetric coverage between initiator and acceptor open-path
 - **`SessionConfig`**: User-facing configuration value type. Pre-010: held as `const SessionConfig&` by `Session` (caller owns; UAF risk). Post-010: copied by value into `Session` at construction; caller's `SessionConfig` lifetime is independent of the `Session`.
 - **`Session`**: FSM-bearing session object, today holds `const SessionConfig& cfg_`. Post-010, holds `SessionConfig cfg_` (or `const SessionConfig cfg_`) as a by-value member.
 - **`session_error` enum**: existing error code enum (or `std::error_code` category — verify at /plan). Post-010, gains one new variant `session_invalid_state_for_send` (final name at /plan).
-- **FSM state set**: `[FIX-SL §4.10]` 6 states (NotConnected / LogonSent / LogonReceived / Active / Disconnected / Failed-or-equivalent — exact set from 005 `data-model.md`). Unchanged by 010; new test seam exposes the synchronous-transient `LogonReceived` state.
+- **FSM state set**: `[FIX-SL §4.10]` 6 states (NotConnected / LogonSent / LogonReceived / Active / LogoutSent / Disconnected — exact set from 005 `data-model.md`, confirmed against `include/fixpp/session/session_fsm.hpp:30-46`). Unchanged by 010; new test seam exposes the synchronous-transient `LogonReceived` state.
 
 ## Success Criteria *(mandatory)*
 
@@ -146,7 +146,28 @@ A team auditor wants symmetric coverage between initiator and acceptor open-path
 - **Binding 005 design unchanged.** The 010 slice does not amend `specs/005-session-establishment-fsm/spec.md`, `data-model.md`, or `contracts/*.hpp`. Gate A may waive (single /clarify decision drives implementation; no new design anchors) — final call at /plan.
 - **Gate A inheritance from 005.** Per `library/CLAUDE.md` 009 precedent, when no new design anchor is introduced Gate A may carry forward from 005 with a 010-specific addendum. Identical pattern proposed here pending /plan decision.
 - **W-1..W-4 carry-forwards auto-revisit at /speckit-verify.** No dedicated tasks; the verify record either clears them organically as the 010 tests raise coverage on `session.cpp`/`session.hpp`, or re-waives them with rationale per `[[feedback_codecov_patch_vs_lcov_da_brda_gate]]` + PR #73 precedent.
-- **No external consumers of the `session_error` enum yet.** Renaming the `session_invalid_logon` reuse at `src/session/session.cpp:1150-1151` to `session_invalid_state_for_send` is an internal change. If this assumption breaks before merge, FR-005 escalates to a wire-API concern needing /clarify.
+- **No external consumers of the `session_error` enum yet.** Renaming the `session_invalid_logon` reuse at `src/session/session.cpp:1151` (one site, confirmed by /speckit-analyze) to `session_invalid_state_for_send` is an internal change. If this assumption breaks before merge, FR-005 escalates to a wire-API concern needing /clarify.
 - **Reference engines (QuickFIX-cpp, Fix8) are not consulted for 010** — the slice is a pure internal refactor + test coverage improvement; the interop matrix work belongs to the separate per-release interop gate.
 - **Submodule-scoped.** All changes land in `research/G19-fix-fpml-iso20022/library/` (the Spec-Kit submodule). The parent repo only sees a submodule pointer bump on merge.
 - **Branch base.** 010 is rooted on the post-PR-#82-merge `main` of the library submodule (commit `ba2222d`). No 009-branch carry-overs.
+
+## Normative References
+
+Per `[const §VI.5]` (applies per-artifact). All entries below are referenced inline in the FRs and acceptance scenarios above; this section consolidates them.
+
+**FIX specification:**
+- `[FIX-SL §4.10]` *FIX Session Layer §4.10 — State transitions* — binding for FR-004 / FR-006 (matrix observability + per-cell witness).
+- `[FIX-SL §4.5.4]` *FIX Session Layer §4.5.4 — Rejecting invalid messages* — binding for FR-005 (the `session_invalid_state_for_send` variant is the outbound analogue for FSM-state-mismatch rejects).
+- `[FIX-SL §4.3]` *FIX Session Layer §4.3 — Establishing a FIX connection* — binding for FR-009 (initiator open() transport-throw witness on Logon emit).
+- `[FIX-TC]` *FIX conformance test corpus (TC-001..TC-017 in-scope subset)* — inherited from 005 / 009 unchanged; not re-asserted by 010.
+
+**Project Phase-2 design anchors:**
+- `[2d §4.5]` *2d-threading §4.5 — SessionConfig fields* — binding for FR-001 / FR-002 (the by-value `cfg_` member preserves the per-field semantics defined here).
+- `[2e §4.1]` *2e-msgstore §4.1 — MessageStore consumed interface* — inherited from 005; no 010 change.
+
+**Source contracts (binding, 005/009-owned, unchanged):**
+- `005/contracts/session.hpp` — `Session` public API (open / send / close / state) — binding shape; 010 adds one observation-only method (`fsm_visit_history()`) without altering the existing surface.
+- `005/contracts/session_fsm.hpp` (= `include/fixpp/session/session_fsm.hpp:30-46`) — `fsm_state` enum (6 states) — binding for FR-004 / FR-006.
+- `009/contracts/session_role.hpp` — `session_role` enum + `SessionConfig::role` field — binding for FR-001 (the by-value member preserves the role field intact).
+
+**Constitution articles cited inline in plan.md Constitution Check** (Article roman + section arabic): `[const §VI.5]` (this section), `[const §VIII.5]` / `[const §XV.1]` (alloc discipline), `[const §IX.1]` (coverage gate), `[const §IX.2]` (sanitizers), `[const §X.4]` (bounded error variants — slot 77), `[const §XI.4]` (per-session strand), `[const §XVII.1]` (Gate A trigger — inherited from 005 per plan), `[const §XVII.8]` (verify mandatory post-implement).

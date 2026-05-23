@@ -38,9 +38,9 @@ namespace fixpp::core {
 //   Returned by Session::send(...) when the FSM is NOT in `fsm_state::Active`
 //   (e.g. NotConnected, LogonSent, LogonReceived-transient, Disconnected).
 //
-//   Replaces the 005-era reuse of `session_invalid_logon` at the two outbound
-//   send sites in src/session/session.cpp (lines ~1150-1151 + symmetric site
-//   in Session::send). The reuse was a semantic near-fit: `invalid_logon` is
+//   Replaces the 005-era reuse of `session_invalid_logon` at the one outbound
+//   send site in src/session/session.cpp:1151 (Session::send, /speckit-analyze
+//   verified exactly one site). The reuse was a semantic near-fit: `invalid_logon` is
 //   meant for FSM-side Logon-refusal handling, but the outbound-send not-Active
 //   case is a *caller* error (the integrator called send before the session
 //   reached Active), not a Logon refusal.
@@ -59,8 +59,8 @@ namespace fixpp::core {
 //       Grouped with `session_msg_type_invalid_for_state = 72`, which
 //       documents the analogous *inbound* event-in-wrong-state case.
 //
-//   Tests that asserted `error::session_invalid_logon` at the two
-//   Session::send non-Active sites MUST be updated to assert
+//   Tests that asserted `error::session_invalid_logon` at the one
+//   Session::send non-Active site MUST be updated to assert
 //   `error::session_invalid_state_for_send` (FR-005 AC3). File list pinned
 //   at /speckit-tasks (grep candidates: tests/session/send_path_test.cpp +
 //   any FSM-state-mismatch test that drives send pre-Logon).

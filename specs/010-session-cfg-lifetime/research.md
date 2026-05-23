@@ -29,7 +29,7 @@ This slice is a waiver-closure ride-along. It introduces **no new design space**
 
 ## D-2 — F-04 LogonReceived observability seam mechanism
 
-**Decision:** **`Session` exposes a public `fsm_visit_history() const noexcept` accessor returning `std::span<const fsm_state>` over a fixed-capacity (16-entry) `std::array<fsm_state, 16>` ring-buffer member.** Every assignment to `fsm_state_` in `src/session/session.cpp` (~10 sites identified) is routed through a new private `record_state_transition_(fsm_state) noexcept` helper that:
+**Decision:** **`Session` exposes a public `fsm_visit_history() const noexcept` accessor returning `std::span<const fsm_state>` over a fixed-capacity (16-entry) `std::array<fsm_state, 16>` ring-buffer member.** Every assignment to `fsm_state_` in `src/session/session.cpp` (/speckit-analyze verified: **37 sites** spread across `Session::open`, the message-handler `switch` cascade, the close path, and the logout-timer handler) is routed through a new private `record_state_transition_(fsm_state) noexcept` helper that:
 1. Writes `fsm_visit_history_[fsm_visit_count_ % 16] = new_state;`
 2. Increments `fsm_visit_count_` (saturates at `std::numeric_limits<std::uint8_t>::max()` to avoid wrap-around for the read pattern; in practice the count is bounded by `[FIX-SL §4.10]` cells ≤ 30 per session lifetime).
 3. Performs the actual `fsm_state_ = new_state;` assignment.
@@ -81,7 +81,7 @@ session_invalid_state_for_send = 77,       // FR-005 (010), [FIX-SL §4.5.4] —
 - `session_state_mismatch_for_send` — too long; "invalid_state_for_send" is the natural shortening.
 - Adding to `FIXPP_ERR_SESSION_LIFECYCLE` (the prefix group for `session_logout_timeout` etc.) — rejected; lifecycle errors are about session termination, not about a caller's misuse of a non-Active session.
 
-**Implementation impact:** 6 lines added to `include/fixpp/core/error.hpp` (variant + doc comment); 2 lines edited in `src/session/session.cpp` (the two `co_return std::unexpected(error::session_invalid_logon);` at line 1151 + symmetric site → `error::session_invalid_state_for_send`); ≤5 lines edited across 1-2 test files (FR-005 AC3 assertion updates).
+**Implementation impact:** 6 lines added to `include/fixpp/core/error.hpp` (variant + doc comment); 1 line edited in `src/session/session.cpp` (the single `co_return std::unexpected(error::session_invalid_logon);` at line 1151 → `error::session_invalid_state_for_send` — /speckit-analyze verified exactly one site, not two as first-draft estimated); test-side FR-005 AC3 coverage is delivered by the new `session_send_invalid_state_test.cpp` (T013), since /speckit-analyze confirmed no existing test asserts against this specific variant at the send path (existing tests assert `EXPECT_FALSE(has_value())` only).
 
 **Risk:** If any external C-ABI consumer mapped `session_invalid_logon` to a SESSION_REFUSAL handler and now sees a SESSION_REJECT, the rename is observably different. The pre-D-12 C-ABI prefix-group comments in `error.hpp` are *documentation only* — the variant→prefix mapping is implemented at a separate seam (deferred 2i). Today no external consumer depends on it (the C-ABI surface itself is deferred per `[const §X.2]` and 005 plan). When 2i lands and produces the actual mapping table, this slice's prefix-group annotation is the authoritative entry. **No external compatibility break today.**
 
@@ -89,7 +89,7 @@ session_invalid_state_for_send = 77,       // FR-005 (010), [FIX-SL §4.5.4] —
 
 ## D-4 — FSM matrix cell count (N events for FR-006)
 
-**Decision:** **N = the union of events in `[FIX-SL §4.10]` per the 005 `data-model.md`** — i.e. the inbound + outbound admin event types plus the lifecycle events (open / close / timer-fire) handled by the FSM transition function. Concretely, the enumeration comes from the existing `switch (fsm_state_)` cascade in `src/session/session.cpp` (state-arm) × the message-handler dispatch (event-arm). Estimated total: **~8-10 events** (Logon-in, Logout-in, Heartbeat-in, TestRequest-in, Reject-in, App-msg-in, lifecycle-open, lifecycle-close, lifecycle-timer-fire, lifecycle-transport-error). Cells therefore ≈ 6 × 9 = **54 cells**; minus the design-forbidden cells (events that the FSM ignores in certain states by spec, per 005 data-model) reduces to **~40-45 reachable cells**.
+**Decision:** **N = the union of events in `[FIX-SL §4.10]` per the 005 `data-model.md` + the event alphabet defined in `include/fixpp/session/session_fsm.hpp:52-67`** — i.e. the inbound + outbound admin event types plus the lifecycle events (open / close / timer-fire) handled by the FSM transition function. Concretely, the enumeration comes from the existing `switch (fsm_state_)` cascade in `src/session/session.cpp` (state-arm) × the message-handler dispatch (event-arm). /speckit-analyze verified the event alphabet has **15 named events**: `open_initiator`, `inbound_logon_valid`, `inbound_logon_refused`, `inbound_heartbeat`, `inbound_test_request`, `inbound_reject`, `inbound_logout`, `inbound_out_of_scope_admin`, `seqnum_in_seq`, `seqnum_too_low`, `seqnum_too_high`, `invalid_msgtype`, `timer_tick`, `initiate_logout`, `close_terminal_or_fatal`. Raw matrix ≈ 6 × 15 = **90 cells**; minus the design-forbidden cells (events that the FSM ignores in certain states by spec, per 005 data-model) reduces to **~55-70 reachable cells**.
 
 **Rationale:**
 - Pinning the exact enumeration at /tasks-time avoids drift: the matrix witness file lists one `TEST` per cell, with the cell coords (state + event) in the test name (e.g. `TEST(FsmMatrixWitness, LogonSent_HeartbeatIn_IsRejected)`).
@@ -98,7 +98,7 @@ session_invalid_state_for_send = 77,       // FR-005 (010), [FIX-SL §4.5.4] —
 
 **Alternatives considered:**
 - Enumerate ALL combinations (6 × ~all message types ≈ 6 × 30) — rejected; over-broad. The FSM only branches on session-admin events plus lifecycle events; application messages are out-of-band.
-- Defer to /speckit-tasks without committing to a count here — rejected; the LoC estimate (~400-500) needs an anchored cell count.
+- Defer to /speckit-tasks without committing to a count here — rejected; the LoC estimate (~700-900 — updated post-/speckit-analyze to reflect the 15-event alphabet, not the first-draft 8-10) needs an anchored cell count.
 
 **Implementation impact:** Phase 0 closes here; /speckit-tasks generates the per-cell task list by mining the 005 data-model + the existing FSM `switch` cascade.
 

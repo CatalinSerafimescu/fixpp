@@ -83,13 +83,23 @@ ctest --preset linux-clang-tsan --test-dir build/linux-clang-tsan --output-on-fa
   ctest --test-dir build/linux-clang-asan --output-on-failure -R '^session_cfg_lifetime_safety$'
   ```
 
-- **FR-005 / SC-004** — assertions on the new error variant in updated tests:
+- **FR-004 / SC-002** — LogonReceived observability via the new visit-history accessor:
+
+  ```bash
+  ctest --test-dir build/linux-clang-debug --output-on-failure -R '^session_logon_received_observability$'
+  ```
+
+- **FR-005 / SC-004** — assertions on the new `session_invalid_state_for_send` error variant:
+
+  ```bash
+  ctest --test-dir build/linux-clang-debug --output-on-failure -R '^session_send_invalid_state$'
+  ```
+
+  Plus the full session suite as a regression check (any test that asserted the old `session_invalid_logon` at the send site would surface here):
 
   ```bash
   ctest --test-dir build/linux-clang-debug --output-on-failure -R '^session_'
   ```
-
-  (Test names pinned at `/speckit-tasks` after grep on `session_invalid_logon` assertions in `tests/session/`.)
 
 ## Build the codegen first, before reconfiguring
 

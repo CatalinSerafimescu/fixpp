@@ -52,13 +52,13 @@ W-5 is the primary subject — every other bundled item lives at the same touch 
 - `include/fixpp/session/session.hpp` — flip `const SessionConfig& cfg_;` (line ~281) to `SessionConfig cfg_;` (~1 line); add `std::array<fsm_state, 16> fsm_visit_history_; std::uint8_t fsm_visit_count_;` member (~3 lines); add public `fsm_visit_history() const noexcept` accessor returning `std::span<const fsm_state>` (~5 lines). **Total ~9 lines.**
 - `include/fixpp/session/session_config.hpp` — verify copyability; no expected edit. **0 lines.**
 - `include/fixpp/core/error.hpp` — add `session_invalid_state_for_send = 77,` variant after `session_invalid_config = 76,` with comment block in the existing format (~6 lines including comment).
-- `src/session/session.cpp` — ctor: drop the reference-binding pattern (line ~116 and the initializer list), instantiate `cfg_` by copy from the ctor param (~3 lines edited). Add a small inline `record_state_transition_(fsm_state)` helper called from each `fsm_state_ = X;` site (~10 sites identified at lines 239, 292, 376, 388, 630, 641, 648, 659, 690, 696, 702, 712, …) — net ~15 lines including the helper definition. Replace `co_return std::unexpected(error::session_invalid_logon);` at line 1151 (and the symmetric site) with `error::session_invalid_state_for_send` (~2 lines).
+- `src/session/session.cpp` — ctor: drop the reference-binding pattern (line ~116 and the initializer list), instantiate `cfg_` by copy from the ctor param (~3 lines edited). Add a small inline `record_state_transition_(fsm_state)` helper called from each `fsm_state_ = X;` site (/speckit-analyze verified: **37 assignment sites** in the post-009 tree, not the ~10 first-draft estimate; spread across `Session::open`, the message-handler `switch` cascade, the close path, and the logout-timer handler). Mechanical refactor — one call-site flip per assignment + the helper body (~6 lines) + the accessor body (~3 lines). Net ~50-80 lines edited including the helper definition. Replace `co_return std::unexpected(error::session_invalid_logon);` at line 1151 with `error::session_invalid_state_for_send` (1 line; /speckit-analyze verified exactly one site in `Session::send`, not two).
 - `tests/session/CMakeLists.txt` — remove the `if(FIXPP_ENABLE_ASAN) set_tests_properties(session_coverage_adversarial PROPERTIES DISABLED TRUE) endif()` block added in PR #82 (~10 lines deleted including the comment).
-- `tests/session/fsm_matrix_witness_test.cpp` — **NEW**. One witness per cell of the 6-state × N-event matrix. ~400-500 LoC.
+- `tests/session/fsm_matrix_witness_test.cpp` — **NEW**. One witness per cell of the 6-state × N-event matrix. /speckit-analyze verified: the event alphabet in `include/fixpp/session/session_fsm.hpp:52-67` enumerates **15 named events** (not the ~8-10 first-draft estimate). Raw matrix = 6 × 15 = 90 cells; minus design-forbidden cells reduces to **~55-70 reachable cells**. Estimated **~700-900 LoC** (one TEST per cell, ride-along on existing fixtures). May split into per-state batches per `[[feedback_phase_implementer_sonnet_runaway_scope]]` LoC cap.
 - `tests/session/admin_builder_distinct_now_test.cpp` — **NEW**. `clock->advance(...)` between two emits across Heartbeat / TestRequest / Logout / Reject; assert distinct `SendingTime`. ~80-120 LoC.
 - `tests/session/admin_emit_mixed_path_test.cpp` — **NEW**. Four mixed-success-mode permutations at sites 1+2 (Reject-ok/Logout-ok, Reject-fail/Logout-skip, Reject-ok/Logout-fail, Reject-fail/Logout-fail). ~150-200 LoC.
 - `tests/session/initiator_transport_throw_test.cpp` — **NEW**. RED: `transport.send` throws during initiator Logon emit on `Session::open()`. ~60-80 LoC.
-- `tests/session/<existing files>` — update assertions at the two `Session::send` non-Active sites from `session_invalid_logon` to `session_invalid_state_for_send` (FR-005 AC3). Grep at /speckit-tasks to pin the file list; estimated ≤5 LoC across 1-2 files.
+- `tests/session/<existing files>` — update assertions at the one `Session::send` non-Active site from `session_invalid_logon` to `session_invalid_state_for_send` (FR-005 AC3). /speckit-analyze verified: existing tests do NOT assert against the specific variant at this site (they assert `EXPECT_FALSE(has_value())` only), so the expected update count is **0**; the new T013 tests provide AC3 coverage going forward. T015 is retained as a safety-net grep.
 - `tests/session/cfg_lifetime_safety_test.cpp` — **NEW**. Construct `SessionConfig` as a local in a nested scope, pass to `Session`, drop the config, exercise the session, assert ASan clean. ~80 LoC.
 
 Total: ~800-1100 LoC across ~12 files (mostly tests). The production edits are surgical (≈30 net lines).
@@ -135,11 +135,13 @@ include/fixpp/core/
 
 src/session/
 └── session.cpp            # MODIFY: ctor — drop ref-binding pattern (~L116, initializer list); copy cfg into cfg_ (FR-001);
-                           # MODIFY: every `fsm_state_ = X;` site (~10 sites; lines 239, 292, 376, 388, 630, 641, 648,
-                           #         659, 690, 696, 702, 712, …) calls a new private record_state_transition_(state)
+                           # MODIFY: every `fsm_state_ = X;` site (/speckit-analyze verified 37 sites in post-009
+                           #         tree across Session::open, message-handler switch cascade, close path, and
+                           #         logout-timer handler) calls a new private record_state_transition_(state)
                            #         that pushes to the ring buffer (FR-004 D-2);
-                           # MODIFY: two `co_return std::unexpected(error::session_invalid_logon);` sites in Session::send
-                           #         (~L1151 and the symmetric site) → `session_invalid_state_for_send` (FR-005)
+                           # MODIFY: one `co_return std::unexpected(error::session_invalid_logon);` site in Session::send
+                           #         at L1151 → `session_invalid_state_for_send` (FR-005; /speckit-analyze verified
+                           #         exactly one site, not two as first-draft assumed)
 
 tests/session/
 ├── CMakeLists.txt                                    # MODIFY: remove the FIXPP_ENABLE_ASAN guard block on
