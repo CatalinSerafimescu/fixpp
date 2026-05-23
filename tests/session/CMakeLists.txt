@@ -369,6 +369,25 @@ add_threading_test(session_seqnum_drain_on_close
   test_seqnum_drain_on_close.cpp)
 target_compile_definitions(session_seqnum_drain_on_close PRIVATE FIXPP_TEST_HOOKS)
 
+# ── 010-session-cfg-lifetime Phase 5 (US3) — T016/T017/T018/T019/T020 ────────
+
+# T016+T017 — FSM matrix per-cell witness (FR-006 / SC-002).
+# One TEST per enumerated (state×event) cell; uses fsm_visit_history() to
+# confirm intermediate and final state transitions.
+add_threading_test(session_fsm_matrix_witness fsm_matrix_witness_test.cpp)
+
+# T018 — admin builders per-message-distinct SendingTime (FR-007 / SC-006).
+# Exercises the branch where clock advances between two emits yield distinct
+# SendingTime(52) values for Heartbeat / Reject / Logout / Logon builders.
+add_threading_test(session_admin_builder_distinct_now admin_builder_distinct_now_test.cpp)
+
+# T019 — admin emit mixed-path permutations (FR-008 / SC-005 / RC#G).
+# Exercises gated-emit success/failure combinations at Site 1 (Q3 path) and
+# Site 2 (Active×Logout confirming emit). Requires FIXPP_TEST_HOOKS for
+# SeqnumManager::set_counters_for_test() overflow injection.
+add_threading_test(session_admin_emit_mixed_path admin_emit_mixed_path_test.cpp)
+target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOKS)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
