@@ -241,8 +241,8 @@ TEST_F(LogonHandshakeTest, AcceptorValidLogonTransitionsToActive) {
         << "on_inbound_frame() returned error for valid Logon";
 
     const auto s = sess.state();
-    EXPECT_TRUE(s == fsm_state::Active || s == fsm_state::LogonReceived)
-        << "Acceptor should be Active or LogonReceived after valid peer Logon, "
+    EXPECT_EQ(s, fsm_state::Active)
+        << "Acceptor should be Active after valid peer Logon (strict: F2 relaxation strict-up), "
         << "got state=" << static_cast<int>(s);
 }
 

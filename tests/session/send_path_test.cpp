@@ -889,4 +889,103 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
         << "[gate-b/r1-red: F-03; 009 spec.md US1 AC3]";
 }
 
+// ── RC#G RED: Admin emit must gate on assign_outbound() error.
+//
+// Bug: 6 of 8 admin call-sites do `(void)assign_r;` and then call
+// store_then_emit() with the peeked seq even when assign_outbound() returned
+// store_seqnum_overflow. This corrupts the wire sequence stream and silently
+// continues emitting on a session that is supposed to be session-fatal.
+//
+// Test: seed the SeqnumManager outbound counter to seqnum_max (so the next
+// assign_outbound() call returns store_seqnum_overflow), then feed an inbound
+// TestRequest (35=1) which triggers the Heartbeat-reply admin emit at
+// session.cpp:901-904. Assert:
+//   (a) on_inbound_frame returns an error (not ok),
+//   (b) session state transitions to Disconnected (not Active),
+//   (c) no Heartbeat frame was emitted (transport did NOT see a second frame
+//       beyond the frames already captured before the inbound TestRequest).
+//
+// Anchors: 005 data-model.md:30 E3 ("session-fatal, no wrap, surfaced via
+// store_seqnum_overflow"); 009 spec.md FR-001; [gate-b/r2-red: RC#G F-10].
+// Requires FIXPP_TEST_HOOKS for seqnum_mgr_test_access() and set_counters_for_test().
+TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_ReachesDisconnected) {
+    std::vector<std::vector<std::byte>> transport_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        transport_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    // Capture baseline: frames emitted during open() + drive_to_active.
+    const std::size_t frames_before = transport_frames.size();
+
+    // Seed outbound counter to seqnum_max so the next assign_outbound() overflows.
+    // Preserve the current inbound counter (we need the peer seq to be in-sequence).
+    auto& mgr = sess.seqnum_mgr_test_access();
+    const seqnum_t next_inbound = mgr.next_inbound_unsafe();
+    mgr.set_counters_for_test(next_inbound, seqnum_max);
+
+    // Feed an inbound TestRequest (35=1). The session should try to emit a
+    // Heartbeat reply, fail on assign_outbound() (seqnum_max → overflow),
+    // skip the emit, set state=Disconnected, and return an error.
+    auto tr_frame = make_peer_logon("FIX.4.4", next_inbound, "TW", "ISLD");
+    // Reuse make_peer_logon structure but override to TestRequest type.
+    // Build a minimal 35=1 TestRequest frame inline.
+    {
+        std::string body;
+        body += "35=1\x01";
+        body += "34=" + std::to_string(next_inbound) + "\x01";
+        body += "49=TW\x01";
+        body += "52=20240101-00:00:00.000\x01";
+        body += "56=ISLD\x01";
+        body += "112=TR-OVERFLOW-TEST\x01";
+
+        std::string hdr;
+        hdr += "8=FIX.4.4\x01";
+        hdr += "9=" + std::to_string(body.size()) + "\x01";
+
+        std::string full = hdr + body;
+        unsigned int cs = 0;
+        for (unsigned char c : full) { cs += c; }
+        cs &= 0xFFU;
+        char csbuf[4];
+        snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+        full += "10=" + std::string(csbuf) + "\x01";
+
+        tr_frame.clear();
+        for (char c : full) { tr_frame.push_back(static_cast<std::byte>(c)); }
+    }
+
+    auto fut = asio::co_spawn(
+        ioc,
+        sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
+        asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    auto inbound_result = fut.get();
+
+    // (a) on_inbound_frame must return an error — the session-fatal overflow
+    //     must be surfaced, not silently discarded with (void)assign_r.
+    EXPECT_FALSE(inbound_result.has_value())
+        << "on_inbound_frame must return an error when assign_outbound() overflows; "
+        << "got ok (bug: (void)assign_r at session.cpp:901-904 discards overflow). "
+        << "[gate-b/r2-red: RC#G F-10; data-model.md:30 E3]";
+
+    // (b) Session must be Disconnected after session-fatal overflow.
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "Session must be Disconnected after assign_outbound() overflow; "
+        << "got state=" << static_cast<int>(sess.state())
+        << ". [gate-b/r2-red: RC#G F-10; data-model.md:30 E3]";
+
+    // (c) No Heartbeat frame must have been emitted (transport saw no new frame).
+    EXPECT_EQ(transport_frames.size(), frames_before)
+        << "No Heartbeat must be emitted when assign_outbound() overflows; "
+        << "got " << (transport_frames.size() - frames_before) << " extra frame(s). "
+        << "[gate-b/r2-red: RC#G F-10]";
+}
+
 }  // namespace fixpp::session::test
