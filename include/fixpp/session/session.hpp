@@ -25,6 +25,7 @@
 #include <asio/post.hpp>
 #include <atomic>
 #include <cassert>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
@@ -217,6 +218,11 @@ public:
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
     [[nodiscard]] fsm_state state() const noexcept;
 
+    // FR-004 / D-2 — ordered FSM transition log (ring-buffer, capacity 16).
+    // Returns a view of the fsm_visit_history_ ring-buffer (oldest first,
+    // up to 16 entries). Empty before the first record_state_transition_ call.
+    [[nodiscard]] std::span<const fsm_state> fsm_visit_history() const noexcept;
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto
@@ -351,6 +357,17 @@ private:
     // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
     // this tracks the FIX protocol state).
     fsm_state fsm_state_ = fsm_state::NotConnected;
+
+    // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
+    // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
+    // Written exclusively via record_state_transition_; ring wraps at index 16.
+    // fsm_visit_count_ saturates at UINT8_MAX to avoid overflow.
+    std::array<fsm_state, 16> fsm_visit_history_{};
+    std::uint8_t fsm_visit_count_ = 0;
+
+    // FR-004 / D-2 — route every FSM transition through this helper so the
+    // ring-buffer is always in sync with fsm_state_.
+    void record_state_transition_(fsm_state new_state) noexcept;
 
     // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).
