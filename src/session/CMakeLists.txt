@@ -59,6 +59,11 @@ target_sources(fixpp_session PRIVATE
   file_store.cpp
   file_store_factory.cpp
   quickfix_compat/cfg_loader.cpp  # T047 (008-message-store / US4): QuickFIX .cfg → FileStoreFactory config translation
+  # ── 005-session-establishment-fsm stubs (T018) ─────────────────────────────
+  # Phase 2 scaffold: link-green before user-story bodies land (Phase 3–7).
+  seqnum_manager.cpp   # T018: Phase 2 stub; full impl T031/T032/T033 (Phase 4 / US2)
+  admin_messages.cpp   # T018: Phase 2 stub; full impl T021/T040/T046/T054 (Phase 3-7)
+  sending_time.cpp     # T018: Phase 2 stub; full impl T022/T055 (Phase 3/7)
 )
 
 target_link_libraries(fixpp_session PRIVATE Crc32c::crc32c)

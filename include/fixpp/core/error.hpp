@@ -79,11 +79,11 @@ enum class error : std::uint8_t {
     // non-renumbering ([const §X.4]). C-ABI FIXPP_ERR_SYNC_* coalescing +
     // tools/abi_history audit-trail entry deferred to 2i (same time-bounded
     // waiver shape as 002/003/004; no C-ABI surface added here).
-    sync_lock_aborted         = 43,  // [2f §4.5] — cancellation won the
+    sync_lock_aborted = 43,          // [2f §4.5] — cancellation won the
                                      //   CAS-arbitration race against the drain;
                                      //   waiter was not granted ownership.
                                      //   Joins FIXPP_ERR_CANCELLED at the C ABI.
-    sync_lock_alloc_failed    = 44,  // [2f §4.3] — PMR fallback's allocate()
+    sync_lock_alloc_failed = 44,     // [2f §4.3] — PMR fallback's allocate()
                                      //   threw std::bad_alloc (mr exhausted) or
                                      //   the embedded inline 32-byte slot_storage_
                                      //   buffer overflowed and null_memory_resource
@@ -93,7 +93,7 @@ enum class error : std::uint8_t {
                                      //   executor called outside a session
                                      //   serialisation domain (bound executor is
                                      //   not a session_executor value).
-    sync_lock_drained         = 46,  // [2f §4.7.2] NEW v1.1 / RC-B —
+    sync_lock_drained = 46,          // [2f §4.7.2] NEW v1.1 / RC-B —
                                      //   cancel_and_drain() set draining_ = true;
                                      //   subsequent async_lock(...) fast-fails
                                      //   without enqueuing.
@@ -111,17 +111,17 @@ enum class error : std::uint8_t {
     // (N-P2-1), version_registry_dictionary_missing (Opus N2-P2-1 — the
     // FIXT.1.1 miss routes through the EXISTING slot-28
     // dict_no_dictionary_for_application_version).
-    executor_already_stopped   = 47,  // [2d §4.4] — resolved executor
+    executor_already_stopped = 47,    // [2d §4.4] — resolved executor
                                       //   (executor_override.value_or(
                                       //   EngineConfig::executor)) joined before
                                       //   Engine::open / Session::open.
                                       //   → FIXPP_ERR_THREAD_CONFIG
-    executor_not_serialised    = 48,  // [2d §4.5]/§6.1 — mode==direct_executor
+    executor_not_serialised = 48,     // [2d §4.5]/§6.1 — mode==direct_executor
                                       //   without already_serialized_executor
                                       //   (root cause #1 / C-P1-2); enforced at
                                       //   the SINGLE point make_session_executor.
                                       //   → FIXPP_ERR_THREAD_CONFIG
-    clock_sleeps_cancelled     = 49,  // [2d §4.1]/§6.6 — a sleep_until waiter
+    clock_sleeps_cancelled = 49,      // [2d §4.1]/§6.6 — a sleep_until waiter
                                       //   completed via cancel_sleeps. Maps to
                                       //   asio::error::operation_aborted at the
                                       //   awaitable level; this value is the
@@ -133,10 +133,10 @@ enum class error : std::uint8_t {
                                       //   cancellable_dispatch node exhausted the
                                       //   per-session arena. Forced disconnect.
                                       //   → FIXPP_ERR_THREAD_RUNTIME
-    session_already_open       = 51,  // [2d §4.7] — Session::open() called twice
+    session_already_open = 51,        // [2d §4.7] — Session::open() called twice
                                       //   on the same handle (programmer error).
                                       //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
-    session_already_closed     = 52,  // [2d §4.7]:830-832,863 / [2d §6.5]:1172 —
+    session_already_closed = 52,      // [2d §4.7]:830-832,863 / [2d §6.5]:1172 —
                                       //   close() on a NEVER-OPENED or an
                                       //   ALREADY-CLOSED (drained) session. NOT
                                       //   returned for an ALREADY-CLOSING
@@ -144,18 +144,18 @@ enum class error : std::uint8_t {
                                       //   SAME in-flight awaitable, no error.
                                       //   Idempotency; non-fatal.
                                       //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
-    invalid_session_config     = 53,  // [2d §4.5]/§6.1 — incompatible combo
+    invalid_session_config = 53,      // [2d §4.5]/§6.1 — incompatible combo
                                       //   (direct_executor+lock_policy::spin even
                                       //   when attested; null EngineConfig::
                                       //   executor; null dictionary;
                                       //   default-constructed security_profile
                                       //   sentinel — N-P2-3).
                                       //   → FIXPP_ERR_THREAD_CONFIG
-    clock_not_set              = 54,  // [2d §4.4] — EngineConfig::clock is null
+    clock_not_set = 54,               // [2d §4.4] — EngineConfig::clock is null
                                       //   at Engine::open, regardless of
                                       //   per-session clock_override (root #2).
                                       //   → FIXPP_ERR_THREAD_CONFIG
-    dispatch_aborted           = 55,  // [2d §6.5] — cancellable_dispatch's slot
+    dispatch_aborted = 55,            // [2d §6.5] — cancellable_dispatch's slot
                                       //   fired BEFORE the posted handler was
                                       //   picked up; handler reaped (not invoked).
                                       //   Expected on the §4.7 phase-2 close path.
@@ -186,47 +186,135 @@ enum class error : std::uint8_t {
     //        async_mutex makes the variant impossible).
     //      store_shim_timeout      — REMOVED v0.3 per Codex C-R2-P2-1
     //        ([2e §4.8.B] Path A retired; no runtime adapter).
-    store_io_failure           = 56,  // FileStore I/O fault (disk full, hardware
-                                      //   fault, ENOSPC, EACCES, mid-flush error
-                                      //   from flush_for_session_close()).
-                                      //   → FIXPP_ERR_STORE_RUNTIME
-    store_seqnum_gap           = 57,  // retrieve over a never-persisted gap
-                                      //   (unless trailing edge of end == 0).
-                                      //   → FIXPP_ERR_STORE_CONSISTENCY
-    store_seqnum_out_of_order  = 58,  // store(seq, ...) with seq !=
-                                      //   next_seqnum(dir, false) inside the
-                                      //   writer-mutex CS (I-05; Opus N2-P2-3).
-                                      //   → FIXPP_ERR_STORE_CONSISTENCY
-    store_capacity_exhausted   = 59,  // MemoryStore::store under bounded policy
-                                      //   at per-direction cap (I-08).
-                                      //   → FIXPP_ERR_STORE_RUNTIME
-    store_seqnum_overflow      = 60,  // next_seqnum(dir, true) when current
-                                      //   == seqnum_max (session-fatal; I-18).
-                                      //   → FIXPP_ERR_STORE_RUNTIME
-    store_factory_failed       = 61,  // MessageStoreFactory::make() validation
-                                      //   failure (CompID filesystem safety
-                                      //   per [2e §D.4], storage-DoS, sentinel
-                                      //   mismatch, advisory lock contention,
-                                      //   OOM at config validation, empty
-                                      //   resolved file_io_executor).
-                                      //   → FIXPP_ERR_STORE_CONFIG
-    store_visitor_aborted      = 62,  // retrieve_visitor::on_frame returned
-                                      //   visit_result::abort (default
-                                      //   abort_error()); PMR poison routed
-                                      //   via trap_throw (I-20 / I-21).
-                                      //   → FIXPP_ERR_STORE_VISITOR
-    store_seqnum_invalid       = 63,  // retrieve(begin=0, ...) — FIX wire
-                                      //   seqnums start at 1 per [FIX-SL §4.1].
-                                      //   → FIXPP_ERR_STORE_CONSISTENCY
-    store_invalid_range        = 64,  // retrieve(begin, end, ...) with
-                                      //   end != 0 && end < begin.
-                                      //   → FIXPP_ERR_STORE_CONSISTENCY
-    store_cancelled            = 65,  // Cancellation winning before a method's
-                                      //   linearisation point per [2e §6.1.4]
-                                      //   (I-07).
-                                      //   → FIXPP_ERR_CANCELLED (reused; joins
-                                      //     dispatch_aborted /
-                                      //     clock_sleeps_cancelled).
+    store_io_failure = 56,           // FileStore I/O fault (disk full, hardware
+                                     //   fault, ENOSPC, EACCES, mid-flush error
+                                     //   from flush_for_session_close()).
+                                     //   → FIXPP_ERR_STORE_RUNTIME
+    store_seqnum_gap = 57,           // retrieve over a never-persisted gap
+                                     //   (unless trailing edge of end == 0).
+                                     //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_seqnum_out_of_order = 58,  // store(seq, ...) with seq !=
+                                     //   next_seqnum(dir, false) inside the
+                                     //   writer-mutex CS (I-05; Opus N2-P2-3).
+                                     //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_capacity_exhausted = 59,   // MemoryStore::store under bounded policy
+                                     //   at per-direction cap (I-08).
+                                     //   → FIXPP_ERR_STORE_RUNTIME
+    store_seqnum_overflow = 60,      // next_seqnum(dir, true) when current
+                                     //   == seqnum_max (session-fatal; I-18).
+                                     //   → FIXPP_ERR_STORE_RUNTIME
+    store_factory_failed = 61,       // MessageStoreFactory::make() validation
+                                     //   failure (CompID filesystem safety
+                                     //   per [2e §D.4], storage-DoS, sentinel
+                                     //   mismatch, advisory lock contention,
+                                     //   OOM at config validation, empty
+                                     //   resolved file_io_executor).
+                                     //   → FIXPP_ERR_STORE_CONFIG
+    store_visitor_aborted = 62,      // retrieve_visitor::on_frame returned
+                                     //   visit_result::abort (default
+                                     //   abort_error()); PMR poison routed
+                                     //   via trap_throw (I-20 / I-21).
+                                     //   → FIXPP_ERR_STORE_VISITOR
+    store_seqnum_invalid = 63,       // retrieve(begin=0, ...) — FIX wire
+                                     //   seqnums start at 1 per [FIX-SL §4.1].
+                                     //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_invalid_range = 64,        // retrieve(begin, end, ...) with
+                                     //   end != 0 && end < begin.
+                                     //   → FIXPP_ERR_STORE_CONSISTENCY
+    store_cancelled = 65,            // Cancellation winning before a method's
+                                     //   linearisation point per [2e §6.1.4]
+                                     //   (I-07).
+                                     //   → FIXPP_ERR_CANCELLED (reused; joins
+                                     //     dispatch_aborted /
+                                     //     clock_sleeps_cancelled).
+
+    // ── 005-session-establishment-fsm: 11 session_* variants per data-model.md
+    //    "Error mapping" §56..N / FR-003/004/005/006/007/008/013/017.
+    //    Non-renumbering append at unused slots 66–76, post-publication of
+    //    006/007/008 (occupied: 1,10-13,20-29,30-42,43-65). Data-model.md
+    //    planned these at 43–53 before 006/007/008 merged; they are published
+    //    here at the next contiguous free slots per [const §X.4].
+    //
+    //    REUSE — do NOT duplicate these pre-existing variants:
+    //      session_already_open   = 51  ([2d §4.7] / FR-018)
+    //      session_already_closed = 52  ([2d §4.7] / FR-005 idempotency)
+    //      invalid_session_config = 53  ([2d §4.5] / FR-018 open-validation)
+    //      clock_sleeps_cancelled = 49  ([2d §4.1]/§6.6)
+    //      dispatch_aborted       = 55  ([2d §6.5] / close path)
+    //      store_seqnum_overflow  = 60  ([2e §6.7] / seqnum_max session-fatal)
+    //
+    //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
+    //    surface added by this feature — research D-12):
+    //      FIXPP_ERR_SESSION_REFUSAL     ← { session_invalid_logon,
+    //                                        session_compid_mismatch,
+    //                                        session_begin_string_unsupported }
+    //      FIXPP_ERR_SESSION_FATAL       ← { session_seqnum_too_low,
+    //                                        session_seqnum_gap_unrecoverable }
+    //      FIXPP_ERR_SESSION_REJECT      ← { session_sending_time_accuracy,
+    //                                        session_msg_type_invalid_for_state,
+    //                                        session_admin_not_supported }
+    //      FIXPP_ERR_SESSION_LIFECYCLE   ← { session_logout_timeout,
+    //                                        session_test_request_unanswered,
+    //                                        session_invalid_config }
+    session_invalid_logon = 66,               // FR-003/004, US1#3/#4, [FIX-SL §4.2]/§4.3 —
+                                              //   Logon refused; session never reaches Active.
+                                              //   → FIXPP_ERR_SESSION_REFUSAL
+    session_compid_mismatch = 67,             // FR-004, [FIX-SL §4.2.2] — SenderCompID/
+                                              //   TargetCompID do not match the configured
+                                              //   counterparty identity (point-to-point 49/56).
+                                              //   → FIXPP_ERR_SESSION_REFUSAL
+    session_begin_string_unsupported = 68,    // FR-003, [FIX-SL §4.2.1] — BeginString(8) is
+                                              //   not in the supported version set (FIX.4.2/4.4
+                                              //   for 005; FIXT.1.1/5.0SP2 deferred).
+                                              //   → FIXPP_ERR_SESSION_REFUSAL
+    session_seqnum_too_low = 69,              // FR-008, [FIX-SL §4.1] — inbound MsgSeqNum <
+                                              //   next-expected, no PossDupFlag=Y: session-fatal
+                                              //   (ordered-sequence integrity). PossDup handling
+                                              //   is deferred (S-010); treated as the no-PossDup
+                                              //   case in 005. → FIXPP_ERR_SESSION_FATAL
+    session_seqnum_gap_unrecoverable = 70,    // FR-008/FR-001, Session-2026-05-18 — inbound
+                                              //   MsgSeqNum too-high: session-fatal disconnect.
+                                              //   Replaces the removed session_recovery_pending
+                                              //   (D-2 Gate A round 1). Real ResendRequest-driven
+                                              //   recovery is the deferred session-recovery feature
+                                              //   ([2e §3.1] / [2e §4 last bullet]).
+                                              //   → FIXPP_ERR_SESSION_FATAL
+    session_sending_time_accuracy = 71,       // Clarification Q3, FR-013, [FIX-SL §4.2.3] —
+                                              //   inbound SendingTime(52) diverges > MaxLatency
+                                              //   (default 120 s, D-8). Disposition: emit
+                                              //   Reject(SessionRejectReason=10, ref tag 52) →
+                                              //   Logout → disconnect; Logon-path → logout-with-
+                                              //   error, no standalone Reject.
+                                              //   → FIXPP_ERR_SESSION_REJECT
+    session_msg_type_invalid_for_state = 72,  // FR-007, [FIX-SL §4.5.4] — message type not
+                                              //   legal in the current FSM state (e.g. Heartbeat
+                                              //   before Active). Surfaced as a session Reject
+                                              //   with RefMsgType. No reject loop (I-5).
+                                              //   → FIXPP_ERR_SESSION_REJECT
+    session_logout_timeout = 73,              // FR-005, [FIX-SL §4.6.2] — graceful-close
+                                              //   (Logout exchange) timed out: phase-1 child
+                                              //   cancellation_state expires; session force-
+                                              //   disconnects → Disconnected (I-9, D-8: 2 s
+                                              //   QuickFIX LogoutTimeout default).
+                                              //   → FIXPP_ERR_SESSION_LIFECYCLE
+    session_test_request_unanswered = 74,     // FR-006, [FIX-SL §4.5.5] — inbound silence
+                                              //   exceeded test_request_threshold (1×HeartBtInt,
+                                              //   D-8) without a Heartbeat echo: session unhealthy
+                                              //   → disconnect. → FIXPP_ERR_SESSION_LIFECYCLE
+    session_admin_not_supported = 75,         // FR-017, [FIX-SL §4.10] — deferred admin type
+                                              //   received (ResendRequest/SequenceReset): defined
+                                              //   bounded transition (session-level Reject, never
+                                              //   undefined/silent). Recovery is the deferred
+                                              //   session-recovery feature's.
+                                              //   → FIXPP_ERR_SESSION_REJECT
+    session_invalid_config = 76,              // [2d §4.5] N-P2-3 / Session::open validation —
+                                              //   session-level config error NOT caught at engine
+                                              //   level (e.g. missing CompID strings, null
+                                              //   begin_string, out-of-range config field value).
+                                              //   Distinct from invalid_session_config (slot 53)
+                                              //   which catches threading/executor/security_profile
+                                              //   config errors at Session::open level.
+                                              //   → FIXPP_ERR_SESSION_LIFECYCLE
 };
 
 template <class T>

@@ -17,37 +17,56 @@
 // only the timeout mechanism ([2d §4.7]:864 / [2d §6.7]:1207).
 #pragma once
 
+#include <asio/any_io_executor.hpp>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/message_store_factory.hpp>  // unique_ptr member ⇒ complete type
+#include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
+#include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <string>
 
-#include <asio/any_io_executor.hpp>
-
-#include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/message_store_factory.hpp>  // unique_ptr member ⇒ complete type
-#include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
-#include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
-
-namespace fixpp::core { class Clock; }
-namespace fixpp::dict { class Dictionary; class DialectOverlay; }
-namespace fixpp::tls  { class cert_source; }
-namespace fixpp::log  { class Sink; }
+namespace fixpp::core {
+class Clock;
+}
+namespace fixpp::dict {
+class Dictionary;
+class DialectOverlay;
+}  // namespace fixpp::dict
+namespace fixpp::tls {
+class cert_source;
+}
+namespace fixpp::log {
+class Sink;
+}
 
 namespace fixpp::session {
 
 enum class RejectPolicy : std::uint8_t;  // owned by 005; declared for the field
 
 enum class threading_mode : std::uint8_t {
-    per_session_strand = 0,   // default — make_strand wrap; callbacks serialised
-    direct_executor    = 1,   // expert opt-out — needs already_serialized_executor
+    per_session_strand = 0,  // default — make_strand wrap; callbacks serialised
+    direct_executor = 1,     // expert opt-out — needs already_serialized_executor
 };
 
 enum class lock_policy : std::uint8_t {
-    mutex = 0,                // default
-    spin  = 1,                // opt-in; store-write path always mutex ([const §XI.5])
+    mutex = 0,  // default
+    spin = 1,   // opt-in; store-write path always mutex ([const §XI.5])
+};
+
+// Selects the role for a Session at construction time; drives Session::open()
+// initial-state choice (specs/009-session-fsm-finalize/contracts/session_role.hpp).
+// - initiator: open() sets fsm_state_ = LogonSent + emits initial Logon.
+// - acceptor:  open() sets fsm_state_ = NotConnected + waits for peer Logon.
+enum class session_role : std::uint8_t {
+    initiator = 0,
+    acceptor = 1,
 };
 
 // Portable "closed enum" attribute (no-op where unsupported). Placed after
@@ -55,12 +74,12 @@ enum class lock_policy : std::uint8_t {
 // (T048) enumerates exactly the 2 values and a runtime out-of-range cast is
 // rejected with error::invalid_session_config (seam 13).
 #if defined(__clang__) && defined(__has_attribute)
-#  if __has_attribute(enum_extensibility)
-#    define FIXPP_ENUM_CLOSED __attribute__((enum_extensibility(closed)))
-#  endif
+#if __has_attribute(enum_extensibility)
+#define FIXPP_ENUM_CLOSED __attribute__((enum_extensibility(closed)))
+#endif
 #endif
 #ifndef FIXPP_ENUM_CLOSED
-#  define FIXPP_ENUM_CLOSED
+#define FIXPP_ENUM_CLOSED
 #endif
 
 // Compile-time exhaustiveness guard for switch sites over backpressure_mode.
@@ -77,53 +96,65 @@ enum class lock_policy : std::uint8_t {
 //       case SessionConfig::backpressure_mode::block:              ...
 //       case SessionConfig::backpressure_mode::disconnect_and_recover: ...
 //   }
-#define FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(T)                         \
-    static_assert(                                                              \
-        static_cast<std::uint8_t>(T::block) == 0 &&                            \
-        static_cast<std::uint8_t>(T::disconnect_and_recover) == 1,             \
-        "backpressure_mode must be closed: exactly {block=0, "                  \
-        "disconnect_and_recover=1}. drop_oldest is BANNED on the app/session " \
-        "path ([const §XV.15] / [2d §6.4] / I-14). Extend this list if "      \
-        "the enum changes and update ALL switch sites.")
+#define FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(T)                                   \
+    static_assert(static_cast<std::uint8_t>(T::block) == 0 &&                            \
+                      static_cast<std::uint8_t>(T::disconnect_and_recover) == 1,         \
+                  "backpressure_mode must be closed: exactly {block=0, "                 \
+                  "disconnect_and_recover=1}. drop_oldest is BANNED on the app/session " \
+                  "path ([const §XV.15] / [2d §6.4] / I-14). Extend this list if "       \
+                  "the enum changes and update ALL switch sites.")
 
 // Value-typed; FROZEN at Session::open ([arch §5.6] — close-and-reopen only).
 struct SessionConfig {
     enum class FIXPP_ENUM_CLOSED backpressure_mode : std::uint8_t {
-        block                  = 0,   // push back to producer (default)
-        disconnect_and_recover = 1,   // terminate session; ResendRequest on reconnect
+        block = 0,                   // push back to producer (default)
+        disconnect_and_recover = 1,  // terminate session; ResendRequest on reconnect
     };
 
     std::optional<asio::any_io_executor> executor_override;
-    threading_mode mode  = threading_mode::per_session_strand;
-    lock_policy    locks = lock_policy::mutex;
-    bool           already_serialized_executor = false;          // MUST be true when mode==direct_executor
-    std::shared_ptr<fixpp::core::Clock> clock_override;          // null → EngineConfig::clock
+    threading_mode mode = threading_mode::per_session_strand;
+    lock_policy locks = lock_policy::mutex;
+    bool already_serialized_executor = false;            // MUST be true when mode==direct_executor
+    std::shared_ptr<fixpp::core::Clock> clock_override;  // null → EngineConfig::clock
 
-    std::string sender_comp_id;     // identity owned by 005
+    std::string sender_comp_id;  // identity owned by 005
     std::string target_comp_id;
     std::string begin_string;
 
-    std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership
-    std::shared_ptr<fixpp::tls::cert_source>       cert_source;
-    fixpp::session::SecurityProfile                security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects (FR-018; lives in `session` per [arch §6 line 243])
+    session_role role = session_role::initiator;  // FR-004; default preserves 005 behavior
 
-    std::shared_ptr<const fixpp::dict::Dictionary>     dictionary;       // required
+    std::unique_ptr<MessageStoreFactory> store_factory;  // unique ownership
+    std::shared_ptr<fixpp::tls::cert_source> cert_source;
+    fixpp::session::SecurityProfile
+        security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects
+                           // (FR-018; lives in `session` per [arch §6 line 243])
+
+    std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
 
-    std::optional<std::chrono::seconds>      heartbeat_interval;       // value owned by 005
-    std::optional<std::chrono::milliseconds> test_request_threshold;   // value owned by 005
-    std::optional<std::chrono::milliseconds> sending_time_threshold;   // value owned by 005
-    RejectPolicy reject_policy{};                                      // owned by 005
+    std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
+    std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005
+    std::optional<std::chrono::milliseconds> sending_time_threshold;  // value owned by 005
+    RejectPolicy reject_policy{};                                     // owned by 005
 
-    std::pmr::memory_resource* message_arena      = nullptr;  // null → engine default
+    std::pmr::memory_resource* message_arena = nullptr;       // null → engine default
     std::pmr::memory_resource* framer_carry_arena = nullptr;  // owned by 2b; recorded here
-    std::pmr::memory_resource* session_arena      = nullptr;
+    std::pmr::memory_resource* session_arena = nullptr;
 
-    fixpp::otel::trace_context        initial_trace_context{}; // value-typed (C-P2-4)
-    std::shared_ptr<fixpp::log::Sink> log_sink_override;       // null → engine default
-    fixpp::tap::TapConsumer           tap_consumer;             // default = no tap
+    fixpp::otel::trace_context initial_trace_context{};   // value-typed (C-P2-4)
+    std::shared_ptr<fixpp::log::Sink> log_sink_override;  // null → engine default
+    fixpp::tap::TapConsumer tap_consumer;                 // default = no tap
 
     backpressure_mode app_backpressure = backpressure_mode::block;
+
+    // Out-of-band test/transport sink (US4 / T046 / seam #11).
+    // Called with the committed outbound frame span AFTER store(outbound)
+    // completes (durable-before-transmit, I-3). If null, outbound frames are
+    // silently dropped (mirrors today's "no transport" state for earlier phases).
+    // The 2d::TransportFactory replaces this in the transport/ feature (deferred).
+    // NO std::mutex — must only be called from the session executor strand.
+    // ([const §XV.9] grep gate: this field is a std::function, not std::mutex.)
+    std::function<void(std::span<const std::byte>)> transport_send;
 };
 
 }  // namespace fixpp::session

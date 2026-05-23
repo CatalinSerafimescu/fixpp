@@ -7,12 +7,17 @@ metadata:
   author: "github-spec-kit"
   source: "templates/commands/implement.md"
   # >>> LOCAL PATCH (Antreprenoriat) — DO NOT regenerate blindly <<<
-  # Step 2 ("Check checklists status") was rewritten to route the
-  # pipeline.md §9 CHECKLIST AUDIT through /speckit-checklist-audit and
-  # to remove the weak "proceed anyway? (yes/no)" bypass. This vendored
-  # upstream skill is otherwise pristine. If spec-kit is re-vendored or
-  # regenerated, this header WILL be clobbered — re-apply the step-2 change
-  # (see pipeline.md §9 and `git log` of this file).
+  # Two local patches against upstream:
+  # 1. Step 2 ("Check checklists status") was rewritten to route the
+  #    pipeline.md §9 CHECKLIST AUDIT through /speckit-checklist-audit and
+  #    to remove the weak "proceed anyway? (yes/no)" bypass.
+  # 2. Step 5a was added (between step 5 and step 6) to bind the
+  #    per-phase executor to the `phase-implementer-sonnet` agent
+  #    (`.claude/agents/phase-implementer-sonnet.md` at parent root).
+  #    See pipeline.md [H] (2026-05-22) and
+  #    `[[feedback_speckit_subagent_phasing]]`.
+  # If spec-kit is re-vendored or regenerated, this header WILL be
+  # clobbered — re-apply both changes (see `git log` of this file).
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -169,6 +174,62 @@ You **MUST** consider the user input before proceeding (if not empty).
    - **Task dependencies**: Sequential vs parallel execution rules
    - **Task details**: ID, description, file paths, parallel markers [P]
    - **Execution flow**: Order and dependency requirements
+
+5a. **Per-phase executor binding** (LOCAL PATCH — see metadata header,
+   pipeline.md [H] 2026-05-22).
+
+   The canonical executor for each phase's implementation work is the
+   `phase-implementer-sonnet` agent at
+   `.claude/agents/phase-implementer-sonnet.md` (parent root). The
+   orchestrator (Opus main session) SHOULD NOT implement task bodies
+   directly — it spawns one `phase-implementer-sonnet` subagent per
+   phase via `Agent(subagent_type="phase-implementer-sonnet", ...)`,
+   re-verifies the result per the parent-verification checklist
+   (`[[feedback_subagent_phase_verification_two_traps]]`,
+   `[[feedback_tracking_pmr_resource_false_pass]]`), and only then
+   proceeds to the next phase.
+
+   The agent encodes the stable persona (anchor citation, TDD ordering,
+   scope discipline, constitutional bindings, anti-pattern library,
+   reporting contract) so the orchestrator passes ONLY the per-call
+   delta: task IDs in scope, feature directory, design-doc anchor
+   path(s), and any phase-specific anchors the orchestrator decided
+   matter.
+
+   The orchestrator MAY implement task bodies directly only when (a)
+   the agent escalates with a question that requires reading code the
+   orchestrator already has cached, OR (b) a phase is trivially one
+   task with no test gate (rare — Setup/Polish only). Anything else
+   goes through the agent so the persona stays consistent.
+
+   **Between phases — CodeGraph freshness gate.** After each phase
+   agent returns, BEFORE spawning the next phase's agent (or before
+   handing off to a reviewer in steps 11 / 14), the orchestrator
+   verifies the index is fresh:
+
+   1. The agent's reporting contract item #7 must confirm `codegraph
+      sync` ran. If missing or unclear, run it from the submodule:
+
+      ```bash
+      cd research/G19-fix-fpml-iso20022/library
+      codegraph sync
+      ```
+
+   2. Run `codegraph status` and confirm the file count is ≥188 (per
+      `[[project_codegraph_library_autoresolve]]`; new sources bump
+      it). A 0-file count means the index resolved against the empty
+      parent root — re-run from the submodule.
+
+   3. If the phase touched codegen (`fixpp-codegen` emitter changes,
+      `_codegen/` regeneration), prefer `codegraph index --force`
+      over `sync` per the parent CLAUDE.md rule for structural
+      changes — the file-count delta will be larger than `sync`
+      tolerates cleanly.
+
+   A stale index between phases silently mislabels impact and
+   callers, so the next phase agent's `codegraph_impact` lookups
+   become unreliable. This gate is cheap (`sync` is incremental); do
+   not skip it even when the diff "looks small."
 
 6. Execute implementation following the task plan:
    - **Phase-by-phase execution**: Complete each phase before moving to the next

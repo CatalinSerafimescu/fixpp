@@ -1,6 +1,16 @@
 # tests/session/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
+# ── 009-session-fsm-finalize T005 — shared test helper ──────────────────────
+# OBJECT library so executables can absorb the helper without an install/link
+# step; consumed via $<TARGET_OBJECTS:session_test_support> in test sources.
+add_library(session_test_support OBJECT
+  support/frame_field_extract.cpp
+)
+target_include_directories(session_test_support PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 add_executable(session_smoke_test session_smoke_test.cpp)
 target_link_libraries(session_smoke_test PRIVATE
   fixpp_session
@@ -222,3 +232,137 @@ fixpp_add_store_test(store_file_coverage_uplift SOURCES
   test_file_store_coverage_uplift.cpp
   _fixtures_/test_double_fsm.cpp
 )
+
+# ── 005-session-establishment-fsm seam registrations (T007/T009) ─────────────
+# Seam #13: seqnum_t consumer/build check (T007 red → T008 green).
+# Seam #9:  fix_time format↔parse roundtrip corpus (T009 red → T011 green).
+# Both use add_threading_test (fixpp_session + GTest; no mock_clock needed for
+# these two scaffolding seams — they test pure-value types).
+
+# Seam #13: T007 seqnum_t handoff test.
+add_threading_test(session_seqnum_t_handoff seqnum_t_handoff_test.cpp)
+
+# Seam #9: T009 fix_time roundtrip test. fixpp_core provides the implementation
+# (fix_time.cpp compiled into fixpp_core at T011 / src/core/CMakeLists.txt).
+add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
+
+# ── 005 Phase 3 (US1) — seam #2: Logon handshake test (T019) ────────────────
+# Red-first TDD: authored before T021–T026 implementation; must turn green
+# at T026. Links fixpp_mock_clock for deterministic SendingTime assertions.
+add_threading_test(session_logon_handshake logon_handshake_test.cpp)
+
+# ── 005 Phase 8 /speckit-verify Step 4 coverage uplift ──────────────────────
+# Adversarial-input tests for defensive code paths that the well-formed
+# seam corpus doesn't exercise: builder buffer-too-small, parser malformed
+# field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
+add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
+# W-5 waiver carry-forward: pre-existing 005-baseline stack-use-after-scope
+# at src/session/session.cpp:116 (cfg_ const-ref dereferenced after the
+# fixture-local SessionConfig leaves scope). Verified pre-009 via
+# `git show 4e621e1:src/session/session.cpp`; the cfg_ lifetime refactor
+# (by-value member / owning shared_ptr / arena-tracked) is the explicit
+# subject of follow-on slice 010-session-cfg-lifetime. Skip under ASan
+# until 010 lands so CI doesn't re-fire the documented baseline; non-ASan
+# presets keep running the 14 adversarial-input scenarios as before.
+if(FIXPP_ENABLE_ASAN)
+  set_tests_properties(session_coverage_adversarial PROPERTIES DISABLED TRUE)
+endif()
+
+# ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
+# Red-first TDD: authored before T031–T036 implementation.
+# session_seqnum_manager: seam #3, SeqnumManager unit tests (T027).
+# session_seqnum_gap_fatal: seam #4, too-high gap fatal FSM tests (T028).
+# session_durable_before_transmit: seam #10, store-before-write ordering (T029).
+
+# Seam #3: SeqnumManager increment/overflow/fatal checks (T027).
+# FIXPP_TEST_HOOKS enables set_counters_for_test() for the overflow test.
+add_executable(session_seqnum_manager seqnum_manager_test.cpp)
+target_link_libraries(session_seqnum_manager PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_seqnum_manager PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_seqnum_manager PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_seqnum_manager COMMAND session_seqnum_manager)
+set_tests_properties(session_seqnum_manager PROPERTIES ENVIRONMENT
+  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# Seam #4: Too-high gap fatal disposition (T028).
+add_threading_test(session_seqnum_gap_fatal seqnum_gap_fatal_test.cpp)
+
+# Seam #10: Durable-before-transmit ordering (T029).
+add_threading_test(session_durable_before_transmit durable_before_transmit_test.cpp)
+
+# ── 005 Phase 5 (US3) — seam #5: Heartbeat/TestRequest test (T037) ───────────
+# Red-first TDD: authored before T039–T042 implementation; turns green at T042.
+# Tests: build_heartbeat/build_test_request builders; inbound TestRequest echo;
+# HeartBtInt=0 disable; unanswered-TR disconnect; inbound Heartbeat liveness.
+add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
+
+# ── 005 Phase 6 (US4) — seam #6/#11: Logout exchange + cancellation (T043/T044)
+# Red-first TDD: authored before T046–T048; turns green at T049.
+# seam #6: Logout exchange — graceful both-directions; never-confirmed timeout;
+#          non-Active Logout transitions; outbound store-before-transmit (T029 retire).
+# seam #11: Two-phase cancellation — child cancellation_state; close idempotent;
+#           close(terminal) skips phase 1.
+add_threading_test(session_logout_exchange logout_exchange_test.cpp)
+target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
+add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cpp)
+
+# ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────
+# Red-first TDD: authored before T054/T056 implementation; turns green at T057.
+# seam #7: session_reject — build_reject shape; no-reject-loop (I-5); type-invalid-for-state.
+# seam #8: sending_time  — check_sending_time unit tests; Q3 integration (Active + Logon paths).
+add_threading_test(session_reject      session_reject_test.cpp)
+add_threading_test(session_sending_time sending_time_test.cpp)
+
+# ── 005 Phase 8 — T058: Seam #1 FSM transition matrix (FR-001 / I-1) ────────
+# Meta-attestation that every state×event cell is defined (no UB / no silent
+# no-op). Detailed per-cell behaviour is the per-US seam suite's coverage.
+add_threading_test(session_fsm_transition_matrix fsm_transition_matrix_test.cpp)
+
+# ── 005 Phase 8 — T060: noexcept window + no-C++-across-C-ABI layering ──────
+# Compile-time static_assert + nm/grep checks for FR-015 / [const §X.2].
+# Needs FIXPP_TEST_BINARY_DIR + FIXPP_TEST_SOURCE_DIR for the nm/grep probes.
+add_threading_test(session_layering test_session_layering.cpp)
+target_compile_definitions(session_layering PRIVATE
+  FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# ── 009-session-fsm-finalize T006 — Session::send path test (US1 FR-001) ────
+# TDD red: T006 authors RED (compile + fail); T007 + T008 turn GREEN.
+# Uses session_test_support OBJECT library (T005 frame_field_extract helper).
+# F3 (Round-A drift): FIXPP_TEST_HOOKS enables seqnum_mgr_test_access() on Session
+# so tests can verify SeqnumManager counter consistency after send().
+add_threading_test(session_send_path send_path_test.cpp
+  $<TARGET_OBJECTS:session_test_support>)
+target_compile_definitions(session_send_path PRIVATE FIXPP_TEST_HOOKS)
+
+# ── 009-session-fsm-finalize Phase 6 (US4) — T019/T021 ──────────────────────
+
+# T019 — cross-session TestReqID disjointness + monotonicity (FR-010 / SC-003).
+# Registered under BOTH debug (assertion-level checks) AND tsan (data-race check).
+# The tsan preset selection is handled by the preset's toolchain; both CTest entries
+# exist unconditionally and the TSan-specific race detection fires only on the
+# linux-clang-tsan build.
+#
+# CTest label `session_` picks this test up with `-R 'session_|tc_'`.
+add_threading_test(session_test_request_id_cross_session_race
+  test_test_request_id_cross_session_race.cpp)
+
+# T021 — SeqnumManager::drain() called in close() (FR-011 / SC-004).
+# Tests: CloseWithHolderDoesNotTerminate + NeverOpenedDestructionSafe +
+#        OpenThenCloseTerminalIdempotent + DrainCalledByClose.
+# RED before T022 (close() does not call drain); GREEN after T022.
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session and
+# mutex_test_access() on SeqnumManager (needed for holder-during-drain scenario).
+add_threading_test(session_seqnum_drain_on_close
+  test_seqnum_drain_on_close.cpp)
+target_compile_definitions(session_seqnum_drain_on_close PRIVATE FIXPP_TEST_HOOKS)
+
+# ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
+# Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
+add_subdirectory(conformance)

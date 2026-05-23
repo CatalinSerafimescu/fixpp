@@ -4,6 +4,8 @@
 
 add_library(fixpp_core STATIC
   decimal.cpp
+  fix_time.cpp         # 005-session-establishment-fsm T011: FIX UTCTimestamp
+                       # formatter + parser (core/ module-exit row #4, D-3).
 )
 add_library(fixpp::core ALIAS fixpp_core)
 

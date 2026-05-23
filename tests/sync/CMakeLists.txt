@@ -144,4 +144,13 @@ add_test(NAME check_no_std_mutex_corpus
     --
     "${CMAKE_SOURCE_DIR}/include/fixpp/core/sync/async_mutex.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/async_lock_via_session_executor.hpp"
+    # 005-session-establishment-fsm T064 (Phase 8) — extend the [const §XV.9]
+    # grep gate over every 005-owned awaitable-including header. Each must
+    # NOT name any of the FR-014 six banned std::mutex types post-preprocess.
+    "${CMAKE_SOURCE_DIR}/include/fixpp/core/fix_time.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/admin_messages.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/sending_time.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/seqnum_manager.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/session_fsm.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/session.hpp"
 )

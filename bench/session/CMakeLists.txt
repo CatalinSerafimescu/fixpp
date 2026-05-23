@@ -23,3 +23,12 @@ endfunction()
 #    bench_file_store) ────────────────────────────────────────────────────────
 add_store_bench(bench_memory_store bench_memory_store.cpp)
 add_store_bench(bench_file_store   bench_file_store.cpp)
+
+# ── 005-session-establishment-fsm T061 (Phase 8) bench registrations ────────
+# Tier-1 latency benches against the plan.md Technical-Context ceilings
+# ([2e §6.6] / [2d §6.3]). ±5% regression gate per [const §VIII.2]; baselines
+# under bench/baselines/session/. See each .cpp header for scope/deferral.
+add_store_bench(fsm_bench       fsm_bench.cpp)
+add_store_bench(seqnum_bench    seqnum_bench.cpp)
+add_store_bench(fix_time_bench  fix_time_bench.cpp)
+add_store_bench(heartbeat_bench heartbeat_bench.cpp)

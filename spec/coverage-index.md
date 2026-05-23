@@ -107,7 +107,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §5.4.5 | LFIXT succinct mode | N | S-028 | informative |
 | §6 | FIX message routing | Y | S-016 | — |
 | §6.1 | Message routing — point-to-point | Y | S-016 | — |
-| §6.2 | Message routing — third-party routing (OnBehalfOf/DeliverTo) | Y | S-016, TC-016 | — |
+| §6.2 | Message routing — third-party routing (OnBehalfOf/DeliverTo) | Y | S-016, TC-016 | 005-defer: `OnBehalfOfCompID(115)`/`DeliverToCompID(128)` third-party addressing is the non-49/56 portion of S-016 — deferred-with-traceability to a later third-party-addressing feature; 005 owns only the 49/56 point-to-point portion (see 005 ledger below) |
 | §7 | Transmitting alternatively encoded messages | Y | — | out-of-scope → dropped(post-1.0: alt encoding framing; SOFH W-016 tracks SOFH framing) |
 | §7.1 | Use of Attachment group | Y | — | out-of-scope → dropped(post-1.0: attachment group) |
 
@@ -372,21 +372,42 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 | 5 | Receive Heartbeat message | Y | TC-004 | — |
 | 6 | Send Test Request | Y | TC-004 | — |
 | 7 | Receive Reject message | Y | TC-005 | — |
-| 8 | Receive Resend Request message | Y | TC-006 | — |
-| 9 | Synchronize sequence numbers | Optional | TC-014 | — |
-| 10 | Receive Sequence Reset (Gap Fill) | Y | TC-007 | — |
-| 11 | Receive Sequence Reset (Reset) | Y | TC-008 | — |
+| 8 | Receive Resend Request message | Y | TC-006 | 005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below) |
+| 9 | Synchronize sequence numbers | Optional | TC-014 | 005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below) |
+| 10 | Receive Sequence Reset (Gap Fill) | Y | TC-007 | 005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below) |
+| 11 | Receive Sequence Reset (Reset) | Y | TC-008 | 005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below) |
 | 12 | Initiate logout process | Y | TC-009 | — |
 | 13 | Receive Logout message | Y | TC-009 | — |
-| 14 | Receive application or session layer message | Y | TC-010 | — |
+| 14 | Receive application or session layer message | Y | TC-010 | 005-partial: scenario-14 corpus is exactly `14a`–`14j`; 005 ships `14a`–`14g` (session-layer reject taxonomy) in scope; `14h_RepeatedTag`/`14i_RepeatingGroupCountNotEqual`/`14j_OutOfOrderRepeatingGroupMembers` are repeating-group/repeated-tag dictionary-validation cases deferred-with-traceability (see 005 ledger below) |
 | 15 | Send application or session layer messages (field ordering) | Optional | TC-015 | — |
 | 16 | Queue outgoing messages | Y | TC-011 | — |
 | 17 | Support encryption (legacy EncryptMethod) | Optional | TC-017 | — |
 | 18 | Support third-party addressing | Optional | TC-016 | — |
-| 19 | PossResend handling | Y | TC-012 | — |
+| 19 | PossResend handling | Y | TC-012 | 005-defer: PossDup/PossResend (S-010) recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below) |
 | 20 | Simultaneous Resend request | Y | TC-013 | — |
 
-**Conclusion:** All 20 FIX-TC scenarios map to TC-001–TC-017. TC-001 covers 1B+1S; TC-002 covers 2S+2; TC-004 covers 4+5+6; TC-009 covers 12+13. No FIX-TC gaps.
+**Conclusion:** All 20 FIX-TC scenarios map to TC-001–TC-017. TC-001 covers 1B+1S; TC-002 covers 2S+2; TC-004 covers 4+5+6; TC-009 covers 12+13. No FIX-TC catalogue-mapping gaps. **Per-feature delivery scope is not full per PR:** feature `005-session-establishment-fsm` ships only the capability-partitioned in-scope subset green and records the rest deferred-with-traceability — see the **005 session-establishment — scope-deferral ledger** below (these are recorded, traceable scope deferrals, not silent omissions).
+
+---
+
+## 005 session-establishment — scope-deferral ledger
+
+> Recorded for `[const §I.4]` (no silent omission) and the `[const §VII.5]` Gate-A blocker waiver (Art XVII §1) carried by feature `005-session-establishment-fsm`. Feature `005` ships only the in-scope `[FIX-TC]` subset green this PR; the entries below are deferred-with-traceability to the named successor work. `[const §VII.5]` (full TC corpus per PR) is NOT satisfied by 005 and proceeds under an explicit recorded Gate-A blocker waiver (`[const §XVII.1]`, `constitution.md:255`); see `specs/005-session-establishment-fsm/plan.md` Constitution Check + Complexity Tracking.
+
+| Deferred item | Catalogue / scenario | Reason | Discharged by |
+|---|---|---|---|
+| Too-high `MsgSeqNum` oracle cases (`1a_ValidLogonMsgSeqNumTooHigh`, `2b_MsgSeqNumTooHigh`) | TC-001/TC-002 (QFJ `fix42`/`fix44`) | Require the deferred `ResendRequest(35=2)` to pass the QFJ comparison; 005 treats too-high as session-fatal (Logout-with-text → disconnect), recovery is out of scope | later session-recovery feature |
+| ResendRequest / SequenceReset-GapFill / SequenceReset-Reset / synchronize-seqnums | scenarios 8, 10, 11, 9 → TC-006/TC-007/TC-008/TC-014 | Recovery-dependent (gap-fill / store-recovery) | later session-recovery feature |
+| PossDup / PossResend duplicate semantics (S-010) | scenario 19 → TC-012 | Recovery-dependent duplicate handling | later session-recovery feature |
+| Scenario-14 repeating-group/repeated-tag cases `14h`/`14i`/`14j` | scenario 14 → TC-010 | Repeating-group / repeated-tag dictionary-validation territory, not session-layer reject taxonomy; 005 ships `14a`–`14g` | later dictionary-validation / wire follow-up |
+| S-016 third-party addressing `OnBehalfOfCompID(115)`/`DeliverToCompID(128)` | `[FIX-SL §6.2]`, scenario 18 → S-016/TC-016 | Separable session-routing work; 005 owns only the 49/56 point-to-point portion of S-016 | later third-party-addressing feature |
+| Version-scope: FIX.4.0/4.1/4.3/5.0 establishment + FIXT.1.1/5.0SP2 (no oracle dir; `DefaultApplVerID(1137)`/`[FIX-SL §4.4]`) | S-001/S-008/S-009/S-015/S-016/S-019/S-020 | QFJ oracle has no `fixt11`/`fix50sp2` dir; 4.0/4.1/4.3/5.0 are runtime-XML-only with no typed namespace in v1.0 (`[const §I.1]`); 005 validates FIX.4.2/4.4 only | later version-coverage / FIXT work |
+
+> **Per-row delivery scope (delivered slice).** Catalogue rows `S-001`, `S-002`, `S-003`, `S-004`, `S-007`, `S-008`, `S-009`, `S-015`, `S-016`, `S-019`, `S-020` — and the folded `core/` time-helper row #4 (`utc_time_to_fix_string` / `fix_string_to_utc_time` for `SendingTime(52)`) — are delivered by 005 as the **FIX.4.2/4.4 point-to-point establishment slice only**, not their full version span. `S-016` is delivered as the 49/56 portion only; the `OnBehalfOfCompID(115)`/`DeliverToCompID(128)` portion is the third-party-addressing deferral above. FIXT.1.1 / 5.0SP2 establishment is **explicitly NOT claimed** by 005 (FR-017 + SC-001 — the QFJ oracle has no `fixt11`/`fix50sp2` directory and FIXT logon-time semantics, including `DefaultApplVerID(1137)`, are deferred).
+>
+> **Ledger close-out (2026-05-22, Phase 8 T065).** The entries above are complete against the Session-2026-05-17 Q2 → Session-2026-05-18 re-scope and the Gate-A `[const §VII.5]` Article-XVII §1 recorded waiver carried by 005. No further deferrals are introduced by 005 Phases 1–8; any successor session-recovery / version-coverage / third-party-addressing feature discharges its rows by amending this ledger at merge.
+>
+> **009-session-fsm-finalize close-out (2026-05-23, T029).** Closed the FR-001 / FR-002 / FR-003 / FR-011 / FR-013 binding-contract drifts on 005's rows per `[[project_005_phase8_completeness_false_pass]]` (PR #81 round-1 hostile-review findings). 005 deferral ledger unchanged: no new deferral row, no green-via-009 of a deferred case. Slice scope was implementation-drift closure against the Gate-A-converged 005 design (Gate A not re-run; the design is unchanged). See `.specify/decisions/009-session-fsm-finalize-verify.md` for the YELLOW non-RED verify verdict; one pre-existing 005-baseline ASan UAF (`src/session/session.cpp:116`, `Session::open` config-ref lifetime) recorded as W-5 for a follow-on slice.
 
 ---
 
