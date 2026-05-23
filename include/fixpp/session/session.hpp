@@ -387,9 +387,12 @@ private:
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
     // Written exclusively via record_state_transition_; ring wraps at index 16.
-    // fsm_visit_count_ saturates at UINT8_MAX to avoid overflow.
+    // fsm_visit_count_ saturates at UINT8_MAX to avoid overflow; the write index
+    // is tracked separately (fsm_visit_write_idx_) so the ring keeps rotating
+    // even after fsm_visit_count_ saturates (F-13 fix).
     std::array<fsm_state, 16> fsm_visit_history_{};
-    std::uint8_t fsm_visit_count_ = 0;
+    std::uint8_t  fsm_visit_count_     = 0;
+    std::uint32_t fsm_visit_write_idx_ = 0;
 
     // FR-004 / D-2 — route every FSM transition through this helper so the
     // ring-buffer is always in sync with fsm_state_.

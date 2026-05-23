@@ -991,9 +991,10 @@ TEST_F(FsmMatrixWitness, LO_InboundHeartbeat_Drained_StaysLogoutSent) {
     // FR-006: E04 from LogoutSent → (drained), FSM remains LogoutSent.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
-    if (!drive_to_logout_sent(sess)) {
-        GTEST_SKIP() << "Could not reach LogoutSent within 50 ms";
-    }
+    ASSERT_TRUE(drive_to_logout_sent(sess))
+        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "FSM staging regression on the Active → LogoutSent path. "
+        << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
 
     // Feed Heartbeat (seq=3, one past the Logout we emitted).
@@ -1012,9 +1013,10 @@ TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     // FR-006: E07 from LogoutSent → Disconnected (confirm).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
-    if (!drive_to_logout_sent(sess)) {
-        GTEST_SKIP() << "Could not reach LogoutSent within 50 ms";
-    }
+    ASSERT_TRUE(drive_to_logout_sent(sess))
+        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "FSM staging regression on the Active → LogoutSent path. "
+        << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
 
     // Feed confirming Logout from peer.
@@ -1040,9 +1042,10 @@ TEST_F(FsmMatrixWitness, LO_InboundOutOfScopeAdmin_Drained_StaysLogoutSent) {
     // FR-006: E08 from LogoutSent → (drained).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
-    if (!drive_to_logout_sent(sess)) {
-        GTEST_SKIP() << "Could not reach LogoutSent within 50 ms";
-    }
+    ASSERT_TRUE(drive_to_logout_sent(sess))
+        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "FSM staging regression on the Active → LogoutSent path. "
+        << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
 
     std::string extra = "7=1\x01" "16=0\x01";
@@ -1068,9 +1071,10 @@ TEST_F(FsmMatrixWitness, LogoutSent_GracefulCloseTimeout_TransitionsToDisconnect
     // This also serves as the E15 attestation (same → Disconnected outcome).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
-    if (!drive_to_logout_sent(sess)) {
-        GTEST_SKIP() << "Could not reach LogoutSent within 50 ms";
-    }
+    ASSERT_TRUE(drive_to_logout_sent(sess))
+        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "FSM staging regression on the Active → LogoutSent path. "
+        << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
 
     // Advance clock to trigger the 2s timeout → Disconnected.

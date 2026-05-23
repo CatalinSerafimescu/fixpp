@@ -100,10 +100,11 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
-// fsm_state_. The count saturates at UINT8_MAX to prevent wrap-around from
-// silently resetting the index.
+// fsm_state_. The write index (fsm_visit_write_idx_) is a separate uint32 that
+// always advances; the public count (fsm_visit_count_) saturates at UINT8_MAX
+// to signal "≥255 transitions" without freezing the ring rotation.
 void Session::record_state_transition_(fsm_state new_state) noexcept {
-    fsm_visit_history_[fsm_visit_count_ % 16] = new_state;
+    fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;
     if (fsm_visit_count_ < std::numeric_limits<std::uint8_t>::max()) {
         ++fsm_visit_count_;
     }
