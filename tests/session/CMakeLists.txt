@@ -388,6 +388,12 @@ add_threading_test(session_admin_builder_distinct_now admin_builder_distinct_now
 add_threading_test(session_admin_emit_mixed_path admin_emit_mixed_path_test.cpp)
 target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOKS)
 
+# T021 — Initiator transport-throw witness (FR-009 / SC-007).
+# Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
+# Exercises Session::open() when transport.send() throws during Logon emit;
+# asserts dispatch_aborted return and LogonSent FSM end-state per 005 design.
+add_threading_test(session_initiator_transport_throw initiator_transport_throw_test.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
