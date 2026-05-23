@@ -26,13 +26,17 @@ All other `Session` members and methods are **unchanged**. The 005-defined field
 
 ---
 
-## E2 — `SessionConfig` (verified copyable)
+## E2 — `SessionConfig` (made copyable via store_factory amendment)
 
-005 anchor: `specs/005-session-establishment-fsm/data-model.md` E2. 009 added the `session_role` field. 010 makes no edit to `SessionConfig` itself — but adds a verification gate.
+005 anchor: `specs/005-session-establishment-fsm/data-model.md` E2. 009 added the `session_role` field. 010 amends ONE field to make `SessionConfig` copy-constructible (W-5 enabler).
 
-**Verification gate** (FR-001 D-1 hygiene check): the header `include/fixpp/session/session_config.hpp` MUST contain a top-level `static_assert(std::is_copy_constructible_v<SessionConfig>);` immediately after the class definition. The assert pins the by-value-membership contract: if a future contributor adds a non-copyable member (e.g. a `std::unique_ptr` to a session-scoped resource), the compile breaks and 010's by-value `Session::cfg_` decision is forced into review.
+| Field | Before (post-009) | After (010) | FR / D | Rationale |
+|---|---|---|---|---|
+| `store_factory` | `std::unique_ptr<MessageStoreFactory> store_factory;` | `std::shared_ptr<MessageStoreFactory> store_factory;` | FR-001a (W-5 enabler) / research D-1 amendment | Makes `SessionConfig` copy-constructible. `MessageStoreFactory` is a stateless interface (only `make()`); sharing is meaningful; per-Session MessageStore uniqueness is preserved (each Session calls `make()` on the shared factory). Call sites that assign `cfg.store_factory = std::make_unique<...>(...)` continue to work via implicit `unique_ptr&&→shared_ptr` move-conversion. |
 
-No field added or removed.
+**Verification gate** (FR-001 D-1 hygiene check): the header `include/fixpp/session/session_config.hpp` MUST contain a top-level `static_assert(std::is_copy_constructible_v<SessionConfig>);` immediately after the class definition. The assert pins the by-value-membership contract: if a future contributor adds a non-copyable member, the compile breaks and 010's by-value `Session::cfg_` decision is forced into review. The assert WAS the discovery mechanism for the unique→shared amendment (the static_assert added at the first T006 attempt failed, surfacing the `store_factory` constraint).
+
+No other field added or removed.
 
 ---
 

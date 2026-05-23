@@ -45,6 +45,7 @@
 // nested type alias flush_hook_fn requires it).
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
+#include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
 #include <fixpp/session/session_fsm.hpp>     // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core {
@@ -53,8 +54,6 @@ class Clock;
 }  // namespace fixpp::core
 
 namespace fixpp::session {
-
-struct SessionConfig;
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
 // hook once → Logout exchange under a CHILD asio::cancellation_state below
@@ -67,8 +66,10 @@ class Session {
 public:
     // The ctor pre-conditions a non-null session_arena via the [2d §4.5]
     // resolution chain so session_arena()'s never-null contract holds for
-    // the whole session lifetime (I-18). engine/cfg are borrowed and MUST
-    // outlive the Session (engine-owned lifetime — [arch §4.4]).
+    // the whole session lifetime (I-18). engine is borrowed and MUST
+    // outlive the Session (engine-owned lifetime — [arch §4.4]). cfg is
+    // COPIED into cfg_ by value (FR-001 / D-1 / W-5 lifetime fix); the
+    // caller may freely drop or mutate the config after the ctor returns.
     Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg) noexcept;
 
     Session(const Session&) = delete;
@@ -284,7 +285,7 @@ public:
 
 private:
     const fixpp::core::EngineConfig& engine_;
-    const SessionConfig& cfg_;
+    SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or mutate the config after the ctor returns without causing UAF
     std::pmr::memory_resource* session_arena_;  // resolved in ctor, never null
 
     fixpp::core::session_executor exec_;                   // bound at open() (T020)

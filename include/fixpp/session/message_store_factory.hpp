@@ -7,10 +7,17 @@
 //
 // History: 007 shipped the MINIMAL polymorphic-bind-target stub (deleted
 // move/copy + virtual destructor only) so SessionConfig's
-// unique_ptr<MessageStoreFactory> at session_config.hpp:106 could carry a
+// shared_ptr<MessageStoreFactory> at session_config.hpp:127 could carry a
 // complete type ([2d §4.5] Appendix D §D.1). 008 EXTENDS the class in place
 // (preserving the class identity, the deleted move/copy, the virtual
-// destructor) by adding the make() pure-virtual.
+// destructor) by adding the make() pure-virtual. 010 FR-001a amended
+// SessionConfig::store_factory from unique_ptr to shared_ptr (W-5 enabler:
+// makes SessionConfig copy-constructible for the by-value Session::cfg_
+// membership decided at /speckit-clarify); the factory is stateless and
+// the per-Session MessageStore uniqueness invariant is preserved because
+// each Session calls make() to mint its own store. See specs/010-session-
+// cfg-lifetime/spec.md FR-001a and the Gate A inheritance addendum at
+// library/.specify/decisions/010-session-cfg-lifetime-gatea.md (T027b).
 //
 // Anchor: .specify/2e-msgstore.md v0.5 §4.4 (N1 — unique_ptr ownership) +
 // Appendix D §D.6 (Gap 3 close — store-object deleter contract). FR-005 /

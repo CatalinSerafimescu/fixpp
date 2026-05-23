@@ -256,17 +256,17 @@ add_threading_test(session_logon_handshake logon_handshake_test.cpp)
 # seam corpus doesn't exercise: builder buffer-too-small, parser malformed
 # field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
 add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
-# W-5 waiver carry-forward: pre-existing 005-baseline stack-use-after-scope
-# at src/session/session.cpp:116 (cfg_ const-ref dereferenced after the
-# fixture-local SessionConfig leaves scope). Verified pre-009 via
-# `git show 4e621e1:src/session/session.cpp`; the cfg_ lifetime refactor
-# (by-value member / owning shared_ptr / arena-tracked) is the explicit
-# subject of follow-on slice 010-session-cfg-lifetime. Skip under ASan
-# until 010 lands so CI doesn't re-fire the documented baseline; non-ASan
-# presets keep running the 14 adversarial-input scenarios as before.
-if(FIXPP_ENABLE_ASAN)
-  set_tests_properties(session_coverage_adversarial PROPERTIES DISABLED TRUE)
-endif()
+# FR-003 (010-session-cfg-lifetime): W-5 ASan skip removed. The
+# stack-use-after-scope at cfg_ is fixed by the by-value member change
+# (T008/T009). session_coverage_adversarial now runs under ASan clean.
+
+# ── 010-session-cfg-lifetime T007 — FR-001 / FR-002 / SC-001 ─────────────────
+# Lifetime safety tests for by-value SessionConfig cfg_ member (W-5 fix).
+# Three runtime contracts verified under both debug and ASan:
+#   A. CallerCfgDropsAfterCtor_SessionContinuesWithoutUAF
+#   B. CallerMutatesCfgAfterCtor_SessionUnaffected
+#   C. MultipleSessionsFromSameCfgEvolveIndependently
+add_threading_test(session_cfg_lifetime_safety cfg_lifetime_safety_test.cpp)
 
 # ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
 # Red-first TDD: authored before T031–T036 implementation.

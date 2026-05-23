@@ -21,8 +21,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/message_store_factory.hpp>  // unique_ptr member ⇒ complete type
+#include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
@@ -123,7 +124,7 @@ struct SessionConfig {
 
     session_role role = session_role::initiator;  // FR-004; default preserves 005 behavior
 
-    std::unique_ptr<MessageStoreFactory> store_factory;  // unique ownership
+    std::shared_ptr<MessageStoreFactory> store_factory;  // FR-001a — shared ownership (was unique_ptr pre-010); stateless factory may be shared across Sessions, each calling make() to mint its own MessageStore (per-Session uniqueness invariant preserved)
     std::shared_ptr<fixpp::tls::cert_source> cert_source;
     fixpp::session::SecurityProfile
         security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects
@@ -156,5 +157,18 @@ struct SessionConfig {
     // ([const §XV.9] grep gate: this field is a std::function, not std::mutex.)
     std::function<void(std::span<const std::byte>)> transport_send;
 };
+
+// FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so
+// Session can hold it by value (W-5 lifetime fix, 010-session-cfg-lifetime).
+// This static_assert fires at compile time if any future field addition breaks
+// copyability (e.g., a unique_ptr<T> member). The std::shared_ptr<T> pattern
+// (as used for store_factory post FR-001a amendment) is copy-constructible;
+// unique_ptr<T> is not. Amendment: if a field must be non-copyable, convert
+// it to shared_ptr per the FR-001a amendment pattern and update this comment.
+static_assert(std::is_copy_constructible_v<SessionConfig>,
+              "SessionConfig must be copy-constructible per 010 W-5 by-value "
+              "Session::cfg_ membership (FR-001 / D-1). If a new field is not "
+              "copy-constructible (e.g. unique_ptr<T>), convert to shared_ptr<T> "
+              "following the FR-001a amendment pattern for store_factory.");
 
 }  // namespace fixpp::session
