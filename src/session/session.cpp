@@ -785,12 +785,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.begin_string, st52.value);
                         if (rj_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            if (assign_r) {
-                                auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            if (!assign_r) {
+                                fsm_state_ = fsm_state::Disconnected;
+                                co_return std::unexpected(assign_r.error());
                             }
-                            // else: overflow/closed — skip emit; session-fatal,
-                            //       Disconnect happens unconditionally below (Step 3).
+                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                         }
                     }
                     // Step 2: emit Logout(35=5).
@@ -803,11 +803,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             {}, cfg_.begin_string, st52.value);
                         if (lo_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            if (assign_r) {
-                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            if (!assign_r) {
+                                fsm_state_ = fsm_state::Disconnected;
+                                co_return std::unexpected(assign_r.error());
                             }
-                            // else: overflow/closed — skip emit; Disconnect below.
+                            auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                         }
                     }
                     // Step 3: Disconnect.
@@ -853,12 +854,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         {}, cfg_.begin_string, st52.value);
                     if (logout_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        if (assign_r) {
-                            auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
-                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        if (!assign_r) {
+                            fsm_state_ = fsm_state::Disconnected;
+                            co_return std::unexpected(assign_r.error());
                         }
-                        // else: overflow/closed — skip emit; Disconnect below
-                        //       is unconditional per the matrix cell.
+                        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
+                        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
                 }
                 // Both Active and LogonReceived → Disconnected.
@@ -1062,11 +1063,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         sending_time_error, cfg_.begin_string, st52.value);
                     if (lo_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        if (assign_r) {
-                            auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        if (!assign_r) {
+                            fsm_state_ = fsm_state::Disconnected;
+                            co_return std::unexpected(assign_r.error());
                         }
-                        // else: overflow/closed — skip emit; Disconnect below.
+                        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
                     fsm_state_ = fsm_state::Disconnected;
                     co_return fixpp::core::expected_t<void>{};
