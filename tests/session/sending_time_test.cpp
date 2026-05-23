@@ -474,14 +474,17 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
     ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
 
-    // Feed valid peer Logon → NotConnected → LogonReceived.
+    // Feed valid peer Logon → NotConnected → (LogonReceived) → Active.
+    // F1 (Round-A drift fix): acceptor now emits reply Logon and transitions to Active
+    // within on_inbound_frame; LogonReceived is internal/transient. After feed_sync
+    // the state is Active (spec.md FR-005 §US2 AC2).
     auto peer_logon = make_frame_with_sending_time(
         "FIX.4.2", "A", 1, "TW", "ISLD",
         "20240101-00:00:00.000",
         "98=0\x01""108=30\x01");
     f.feed(sess, peer_logon);
-    ASSERT_EQ(sess.state(), fsm_state::LogonReceived)
-        << "acceptor must be in LogonReceived after valid peer Logon";
+    ASSERT_EQ(sess.state(), fsm_state::Active)
+        << "acceptor must be in Active after valid peer Logon (F1 drift fix: LogonReceived is transient)";
 
     const std::size_t before = f.transport.sent_count();
 

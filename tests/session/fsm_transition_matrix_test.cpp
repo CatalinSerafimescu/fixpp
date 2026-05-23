@@ -390,8 +390,9 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_NonLogonFirstMessage_TransitionsToD
 
 // Acceptor-shaped NotConnected: a fresh session (no open() called) receives a
 // valid peer Logon (BeginString + CompID + seqnum=1 all match cfg). Per the
-// matrix row NotConnected×Logon(valid), the FSM transitions to LogonReceived
-// (session.cpp:578).
+// matrix row NotConnected×Logon(valid), the FSM transitions through LogonReceived
+// to Active (the acceptor emits its own Logon reply on the LogonReceived→Active
+// transition, F1 Round-A drift fix, spec.md FR-005 §US2 AC2).
 TEST_F(FsmTransitionMatrixTest, NotConnected_ValidLogonFromPeer_LandsInLogonReceived) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
@@ -424,9 +425,12 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_ValidLogonFromPeer_LandsInLogonRece
 
     (void)feed_sync(sess, frame);
 
-    EXPECT_EQ(sess.state(), fsm_state::LogonReceived)
+    // F1 (Round-A drift fix): acceptor now emits reply Logon and transitions to Active
+    // within on_inbound_frame. The LogonReceived state is transient and internal;
+    // after feed_sync returns, state must be Active (spec.md FR-005 §US2 AC2).
+    EXPECT_EQ(sess.state(), fsm_state::Active)
         << "NotConnected + valid peer Logon (acceptor first message) must "
-        << "transition to LogonReceived (session.cpp:578)";
+        << "transition through LogonReceived to Active (FR-005/F1 drift fix)";
 }
 
 // T013 [US3] — FR-006: refused Logon on NotConnected row → Disconnected (not preserved).

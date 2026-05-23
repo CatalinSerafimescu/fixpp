@@ -11,6 +11,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
 #include <asio/awaitable.hpp>
+#include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
@@ -258,14 +259,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         const int heartbt_sec = cfg_.heartbeat_interval.has_value()
             ? static_cast<int>(cfg_.heartbeat_interval->count())
             : 30;  // D-8 default 30 s
+        // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
+        // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
+        // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
+        const seqnum_t logon_seq = next_outbound_seq_;  // peek
         auto logon_result = fixpp::session::build_logon(
             std::span<std::byte>{logon_buf.data(), logon_buf.size()},
-            next_outbound_seq_++,
+            logon_seq,
             cfg_.sender_comp_id, cfg_.target_comp_id,
             cfg_.begin_string, heartbt_sec, sending_time_view);
-        if (logon_result) {
-            auto emit_r = co_await store_then_emit(*logon_result);
-            (void)emit_r;
+        if (!logon_result) {
+            // build_logon failed (oversized IDs → wire_frame_too_large).
+            // Propagate as an open() error; seqnum NOT consumed. [F6 drift fix]
+            co_return std::unexpected(logon_result.error());
+        }
+        ++next_outbound_seq_;  // advance ONLY on build success
+        auto emit_r = co_await store_then_emit(*logon_result);
+        if (!emit_r) {
+            // store_then_emit failed (store I/O or transport error).
+            // Propagate error; seqnum was advanced but no message was delivered.
+            // [F7 drift fix; spec.md FR-001(e)]
+            co_return std::unexpected(emit_r.error());
         }
     } else {
         // Acceptor: stay in NotConnected, emit nothing.
@@ -630,9 +644,66 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
-            // Valid Logon + in-seq: transition to LogonReceived.
-            // The echo Logon build/send (acceptor replies) is wired in T026.
+            // Valid Logon + in-seq: transition to LogonReceived, then emit
+            // the acceptor's own Logon reply and transition to Active.
+            // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
             fsm_state_ = fsm_state::LogonReceived;
+
+            // Emit the acceptor reply Logon using the same admin-builder path
+            // as the initiator's open() Logon. [spec.md FR-005 line 112]
+            {
+                std::array<std::byte, 256> reply_buf{};
+                std::array<char, 32> reply_time_buf{};
+                std::string_view reply_sending_time_view;
+                if (effective_clock_) {
+                    auto fmt_r = fixpp::session::stamp_sending_time(
+                        effective_clock_->now(),
+                        std::span<char>{reply_time_buf.data(), reply_time_buf.size()});
+                    if (fmt_r) {
+                        reply_sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+                    }
+                }
+                const int heartbt_sec = cfg_.heartbeat_interval.has_value()
+                    ? static_cast<int>(cfg_.heartbeat_interval->count())
+                    : 30;  // D-8 default 30 s
+
+                // seq for the reply Logon — peek then advance on success (F6 pattern).
+                const seqnum_t reply_seq = next_outbound_seq_;
+                auto reply_logon = fixpp::session::build_logon(
+                    std::span<std::byte>{reply_buf.data(), reply_buf.size()},
+                    reply_seq,
+                    cfg_.sender_comp_id, cfg_.target_comp_id,
+                    cfg_.begin_string, heartbt_sec, reply_sending_time_view);
+                if (reply_logon) {
+                    ++next_outbound_seq_;
+                    auto emit_r = co_await store_then_emit(*reply_logon);
+                    (void)emit_r;  // I-07: logged-then-proceed
+                }
+                // If build fails (oversized IDs), stay in LogonReceived without
+                // emitting — the session will not progress to Active. This is
+                // acceptable: the root cause is a misconfigured session.
+            }
+
+            // Transition to Active (LogonReceived→Active) if the reply was emitted.
+            // If build_logon above failed (no emit), fsm_state_ stays LogonReceived
+            // and the session stalls — this is the correct behaviour per I-07
+            // (build failure is a config error, not a wire protocol error).
+            // For normal sessions (valid IDs), this always reaches Active.
+            if (fsm_state_ == fsm_state::LogonReceived) {
+                // Reply Logon was attempted; transition to Active.
+                // T039/T041 (US3): seed last_inbound_steady_ and spawn liveness.
+                if (effective_clock_) {
+                    last_inbound_steady_ = effective_clock_->steady_now();
+                }
+                fsm_state_ = fsm_state::Active;
+                // Spawn liveness loop (same as initiator's LogonSent→Active path).
+                {
+                    auto ex = co_await asio::this_coro::executor;
+                    // NOLINTNEXTLINE(misc-include-cleaner)
+                    asio::co_spawn(ex, run_liveness_loop(),
+                                   asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
+                }
+            }
             co_return fixpp::core::expected_t<void>{};
         }
 
@@ -1020,11 +1091,67 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
     using fixpp::core::error;
 
+    // F4 (Round-A drift): FSM precondition — Session::send is only valid in Active.
+    // spec.md US1 ACs all premise Active; sending while in LogonSent/NotConnected/
+    // LogonReceived/LogoutSent/Disconnected is a programmer error.
+    // [spec.md US1; data-model.md §E1 Session::send; F4 drift fix]
+    if (fsm_state_ != fsm_state::Active) {
+        co_return std::unexpected(error::session_invalid_logon);
+    }
+
+    // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
+    // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
+    // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
+    // The noexcept window on this coroutine must never let an uncaught exception
+    // propagate (std::terminate). [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+    try {
+        auto impl_r = co_await send_impl(app_payload);
+        // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
+        // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
+        if (!impl_r && impl_r.error() == error::dispatch_aborted) {
+            fsm_state_ = fsm_state::Disconnected;  // [spec.md US1 AC3; F9 drift fix]
+        }
+        co_return impl_r;
+    } catch (const asio::system_error& e) {
+        if (e.code() == asio::error::operation_aborted) {
+            // Uncaught operation_aborted from a co_await inside send_impl —
+            // transition to Disconnected per US1 AC3. [spec.md US1 AC3; F5+F9 drift fix]
+            fsm_state_ = fsm_state::Disconnected;
+            co_return std::unexpected(error::dispatch_aborted);
+        }
+        // Unexpected system_error — still transition to Disconnected (I-09).
+        fsm_state_ = fsm_state::Disconnected;
+        co_return std::unexpected(error::dispatch_aborted);
+    } catch (...) {
+        // Unexpected exception from send_impl — transition to Disconnected (I-09).
+        fsm_state_ = fsm_state::Disconnected;
+        co_return std::unexpected(error::dispatch_aborted);
+    }
+}
+
+// send_impl: the actual send pipeline, called from the noexcept wrapper above.
+// May throw asio::system_error on cancellation of the store awaitable.
+// Separated so the outer noexcept wrapper can catch and convert to expected_t.
+// [F5 Round-A drift fix: noexcept-throw trap separation]
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
+    std::span<const std::byte> app_payload) {
+    using fixpp::core::error;
+
     // (1) Stamp SendingTime(52) from effective_clock.now().
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
 
-    // (2) Assign outbound MsgSeqNum(34) — consistent with admin-builder pattern.
-    const seqnum_t seq = next_outbound_seq_++;
+    // (2) Assign outbound MsgSeqNum(34) via SeqnumManager::assign_outbound() per
+    // spec.md FR-001(a). Peek the current value; advance on success of emit.
+    // F3 (Round-A drift): switched from bare next_outbound_seq_++ to
+    // seqnum_mgr_.assign_outbound() so both counters stay in sync.
+    // [spec.md FR-001(a); data-model.md §E1; F3 drift fix]
+    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+    if (!assign_r) {
+        co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
+    }
+    const seqnum_t seq = *assign_r;
+    // Also advance next_outbound_seq_ to keep it in sync with the manager.
+    next_outbound_seq_ = seq + 1U;
 
     // (3) Build the frame into a 4096-byte stack buffer.
     std::array<std::byte, 4096> buf{};
@@ -1311,8 +1438,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // The outbound seqnum was already stamped into the frame by the builder;
         // pass next_outbound_seq_ - 1 (the value that was stamped).
         const seqnum_t stamped_seq = next_outbound_seq_ - 1U;
-        auto store_r = co_await store_->store(stamped_seq, frame, direction_t::outbound);
-        (void)store_r;  // store errors → logged-then-proceed (I-07)
+        // F5 (Round-A drift): wrap co_await store_->store() in try/catch to absorb
+        // asio::system_error{operation_aborted} thrown by the store awaitable on
+        // cancellation. Without this, the throw propagates out of the noexcept
+        // store_then_emit frame → std::terminate.
+        // [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+        try {
+            auto store_r = co_await store_->store(stamped_seq, frame, direction_t::outbound);
+            (void)store_r;  // store errors → logged-then-proceed (I-07)
+        } catch (const asio::system_error& e) {
+            if (e.code() == asio::error::operation_aborted) {
+                // Cancellation won before the store committed. Per US1 AC3 and I-07:
+                // propagate as an error so the caller can transition to Disconnected.
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+            // Non-abort system_error: absorb (I-07 logged-then-proceed on store path).
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption:
+            // any other exception from the store awaitable is absorbed (I-07).
+        }
     }
 
     // Step 2: transmit (ONLY after store completes — I-3).

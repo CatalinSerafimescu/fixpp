@@ -420,6 +420,13 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         std::span<const std::byte> frame) noexcept;
 
+    // send_impl: the actual send pipeline (frame building + store_then_emit).
+    // Called from the noexcept send() wrapper which catches asio::system_error
+    // thrown on async cancellation. May throw on store awaitable cancellation.
+    // [F5 Round-A drift fix: noexcept-throw trap separation]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
+        std::span<const std::byte> app_payload);
+
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.

@@ -521,15 +521,22 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
 //
 // ThrowingStore: throws asio::system_error(operation_aborted) from store().
 // This simulates the async_mutex awaitable throwing on cancellation.
+// ThrowingStore: store that throws asio::system_error{operation_aborted} from its
+// outbound store() awaitable when throw_enabled is set.
+// throw_enabled is shared via shared_ptr so the test can enable throwing after
+// the session has successfully reached Active (during drive_to_active, throwing
+// would prevent open() from completing).
 class ThrowingStore final : public MessageStore {
 public:
-    explicit ThrowingStore(std::vector<std::string>& log) noexcept
-        : MessageStore(flush_thunk_for<ThrowingStore>()), log_(log) {}
+    explicit ThrowingStore(std::vector<std::string>& log,
+                           std::shared_ptr<bool> throw_flag) noexcept
+        : MessageStore(flush_thunk_for<ThrowingStore>()), log_(log),
+          throw_flag_(std::move(throw_flag)) {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
         direction_t dir) noexcept override {
-        if (dir == direction_t::outbound) {
+        if (dir == direction_t::outbound && throw_flag_ && *throw_flag_) {
             log_.push_back("store_throw");
             throw asio::system_error(asio::error::operation_aborted);
         }
@@ -557,32 +564,40 @@ public:
 
 private:
     std::vector<std::string>& log_;
+    std::shared_ptr<bool> throw_flag_;
     seqnum_t next_out_ = seqnum_min;
     seqnum_t next_in_ = seqnum_min;
 };
 
 class ThrowingStoreFactory final : public MessageStoreFactory {
 public:
-    explicit ThrowingStoreFactory(std::vector<std::string>& log) noexcept : log_(log) {}
+    explicit ThrowingStoreFactory(std::vector<std::string>& log,
+                                  std::shared_ptr<bool> throw_flag) noexcept
+        : log_(log), throw_flag_(std::move(throw_flag)) {}
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
         std::string_view, std::string_view, std::pmr::memory_resource*,
         std::size_t, asio::any_io_executor) noexcept override {
-        return std::make_unique<ThrowingStore>(log_);
+        return std::make_unique<ThrowingStore>(log_, throw_flag_);
     }
 private:
     std::vector<std::string>& log_;
+    std::shared_ptr<bool> throw_flag_;
 };
 
 TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerminate) {
     std::vector<std::string> store_log;
+    auto throw_flag = std::make_shared<bool>(false);  // off during drive_to_active
 
     auto cfg = make_cfg("FIX.4.4");
-    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log);
+    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log, throw_flag);
     cfg.transport_send = [](std::span<const std::byte> /*frame*/) {};
 
     Session sess(engine, cfg);
     drive_to_active(sess, "FIX.4.4");
+
+    // Enable throwing AFTER reaching Active (so open() and peer Logon succeeded).
+    *throw_flag = true;
 
     std::array<std::byte, 4> payload{};
     auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
@@ -604,13 +619,17 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
 // [Drift F9; spec.md US1 AC3]
 TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
     std::vector<std::string> store_log;
+    auto throw_flag = std::make_shared<bool>(false);
 
     auto cfg = make_cfg("FIX.4.4");
-    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log);
+    cfg.store_factory = std::make_unique<ThrowingStoreFactory>(store_log, throw_flag);
     cfg.transport_send = [](std::span<const std::byte> /*frame*/) {};
 
     Session sess(engine, cfg);
     drive_to_active(sess, "FIX.4.4");
+
+    // Enable throwing AFTER reaching Active.
+    *throw_flag = true;
 
     std::array<std::byte, 4> payload{};
     auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
