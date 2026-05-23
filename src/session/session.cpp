@@ -1163,12 +1163,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
     using fixpp::core::error;
 
-    // F4 (Round-A drift): FSM precondition — Session::send is only valid in Active.
+    // FR-005 / D-3: FSM precondition — Session::send is only valid in Active.
     // spec.md US1 ACs all premise Active; sending while in LogonSent/NotConnected/
     // LogonReceived/LogoutSent/Disconnected is a programmer error.
-    // [spec.md US1; data-model.md §E1 Session::send; F4 drift fix]
+    // Returns session_invalid_state_for_send (=77) — not session_invalid_logon —
+    // to give the caller a semantically distinct diagnosis. [FR-005 / D-3]
     if (fsm_state_ != fsm_state::Active) {
-        co_return std::unexpected(error::session_invalid_logon);
+        co_return std::unexpected(error::session_invalid_state_for_send);
     }
 
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb

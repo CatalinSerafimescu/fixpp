@@ -260,6 +260,12 @@ add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
 # stack-use-after-scope at cfg_ is fixed by the by-value member change
 # (T008/T009). session_coverage_adversarial now runs under ASan clean.
 
+# ── 010-session-cfg-lifetime T012 — FR-004 / D-2: LogonReceived observability ──
+add_threading_test(session_logon_received_observability logon_received_observability_test.cpp)
+
+# ── 010-session-cfg-lifetime T013/T014 — FR-005 / D-3: send invalid-state gate ─
+add_threading_test(session_send_invalid_state session_send_invalid_state_test.cpp)
+
 # ── 010-session-cfg-lifetime T007 — FR-001 / FR-002 / SC-001 ─────────────────
 # Lifetime safety tests for by-value SessionConfig cfg_ member (W-5 fix).
 # Three runtime contracts verified under both debug and ASan:
