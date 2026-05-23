@@ -147,7 +147,7 @@ TEST(FileStoreFlushForSessionClose, GracefulCloseFlushes32FramesBatch64) {
         engine.clock = make_mock_clock(pool.get_executor());
         engine.max_store_memory_per_session = 1ULL << 30;
 
-        SessionConfig cfg;
+        SessionConfig cfg{};
         cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.sender_comp_id = "FLUSHSND";
@@ -309,7 +309,7 @@ TEST(FileStoreFlushForSessionClose, SessionWithMemoryStoreGracefulCloseSucceeds)
     engine.clock = make_mock_clock(pool.get_executor());
     engine.max_store_memory_per_session = kSmallCap;
 
-    SessionConfig cfg;
+    SessionConfig cfg{};
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
     cfg.store_factory = std::make_unique<MemoryStoreFactory>(mcfg);
@@ -407,7 +407,7 @@ TEST(FileStoreFlushForSessionClose, A1HookInvokedBySessionCloseGraceful) {
     engine.clock = make_mock_clock(pool.get_executor());
     engine.max_store_memory_per_session = 1ULL << 30;
 
-    SessionConfig cfg;
+    SessionConfig cfg{};
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
     cfg.store_factory = std::move(factory_up);
@@ -447,7 +447,7 @@ TEST(FileStoreFlushForSessionClose, A1HookNotInvokedBySessionCloseTerminal) {
     engine.clock = make_mock_clock(pool.get_executor());
     engine.max_store_memory_per_session = 1ULL << 30;
 
-    SessionConfig cfg;
+    SessionConfig cfg{};
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
     cfg.store_factory = std::move(factory_up);
