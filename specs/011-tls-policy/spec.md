@@ -5,6 +5,16 @@
 **Status**: Draft
 **Input**: User description: TLS policy core (slug: 011-tls-policy). Locks the public TLS-policy surface for fixpp v1.0, consumed by the 2h-transport feature that ships next. Inherits signed-off design doc `.specify/2g-tls.md` v0.4 (Gate A r3 converged Phase A).
 
+## Clarifications
+
+### Session 2026-05-23
+
+- Q: TLS-version negotiation order — preference between TLS 1.3 and TLS 1.2 (ECDHE-AEAD-only) → A: TLS 1.3 preferred; TLS 1.2 ECDHE-AEAD admitted as fallback (`SSL_CTX_set_min_proto_version = TLS1_2_VERSION`, `set_max = TLS1_3_VERSION`). Counterparties on 1.2 remain interop-viable; 1.3-capable counterparties always negotiate 1.3.
+- Q: `mtls_pinned` empty-pinset bootstrap — fail-early at session-open vs fail-late at every handshake → A: Fail-EARLY at session-open with a distinct named variant `tls_pin_empty_at_open`. `make_ssl_ctx_config(mtls_pinned, empty_pinset, …)` returns `unexpected{tls_pin_empty_at_open}`; the session never opens. Distinguishes operator-config error from peer-cert-mismatch error. Reference-engine sweep (QuickFIX-cpp / QuickFIX-J / Fix8) found NONE of them implement leaf-cert pinning, so no precedent — fixpp is establishing the diagnostic surface.
+- Q: `verify_peer` multi-violation ordering — short-circuit first hit vs aggregate report → A: Short-circuit first hit in a documented evaluation order (per-cert DER size → RSA key bounds → ECDSA curve → chain depth → SAN cardinality → X.509 version → expiration against effective clock → CipherPolicy `is_allowed`). One `error::tls_*` variant per failed handshake. Matches the OpenSSL `X509_V_ERR_*` norm; keeps the error envelope flat for the 2i C-ABI projection. Reference-engine sweep: no precedent — QuickFIX-cpp / QuickFIX-J / Fix8 ship no analogous DoS-bound surface.
+- Q: Pin lookup key for `Pinset::find` / `add` / `remove` — SHA-256-of-leaf-DER vs SPKI vs Subject DN → A: SHA-256 fingerprint of the leaf cert's DER encoding (32 bytes). Matches FIXS-RC1 §5 and design-doc §4.5 line 115. Stored as `std::array<std::byte, 32>` in the Pinset; `add` / `remove` / `find` all key on this fingerprint. Pin rotation involves the operator computing SHA-256(new_leaf_DER) and calling `add(new_fingerprint)` then `remove(old_fingerprint)`.
+- Q: Pinset granularity — per-counterparty / per-session / engine-wide → A: Per-counterparty is the **recommended** pattern: one Pinset instance shared across all `SessionConfig`s targeting the same counterparty. Same-counterparty sessions see rotation atomically (the canonical FIXS-RC1 §5 model). The engine does NOT enforce granularity (Pinset is held by `std::shared_ptr`, so the operator chooses); per-session is allowed (stronger isolation, more API ceremony) but engine-wide sharing across DIFFERENT counterparties is explicitly discouraged because it conflates trust authorities (a pin meant for `X` would be live for `Y`).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Counterparty cert rotation without disconnects (Priority: P1)
@@ -13,7 +23,7 @@ A FIX engine operator runs a long-lived session against a counterparty whose lea
 
 **Why this priority**: This is the canonical FIXS RC1 §5 rotation use case. Without it, every cert rotation on either side of a counterparty link forces a session restart, breaking 24-hour-connectivity (S-032) and producing customer-visible outages on a routine operational event. It is also the *only* mid-session-mutable TLS surface per the architecture carve-out — every other TLS knob freezes at session open — so the contract here is load-bearing.
 
-**Independent Test**: With a session in `mtls_pinned` mode, run a continuous handshake loop against a peer presenting the *old* cert, then `add(new)`, then `remove(old)`, then run the same loop against a peer presenting the *new* cert. Both endpoints succeed across the rotation window; an in-flight handshake captured mid-rotation completes against whichever set it started with.
+**Independent Test**: With **two `SessionConfig`s targeting the same counterparty sharing one `Pinset` instance** (per FR-009a recommended granularity), in `mtls_pinned` mode, run a continuous handshake loop against a peer presenting the *old* cert on both sessions, then `add(new)`, then `remove(old)`, then run the same loop against a peer presenting the *new* cert. Both sessions transition atomically; both endpoints succeed across the rotation window; an in-flight handshake captured mid-rotation completes against whichever set it started with.
 
 **Acceptance Scenarios**:
 
@@ -55,7 +65,7 @@ A FIX engine is configured against a new counterparty. The operator picks a `Sec
 2. **Given** the C-ABI runtime path passes the string of a non-allowed cipher to `CipherPolicy::is_allowed`, **When** the predicate is evaluated, **Then** it returns `false` — no fall-through to OpenSSL.
 3. **Given** a session opened in `mtls_ca` mode against a peer presenting an RSA-1024 leaf cert, **When** `verify_peer` runs, **Then** the handshake is refused with `error::tls_rsa_key_too_small`.
 4. **Given** a session opened against a peer presenting an X.509 v1 leaf cert, **When** `verify_peer` runs, **Then** the handshake is refused (X.509 v1 is rejected per [FIXS §3.4]).
-5. **Given** an `mtls_pinned` session whose pinset is empty at session open, **When** the session attempts to open, **Then** session open is refused (fail-closed; the pinset is the trust authority in this mode and an empty trust authority is a configuration error).
+5. **Given** an `mtls_pinned` session whose pinset is non-null but empty (zero entries) at session open, **When** the session attempts to open, **Then** session open is refused at session-config time with the distinct variant `error::tls_pin_empty_at_open` — distinct from `tls_cert_pin_mismatch` so operator logs separate "fixpp-config problem" from "peer-cert problem" (Clarifications 2026-05-23).
 
 ---
 
@@ -93,10 +103,11 @@ All requirements below are testable. Items tagged "(security)" trace to [const �
 
 **Pinset rotation**
 
-- **FR-006**: `Pinset::add(cert)` and `Pinset::remove(cert)` MUST be separate explicit operations. There MUST be NO atomic-swap or "set" shortcut. Old certs MUST remain usable until `remove` returns. (security, [FIXS RC1 §5])
+- **FR-006**: `Pinset::add(fp)` and `Pinset::remove(fp)` MUST be separate explicit operations keyed on the SHA-256 fingerprint of the leaf certificate's DER encoding (`std::array<std::byte, 32>`) per FIXS-RC1 §5. There MUST be NO atomic-swap or "set" shortcut. Old fingerprints MUST remain usable for `find` until `remove` returns. (security, [FIXS RC1 §5]; Clarifications 2026-05-23.)
 - **FR-007**: Pinset reads on the TLS handshake hot path MUST be lock-free and MUST allocate zero per [const §VIII.5]. (security)
-- **FR-008**: `Pinset::find(...)` MUST return a value-typed `pin_view` that carries a `shared_ptr<const pin_snapshot>` keeping the matched entry alive for the view's lifetime — no dangling on concurrent rotation.
+- **FR-008**: `Pinset::find(fp)` MUST take the leaf cert's SHA-256-of-DER fingerprint (`std::array<std::byte, 32>`, the same key type as FR-006) and MUST return a value-typed `pin_view` that carries a `shared_ptr<const pin_snapshot>` keeping the matched entry alive for the view's lifetime — no dangling on concurrent rotation. (Clarifications 2026-05-23.)
 - **FR-009**: Pinset rotation MUST be mid-session-mutable per the [arch §5.6] carve-out. A rotation landing during an in-flight handshake MUST NOT affect that handshake; the new pinset is picked up at the *next* handshake.
+- **FR-009a**: Pinset granularity MUST be **per-counterparty** as the recommended operator pattern: one `Pinset` instance is shared (via `std::shared_ptr`) across all `SessionConfig`s targeting the same counterparty so the rotation API call applies to every same-counterparty session atomically on the next handshake. The engine MUST NOT enforce this pattern — per-session granularity is permitted — but engine-wide sharing across distinct counterparties is discouraged in operator-facing documentation because it conflates trust authorities. (Clarifications 2026-05-23.)
 - **FR-010**: `Pinset::Config::max_pins` MUST default to 16; `add()` over the cap MUST be refused (no silent eviction).
 
 **Cipher / version policy**
@@ -107,7 +118,7 @@ All requirements below are testable. Items tagged "(security)" trace to [const �
 **Security profile**
 
 - **FR-013**: `SecurityProfile` MUST publish exactly three enumerators: `mtls_ca`, `mtls_pinned`, `one_way_ca`. The `[[deprecated]]` attribute MUST be applied to the `one_way_ca` enumerator declaration itself (not in a comment) per [const §XII.5]. (security)
-- **FR-014**: The mapping from each `SecurityProfile` value to the OpenSSL `SSL_CTX` configuration the 2h-transport feature applies MUST be published as a normative table; the table is the contract 2h consumes.
+- **FR-014**: The mapping from each `SecurityProfile` value to the OpenSSL `SSL_CTX` configuration the 2h-transport feature applies MUST be published as a normative table; the table is the contract 2h consumes. The table MUST encode TLS 1.3 as preferred and TLS 1.2 ECDHE-AEAD as the fallback (`SSL_CTX_set_min_proto_version = TLS1_2_VERSION`, `SSL_CTX_set_max_proto_version = TLS1_3_VERSION`) — version-preference is part of this feature's contract, not a 2h-private choice. (Clarifications 2026-05-23.)
 - **FR-015**: `SecurityProfile` MUST be frozen at session open per [arch §5.6]. No mid-session swap API MUST be exposed.
 - **FR-016**: The `cert_source` MUST be frozen at session open per [arch §5.6]. The `Pinset` is the ONLY mid-session-mutable TLS surface.
 
@@ -120,6 +131,7 @@ All requirements below are testable. Items tagged "(security)" trace to [const �
 
 - **FR-019**: `verify_peer` MUST enforce, at entry: RSA key size ≤ `cert_source::Config::max_rsa_key_bits` (default 8192) with refusal variant `error::tls_rsa_key_too_large`; per-cert DER ≤ `Config::max_cert_der_bytes` (default 16 KiB) with `error::tls_cert_der_too_large`; SAN list (DNS + URI combined) ≤ `Config::max_san_entries` (default 64) with `error::tls_san_entries_exceeded`. (security)
 - **FR-020**: `verify_peer` MUST also enforce: chain depth ≤ `Config::max_chain_depth` (default 8); RSA key size ≥ 2048 bits per [FIXS §3.4]; ECDSA keys MUST be P-256 or P-384; X.509 v1 certs MUST be rejected; cert expiration MUST be evaluated against the *effective* clock per [2d §7.9] (not wall-clock). (security)
+- **FR-020a**: `verify_peer` MUST short-circuit on the first violation hit and surface exactly one `error::tls_*` variant per failed handshake (no aggregate report). The evaluation order MUST be: (1) per-cert DER envelope size → (2) RSA key bounds (lower 2048, then upper `max_rsa_key_bits`) → (3) ECDSA curve (P-256/P-384) → (4) chain depth → (5) SAN cardinality → (6) X.509 version → (7) expiration against `effective_clock` → (8) `CipherPolicy::is_allowed` on the negotiated suite. Matches OpenSSL `X509_V_ERR_*` semantics; keeps the 2i C-ABI projection flat. (security; Clarifications 2026-05-23.)
 
 **Cancellation, error envelope, allocation**
 
@@ -127,7 +139,7 @@ All requirements below are testable. Items tagged "(security)" trace to [const �
 - **FR-022**: Every `expected_t<T>`-returning method on the public surface MUST be `[[nodiscard]]`.
 - **FR-023**: PMR allocation MUST be permitted on the cold-path `load_credentials` (file I/O + parse + chain build). The zero-allocation invariant applies to the hot-path `Pinset::find` only.
 - **FR-024**: PMR-thrown exceptions MUST be routed through `[2a §4.2]` `trap_throw` and surface as `error::tls_*` variants. No PMR throw MUST escape the public surface as an exception.
-- **FR-025**: The `error::tls_*` variant family MUST cover at minimum: `tls_load_failed`, `tls_load_cancelled`, `tls_cert_invalid`, `tls_cert_expired`, `tls_cert_pin_mismatch`, `tls_cert_chain_too_deep`, `tls_cert_der_too_large`, `tls_rsa_key_too_large`, `tls_rsa_key_too_small`, `tls_san_entries_exceeded`, `tls_profile_mismatch`, `tls_cipher_not_allowed`. Each MUST coalesce to a per-doc-prefix `FIXPP_ERR_TLS_*` C-ABI variant (the C-ABI surface itself is delegated to 2i).
+- **FR-025**: The `error::tls_*` variant family MUST cover at minimum: `tls_load_failed`, `tls_load_cancelled`, `tls_cert_invalid`, `tls_cert_expired`, `tls_cert_pin_mismatch`, `tls_pin_empty_at_open` (distinct from `tls_cert_pin_mismatch` — surfaces at session-open when `mtls_pinned` is paired with a non-null empty pinset; see Clarifications 2026-05-23), `tls_cert_chain_too_deep`, `tls_cert_der_too_large`, `tls_rsa_key_too_large`, `tls_rsa_key_too_small`, `tls_san_entries_exceeded`, `tls_profile_mismatch`, `tls_cipher_not_allowed`. Each MUST coalesce to a per-doc-prefix `FIXPP_ERR_TLS_*` C-ABI variant (the C-ABI surface itself is delegated to 2i).
 
 **Scope boundary (negative requirements)**
 
@@ -138,7 +150,7 @@ All requirements below are testable. Items tagged "(security)" trace to [const �
 
 - **`cert_source`** — abstract pure-virtual plugin interface (≤ 2 methods). Users implement to integrate HSM / KMS / vault / file / in-memory cert sources without touching engine code.
 - **`local_credentials`** — value type returned by `cert_source::load_credentials`. Carries the leaf cert, its chain, and a `signer` variant (`software_key_ref` for in-process keys, `async_signer_ref` for offloaded signing).
-- **`Pinset`** — mutable container of pinned counterparty certificates. Owns the FIXS RC1 §5 add-then-remove rotation semantics. Mid-session-mutable.
+- **`Pinset`** — mutable container of pinned counterparty certificates keyed on SHA-256-of-leaf-DER fingerprints (32 bytes). Owns the FIXS RC1 §5 add-then-remove rotation semantics. Mid-session-mutable.
 - **`pin_view`** — value-typed handle returned by `Pinset::find`. Keeps the matched pin alive across concurrent rotation.
 - **`CipherPolicy`** — compile-time allow-list of cipher suites, TLS versions, key-exchange groups, and signature algorithms. Banned items are `static_assert`-rejected at build time. Exposes `is_allowed(string_view) constexpr` for runtime-string predicates.
 - **`SecurityProfile`** — enum selecting trust mode at session construction: `mtls_ca`, `mtls_pinned`, `one_way_ca [[deprecated]]`. Frozen at session open.
@@ -165,9 +177,9 @@ This spec codifies the user-visible contract that the signed-off design doc `.sp
 
 - **Design-doc inheritance**: 2g-tls.md v0.4 is the binding upstream. All §-anchored cites in this spec resolve there or in the inherited docs (constitution v0.2, architecture v0.2, 2a/2b/2c/2d/2e/2f signed-off).
 - **TLS provider**: OpenSSL on Linux and Windows. No Schannel, no platform-native fallback, no other TLS backend in v1.0. (Locked by [const §XII.1].)
-- **TLS version posture**: The compile-time allow-list admits both TLS 1.3 and TLS 1.2 (ECDHE-AEAD-only); negotiation order between them is owned by the 2h-transport `SSL_CTX` config, not by this feature. This spec locks *which* versions are admissible; 2h locks the *preference* in `SSL_CTX_set_min_proto_version` / `SSL_CTX_set_max_proto_version`. (Candidate /clarify probe.)
-- **`mtls_pinned` bootstrap**: A session opened in `mtls_pinned` mode with an empty pinset fail-closes at session open with `error::tls_pin_empty_at_open` (per US3 acceptance scenario 5). An empty trust authority is a configuration error, not a deferred-populate signal. (Candidate /clarify probe — fail-closed is the default; the alternative is empty-pinset-accepts-any, which is unsafe by construction.)
-- **`verify_peer` multi-violation ordering**: When a peer cert violates multiple DoS bounds simultaneously (e.g., RSA too large AND chain too deep AND SAN too long), `verify_peer` MAY short-circuit on the first violation hit. The surfaced error variant is the *first* violation hit, not an aggregated set. Detection-order is documented in the design doc §6.6. (Candidate /clarify probe — short-circuit is the default for cost; aggregate is the alternative for richer observability.)
+- **TLS version posture** (resolved via Clarifications Session 2026-05-23): The compile-time allow-list admits both TLS 1.3 and TLS 1.2 (ECDHE-AEAD-only). The `SecurityProfile`-to-`SSL_CTX` mapping table (FR-014) MUST encode **TLS 1.3 as preferred with TLS 1.2 admitted as fallback** (`set_min_proto_version = TLS1_2_VERSION`, `set_max_proto_version = TLS1_3_VERSION`). 2h-transport applies the table; the version posture is part of the contract this feature publishes, not a 2h-private choice.
+- **`mtls_pinned` bootstrap** (resolved via Clarifications Session 2026-05-23): A session opened in `mtls_pinned` mode with a non-null but empty pinset MUST fail-CLOSE at session-open with the distinct variant `error::tls_pin_empty_at_open`, NOT at every subsequent handshake via the generic `tls_pin_mismatch`. The early-refusal cost is one config-time validation; the diagnostic benefit is operator clarity (config error vs peer error). FIXS-RC1 §5 pinning is genuinely new to operators migrating from QuickFIX-cpp / QuickFIX-J / Fix8 (none implement leaf-cert pinning); the distinct variant flattens that learning curve.
+- **`verify_peer` multi-violation ordering** (resolved via Clarifications Session 2026-05-23): When a peer cert violates multiple bounds simultaneously, `verify_peer` MUST short-circuit on the first violation hit in this documented evaluation order: (1) per-cert DER envelope size → (2) RSA key bounds (lower 2048 then upper `max_rsa_key_bits`) → (3) ECDSA curve membership (P-256/P-384 only) → (4) chain depth ≤ `max_chain_depth` → (5) SAN list cardinality ≤ `max_san_entries` → (6) X.509 version (v2/v3 only) → (7) expiration against `effective_clock` → (8) `CipherPolicy::is_allowed` on the negotiated suite. One `error::tls_*` variant per failed handshake. Matches OpenSSL `X509_V_ERR_*` norm; keeps the 2i C-ABI projection flat (no list-of-codes type). FR-020 codifies this ordering.
 - **HSM / TPM / KMS / vault impls are user-side**: this feature locks the `cert_source` interface; concrete impls are supplied by operators per [const §XII.8] and [const §XIV.4]'s no-dlopen rule.
 - **C ABI ownership**: the C ABI for `cert_source`, `Pinset`, `SecurityProfile`, `CipherPolicy::is_allowed`, and the `FIXPP_ERR_TLS_*` coalescing groups is owned by **2i-capi**. This feature publishes the C++ source-of-truth and the per-doc-prefix coalescing rule that 2i consumes.
 - **Control-plane reload trigger**: owned by **2j-controlplane**. This feature does not own runtime hot-reload of cert sources; rotation through the `Pinset` API is the only mid-session-mutable knob.
@@ -176,4 +188,4 @@ This spec codifies the user-visible contract that the signed-off design doc `.sp
 - **Session-FSM boundary**: the session FSM's consumption of `SecurityProfile` at `Session::open`, and the CompID-to-TLS-identity binding T-041, both live in the session Phase-4 module. This feature publishes the `peer_identity` value (FR-018); session consumes it.
 - **Interop testing deferred to pre-v1.0**: per `[[project_release_interop_quickfix_fix8]]`, fixpp ↔ QuickFIX-cpp / Fix8 interop against TLS-active sessions is a release-gate, not a per-feature gate.
 - **Non-goals (carried verbatim from design-doc §2)**: no Schannel; no TLS 1.0 / 1.1 / SSL; no application-layer encryption (`EncryptMethod(98) ≠ 0` rejection is wire-validator + session FSM, not 2g); no TLS 1.3 0-RTT / early data; no dynamic cipher reconfiguration; no PSK in v1.0; no CRL / OCSP infrastructure in v1.0; no mid-handshake pinset rotation; no `dlopen` plugin loading; no mid-session `SecurityProfile` or `cert_source` swap.
-- **/clarify is mandatory** before /plan per [const §XVI.3] (security feature). Probes flagged above ("Candidate /clarify probe") are the priority targets for the /clarify pass.
+- **/clarify completed 2026-05-23** (mandatory per [const §XVI.3] for security features). 5 questions resolved; see `## Clarifications` for the bullet log. Three assumptions were locked from candidate-probes: TLS-version negotiation order (Q1 → FR-014), `mtls_pinned` empty-pinset bootstrap (Q2 → FR-025 + US3 scenario 5), `verify_peer` multi-violation evaluation order (Q3 → FR-020a). Two further unknowns surfaced and resolved: pin lookup key (Q4 → FR-006 + FR-008), Pinset granularity (Q5 → FR-009a + US1 Independent Test).
