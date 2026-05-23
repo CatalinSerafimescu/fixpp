@@ -579,6 +579,92 @@ TEST_F(LogonHandshakeTest, InitiatorOpen_BuildLogonOverflow_ReturnsError_NotSile
         << "[spec.md FR-001(e); session.cpp:263]";
 }
 
+// ── RC#B RED: Acceptor build-logon overflow must reach Disconnected (not Active).
+//
+// Bug: acceptor sets fsm_state_=LogonReceived BEFORE attempting reply build, then
+// checks `fsm_state_ == LogonReceived` (always true) to transition to Active.
+// When build_logon fails (oversized sender_comp_id), the session still reaches Active.
+//
+// Fix: gate the LogonReceived→Active transition on successful emit.
+// Anchors: 009 spec.md FR-005; 005 data-model.md:19 matrix row.
+// [gate-b/r1-red: F-02 acceptor build failure]
+TEST_F(LogonHandshakeTest, Acceptor_BuildLogonOverflow_DoesNotReachActive) {
+    // Build an acceptor with an oversized sender_comp_id that makes build_logon fail.
+    // The 256-byte reply_buf overflows when sender_comp_id alone is 200 chars.
+    //
+    // Constraint: interpret_logon validates peer's 56= against cfg.sender_comp_id, so
+    // the peer frame's 56= must match. We build a custom peer frame with 56=<200 X's>
+    // and set cfg.sender_comp_id=<200 X's> to pass the CompID check while overflowing
+    // the reply build buffer.
+    const std::string long_sender(200, 'X');
+
+    auto cfg = make_acceptor_cfg(30);
+    cfg.sender_comp_id = long_sender;   // overflows 256-byte reply_buf in build_logon
+    cfg.target_comp_id = "TW";
+
+    // Build a peer Logon that matches (peer.49=TW, peer.56=<long_sender>, 8=FIX.4.2).
+    // Using make_logon_frame won't work as it hard-wires target="ISLD". Build manually.
+    auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", long_sender, 30);
+
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+    ASSERT_TRUE(open_result.has_value()) << "Acceptor open() must succeed (no outbound Logon)";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    // Feed the peer Logon — the session accepts it (CompID match) but fails to
+    // build the reply (sender_comp_id is too large for the 256-byte reply buffer).
+    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+
+    // RC#B bug: the session transitions to Active anyway because the
+    // `if (fsm_state_ == LogonReceived)` check is tautological.
+    const auto s = sess.state();
+    EXPECT_EQ(s, fsm_state::Disconnected)
+        << "Acceptor must reach Disconnected (not Active) when reply build_logon fails; "
+        << "got state=" << static_cast<int>(s) << ". "
+        << "Bug: fsm_state_==LogonReceived is set at line 650 then tested tautologically "
+        << "at line 692, so build failure still transitions to Active. "
+        << "[gate-b/r1-red: F-02; 009 spec.md FR-005]";
+    EXPECT_FALSE(inbound_result.has_value())
+        << "on_inbound_frame must return an error when reply build fails "
+        << "[gate-b/r1-red: F-02]";
+}
+
+// ── RC#B RED: Acceptor transport throw on reply Logon must reach Disconnected.
+//
+// Bug: store_then_emit swallows transport throws (F-03) AND the acceptor discards
+// emit_r with `(void)emit_r` (F-02). Even if store_then_emit did propagate transport
+// errors, the acceptor would not gate the Active transition on it.
+//
+// [gate-b/r1-red: F-02/F-03 acceptor transport failure]
+TEST_F(LogonHandshakeTest, Acceptor_TransportThrowsOnReplyLogon_DoesNotReachActive) {
+    // Transport that throws on all calls (including the reply Logon emission).
+    // During open() the acceptor emits nothing, so the throw only fires on the reply.
+    auto cfg = make_acceptor_cfg(30);
+    cfg.transport_send = [](std::span<const std::byte> /*frame*/) {
+        throw std::system_error(std::make_error_code(std::errc::connection_reset));
+    };
+
+    fixpp::session::Session sess(engine, cfg);
+    auto open_result = open_sync(sess);
+    ASSERT_TRUE(open_result.has_value()) << "Acceptor open() must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    // Feed a valid peer Logon — the reply emission will throw.
+    auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
+    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+
+    // RC#B bug: transport throw is swallowed AND emit_r is discarded — Active anyway.
+    const auto s = sess.state();
+    EXPECT_EQ(s, fsm_state::Disconnected)
+        << "Acceptor must reach Disconnected (not Active) when reply transport throws; "
+        << "got state=" << static_cast<int>(s) << ". "
+        << "Bug: store_then_emit swallows throw + (void)emit_r discards result. "
+        << "[gate-b/r1-red: F-02/F-03; 009 spec.md FR-005]";
+    EXPECT_FALSE(inbound_result.has_value())
+        << "on_inbound_frame must return error when transport fails on reply Logon "
+        << "[gate-b/r1-red: F-02/F-03]";
+}
+
 // ── Original T10: stamp_sending_time() unit test (preserved) ─────────────────
 
 // T10: stamp_sending_time() — formats SendingTime correctly (T022 unit test).

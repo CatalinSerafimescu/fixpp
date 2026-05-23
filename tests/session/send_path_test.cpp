@@ -717,4 +717,165 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
         << "Second send must use seqnum one higher than first send [F3]";
 }
 
+// ── RC#A RED: Absolute seqnum integrity — first Session::send after Logon must
+// carry 34=2 (not 34=1, which duplicates the Logon's seqnum).
+//
+// Bug: send() calls seqnum_mgr_.assign_outbound() which returns 1 (the manager
+// was never advanced by open()'s Logon emission because that path uses the bare
+// next_outbound_seq_ counter). The first send therefore stamps 34=1 — a duplicate
+// of the Logon's seqnum.
+//
+// Fix: unify all outbound seqnum advance through SeqnumManager.
+// Anchors: 005 contracts/session.hpp:46-50; 005 data-model.md:30 E3; 009 spec.md FR-001(a).
+// [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
+TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
+    std::vector<std::vector<std::byte>> outbound_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        outbound_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+
+    // Capture frame count before the user send — outbound_frames[0] is the Logon.
+    const std::size_t logon_frame_idx = 0;
+    ASSERT_GE(outbound_frames.size(), 1u) << "open() must have emitted the initiator Logon";
+
+    // Verify Logon is at seq=1 (our baseline).
+    const auto logon_span = std::span<const std::byte>(outbound_frames[logon_frame_idx]);
+    const auto logon_34 = extract_field(logon_span, 34);
+    ASSERT_TRUE(logon_34.has_value()) << "Logon frame must carry tag 34";
+    EXPECT_EQ(std::string(*logon_34), "1") << "Initiator Logon must have 34=1";
+
+    // Call Session::send once.
+    std::array<std::byte, 4> payload{};
+    {
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        ioc.run_for(200ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "Session::send failed";
+    }
+
+    // The frame emitted by Session::send is the last outbound frame.
+    ASSERT_GE(outbound_frames.size(), 2u) << "Session::send must emit a frame";
+    const auto send_span = std::span<const std::byte>(outbound_frames.back());
+    const auto send_34 = extract_field(send_span, 34);
+    ASSERT_TRUE(send_34.has_value()) << "Session::send frame must carry tag 34";
+    // RC#A bug: send() calls assign_outbound() which returns 1 (manager never advanced
+    // by Logon). After fix, send() must see 34=2.
+    EXPECT_EQ(std::string(*send_34), "2")
+        << "First Session::send after Logon must have 34=2, not 34=1; "
+        << "got 34=" << *send_34 << ". "
+        << "Bug: open() advances next_outbound_seq_ but NOT SeqnumManager — "
+        << "assign_outbound() returns 1, duplicating Logon's seq. "
+        << "[gate-b/r1-red: F-01; 009 spec.md FR-001(a)]";
+}
+
+// ── RC#A RED: 3-way absolute seqnum integrity — Logon=1, send1=2, send2=3.
+// [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
+TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
+    std::vector<std::vector<std::byte>> outbound_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        outbound_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+
+    std::array<std::byte, 4> payload{};
+    // First send.
+    {
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        ioc.run_for(200ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "First send failed";
+    }
+    // Second send.
+    {
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        ioc.run_for(200ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "Second send failed";
+    }
+
+    // outbound_frames: [Logon(34=1), send1(34=2), send2(34=3)]
+    ASSERT_GE(outbound_frames.size(), 3u)
+        << "Expected Logon + 2 sends = at least 3 outbound frames";
+
+    const auto get_34 = [&](std::size_t idx) -> std::string {
+        const auto sp = std::span<const std::byte>(outbound_frames[idx]);
+        const auto v = extract_field(sp, 34);
+        return v.has_value() ? std::string(*v) : "<missing>";
+    };
+
+    EXPECT_EQ(get_34(0), "1") << "Logon must have 34=1";
+    // After open(), manager is at 1 (no advance). send1 → assign_outbound() = 1 (BUG),
+    // then fixes that → should be 2. send2 should be 3.
+    EXPECT_EQ(get_34(1), "2")
+        << "First Session::send must have 34=2 (not 1); "
+        << "RC#A bug: split counter means send1 gets 34=1 duplicating Logon";
+    EXPECT_EQ(get_34(2), "3")
+        << "Second Session::send must have 34=3 (not 2)";
+}
+
+// ── RC#B RED: Transport throw on Session::send (after store) must:
+//   (a) return a defined error (not unconditional ok), AND
+//   (b) leave session in Disconnected state.
+//
+// Bug: store_then_emit catches transport throw in catch(...) and returns
+// expected_t<void>{} unconditionally (session.cpp:1474). The transport error
+// is silently swallowed. Callers see ok; state stays Active.
+//
+// Anchors: 009 spec.md US1 AC3; 005 data-model.md:80 I-3.
+// [gate-b/r1-red: F-02/F-03 transport failure surface]
+TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDisconnected) {
+    std::vector<std::string> store_log;
+    std::vector<seqnum_t> store_seqs;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.store_factory = std::make_unique<OrderingStoreFactory>(store_log, store_seqs);
+
+    // Transport that ALWAYS throws (for the user send; during open() it also throws
+    // but we drive_to_active which uses its own cfg without a store_factory).
+    // Use a shared_ptr flag so we can disable throwing during drive_to_active.
+    auto transport_throw = std::make_shared<bool>(false);
+    cfg.transport_send = [transport_throw](std::span<const std::byte> /*frame*/) {
+        if (*transport_throw) {
+            throw std::system_error(std::make_error_code(std::errc::connection_reset));
+        }
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    // Enable transport throwing AFTER reaching Active.
+    *transport_throw = true;
+
+    std::array<std::byte, 4> payload{};
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    auto result = fut.get();
+
+    // RC#B / F-03 bug: store_then_emit swallows transport throw and returns ok.
+    EXPECT_FALSE(result.has_value())
+        << "Session::send must return a defined error when transport throws; "
+        << "got ok (bug: store_then_emit swallows transport throw at session.cpp:1474). "
+        << "[gate-b/r1-red: F-03; 009 spec.md US1 AC3]";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "Session must be Disconnected after transport failure; "
+        << "got state=" << static_cast<int>(sess.state())
+        << " (bug: state stays Active when transport error is swallowed). "
+        << "[gate-b/r1-red: F-03; 009 spec.md US1 AC3]";
+}
+
 }  // namespace fixpp::session::test
