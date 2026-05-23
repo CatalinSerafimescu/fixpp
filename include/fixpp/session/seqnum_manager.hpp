@@ -79,6 +79,14 @@ public:
 
     // ── Outbound assign ──────────────────────────────────────────────────────
     //
+    // peek_outbound(): synchronously read the NEXT outbound counter without advancing.
+    //   ONLY safe to call on the session strand (single-threaded, no contention).
+    //   Under the per-session-strand discipline this is always the case.
+    //   Used by admin builders (build_logon, build_logout, etc.) to obtain the seqnum
+    //   BEFORE deciding whether to advance — "peek first, assign on success" (F6 pattern).
+    //   [gate-b/r1-green: RC#A; 005 data-model.md:30 E3 singular "next outbound seqnum_t"]
+    [[nodiscard]] seqnum_t peek_outbound() const noexcept { return next_outbound_; }
+
     // assign_outbound(): atomically read-then-advance the outbound counter.
     //   Returns the ASSIGNED sequence number (the value to stamp on the message).
     //   next_outbound_ is then incremented.

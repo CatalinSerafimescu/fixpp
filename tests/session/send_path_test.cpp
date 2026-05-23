@@ -338,23 +338,34 @@ TEST_F(SendPathTest, Fix42_Active_Send_CarriesNegotiatedBeginString) {
 // ── Scenario (c): transport cancellation → defined error; store-before-transport
 // ordering is preserved (store committed before transport was attempted).
 // [FR-001 scenario 3 / spec.md §Edge Cases]
+//
+// RC#B (gate-b/r1-green): transport throws are now surfaced as dispatch_aborted.
+// Use a shared flag so the transport only throws on the user send (not during
+// drive_to_active's open() / peer-Logon handling). [009 spec.md US1 AC3; F-03]
 TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitted) {
     std::vector<std::string> call_log;
     std::vector<seqnum_t> store_seqs;
 
     auto cfg = make_cfg("FIX.4.4");
     cfg.store_factory = std::make_unique<OrderingStoreFactory>(call_log, store_seqs);
-    // Transport that throws to signal cancellation.
+    // Transport throws only after the flag is set (after reaching Active).
+    auto should_throw = std::make_shared<bool>(false);
     bool transport_called = false;
-    cfg.transport_send = [&](std::span<const std::byte> /*frame*/) {
+    cfg.transport_send = [&, should_throw](std::span<const std::byte> /*frame*/) {
         transport_called = true;
-        // Simulate a transport error by throwing (the session noexcept window must
-        // absorb this and return a defined error — FR-001 return contract).
-        throw std::system_error(std::make_error_code(std::errc::connection_reset));
+        if (*should_throw) {
+            // Simulate a transport error (session noexcept window converts to
+            // defined error — FR-001 return contract; RC#B fix surfaces it).
+            throw std::system_error(std::make_error_code(std::errc::connection_reset));
+        }
     };
 
     Session sess(engine, cfg);
     drive_to_active(sess, "FIX.4.4");
+
+    // Enable throwing ONLY for the user send (not during open / handshake).
+    *should_throw = true;
+    transport_called = false;  // reset — only count the user send transport call
 
     const std::size_t store_out_count_before =
         static_cast<std::size_t>(std::count(call_log.begin(), call_log.end(), "store_out"));
@@ -364,7 +375,7 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
-    // The result may be ok or error depending on implementation, but must not hang.
+    // RC#B: transport throw now surfaces as dispatch_aborted (not unconditional ok).
     (void)fut.get();
 
     // I-3: store was called BEFORE transport (regardless of transport outcome).

@@ -262,7 +262,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
         // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
         // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
-        const seqnum_t logon_seq = next_outbound_seq_;  // peek
+        // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
+        const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
         auto logon_result = fixpp::session::build_logon(
             std::span<std::byte>{logon_buf.data(), logon_buf.size()},
             logon_seq,
@@ -273,8 +274,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             // Propagate as an open() error; seqnum NOT consumed. [F6 drift fix]
             co_return std::unexpected(logon_result.error());
         }
-        ++next_outbound_seq_;  // advance ONLY on build success
-        auto emit_r = co_await store_then_emit(*logon_result);
+        // Advance outbound counter through manager ONLY on build success.
+        // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            co_return std::unexpected(assign_r.error());  // overflow (I-8)
+        }
+        auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
         if (!emit_r) {
             // store_then_emit failed (store I/O or transport error).
             // Propagate error; seqnum was advanced but no message was delivered.
@@ -647,6 +653,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Valid Logon + in-seq: transition to LogonReceived, then emit
             // the acceptor's own Logon reply and transition to Active.
             // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
+            // RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on
+            // successful reply build AND emit. Build/emit failure → Disconnected.
+            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed HeartBtInt"]
             fsm_state_ = fsm_state::LogonReceived;
 
             // Emit the acceptor reply Logon using the same admin-builder path
@@ -667,42 +676,46 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     ? static_cast<int>(cfg_.heartbeat_interval->count())
                     : 30;  // D-8 default 30 s
 
-                // seq for the reply Logon — peek then advance on success (F6 pattern).
-                const seqnum_t reply_seq = next_outbound_seq_;
+                // RC#A (gate-b/r1-green): peek via manager (not bare field).
+                // RC#B: gate the advance on build success; gate Active on emit success.
+                const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()},
                     reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id,
                     cfg_.begin_string, heartbt_sec, reply_sending_time_view);
-                if (reply_logon) {
-                    ++next_outbound_seq_;
-                    auto emit_r = co_await store_then_emit(*reply_logon);
-                    (void)emit_r;  // I-07: logged-then-proceed
+                if (!reply_logon) {
+                    // Build failed (oversized IDs → wire_frame_too_large).
+                    // RC#B: must NOT reach Active — Disconnected, propagate error.
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return std::unexpected(reply_logon.error());
                 }
-                // If build fails (oversized IDs), stay in LogonReceived without
-                // emitting — the session will not progress to Active. This is
-                // acceptable: the root cause is a misconfigured session.
+                // Advance outbound counter through manager (RC#A: was ++next_outbound_seq_).
+                auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                if (!assign_r) {
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return std::unexpected(assign_r.error());
+                }
+                auto emit_r = co_await store_then_emit(reply_seq, *reply_logon);
+                if (!emit_r) {
+                    // Emit failed (transport error). RC#B: Disconnected, not Active.
+                    fsm_state_ = fsm_state::Disconnected;
+                    co_return std::unexpected(emit_r.error());
+                }
             }
 
-            // Transition to Active (LogonReceived→Active) if the reply was emitted.
-            // If build_logon above failed (no emit), fsm_state_ stays LogonReceived
-            // and the session stalls — this is the correct behaviour per I-07
-            // (build failure is a config error, not a wire protocol error).
-            // For normal sessions (valid IDs), this always reaches Active.
-            if (fsm_state_ == fsm_state::LogonReceived) {
-                // Reply Logon was attempted; transition to Active.
-                // T039/T041 (US3): seed last_inbound_steady_ and spawn liveness.
-                if (effective_clock_) {
-                    last_inbound_steady_ = effective_clock_->steady_now();
-                }
-                fsm_state_ = fsm_state::Active;
-                // Spawn liveness loop (same as initiator's LogonSent→Active path).
-                {
-                    auto ex = co_await asio::this_coro::executor;
-                    // NOLINTNEXTLINE(misc-include-cleaner)
-                    asio::co_spawn(ex, run_liveness_loop(),
-                                   asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
-                }
+            // Reply Logon successfully emitted: transition to Active.
+            // T039/T041 (US3): seed last_inbound_steady_ and spawn liveness.
+            if (effective_clock_) {
+                last_inbound_steady_ = effective_clock_->steady_now();
+            }
+            fsm_state_ = fsm_state::Active;
+            // Spawn liveness loop (same as initiator's LogonSent→Active path).
+            {
+                auto ex = co_await asio::this_coro::executor;
+                // NOLINTNEXTLINE(misc-include-cleaner)
+                asio::co_spawn(ex, run_liveness_loop(),
+                               asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
             }
             co_return fixpp::core::expected_t<void>{};
         }
@@ -761,28 +774,34 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     {
                         std::array<std::byte, 512> rj_buf{};
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
                             std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
                             ref_seq,
                             52,  // RefTagID = 52 (SendingTime)
                             hdr.msg_type,
                             10,  // SessionRejectReason = 10 (SendingTime accuracy)
                             cfg_.begin_string, st52.value);
                         if (rj_result) {
-                            auto emit_r = co_await store_then_emit(*rj_result);
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            (void)assign_r;
+                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
                             (void)emit_r;
                         }
                     }
                     // Step 2: emit Logout(35=5).
                     {
                         std::array<std::byte, 256> lo_buf{};
+                        const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                         auto lo_result = fixpp::session::build_logout(
                             std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                            lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
                             {}, cfg_.begin_string, st52.value);
                         if (lo_result) {
-                            auto emit_r = co_await store_then_emit(*lo_result);
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            (void)assign_r;
+                            auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
                             (void)emit_r;
                         }
                     }
@@ -822,12 +841,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     std::array<std::byte, 256> buf{};
                     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                        : SendingTimeStamp{};
+                    const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
                     auto logout_result = fixpp::session::build_logout(
-                        std::span<std::byte>{buf.data(), buf.size()}, next_outbound_seq_++,
+                        std::span<std::byte>{buf.data(), buf.size()}, logout_seq,
                         cfg_.sender_comp_id, cfg_.target_comp_id,
                         {}, cfg_.begin_string, st52.value);
                     if (logout_result) {
-                        auto emit_r = co_await store_then_emit(*logout_result);
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        (void)assign_r;
+                        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
                         (void)emit_r;  // errors logged-then-proceed (I-07)
                     }
                 }
@@ -870,12 +892,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     std::array<std::byte, 256> hb_buf{};
                     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                        : SendingTimeStamp{};
+                    const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
                     auto hb_result = fixpp::session::build_heartbeat(
-                        std::span<std::byte>{hb_buf.data(), hb_buf.size()}, next_outbound_seq_++,
+                        std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
                         cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
                         cfg_.begin_string, st52.value);
                     if (hb_result) {
-                        auto emit_r = co_await store_then_emit(*hb_result);
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        (void)assign_r;
+                        auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
                         (void)emit_r;
                     }
                     // Remain in Active.
@@ -910,15 +935,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                            : SendingTimeStamp{};
+                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
                             std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             0,             // RefTagID: n/a for MsgType rejection
                             hdr.msg_type,  // RefMsgType: the offending MsgType
                             3,             // SessionRejectReason = 3 (invalid MsgType)
                             cfg_.begin_string, st52.value);
                         if (rj_result) {
-                            auto emit_r = co_await store_then_emit(*rj_result);
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            (void)assign_r;
+                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
                             (void)emit_r;
                         }
                         // Remain in Active — session stays after sending Reject.
@@ -1010,12 +1038,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
                     std::array<std::byte, 256> lo_buf{};
                     const auto st52 = stamp_sending_time(*effective_clock_);
+                    const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                     auto lo_result = fixpp::session::build_logout(
                         std::span<std::byte>{lo_buf.data(), lo_buf.size()},
-                        next_outbound_seq_++, cfg_.sender_comp_id, cfg_.target_comp_id,
+                        lo_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
                         sending_time_error, cfg_.begin_string, st52.value);
                     if (lo_result) {
-                        auto emit_r = co_await store_then_emit(*lo_result);
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        (void)assign_r;
+                        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
                         (void)emit_r;
                     }
                     fsm_state_ = fsm_state::Disconnected;
@@ -1074,7 +1105,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 //
 // Pipeline per FR-001 + [2e §4.1] durable-before-transmit:
 //   (1) stamp SendingTime(52) from effective_clock.now();
-//   (2) assign outbound MsgSeqNum(34) via next_outbound_seq_++;
+//   (2) assign outbound MsgSeqNum(34) via seqnum_mgr_.assign_outbound() (RC#A);
 //   (3) build the framed wire bytes into a stack buffer ([const §VIII.5] — no heap);
 //   (4) store_then_emit (I-3): store(outbound) BEFORE transport_send_.
 //
@@ -1150,8 +1181,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
     }
     const seqnum_t seq = *assign_r;
-    // Also advance next_outbound_seq_ to keep it in sync with the manager.
-    next_outbound_seq_ = seq + 1U;
+    // RC#A (gate-b/r1-green): next_outbound_seq_ removed — no sync needed.
+    // The manager is now the single source of truth for outbound seqnums.
 
     // (3) Build the frame into a 4096-byte stack buffer.
     std::array<std::byte, 4096> buf{};
@@ -1271,7 +1302,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     }
 
     // (4) store(outbound) BEFORE transport ([2e §4.1]).
-    co_return co_await store_then_emit(std::span<const std::byte>(buf.data(), pos));
+    // Pass the stamped seqnum explicitly (RC#A: next_outbound_seq_ removed).
+    co_return co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
 }
 
 fsm_state Session::state() const noexcept { return fsm_state_; }
@@ -1380,12 +1412,15 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             {
                 std::array<std::byte, 256> tr_buf{};
                 const auto st52 = stamp_sending_time(*effective_clock_);
+                const seqnum_t tr_seq = seqnum_mgr_.peek_outbound();
                 auto tr_result = fixpp::session::build_test_request(
-                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, next_outbound_seq_++,
+                    std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, pending_test_req_id_,
                     cfg_.begin_string, st52.value);
                 if (tr_result) {
-                    auto emit_r = co_await store_then_emit(*tr_result);
+                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                    (void)assign_r;
+                    auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
                     (void)emit_r;
                 }
             }
@@ -1426,18 +1461,17 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // ── US4 T046: store_then_emit ─────────────────────────────────────────────────
 //
 // Durable-before-transmit (I-3 outbound half):
-//   1. If store_ is available: co_await store_->store(seq, frame, outbound).
+//   1. If store_ is available: co_await store_->store(stamped_seq, frame, outbound).
 //   2. AFTER store returns: call transport_send_(frame) if non-null.
 // Errors from store(): logged-then-proceed (I-07); close still completes.
-// The outbound seqnum counter (next_outbound_seq_) is already advanced by
-// the caller before passing the committed frame.
+// stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
+//   explicitly (RC#A: next_outbound_seq_ removed; RC#B: transport errors surfaced).
+// [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
+//  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    std::span<const std::byte> frame) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
     // Step 1: store (durable-before-transmit).
     if (store_) {
-        // The outbound seqnum was already stamped into the frame by the builder;
-        // pass next_outbound_seq_ - 1 (the value that was stamped).
-        const seqnum_t stamped_seq = next_outbound_seq_ - 1U;
         // F5 (Round-A drift): wrap co_await store_->store() in try/catch to absorb
         // asio::system_error{operation_aborted} thrown by the store awaitable on
         // cancellation. Without this, the throw propagates out of the noexcept
@@ -1459,15 +1493,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     }
 
     // Step 2: transmit (ONLY after store completes — I-3).
+    // RC#B (gate-b/r1-green): convert transport throw → dispatch_aborted so callers
+    // can gate FSM transitions on emit success. [009 spec.md US1 AC3; F-02/F-03]
     if (transport_send_) {
-        // FR-15 noexcept window: throwing user callback must trap, not propagate.
-        // Durable-before-transmit is already satisfied → log-then-proceed.
         try {
             transport_send_(frame);
-        } catch (...) {  // NOLINT(bugprone-empty-catch) — FR-15 noexcept window absorption:
-                         // durable-before-transmit already satisfied; the transport-send throw is
-                         // not a recoverable signal here.
-            // Absorbed; FR-15 noexcept window per comment above.
+        } catch (const asio::system_error&) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        } catch (...) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
     }
 
@@ -1500,8 +1534,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // Build the Logout frame into a stack buffer.
     std::array<std::byte, 256> buf{};
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+    const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
     auto logout_result = fixpp::session::build_logout(std::span<std::byte>{buf.data(), buf.size()},
-                                                      next_outbound_seq_++, cfg_.sender_comp_id,
+                                                      logout_seq, cfg_.sender_comp_id,
                                                       cfg_.target_comp_id,
                                                       {}, cfg_.begin_string, st52.value);
 
@@ -1510,7 +1545,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // The session still transitions to LogoutSent and times out.
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
-        auto emit_r = co_await store_then_emit(*logout_result);
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        (void)assign_r;
+        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
         (void)emit_r;
     }
 

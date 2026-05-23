@@ -404,9 +404,10 @@ private:
     // Always called from the session strand (single-writer, no races).
     std::function<void(std::span<const std::byte>)> transport_send_;
 
-    // Outbound seqnum counter for building admin messages. Advances with every
-    // frame stored to the outbound store. Starts at 1 (seqnum_min).
-    fixpp::session::seqnum_t next_outbound_seq_ = fixpp::session::seqnum_min;
+    // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
+    // Use seqnum_mgr_.peek_outbound() to read; seqnum_mgr_.assign_outbound() to advance.
+    // The bare next_outbound_seq_ field was removed to prevent split-brain divergence
+    // between admin paths and Session::send. [005 data-model.md:30 E3; 009 spec.md FR-001(a)]
 
     // logout_confirmed_: set to true when an inbound Logout is received while
     // in LogoutSent state (the peer is confirming our Logout). The
@@ -415,10 +416,12 @@ private:
     bool logout_confirmed_ = false;
 
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
-    // seq: the outbound MsgSeqNum to store with; span: the committed frame bytes.
-    // Returns ok on success; propagates store errors (logs + continues per I-07).
+    // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
+    //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
+    // Returns ok on success; propagates store errors per I-07; propagates transport
+    //   throws as dispatch_aborted (RC#B gate-b/r1-green transport error surface).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
-        std::span<const std::byte> frame) noexcept;
+        seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept;
 
     // send_impl: the actual send pipeline (frame building + store_then_emit).
     // Called from the noexcept send() wrapper which catches asio::system_error
