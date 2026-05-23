@@ -785,9 +785,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.begin_string, st52.value);
                         if (rj_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            (void)assign_r;
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-                            (void)emit_r;
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                            // else: overflow/closed — skip emit; session-fatal,
+                            //       Disconnect happens unconditionally below (Step 3).
                         }
                     }
                     // Step 2: emit Logout(35=5).
@@ -800,9 +803,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             {}, cfg_.begin_string, st52.value);
                         if (lo_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            (void)assign_r;
-                            auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-                            (void)emit_r;
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                            // else: overflow/closed — skip emit; Disconnect below.
                         }
                     }
                     // Step 3: Disconnect.
@@ -848,9 +853,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         {}, cfg_.begin_string, st52.value);
                     if (logout_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        (void)assign_r;
-                        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
-                        (void)emit_r;  // errors logged-then-proceed (I-07)
+                        if (assign_r) {
+                            auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        }
+                        // else: overflow/closed — skip emit; Disconnect below
+                        //       is unconditional per the matrix cell.
                     }
                 }
                 // Both Active and LogonReceived → Disconnected.
@@ -899,9 +907,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.begin_string, st52.value);
                     if (hb_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        (void)assign_r;
+                        if (!assign_r) {
+                            // Overflow or closed: session-fatal per data-model.md:30 E3.
+                            // Do NOT emit with unassigned seq — skip and disconnect.
+                            fsm_state_ = fsm_state::Disconnected;
+                            co_return std::unexpected(assign_r.error());
+                        }
                         auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
-                        (void)emit_r;
+                        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
                     // Remain in Active.
                     co_return fixpp::core::expected_t<void>{};
@@ -945,9 +958,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.begin_string, st52.value);
                         if (rj_result) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            (void)assign_r;
+                            if (!assign_r) {
+                                // Overflow or closed: session-fatal per data-model.md:30 E3.
+                                fsm_state_ = fsm_state::Disconnected;
+                                co_return std::unexpected(assign_r.error());
+                            }
                             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-                            (void)emit_r;
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                         }
                         // Remain in Active — session stays after sending Reject.
                         co_return fixpp::core::expected_t<void>{};
@@ -1045,9 +1062,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         sending_time_error, cfg_.begin_string, st52.value);
                     if (lo_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        (void)assign_r;
-                        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-                        (void)emit_r;
+                        if (assign_r) {
+                            auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        }
+                        // else: overflow/closed — skip emit; Disconnect below.
                     }
                     fsm_state_ = fsm_state::Disconnected;
                     co_return fixpp::core::expected_t<void>{};
@@ -1419,9 +1438,15 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     cfg_.begin_string, st52.value);
                 if (tr_result) {
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                    (void)assign_r;
+                    if (!assign_r) {
+                        // Overflow or closed: session-fatal per data-model.md:30 E3.
+                        // Liveness loop is fire-and-forget (no expected_t return):
+                        // log by transitioning to Disconnected and stopping the loop.
+                        fsm_state_ = fsm_state::Disconnected;
+                        co_return;
+                    }
                     auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
-                    (void)emit_r;
+                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                 }
             }
 
@@ -1546,9 +1571,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
-        (void)assign_r;
+        if (!assign_r) {
+            // Overflow or closed: session-fatal per data-model.md:30 E3.
+            // Abort logout, force-disconnect with propagated error.
+            fsm_state_ = fsm_state::Disconnected;
+            co_return std::unexpected(assign_r.error());
+        }
         auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
-        (void)emit_r;
+        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
     }
 
     // Transition to LogoutSent.
