@@ -323,6 +323,114 @@ enum class error : std::uint8_t {
              //   near-fit; the caller's state mismatch is distinct
              //   from a Logon refusal). No reject loop (I-5).
              //   → FIXPP_ERR_SESSION_REJECT
+
+    // ── 011-tls-policy: 16 tls_* variants per [2g §6.6] lines 980-1003 +
+    //    /clarify Q2 additive amendment (tls_pin_empty_at_open). Non-renumbering
+    //    append at unused slots 78–93 per [const §X.4]. Design-doc table order.
+    //
+    //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
+    //    surface added by this feature — data-model.md E-15):
+    //      FIXPP_ERR_TLS_CONFIG     ← { tls_cert_load_failed,
+    //                                   tls_cert_parse_failed,
+    //                                   tls_cipher_not_allowed,
+    //                                   tls_invalid_security_profile,
+    //                                   tls_sign_callback_unavailable,
+    //                                   tls_pin_empty_at_open }
+    //      FIXPP_ERR_TLS_PINSET    ← { tls_pin_not_found,
+    //                                   tls_pin_already_present,
+    //                                   tls_pinset_capacity_exhausted }
+    //      FIXPP_ERR_TLS_RUNTIME   ← { tls_pinset_alloc_failed }
+    //      FIXPP_ERR_TLS_HANDSHAKE ← { tls_handshake_failed (GROUPING),
+    //                                   tls_rsa_key_too_large,
+    //                                   tls_cert_der_too_large,
+    //                                   tls_san_entries_exceeded,
+    //                                   tls_pin_mismatch }
+    //      FIXPP_ERR_CANCELLED     ← { tls_load_cancelled }  (reused; joins
+    //                                   dispatch_aborted / clock_sleeps_cancelled
+    //                                   / store_cancelled).
+    tls_cert_load_failed = 78,          // [2g §4.2] — file_cert_source could not
+                                        //   read a cert file at construction; OR
+                                        //   local cert exceeds DoS caps at load;
+                                        //   OR make_file_cert_source returning the
+                                        //   same condition through expected_t<...>.
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_cert_parse_failed = 79,         // [2g §4.2] / [2g §4.5] — PEM/DER parse
+                                        //   failed (malformed envelope, unexpected
+                                        //   ASN.1 shape, unsupported encoding).
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_cipher_not_allowed = 80,        // [2g §4.4] / [2g §4.5] / [2g §6.1] —
+                                        //   runtime config attempted to enable a
+                                        //   cipher not on the four CipherPolicy
+                                        //   allow-lists; the compile-time
+                                        //   static_assert chain catches at build,
+                                        //   this covers the C-ABI / config-file
+                                        //   path through CipherPolicy::is_allowed.
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_invalid_security_profile = 81,  // [2g §4.5] — SecurityProfile::unset reached
+                                        //   make_ssl_ctx_config; OR mtls_pinned with
+                                        //   null Pinset; OR one_way_ca with non-null
+                                        //   Pinset; OR any profile with null clock.
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_sign_callback_unavailable = 82, // [2g §4.1] — impl returned local_credentials
+                                        //   whose signer variant carried a
+                                        //   software_key_ref with a null handle AND
+                                        //   the awaitable signer path was also empty.
+                                        //   Preserved for the C-ABI path where the
+                                        //   discriminator may carry an unset value.
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_pin_empty_at_open = 83,         // [2g §4.5] / /clarify Q2 amendment —
+                                        //   make_ssl_ctx_config(mtls_pinned, ...,
+                                        //   empty_pinset, ...) returns this distinct
+                                        //   variant. Surfaces at session-open
+                                        //   (config-time), NOT per-handshake; distinct
+                                        //   from tls_pin_mismatch so operator logs
+                                        //   separate config problem from peer-cert
+                                        //   problem.
+                                        //   → FIXPP_ERR_TLS_CONFIG
+    tls_pin_not_found = 84,             // [2g §4.3] — Pinset::remove(fp) with a
+                                        //   fingerprint not in the set.
+                                        //   → FIXPP_ERR_TLS_PINSET
+    tls_pin_already_present = 85,       // [2g §4.3] — Pinset::add(p) with a pin
+                                        //   already in the set (by SHA-256).
+                                        //   → FIXPP_ERR_TLS_PINSET
+    tls_pinset_capacity_exhausted = 86, // [2g §4.3] / [2g §1.1] — Pinset::add
+                                        //   with size() == max_pins.
+                                        //   → FIXPP_ERR_TLS_PINSET
+    tls_pinset_alloc_failed = 87,       // [2g §4.3] — PMR allocation throw on
+                                        //   snapshot clone routed through
+                                        //   [2a §4.2] trap_throw.
+                                        //   → FIXPP_ERR_TLS_RUNTIME
+    tls_handshake_failed = 88,          // [2g §6.6] line 995 — GROUPING variant;
+                                        //   the C-ABI coalescing scheme depends on
+                                        //   this. The diagnostic field carries the
+                                        //   specific sub-reason ("expired",
+                                        //   "not_yet_valid", "rsa_under_min",
+                                        //   "sigalg_disallowed", "ecdsa_curve",
+                                        //   "chain_too_deep", "x509_v1", etc.).
+                                        //   verify_peer returns this variant on any
+                                        //   non-DoS-cap, non-pinning rejection.
+                                        //   → FIXPP_ERR_TLS_HANDSHAKE
+    tls_rsa_key_too_large = 89,         // [2g §6.6] — DoS bound; RSA key bits
+                                        //   exceed Config::max_rsa_key_bits. Sub-
+                                        //   reason "rsa_over_max".
+                                        //   → FIXPP_ERR_TLS_HANDSHAKE
+    tls_cert_der_too_large = 90,        // [2g §6.6] — DoS bound; DER envelope
+                                        //   exceeds Config::max_cert_der_bytes.
+                                        //   → FIXPP_ERR_TLS_HANDSHAKE
+    tls_san_entries_exceeded = 91,      // [2g §6.6] — DoS bound; san_dns_names
+                                        //   + san_uris > Config::max_san_entries.
+                                        //   → FIXPP_ERR_TLS_HANDSHAKE
+    tls_pin_mismatch = 92,              // [2g §6.6] — peer cert SHA-256 not in the
+                                        //   captured handshake-time Pinset snapshot
+                                        //   under SecurityProfile::mtls_pinned.
+                                        //   Uses cfg.pinset_snapshot per
+                                        //   [2g §6.5.1] BINDING CONTRACT.
+                                        //   → FIXPP_ERR_TLS_HANDSHAKE
+    tls_load_cancelled = 93,            // [2g §4.1] / [2g §6.4] —
+                                        //   cert_source::load_credentials' awaitable
+                                        //   was cancelled; OR async_signer_ref::sign
+                                        //   was cancelled.
+                                        //   → FIXPP_ERR_CANCELLED (reused)
 };
 
 template <class T>

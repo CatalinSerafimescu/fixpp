@@ -41,6 +41,10 @@ find_package(asio CONFIG QUIET)
 # QUIET so the symbol exists for src/session even if the toolchain hasn't been
 # regenerated yet (linker fail surfaces the real issue if the dep is missing).
 find_package(Crc32c CONFIG QUIET)
+# openssl/3.6.2 — 011-tls-policy [arch §4.6]. Minimum 3.0 per plan.md
+# Technical Context. QUIET while tls/ symbols are still landing; src/tls
+# tightens to REQUIRED once fixpp_tls grows .cpp sources.
+find_package(OpenSSL 3.0 QUIET)
 
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
