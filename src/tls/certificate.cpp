@@ -41,6 +41,14 @@ struct X509Deleter {
 };
 using X509Ptr = std::unique_ptr<X509, X509Deleter>;
 
+// RAII wrapper around BIO* that calls BIO_free on destruction.
+// Required so pmr_copy_str's bad_alloc (when PMR is exhausted) does not
+// leak the BIO inside extract_dn. F-2 Gate-B/r1 fix.
+struct BioDeleter {
+    void operator()(BIO* p) const noexcept { BIO_free(p); }
+};
+using BioPtr = std::unique_ptr<BIO, BioDeleter>;
+
 // Copy a C-string (possibly null) into the PMR arena.  Returns a string_view
 // into that arena-owned storage.  The caller must ensure `mr` outlives the
 // returned view.
@@ -77,24 +85,24 @@ std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexce
 
 // Extract a one-line subject/issuer DN string from an X509_NAME.
 // Returns "" on failure.  The returned string_view is allocated in `mr`.
+// Uses BioPtr (RAII) so a bad_alloc from pmr_copy_str does not leak the BIO.
 std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
     if (name == nullptr) {
         return {};
     }
-    // BIO to render the name as a one-line string.
-    BIO* bio = BIO_new(BIO_s_mem());
-    if (bio == nullptr) {
+    // BIO to render the name as a one-line string.  RAII-managed so a
+    // pmr_copy_str bad_alloc below does not leak it.
+    BioPtr bio{BIO_new(BIO_s_mem())};
+    if (!bio) {
         return {};
     }
-    X509_NAME_print_ex(bio, name, 0, XN_FLAG_ONELINE);
+    X509_NAME_print_ex(bio.get(), name, 0, XN_FLAG_ONELINE);
     BUF_MEM* bptr = nullptr;
-    BIO_get_mem_ptr(bio, &bptr);
-    std::string_view result;
+    BIO_get_mem_ptr(bio.get(), &bptr);
     if ((bptr != nullptr) && bptr->length > 0) {
-        result = pmr_copy_str(bptr->data, bptr->length, mr);
+        return pmr_copy_str(bptr->data, bptr->length, mr);
     }
-    BIO_free(bio);
-    return result;
+    return {};
 }
 
 }  // namespace
