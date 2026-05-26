@@ -313,6 +313,36 @@ TEST(VerifyPeerT039, ValidEcdsaP384Accepted) {
     ASSERT_TRUE(r.has_value()) << "ECDSA P-384 valid cert should be accepted";
 }
 
+// ── Happy-path with SAN entries → peer_identity carries owned SAN copies ─────
+// Lifts the SAN-copy hot path inside verify_peer (emplace_back into
+// peer_identity.san_dns_names_owned + san_uris_owned) which the SAN-less
+// happy-paths above skip.
+TEST(VerifyPeerT039, ValidCertWithSanCopiesOwnedSans) {
+    auto now = std::chrono::system_clock::now();
+    auto cfg = make_mtls_ca(now);
+
+    static const std::array<std::string_view, 3> dns_sans = {{
+        "fixpp.example.invalid",
+        "alt-1.fixpp.example.invalid",
+        "alt-2.fixpp.example.invalid",
+    }};
+    static const std::array<std::string_view, 2> uri_sans = {{
+        "spiffe://fixpp.example.invalid/order-gateway",
+        "spiffe://fixpp.example.invalid/admin",
+    }};
+
+    Certificate c = make_valid(now);
+    c.san_dns_names_ = std::span<const std::string_view>{dns_sans};
+    c.san_uris_ = std::span<const std::string_view>{uri_sans};
+
+    auto r = verify_peer(cfg, {&c, 1});
+    ASSERT_TRUE(r.has_value()) << "valid cert with SAN entries must be accepted";
+    EXPECT_EQ(r->san_dns_names_owned.size(), dns_sans.size());
+    EXPECT_EQ(r->san_uris_owned.size(), uri_sans.size());
+    EXPECT_EQ(r->san_dns_names_owned[0], dns_sans[0]);
+    EXPECT_EQ(r->san_uris_owned[1], uri_sans[1]);
+}
+
 // ── Step 9 happy path: mtls_pinned leaf matches a pin → accepted ─────────────
 // FR-020a step 9 match→accept branch (no other test covers this; existing
 // Step9PinMismatch only covers the reject branch).
