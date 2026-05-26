@@ -49,6 +49,16 @@ struct BioDeleter {
 };
 using BioPtr = std::unique_ptr<BIO, BioDeleter>;
 
+// RAII wrapper around GENERAL_NAMES* that calls GENERAL_NAMES_free on destruction.
+// Required so that a bad_alloc thrown inside the SAN processing loop (e.g.
+// dns_views.reserve, pmr_copy_str) does not leak the OpenSSL-owned stack before
+// the outer catch(bad_alloc) maps it to tls_cert_parse_failed. Gate-B/r2 N-1 fix.
+// Anchor: [2g §1 item 7] + [2g §6.6] (no resource leak on PMR-fault unwind path).
+struct GeneralNamesDeleter {
+    void operator()(GENERAL_NAMES* p) const noexcept { GENERAL_NAMES_free(p); }
+};
+using GeneralNamesPtr = std::unique_ptr<GENERAL_NAMES, GeneralNamesDeleter>;
+
 // Copy a C-string (possibly null) into the PMR arena.  Returns a string_view
 // into that arena-owned storage.  The caller must ensure `mr` outlives the
 // returned view.
@@ -207,11 +217,16 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
     // We collect into temporary vectors first, then copy the string storage into
     // `mr` and build a PMR-allocated array of string_view for the spans.
     {
-        auto* gens = static_cast<GENERAL_NAMES*>(
-            X509_get_ext_d2i(cert.get(), NID_subject_alt_name, nullptr, nullptr));
-        if (gens != nullptr) {
+        // GeneralNamesPtr (RAII) ensures GENERAL_NAMES_free is called on any
+        // unwind path — including bad_alloc thrown by dns_views.reserve,
+        // uri_views.reserve, or pmr_copy_str inside the loop.
+        // Anchor: [2g §1 item 7] / [2g §6.6] — no resource leak on PMR-fault
+        // unwind path. Gate-B/r2 N-1 fix.
+        GeneralNamesPtr gens{static_cast<GENERAL_NAMES*>(
+            X509_get_ext_d2i(cert.get(), NID_subject_alt_name, nullptr, nullptr))};
+        if (gens) {
             // Two-pass: first count, then allocate.
-            int total = sk_GENERAL_NAME_num(gens);
+            int total = sk_GENERAL_NAME_num(gens.get());
 
             // Temporary vectors to collect string_views into mr-owned storage.
             // These themselves live on the native stack/heap — they're temporary.
@@ -221,7 +236,7 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
             uri_views.reserve(static_cast<std::size_t>(total));
 
             for (int i = 0; i < total; ++i) {
-                GENERAL_NAME* gn = sk_GENERAL_NAME_value(gens, i);
+                GENERAL_NAME* gn = sk_GENERAL_NAME_value(gens.get(), i);
                 if (gn == nullptr) {
                     continue;
                 }
@@ -248,7 +263,8 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
                 }
             }
 
-            GENERAL_NAMES_free(gens);
+            // gens freed here via GeneralNamesPtr RAII (or on any earlier
+            // throw path — dns_views.reserve / uri_views.reserve / pmr_copy_str).
 
             // Allocate PMR arrays of string_view for the spans.
             if (!dns_views.empty()) {

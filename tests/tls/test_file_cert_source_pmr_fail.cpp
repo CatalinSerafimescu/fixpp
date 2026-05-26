@@ -16,6 +16,9 @@
 //       (normal or error).
 //   (d) parse_certificate_der with a tiny PMR (null_memory_resource upstream)
 //       returns unexpected{tls_cert_parse_failed} — not terminate.
+//   (e) Gate-B/r2 N-1 fix: GENERAL_NAMES* returned by X509_get_ext_d2i is
+//       RAII-managed so that a bad_alloc thrown inside the SAN loop does NOT
+//       leak it before the outer catch returns tls_cert_parse_failed.
 
 #include <gtest/gtest.h>
 
@@ -220,6 +223,51 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFai
     EXPECT_TRUE(result.error() == error::tls_cert_load_failed ||
                 result.error() == error::tls_cert_parse_failed)
         << "PMR exhaustion must surface as tls_cert_load_failed or tls_cert_parse_failed";
+}
+
+// ── ParseCertificateDerPmrExhaustionInSanBlockSurfacesCertParseFailed ─────────
+// Gate-B/r2 N-1 fix witness: GENERAL_NAMES* returned by X509_get_ext_d2i must
+// be freed even when bad_alloc fires INSIDE the SAN processing loop.
+//
+// The existing ParseCertificateDerPmrExhaustionSurfacesCertParseFailed test
+// uses a 1-byte arena that fires on the FIRST PMR allocation (subject DN copy
+// at certificate.cpp:151), so execution never reaches the SAN block and the
+// GENERAL_NAMES* leak on the SAN code-path was silently undetected.
+//
+// This test uses leaf_san_64.pem (64 DNS SANs, long hostnames ~70 bytes each)
+// with a medium arena (512 bytes) that is large enough to complete the subject
+// and issuer DN copies but exhausts before the first SAN string is allocated.
+// The bad_alloc then unwinds through the SAN loop past GENERAL_NAMES_free.
+// Without the RAII fix (GeneralNamesPtr) the OpenSSL-owned GENERAL_NAMES*
+// leaks; ASan/LSan detects this deterministically on the ASan preset.
+//
+// Contract: [2g §1 item 7] + [2g §6.6]: no OpenSSL resource leaks on the
+// PMR-fault unwind path.
+TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionInSanBlockSurfacesCertParseFailed) {
+    // Use a 512-byte arena — enough for subject + issuer DN strings (~50 bytes
+    // total with alignment padding) but NOT enough for the first SAN string
+    // (~70 bytes for "host-1-fixpp-test-fixtures-very-long-subdomain...").
+    // The null_memory_resource upstream ensures bad_alloc once the buffer fills.
+    char medium_buf[512]{};
+    std::pmr::monotonic_buffer_resource medium_mr{
+        medium_buf, sizeof(medium_buf), std::pmr::null_memory_resource()};
+
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_san_64.pem");
+    cfg.private_key_path = fixture("leaf_san_64.key");
+
+    // This call exercises parse_certificate_der with a cert that has 64 DNS SANs
+    // (leaf_san_64.pem). The arena exhausts inside the SAN loop after copying
+    // both DN strings. Without RAII on GENERAL_NAMES*, the pointer leaks before
+    // the outer catch(bad_alloc) returns tls_cert_parse_failed.
+    // ASan/LSan will flag the leak if the fix is absent.
+    auto result = file_cert_source::make_file_cert_source(cfg, &medium_mr);
+
+    ASSERT_FALSE(result.has_value())
+        << "PMR exhaustion in SAN block must surface as a typed error, not terminate";
+    EXPECT_TRUE(result.error() == error::tls_cert_load_failed ||
+                result.error() == error::tls_cert_parse_failed)
+        << "PMR exhaustion in SAN block must surface as tls_cert_load_failed or tls_cert_parse_failed";
 }
 
 }  // namespace
