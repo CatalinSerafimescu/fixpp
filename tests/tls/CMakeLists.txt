@@ -184,8 +184,12 @@ endif()
 
 # T036 — seam #11: SecurityProfile-to-OpenSSL-mode row mapping.
 # Needs OpenSSL because fixpp_tls static lib embeds certificate.cpp (OpenSSL).
+# FIXPP_TLS_FIXTURE_DIR needed by the ExtractCapsReadsFileCertSourceConfig test
+# (added in /speckit-verify coverage remediation — covers F-04 dynamic_cast path).
 fixpp_add_tls_test(NAME tls_security_profile_mapping
     SOURCES test_security_profile_mapping.cpp)
+target_compile_definitions(tls_security_profile_mapping PRIVATE
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_link_libraries(tls_security_profile_mapping PRIVATE
     "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
 

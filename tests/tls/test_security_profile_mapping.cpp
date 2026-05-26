@@ -6,6 +6,7 @@
 // Spec anchors: FR-013 (enum + [[deprecated]] enumerator), FR-014 (TLS-version posture),
 //               FR-022 ([[nodiscard]]), FR-025 (named error variants).
 
+#include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/tls/pinset.hpp>
 
@@ -14,6 +15,11 @@
 #include <memory>
 #include <memory_resource>
 #include <chrono>
+#include <string>
+
+#ifndef FIXPP_TLS_FIXTURE_DIR
+#define FIXPP_TLS_FIXTURE_DIR ""
+#endif
 
 using namespace fixpp::tls;
 using fixpp::core::error;
@@ -183,6 +189,38 @@ TEST(SecurityProfileMapping, OneWayCaWithPinsetRejected) {
 }
 
 // ── SecurityProfile enumerator count ─────────────────────────────────────────
+
+// ── extract_caps reads operator-configured file_cert_source::Config (FR-019) ─
+// /simplify F-04 wired make_ssl_ctx_config's extract_caps to read the real
+// Config via cert_source::dynamic_cast → file_cert_source::config(). All other
+// tests in this file use the stub_cert_source which returns default caps; this
+// test exercises the dynamic_cast happy-path and asserts the operator's tightened
+// caps flow into cfg.caps (vs being silently dropped — the pre-F-04 drift).
+TEST(SecurityProfileMapping, ExtractCapsReadsFileCertSourceConfig) {
+    file_cert_source::Config fcs_cfg;
+    fcs_cfg.leaf_path        = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.pem";
+    fcs_cfg.private_key_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.key";
+    fcs_cfg.ca_bundle_path   = std::string(FIXPP_TLS_FIXTURE_DIR) + "/ca.pem";
+    // Tightened DoS caps vs CertSourceCaps{} defaults of 8/8192/16384/64.
+    fcs_cfg.max_chain_depth    = 4;
+    fcs_cfg.max_rsa_key_bits   = 4096;
+    fcs_cfg.max_cert_der_bytes = 8 * 1024;
+    fcs_cfg.max_san_entries    = 16;
+
+    auto fcs_r = file_cert_source::make_file_cert_source(fcs_cfg, nullptr);
+    ASSERT_TRUE(fcs_r.has_value())
+        << "file_cert_source factory must succeed against checked-in fixtures";
+
+    auto cfg_r = make_ssl_ctx_config(
+        SecurityProfile::mtls_ca, *fcs_r, make_clock(), nullptr, nullptr);
+    ASSERT_TRUE(cfg_r.has_value());
+    auto& cfg = *cfg_r;
+
+    EXPECT_EQ(cfg.caps.max_chain_depth,    4u);
+    EXPECT_EQ(cfg.caps.max_rsa_key_bits,   4096u);
+    EXPECT_EQ(cfg.caps.max_cert_der_bytes, 8u * 1024u);
+    EXPECT_EQ(cfg.caps.max_san_entries,    16u);
+}
 
 TEST(SecurityProfileMapping, EnumHasFourValues) {
     // Contract assertion 1: four enumerators including unset sentinel.
