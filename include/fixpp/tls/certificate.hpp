@@ -121,8 +121,11 @@ struct Certificate {
 // The raw DER bytes are NOT copied; the caller's storage must outlive the
 // returned Certificate. Implemented in src/tls/certificate.cpp.
 //
-// On parse failure → unexpected{error::tls_cert_parse_failed}.
+// On parse failure         → unexpected{error::tls_cert_parse_failed}.
+// On PMR allocation failure → unexpected{error::tls_cert_parse_failed} (the
+//   bad_alloc from mr.allocate() is routed through [2a §4.2] trap_throw per
+//   [2g §1 item 7] / [2g §6.6]; it never escapes as a thrown exception.
 [[nodiscard]] core::expected_t<Certificate> parse_certificate_der(
-    std::span<const std::byte> der, std::pmr::memory_resource& mr) noexcept;
+    std::span<const std::byte> der, std::pmr::memory_resource& mr);
 
 }  // namespace fixpp::tls

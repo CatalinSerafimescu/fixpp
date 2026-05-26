@@ -104,13 +104,21 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
 // string/span storage into `mr`.  The raw DER bytes themselves are NOT copied;
 // the caller owns them and must ensure they outlive any Certificate produced.
 //
-// On parse failure → unexpected{error::tls_cert_parse_failed}.
-// On success       → Certificate with all view fields pointing into `mr`.
+// On parse failure         → unexpected{error::tls_cert_parse_failed}.
+// On PMR allocation failure → unexpected{error::tls_cert_parse_failed}.
+//   [2g §1 item 7]: PMR throws are routed through [2a §4.2] trap_throw and
+//   surface as error::tls_* variants per [2g §6.6]. The top-level try/catch
+//   below is the trap_throw boundary for this function.
+// On success → Certificate with all view fields pointing into `mr`.
 [[nodiscard]] core::expected_t<Certificate> parse_certificate_der(
-    std::span<const std::byte> der, std::pmr::memory_resource& mr) noexcept {
+    std::span<const std::byte> der, std::pmr::memory_resource& mr) {
     if (der.empty()) {
         return std::unexpected{core::error::tls_cert_parse_failed};
     }
+    // [2g §1 item 7] / [2g §6.6] trap_throw boundary: catch bad_alloc from
+    // mr.allocate() (inside pmr_copy_str / extract_dn / SAN span allocation)
+    // and surface as tls_cert_parse_failed. No bad_alloc escapes this function.
+    try {
 
     // d2i_X509 consumes DER bytes.
     const auto* p = reinterpret_cast<const unsigned char*>(der.data());
@@ -253,6 +261,11 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
     }
 
     return out;
+    } catch (const std::bad_alloc&) {
+        // PMR allocation failure — route through [2a §4.2] trap_throw per
+        // [2g §1 item 7] / [2g §6.6]. No bad_alloc escapes this boundary.
+        return std::unexpected{core::error::tls_cert_parse_failed};
+    }
 }
 
 }  // namespace fixpp::tls

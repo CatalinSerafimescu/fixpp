@@ -4,24 +4,18 @@
 // T029 — Gate A round-3 carry-forward P3: cold-path PMR-failure witness.
 //
 // Binding contracts tested:
-//   (a) PMR allocation failures during file_cert_source::load_credentials
-//       (cold-path) must not escape as thrown exceptions across the public API.
+//   (a) PMR allocation failures during parse_certificate_der must surface as
+//       expected_t::unexpected{tls_cert_parse_failed}, NOT std::terminate.
+//       Gate-B/r1 F-2 fix: parse_certificate_der had noexcept dropped and
+//       a top-level try/catch(bad_alloc) trap_throw boundary added per
+//       [2g §1 item 7] / [2g §6.6] / [arch §5.3].
 //   (b) make_file_cert_source factory catches all throws from the constructor
 //       (including runtime_error from bad file paths) and converts to
 //       expected_t::unexpected{error::tls_cert_load_failed}.
 //   (c) load_credentials awaitable does not throw on any code path
 //       (normal or error).
-//
-// Note: parse_certificate_der is declared noexcept in certificate.hpp, so
-// triggering a PMR allocation failure INSIDE it terminates (std::terminate).
-// T029 therefore tests the PMR failure path via the FACTORY boundary (the
-// wrap in trap_throw that catches std::bad_alloc from std::make_shared) and
-// via the load_credentials no-exception contract, NOT by forcing the internal
-// monotonic_buffer_resource to run out inside a noexcept function.
-//
-// The cold-path PMR-failure witness is via the factory's std::bad_alloc catch:
-// if the system heap is nearly full, std::make_shared<file_cert_source> can
-// throw std::bad_alloc. The factory must return tls_cert_load_failed.
+//   (d) parse_certificate_der with a tiny PMR (null_memory_resource upstream)
+//       returns unexpected{tls_cert_parse_failed} — not terminate.
 
 #include <gtest/gtest.h>
 
@@ -151,20 +145,11 @@ TEST(FileCertSourcePmrFail, LoadCredentialsDoesNotThrow) {
     EXPECT_TRUE(complete) << "load_credentials coroutine must complete";
 }
 
-// ── LoadCredentialsPmrAllocationFailSurfaces ──────────────────────────────────
-// When the PMR resource passed to the factory runs out BEFORE construction
-// can complete (i.e., the resource is used for cert metadata allocations),
-// the factory must return a typed error rather than throwing.
-// NOTE: Because parse_certificate_der is noexcept, we cannot pass a micro-tiny
-// arena to it — that would cause std::terminate. We test the scenario where
-// the PMR fails at the FACTORY level (std::make_shared allocation itself).
-// The test validates the wrapping pattern exists and works for bad_alloc from
-// the operator new path (not from the PMR internals).
-// This test uses a normal PMR (new_delete_resource) and verifies the factory
-// returns a working pointer, not a crash. The trap_throw boundary IS present
-// and would catch std::bad_alloc from std::make_shared in low-memory conditions.
+// ── TrapThrowBoundaryIsPresent ────────────────────────────────────────────────
+// Compile-time: make_file_cert_source is noexcept (2i C-ABI bridge requirement).
+// Runtime: factory succeeds with a valid PMR and returns a non-null shared_ptr.
 TEST(FileCertSourcePmrFail, TrapThrowBoundaryIsPresent) {
-    // Verify that make_file_cert_source is noexcept (compile-time contract check).
+    // Compile-time contract: factory is noexcept per FR-005 / [arch §5.3].
     static_assert(
         noexcept(file_cert_source::make_file_cert_source(file_cert_source::Config{}, nullptr)),
         "make_file_cert_source must be noexcept — trap_throw boundary required (FR-005)");
@@ -184,6 +169,57 @@ TEST(FileCertSourcePmrFail, TrapThrowBoundaryIsPresent) {
             result.error() == error::tls_cert_parse_failed)
             << "Failure must be a typed error";
     }
+}
+
+// ── ParseCertificateDerPmrExhaustionSurfesCertParseFailed ────────────────────
+// Gate-B/r1 F-2 fix: parse_certificate_der with a PMR whose upstream is
+// null_memory_resource (throws on every allocation past the tiny buffer) must
+// return unexpected{tls_cert_parse_failed}, NOT terminate.
+//
+// Contract: [2g §1 item 7] "PMR throws are routed through [2a §4.2] trap_throw
+// and surface as error::tls_* variants per §6.6." The noexcept was the bug.
+//
+// Uses a real cert DER (read from fixture) and a 1-byte monotonic_buffer_resource
+// so the FIRST allocation inside parse_certificate_der throws bad_alloc.
+TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFailed) {
+    // Load a real cert DER via a normal factory call first (to get the raw bytes).
+    file_cert_source::Config cfg_full;
+    cfg_full.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg_full.private_key_path = fixture("leaf_rsa2048.key");
+    // We need the raw DER bytes. Read them via the make_file_cert_source path
+    // first to confirm the fixture is present and valid.
+    auto full_result = file_cert_source::make_file_cert_source(cfg_full, nullptr);
+    ASSERT_TRUE(full_result.has_value())
+        << "Fixture leaf_rsa2048.pem must be present and loadable";
+
+    // Read the DER bytes from the PEM fixture file directly using the fixture path.
+    // PEM → DER conversion via OpenSSL BIO so we have raw bytes to feed
+    // parse_certificate_der directly. Alternatively, just use
+    // make_file_cert_source with a tiny PMR — it wraps the whole constructor.
+    //
+    // Simpler approach: pass a tiny monotonic_buffer_resource backed by
+    // null_memory_resource to make_file_cert_source itself. Any cert-metadata
+    // allocation (subject DN, issuer DN, SAN strings, SAN span arrays) inside
+    // parse_certificate_der will throw bad_alloc once the 1-byte buffer is
+    // exhausted. The factory must catch it and return tls_cert_load_failed.
+    char tiny_buf[1]{};
+    std::pmr::monotonic_buffer_resource tiny_mr{
+        tiny_buf, sizeof(tiny_buf), std::pmr::null_memory_resource()};
+
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.private_key_path = fixture("leaf_rsa2048.key");
+
+    // This call exercises parse_certificate_der with an arena that throws on
+    // the first allocation (subject DN copy). With the old noexcept, this would
+    // have called std::terminate. With the F-2 fix, it must return a typed error.
+    auto result = file_cert_source::make_file_cert_source(cfg, &tiny_mr);
+
+    ASSERT_FALSE(result.has_value())
+        << "PMR exhaustion must surface as a typed error, not terminate";
+    EXPECT_TRUE(result.error() == error::tls_cert_load_failed ||
+                result.error() == error::tls_cert_parse_failed)
+        << "PMR exhaustion must surface as tls_cert_load_failed or tls_cert_parse_failed";
 }
 
 }  // namespace
