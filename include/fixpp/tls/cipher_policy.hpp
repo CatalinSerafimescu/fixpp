@@ -9,6 +9,7 @@
 //               [const §XII.4] (banned cryptography),
 //               [const §XV.11] (banned TLS-1.0/1.1/SSL/RC4/etc).
 
+#include <algorithm>
 #include <array>
 #include <string_view>
 
@@ -20,14 +21,13 @@ namespace detail {
 // `banned` as a substring? Used by CipherPolicy::static_assert chain (FR-011).
 template <std::size_t N, std::size_t M>
 [[nodiscard]] constexpr bool contains_banned(
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::array<std::string_view, N> const& list,
     std::array<std::string_view, M> const& banned) noexcept {
-    for (std::string_view entry : list) {
-        for (std::string_view ban : banned) {
-            if (entry.find(ban) != std::string_view::npos) return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(list, [&banned](std::string_view entry) {
+        return std::ranges::any_of(banned,
+                                   [entry](std::string_view ban) { return entry.contains(ban); });
+    });
 }
 
 }  // namespace detail
@@ -106,17 +106,13 @@ struct CipherPolicy {
     [[nodiscard]]
     static constexpr bool is_allowed(std::string_view tok) noexcept {
         // First: check no banned token is a substring.
-        for (std::string_view ban : banned_tokens) {
-            if (tok.find(ban) != std::string_view::npos) return false;
+        if (std::ranges::any_of(banned_tokens,
+                                [tok](std::string_view ban) { return tok.contains(ban); })) {
+            return false;
         }
         // Then: tok must be on the explicit allow-list (tls13 OR tls12).
-        for (std::string_view s : tls13_suites) {
-            if (s == tok) return true;
-        }
-        for (std::string_view s : tls12_suites) {
-            if (s == tok) return true;
-        }
-        return false;
+        return std::ranges::any_of(tls13_suites, [tok](std::string_view s) { return s == tok; }) ||
+               std::ranges::any_of(tls12_suites, [tok](std::string_view s) { return s == tok; });
     }
 };
 

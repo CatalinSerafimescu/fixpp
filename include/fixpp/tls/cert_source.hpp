@@ -120,6 +120,8 @@ struct local_credentials {
 // ── cert_source ───────────────────────────────────────────────────────────────
 // Pluggable credential source — exactly 2 pure-virtuals per FR-001 /
 // [const §XIV.2] (cap = 5). Re-emitted verbatim from [2g §4.1] lines 259-290.
+// Abstract interface; defaulted dtor + Liskov-safe non-copy/non-move is intentional.
+// NOLINTNEXTLINE(hicpp-special-member-functions,cppcoreguidelines-special-member-functions)
 class cert_source {
 public:
     virtual ~cert_source() = default;

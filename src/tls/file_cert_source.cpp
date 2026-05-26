@@ -32,6 +32,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_type.hpp>
@@ -75,43 +76,62 @@ using EvpKeyPtr = std::unique_ptr<EVP_PKEY, EvpKeyDeleter>;
 // Passed as the 4th arg to PEM_read_bio_PrivateKey / PEM_read_bio_X509 via
 // the standard OpenSSL pem_password_cb signature.
 // `userdata` points to a std::string containing the password.
-static int pem_passwd_cb(char* buf, int size, int /*rwflag*/, void* userdata) {
-    if (!userdata || !buf || size <= 0) return 0;
+int pem_passwd_cb(char* buf, int size, int /*rwflag*/, void* userdata) {
+    if (userdata == nullptr || buf == nullptr || size <= 0) {
+        return 0;
+    }
     const auto* pwd = static_cast<const std::string*>(userdata);
     int len = static_cast<int>(pwd->size());
-    if (len > size) len = size;
+    len = std::min(len, size);
     std::memcpy(buf, pwd->c_str(), static_cast<std::size_t>(len));
     return len;
 }
 
 // ── is_pem ─────────────────────────────────────────────────────────────────────
 // Returns true if the file starts with "-----BEGIN".
-static bool is_pem(const std::string& path) {
+bool is_pem(const std::string& path) {
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C FILE* owned via fclose below
     FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return false;
+    if (f == nullptr) {
+        return false;
+    }
     char buf[10] = {};
     std::size_t n = std::fread(buf, 1, sizeof(buf), f);
+    // Closing the C FILE*; close failure is non-actionable here.
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory,cert-err33-c)
     std::fclose(f);
-    if (n < 5) return false;
+    if (n < 5) {
+        return false;
+    }
     return std::strncmp(buf, "-----", 5) == 0;
 }
 
 // ── read_file_bytes ───────────────────────────────────────────────────────────
 // Reads a file into a byte vector. Returns empty vector on error.
-static std::vector<std::byte> read_file_bytes(const std::string& path) {
+std::vector<std::byte> read_file_bytes(const std::string& path) {
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C FILE* owned via fclose below
     FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return {};
+    if (f == nullptr) {
+        return {};
+    }
+    // NOLINTBEGIN(cert-err33-c) -- fseek/ftell/fclose failure modes non-actionable; errors surface
+    // via size check below
     std::fseek(f, 0, SEEK_END);
     long sz = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
     if (sz <= 0) {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         std::fclose(f);
         return {};
     }
     std::vector<std::byte> buf(static_cast<std::size_t>(sz));
     std::size_t n = std::fread(buf.data(), 1, static_cast<std::size_t>(sz), f);
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
     std::fclose(f);
-    if (n != static_cast<std::size_t>(sz)) return {};
+    // NOLINTEND(cert-err33-c)
+    if (std::cmp_not_equal(n, sz)) {
+        return {};
+    }
     return buf;
 }
 
@@ -119,20 +139,26 @@ static std::vector<std::byte> read_file_bytes(const std::string& path) {
 // Parse a single PEM certificate from a BIO. Returns nullptr on failure.
 // pwd may be null if the cert is not encrypted (certs rarely are, but
 // PEM_read_bio_X509 still accepts a callback).
-static X509Ptr read_x509_pem(BIO* bio, const std::string* pwd) {
-    return X509Ptr{PEM_read_bio_X509(bio, nullptr, pwd ? pem_passwd_cb : nullptr,
+X509Ptr read_x509_pem(BIO* bio, const std::string* pwd) {
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
+    return X509Ptr{PEM_read_bio_X509(bio, nullptr, pwd != nullptr ? pem_passwd_cb : nullptr,
                                      const_cast<std::string*>(pwd))};
+    // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 }
 
 // ── x509_to_der ───────────────────────────────────────────────────────────────
 // Convert an X509* to a heap-allocated DER byte vector.
-static std::vector<std::byte> x509_to_der(X509* x) {
+std::vector<std::byte> x509_to_der(X509* x) {
     int len = i2d_X509(x, nullptr);
-    if (len <= 0) return {};
+    if (len <= 0) {
+        return {};
+    }
     std::vector<std::byte> buf(static_cast<std::size_t>(len));
-    unsigned char* p = reinterpret_cast<unsigned char*>(buf.data());
+    auto* p = reinterpret_cast<unsigned char*>(buf.data());
     int written = i2d_X509(x, &p);
-    if (written != len) return {};
+    if (written != len) {
+        return {};
+    }
     return buf;
 }
 
@@ -141,14 +167,18 @@ static std::vector<std::byte> x509_to_der(X509* x) {
 // DER bytes allocated into `der_storage` (a plain vector — lifetime owned by
 // the caller via the Impl struct). Certificate view fields alias der_storage.
 // Returns false on failure.
-static bool parse_cert_from_x509(X509* x, std::vector<std::byte>& der_storage,
-                                 std::pmr::memory_resource& mr, Certificate& out) {
+bool parse_cert_from_x509(X509* x, std::vector<std::byte>& der_storage,
+                          std::pmr::memory_resource& mr, Certificate& out) {
     auto der = x509_to_der(x);
-    if (der.empty()) return false;
+    if (der.empty()) {
+        return false;
+    }
     der_storage = std::move(der);
     auto result = parse_certificate_der(
         std::span<const std::byte>{der_storage.data(), der_storage.size()}, mr);
-    if (!result) return false;
+    if (!result) {
+        return false;
+    }
     out = *result;
     return true;
 }
@@ -189,7 +219,7 @@ struct file_cert_source::Impl {
         cfg = c;
         // arena_ was already initialised with the upstream in the Impl ctor.
 
-        std::string passwd;
+        std::string passwd{};
         const std::string* passwd_ptr = nullptr;
         if (c.password_cb) {
             passwd = c.password_cb();
@@ -214,9 +244,12 @@ struct file_cert_source::Impl {
                     throw std::runtime_error("tls_cert_load_failed: cannot open key file: " +
                                              c.private_key_path);
                 }
-                key = EvpKeyPtr{PEM_read_bio_PrivateKey(bio.get(), nullptr,
-                                                        passwd_ptr ? pem_passwd_cb : nullptr,
-                                                        const_cast<std::string*>(passwd_ptr))};
+                // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast) -- OpenSSL PEM_read API needs
+                // void* userdata
+                key = EvpKeyPtr{PEM_read_bio_PrivateKey(
+                    bio.get(), nullptr, (passwd_ptr != nullptr) ? pem_passwd_cb : nullptr,
+                    const_cast<std::string*>(passwd_ptr))};
+                // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
             } else {
                 // DER key
                 auto bytes = read_file_bytes(c.private_key_path);
@@ -224,7 +257,7 @@ struct file_cert_source::Impl {
                     throw std::runtime_error("tls_cert_load_failed: cannot read key file: " +
                                              c.private_key_path);
                 }
-                const unsigned char* p = reinterpret_cast<const unsigned char*>(bytes.data());
+                const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
                 key = EvpKeyPtr{d2i_AutoPrivateKey(nullptr, &p, static_cast<long>(bytes.size()))};
             }
             if (!key) {
@@ -241,6 +274,8 @@ struct file_cert_source::Impl {
     }
 
     // Load a single cert file (PEM or DER) → chain[0] = leaf.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- uses chain/der_storage/mr()
+    // members
     void load_cert_file(const std::string& path, const std::string* passwd_ptr) {
         if (is_pem(path)) {
             BioPtr bio{BIO_new_file(path.c_str(), "rb")};
@@ -280,6 +315,8 @@ struct file_cert_source::Impl {
     }
 
     // Load a PEM bundle (chain file) — may contain multiple certs.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- uses chain/der_storage/mr()
+    // members
     void load_chain_file(const std::string& path, const std::string* passwd_ptr) {
         BioPtr bio{BIO_new_file(path.c_str(), "rb")};
         if (!bio) {
@@ -288,7 +325,9 @@ struct file_cert_source::Impl {
         // Read certs one by one until BIO exhausted.
         while (true) {
             X509Ptr x{read_x509_pem(bio.get(), passwd_ptr)};
-            if (!x) break;  // EOF or parse error — stop iterating.
+            if (!x) {
+                break;  // EOF or parse error — stop iterating.
+            }
 
             Certificate cert;
             der_storage.emplace_back();
@@ -312,6 +351,7 @@ struct file_cert_source::Impl {
                     break;
                 }
             }
+            // NOLINTNEXTLINE(bugprone-branch-clone) -- distinct actions: push vs pop_back
             if (!dup) {
                 chain.push_back(cert);
             } else {
@@ -321,6 +361,8 @@ struct file_cert_source::Impl {
     }
 
     // Load a CA bundle (PEM file with one or more CA certs).
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- uses
+    // trust_anchors/der_storage/mr() members
     void load_ca_bundle(const std::string& path, const std::string* passwd_ptr) {
         BioPtr bio{BIO_new_file(path.c_str(), "rb")};
         if (!bio) {
@@ -328,7 +370,9 @@ struct file_cert_source::Impl {
         }
         while (true) {
             X509Ptr x{read_x509_pem(bio.get(), passwd_ptr)};
-            if (!x) break;
+            if (!x) {
+                break;
+            }
 
             Certificate cert;
             der_storage.emplace_back();
@@ -346,6 +390,7 @@ struct file_cert_source::Impl {
                     break;
                 }
             }
+            // NOLINTNEXTLINE(bugprone-branch-clone) -- distinct actions: push vs pop_back
             if (!dup) {
                 trust_anchors.push_back(cert);
             } else {
@@ -355,6 +400,8 @@ struct file_cert_source::Impl {
     }
 
     // Build local_credentials from cached state.
+    // NOLINTNEXTLINE(readability-make-member-function-const) -- moves owned EvpKeyPtr/Certificate
+    // state
     local_credentials build_credentials() {
         local_credentials creds;
 
@@ -383,8 +430,9 @@ struct file_cert_source::Impl {
 
 // ── file_cert_source — public API ─────────────────────────────────────────────
 
-file_cert_source::file_cert_source(Config cfg)
-    : impl_{std::make_unique<Impl>(cfg.mr ? cfg.mr : std::pmr::new_delete_resource())} {
+file_cert_source::file_cert_source(const Config& cfg)
+    : impl_{
+          std::make_unique<Impl>((cfg.mr != nullptr) ? cfg.mr : std::pmr::new_delete_resource())} {
     // May throw — construction-time carve-out per [arch §5.3].
     // Exception message encodes the reason; make_file_cert_source catches.
     impl_->load(cfg);
@@ -402,7 +450,9 @@ file_cert_source::Config const& file_cert_source::config() const noexcept { retu
 [[nodiscard]] core::expected_t<std::shared_ptr<cert_source>>
 file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* mr) noexcept {
     // Factory mr parameter overrides cfg.mr when non-null.
-    if (mr) cfg.mr = mr;
+    if (mr != nullptr) {
+        cfg.mr = mr;
+    }
 
     try {
         auto impl = std::make_shared<file_cert_source>(std::move(cfg));
@@ -413,7 +463,7 @@ file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* m
     } catch (const std::runtime_error& e) {
         const char* what = e.what();
         // Inspect the message prefix to decide which error code to return.
-        if (what && std::strncmp(what, "tls_cert_parse_failed", 21) == 0) {
+        if (what != nullptr && std::strncmp(what, "tls_cert_parse_failed", 21) == 0) {
             return std::unexpected{core::error::tls_cert_parse_failed};
         }
         return std::unexpected{core::error::tls_cert_load_failed};

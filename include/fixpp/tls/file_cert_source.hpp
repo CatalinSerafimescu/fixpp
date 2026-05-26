@@ -46,7 +46,7 @@ public:
             nullptr};  // PMR for parsed-cert storage. nullptr → new_delete_resource.
         std::size_t max_chain_depth{8};
         std::size_t max_rsa_key_bits{8192};
-        std::size_t max_cert_der_bytes{16 * 1024};
+        std::size_t max_cert_der_bytes{std::size_t{16} * 1024};
         std::size_t max_san_entries{64};
     };
 
@@ -58,7 +58,7 @@ public:
 
     // Direct-construction path for in-process C++ callers that prefer
     // throw-on-failure per [arch §5.3] construction-time carve-out.
-    explicit file_cert_source(Config cfg);
+    explicit file_cert_source(const Config& cfg);
     ~file_cert_source() override;
 
     // Non-copyable, non-movable (holds OpenSSL RAII resources).

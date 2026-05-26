@@ -25,7 +25,9 @@ namespace {
 // [arch §5.3]: dynamic_cast is allowed in cold-path (session-open) code.
 // Unknown concrete cert_source impls fall back to CertSourceCaps{} defaults.
 CertSourceCaps extract_caps(cert_source* cs) noexcept {
-    if (!cs) return {};
+    if (cs == nullptr) {
+        return {};
+    }
     if (auto* fcs = dynamic_cast<file_cert_source*>(cs)) {
         auto const& c = fcs->config();
         return CertSourceCaps{
@@ -40,34 +42,47 @@ CertSourceCaps extract_caps(cert_source* cs) noexcept {
 
 }  // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage) -- declared non-static in security_profile.hpp
 core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
                                                    std::shared_ptr<cert_source> cs,
                                                    std::shared_ptr<fixpp::core::Clock> clock,
-                                                   std::shared_ptr<Pinset> pinset,
+                                                   const std::shared_ptr<Pinset>& pinset,
                                                    std::pmr::memory_resource* mr) noexcept {
     using E = core::error;
 
     // Reject sentinel.
-    if (profile == SecurityProfile::unset) return std::unexpected{E::tls_invalid_security_profile};
+    if (profile == SecurityProfile::unset) {
+        return std::unexpected{E::tls_invalid_security_profile};
+    }
 
     // Reject null cs.
-    if (!cs) return std::unexpected{E::tls_invalid_security_profile};
+    if (!cs) {
+        return std::unexpected{E::tls_invalid_security_profile};
+    }
 
     // Reject null clock.
-    if (!clock) return std::unexpected{E::tls_invalid_security_profile};
+    if (!clock) {
+        return std::unexpected{E::tls_invalid_security_profile};
+    }
 
     // Profile-specific validation per [2g §4.5.1] 4-row table.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     switch (profile) {
         case SecurityProfile::mtls_pinned:
-            if (!pinset) return std::unexpected{E::tls_invalid_security_profile};
-            if (pinset->size() == 0) return std::unexpected{E::tls_pin_empty_at_open};
+            if (!pinset) {
+                return std::unexpected{E::tls_invalid_security_profile};
+            }
+            if (pinset->size() == 0) {
+                return std::unexpected{E::tls_pin_empty_at_open};
+            }
             break;
 
         case SecurityProfile::one_way_ca:
             // Deprecated profile: Pinset must be null (no pinning on legacy interop).
-            if (pinset) return std::unexpected{E::tls_invalid_security_profile};
+            if (pinset) {
+                return std::unexpected{E::tls_invalid_security_profile};
+            }
             break;
 
         case SecurityProfile::mtls_ca:

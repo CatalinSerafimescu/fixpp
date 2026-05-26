@@ -13,6 +13,7 @@
 // [2d §7.9] effective_clock wiring via SessionConfig is NOT yet plumbed into
 // Pinset::Config in Phase 3. Next phase revisit when Config gains a clock field.
 
+#include <algorithm>
 #include <chrono>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/certificate.hpp>
@@ -31,7 +32,7 @@ namespace {
 // Resolve the effective memory resource: use cfg.mr if non-null, else the
 // PMR new-delete resource (always available, outlives everything).
 std::pmr::memory_resource* resolve_mr(std::pmr::memory_resource* mr) noexcept {
-    return mr ? mr : std::pmr::new_delete_resource();
+    return (mr != nullptr) ? mr : std::pmr::new_delete_resource();
 }
 
 // Clone an existing pin_snapshot into a new one using `mr`, then append `p`.
@@ -90,16 +91,17 @@ Pinset::Pinset(Config cfg)
 Pinset::~Pinset() = default;
 
 // ── Move ──────────────────────────────────────────────────────────────────────
-Pinset::Pinset(Pinset&& other) noexcept {
+Pinset::Pinset(Pinset&& other) noexcept : cfg_(other.cfg_), mr_(other.mr_) {
     std::unique_lock<std::shared_mutex> lk(other.writer_);
-    cfg_ = other.cfg_;
-    mr_ = other.mr_;
+
     snapshot_.store(other.snapshot_.load(std::memory_order_acquire), std::memory_order_release);
     other.snapshot_.store(std::make_shared<pin_snapshot>(other.mr_), std::memory_order_release);
 }
 
 Pinset& Pinset::operator=(Pinset&& other) noexcept {
-    if (this == &other) return *this;
+    if (this == &other) {
+        return *this;
+    }
     // Lock both to avoid concurrent readers on `other` seeing a torn state.
     std::unique_lock<std::shared_mutex> lk1(writer_);
     std::unique_lock<std::shared_mutex> lk2(other.writer_);
@@ -137,8 +139,10 @@ core::expected_t<void> Pinset::add(Certificate const& cert) {
         new_pin.subject_dn = std::pmr::string{cert.subject_dn_, mr_};
         new_pin.san_dns = std::pmr::vector<std::pmr::string>{mr_};
         for (auto const& sv : cert.san_dns_names_) {
-            // Construct each PMR string explicitly with the resource, then push.
-            new_pin.san_dns.push_back(std::pmr::string{sv, mr_});
+            // emplace_back constructs the pmr::string using the vector's
+            // allocator (mr_); passing (sv, mr_) would invoke a 3-arg
+            // uses-allocator construction that pmr::string doesn't support.
+            new_pin.san_dns.emplace_back(sv);
         }
         // v0.1: system_clock::now() — see file-level NOTE on [2d §7.9].
         new_pin.added_at = std::chrono::system_clock::now();
@@ -178,10 +182,10 @@ pin_view Pinset::find(std::array<std::byte, 32> const& sha256) const noexcept {
     auto snap = snapshot_.load(std::memory_order_acquire);
     for (auto const& p : *snap) {
         if (p.sha256 == sha256) {
-            return pin_view{snap, &p};
+            return pin_view{.snapshot = snap, .value = &p};
         }
     }
-    return pin_view{std::move(snap), nullptr};
+    return pin_view{.snapshot = std::move(snap), .value = nullptr};
 }
 
 // ── snapshot ──────────────────────────────────────────────────────────────────
@@ -198,10 +202,7 @@ std::size_t Pinset::size() const noexcept {
 // ── contains ─────────────────────────────────────────────────────────────────
 bool Pinset::contains(std::array<std::byte, 32> const& sha256) const noexcept {
     auto snap = snapshot_.load(std::memory_order_acquire);
-    for (auto const& p : *snap) {
-        if (p.sha256 == sha256) return true;
-    }
-    return false;
+    return std::ranges::any_of(*snap, [&sha256](pin const& p) { return p.sha256 == sha256; });
 }
 
 // ── make_pinset factory ───────────────────────────────────────────────────────
@@ -209,7 +210,9 @@ bool Pinset::contains(std::array<std::byte, 32> const& sha256) const noexcept {
 // expected_t::unexpected{tls_pinset_alloc_failed} per [2a §4.2] trap_throw.
 core::expected_t<std::shared_ptr<Pinset>> Pinset::make_pinset(
     Config cfg, std::pmr::memory_resource* mr) noexcept {
-    if (cfg.mr == nullptr) cfg.mr = mr;
+    if (cfg.mr == nullptr) {
+        cfg.mr = mr;
+    }
     try {
         return std::make_shared<Pinset>(cfg);
     } catch (std::bad_alloc const&) {

@@ -36,7 +36,7 @@ struct peer_identity {
     peer_identity() = default;
 
     // not_after carried for the session FSM's expiry checks (D-9 / [2d §7.9]).
-    std::chrono::system_clock::time_point not_after{};
+    std::chrono::system_clock::time_point not_after;
 
     // ── Convenience views — bounded by *this ──────────────────────────────────
     // Storage is the owning vectors above; accessors carry [[clang::lifetimebound]]

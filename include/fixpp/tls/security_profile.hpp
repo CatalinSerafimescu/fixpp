@@ -52,7 +52,7 @@ enum class SecurityProfile : std::uint8_t {
 struct CertSourceCaps {
     std::size_t max_chain_depth{8};
     std::size_t max_rsa_key_bits{8192};
-    std::size_t max_cert_der_bytes{16 * 1024};
+    std::size_t max_cert_der_bytes{std::size_t{16} * 1024};
     std::size_t max_san_entries{64};
 };
 
@@ -102,7 +102,7 @@ struct SslCtxConfig {
 // Implemented in src/tls/security_profile.cpp.
 [[nodiscard]] core::expected_t<SslCtxConfig> make_ssl_ctx_config(
     SecurityProfile profile, std::shared_ptr<cert_source> cs,
-    std::shared_ptr<fixpp::core::Clock> clock, std::shared_ptr<Pinset> pinset = nullptr,
+    std::shared_ptr<fixpp::core::Clock> clock, const std::shared_ptr<Pinset>& pinset = nullptr,
     std::pmr::memory_resource* mr = nullptr) noexcept;
 
 // ── verify_peer ──────────────────────────────────────────────────────────────

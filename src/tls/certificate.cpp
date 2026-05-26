@@ -44,9 +44,10 @@ using X509Ptr = std::unique_ptr<X509, X509Deleter>;
 // Copy a C-string (possibly null) into the PMR arena.  Returns a string_view
 // into that arena-owned storage.  The caller must ensure `mr` outlives the
 // returned view.
-static std::string_view pmr_copy_str(const char* src, std::size_t len,
-                                     std::pmr::memory_resource& mr) {
-    if (len == 0) return {};
+std::string_view pmr_copy_str(const char* src, std::size_t len, std::pmr::memory_resource& mr) {
+    if (len == 0) {
+        return {};
+    }
     void* p = mr.allocate(len, alignof(char));
     std::memcpy(p, src, len);
     return {static_cast<const char*>(p), len};
@@ -54,32 +55,42 @@ static std::string_view pmr_copy_str(const char* src, std::size_t len,
 
 // Convert an OpenSSL ASN1_TIME to system_clock::time_point.
 // Returns the epoch on failure (not a hard error; verify_peer will reject it).
-static std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexcept {
-    if (!t) return {};
+std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexcept {
+    if (t == nullptr) {
+        return {};
+    }
     struct tm tm_val{};
-    if (ASN1_TIME_to_tm(t, &tm_val) != 1) return {};
+    if (ASN1_TIME_to_tm(t, &tm_val) != 1) {
+        return {};
+    }
     // timegm is POSIX; mktime interprets local time, timegm interprets UTC.
-#if defined(_WIN32)
+#ifdef _WIN32
     std::time_t tt = _mkgmtime(&tm_val);
 #else
     std::time_t tt = timegm(&tm_val);
 #endif
-    if (tt == -1) return {};
+    if (tt == -1) {
+        return {};
+    }
     return std::chrono::system_clock::from_time_t(tt);
 }
 
 // Extract a one-line subject/issuer DN string from an X509_NAME.
 // Returns "" on failure.  The returned string_view is allocated in `mr`.
-static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
-    if (!name) return {};
+std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
+    if (name == nullptr) {
+        return {};
+    }
     // BIO to render the name as a one-line string.
     BIO* bio = BIO_new(BIO_s_mem());
-    if (!bio) return {};
+    if (bio == nullptr) {
+        return {};
+    }
     X509_NAME_print_ex(bio, name, 0, XN_FLAG_ONELINE);
     BUF_MEM* bptr = nullptr;
     BIO_get_mem_ptr(bio, &bptr);
     std::string_view result;
-    if (bptr && bptr->length > 0) {
+    if ((bptr != nullptr) && bptr->length > 0) {
         result = pmr_copy_str(bptr->data, bptr->length, mr);
     }
     BIO_free(bio);
@@ -102,7 +113,7 @@ static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& m
     }
 
     // d2i_X509 consumes DER bytes.
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(der.data());
+    const auto* p = reinterpret_cast<const unsigned char*>(der.data());
     X509Ptr cert{d2i_X509(nullptr, &p, static_cast<long>(der.size()))};
     if (!cert) {
         return std::unexpected{core::error::tls_cert_parse_failed};
@@ -136,7 +147,7 @@ static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& m
     // ── Signature algorithm + key details ────────────────────────────────────
     {
         EVP_PKEY* pkey = X509_get0_pubkey(cert.get());
-        if (pkey) {
+        if (pkey != nullptr) {
             const int id = EVP_PKEY_get_base_id(pkey);
             if (id == EVP_PKEY_RSA || id == EVP_PKEY_RSA_PSS) {
                 out.alg_ = signature_algorithm::rsa_pss;
@@ -180,9 +191,9 @@ static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& m
     // We collect into temporary vectors first, then copy the string storage into
     // `mr` and build a PMR-allocated array of string_view for the spans.
     {
-        GENERAL_NAMES* gens = static_cast<GENERAL_NAMES*>(
+        auto* gens = static_cast<GENERAL_NAMES*>(
             X509_get_ext_d2i(cert.get(), NID_subject_alt_name, nullptr, nullptr));
-        if (gens) {
+        if (gens != nullptr) {
             // Two-pass: first count, then allocate.
             int total = sk_GENERAL_NAME_num(gens);
 
@@ -195,19 +206,27 @@ static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& m
 
             for (int i = 0; i < total; ++i) {
                 GENERAL_NAME* gn = sk_GENERAL_NAME_value(gens, i);
-                if (!gn) continue;
+                if (gn == nullptr) {
+                    continue;
+                }
                 if (gn->type == GEN_DNS) {
+                    // OpenSSL ASN1 union API.
+                    // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
                     const char* s =
                         reinterpret_cast<const char*>(ASN1_STRING_get0_data(gn->d.dNSName));
                     const int slen = ASN1_STRING_length(gn->d.dNSName);
-                    if (s && slen > 0) {
+                    // NOLINTEND(cppcoreguidelines-pro-type-union-access)
+                    if ((s != nullptr) && slen > 0) {
                         dns_views.push_back(pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
                     }
                 } else if (gn->type == GEN_URI) {
+                    // OpenSSL ASN1 union API.
+                    // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
                     const char* s = reinterpret_cast<const char*>(
                         ASN1_STRING_get0_data(gn->d.uniformResourceIdentifier));
                     const int slen = ASN1_STRING_length(gn->d.uniformResourceIdentifier);
-                    if (s && slen > 0) {
+                    // NOLINTEND(cppcoreguidelines-pro-type-union-access)
+                    if ((s != nullptr) && slen > 0) {
                         uri_views.push_back(pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
                     }
                 }

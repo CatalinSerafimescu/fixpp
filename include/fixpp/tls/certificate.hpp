@@ -109,8 +109,8 @@ struct Certificate {
     std::span<const std::string_view> san_uris_;
     std::array<std::byte, 32> sha256_{};
     int x509_version_ = 0;
-    std::chrono::system_clock::time_point not_before_{};
-    std::chrono::system_clock::time_point not_after_{};
+    std::chrono::system_clock::time_point not_before_;
+    std::chrono::system_clock::time_point not_after_;
     signature_algorithm alg_ = signature_algorithm::unspecified;
     std::size_t rsa_key_bits_ = 0;
     ecdsa_curve curve_ = ecdsa_curve::unspecified;

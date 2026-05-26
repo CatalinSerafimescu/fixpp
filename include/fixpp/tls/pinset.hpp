@@ -101,8 +101,8 @@ public:
 
     Pinset(Pinset const&) = delete;
     Pinset& operator=(Pinset const&) = delete;
-    Pinset(Pinset&&) noexcept;
-    Pinset& operator=(Pinset&&) noexcept;
+    Pinset(Pinset&& other) noexcept;
+    Pinset& operator=(Pinset&& other) noexcept;
 
     // (1) Add a pin from a Certificate. Deep-copies subject_dn + san_dns into
     // the snapshot's PMR arena. Errors:
