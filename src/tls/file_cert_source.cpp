@@ -219,6 +219,21 @@ struct file_cert_source::Impl {
         cfg = c;
         // arena_ was already initialised with the upstream in the Impl ctor.
 
+        // ── Fail-closed path validation ───────────────────────────────────
+        // [2g §4.2] / data-model E-2 / [2g §6.6] tls_sign_callback_unavailable:
+        // leaf_path and private_key_path are MANDATORY for a file_cert_source
+        // that supplies local credentials. Accepting empty paths silently and
+        // returning a null-handle signer violates data-model E-2 ("default-
+        // construction is NOT permitted") and [2g §4.2] line 376 (signer must
+        // be software_key_ref{handle = key_, ...} unconditionally on the
+        // success path). F-3 Gate-B/r1 fix.
+        if (c.leaf_path.empty()) {
+            throw std::runtime_error("tls_cert_load_failed: leaf_path must not be empty");
+        }
+        if (c.private_key_path.empty()) {
+            throw std::runtime_error("tls_cert_load_failed: private_key_path must not be empty");
+        }
+
         std::string passwd{};
         const std::string* passwd_ptr = nullptr;
         if (c.password_cb) {

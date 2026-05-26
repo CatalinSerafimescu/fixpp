@@ -18,10 +18,16 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/core/error.hpp>
 
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_awaitable.hpp>
+#include <asio/use_future.hpp>
+
 #include <filesystem>
 #include <memory>
 #include <memory_resource>
 #include <string>
+#include <variant>
 
 namespace {
 
@@ -236,6 +242,102 @@ TEST(FileCertSourceFactory, SuccessLoadsChainDepth8) {
     ASSERT_TRUE(result.has_value())
         << "make_file_cert_source must succeed for chain_depth_8 fixture";
     ASSERT_NE(*result, nullptr);
+}
+
+// ── Gate-B/r1 F-3 negative tests + success-path signer assertion ─────────────
+// [2g §4.2] line 376: file_cert_source::load_credentials returns local_credentials
+// whose signer is software_key_ref{handle = key_, ...} unconditionally on the
+// success path. data-model E-2: "default-construction is NOT permitted" for signer.
+// [2g §6.6] tls_sign_callback_unavailable: null-handle signer is the exact
+// broken state the variant exists to refuse.
+//
+// F-3 fix: Impl::load() now fails-closed when leaf_path or private_key_path is
+// empty, surfacing tls_cert_load_failed before returning a null-handle bundle.
+
+// ── Empty leaf_path must fail closed ─────────────────────────────────────────
+TEST(FileCertSourceFactory, EmptyLeafPathSurfacesCertLoadFailed) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = "";  // intentionally empty
+    cfg.private_key_path = fixture("leaf_rsa2048.key");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_FALSE(result.has_value())
+        << "Empty leaf_path must not succeed";
+    EXPECT_EQ(result.error(), error::tls_cert_load_failed)
+        << "Empty leaf_path must surface as tls_cert_load_failed";
+}
+
+// ── Empty private_key_path must fail closed ───────────────────────────────────
+TEST(FileCertSourceFactory, EmptyPrivateKeyPathSurfacesCertLoadFailed) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.private_key_path = "";  // intentionally empty
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_FALSE(result.has_value())
+        << "Empty private_key_path must not succeed";
+    EXPECT_EQ(result.error(), error::tls_cert_load_failed)
+        << "Empty private_key_path must surface as tls_cert_load_failed";
+}
+
+// ── Both paths empty must fail closed ────────────────────────────────────────
+TEST(FileCertSourceFactory, BothPathsEmptySurfacesCertLoadFailed) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = "";  // intentionally empty
+    cfg.private_key_path = "";  // intentionally empty
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_FALSE(result.has_value())
+        << "Both empty paths must not succeed";
+    EXPECT_EQ(result.error(), error::tls_cert_load_failed)
+        << "Both empty paths must surface as tls_cert_load_failed";
+}
+
+// ── Success path: software_key_ref handle must be non-null ────────────────────
+// Verifies [2g §4.2] line 376 contract: the success path always yields a
+// software_key_ref with a non-null ossl_pkey handle. Previously, empty paths
+// would silently produce a null-handle signer (data-model E-2 violation).
+TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.private_key_path = fixture("leaf_rsa2048.key");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed against checked-in fixtures";
+
+    auto cs_ptr = *result;
+    ASSERT_NE(cs_ptr, nullptr);
+
+    // Drive load_credentials() to get the actual local_credentials bundle.
+    asio::io_context ioc;
+    fixpp::tls::local_credentials creds{};
+    bool got_creds = false;
+    bool creds_ok  = false;
+
+    auto fut = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            auto r = co_await cs_ptr->load_credentials();
+            if (r.has_value()) {
+                creds = *r;
+                got_creds = true;
+                creds_ok  = true;
+            }
+        },
+        asio::use_future);
+    ioc.run();
+    fut.get();
+
+    ASSERT_TRUE(got_creds) << "load_credentials must succeed and coroutine must complete";
+    ASSERT_TRUE(creds_ok) << "load_credentials must return a valid result";
+
+    // [2g §4.2] line 376: signer MUST be software_key_ref with non-null handle.
+    ASSERT_TRUE(std::holds_alternative<fixpp::tls::software_key_ref>(creds.signer))
+        << "Success path signer must be software_key_ref variant (not async_signer_ref)";
+    auto const& ref = std::get<fixpp::tls::software_key_ref>(creds.signer);
+    EXPECT_NE(ref.handle.ossl_pkey, nullptr)
+        << "software_key_ref handle must not be null on the success path";
 }
 
 }  // namespace
