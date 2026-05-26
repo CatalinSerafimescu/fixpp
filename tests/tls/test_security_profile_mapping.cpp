@@ -106,8 +106,9 @@ TEST(SecurityProfileMapping, MtlsPinnedWithPopulatedPinsetAccepted) {
                                       pinset, nullptr);
     ASSERT_TRUE(result.has_value()) << "mtls_pinned with non-empty Pinset should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::mtls_pinned);
-    // pinset_snapshot must be captured per NEW-P1-1.
-    EXPECT_NE(result->pinset_snapshot, nullptr);
+    // pinset_snapshot is INTENTIONALLY null at make_ssl_ctx_config time per
+    // [2g §6.5.1] BINDING CONTRACT; 2h's wiring captures it at handshake start.
+    EXPECT_EQ(result->pinset_snapshot, nullptr);
 }
 
 // ── Row 3 (deprecated): one_way_ca + null Pinset — accepted ──────────────────

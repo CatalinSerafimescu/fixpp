@@ -332,6 +332,8 @@ TEST(TlsErrorVariants, PinMismatch) {
         pinset, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
+    // Act as 2h's wiring: capture the snapshot per [2g §6.5.1] BINDING CONTRACT.
+    cfg.pinset_snapshot = pinset->snapshot();
 
     // Present a cert with a DIFFERENT fingerprint.
     Certificate peer_cert = make_valid_ecdsa_cert(now);

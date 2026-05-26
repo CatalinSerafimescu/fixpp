@@ -17,7 +17,6 @@
 #include <fixpp/tls/certificate.hpp>
 #include <fixpp/core/error.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <memory_resource>
@@ -56,8 +55,10 @@ clone_and_append(std::shared_ptr<const pin_snapshot> const& old_snap,
     return new_snap;
 }
 
-// Clone an existing pin_snapshot minus the element matching `fp`.
-// Returns nullptr if `fp` not found (caller reports tls_pin_not_found).
+// Clone an existing pin_snapshot minus the element matching `fp`. Returns
+// the cloned snapshot; `found` is set to true iff a pin matching `fp` was
+// elided. Caller inspects `found` (not the return value) to decide whether
+// to report tls_pin_not_found.
 // Throws std::bad_alloc if mr is exhausted.
 std::shared_ptr<const pin_snapshot>
 clone_minus(std::shared_ptr<const pin_snapshot> const& old_snap,

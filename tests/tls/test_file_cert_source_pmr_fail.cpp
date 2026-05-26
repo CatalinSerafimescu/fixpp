@@ -66,12 +66,10 @@ TEST(FileCertSourcePmrFail, FactoryNeverThrows) {
         cfg.leaf_path        = "/nonexistent/path/cert.pem";
         cfg.private_key_path = "/nonexistent/path/key.pem";
         auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-        EXPECT_FALSE(result.has_value())
+        ASSERT_FALSE(result.has_value())
             << "Missing file must fail";
-        if (!result.has_value()) {
-            EXPECT_EQ(result.error(), error::tls_cert_load_failed)
-                << "Load failure must surface as tls_cert_load_failed";
-        }
+        EXPECT_EQ(result.error(), error::tls_cert_load_failed)
+            << "Load failure must surface as tls_cert_load_failed";
     } catch (...) {
         threw = true;
     }

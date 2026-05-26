@@ -219,6 +219,9 @@ TEST(VerifyPeerT039, Step9PinMismatch) {
         pinset, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
+    // Act as 2h's wiring: capture the snapshot at "handshake start" per
+    // [2g §6.5.1] BINDING CONTRACT. make_ssl_ctx_config no longer pre-populates.
+    cfg.pinset_snapshot = pinset->snapshot();
 
     Certificate peer = make_valid(now);
     peer.sha256_[0] = std::byte{0x11};  // Different from 0xCC.
@@ -308,4 +311,72 @@ TEST(VerifyPeerT039, ValidEcdsaP384Accepted) {
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_TRUE(r.has_value()) << "ECDSA P-384 valid cert should be accepted";
+}
+
+// ── Step 9 happy path: mtls_pinned leaf matches a pin → accepted ─────────────
+// FR-020a step 9 match→accept branch (no other test covers this; existing
+// Step9PinMismatch only covers the reject branch).
+TEST(VerifyPeerT039, MtlsPinnedLeafMatchesAccepted) {
+    auto now = std::chrono::system_clock::now();
+    auto pinset_r = Pinset::make_pinset(Pinset::Config{}, nullptr);
+    ASSERT_TRUE(pinset_r.has_value());
+    auto pinset = *pinset_r;
+
+    Certificate pinned_leaf = make_valid(now);
+    pinned_leaf.sha256_[0]  = std::byte{0xCC};
+    ASSERT_TRUE(pinset->add(pinned_leaf).has_value());
+
+    auto cfg_r = make_ssl_ctx_config(
+        SecurityProfile::mtls_pinned,
+        std::make_shared<stub_cs2>(),
+        std::make_shared<fixed_clock>(now),
+        pinset, nullptr);
+    ASSERT_TRUE(cfg_r.has_value());
+    auto& cfg = *cfg_r;
+    cfg.pinset_snapshot = pinset->snapshot();  // 2h's wiring
+
+    auto r = verify_peer(cfg, {&pinned_leaf, 1});
+    ASSERT_TRUE(r.has_value()) << "pinned leaf must be accepted";
+}
+
+// ── mtls_pinned with null snapshot → tls_pin_empty_at_open (fail-closed) ─────
+// 2h's wiring forgot to capture; verify_peer must NOT silently accept.
+TEST(VerifyPeerT039, MtlsPinnedNullSnapshotFailsClosed) {
+    auto now = std::chrono::system_clock::now();
+    auto pinset_r = Pinset::make_pinset(Pinset::Config{}, nullptr);
+    ASSERT_TRUE(pinset_r.has_value());
+    auto pinset = *pinset_r;
+    Certificate dummy{};
+    dummy.sha256_[0] = std::byte{0x55};
+    ASSERT_TRUE(pinset->add(dummy).has_value());
+
+    auto cfg_r = make_ssl_ctx_config(
+        SecurityProfile::mtls_pinned,
+        std::make_shared<stub_cs2>(),
+        std::make_shared<fixed_clock>(now),
+        pinset, nullptr);
+    ASSERT_TRUE(cfg_r.has_value());
+    auto& cfg = *cfg_r;
+    // INTENTIONALLY leave cfg.pinset_snapshot null (simulate 2h forgetting).
+
+    Certificate peer = make_valid(now);
+    auto r = verify_peer(cfg, {&peer, 1});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::tls_pin_empty_at_open);
+}
+
+// ── Unspecified sig_alg → tls_handshake_failed sub-reason "sigalg_disallowed" ─
+// FR-020 envelope: a leaf whose key algorithm is neither RSA nor ECDSA
+// (Ed25519/Ed448/unknown EVP_PKEY) must be rejected. Without this, step 10
+// (cipher gate, TODO 2h) is the only hardening barrier and the cert passes.
+TEST(VerifyPeerT039, UnspecifiedSigAlgRejected) {
+    auto now = std::chrono::system_clock::now();
+    auto cfg = make_mtls_ca(now);
+    Certificate c = make_valid(now);
+    c.alg_ = signature_algorithm::unspecified;
+
+    auto r = verify_peer(cfg, {&c, 1});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::tls_handshake_failed);
+    EXPECT_EQ(last_handshake_sub_reason(), "sigalg_disallowed");
 }

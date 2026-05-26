@@ -28,7 +28,6 @@
 
 #include <fixpp/core/error.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <string_view>
@@ -70,6 +69,15 @@ verify_peer(SslCtxConfig const&          cfg,
     if (leaf.raw_der().size() > caps.max_cert_der_bytes)
         return std::unexpected{core::error::tls_cert_der_too_large};
 
+    // Reject keys whose algorithm we do not recognise as RSA or ECDSA before
+    // running the algorithm-specific bounds (steps 2-4). Without this, an
+    // Ed25519 / Ed448 / unknown EVP_PKEY leaf would bypass FR-020's RSA and
+    // ECDSA envelope (step 10 cipher gate is TODO 2h, so this is the only
+    // hardening barrier today). Sub-reason "sigalg_disallowed" per [2g §6.6].
+    if (leaf.alg() != signature_algorithm::rsa_pss &&
+        leaf.alg() != signature_algorithm::ecdsa)
+        return handshake_failed("sigalg_disallowed");
+
     // ── Step 2: RSA key lower bound (≥ 2048 bits) ─────────────────────────────
     if (leaf.alg() == signature_algorithm::rsa_pss && leaf.rsa_key_bits() < 2048)
         return handshake_failed("rsa_under_min");
@@ -109,7 +117,12 @@ verify_peer(SslCtxConfig const&          cfg,
 
     // ── Step 9: Pinning (mtls_pinned only) ────────────────────────────────────
     // Consumes cfg.pinset_snapshot — NEVER calls cfg.pinset->find/contains/snapshot.
-    if (cfg.profile == SecurityProfile::mtls_pinned && cfg.pinset_snapshot) {
+    // Fail-closed if 2h's wiring failed to capture a snapshot before calling
+    // verify_peer: a null snapshot under mtls_pinned would otherwise silently
+    // accept any peer cert (worst-case trust bypass, US3).
+    if (cfg.profile == SecurityProfile::mtls_pinned) {
+        if (!cfg.pinset_snapshot)
+            return std::unexpected{core::error::tls_pin_empty_at_open};
         const auto& fp = leaf.sha256();
         bool found = false;
         for (const auto& pin_entry : *cfg.pinset_snapshot) {
@@ -135,17 +148,11 @@ verify_peer(SslCtxConfig const&          cfg,
     peer_identity id{mr};
     id.subject_dn.assign(leaf.subject_dn());
 
-    for (const std::string_view dns : leaf.san_dns_names()) {
-        std::pmr::string s{mr};
-        s.assign(dns);
-        id.san_dns_names_owned.push_back(std::move(s));
-    }
+    for (const std::string_view dns : leaf.san_dns_names())
+        id.san_dns_names_owned.emplace_back(dns);
 
-    for (const std::string_view uri : leaf.san_uris()) {
-        std::pmr::string s{mr};
-        s.assign(uri);
-        id.san_uris_owned.push_back(std::move(s));
-    }
+    for (const std::string_view uri : leaf.san_uris())
+        id.san_uris_owned.emplace_back(uri);
 
     id.leaf_fingerprint = leaf.sha256();
     id.not_after        = leaf.not_after();

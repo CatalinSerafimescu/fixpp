@@ -59,10 +59,13 @@ struct CertSourceCaps {
 // Value-type description of the SSL_CTX configuration the 2h-transport feature
 // must apply. Re-emitted VERBATIM from 2g §4.5 lines 670-677.
 //
-// CRITICAL (NEW-P1-1 close): `pinset_snapshot` is captured ONCE at
-// make_ssl_ctx_config time (or by 2h's wiring at handshake start) so
-// verify_peer can scan it directly without calling cfg.pinset->find/contains/
-// snapshot itself per [2g §6.5.1] BINDING CONTRACT.
+// CRITICAL: `pinset_snapshot` is captured ONCE by 2h's wiring at handshake
+// start per [2g §6.5.1] BINDING CONTRACT. make_ssl_ctx_config leaves this
+// field NULL — pre-populating at config-time would fossilize the snapshot
+// across handshakes and break FR-009 rotation semantics. verify_peer scans
+// this field directly without calling cfg.pinset->find/contains/snapshot.
+// Under SecurityProfile::mtls_pinned, a null pinset_snapshot at verify_peer
+// time returns tls_pin_empty_at_open (fail-closed).
 struct SslCtxConfig {
     SecurityProfile                          profile          {SecurityProfile::unset};
     std::shared_ptr<cert_source>             cs;
@@ -122,12 +125,15 @@ verify_peer(SslCtxConfig const&          cfg,
 // Thread-local string_view set by verify_peer when it returns
 // tls_handshake_failed (the GROUPING variant). Carries the specific sub-reason
 // for diagnostic purposes:
-//   "rsa_under_min"   — RSA key < 2048 bits
-//   "ecdsa_curve"     — ECDSA curve not P-256 or P-384
-//   "chain_too_deep"  — chain depth > max_chain_depth
-//   "x509_v1"         — X.509 version 1 certificate
-//   "expired"         — cert's not_after < clock->now()
-//   "not_yet_valid"   — cert's not_before > clock->now()
+//   "rsa_under_min"     — RSA key < 2048 bits
+//   "ecdsa_curve"       — ECDSA curve not P-256 or P-384
+//   "sigalg_disallowed" — leaf key algorithm is neither RSA nor ECDSA (e.g.
+//                         Ed25519/Ed448/unknown EVP_PKEY) — FR-020 envelope
+//   "chain_too_deep"    — chain depth > max_chain_depth
+//   "x509_v1"           — X.509 version 1 certificate
+//   "expired"           — cert's not_after < clock->now()
+//   "not_yet_valid"     — cert's not_before > clock->now()
+//   "empty_chain"       — OpenSSL delivered zero certs to verify_peer
 //
 // Pragmatic v0.1 per T037 brief: enum-only return + thread-local sub-reason
 // carrier (matching how dispatch_aborted doesn't carry diagnostics inline).

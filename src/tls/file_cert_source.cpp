@@ -46,7 +46,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -379,6 +378,11 @@ file_cert_source::file_cert_source(Config cfg)
 }
 
 file_cert_source::~file_cert_source() = default;
+
+file_cert_source::Config const&
+file_cert_source::config() const noexcept {
+    return impl_->cfg;
+}
 
 // ── make_file_cert_source — factory ──────────────────────────────────────────
 // Wraps construction-time throw in expected_t<...> per [arch §5.3] / FR-005.

@@ -73,6 +73,12 @@ class file_cert_source final : public cert_source {
     [[nodiscard]] core::expected_t<std::span<const Certificate>>
     load_trust_anchors() [[clang::lifetimebound]] override;
 
+    // Operator-configured Config. Reachable per contracts/security_profile.hpp:153
+    // "caps.X is shorthand for the cert_source's Config::X field reachable through
+    //  cfg.cs->config()" — security_profile.cpp extracts CertSourceCaps from here
+    // via cold-path dynamic_cast per [arch §5.3].
+    [[nodiscard]] Config const& config() const noexcept [[clang::lifetimebound]];
+
  private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

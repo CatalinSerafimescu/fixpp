@@ -19,21 +19,22 @@ namespace fixpp::tls {
 
 namespace {
 
-// Extract DoS caps from the cert_source. Tries dynamic_cast to file_cert_source
-// to read its Config; falls back to defaults if the concrete type is unknown.
+// Extract DoS caps from the cert_source. dynamic_cast to file_cert_source to read
+// the OPERATOR-CONFIGURED Config (NOT the defaults — per FR-019 spec text and
+// contracts/security_profile.hpp:153-154 binding contract "caps.X is shorthand for
+// the cert_source's Config::X field reachable through cfg.cs->config()").
 // [arch §5.3]: dynamic_cast is allowed in cold-path (session-open) code.
+// Unknown concrete cert_source impls fall back to CertSourceCaps{} defaults.
 CertSourceCaps extract_caps(cert_source* cs) noexcept {
     if (!cs) return {};
     if (auto* fcs = dynamic_cast<file_cert_source*>(cs)) {
-        // We cannot access fcs->cfg_ directly (private), but the public Config
-        // defaults are the same as CertSourceCaps defaults. For a real accessor
-        // we would need a virtual getter; for v0.1 the defaults match exactly.
-        // file_cert_source::Config defaults: max_chain_depth=8, max_rsa_key_bits=8192,
-        // max_cert_der_bytes=16*1024, max_san_entries=64. These match CertSourceCaps{}.
-        // In a future refactor, a virtual Config const& cert_source::validation_config()
-        // would allow reading the actual configured values.
-        (void)fcs;  // suppress unused-variable warning; caps match defaults.
-        return {};
+        auto const& c = fcs->config();
+        return CertSourceCaps{
+            .max_chain_depth    = c.max_chain_depth,
+            .max_rsa_key_bits   = c.max_rsa_key_bits,
+            .max_cert_der_bytes = c.max_cert_der_bytes,
+            .max_san_entries    = c.max_san_entries,
+        };
     }
     return {};
 }
@@ -97,10 +98,13 @@ make_ssl_ctx_config(SecurityProfile                      profile,
     cfg.mr      = mr;
     cfg.caps    = extract_caps(cfg.cs.get());
 
-    // NEW-P1-1: capture pinset_snapshot ONCE here (or by 2h at handshake start).
-    // For make_ssl_ctx_config's scope, capture it now so verify_peer can use it.
-    if (cfg.pinset)
-        cfg.pinset_snapshot = cfg.pinset->snapshot();
+    // pinset_snapshot is INTENTIONALLY left null here. Per [2g §6.5.1] BINDING
+    // CONTRACT (re-emitted at contracts/security_profile.hpp:139-141), the
+    // snapshot is captured ONCE at handshake start by 2h's wiring — NOT at
+    // config time. A single SslCtxConfig may serve many handshakes; capturing
+    // here would fossilize the snapshot and break FR-009 rotation semantics.
+    // Tests acting as 2h must populate cfg.pinset_snapshot themselves before
+    // calling verify_peer.
 
     return cfg;
 }
