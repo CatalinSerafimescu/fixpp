@@ -17,7 +17,14 @@
 //   pem_password_cb userdata (OpenSSL 4th-argument pattern).
 // - Chain dedupe by SHA-256-of-DER on load.
 //
-// load_credentials: follows the §6.4 recipe VERBATIM.
+// load_credentials: implements the [2g §6.4] cached-state fast path
+// (lines 926-929: "for already-cached state, just return the prepared
+// local_credentials directly"). Performs the §6.4 step-2 (read
+// cancellation_state) and step-3 (pre-I/O reap) checks; the step-4
+// cancellable_dispatch hop is omitted because all parsing happens at
+// construction time. Full production-path witness under per_session_strand
+// / direct_executor lives in 2h-transport (its Gate B pins the seam #13
+// obligation against a real Session*).
 // load_trust_anchors: returns span<const Certificate> from cached trust_anchors_.
 //
 // make_file_cert_source factory: wraps construction in trap_throw →
@@ -487,17 +494,23 @@ file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* m
     }
 }
 
-// ── load_credentials — §6.4 recipe VERBATIM ──────────────────────────────────
-// Steps per contracts/cert_source.hpp lines 206-243:
-//   1. Read executor.
+// ── load_credentials — [2g §6.4] cached-state fast path ──────────────────────
+// Implements [2g §6.4] lines 926-929: "for already-cached state, just return
+// the prepared local_credentials directly." Since file_cert_source loads and
+// parses every file ONCE at construction time, no blocking I/O is needed here.
+//
+// Steps executed per [2g §6.4] contracts/cert_source.hpp lines 206-243:
+//   0. Enable total cancellation ([feedback_asio_cospawn_total_cancellation_default]).
 //   2. Read cancellation_state.
 //   3. REAP PRE-I/O CANCELLATION (load-bearing).
-//   4. Post via cancellable_dispatch (for file_cert_source: certs cached at
-//      construction, so step 4 builds credentials inline in the lambda).
+//   4. Build credentials inline from cached state (no cancellable_dispatch hop —
+//      the §6.4 footnote explicitly authorises this for already-cached state).
+//      Post-build cancellation check is retained for symmetry.
 //
-// Note: since file_cert_source caches everything at construction, step 4's
-// lambda is cheap (no blocking I/O). The dispatch hop still satisfies the
-// recipe obligation and provides the seam for in-flight cancellation.
+// The step-4 cancellable_dispatch hop and the full §6.4 production-path witness
+// (deterministic probe under per_session_strand / direct_executor per [2d §4.8])
+// require a real Session* / session_executor and live in 2h-transport (Gate B
+// seam #13 pin). [2g §6.4:926-929] is the spec authorisation for this path.
 [[nodiscard]] asio::awaitable<core::expected_t<local_credentials>>
 file_cert_source::load_credentials() {
     // Enable total cancellation so callers using cancellation_type::total are
