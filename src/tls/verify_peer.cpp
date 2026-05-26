@@ -14,7 +14,8 @@
 //   5. Chain depth              ≤ caps.max_chain_depth     → tls_handshake_failed "chain_too_deep"
 //   6. SAN cardinality          ≤ caps.max_san_entries     → tls_san_entries_exceeded
 //   7. X.509 version            ∈ {v2, v3}                 → tls_handshake_failed "x509_v1"
-//   8. Expiration               leaf.not_before ≤ now ≤ leaf.not_after → tls_handshake_failed "expired"/"not_yet_valid"
+//   8. Expiration               leaf.not_before ≤ now ≤ leaf.not_after → tls_handshake_failed
+//   "expired"/"not_yet_valid"
 //   9. Pinning (mtls_pinned)    scan cfg.pinset_snapshot for leaf.sha256_ → tls_pin_mismatch
 //  10. Cipher (TODO 2h)         CipherPolicy::is_allowed(negotiated)  → tls_cipher_not_allowed
 //
@@ -24,12 +25,10 @@
 // Sub-reason carrier: thread-local per pragmatic v0.1 design (T037 brief).
 // The thread-local is set only when verify_peer returns tls_handshake_failed.
 
-#include <fixpp/tls/security_profile.hpp>
-
-#include <fixpp/core/error.hpp>
-
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/security_profile.hpp>
 #include <string_view>
 
 namespace fixpp::tls {
@@ -46,21 +45,17 @@ std::string_view last_handshake_sub_reason() noexcept {
 namespace {
 
 // Helper: return tls_handshake_failed with a sub-reason set.
-core::expected_t<peer_identity>
-handshake_failed(const char* sub_reason) noexcept {
+core::expected_t<peer_identity> handshake_failed(const char* sub_reason) noexcept {
     tls_last_sub_reason = sub_reason;
     return std::unexpected{core::error::tls_handshake_failed};
 }
 
 }  // namespace
 
-core::expected_t<peer_identity>
-verify_peer(SslCtxConfig const&          cfg,
-            std::span<const Certificate> peer_chain) noexcept
-{
+core::expected_t<peer_identity> verify_peer(SslCtxConfig const& cfg,
+                                            std::span<const Certificate> peer_chain) noexcept {
     // Empty chain is a degenerate case; treat as handshake failure.
-    if (peer_chain.empty())
-        return handshake_failed("empty_chain");
+    if (peer_chain.empty()) return handshake_failed("empty_chain");
 
     const Certificate& leaf = peer_chain[0];
     const auto& caps = cfg.caps;
@@ -74,8 +69,7 @@ verify_peer(SslCtxConfig const&          cfg,
     // Ed25519 / Ed448 / unknown EVP_PKEY leaf would bypass FR-020's RSA and
     // ECDSA envelope (step 10 cipher gate is TODO 2h, so this is the only
     // hardening barrier today). Sub-reason "sigalg_disallowed" per [2g §6.6].
-    if (leaf.alg() != signature_algorithm::rsa_pss &&
-        leaf.alg() != signature_algorithm::ecdsa)
+    if (leaf.alg() != signature_algorithm::rsa_pss && leaf.alg() != signature_algorithm::ecdsa)
         return handshake_failed("sigalg_disallowed");
 
     // ── Step 2: RSA key lower bound (≥ 2048 bits) ─────────────────────────────
@@ -93,26 +87,21 @@ verify_peer(SslCtxConfig const&          cfg,
     }
 
     // ── Step 5: Chain depth ≤ max_chain_depth ─────────────────────────────────
-    if (peer_chain.size() > caps.max_chain_depth)
-        return handshake_failed("chain_too_deep");
+    if (peer_chain.size() > caps.max_chain_depth) return handshake_failed("chain_too_deep");
 
     // ── Step 6: SAN cardinality ≤ max_san_entries ─────────────────────────────
-    const std::size_t san_total =
-        leaf.san_dns_names().size() + leaf.san_uris().size();
+    const std::size_t san_total = leaf.san_dns_names().size() + leaf.san_uris().size();
     if (san_total > caps.max_san_entries)
         return std::unexpected{core::error::tls_san_entries_exceeded};
 
     // ── Step 7: X.509 version ∈ {v2, v3} (v1 rejected) ───────────────────────
-    if (leaf.x509_version() == 1)
-        return handshake_failed("x509_v1");
+    if (leaf.x509_version() == 1) return handshake_failed("x509_v1");
 
     // ── Step 8: Expiration ────────────────────────────────────────────────────
     if (cfg.clock) {
         const auto now = cfg.clock->now();
-        if (now > leaf.not_after())
-            return handshake_failed("expired");
-        if (now < leaf.not_before())
-            return handshake_failed("not_yet_valid");
+        if (now > leaf.not_after()) return handshake_failed("expired");
+        if (now < leaf.not_before()) return handshake_failed("not_yet_valid");
     }
 
     // ── Step 9: Pinning (mtls_pinned only) ────────────────────────────────────
@@ -121,8 +110,7 @@ verify_peer(SslCtxConfig const&          cfg,
     // verify_peer: a null snapshot under mtls_pinned would otherwise silently
     // accept any peer cert (worst-case trust bypass, US3).
     if (cfg.profile == SecurityProfile::mtls_pinned) {
-        if (!cfg.pinset_snapshot)
-            return std::unexpected{core::error::tls_pin_empty_at_open};
+        if (!cfg.pinset_snapshot) return std::unexpected{core::error::tls_pin_empty_at_open};
         const auto& fp = leaf.sha256();
         bool found = false;
         for (const auto& pin_entry : *cfg.pinset_snapshot) {
@@ -131,8 +119,7 @@ verify_peer(SslCtxConfig const&          cfg,
                 break;
             }
         }
-        if (!found)
-            return std::unexpected{core::error::tls_pin_mismatch};
+        if (!found) return std::unexpected{core::error::tls_pin_mismatch};
     }
 
     // ── Step 10: Cipher (TODO: 2h delegates negotiated cipher string) ──────────
@@ -151,11 +138,10 @@ verify_peer(SslCtxConfig const&          cfg,
     for (const std::string_view dns : leaf.san_dns_names())
         id.san_dns_names_owned.emplace_back(dns);
 
-    for (const std::string_view uri : leaf.san_uris())
-        id.san_uris_owned.emplace_back(uri);
+    for (const std::string_view uri : leaf.san_uris()) id.san_uris_owned.emplace_back(uri);
 
     id.leaf_fingerprint = leaf.sha256();
-    id.not_after        = leaf.not_after();
+    id.not_after = leaf.not_after();
 
     return id;
 }

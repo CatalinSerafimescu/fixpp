@@ -24,29 +24,32 @@
 namespace fixpp::tls::errors {
 
 // ── FIXPP_ERR_TLS_CONFIG ─────────────────────────────────────────────────────
-inline constexpr auto tls_cert_load_failed        = ::fixpp::core::error::tls_cert_load_failed;
-inline constexpr auto tls_cert_parse_failed       = ::fixpp::core::error::tls_cert_parse_failed;
-inline constexpr auto tls_cipher_not_allowed      = ::fixpp::core::error::tls_cipher_not_allowed;
-inline constexpr auto tls_invalid_security_profile = ::fixpp::core::error::tls_invalid_security_profile;
-inline constexpr auto tls_sign_callback_unavailable = ::fixpp::core::error::tls_sign_callback_unavailable;
-inline constexpr auto tls_pin_empty_at_open       = ::fixpp::core::error::tls_pin_empty_at_open;
+inline constexpr auto tls_cert_load_failed = ::fixpp::core::error::tls_cert_load_failed;
+inline constexpr auto tls_cert_parse_failed = ::fixpp::core::error::tls_cert_parse_failed;
+inline constexpr auto tls_cipher_not_allowed = ::fixpp::core::error::tls_cipher_not_allowed;
+inline constexpr auto tls_invalid_security_profile =
+    ::fixpp::core::error::tls_invalid_security_profile;
+inline constexpr auto tls_sign_callback_unavailable =
+    ::fixpp::core::error::tls_sign_callback_unavailable;
+inline constexpr auto tls_pin_empty_at_open = ::fixpp::core::error::tls_pin_empty_at_open;
 
 // ── FIXPP_ERR_TLS_PINSET ─────────────────────────────────────────────────────
-inline constexpr auto tls_pin_not_found           = ::fixpp::core::error::tls_pin_not_found;
-inline constexpr auto tls_pin_already_present     = ::fixpp::core::error::tls_pin_already_present;
-inline constexpr auto tls_pinset_capacity_exhausted = ::fixpp::core::error::tls_pinset_capacity_exhausted;
+inline constexpr auto tls_pin_not_found = ::fixpp::core::error::tls_pin_not_found;
+inline constexpr auto tls_pin_already_present = ::fixpp::core::error::tls_pin_already_present;
+inline constexpr auto tls_pinset_capacity_exhausted =
+    ::fixpp::core::error::tls_pinset_capacity_exhausted;
 
 // ── FIXPP_ERR_TLS_RUNTIME ────────────────────────────────────────────────────
-inline constexpr auto tls_pinset_alloc_failed     = ::fixpp::core::error::tls_pinset_alloc_failed;
+inline constexpr auto tls_pinset_alloc_failed = ::fixpp::core::error::tls_pinset_alloc_failed;
 
 // ── FIXPP_ERR_TLS_HANDSHAKE ──────────────────────────────────────────────────
-inline constexpr auto tls_handshake_failed        = ::fixpp::core::error::tls_handshake_failed;
-inline constexpr auto tls_rsa_key_too_large       = ::fixpp::core::error::tls_rsa_key_too_large;
-inline constexpr auto tls_cert_der_too_large      = ::fixpp::core::error::tls_cert_der_too_large;
-inline constexpr auto tls_san_entries_exceeded    = ::fixpp::core::error::tls_san_entries_exceeded;
-inline constexpr auto tls_pin_mismatch            = ::fixpp::core::error::tls_pin_mismatch;
+inline constexpr auto tls_handshake_failed = ::fixpp::core::error::tls_handshake_failed;
+inline constexpr auto tls_rsa_key_too_large = ::fixpp::core::error::tls_rsa_key_too_large;
+inline constexpr auto tls_cert_der_too_large = ::fixpp::core::error::tls_cert_der_too_large;
+inline constexpr auto tls_san_entries_exceeded = ::fixpp::core::error::tls_san_entries_exceeded;
+inline constexpr auto tls_pin_mismatch = ::fixpp::core::error::tls_pin_mismatch;
 
 // ── FIXPP_ERR_CANCELLED (reused) ─────────────────────────────────────────────
-inline constexpr auto tls_load_cancelled          = ::fixpp::core::error::tls_load_cancelled;
+inline constexpr auto tls_load_cancelled = ::fixpp::core::error::tls_load_cancelled;
 
 }  // namespace fixpp::tls::errors

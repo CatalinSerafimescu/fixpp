@@ -13,11 +13,10 @@
 // [2d §7.9] effective_clock wiring via SessionConfig is NOT yet plumbed into
 // Pinset::Config in Phase 3. Next phase revisit when Config gains a clock field.
 
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <chrono>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -38,10 +37,8 @@ std::pmr::memory_resource* resolve_mr(std::pmr::memory_resource* mr) noexcept {
 // Clone an existing pin_snapshot into a new one using `mr`, then append `p`.
 // Returns the new snapshot.
 // Throws std::bad_alloc if mr is exhausted (caller catches → alloc_failed).
-std::shared_ptr<const pin_snapshot>
-clone_and_append(std::shared_ptr<const pin_snapshot> const& old_snap,
-                 pin p,
-                 std::pmr::memory_resource* mr) {
+std::shared_ptr<const pin_snapshot> clone_and_append(
+    std::shared_ptr<const pin_snapshot> const& old_snap, pin p, std::pmr::memory_resource* mr) {
     // Allocate the new vector in the PMR arena.
     auto new_snap = std::make_shared<pin_snapshot>(mr);
     new_snap->reserve(old_snap->size() + 1);
@@ -60,11 +57,9 @@ clone_and_append(std::shared_ptr<const pin_snapshot> const& old_snap,
 // elided. Caller inspects `found` (not the return value) to decide whether
 // to report tls_pin_not_found.
 // Throws std::bad_alloc if mr is exhausted.
-std::shared_ptr<const pin_snapshot>
-clone_minus(std::shared_ptr<const pin_snapshot> const& old_snap,
-            std::array<std::byte, 32> const& fp,
-            std::pmr::memory_resource* mr,
-            bool& found) {
+std::shared_ptr<const pin_snapshot> clone_minus(std::shared_ptr<const pin_snapshot> const& old_snap,
+                                                std::array<std::byte, 32> const& fp,
+                                                std::pmr::memory_resource* mr, bool& found) {
     found = false;
     auto new_snap = std::make_shared<pin_snapshot>(mr);
     new_snap->reserve(old_snap->size());
@@ -85,10 +80,10 @@ Pinset::Pinset() : Pinset(Config{}) {}
 
 // ── Pinset constructor ────────────────────────────────────────────────────────
 Pinset::Pinset(Config cfg)
-    : cfg_{cfg}
-    , mr_{resolve_mr(cfg.mr)}
-    , writer_{}
-    , snapshot_{std::make_shared<pin_snapshot>(mr_)}   // initial empty snapshot
+    : cfg_{cfg},
+      mr_{resolve_mr(cfg.mr)},
+      writer_{},
+      snapshot_{std::make_shared<pin_snapshot>(mr_)}  // initial empty snapshot
 {}
 
 // ── Destructor ────────────────────────────────────────────────────────────────
@@ -98,11 +93,9 @@ Pinset::~Pinset() = default;
 Pinset::Pinset(Pinset&& other) noexcept {
     std::unique_lock<std::shared_mutex> lk(other.writer_);
     cfg_ = other.cfg_;
-    mr_  = other.mr_;
-    snapshot_.store(other.snapshot_.load(std::memory_order_acquire),
-                    std::memory_order_release);
-    other.snapshot_.store(std::make_shared<pin_snapshot>(other.mr_),
-                          std::memory_order_release);
+    mr_ = other.mr_;
+    snapshot_.store(other.snapshot_.load(std::memory_order_acquire), std::memory_order_release);
+    other.snapshot_.store(std::make_shared<pin_snapshot>(other.mr_), std::memory_order_release);
 }
 
 Pinset& Pinset::operator=(Pinset&& other) noexcept {
@@ -111,11 +104,9 @@ Pinset& Pinset::operator=(Pinset&& other) noexcept {
     std::unique_lock<std::shared_mutex> lk1(writer_);
     std::unique_lock<std::shared_mutex> lk2(other.writer_);
     cfg_ = other.cfg_;
-    mr_  = other.mr_;
-    snapshot_.store(other.snapshot_.load(std::memory_order_acquire),
-                    std::memory_order_release);
-    other.snapshot_.store(std::make_shared<pin_snapshot>(other.mr_),
-                          std::memory_order_release);
+    mr_ = other.mr_;
+    snapshot_.store(other.snapshot_.load(std::memory_order_acquire), std::memory_order_release);
+    other.snapshot_.store(std::make_shared<pin_snapshot>(other.mr_), std::memory_order_release);
     return *this;
 }
 
@@ -142,9 +133,9 @@ core::expected_t<void> Pinset::add(Certificate const& cert) {
     // per [2a §4.2] trap_throw pattern.
     try {
         pin new_pin;
-        new_pin.sha256     = cert.sha256_;
+        new_pin.sha256 = cert.sha256_;
         new_pin.subject_dn = std::pmr::string{cert.subject_dn_, mr_};
-        new_pin.san_dns    = std::pmr::vector<std::pmr::string>{mr_};
+        new_pin.san_dns = std::pmr::vector<std::pmr::string>{mr_};
         for (auto const& sv : cert.san_dns_names_) {
             // Construct each PMR string explicitly with the resource, then push.
             new_pin.san_dns.push_back(std::pmr::string{sv, mr_});
@@ -216,8 +207,8 @@ bool Pinset::contains(std::array<std::byte, 32> const& sha256) const noexcept {
 // ── make_pinset factory ───────────────────────────────────────────────────────
 // Wraps construction in try/catch so allocation failure surfaces as
 // expected_t::unexpected{tls_pinset_alloc_failed} per [2a §4.2] trap_throw.
-core::expected_t<std::shared_ptr<Pinset>>
-Pinset::make_pinset(Config cfg, std::pmr::memory_resource* mr) noexcept {
+core::expected_t<std::shared_ptr<Pinset>> Pinset::make_pinset(
+    Config cfg, std::pmr::memory_resource* mr) noexcept {
     if (cfg.mr == nullptr) cfg.mr = mr;
     try {
         return std::make_shared<Pinset>(cfg);

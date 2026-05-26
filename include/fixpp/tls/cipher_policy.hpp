@@ -21,12 +21,10 @@ namespace detail {
 template <std::size_t N, std::size_t M>
 [[nodiscard]] constexpr bool contains_banned(
     std::array<std::string_view, N> const& list,
-    std::array<std::string_view, M> const& banned) noexcept
-{
+    std::array<std::string_view, M> const& banned) noexcept {
     for (std::string_view entry : list) {
         for (std::string_view ban : banned) {
-            if (entry.find(ban) != std::string_view::npos)
-                return true;
+            if (entry.find(ban) != std::string_view::npos) return true;
         }
     }
     return false;
@@ -36,14 +34,14 @@ template <std::size_t N, std::size_t M>
 
 struct CipherPolicy {
     // ── TLS 1.3 suites (RFC 8446 §9.1 mandatory + recommended) ──
-    static constexpr std::array<std::string_view, 3> tls13_suites {{
+    static constexpr std::array<std::string_view, 3> tls13_suites{{
         "TLS_AES_128_GCM_SHA256",
         "TLS_AES_256_GCM_SHA384",
         "TLS_CHACHA20_POLY1305_SHA256",
     }};
 
     // ── TLS 1.2 suites (ECDHE + AEAD only; SHA-256 / SHA-384 PRF) ──
-    static constexpr std::array<std::string_view, 6> tls12_suites {{
+    static constexpr std::array<std::string_view, 6> tls12_suites{{
         "ECDHE-RSA-AES128-GCM-SHA256",
         "ECDHE-RSA-AES256-GCM-SHA384",
         "ECDHE-ECDSA-AES128-GCM-SHA256",
@@ -53,7 +51,7 @@ struct CipherPolicy {
     }};
 
     // ── Key exchange groups ──
-    static constexpr std::array<std::string_view, 3> kx_groups {{
+    static constexpr std::array<std::string_view, 3> kx_groups{{
         "X25519",
         "secp256r1",
         "secp384r1",
@@ -61,7 +59,7 @@ struct CipherPolicy {
 
     // ── Signature algorithms ──
     // RSA-PSS key-size constraint (≥ 2048 bits) enforced at verify_peer per [FIXS §3.4].
-    static constexpr std::array<std::string_view, 4> sig_algs {{
+    static constexpr std::array<std::string_view, 4> sig_algs{{
         "ECDSA+SHA256",
         "ECDSA+SHA384",
         "RSA-PSS+SHA256",
@@ -72,9 +70,17 @@ struct CipherPolicy {
     // Note: banned_tokens covers two axes:
     //   (1) tokens [const §XII.4] / [const §XV.11] explicitly bans;
     //   (2) tokens not on [const §XII.3] allow-list (TLS_AES_128_CCM belt-and-braces guard).
-    static constexpr std::array<std::string_view, 12> banned_tokens {{
-        "RC4", "DES", "3DES", "MD5", "DH_anon", "NULL",
-        "EXPORT", "TLS_RSA", "CBC", "SHA1",
+    static constexpr std::array<std::string_view, 12> banned_tokens{{
+        "RC4",
+        "DES",
+        "3DES",
+        "MD5",
+        "DH_anon",
+        "NULL",
+        "EXPORT",
+        "TLS_RSA",
+        "CBC",
+        "SHA1",
         "TLS_AES_128_CCM",  // not on [const §XII.3] allow-list — intersection guard.
         "0RTT",             // banned per [const §XII.3].
     }};
@@ -83,15 +89,15 @@ struct CipherPolicy {
     // defined AFTER all array declarations so the values are available.
     // Fires a diagnostic at build time if any allow-list entry contains a banned token.
     static_assert(!detail::contains_banned(tls13_suites, banned_tokens),
-        "TLS 1.3 suite list contains a banned token "
-        "(per [const §XII.3] / [const §XII.4] / [const §XV.11]).");
+                  "TLS 1.3 suite list contains a banned token "
+                  "(per [const §XII.3] / [const §XII.4] / [const §XV.11]).");
     static_assert(!detail::contains_banned(tls12_suites, banned_tokens),
-        "TLS 1.2 suite list contains a banned token "
-        "(per [const §XII.3] / [const §XII.4] / [const §XV.11]).");
+                  "TLS 1.2 suite list contains a banned token "
+                  "(per [const §XII.3] / [const §XII.4] / [const §XV.11]).");
     static_assert(!detail::contains_banned(kx_groups, banned_tokens),
-        "Key-exchange group list contains a banned token.");
+                  "Key-exchange group list contains a banned token.");
     static_assert(!detail::contains_banned(sig_algs, banned_tokens),
-        "Signature-algorithm list contains a banned token.");
+                  "Signature-algorithm list contains a banned token.");
 
     // ── Runtime predicate (FR-012) ──
     // Returns true iff tok ∈ (tls13_suites ∪ tls12_suites) AND
@@ -101,8 +107,7 @@ struct CipherPolicy {
     static constexpr bool is_allowed(std::string_view tok) noexcept {
         // First: check no banned token is a substring.
         for (std::string_view ban : banned_tokens) {
-            if (tok.find(ban) != std::string_view::npos)
-                return false;
+            if (tok.find(ban) != std::string_view::npos) return false;
         }
         // Then: tok must be on the explicit allow-list (tls13 OR tls12).
         for (std::string_view s : tls13_suites) {

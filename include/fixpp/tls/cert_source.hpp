@@ -40,17 +40,15 @@
 //       co_return core::expected_t<local_credentials>{ /* built value */ };
 //   }
 
+#include <asio/awaitable.hpp>
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/certificate.hpp>
-
-#include <cstddef>
 #include <functional>
 #include <memory_resource>
 #include <span>
 #include <variant>
 #include <vector>
-
-#include <asio/awaitable.hpp>
 
 namespace fixpp::tls {
 
@@ -69,8 +67,8 @@ struct private_key_handle {
 // Lifetime is bounded by the cert_source instance that issued it.
 // Per [2g §4.1]; data-model E-3.
 struct software_key_ref {
-    detail::private_key_handle handle;       // EVP_PKEY* wrapped opaquely; *this-bounded.
-    int                        ossl_pkey_id; // OpenSSL EVP_PKEY_id (e.g., EVP_PKEY_RSA, EVP_PKEY_EC).
+    detail::private_key_handle handle;  // EVP_PKEY* wrapped opaquely; *this-bounded.
+    int ossl_pkey_id;                   // OpenSSL EVP_PKEY_id (e.g., EVP_PKEY_RSA, EVP_PKEY_EC).
 };
 
 // ── sign_request / sign_response ─────────────────────────────────────────────
@@ -80,8 +78,8 @@ struct sign_request {
     // members (clang limitation). The lifetime contract is documented here: `tbs`
     // always points into caller-owned storage and is valid for the duration of the
     // sign call. See pin_view::value in pinset.hpp for the same precedent.
-    std::span<const std::byte> tbs;   // bytes-to-be-signed; caller-owned.
-    int                        sig_alg;                       // OpenSSL NID for the signature algorithm.
+    std::span<const std::byte> tbs;  // bytes-to-be-signed; caller-owned.
+    int sig_alg;                     // OpenSSL NID for the signature algorithm.
 };
 
 struct sign_response {
@@ -93,9 +91,8 @@ struct sign_response {
 // session strand; it must post blocking work off-strand via cancellable_dispatch.
 // Per [2g §4.1]; data-model E-4.
 struct async_signer_ref {
-    using sign_fn = std::function<
-        asio::awaitable<core::expected_t<sign_response>>(
-            sign_request const& req)>;
+    using sign_fn =
+        std::function<asio::awaitable<core::expected_t<sign_response>>(sign_request const& req)>;
     sign_fn sign;
 };
 
@@ -113,16 +110,18 @@ struct async_signer_ref {
 // These are enforced by the struct invariant, not by an attribute.
 // See pin_view::value in pinset.hpp for the same precedent (N-P3-1).
 struct local_credentials {
-    Certificate                                      leaf;    // view fields alias cert_source storage; *this-bounded.
-    std::span<const Certificate>                     chain;   // root last; view into cert_source-owned storage; *this-bounded.
-    std::variant<software_key_ref, async_signer_ref> signer;  // software handle OR awaitable HSM oracle.
+    Certificate leaf;  // view fields alias cert_source storage; *this-bounded.
+    std::span<const Certificate>
+        chain;  // root last; view into cert_source-owned storage; *this-bounded.
+    std::variant<software_key_ref, async_signer_ref>
+        signer;  // software handle OR awaitable HSM oracle.
 };
 
 // ── cert_source ───────────────────────────────────────────────────────────────
 // Pluggable credential source — exactly 2 pure-virtuals per FR-001 /
 // [const §XIV.2] (cap = 5). Re-emitted verbatim from [2g §4.1] lines 259-290.
 class cert_source {
- public:
+public:
     virtual ~cert_source() = default;
 
     // (1) Load the local credentials bundle (leaf cert + chain + signer).
@@ -132,17 +131,15 @@ class cert_source {
     //     On cancellation → expected_t::unexpected{error::tls_load_cancelled}.
     //     [[clang::lifetimebound]] on local_credentials fields is at the
     //     ABSTRACT BASE declaration site per [arch §5.5] / [2b §6.4] precedent.
-    [[nodiscard]] virtual
-    asio::awaitable<core::expected_t<local_credentials>>
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<local_credentials>>
     load_credentials() = 0;
 
     // (2) Trust anchors (CA certs). Span view is *this-bounded.
     //     Returns expected_t<span> so that error cases (e.g., a pinned-only
     //     deployment that explicitly has no CA trust) can be surfaced.
     //     [[clang::lifetimebound]] at the abstract base per [arch §5.5].
-    [[nodiscard]] virtual
-    core::expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] = 0;
+    [[nodiscard]] virtual core::expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] = 0;
 };
 
 }  // namespace fixpp::tls

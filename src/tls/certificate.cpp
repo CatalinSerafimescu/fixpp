@@ -9,9 +9,6 @@
 // Does NOT implement: PEM parsing (Phase 4 / file_cert_source), validation
 // (verify_peer, Phase 5), or cipher checks (CipherPolicy, Phase 3).
 
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/ec.h>
@@ -26,6 +23,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -57,7 +56,7 @@ static std::string_view pmr_copy_str(const char* src, std::size_t len,
 // Returns the epoch on failure (not a hard error; verify_peer will reject it).
 static std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexcept {
     if (!t) return {};
-    struct tm tm_val {};
+    struct tm tm_val{};
     if (ASN1_TIME_to_tm(t, &tm_val) != 1) return {};
     // timegm is POSIX; mktime interprets local time, timegm interprets UTC.
 #if defined(_WIN32)
@@ -96,9 +95,8 @@ static std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& m
 //
 // On parse failure → unexpected{error::tls_cert_parse_failed}.
 // On success       → Certificate with all view fields pointing into `mr`.
-[[nodiscard]] core::expected_t<Certificate>
-parse_certificate_der(std::span<const std::byte> der,
-                      std::pmr::memory_resource& mr) noexcept {
+[[nodiscard]] core::expected_t<Certificate> parse_certificate_der(
+    std::span<const std::byte> der, std::pmr::memory_resource& mr) noexcept {
     if (der.empty()) {
         return std::unexpected{core::error::tls_cert_parse_failed};
     }
@@ -117,8 +115,7 @@ parse_certificate_der(std::span<const std::byte> der,
     // ── SHA-256 of raw DER ────────────────────────────────────────────────────
     {
         unsigned char digest[SHA256_DIGEST_LENGTH];
-        SHA256(reinterpret_cast<const unsigned char*>(der.data()),
-               der.size(), digest);
+        SHA256(reinterpret_cast<const unsigned char*>(der.data()), der.size(), digest);
         static_assert(SHA256_DIGEST_LENGTH == 32);
         std::memcpy(out.sha256_.data(), digest, 32);
     }
@@ -134,7 +131,7 @@ parse_certificate_der(std::span<const std::byte> der,
 
     // ── Validity window ───────────────────────────────────────────────────────
     out.not_before_ = asn1_time_to_tp(X509_get0_notBefore(cert.get()));
-    out.not_after_  = asn1_time_to_tp(X509_get0_notAfter(cert.get()));
+    out.not_after_ = asn1_time_to_tp(X509_get0_notAfter(cert.get()));
 
     // ── Signature algorithm + key details ────────────────────────────────────
     {
@@ -142,7 +139,7 @@ parse_certificate_der(std::span<const std::byte> der,
         if (pkey) {
             const int id = EVP_PKEY_get_base_id(pkey);
             if (id == EVP_PKEY_RSA || id == EVP_PKEY_RSA_PSS) {
-                out.alg_          = signature_algorithm::rsa_pss;
+                out.alg_ = signature_algorithm::rsa_pss;
                 out.rsa_key_bits_ = static_cast<std::size_t>(EVP_PKEY_get_bits(pkey));
             } else if (id == EVP_PKEY_EC) {
                 out.alg_ = signature_algorithm::ecdsa;
@@ -200,21 +197,18 @@ parse_certificate_der(std::span<const std::byte> der,
                 GENERAL_NAME* gn = sk_GENERAL_NAME_value(gens, i);
                 if (!gn) continue;
                 if (gn->type == GEN_DNS) {
-                    const char* s = reinterpret_cast<const char*>(
-                        ASN1_STRING_get0_data(gn->d.dNSName));
-                    const int   slen = ASN1_STRING_length(gn->d.dNSName);
+                    const char* s =
+                        reinterpret_cast<const char*>(ASN1_STRING_get0_data(gn->d.dNSName));
+                    const int slen = ASN1_STRING_length(gn->d.dNSName);
                     if (s && slen > 0) {
-                        dns_views.push_back(
-                            pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
+                        dns_views.push_back(pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
                     }
                 } else if (gn->type == GEN_URI) {
                     const char* s = reinterpret_cast<const char*>(
                         ASN1_STRING_get0_data(gn->d.uniformResourceIdentifier));
-                    const int slen =
-                        ASN1_STRING_length(gn->d.uniformResourceIdentifier);
+                    const int slen = ASN1_STRING_length(gn->d.uniformResourceIdentifier);
                     if (s && slen > 0) {
-                        uri_views.push_back(
-                            pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
+                        uri_views.push_back(pmr_copy_str(s, static_cast<std::size_t>(slen), mr));
                     }
                 }
             }
@@ -226,16 +220,14 @@ parse_certificate_der(std::span<const std::byte> der,
                 void* p = mr.allocate(dns_views.size() * sizeof(std::string_view),
                                       alignof(std::string_view));
                 auto* arr = static_cast<std::string_view*>(p);
-                std::memcpy(arr, dns_views.data(),
-                            dns_views.size() * sizeof(std::string_view));
+                std::memcpy(arr, dns_views.data(), dns_views.size() * sizeof(std::string_view));
                 out.san_dns_names_ = {arr, dns_views.size()};
             }
             if (!uri_views.empty()) {
                 void* p = mr.allocate(uri_views.size() * sizeof(std::string_view),
                                       alignof(std::string_view));
                 auto* arr = static_cast<std::string_view*>(p);
-                std::memcpy(arr, uri_views.data(),
-                            uri_views.size() * sizeof(std::string_view));
+                std::memcpy(arr, uri_views.data(), uri_views.size() * sizeof(std::string_view));
                 out.san_uris_ = {arr, uri_views.size()};
             }
         }

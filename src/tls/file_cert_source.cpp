@@ -27,25 +27,23 @@
 // where pem_password_cb is a static callback that copies the std::string from
 // userdata into the OpenSSL buffer.
 
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/core/error.hpp>
-
-#include <asio/awaitable.hpp>
-#include <asio/cancellation_type.hpp>
-#include <asio/this_coro.hpp>
-#include <asio/use_awaitable.hpp>
-
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
 #include <array>
+#include <asio/awaitable.hpp>
+#include <asio/cancellation_type.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -59,12 +57,18 @@ namespace fixpp::tls {
 namespace {
 
 // ── RAII wrappers ─────────────────────────────────────────────────────────────
-struct BioDeleter { void operator()(BIO* b)     const noexcept { BIO_free(b); } };
-struct X509Deleter { void operator()(X509* x)   const noexcept { X509_free(x); } };
-struct EvpKeyDeleter { void operator()(EVP_PKEY* k) const noexcept { EVP_PKEY_free(k); } };
+struct BioDeleter {
+    void operator()(BIO* b) const noexcept { BIO_free(b); }
+};
+struct X509Deleter {
+    void operator()(X509* x) const noexcept { X509_free(x); }
+};
+struct EvpKeyDeleter {
+    void operator()(EVP_PKEY* k) const noexcept { EVP_PKEY_free(k); }
+};
 
-using BioPtr    = std::unique_ptr<BIO, BioDeleter>;
-using X509Ptr   = std::unique_ptr<X509, X509Deleter>;
+using BioPtr = std::unique_ptr<BIO, BioDeleter>;
+using X509Ptr = std::unique_ptr<X509, X509Deleter>;
 using EvpKeyPtr = std::unique_ptr<EVP_PKEY, EvpKeyDeleter>;
 
 // ── PEM password callback ─────────────────────────────────────────────────────
@@ -100,7 +104,10 @@ static std::vector<std::byte> read_file_bytes(const std::string& path) {
     std::fseek(f, 0, SEEK_END);
     long sz = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
-    if (sz <= 0) { std::fclose(f); return {}; }
+    if (sz <= 0) {
+        std::fclose(f);
+        return {};
+    }
     std::vector<std::byte> buf(static_cast<std::size_t>(sz));
     std::size_t n = std::fread(buf.data(), 1, static_cast<std::size_t>(sz), f);
     std::fclose(f);
@@ -113,8 +120,7 @@ static std::vector<std::byte> read_file_bytes(const std::string& path) {
 // pwd may be null if the cert is not encrypted (certs rarely are, but
 // PEM_read_bio_X509 still accepts a callback).
 static X509Ptr read_x509_pem(BIO* bio, const std::string* pwd) {
-    return X509Ptr{PEM_read_bio_X509(bio, nullptr,
-                                     pwd ? pem_passwd_cb : nullptr,
+    return X509Ptr{PEM_read_bio_X509(bio, nullptr, pwd ? pem_passwd_cb : nullptr,
                                      const_cast<std::string*>(pwd))};
 }
 
@@ -136,7 +142,7 @@ static std::vector<std::byte> x509_to_der(X509* x) {
 // the caller via the Impl struct). Certificate view fields alias der_storage.
 // Returns false on failure.
 static bool parse_cert_from_x509(X509* x, std::vector<std::byte>& der_storage,
-                                  std::pmr::memory_resource& mr, Certificate& out) {
+                                 std::pmr::memory_resource& mr, Certificate& out) {
     auto der = x509_to_der(x);
     if (der.empty()) return false;
     der_storage = std::move(der);
@@ -152,7 +158,7 @@ static bool parse_cert_from_x509(X509* x, std::vector<std::byte>& der_storage,
 // ── Impl ─────────────────────────────────────────────────────────────────────
 // All mutable state is in Impl so file_cert_source is fully opaque in the header.
 struct file_cert_source::Impl {
-    file_cert_source::Config         cfg;
+    file_cert_source::Config cfg;
 
     // PMR arena: a monotonic_buffer_resource backed by the caller-supplied
     // upstream resource (default: new_delete_resource). Wrapping in a monotonic
@@ -170,14 +176,13 @@ struct file_cert_source::Impl {
     // any Certificate value the caller holds.
     std::vector<std::vector<std::byte>> der_storage;
 
-    std::vector<Certificate>         chain;          // intermediate + leaf; chain[0] = leaf.
-    std::vector<Certificate>         trust_anchors;  // CA certs from ca_bundle_path.
+    std::vector<Certificate> chain;          // intermediate + leaf; chain[0] = leaf.
+    std::vector<Certificate> trust_anchors;  // CA certs from ca_bundle_path.
 
-    EvpKeyPtr                        key;            // parsed private key.
-    int                              ossl_pkey_id = 0;
+    EvpKeyPtr key;  // parsed private key.
+    int ossl_pkey_id = 0;
 
-    explicit Impl(std::pmr::memory_resource* upstream)
-        : arena_(upstream) {}
+    explicit Impl(std::pmr::memory_resource* upstream) : arena_(upstream) {}
 
     // Load everything at construction time.
     void load(const file_cert_source::Config& c) {
@@ -187,7 +192,7 @@ struct file_cert_source::Impl {
         std::string passwd;
         const std::string* passwd_ptr = nullptr;
         if (c.password_cb) {
-            passwd     = c.password_cb();
+            passwd = c.password_cb();
             passwd_ptr = &passwd;
         }
 
@@ -206,27 +211,25 @@ struct file_cert_source::Impl {
             if (is_pem(c.private_key_path)) {
                 BioPtr bio{BIO_new_file(c.private_key_path.c_str(), "rb")};
                 if (!bio) {
-                    throw std::runtime_error("tls_cert_load_failed: cannot open key file: "
-                                             + c.private_key_path);
+                    throw std::runtime_error("tls_cert_load_failed: cannot open key file: " +
+                                             c.private_key_path);
                 }
-                key = EvpKeyPtr{PEM_read_bio_PrivateKey(
-                    bio.get(), nullptr,
-                    passwd_ptr ? pem_passwd_cb : nullptr,
-                    const_cast<std::string*>(passwd_ptr))};
+                key = EvpKeyPtr{PEM_read_bio_PrivateKey(bio.get(), nullptr,
+                                                        passwd_ptr ? pem_passwd_cb : nullptr,
+                                                        const_cast<std::string*>(passwd_ptr))};
             } else {
                 // DER key
                 auto bytes = read_file_bytes(c.private_key_path);
                 if (bytes.empty()) {
-                    throw std::runtime_error("tls_cert_load_failed: cannot read key file: "
-                                             + c.private_key_path);
+                    throw std::runtime_error("tls_cert_load_failed: cannot read key file: " +
+                                             c.private_key_path);
                 }
                 const unsigned char* p = reinterpret_cast<const unsigned char*>(bytes.data());
-                key = EvpKeyPtr{d2i_AutoPrivateKey(nullptr, &p,
-                                                   static_cast<long>(bytes.size()))};
+                key = EvpKeyPtr{d2i_AutoPrivateKey(nullptr, &p, static_cast<long>(bytes.size()))};
             }
             if (!key) {
-                throw std::runtime_error("tls_cert_load_failed: failed to parse private key: "
-                                         + c.private_key_path);
+                throw std::runtime_error("tls_cert_load_failed: failed to parse private key: " +
+                                         c.private_key_path);
             }
             ossl_pkey_id = EVP_PKEY_get_base_id(key.get());
         }
@@ -246,7 +249,8 @@ struct file_cert_source::Impl {
             }
             X509Ptr x{read_x509_pem(bio.get(), passwd_ptr)};
             if (!x) {
-                throw std::runtime_error("tls_cert_parse_failed: failed to parse PEM cert: " + path);
+                throw std::runtime_error("tls_cert_parse_failed: failed to parse PEM cert: " +
+                                         path);
             }
             Certificate cert;
             der_storage.emplace_back();
@@ -264,11 +268,12 @@ struct file_cert_source::Impl {
             }
             der_storage.emplace_back(std::move(bytes));
             auto result = parse_certificate_der(
-                std::span<const std::byte>{der_storage.back().data(),
-                                           der_storage.back().size()}, *mr());
+                std::span<const std::byte>{der_storage.back().data(), der_storage.back().size()},
+                *mr());
             if (!result) {
                 der_storage.pop_back();
-                throw std::runtime_error("tls_cert_parse_failed: failed to parse DER cert: " + path);
+                throw std::runtime_error("tls_cert_parse_failed: failed to parse DER cert: " +
+                                         path);
             }
             chain.insert(chain.begin(), *result);
         }
@@ -296,10 +301,16 @@ struct file_cert_source::Impl {
             auto fp = cert.sha256();
             bool dup = false;
             for (const auto& existing : chain) {
-                if (existing.sha256() == fp) { dup = true; break; }
+                if (existing.sha256() == fp) {
+                    dup = true;
+                    break;
+                }
             }
             for (const auto& existing : trust_anchors) {
-                if (existing.sha256() == fp) { dup = true; break; }
+                if (existing.sha256() == fp) {
+                    dup = true;
+                    break;
+                }
             }
             if (!dup) {
                 chain.push_back(cert);
@@ -330,7 +341,10 @@ struct file_cert_source::Impl {
             auto fp = cert.sha256();
             bool dup = false;
             for (const auto& existing : trust_anchors) {
-                if (existing.sha256() == fp) { dup = true; break; }
+                if (existing.sha256() == fp) {
+                    dup = true;
+                    break;
+                }
             }
             if (!dup) {
                 trust_anchors.push_back(cert);
@@ -346,12 +360,11 @@ struct file_cert_source::Impl {
 
         // leaf is chain[0] if chain is non-empty; else a default-constructed cert.
         if (!chain.empty()) {
-            creds.leaf  = chain[0];
+            creds.leaf = chain[0];
             // chain view excludes leaf (intermediates only), root last.
             // If chain has only the leaf, the span is empty.
             if (chain.size() > 1) {
-                creds.chain = std::span<const Certificate>{chain.data() + 1,
-                                                           chain.size() - 1};
+                creds.chain = std::span<const Certificate>{chain.data() + 1, chain.size() - 1};
             } else {
                 creds.chain = {};
             }
@@ -360,8 +373,8 @@ struct file_cert_source::Impl {
         if (key) {
             software_key_ref ref;
             ref.handle.ossl_pkey = key.get();
-            ref.ossl_pkey_id     = ossl_pkey_id;
-            creds.signer         = ref;
+            ref.ossl_pkey_id = ossl_pkey_id;
+            creds.signer = ref;
         }
 
         return creds;
@@ -379,10 +392,7 @@ file_cert_source::file_cert_source(Config cfg)
 
 file_cert_source::~file_cert_source() = default;
 
-file_cert_source::Config const&
-file_cert_source::config() const noexcept {
-    return impl_->cfg;
-}
+file_cert_source::Config const& file_cert_source::config() const noexcept { return impl_->cfg; }
 
 // ── make_file_cert_source — factory ──────────────────────────────────────────
 // Wraps construction-time throw in expected_t<...> per [arch §5.3] / FR-005.
@@ -390,8 +400,7 @@ file_cert_source::config() const noexcept {
 // Parse failures: runtime_error messages starting with "tls_cert_parse_failed"
 // surface as tls_cert_parse_failed; all others → tls_cert_load_failed.
 [[nodiscard]] core::expected_t<std::shared_ptr<cert_source>>
-file_cert_source::make_file_cert_source(Config cfg,
-                                         std::pmr::memory_resource* mr) noexcept {
+file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* mr) noexcept {
     // Factory mr parameter overrides cfg.mr when non-null.
     if (mr) cfg.mr = mr;
 
@@ -429,8 +438,7 @@ file_cert_source::load_credentials() {
     // Enable total cancellation so callers using cancellation_type::total are
     // honoured (asio::co_spawn defaults to terminal-only cancellation per
     // [[feedback_asio_cospawn_total_cancellation_default]]).
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // Step 2: read cancellation_state.
     auto cs = co_await asio::this_coro::cancellation_state;
@@ -439,8 +447,8 @@ file_cert_source::load_credentials() {
     // This is the "between-call-and-first-suspension" reap — load-bearing
     // for the §6.4 binding contract.
     if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return core::expected_t<local_credentials>{
-            std::unexpect, core::error::tls_load_cancelled};
+        co_return core::expected_t<local_credentials>{std::unexpect,
+                                                      core::error::tls_load_cancelled};
     }
 
     // Step 4: build credentials from cached state.
@@ -450,7 +458,7 @@ file_cert_source::load_credentials() {
     core::expected_t<local_credentials> result;
     try {
         auto creds = impl_->build_credentials();
-        result     = core::expected_t<local_credentials>{std::move(creds)};
+        result = core::expected_t<local_credentials>{std::move(creds)};
     } catch (const std::bad_alloc&) {
         result = std::unexpected{core::error::tls_cert_load_failed};
     } catch (...) {
@@ -460,8 +468,8 @@ file_cert_source::load_credentials() {
     // Check cancellation again after the build step.
     cs = co_await asio::this_coro::cancellation_state;
     if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return core::expected_t<local_credentials>{
-            std::unexpect, core::error::tls_load_cancelled};
+        co_return core::expected_t<local_credentials>{std::unexpect,
+                                                      core::error::tls_load_cancelled};
     }
 
     co_return result;
@@ -472,8 +480,7 @@ file_cert_source::load_credentials() {
 [[nodiscard]] core::expected_t<std::span<const Certificate>>
 file_cert_source::load_trust_anchors() {
     return core::expected_t<std::span<const Certificate>>{
-        std::span<const Certificate>{impl_->trust_anchors.data(),
-                                     impl_->trust_anchors.size()}};
+        std::span<const Certificate>{impl_->trust_anchors.data(), impl_->trust_anchors.size()}};
 }
 
 }  // namespace fixpp::tls

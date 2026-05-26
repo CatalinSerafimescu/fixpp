@@ -15,12 +15,11 @@
 // Writer synchronisation: std::shared_mutex per [2g §6.5.2] consolidated
 // rationale. See contracts/pinset.hpp §6.5.2 — CITE AND STOP.
 
-#include <fixpp/core/error.hpp>
-#include <fixpp/tls/certificate.hpp>
-
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
 #include <memory>
 #include <memory_resource>
 #include <shared_mutex>
@@ -41,14 +40,16 @@ using pin_fingerprint = std::array<std::byte, 32>;
 //
 // CRITICAL (NEW-P1-4 close): diagnostic fields are NOT optional.
 struct pin {
-    std::array<std::byte, 32>          sha256;      // SHA-256 fingerprint of the pinned leaf cert's DER bytes.
-    std::pmr::string                   subject_dn;  // PMR-copied at add() time from the caller-supplied Certificate.
-    std::pmr::vector<std::pmr::string> san_dns;     // PMR-copied at add() time; bounded by max_pins indirectly.
-    std::chrono::system_clock::time_point added_at; // Wall-clock UTC at add() time.
-                                                    // NOTE: uses std::chrono::system_clock directly for v0.1.
-                                                    // [2d §7.9] effective_clock is sourced via SessionConfig /
-                                                    // EngineConfig — not yet wired to Pinset::Config in Phase 3.
-                                                    // Next phase revisit: bind via Config::clock when available.
+    std::array<std::byte, 32> sha256;  // SHA-256 fingerprint of the pinned leaf cert's DER bytes.
+    std::pmr::string subject_dn;  // PMR-copied at add() time from the caller-supplied Certificate.
+    std::pmr::vector<std::pmr::string>
+        san_dns;  // PMR-copied at add() time; bounded by max_pins indirectly.
+    std::chrono::system_clock::time_point
+        added_at;  // Wall-clock UTC at add() time.
+                   // NOTE: uses std::chrono::system_clock directly for v0.1.
+                   // [2d §7.9] effective_clock is sourced via SessionConfig /
+                   // EngineConfig — not yet wired to Pinset::Config in Phase 3.
+                   // Next phase revisit: bind via Config::clock when available.
 };
 
 // ── pin_snapshot ──────────────────────────────────────────────────────────────
@@ -65,8 +66,9 @@ using pin_snapshot = std::pmr::vector<pin>;
 // field declaration; the lifetime contract is enforced by the struct invariant:
 // `value` always points into `snapshot->data()` and is valid for `*this`'s lifetime.
 struct pin_view {
-    std::shared_ptr<const pin_snapshot> snapshot;       // pins the matched entry's lifetime (and the entire snapshot).
-    pin const*                          value = nullptr; // bounded by *this (i.e., by `snapshot`).
+    std::shared_ptr<const pin_snapshot>
+        snapshot;                // pins the matched entry's lifetime (and the entire snapshot).
+    pin const* value = nullptr;  // bounded by *this (i.e., by `snapshot`).
 
     [[nodiscard]] bool found() const noexcept { return value != nullptr; }
     explicit operator bool() const noexcept { return found(); }
@@ -76,7 +78,7 @@ struct pin_view {
 // Mutable container with mid-session-mutable rotation.
 // Re-emitted from [2g §4.3] lines 435-528.
 class Pinset {
- public:
+public:
     struct Config {
         // Lifetime contract (v0.4 / round-3 P1-1 close): `mr` MUST outlive
         // every `shared_ptr<const pin_snapshot>` the `Pinset` ever publishes.
@@ -84,20 +86,20 @@ class Pinset {
         // this by construction. User-owned resources (e.g., monotonic_buffer_resource
         // for tests) MUST stay alive until the last reader-held snapshot drains.
         // See contracts/pinset.hpp §6.5.2 binding contract for full text.
-        std::pmr::memory_resource* mr       {nullptr};
-        std::size_t                max_pins {16};
+        std::pmr::memory_resource* mr{nullptr};
+        std::size_t max_pins{16};
     };
 
     // [arch §6] rule-4 factory entry point. Wraps construction in trap_throw so
     // any PMR-allocation throw surfaces as tls_pinset_alloc_failed.
-    [[nodiscard]] static core::expected_t<std::shared_ptr<Pinset>>
-        make_pinset(Config cfg, std::pmr::memory_resource* mr) noexcept;
+    [[nodiscard]] static core::expected_t<std::shared_ptr<Pinset>> make_pinset(
+        Config cfg, std::pmr::memory_resource* mr) noexcept;
 
-    Pinset();                    // default: Config{} (mr=nullptr, max_pins=16)
+    Pinset();  // default: Config{} (mr=nullptr, max_pins=16)
     explicit Pinset(Config cfg);
     ~Pinset();
 
-    Pinset(Pinset const&)            = delete;
+    Pinset(Pinset const&) = delete;
     Pinset& operator=(Pinset const&) = delete;
     Pinset(Pinset&&) noexcept;
     Pinset& operator=(Pinset&&) noexcept;
@@ -107,33 +109,31 @@ class Pinset {
     //   max_pins exceeded → unexpect{tls_pinset_capacity_exhausted}
     //   SHA-256 already present → unexpect{tls_pin_already_present}
     //   PMR allocation failure → unexpect{tls_pinset_alloc_failed}
-    [[nodiscard]] core::expected_t<void>
-        add(Certificate const& cert);
+    [[nodiscard]] core::expected_t<void> add(Certificate const& cert);
 
     // (2) Remove a pin by SHA-256 fingerprint.
     //   absent → unexpect{tls_pin_not_found}
-    [[nodiscard]] core::expected_t<void>
-        remove(std::array<std::byte, 32> const& sha256);
+    [[nodiscard]] core::expected_t<void> remove(std::array<std::byte, 32> const& sha256);
 
     // (3) Lookup on the handshake-hot path. Lock-free — acquire-load on
     // snapshot_, linear scan. Returns pin_view with snapshot shared_ptr pinned.
-    [[nodiscard]] pin_view
-        find(std::array<std::byte, 32> const& sha256) const noexcept;
+    [[nodiscard]] pin_view find(std::array<std::byte, 32> const& sha256) const noexcept;
 
     // (4) Explicit-snapshot accessor — TLS handshake captures this ONCE per
     // [2g §6.5.1] BINDING CONTRACT and scans the captured snapshot.
-    [[nodiscard]] std::shared_ptr<const pin_snapshot>
-        snapshot() const noexcept;
+    [[nodiscard]] std::shared_ptr<const pin_snapshot> snapshot() const noexcept;
 
     // Diagnostic / test-only.
     [[nodiscard]] std::size_t size() const noexcept;
-    [[nodiscard]] bool        contains(std::array<std::byte, 32> const& sha256) const noexcept;
+    [[nodiscard]] bool contains(std::array<std::byte, 32> const& sha256) const noexcept;
 
- private:
-    Config                                           cfg_;
-    std::pmr::memory_resource*                       mr_;       // resolved at construction.
-    mutable std::shared_mutex                        writer_;   // serialises add/remove vs each other; readers do NOT take it. [2g §6.5.2].
-    std::atomic<std::shared_ptr<const pin_snapshot>> snapshot_; // acquire-load on read; release-store on write [2g §6.2].
+private:
+    Config cfg_;
+    std::pmr::memory_resource* mr_;  // resolved at construction.
+    mutable std::shared_mutex
+        writer_;  // serialises add/remove vs each other; readers do NOT take it. [2g §6.5.2].
+    std::atomic<std::shared_ptr<const pin_snapshot>>
+        snapshot_;  // acquire-load on read; release-store on write [2g §6.2].
 };
 
 }  // namespace fixpp::tls

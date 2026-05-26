@@ -155,4 +155,87 @@ TEST(FileCertSourceFactory, SuccessReturnsUsableSharedPtr) {
         << "Loaded ca_bundle_path must yield at least one trust anchor";
 }
 
+// ── (d) Success — ECDSA P-256 leaf (exercises certificate.cpp EC branch) ─────
+// FR-020 covers ECDSA P-256/P-384 curves; the RSA happy-path above leaves
+// parse_certificate_der's EVP_PKEY_EC branch + EVP_PKEY_get_group_name curve
+// detection uncovered. This test fires those.
+TEST(FileCertSourceFactory, SuccessLoadsEcdsaP256Leaf) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_ecdsa_p256.pem");
+    cfg.private_key_path = fixture("leaf_ecdsa_p256.key");
+    cfg.ca_bundle_path   = fixture("ca.pem");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed against ECDSA P-256 fixture";
+    ASSERT_NE(*result, nullptr);
+}
+
+// ── (d) Success — large SAN list (exercises certificate.cpp SAN parse loop) ──
+// FR-019's max_san_entries default is 64; the leaf_san_64 fixture has exactly
+// 64 DNS SANs. This exercises the SAN-collection loop + pmr_copy_str path in
+// parse_certificate_der which the leaf_rsa2048 single-SAN happy-path skips.
+TEST(FileCertSourceFactory, SuccessLoadsLeafWithLargeSanList) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_san_64.pem");
+    cfg.private_key_path = fixture("leaf_san_64.key");
+    cfg.ca_bundle_path   = fixture("ca.pem");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed for 64-SAN leaf";
+    ASSERT_NE(*result, nullptr);
+}
+
+// ── (d) Success — encrypted PEM with correct password ────────────────────────
+// Companion to WrongPasswordSurfacesCertLoadFailed: confirms the happy-path
+// (correct password via Config::password_cb) routes through pem_passwd_cb,
+// PEM_read_bio_PrivateKey, and parse_certificate_der successfully — covering
+// the file_cert_source.cpp encrypted-key load branch that the wrong-password
+// test only short-circuits past.
+TEST(FileCertSourceFactory, SuccessLoadsEncryptedPemWithCorrectPassword) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_encrypted_pem.pem");
+    cfg.private_key_path = fixture("leaf_encrypted_pem.key");
+    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.password_cb      = []() -> std::string { return "test"; };  // matches fixtures/Makefile
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed with correct encrypted-PEM password";
+    ASSERT_NE(*result, nullptr);
+}
+
+// ── (d) Success — DER input format (exercises auto-detect non-PEM path) ─────
+// file_cert_source auto-detects PEM vs DER by first-bytes magic. The PEM
+// fixtures cover the "----BEGIN" PEM branch; this test fires the binary DER
+// branch (read_file_bytes + d2i_AutoPrivateKey + d2i_X509 path in Impl::load).
+TEST(FileCertSourceFactory, SuccessLoadsDerInputFormat) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("leaf_rsa2048.der");
+    cfg.private_key_path = fixture("leaf_rsa2048_pkcs8.der");
+    cfg.ca_bundle_path   = fixture("ca.pem");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed for DER-encoded inputs";
+    ASSERT_NE(*result, nullptr);
+}
+
+// ── (d) Success — multi-cert chain (exercises chain dedupe + intermediates) ──
+// The chain_depth_8 fixture is an 8-cert chain (leaf + 7 intermediates). Loads
+// trigger file_cert_source's chain parsing loop in Impl::load() that the
+// single-cert ca.pem trust-anchor happy-path bypasses.
+TEST(FileCertSourceFactory, SuccessLoadsChainDepth8) {
+    file_cert_source::Config cfg;
+    cfg.leaf_path        = fixture("chain_depth_8.pem");
+    cfg.private_key_path = fixture("chain_depth_8.key");
+    cfg.ca_bundle_path   = fixture("ca.pem");
+
+    auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
+    ASSERT_TRUE(result.has_value())
+        << "make_file_cert_source must succeed for chain_depth_8 fixture";
+    ASSERT_NE(*result, nullptr);
+}
+
 }  // namespace
