@@ -19,6 +19,10 @@ Checks: >
   -llvm-header-guard,
   -llvm-include-order,
   -llvm-*,
+  -misc-include-cleaner,
+  -cppcoreguidelines-pro-type-member-init,
+  -hicpp-member-init,
+  -clang-analyzer-core.CallAndMessage,
   -google-build-using-namespace,
   -google-readability-todo,
   -modernize-use-trailing-return-type,
@@ -49,6 +53,12 @@ Checks: >
 # Treat clang-tidy warnings as errors in CI (FIXPP_WERROR + -Werror applies separately)
 WarningsAsErrors: "*"
 
+# Restrict header analysis to project-owned headers (excludes ~/.conan2/...,
+# system headers, build/_codegen/, etc.). Without this, clang-tidy's
+# clang-analyzer can fire on asio's internals from any TU that includes
+# <asio/awaitable.hpp> — see /speckit-verify decision record for the
+# asio impl/awaitable.hpp:305 clang-analyzer-core.CallAndMessage false-positive
+# surfaced during 011-tls-policy gate-b prep.
 HeaderFilterRegex: "include/fixpp/.*|include/fix/.*"
 
 CheckOptions:

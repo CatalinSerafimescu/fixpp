@@ -163,17 +163,17 @@
 | T-003 | OFFICIAL | transport | ASIO async I/O layer — non-blocking read/write with back-pressure | 4.0–5.0SP2 | [impl] implementation | backlog | — | — | — | — |
 | T-004 | OFFICIAL | transport | Reconnect / exponential back-off — initiator retry on disconnect | 4.0–5.0SP2 | [FIX-SL §4.3.1] Transport layer requirements | backlog | — | — | — | — |
 | T-005 | OFFICIAL | transport | Multi-session TCP acceptor — accept multiple connections on one port | 4.0–5.0SP2 | [FIX-SL §4.3.1] Transport layer requirements | backlog | — | — | — | — |
-| T-006 | OFFICIAL | transport | FIXS: TLS 1.2 support — ECDHE + AES-GCM cipher suites, forward secrecy | 4.0–5.0SP2 | [FIXS §3.1] Protocol version | backlog | — | — | — | — |
-| T-007 | OFFICIAL | transport | FIXS: TLS 1.3 support — preferred; session caching optional | 4.0–5.0SP2 | [FIXS §3.1] Protocol version | backlog | — | — | — | — |
-| T-008 | OFFICIAL | transport | FIXS: Mutual TLS — leaf certificate pinning on both ends | 4.0–5.0SP2 | [FIXS §2.2] Mutual and Simple TLS protocol options | backlog | — | — | — | — |
+| T-006 | OFFICIAL | transport | FIXS: TLS 1.2 support — ECDHE + AES-GCM cipher suites, forward secrecy | 4.0–5.0SP2 | [FIXS §3.1] Protocol version | implementing | 011-tls-policy | — | — | — |
+| T-007 | OFFICIAL | transport | FIXS: TLS 1.3 support — preferred; session caching optional | 4.0–5.0SP2 | [FIXS §3.1] Protocol version | implementing | 011-tls-policy | — | — | — |
+| T-008 | OFFICIAL | transport | FIXS: Mutual TLS — leaf certificate pinning on both ends | 4.0–5.0SP2 | [FIXS §2.2] Mutual and Simple TLS protocol options | implementing | 011-tls-policy | — | — | — |
 | T-009 | OFFICIAL | transport | FIXS: Mutual TLS — CA pinning (server) + leaf pinning (client) | 4.0–5.0SP2 | [FIXS §2.4] Certificate Validation with CA Pinning | backlog | — | — | — | — |
 | T-010 | OFFICIAL | transport | FIXS: Simple TLS — server-only auth (Star topology; client auth deferred to FIXA/FIX session) | 4.0–5.0SP2 | [FIXS §2.2] Mutual and Simple TLS protocol options | backlog | — | — | — | — |
-| T-011 | OFFICIAL | transport | FIXS: Certificate pinset API — multiple valid peer certs per counterparty for rotation/DR | 4.0–5.0SP2 | [FIXS §2.3] Leaf Certificate Pinning | backlog | — | — | — | — |
+| T-011 | OFFICIAL | transport | FIXS: Certificate pinset API — multiple valid peer certs per counterparty for rotation/DR | 4.0–5.0SP2 | [FIXS §2.3] Leaf Certificate Pinning | implementing | 011-tls-policy | — | — | — |
 | T-012 | OFFICIAL | transport | FIXS: PSK authentication — pre-shared key (P2P; optional; 32-char min; out-of-band exchange) | 4.0–5.0SP2 | [FIXS §2.5] Pre-shared keys (PSKs) | backlog | — | — | — | — |
-| T-013 | OFFICIAL | transport | FIXS: Cipher suite enforcement — disable RC4, DES/3DES, anonymous key exchange, MD5 | 4.0–5.0SP2 | [FIXS §3.3] Cipher suites | backlog | — | — | — | — |
-| T-039 | OFFICIAL | transport | FIXS: Certificate parameters — RSA 2048-bit min, ECDSA 256-bit, X.509 v2/v3, expiration validation at handshake | 4.0–5.0SP2 | [FIXS §3.4] Certificate parameters | backlog | — | — | — | — |
-| T-040 | OFFICIAL | transport | FIXS: Secrets management — distribute private keys/PSKs/pinned-certs via approved channels (HTTPS, GnuPG, PKCS#12, postal, in-person); store securely; support rotation | 4.0–5.0SP2 | [FIXS §4.1] Sharing secrets | backlog | — | — | — | — |
-| T-041 | OFFICIAL | transport | FIXS: Authorization linked to authentication — authenticated TLS identity must map to authorized FIX CompID; per-counterparty TLS tunnel | 4.0–5.0SP2 | [FIXS §4.4] Authorization linked to authentication | backlog | — | — | — | — |
+| T-013 | OFFICIAL | transport | FIXS: Cipher suite enforcement — disable RC4, DES/3DES, anonymous key exchange, MD5 | 4.0–5.0SP2 | [FIXS §3.3] Cipher suites | implementing | 011-tls-policy | — | — | — |
+| T-039 | OFFICIAL | transport | FIXS: Certificate parameters — RSA 2048-bit min, ECDSA 256-bit, X.509 v2/v3, expiration validation at handshake | 4.0–5.0SP2 | [FIXS §3.4] Certificate parameters | backlog | — | — | — | C++ surface contract published by 011-tls-policy (`SslCtxConfig` + `verify_peer` + `peer_identity`); row flips when 2h-transport consumes them at handshake-wiring time. |
+| T-040 | OFFICIAL | transport | FIXS: Secrets management — distribute private keys/PSKs/pinned-certs via approved channels (HTTPS, GnuPG, PKCS#12, postal, in-person); store securely; support rotation | 4.0–5.0SP2 | [FIXS §4.1] Sharing secrets | backlog | — | — | — | C++ surface contract published by 011-tls-policy (`cert_source` + `file_cert_source` + `make_file_cert_source`); row flips when 2h-transport consumes them at handshake-wiring time. |
+| T-041 | OFFICIAL | transport | FIXS: Authorization linked to authentication — authenticated TLS identity must map to authorized FIX CompID; per-counterparty TLS tunnel | 4.0–5.0SP2 | [FIXS §4.4] Authorization linked to authentication | backlog | — | — | — | C++ surface contract published by 011-tls-policy (`peer_identity` value type); row flips when session/ Phase-4 binds `peer_identity` to `SessionEvent`. |
 
 ## C ABI
 

@@ -69,6 +69,17 @@ set_target_properties(fuzz_session_cancellation PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+# T030 — Seam #6 of [2g §9] — file_cert_source libFuzzer harness for
+# 011-tls-policy per [const §IX.4]. Feeds random PEM/DER bytes via factory
+# (never the throwing constructor — fuzzer must not trigger unhandled exceptions).
+add_executable(fuzz_file_cert_source fuzz_file_cert_source.cpp)
+target_link_libraries(fuzz_file_cert_source PRIVATE fixpp_tls fixpp_core)
+target_compile_options(fuzz_file_cert_source PRIVATE -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_file_cert_source PRIVATE -fsanitize=fuzzer,address,undefined)
+set_target_properties(fuzz_file_cert_source PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # T051 — Seam #21 — MessageStore libFuzzer harness for 008-message-store per
 # SC-011 / FR-033 / [const §VII.7] voluntary / [const §IX.2].
 # Drives random interleavings of store/retrieve/reset/next_seqnum against

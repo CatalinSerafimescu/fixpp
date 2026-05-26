@@ -17,3 +17,23 @@ fixpp_add_store_test(store_corpus_replay SOURCES
   test_store_corpus_replay.cpp
   "${CMAKE_SOURCE_DIR}/tests/session/_fixtures_/test_double_fsm.cpp"
 )
+
+# ── 011-tls-policy seam registrations ────────────────────────────────────────
+# T020 — seam #3: FIXS-RC1 §5 recorded rotation cross-handshake atomicity.
+# T020a (mock_transport.hpp) is header-only; consumed directly by T020 sources.
+add_executable(tls_fixs_rotation
+  test_fixs_rotation.cpp
+)
+target_include_directories(tls_fixs_rotation PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}"  # for mock_transport.hpp
+)
+target_link_libraries(tls_fixs_rotation PRIVATE
+  fixpp::tls
+  GTest::gtest
+  GTest::gtest_main
+)
+set_target_properties(tls_fixs_rotation PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME tls_fixs_rotation COMMAND tls_fixs_rotation)
+set_tests_properties(tls_fixs_rotation PROPERTIES LABELS "tls;011;conformance")

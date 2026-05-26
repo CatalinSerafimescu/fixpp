@@ -20,7 +20,12 @@ class FixppConan(ConanFile):
     #   feature; user-approved per [const §III.2], pugixml precedent). Standalone
     #   asio, BSL-1.0 (LGPL-only ban [const §68] inapplicable). 001-004 were
     #   non-async so it was never added despite the Phase-4 note below.
-    # Returns in Phase 4: openssl/3.6.2 (4.x is breaking, not yet on Conan).
+    # openssl/3.6.2 added 2026-05-24 for 011-tls-policy (Phase 4 — TLS module
+    #   first to materially link; 4.x is breaking, not yet on Conan). Vetted
+    #   at Gate A (Phase-4) round 4, user-signed-off 2026-05-24 per plan.md
+    #   Technical Context → Primary Dependencies. Apache-2.0, AGPL-compatible
+    #   per [const §V.3]. tls/-touching targets only (PRIVATE link from
+    #   fixpp_tls).
     # Returns in Phase 5: grpc/1.78.1 (1.80 is upstream-only), iceoryx2 via CMake
     #   FetchContent of v0.8.1 gated on FIXPP_USE_ICEORYX2 (Rust/cargo prereq).
     # 002-dictionary-xml-loader adds pugixml/1.14 (MIT) for the XML data-
@@ -36,6 +41,7 @@ class FixppConan(ConanFile):
         "pugixml/1.14",
         "asio/1.36.0",
         "crc32c/1.1.2",
+        "openssl/3.6.2",
     ]
 
     # ── Build-time tools ─────────────────────────────────────────────────────

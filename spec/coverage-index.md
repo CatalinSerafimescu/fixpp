@@ -415,6 +415,27 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ---
 
+## 011-tls-policy — Active feature (2026-05-24, /speckit-implement Phases 1-6)
+
+> Establishes the new `include/fixpp/tls/` + `src/tls/` module from scratch. Ships catalogue rows T-006 / T-007 / T-008 / T-011 / T-013 as `implementing` (await 2h-transport for `done`). T-039 / T-040 / T-041 stay `backlog` with explicit C++ surface-contract forwarding notes (see `feature-catalogue.md`).
+>
+> **C++ surface published.** Five public types under `fixpp::tls::`:
+> - `cert_source` (abstract; 2 pure-virtuals — `load_credentials` awaitable + `load_trust_anchors`) + `file_cert_source` (PEM/DER default impl with encrypted-PEM passphrase support) + `make_file_cert_source(Config, mr) -> expected_t<shared_ptr<cert_source>>` factory.
+> - `Pinset` (mid-session-mutable, `shared_mutex` writer + lock-free `atomic<shared_ptr<const pin_snapshot>>` reader per `[2g §6.2]` / §6.5.2) + `make_pinset(Config, mr) -> expected_t<shared_ptr<Pinset>>` factory.
+> - `CipherPolicy` (compile-time allow-list per `[const §XII.3]` / `[2g §4.4]` — 3 TLS-1.3 suites + 6 TLS-1.2 suites + 3 kx_groups + 4 sig_algs + 12 banned_tokens; `static_assert(!any_banned(...))`; runtime `is_allowed(string_view) constexpr noexcept` for 2i C-ABI).
+> - `SecurityProfile` (4 enumerators incl. `unset = 0` sentinel + `one_way_ca [[deprecated]] = 3`) + `SslCtxConfig` (carries `pinset_snapshot` per NEW-P1-1 BINDING CONTRACT — verify_peer scans the captured snapshot, never calls `cfg.pinset->find/contains`) + `make_ssl_ctx_config(profile, cs, clock, pinset=nullptr, mr=nullptr) -> expected_t<SslCtxConfig>` factory + `verify_peer(SslCtxConfig const&, span<const Certificate>) noexcept -> expected_t<peer_identity>` predicate (10-step short-circuit per `[2g §6.5.1]` / FR-020a).
+> - `Certificate` + `peer_identity` value types (view + owning; `[[clang::lifetimebound]]` at every view accessor's declaration site per `[arch §5.5]` + `[2b §6.4]` precedent).
+>
+> **Error envelope.** 16 new `error::tls_*` variants at slots 78..93 per `[2g §6.6]` + `/clarify` Q2 amendment (`tls_pin_empty_at_open`). C-ABI coalescing groups owned by 2i: `FIXPP_ERR_TLS_CONFIG` (5 variants) / `FIXPP_ERR_TLS_PINSET` (3) / `FIXPP_ERR_TLS_RUNTIME` (1) / `FIXPP_ERR_TLS_HANDSHAKE` (5 — grouping variant `tls_handshake_failed` + 4 DoS-cap / pinning variants) / `FIXPP_ERR_CANCELLED` (1 — reused for `tls_load_cancelled`).
+>
+> **Test surface.** 21 new test binaries (14 named in `tests/tls/*` + 2 fuzz/conformance + 5 negative-compile / cancellation / per-counterparty / lifetimebound / pmr-fail witnesses) + 3 bench binaries — all green under Clang Debug + ASan + UBSan + TSan + GCC Release. Dual-gate alloc (`counting_resource` + `mallocnesia` LD_PRELOAD) on `Pinset::find` / `snapshot` / `verify_peer` per `[[feedback_tracking_pmr_resource_false_pass]]`.
+>
+> **Cross-cuts forwarded.** T-039 / T-040 wait for 2h-transport (handshake wiring) to flip from `backlog` → `implementing` → `done`. T-041 waits for session/ Phase-4 (CompID-to-TLS-identity binding) to consume `peer_identity` on `SessionEvent`. The deferred session-recovery feature's catalogue row 400 is NOT touched by 011.
+>
+> **Pending Phase 6 close-out (this slice).** T051 `/simplify` and T053 `/speckit-verify` (Tier-1 mirror) remain to run per `[[feedback_speckit_simplify_before_verify]]` ordering — `/simplify` first, then `/speckit-verify`, then `/gate-b`.
+
+---
+
 ## FIX Latest — MsgType entries only (FIX-Latest)
 
 Scope: confirm A-035–A-065 account for all new MsgTypes in FIX Latest not present in FIX 5.0SP2. EP-level field additions to existing messages are a post-1.0 gap (see Post-1.0 Gap Registry).
