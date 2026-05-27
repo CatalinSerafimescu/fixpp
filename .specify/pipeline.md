@@ -129,6 +129,14 @@ PHASE 4 — PUBLISH + MERGE
        `feature-catalogue.md` and phase-4 docs captured the
        implementation-status delta, but the Phase-2 design-of-record kept
        reading as "Draft, Gate-A-converged" indefinitely.
+    j. anti-pattern library — commit user-approved new entries from
+       /gate-b Post-loop §4 to `.claude/agents/phase-implementer-sonnet.md`
+       (parent repo). Only if §4 produced candidates AND the user
+       approved them in §5 sign-off; the common "no new candidates"
+       case is a no-op here. The orchestrator drafts; the user
+       approves; this bullet records. Skipped → the next feature's
+       implementer agent runs without the new entry and re-burns the
+       same trap.
 
 20. Review and close all issues for this phase
 ```
@@ -245,6 +253,24 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   subagent's "all green" or "0 CRITICAL" does NOT replace the
   spot-check, by the same memory-grounded reasoning that applies to
   `phase-implementer-sonnet` (per [H]).
+
+- **[J] APPLIED (user-directed 2026-05-27).** Compounding-engineering surface
+  for the anti-pattern library, per `pipeline/pipeline-review.md` item #4.
+  Two coordinated edits: (1) `/gate-b` Post-loop gains a new §4
+  ("Anti-pattern library — propose entries for new burn classes") between
+  label-set and user summary; the orchestrator reads this loop's triage
+  docs, judges each Root Cause against existing entries in
+  `.claude/agents/phase-implementer-sonnet.md`, and drafts candidate
+  entries for any new burn classes. (2) Step 19 gains bullet `j` — commit
+  the user-approved entries to the agent file as part of the post-merge
+  close-out. Root cause: the library is load-bearing (each entry
+  represents a prior burn the implementer agent now avoids), but
+  capturing new entries has been manual transcription from memory and
+  noted as a recurring maintenance burden in `pipeline/ai-sdd-pipeline.md`
+  Cons §6. The 15+ entries today were each ~one Gate B cycle's worth of
+  learning; the next 15 should arrive automatically, not from
+  recollection. Common case is no-op (mature features re-use known
+  patterns); the surface is cheap when there is nothing to capture.
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
 `/tasks` (§XVII.1), `/speckit-verify` mandatory + non-RED (§XVII.8),
