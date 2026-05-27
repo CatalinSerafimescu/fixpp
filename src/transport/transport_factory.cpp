@@ -97,6 +97,41 @@ make_asio_tls_transport(asio::any_io_executor      exec,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// make_accepted_asio_tls_transport — noexcept free function
+//
+// US3 / FR-024 mint path for asio_listener::async_accept. Adopts an
+// already-connected TCP socket via the asio_tls_transport accept-adoption
+// ctor and returns a fresh Transport in state_t::connected. The session FSM
+// (or test) calls async_handshake on the result to drive the TLS handshake.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
+make_accepted_asio_tls_transport(asio::any_io_executor      exec,
+                                  Transport::Config           cfg,
+                                  fixpp::tls::SslCtxConfig    ssl_cfg,
+                                  asio::ip::tcp::socket       accepted_socket,
+                                  std::pmr::memory_resource*  mr) noexcept
+{
+    if (mr != nullptr) {
+        cfg.mr = mr;
+    }
+
+    try {
+        auto ptr = std::make_unique<asio_tls_transport>(
+            std::move(exec),
+            std::move(cfg),
+            std::move(ssl_cfg),
+            std::move(accepted_socket));
+        return std::unique_ptr<Transport>(std::move(ptr));
+    } catch (std::bad_alloc const&) {
+        return std::unexpected{core::error::transport_factory_failed};
+    } catch (std::system_error const&) {
+        return std::unexpected{core::error::transport_factory_failed};
+    } catch (...) {
+        return std::unexpected{core::error::transport_factory_failed};
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // asio_tls_transport_factory — constructor
 //
 // Accepts a Transport::Config template applied to every Transport minted by

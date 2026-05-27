@@ -482,6 +482,83 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
       socket_{exec_},
       ssl_ctx_{std::make_unique<asio::ssl::context>(asio::ssl::context::tls)}
 {
+    setup_ssl_ctx_();
+    // state_ default-initialized to fresh per asio_tls_transport.hpp.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Accept-adoption constructor (US3 — asio_listener mint path per FR-024).
+//
+// Identical SSL_CTX setup to the initiator-side ctor; differs only in:
+//   - socket_ is move-constructed from the already-connected accepted_socket
+//     (preserves the kernel-side TCP state established by accept(2)).
+//   - state_ is promoted to state_t::connected — async_connect is therefore
+//     spent. The FSM calls async_handshake to drive the TLS handshake on the
+//     server-mode SSL context.
+//
+// Throws on OpenSSL SSL_CTX setup failure per the [arch §5.3] engine-bootstrap
+// carve-out; callers wrap in [2a §4.2] trap_throw.
+// ─────────────────────────────────────────────────────────────────────────────
+asio_tls_transport::asio_tls_transport(asio::any_io_executor      exec,
+                                        Transport::Config          cfg,
+                                        fixpp::tls::SslCtxConfig   ssl_cfg,
+                                        asio::ip::tcp::socket      accepted_socket)
+    : cfg_{std::move(cfg)},
+      ssl_cfg_{std::move(ssl_cfg)},
+      exec_{exec},
+      socket_{std::move(accepted_socket)},
+      ssl_ctx_{std::make_unique<asio::ssl::context>(asio::ssl::context::tls)}
+{
+    setup_ssl_ctx_();
+    apply_socket_options_();
+    state_ = state_t::connected;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// apply_socket_options_ — shared FR-029 / FR-029a socket-option application.
+// Initiator: called by async_connect after the kernel 3-way handshake
+// completes. Acceptor: called by the accept-adoption ctor immediately after
+// the SSL_CTX is up. Best-effort — opt_ec from setsockopt is intentionally
+// dropped (mirrors the initiator-side semantics; tests assert post-conditions
+// via get_option in tests/perf/test_socket_option_defaults.cpp).
+// ─────────────────────────────────────────────────────────────────────────────
+void asio_tls_transport::apply_socket_options_() noexcept {
+    asio::error_code opt_ec;
+
+    asio::ip::tcp::no_delay no_delay_opt{cfg_.tcp_nodelay};
+    socket_.set_option(no_delay_opt, opt_ec);
+
+    if (!cfg_.so_linger_enabled) {
+        asio::socket_base::linger linger_opt{false, 0};
+        socket_.set_option(linger_opt, opt_ec);
+    } else {
+        asio::socket_base::linger linger_opt{true, cfg_.so_linger_seconds};
+        socket_.set_option(linger_opt, opt_ec);
+    }
+
+    if (cfg_.tcp_recv_buf_bytes > 0) {
+        asio::socket_base::receive_buffer_size recv_buf{cfg_.tcp_recv_buf_bytes};
+        socket_.set_option(recv_buf, opt_ec);
+    }
+
+    if (cfg_.tcp_send_buf_bytes > 0) {
+        asio::socket_base::send_buffer_size send_buf{cfg_.tcp_send_buf_bytes};
+        socket_.set_option(send_buf, opt_ec);
+    }
+
+    if (cfg_.tcp_keepalive) {
+        asio::socket_base::keep_alive keepalive_opt{true};
+        socket_.set_option(keepalive_opt, opt_ec);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// setup_ssl_ctx_ — shared SSL_CTX bring-up. Reads ssl_cfg_, mutates
+// *ssl_ctx_. Both ctors call this after their member-init lists complete.
+// Anything throwing here propagates out of the ctor and is caught by the
+// caller's trap_throw envelope.
+// ─────────────────────────────────────────────────────────────────────────────
+void asio_tls_transport::setup_ssl_ctx_() {
     // Force registration of the ex_data index before first use.
     (void)ssl_ex_data_transport_idx();
 
@@ -687,7 +764,6 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
             }
         }
     }
-    // state_ default-initialized to fresh per asio_tls_transport.hpp:190.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -770,35 +846,7 @@ asio_tls_transport::async_connect(Endpoint const& ep) {
     }
 
     // ── Apply socket options post-connect (FR-029 / FR-029a) ─────────────────
-    {
-        asio::error_code opt_ec;
-
-        asio::ip::tcp::no_delay no_delay_opt{cfg_.tcp_nodelay};
-        socket_.set_option(no_delay_opt, opt_ec);  // best-effort
-
-        if (!cfg_.so_linger_enabled) {
-            asio::socket_base::linger linger_opt{false, 0};
-            socket_.set_option(linger_opt, opt_ec);
-        } else {
-            asio::socket_base::linger linger_opt{true, cfg_.so_linger_seconds};
-            socket_.set_option(linger_opt, opt_ec);
-        }
-
-        if (cfg_.tcp_recv_buf_bytes > 0) {
-            asio::socket_base::receive_buffer_size recv_buf{cfg_.tcp_recv_buf_bytes};
-            socket_.set_option(recv_buf, opt_ec);
-        }
-
-        if (cfg_.tcp_send_buf_bytes > 0) {
-            asio::socket_base::send_buffer_size send_buf{cfg_.tcp_send_buf_bytes};
-            socket_.set_option(send_buf, opt_ec);
-        }
-
-        if (cfg_.tcp_keepalive) {
-            asio::socket_base::keep_alive keepalive_opt{true};
-            socket_.set_option(keepalive_opt, opt_ec);
-        }
-    }
+    apply_socket_options_();
 
     // ── Populate ConnectInfo ──────────────────────────────────────────────────
     ConnectInfo info;
@@ -936,7 +984,11 @@ asio_tls_transport::async_read_some(std::span<std::byte> buf) {
 
     // state_ != handshaken covers both `closed` and pre-handshake states;
     // post-close every async_* returns transport_already_closed per FR-006.
-    if (state_ != state_t::handshaken) {
+    // ssl_stream_ has_value() iff async_handshake has emplaced it; the
+    // state_ == handshaken transition strictly follows that emplace, so the
+    // optional must be engaged here. The explicit check guards the invariant
+    // against future state-machine drift.
+    if (state_ != state_t::handshaken || !ssl_stream_) {
         co_return std::unexpected{E::transport_already_closed};
     }
 
@@ -986,7 +1038,9 @@ asio_tls_transport::async_write(std::span<const std::byte> bytes) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // state_ != handshaken covers both `closed` and pre-handshake states.
-    if (state_ != state_t::handshaken) {
+    // ssl_stream_ is engaged iff state_ == handshaken (see async_read_some
+    // comment); the explicit optional check guards the invariant.
+    if (state_ != state_t::handshaken || !ssl_stream_) {
         co_return std::unexpected{E::transport_already_closed};
     }
 

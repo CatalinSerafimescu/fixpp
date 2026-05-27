@@ -42,13 +42,20 @@ set_tests_properties(perf_transport_read_alloc_guard PROPERTIES
 set_property(TEST perf_transport_read_alloc_guard APPEND PROPERTY
   ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 
-# T019 — FR-029 / FR-029a — socket option defaults (initiator leg).
-# Acceptor leg wired by T038 after US3 ships.
+# T019 — FR-029 / FR-029a — socket option defaults.
+# Cell 1 (initiator leg) wired by T029. Cell 2 (acceptor leg) wired by T038
+# (post-US3 T037) — verifies Config pass-through through asio_listener.
 add_executable(perf_socket_option_defaults
   test_socket_option_defaults.cpp)
+target_include_directories(perf_socket_option_defaults PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_listener.hpp" + asio_tls_transport.hpp
+)
 target_link_libraries(perf_socket_option_defaults PRIVATE
-  fixpp_transport  GTest::gtest  GTest::gtest_main)
+  fixpp_transport
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main)
 add_test(NAME perf_socket_option_defaults
          COMMAND perf_socket_option_defaults)
 set_tests_properties(perf_socket_option_defaults PROPERTIES
-  LABELS "transport;012;us1;fr029")
+  LABELS "transport;012;us1;us3;fr029")

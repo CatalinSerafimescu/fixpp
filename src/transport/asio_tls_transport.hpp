@@ -118,6 +118,24 @@ public:
                                 Transport::Config          cfg,
                                 fixpp::tls::SslCtxConfig   ssl_cfg);
 
+    // Accept-adoption constructor (US3 — asio_listener mint path per FR-024).
+    //
+    // Adopts an already-connected TCP socket produced by
+    // asio::ip::tcp::acceptor::async_accept. The OS-side 3-way handshake has
+    // already completed; state_ starts in state_t::connected. async_connect is
+    // therefore one-shot-already-spent — calling it returns
+    // transport_already_connected. The FSM (or test) calls async_handshake
+    // directly to drive the TLS handshake.
+    //
+    // accepted_socket MUST be bound to the same executor as `exec` (the
+    // listener typically binds via `acceptor_.async_accept(exec)` overload, or
+    // the test does the equivalent). Throws on OpenSSL SSL_CTX setup failure
+    // per the [arch §5.3] engine-bootstrap carve-out.
+    asio_tls_transport(asio::any_io_executor       exec,
+                       Transport::Config           cfg,
+                       fixpp::tls::SslCtxConfig    ssl_cfg,
+                       asio::ip::tcp::socket       accepted_socket);
+
     // Non-copyable; non-movable (ssl_stream_ holds a ref to socket_).
     asio_tls_transport(asio_tls_transport const&)            = delete;
     asio_tls_transport& operator=(asio_tls_transport const&) = delete;
@@ -155,6 +173,23 @@ public:
     //   tests/transport/test_inflight_exclusivity.cpp (DISABLED_ integration cells)
     //   tests/transport/test_tls_handshake_pinset_rotation.cpp (rotation cell)
     friend class asio_tls_transport_test_access;
+
+private:
+    // Common SSL_CTX setup shared by both ctors. Reads ssl_cfg_, populates
+    // *ssl_ctx_ (protocol bounds, cipher suites, kx groups, sigalgs, verify
+    // trampoline, cert/key chain, trust anchors). Throws on any OpenSSL
+    // failure — callers (both ctors) run inside the [arch §5.3] / [2a §4.2]
+    // trap_throw boundary.
+    void setup_ssl_ctx_();
+
+    // Apply FR-029 / FR-029a socket options (TCP_NODELAY, SO_LINGER,
+    // recv/send buffer sizes, TCP keepalive) on socket_. Called by
+    // async_connect() after the OS-side connect completes (initiator leg)
+    // and by the accept-adoption ctor (acceptor leg). Best-effort —
+    // individual setsockopt failures are silently dropped (matches the
+    // initiator-side semantics; the gate is the post-condition assertion
+    // in the T019 cells).
+    void apply_socket_options_() noexcept;
 
 private:
     // ── Configuration (frozen at construction) ──────────────────────────────
@@ -227,5 +262,24 @@ make_asio_tls_transport(asio::any_io_executor      exec,
                         Transport::Config           cfg,
                         fixpp::tls::SslCtxConfig    ssl_cfg,
                         std::pmr::memory_resource*  mr) noexcept;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// make_accepted_asio_tls_transport — noexcept factory (US3 / FR-024 path).
+//
+// Adopts an already-connected TCP socket produced by
+// asio::ip::tcp::acceptor::async_accept. Returns a Transport in
+// state_t::connected; the FSM calls async_handshake to drive TLS handshake.
+//
+// Used exclusively by asio_listener::async_accept; no SessionConfig / 2i C-ABI
+// path mints accept-side Transports.
+//
+// Body lives in src/transport/transport_factory.cpp alongside the initiator
+// mint helper.
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
+make_accepted_asio_tls_transport(asio::any_io_executor      exec,
+                                  Transport::Config           cfg,
+                                  fixpp::tls::SslCtxConfig    ssl_cfg,
+                                  asio::ip::tcp::socket       accepted_socket,
+                                  std::pmr::memory_resource*  mr) noexcept;
 
 }  // namespace fixpp::transport

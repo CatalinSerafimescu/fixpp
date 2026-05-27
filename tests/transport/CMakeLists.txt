@@ -106,6 +106,53 @@ add_test(NAME transport_inflight_exclusivity
 set_tests_properties(transport_inflight_exclusivity PROPERTIES
   LABELS "transport;012;us1;seam15")
 
+# ── T030 — [2h §9 seam #13] ReconnectPolicy schedule + delay_for_attempt ─────
+
+add_executable(transport_reconnect_policy_schedule
+  test_reconnect_policy_schedule.cpp)
+target_link_libraries(transport_reconnect_policy_schedule PRIVATE
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_reconnect_policy_schedule
+         COMMAND transport_reconnect_policy_schedule)
+set_tests_properties(transport_reconnect_policy_schedule PROPERTIES
+  LABELS "transport;012;us2;seam13;reconnect")
+
+# ── T039 — [2h §9 seam #10] mock_transport backpressure + FR-037 partial-write ─
+
+add_executable(transport_backpressure
+  test_backpressure.cpp)
+target_link_libraries(transport_backpressure PRIVATE
+  fixpp_transport
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_backpressure
+         COMMAND transport_backpressure)
+set_tests_properties(transport_backpressure PROPERTIES
+  LABELS "transport;012;us4;seam10;mock")
+
+# ── T034 — [2h §9 seam #14] asio_listener accept + cancel Option-A contract ─
+
+add_executable(transport_listener_acceptor
+  test_listener_acceptor.cpp)
+target_include_directories(transport_listener_acceptor PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_listener.hpp"
+)
+target_link_libraries(transport_listener_acceptor PRIVATE
+  fixpp_transport
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_listener_acceptor
+         COMMAND transport_listener_acceptor)
+set_tests_properties(transport_listener_acceptor PROPERTIES
+  LABELS "transport;012;us3;seam14")
+
 # ── T029 wiring: transport_cancellation_propagation ──────────────────────────
 
 # T013 — [2h §9 seam #5] — cancellation propagation contract (Phase 3b wiring).

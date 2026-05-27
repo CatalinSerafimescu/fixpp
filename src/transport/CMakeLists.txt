@@ -13,6 +13,8 @@
 add_library(fixpp_transport STATIC
   "${CMAKE_CURRENT_SOURCE_DIR}/asio_tls_transport.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/transport_factory.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/reconnect_policy.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/asio_listener.cpp"
 )
 add_library(fixpp::transport ALIAS fixpp_transport)
 
@@ -47,4 +49,6 @@ target_sources(fixpp_transport PUBLIC
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/tls_transport.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/transport_factory.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/transport_errors.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/transport/reconnect_policy.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/transport/listener.hpp"
 )
