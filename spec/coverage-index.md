@@ -415,11 +415,11 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ---
 
-## 012-2h-transport — Active feature (2026-05-27, /speckit-implement MVP slice: Phases 1-3 + 7 + Phase 8 close-out)
+## 012-2h-transport — Merged (PR #85 squash `53e25b1`, 2026-05-27; Gate B converged 4 rounds with 3 carry-forward waivers)
 
-> Establishes the new `include/fixpp/transport/` + `src/transport/` module from scratch. Ships catalogue rows **T-001 / T-002 / T-003 / T-004 / T-005 / T-009 / T-010** as `implementing` (await full US2 + US3 slices + Gate B for `done`). Annotates **T-039 / T-040** as "2h-owned wiring half" — flipped from `backlog` to `implementing` because 012 ships the `verify_peer_trampoline` (T-039) and `cert_source`-consumption wiring (T-040) via 011-shipped types. T-041 stays `backlog` pending session/ Phase-4 (CompID-to-TLS-identity binding).
+> Established the new `include/fixpp/transport/` + `src/transport/` module. Ships catalogue rows **T-001 / T-002 / T-003 / T-004 / T-005 / T-009 / T-010 → `done`** (post-MVP US2/US3/US4 + Gate B RC#A/RC#B closure landed everything originally deferred). Co-owns **T-006 / T-007 / T-008 / T-011 / T-013** (TLS protocol + cipher + pinset; 011 shipped surface, 012 ships wire) — flipped from `implementing` to `done`. **T-039 / T-040** stay `implementing` as "2h-owned wiring half SHIPPED" — full row pending session-Phase-4 binding into `SessionEvent`. **T-041** stays `backlog` pending session-Phase-4.
 >
-> **MVP scope (this slice).** US1 only (P1 TLS-encrypted FIX session end-to-end) + Phase 7 011 F-1 carryover discharged. **Deferred to follow-on slices:** US2 (P2 ReconnectPolicy), US3 (P3 Listener + asio_listener), US4 (P3 mock_transport test seam), Appendix D §D.1..§D.8 cross-doc amendments (T046-T048), operator-quickstart (T051), bench-body fill-in for Tier-1 measurement, T020 conformance cells pending QuickFIX peer.
+> **Final scope (cumulative across MVP + post-MVP slices + Gate B).** US1 (P1 TLS-encrypted FIX session end-to-end) + US2 (ReconnectPolicy schedule-array shape Q2=C + `delay_for_attempt(n)` + `defaults_quickfix_compat()`) + US3 (Listener + asio_listener with listener-owned cached SSL_CTX factory per RC#B Codex r3) + US4 (mock_transport test seam) + Phase 7 011 F-1 carryover discharged (8-cell × 4-sanitizer = 32 PASS witness) + Appendix D §D.1..§D.8 cross-doc amendments (T046-T048 in commit `81ab659`) + operator-quickstart `docs/src/transport-quickstart.md` (T051) + RC#A live TLS handshake Cells 7-8 + RC#D live truncated-close witness + RC#E FR-007 exclusivity Cells 1-4 + RC#F seam-13 D-17 reset + shared `tests/transport/loopback_tls_fixture.hpp`.
 >
 > **C++ surface published (MVP slice).** Six public types under `fixpp::transport::`:
 > - `Transport` (abstract; 5 pure-virtuals — `async_connect` / `async_read_some` / `async_write` / `cancel` / `close`) + nested `Transport::Config` + `ConnectInfo` POD per `[2h §4.1]`.
@@ -439,16 +439,17 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 > - `tests/perf/test_socket_option_defaults.cpp` — FR-029 / FR-029a initiator-leg socket option defaults (TCP_NODELAY=true, SO_LINGER disabled, tcp_keepalive=false); acceptor-leg cell deferred to US3.
 > - `tests/transport/test_cancellation_propagation.cpp` — 3 runnable error-code cells + 8 DISABLED_ integration cells (4 async methods × 2 executor modes) pending live-wire fixture.
 >
-> **Pending waivers / deferrals (this slice).**
-> - **W-1 (12) SSL_OP_NO_EARLY_DATA omission** — the constant is not defined in pinned OpenSSL 3.6.2 headers (confirmed). Phase 8 / Gate B disposition: use `SSL_CTX_set_max_early_data(ctx, 0)` as the canonical 0-RTT-disabled assertion, OR rely on ASIO `ssl::context` default (TLS 1.3 0-RTT disabled unless caller opts in via `SSL_CTX_set_early_data_enabled`). FR-016 + `[FIXS §3.2]` + `[const §XII.3]` anchor; FR-042 negative-requirement reinforcement.
-> - **W-2 (12) Bench body fill-in deferred** — `bench/transport/bench_async_read_some_dispatch.cpp` + `bench_async_write_issue.cpp` + `bench_tls_handshake_loopback.cpp` wired with placeholder bodies; real Tier-1 numbers (`[2h §6.3]` ≤200 ns p99 dispatch / ≤200 ns p99 write / ≤10 ms p99 handshake) require live-fixture wiring (loopback + cooperating peer) which is out-of-scope for the MVP slice.
-> - **W-3 (12) T020 conformance scaffolding** — 17 TC-001..TC-017 DISABLED_ cells documented as scaffolding pending a runnable QuickFIX test peer. The error-code scaffolding cell runs and passes.
+> **Waivers (final — applied at Gate B convergence per `[const §IX.1]` rationale-backed):**
+> - **W-1 (12) SSL_OP_NO_EARLY_DATA omission** — constant absent in pinned OpenSSL 3.6.2 headers; 0-RTT off by ASIO default. FR-016 + `[FIXS §3.2]` + `[const §XII.3]` anchor.
+> - **RC#C depth (Gate B carry-forward)** — `test_verify_peer_pmr_oom.cpp` witness exhausts boundary only; mid/tail SAN-DNS/SAN-URI/peer_identity + `verify_peer_trampoline` 7-PMR-container surface unwitnessed. Test cert has 1 SAN-DNS + 0 SAN-URI. Per `[[feedback_trap_throw_pmr_witness_enumerate_sites]]` + 011 PR #84 W-5/W-6 precedent.
+> - **RC#G bench (Gate B carry-forward)** — `bench/transport/bench_tls_handshake_loopback.cpp` is scaffold; SetUp/TearDown TODOs; counters 0. Bench-body fill-in deferred until post-cache shape stable (which round-3 RC#B accept-path close just landed). Per 011 PR #84 W-2 cppcheck-bench precedent.
+> - **RC#I fuzz doc (Gate B carry-forward)** — `fuzz_transport_read_path.cpp` documents reduced scope honestly (Framer::feed boundary, not asio_tls_transport::async_read_some); catalogue line label re-classification follow-on slice.
 > - **W-4 (12) `asio_free` namespace alias** — `asio::async_connect` (free function) collides with `asio_tls_transport::async_connect` (member); resolved via local `namespace asio_free = asio` alias inside `asio_tls_transport.cpp`. Transparent — no behavior change; cosmetic only.
-> - **Inherited from 011 (apply at /speckit-verify time without re-deliberation):** W-2 cppcheck + W-3 iwyu carry-forwards per `[[project_011_tls_policy_closed]]`.
+> - **Inherited from 011 / prior PRs:** W-2 cppcheck + W-3 iwyu + W-format (425 repo-wide) + W-tidy (75 diagnostics) — pre-existing carry-forwards per `[[project_011_tls_policy_closed]]` + 011 PR #84. Repo-wide cleanup tracked as a separate `chore/` follow-on branch off post-012 main.
 >
-> **011 F-1 closure ready.** Phase 7 `tests/transport/test_load_credentials_seam13_witness.cpp` + `.specify/decisions/012-2h-transport-verify.md §T044` satisfy SC-008 binding. Cite at 012 Gate B label-application time to flip 011's deferred F-1 row.
+> **011 F-1 closure landed.** Phase 7 `tests/transport/test_load_credentials_seam13_witness.cpp` + Gate B verify record satisfy SC-008 binding. 011's deferred F-1 row flipped at 012 Gate B convergence.
 >
-> **Cross-cuts forwarded.** Appendix D §D.1..§D.8 cross-doc amendments (orchestrator-only sign-off edits to `2d-threading.md` + `2h-transport.md`) deferred to a follow-on slice. T-041 waits for session/ Phase-4 (CompID-to-TLS-identity binding) to consume `peer_identity` on `SessionEvent`.
+> **Cross-cuts forwarded.** T-039 / T-040 wiring half SHIPPED; full rows pending session-Phase-4 (CompID-to-TLS-identity binding + 2j `ReloadCertSource` control-plane). T-041 waits for session-Phase-4.
 
 ---
 
