@@ -142,9 +142,15 @@ add_executable(transport_listener_acceptor
 target_include_directories(transport_listener_acceptor PRIVATE
   "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_listener.hpp"
 )
+# OpenSSL must be linked explicitly: fixpp_transport uses asio::ssl (which
+# pulls in OpenSSL symbols) but exposes it as PRIVATE, so executables that
+# link the static library must repeat the OpenSSL link themselves.
 target_link_libraries(transport_listener_acceptor PRIVATE
   fixpp_transport
   fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main
 )

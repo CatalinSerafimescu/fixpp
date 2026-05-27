@@ -106,6 +106,13 @@ public:
         closed       // close() called or fatal error; no further async ops
     };
 
+    // ── TLS role (RC#A — P1-1 fix) ─────────────────────────────────────────
+    // Distinguishes initiator (client) from acceptor (server) so async_handshake
+    // passes the correct stream_base role to OpenSSL. The role is private to
+    // the impl class; the public TlsTransport::async_handshake virtual does NOT
+    // expose it ([const §XIV.2]: no extra pure-virtual added).
+    enum class role_t : std::uint8_t { client, server };
+
     // ── Constructor (throwing — [arch §5.3] engine-bootstrap carve-out) ───
     //
     // Builds the asio::ssl::context from `ssl_cfg` fields (protocol version
@@ -223,6 +230,9 @@ private:
 
     // ── State ───────────────────────────────────────────────────────────────
     state_t  state_  {state_t::fresh};
+
+    // ── Role (initiator vs acceptor — set by ctor; used by async_handshake) ─
+    role_t   role_   {role_t::client};
 
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ─────────
     //

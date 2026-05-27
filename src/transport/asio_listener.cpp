@@ -132,6 +132,15 @@ asio_listener::async_accept() {
         co_return std::unexpected{E::transport_accept_cancelled};
     }
 
+    // RC#H (P3-1): if the acceptor handle is already closed (e.g., cancel()
+    // was called before this coroutine resumed) short-circuit immediately with
+    // transport_accept_cancelled. This avoids dispatching to OS async_accept
+    // on a closed handle — which on some platforms returns bad_descriptor
+    // (mapped to transport_factory_failed) instead of the expected variant.
+    if (!acceptor_.is_open()) {
+        co_return std::unexpected{E::transport_accept_cancelled};
+    }
+
     // Bind the accepted socket to the listener's service executor. The
     // session bootstrap can rebind to the per-session strand via
     // socket.release() + assign() if it wants; v1.0 keeps the socket on

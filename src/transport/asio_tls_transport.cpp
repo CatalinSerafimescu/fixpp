@@ -512,6 +512,7 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor      exec,
     setup_ssl_ctx_();
     apply_socket_options_();
     state_ = state_t::connected;
+    role_  = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -924,8 +925,11 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     });
 
     asio::error_code handshake_ec;
+    const auto hs_role = (role_ == role_t::server)
+                         ? asio::ssl::stream_base::server
+                         : asio::ssl::stream_base::client;
     co_await ssl_stream_->async_handshake(
-        asio::ssl::stream_base::client,
+        hs_role,
         asio::redirect_error(asio::use_awaitable, handshake_ec));
 
     timer.cancel();

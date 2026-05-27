@@ -199,11 +199,12 @@ TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
     auto result = fut.get();
     ASSERT_FALSE(result.has_value())
         << "post-cancel async_accept must NOT yield a Transport";
-    EXPECT_TRUE(result.error() == error::transport_accept_cancelled ||
-                result.error() == error::transport_factory_failed)
-        << "expected transport_accept_cancelled (operation_aborted) or "
-           "transport_factory_failed (bad_descriptor); got error variant: "
-        << static_cast<int>(result.error());
+    // RC#H (P3-1): asio_listener::async_accept now pre-checks acceptor_.is_open()
+    // before dispatching to the OS — closed handle returns transport_accept_cancelled
+    // directly, avoiding the bad_descriptor → transport_factory_failed path.
+    EXPECT_EQ(result.error(), error::transport_accept_cancelled)
+        << "post-cancel async_accept must return transport_accept_cancelled; "
+           "got variant: " << static_cast<int>(result.error());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
