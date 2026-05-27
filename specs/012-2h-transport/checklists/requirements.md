@@ -29,7 +29,7 @@
 **Notes on requirement completeness**:
 - Zero `[NEEDS CLARIFICATION]` markers needed: every `[2h §10]` open question is DEFERRED (PSK hook → post-v1; control-plane transport → 2j; per-venue reconnect presets → DECIDED v0.2; TCP socket-option docs → post-v1 docs; TLS bidi shutdown timeout → post-v1 ops; IPv6 zone-id corpus → Phase-4 conformance; acceptor accept rate → post-v1). The Assumptions section enumerates each deferral so a `/plan` reviewer can re-open if needed.
 - Success criteria 001 / 004 / 005 / 006 / 007 are user-facing measurable outcomes (zero code changes / hermetic test seam / deployment scale / distinct error variants / no rollback under cancellation). SC-002 / 003 / 008 reference concrete numeric / latency budgets sourced from the design doc.
-- SC-007 / SC-008 reference design-doc-internal anchors (`[2g §4.5]:926-929` for the F-1 carryover witness; `[2h §6.3]` Tier 1 ceilings for latency). These are intentional — the contract this spec publishes is the contract those anchors define; verifiability requires the anchor.
+- SC-007 / SC-008 reference design-doc-internal anchors (`[2g §6.4]:927-928` for the F-1 carryover witness cached-state fast path; `[2h §6.3]` Tier 1 ceilings for latency). These are intentional — the contract this spec publishes is the contract those anchors define; verifiability requires the anchor.
 
 ## Feature Readiness
 

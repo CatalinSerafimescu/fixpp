@@ -153,7 +153,7 @@ The legacy v0.3 fields `initial_delay` / `max_delay` / `multiplier` are NOT pres
 - `defaults_quickfix_compat() -> ReconnectPolicy` — `{schedule = [30 s], jitter = 0.0, max_attempts = 0}` for industry-canonical QuickFIX-cpp / Fix8 / QuickFIX/J behaviour (single fixed 30 s interval, no jitter, no cap).
 
 **Helper method**:
-- `delay_for_attempt(std::uint32_t attempt_n) -> std::chrono::milliseconds` — returns `schedule[std::min(attempt_n, schedule.size() - 1)] * (1.0 + uniform_real(-jitter, +jitter))`. Jitter is **deterministic-per-attempt** (seeded from session id + attempt number) for test repeatability per `[const §VII.7]` fuzz determinism.
+- `delay_for_attempt(std::uint32_t attempt_n) -> std::chrono::milliseconds` — returns `schedule[std::min(attempt_n, schedule.size() - 1)] * (1.0 + uniform_real(-jitter, +jitter))`. Jitter is **deterministic-per-attempt** (seeded from session id + attempt number) for test repeatability per `[const §VII.7]` fuzz determinism. Signature shape note: the v0.3 design doc `[2h §4.4]:596-597` publishes `delay_for_attempt(std::uint32_t attempt_index, double rand01)` (FSM supplies `rand01`); the bundle moves the RNG ownership to the policy (one-parameter shape; deterministic-per-attempt seed derived inside the policy from session id + attempt number). The change is recorded as spec Appendix D §D.6 amendment; the determinism contract is preserved (the seed source moves, but the per-attempt delay is still reproducible from `(session_id, attempt_n)` alone — equivalent to v0.3's `rand01`-source per `[2h §4.4]:609` "The session FSM's RNG is seeded at session open"). The mechanism by which the policy receives the session-id-derived seed (extra field on the policy OR additional `delay_for_attempt(n, seed)` parameter) is settled at /implement-time within 2h's existing surface.
 
 **Ownership**: by value; FSM holds across the session lifetime.
 
@@ -177,7 +177,7 @@ The legacy v0.3 fields `initial_delay` / `max_delay` / `multiplier` are NOT pres
 |---|---|---|---|
 | `connect_timeout` | `std::chrono::milliseconds` | `30 000` (30 s) | `async_connect` upper bound |
 | `tls_handshake_timeout` | `std::chrono::milliseconds` | `30 000` (30 s) | `async_handshake` upper bound; surfaces `transport_handshake_timeout` |
-| `tls_close_timeout` | `std::chrono::milliseconds` | `1 000` (1 s) | `close()` bidi shutdown bound; truncated close surfaces `transport_tls_close_truncated` |
+| `tls_close_timeout` | `std::chrono::milliseconds` | `1 000` (1 s) | `close()` bidi shutdown bound; truncated close surfaces `transport_read_truncated` per `[2h §6.6]:1182` (v1.0 treats as warn-level `transport_read_eof` per `[2g §7.8]`) |
 | `max_read_window_bytes` | `std::size_t` | `262 144` (256 KiB) | matches `[2b §1.2]` `default_max_frame_bytes` |
 | `max_write_size_bytes` | `std::size_t` | `1 048 576` (1 MiB) | one v1.0-max frame + 4× headroom for derivatives venues |
 | `tcp_recv_buf_bytes` | `std::int32_t` | `0` | `0` = OS auto-tune |
@@ -202,17 +202,17 @@ The legacy v0.3 fields `initial_delay` / `max_delay` / `multiplier` are NOT pres
 
 ## E-8 `fixpp::transport::Listener`
 
-**Shape**: abstract pluggable interface. **1 pure-virtual method** (`async_accept`); well under `[const §XIV.2]` cap.
+**Shape**: abstract pluggable interface. **1 pure-virtual method** (`async_accept`) per `[2h §4.6]:810` verbatim; well under `[const §XIV.2]` cap. `cancel()` is a CONCRETE-IMPL method on `asio_listener` (E-10), NOT a pure-virtual on the abstract `Listener` base — the engine-scoped Listener-cancel behaviour is published as a service row in `[2h §6.4.1]:1124`.
 
-**Method** per `[2h §4.6]`:
+**Method** per `[2h §4.6]:810`:
 
 | Signature | Cancellation surface |
 |---|---|
-| `async_accept() -> asio::awaitable<expected_t<std::unique_ptr<Transport>>>` | `transport_accept_cancelled` (mapped from `listener_accept_cancelled` per `[2h §6.6]`) on `cancellation_type::total` |
+| `async_accept() -> asio::awaitable<expected_t<std::unique_ptr<Transport>>>` | `transport_accept_cancelled` per `[2h §6.6]:1191` on `cancellation_type::total` |
 
-**`cancel()` Option-A contract** per spec FR-025 + Clarifications 2026-05-27 Q4=A: does EXACTLY three things and ONLY those three:
+**`asio_listener::cancel()` Option-A contract** (concrete-impl-only API) per spec FR-025 + Clarifications 2026-05-27 Q4=A: does EXACTLY three things and ONLY those three:
 1. Close the listening socket so no new TCP connections complete.
-2. Complete any in-flight `async_accept` awaitable not yet resumed with `listener_accept_cancelled`.
+2. Complete any in-flight `async_accept` awaitable not yet resumed with `transport_accept_cancelled`.
 3. Leave already-resumed-but-not-yet-consumed `unique_ptr<Transport>` results UNAFFECTED.
 
 **Ownership**: engine-owned (`std::unique_ptr<Listener>` held by `service/` per `[arch §4.11]`); lifetime is engine lifetime (outlives many `Transport` instances).
@@ -288,7 +288,7 @@ Cancelled  → (~Listener)                → -
 | `bind_endpoint` | `Endpoint` | (required) | local bind address + port + backlog |
 | `so_reuseaddr` | `bool` | `true` | typical acceptor default |
 | `so_reuseport` | `bool` | `false` | Linux-only; off by default |
-| `accepted_transport_config` | `asio_tls_transport::Config` | (defaults) | passed through to each minted Transport |
+| `accepted_transport_config` | `Transport::Config` | (defaults) | passed through to each minted Transport; the bundle's contract exposes only `Transport::Config` (no separate `asio_tls_transport::Config` nested type) so the acceptor-side knob set is the same struct the abstract base publishes |
 | `ssl_cfg` | `fixpp::tls::SslCtxConfig` | (required) | per-acceptor TLS profile |
 
 **Construction**: direct constructor `asio_listener(exec, cfg)` permitted to throw; factory `make_asio_listener(exec, cfg, mr) -> expected_t<std::unique_ptr<Listener>>` wraps for non-construction-time callers.
@@ -297,7 +297,7 @@ Cancelled  → (~Listener)                → -
 
 **Validation rules**:
 - One `SslCtxConfig` per Listener (acceptor-side TLS profile fixed at engine open); multi-tenant acceptor uses one Listener per counterparty.
-- `cancel()` Option-A contract per E-8 + spec FR-025.
+- `cancel()` Option-A contract per E-8 + spec FR-025 (concrete-impl-only API on `asio_listener`; not pluggable on the abstract `Listener` base).
 
 ---
 
@@ -365,24 +365,9 @@ Cancelled  → (~Listener)                → -
 
 ## E-13 `error::transport_*` variant family
 
-**Shape**: appended to `fixpp::core::error` enum at next free contiguous block per `[[project_2e_design_doc_only_seqnum_handoff]]` slot-pinning rule (slots 94..115; 22 variants; 011 took 78..93; never renumber existing slots).
+**Shape**: appended to `fixpp::core::error` enum at the contiguous block 94..115 (22 variants) immediately after 011's `tls_*` block per `[[project_2e_design_doc_only_seqnum_handoff]]` slot-pinning rule. 011 occupies the 16-slot block 78..93 per the shipped post-PR-#84 header (canonical `[2g §6.6]:1004` `"(15 variants.)"` count + boundary variant `tls_load_cancelled = 93` per `[2g §4.1] / [2g §6.4]`); a future ±1 adjustment is reconciled at `/implement`-time without re-running Gate A. Never renumber existing slots.
 
-**Variants** per `[2h §6.6]` + spec FR-034 (22 total):
-
-**Connect / lifecycle** (8) — `FIXPP_ERR_TRANSPORT_LIFECYCLE` group:
-- `transport_resolve_failed` — DNS NXDOMAIN / malformed host / no AF match
-- `transport_connect_refused` — TCP `ECONNREFUSED`
-- `transport_connect_timeout` — TCP connect exceeded `Config::connect_timeout`
-- `transport_connect_cancelled` — `async_connect` cancelled
-- `transport_already_connected` — `async_connect` or `async_handshake` called twice (one-shot violation)
-- `transport_already_closed` — any `async_*` called after `close()` returned
-- `transport_read_in_progress` — concurrent second `async_read_some` (API-level exclusivity violation)
-- `transport_write_in_progress` — concurrent second `async_write` (API-level exclusivity violation)
-- `transport_reconnect_limit_exceeded` — FSM exhausted `ReconnectPolicy::max_attempts`
-
-Wait — that's 9. Let me re-count per `[2h §6.6]`:
-
-**Re-grouped per `[2h §6.6]` C-ABI coalescing** (22 variants total):
+**Variants** per `[2h §6.6]:1167-1204` + spec FR-034 (22 total, partitioned into 5 C-ABI coalescing groups):
 
 | Group | Variants |
 |---|---|
@@ -394,15 +379,15 @@ Wait — that's 9. Let me re-count per `[2h §6.6]`:
 
 Total: 8 + 5 + 2 + 2 + 5 = 22. ✓
 
-**`transport_handshake_failed` GROUPING variant**: carries a diagnostic-field sub-reason (the underlying OpenSSL error string + the `[2g §6.6]` `tls_*` sub-reason if `verify_peer` rejected). Joins `[2g §6.6]` `tls_handshake_failed` group at the C ABI per 2i's coalescing call. The 11 `tls_*` variants from `[2g §6.6]` surface UNCHANGED through 2h — 2h MUST NOT re-translate or coalesce them (spec FR-034).
+**`transport_handshake_failed` GROUPING variant** (binding per FR-034a + `[2h §6.6]:1188`): carries a diagnostic-field sub-reason (the underlying OpenSSL error string + the `[2g §6.6]` `tls_*` sub-reason if `verify_peer` rejected). Joins `[2g §6.6]` `tls_handshake_failed` group at the C ABI per 2i's coalescing call. The 15 `tls_*` variants from `[2g §6.6]:986-1004` surface UNCHANGED through 2h — 2h MUST NOT re-translate or coalesce them (spec FR-034). The diagnostic sub-reason mechanism is what makes the FR-012 "unchanged" promise observable at the operator's log.
 
-**`transport_tls_close_truncated`** per spec FR-006 / Edge Cases: it's an INFORMATIONAL outcome of `close()`, not a hard error; the spec text mentions it as a `close()` outcome on truncated peer-close. Whether it's a NAMED variant or folded into an existing one is a final-coalescing 2i call. The design doc lists it as `transport_read_truncated` in `[2h §6.6]` (mapping the v0.1 `transport_tls_close_truncated` semantics into `transport_read_truncated` with a strict-mode opt-in). 22 total stands.
+**Truncated-close mapping** per spec FR-006 / Edge Cases + `[2h §6.6]:1182`: a peer closing the connection without TLS close-notify (only relevant for `TlsTransport`) surfaces as **`transport_read_truncated`** — the v1.0 default treats this as `transport_read_eof` (logged at `warn` level by 2k per `[2g §7.8]`); a strict-mode opt-in could escalate to a hard error in a future revision. The dedicated `transport_tls_close_truncated` symbol used in earlier v0.1 prose is RETIRED; the 22-variant count stands.
 
-**Storage**: in `include/fixpp/core/error.hpp` at slots 94..115; re-exported under `fixpp::transport::errors` namespace via `include/fixpp/transport/transport_errors.hpp` for ergonomic at-site use.
+**Storage**: in `include/fixpp/core/error.hpp` at the contiguous block 94..115 immediately after 011's 78..93 `tls_*` block (per shipped post-PR-#84 header; future ±1 reconciled at /implement-time); re-exported under `fixpp::transport::errors` namespace via `include/fixpp/transport/transport_errors.hpp` for ergonomic at-site use.
 
 **Validation rules**:
-- Numeric block is **contiguous** at 94..115; respects prior 005/008/009/010/011 pinning.
-- C-ABI coalescing is **delegated to 2i** per `[2h §6.6]`; 012 publishes the C++ source-of-truth + per-doc-prefix `FIXPP_ERR_TRANSPORT_*` naming rule only.
+- Numeric block is **contiguous** at the 22-slot block 94..115 immediately after 011's 78..93 `tls_*` block (per shipped post-PR-#84 header; future ±1 reconciled at /implement-time); respects prior 005/008/009/010/011 pinning.
+- C-ABI coalescing is **delegated to 2i** per `[2h §6.6]:1167-1204`; 012 publishes the C++ source-of-truth + per-doc-prefix `FIXPP_ERR_TRANSPORT_*` naming rule only.
 
 ---
 
@@ -427,6 +412,12 @@ Per `[2c App D]` / `[2d App D]` / `[2e App D]` / `[2f App D]` / `[2g App D]` pre
 
 Driver: reference-engine sweep — QFC single fixed `m_reconnectInterval = 30`; QFJ `int[] reconnectIntervalInSeconds` plateau-at-last; Fix8 single fixed `_login_retry_interval`. None have jitter; none have default cap. Industry-shape API + constitutional defaults preserves `[const §XV]` thundering-herd defense + operator-familiar surface.
 
+**§D.6** (NEW — 012 Gate A round-1 RC#3 close) — `.specify/2h-transport.md` §4.4 `ReconnectPolicy::delay_for_attempt` signature MUST be amended from the v0.3 published `(std::uint32_t attempt_index, double rand01)` (per `[2h §4.4]:596-597`) to the bundle-published `(std::uint32_t attempt_n)` one-parameter shape. The RNG ownership moves from FSM-side (caller supplies `rand01`) to policy-side (the policy derives a deterministic-per-attempt seed from session id + attempt number). The determinism contract per `[const §VII.7]` fuzz determinism is preserved (the seed source moves, but the per-attempt delay is still reproducible from `(session_id, attempt_n)` alone — equivalent to v0.3's `rand01`-source per `[2h §4.4]:609`). The mechanism by which the policy receives the session-id-derived seed is settled at /implement-time within 2h's existing surface. Driver: simplifies the FSM call-site; the v0.3 two-parameter shape leaked FSM internals into the policy API. Orchestrator applies at 012 sign-off.
+
+**§D.7** (NEW — 012 Gate A round-1 NEW-P2-E close) — the `verify_peer` ↔ captured-pinset-snapshot hand-off MUST be specified at the bundle level. The v0.3 published `[2g §4.5]:670-677` `SslCtxConfig` struct does not carry a `pinset_snapshot` field, and the published `verify_peer(SslCtxConfig const& cfg, std::span<const Certificate> peer_chain)` predicate at `[2g §4.5]:700-701` does not receive the captured snapshot through its signature. 2h's `asio_tls_transport` owns the captured-snapshot lifetime per E-9 `captured_pinset_` field; the trampoline-to-`verify_peer` boundary passes the snapshot via OpenSSL `SSL_get_ex_data` (the standard ASIO+OpenSSL pattern documented at research.md D-16). The `SSL_VERIFY_PEER` trampoline retrieves the per-handshake context from `ex_data` (including the captured `shared_ptr<const fixpp::tls::pin_snapshot>`), constructs a per-call view augmenting `SslCtxConfig` with the captured snapshot, and invokes `verify_peer(...)` against that view. The 2g-published predicate signature is preserved unchanged; no `.specify/2g-tls.md` edit is required — the snapshot transport mechanism is 2h-private wiring per the cross-doc partition `[2h §1.2]`. Orchestrator applies at 012 sign-off (documentation-only; no upstream design-doc surface change).
+
+**§D.8** (NEW — 012 Gate A round-2 Codex P3-1 close) — the bundle's `asio_listener::Config::accepted_transport_config` field type collapses from the v0.3-published `asio_tls_transport::Config` (per `.specify/2h-transport.md:816-823`) to `Transport::Config` (per `contracts/listener.hpp:98-105` + E-10 row at data-model.md:291). The bundle does NOT expose a separate `asio_tls_transport::Config` nested type — the abstract `Transport::Config` (E-7) is the single Config the v1.0 surface publishes (the full knob set including `tcp_nodelay` / `so_linger_enabled` / `tls_handshake_timeout` / `tls_close_timeout` / `mr` lives on `Transport::Config` per E-7). No upstream design-doc edit required; the change is bundle-internal (inheritance-fidelity bookkeeping only). Orchestrator applies at 012 sign-off (documentation-only; no surface change at the C++ ABI level since the concrete-impl-config-as-nested-type was never reachable on the abstract `Transport` surface).
+
 ---
 
 ## E-15 Cross-cuts (informational; entity ownership stays where listed)
@@ -439,7 +430,7 @@ Driver: reference-engine sweep — QFC single fixed `m_reconnectInterval = 30`; 
 | T-005 (multi-session acceptor) | E-8 + E-10 OWNED HERE | sole-owner |
 | Durable-before-transmit invariant | `MessageStore` owned by **008** | 2h's `async_write` is purely the wire-side hop; FSM sequences `Writer::commit → store → async_write`; cancelled `async_write` does NOT rollback persisted frame |
 | `Framer::feed` / `Writer::commit` | **2b** | 2h's `async_read_some` delivers bytes INTO `Framer::feed`; `async_write` consumes FROM `Writer::commit` span |
-| Cancellation seam #13 witness | 011 Gate B F-1 carryover | FR-033 + SC-008 8-cell matrix (4 deterministic cases × 2 executor modes); witnessed at 012 Gate B |
+| Cancellation seam #13 witness | 011 Gate B F-1 carryover | FR-033 + SC-008 8-cell matrix (4 deterministic cases × 2 executor modes); witnessed at 012 Gate B; cached-state fast path anchor `[2g §6.4]:927-928` (recipe step 4 alternative branch) |
 | C ABI surface | **2i** | 012 publishes C++ source-of-truth + `FIXPP_ERR_TRANSPORT_*` coalescing-group naming rule only |
 | Control-plane reload trigger | **2j** | 012 owns the call sites; 2j owns the RPC |
 | TLS event log / OTel record schema | **2k** | 012 owns the call sites; 2k owns the schemas |

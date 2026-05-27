@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 fixpp contributors
 //
-// fixpp::transport::Listener — abstract multi-session acceptor (1 pure-virtual).
+// fixpp::transport::Listener — abstract multi-session acceptor (1 pure-virtual
+// per [2h §4.6]:810; cancel() is a CONCRETE-IMPL method on asio_listener, NOT
+// a pure-virtual on the base — see class-level NOTE).
 // + asio_listener default impl signature. Re-emitted verbatim from [2h §4.6].
 //
 // Discharges T-005. Pluggable; one default impl ships in v1.0. The pure-virtual
@@ -9,12 +11,13 @@
 // custom acceptor (e.g., epoll-driven or io_uring-driven) without touching
 // Transport.
 //
-// Listener::cancel() Option-A contract per Clarifications 2026-05-27 Q4=A
-// — async-coroutine-natural ownership semantics:
+// asio_listener::cancel() Option-A contract per Clarifications 2026-05-27 Q4=A
+// — async-coroutine-natural ownership semantics (concrete-impl-only API per
+// spec FR-023 + FR-025; the engine-scoped Listener-cancel surface is
+// published at [2h §6.4.1]:1124):
 //   (1) Close the listening socket so no new TCP connections complete.
 //   (2) Complete any in-flight async_accept awaitable not yet resumed with
-//       transport_accept_cancelled (mapped from listener_accept_cancelled per
-//       [2h §6.6]).
+//       transport_accept_cancelled per [2h §6.6]:1191.
 //   (3) Leave already-resumed-but-not-yet-consumed unique_ptr<Transport>
 //       results UNAFFECTED — ownership has passed at async_accept return;
 //       Listener has no handle to them.
@@ -42,12 +45,22 @@
 namespace fixpp::transport {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Listener — abstract acceptor interface (1 pure-virtual; well under the
-// [const §XIV.2] ≤ 5 cap).
+// Listener — abstract acceptor interface. EXACTLY 1 pure-virtual method
+// (`async_accept`) per [2h §4.6]:810 verbatim; well under the [const §XIV.2]
+// ≤ 5 cap.
 //
 // Each accepted connection MUST produce a freshly-minted Transport instance
 // per spec FR-023. Lifetime is engine lifetime (outlives many Transport
 // instances).
+//
+// NOTE on cancel(): the design doc DOES NOT publish cancel() as a pure-virtual
+// on the abstract Listener base. The engine-scoped Listener-cancel behaviour
+// is published as a service row in [2h §6.4.1]:1124 (Listener-owned cancel is
+// engine-scoped). The FR-025 3-action contract binds as a CONCRETE-IMPL method
+// on `asio_listener` (below) and on any third-party Listener impl that chooses
+// to expose one. This preserves the [const §XIV.2] count and the inherited
+// surface from [2h §4.6] verbatim — Gate A round 1 RC#1 (Codex P1-2) close
+// per Opus reviewer overruling Codex's framing.
 // ─────────────────────────────────────────────────────────────────────────────
 class Listener {
 public:
@@ -59,22 +72,9 @@ public:
     //     issues async_handshake (TLS) immediately.
     //
     //     Cancellation: cancellation_type::total → transport_accept_cancelled
-    //     (mapped from the named variant listener_accept_cancelled per
-    //     [2h §6.6]).
+    //     per [2h §6.6]:1191.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
         async_accept() = 0;
-
-    // (2) Cancel the listener per the Option-A contract above. Synchronous;
-    //     thread-safe; idempotent. After cancel(), subsequent async_accept
-    //     calls complete with transport_accept_cancelled; already-produced
-    //     Transports (those whose async_accept awaitable has already resumed
-    //     with the unique_ptr result) are UNAFFECTED — ownership has passed.
-    //
-    //     The v0.3 [2h §4.6] does not surface cancel() as a separate method;
-    //     the Listener exposes a cancel() per [2h §6.4.1] engine-scoped row
-    //     (Listener::async_accept honours Listener-owned cancel which is
-    //     engine-scoped). Spec FR-025 codifies the 3-action behaviour.
-    [[nodiscard]] virtual core::expected_t<void> cancel() noexcept = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,7 +119,11 @@ public:
     [[nodiscard]] asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
         async_accept() override;
 
-    [[nodiscard]] core::expected_t<void> cancel() noexcept override;
+    // Concrete-impl-only API per spec FR-023 / FR-025 + [2h §6.4.1]:1124
+    // engine-scoped row. NOT `override` — the abstract Listener base does NOT
+    // publish cancel(). Honours the 3-action contract per the class-level
+    // Option-A note above.
+    [[nodiscard]] core::expected_t<void> cancel() noexcept;
 
 private:
     Config                      cfg_;

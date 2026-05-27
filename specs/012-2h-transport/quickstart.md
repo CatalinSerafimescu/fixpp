@@ -83,7 +83,16 @@ auto factory = std::make_unique<tx::asio_tls_transport_factory>(
 auto transport = factory->make(exec, ssl_cfg, mr).value();
 
 //   2. dynamic_cast<TlsTransport*> EXACTLY ONCE; store typed pointer on Session.
+//      v1.0 partition invariant per contracts/tls_transport.hpp class-level note
+//      (lines 69-71): every Transport returned by the v1.0 factory is TLS-capable
+//      per [FIX-SL §4.3.1] + [FIXS §1.1] mandatory-TLS reality and [2h §4.5]'s
+//      drop of the v0.1 plain-TCP-via-empty-SslCtxConfig narrative — so the cast
+//      MUST NOT return null in v1.0. The assert documents the invariant; in
+//      release builds a null result here means a misconfigured factory.
 auto* tls_transport = dynamic_cast<tx::TlsTransport*>(transport.get());
+assert(tls_transport != nullptr
+    && "v1.0 partition: factory MUST return a TlsTransport-capable instance "
+       "per tls_transport.hpp class note");
 
 //   3. async_connect on the resolved Endpoint.
 auto endpoint = tx::Endpoint{"gateway.venue.example.com", 4001};
@@ -100,9 +109,9 @@ auto handshake_result = co_await tls_transport->async_handshake(ssl_cfg);
 if (!handshake_result) {
     // handshake_result.error() carries one of:
     //   transport_handshake_failed (diagnostic sub-reason: OpenSSL string +
-    //     [2g §6.6] tls_* sub-reason if verify_peer rejected) /
+    //     [2g §6.6] tls_* sub-reason if verify_peer rejected; per FR-034a) /
     //   transport_handshake_timeout / transport_handshake_cancelled
-    // The 11 tls_* variants from [2g §6.6] surface UNCHANGED — no
+    // The 15 tls_* variants from [2g §6.6]:986-1004 surface UNCHANGED — no
     // re-translation.
     co_return propagate(handshake_result.error());
 }
@@ -134,7 +143,8 @@ while (!session.shutting_down()) {
         co_return propagate(read_result.error());
     }
     // ZERO global new/delete on this dispatch chain per spec FR-003 +
-    // [2h §9 seam #4] alloc guard. PMR arena allocs are expected.
+    // [2h §9 seam #4]:1345 alloc guard (DUAL gate: counting_resource +
+    // mallocnesia LD_PRELOAD). PMR arena allocs are expected.
     framer.feed(std::span<const std::byte>(framer_carry.data(), *read_result));
 }
 ```
@@ -164,7 +174,7 @@ if (!write_result) {
 | AC | Verified by |
 |---|---|
 | AC1: handshake succeeds; `handshake_result.peer_id` carries verified counterparty by value | spec FR-010 + `[2h §9 seam #7]` |
-| AC2: zero heap allocs on read-path completion-handler dispatch | spec FR-003 + `[2h §9 seam #4]` (mallocnesia + counting_resource dual gate) |
+| AC2: zero heap allocs on read-path completion-handler dispatch | spec FR-003 + SC-003 + `[2h §9 seam #4]:1345` DUAL gate (`counting_resource` PMR-routed + mallocnesia LD_PRELOAD global `operator new` interception per `[[feedback_tracking_pmr_resource_false_pass]]`) |
 | AC3: outbound frame round-trips OR cancels via `transport_write_cancelled` without rollback | spec FR-030 + `[2h §9 seam #8]` |
 | AC4: handshake against bad-cert peer surfaces UNCHANGED `tls_*` variant from `[2g §6.6]` | spec FR-012 + `[2h §9 seam #7]` |
 | AC5: transport-private failures surface DISTINCT named variants | spec FR-002 + spec FR-034 + `[2h §9 seam #15]` |
@@ -203,9 +213,21 @@ reconnect_unbounded.max_attempts = 0;  // explicit opt-in per [const §XII.5]
 // FSM-owned reconnect loop per Clarifications 2026-05-27 Q1=B:
 // destroy dead Transport → sleep → mint FRESH Transport via factory →
 // async_connect on the NEW instance.
+//
+// attempt_n is 0-indexed (first reconnect attempt uses schedule[0] = 100 ms);
+// attempt_n is incremented EXACTLY ONCE per iteration at the bottom of the
+// loop body. The cap is checked at the top so the first attempt with
+// attempt_n == 0 always runs.
 auto attempt_n = 0u;
 while (true) {
-    auto delay = reconnect.delay_for_attempt(attempt_n);
+    // max_attempts=10 ⇒ attempt_n iterates 0..9 (10 attempts); when attempt_n
+    // becomes 10 at the bottom-of-loop increment, this cap check fires and
+    // surfaces transport_reconnect_limit_exceeded per FR-022 + US2 AC2.
+    if (reconnect.max_attempts != 0 && attempt_n >= reconnect.max_attempts) {
+        co_return propagate(errors::reconnect_limit_exceeded);
+    }
+
+    auto delay = reconnect.delay_for_attempt(attempt_n);  // 0-indexed
     co_await clock->sleep_for(delay);
 
     // Destroy dead Transport BEFORE requesting new one — at most one live
@@ -215,22 +237,19 @@ while (true) {
     // Mint fresh Transport via SAME factory; SslCtxConfig + OpenSSL SSL_CTX*
     // cached at factory level per spec FR-026 — no per-attempt cold-path cost.
     auto fresh = factory->make(exec, ssl_cfg, mr);
-    if (!fresh) {
-        if (++attempt_n >= reconnect.max_attempts && reconnect.max_attempts != 0) {
-            co_return propagate(errors::reconnect_limit_exceeded);
+    if (fresh) {
+        session.transport_ = std::move(fresh.value());
+
+        auto connect_result = co_await session.transport_->async_connect(endpoint);
+        if (connect_result) {
+            co_return /* success — proceed to async_handshake */;
         }
-        continue;
     }
-    session.transport_ = std::move(fresh.value());
+    // Factory failure OR connect failure → next attempt.
 
-    auto connect_result = co_await session.transport_->async_connect(endpoint);
-    if (connect_result) {
-        co_return /* success — proceed to async_handshake */;
-    }
-
-    if (++attempt_n >= reconnect.max_attempts && reconnect.max_attempts != 0) {
-        co_return propagate(errors::reconnect_limit_exceeded);
-    }
+    ++attempt_n;  // single increment site per iteration; matches the
+                  // "delay BEFORE each attempt" semantics described in
+                  // FR-021 + spec US2 AC1.
 }
 ```
 
@@ -238,7 +257,7 @@ while (true) {
 
 | AC | Verified by |
 |---|---|
-| AC1: 9 sequential drops produce 100ms/200ms/.../25.6s delays (±10% jitter); cumulative 73-89s | spec FR-020 + `[2h §9 seam #13]` reconnect_policy_schedule (pins the schedule numerics) |
+| AC1: full 10-entry schedule (100ms/200ms/.../25.6s/30s) at ±10% jitter produces pre-jitter cumulative 81 100 ms widened to 73-89 s wall-clock | spec FR-020 + `[2h §9 seam #13]` reconnect_policy_schedule (pins the schedule numerics) |
 | AC2: 10th attempt fails → `transport_reconnect_limit_exceeded` | spec FR-022 + `[2h §9 seam #13]` |
 | AC3: `max_attempts = 0` (explicit) → unbounded retry at `max_delay` | spec FR-019 + `[2h §9 seam #13]` parallel cell |
 | AC4: ±10% jitter spreads reconnect bursts across fleet — no synchronised spike | spec FR-021 (deterministic-per-attempt jitter; seam #13) |
@@ -266,12 +285,19 @@ auto listener_cfg = tx::asio_listener::Config{
                                     // requires client cert per [2g §4.5.1])
 };
 
-auto listener = tx::asio_listener::make_asio_listener(
+// Hold a typed asio_listener directly so the concrete-impl-only cancel() API
+// (per spec FR-023 + FR-025; the abstract Listener base does NOT publish
+// cancel() — see contracts/listener.hpp class-level NOTE lines 56-63) is
+// reachable. make_asio_listener returns unique_ptr<Listener> for production
+// engine-owned wiring (per data-model E-8 ownership row); this quickstart
+// demonstrates the consumer-held shape needed for the C.3 cancel example.
+// Throwing-on-failure constructor is permitted at engine bootstrap per
+// [arch §5.3] carve-out (contracts/listener.hpp:109-111).
+auto listener = std::make_unique<tx::asio_listener>(
     /* exec */ service_strand_exec,   // SERVICE strand per [2h §6.4.1]
                                        // engine-scoped row — DISTINCT from
                                        // per-session strands.
-    listener_cfg,
-    /* mr */ nullptr).value();
+    listener_cfg);
 ```
 
 ### C.2 The accept loop
@@ -317,7 +343,7 @@ for (auto& session : engine.sessions()) {
 | AC | Verified by |
 |---|---|
 | AC1: 64 concurrent clients → 64 distinct Transports, 64 sessions Active | spec FR-023 + `[2h §9 seam #14]` listener_acceptor |
-| AC2: `cancel()` closes listening socket; subsequent connects refused; in-flight accept → `listener_accept_cancelled` | spec FR-025 + `[2h §9 seam #14]` parallel cell |
+| AC2: `cancel()` closes listening socket; subsequent connects refused; in-flight accept → `transport_accept_cancelled` per `[2h §6.6]:1191` | spec FR-025 + `[2h §9 seam #14]` parallel cell |
 | AC3: 65th client at backlog full → TCP RST per OS behaviour (not over-promised) | spec FR-024 + Edge Cases |
 
 ---
@@ -387,8 +413,8 @@ After 012's `/speckit-implement` completes, the 8-cell `cancellable_dispatch`-re
 
 | Cell | Case | Mode | Expected outcome |
 |---|---|---|---|
-| 1 | Cached-state fast path per `[2g §4.5]:926-929` | `per_session_strand` | returns cached `local_credentials` directly (NO dispatch invoked) |
-| 2 | Cached-state fast path per `[2g §4.5]:926-929` | `direct_executor` | returns cached `local_credentials` directly (NO dispatch invoked) |
+| 1 | Cached-state fast path per `[2g §6.4]:927-928` | `per_session_strand` | returns cached `local_credentials` directly (NO dispatch invoked) |
+| 2 | Cached-state fast path per `[2g §6.4]:927-928` | `direct_executor` | returns cached `local_credentials` directly (NO dispatch invoked) |
 | 3 | Slot signalled BEFORE pickup per `[2d §6.5]` case 1 | `per_session_strand` | `tls_load_cancelled` |
 | 4 | Slot signalled BEFORE pickup per `[2d §6.5]` case 1 | `direct_executor` | `tls_load_cancelled` |
 | 5 | Slot signalled DURING execution per `[2d §6.5]` case 2 | `per_session_strand` | `tls_load_cancelled` |

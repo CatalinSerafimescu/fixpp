@@ -7,8 +7,12 @@
 // include/fixpp/core/error.hpp (the single point of truth across the codebase
 // per [[project_2e_design_doc_only_seqnum_handoff]] slot-pinning rule).
 //
-// 011 (TLS policy) took slots 78..93 per its line-71 narrative; 012 (transport)
-// takes the next free contiguous block 94..115. NEVER renumber existing slots.
+// 011 (TLS policy) occupies the 16-slot contiguous block 78..93 of
+// fixpp::core::error per shipped `include/fixpp/core/error.hpp` post-PR-#84
+// (the canonical [2g §6.6]:1004 "(15 variants.)" count + boundary variant
+// `tls_load_cancelled = 93` per [2g §4.1] / [2g §6.4]); 012 (transport)
+// takes the next free contiguous block immediately after (slots 94..115 =
+// 22 slots). NEVER renumber existing slots.
 //
 // C-ABI mapping (delegated to 2i per the per-doc-prefix discipline):
 //   - LIFECYCLE: resolve / refused / timeout / already-connected /
@@ -22,12 +26,14 @@
 //   - CANCEL:    connect/read/write/handshake/accept_cancelled → reuses
 //                FIXPP_ERR_CANCELLED per [const §XI.2]
 //
-// The 11 `tls_*` variants from [2g §6.6] surface UNCHANGED through this layer
-// per spec FR-034 — 2h MUST NOT re-translate or coalesce them under a
-// transport_* prefix. transport_handshake_failed carries a diagnostic-field
-// sub-reason (the underlying OpenSSL error string + the [2g §6.6] tls_*
-// sub-reason if verify_peer rejected); joins [2g §6.6] tls_handshake_failed
-// group at the C ABI — 2i's final coalescing call.
+// The 15 `tls_*` variants from [2g §6.6]:986-1004 (per the explicit
+// "(15 variants.)" count at [2g §6.6]:1004) surface UNCHANGED through this
+// layer per spec FR-034 — 2h MUST NOT re-translate or coalesce them under a
+// transport_* prefix. transport_handshake_failed is the GROUPING variant
+// (spec FR-034a) carrying a diagnostic-field sub-reason (the underlying
+// OpenSSL error string + the [2g §6.6] tls_* sub-reason if verify_peer
+// rejected); joins [2g §6.6] tls_handshake_failed group at the C ABI per
+// [2h §6.6]:1188 — 2i's final coalescing call.
 
 #pragma once
 
@@ -67,8 +73,9 @@ inline constexpr auto write_error            = fixpp::core::error::transport_wri
 // Joins [2g §6.6] FIXPP_ERR_TLS_HANDSHAKE at the C ABI (2i's coalescing call).
 // handshake_failed is the GROUPING variant carrying a diagnostic-field
 // sub-reason (OpenSSL error string + [2g §6.6] tls_* sub-reason from
-// verify_peer if rejected). The 11 [2g §6.6] tls_* variants surface
-// UNCHANGED — 2h MUST NOT re-translate them.
+// verify_peer if rejected). The 15 [2g §6.6] tls_* variants (per the explicit
+// "(15 variants.)" count at [2g §6.6]:1004) surface UNCHANGED — 2h MUST NOT
+// re-translate them.
 inline constexpr auto handshake_failed       = fixpp::core::error::transport_handshake_failed;
 inline constexpr auto handshake_timeout      = fixpp::core::error::transport_handshake_timeout;
 
@@ -84,6 +91,9 @@ inline constexpr auto handshake_cancelled    = fixpp::core::error::transport_han
 inline constexpr auto accept_cancelled       = fixpp::core::error::transport_accept_cancelled;
 
 // 22 total. Matches spec FR-034 and [2h §6.6]. C-ABI coalescing is 2i's call;
-// the C++ source-of-truth is the fixpp::core::error enum slots 94..115.
+// the C++ source-of-truth is the fixpp::core::error enum slots 94..115
+// (immediately after 011's 78..93 block per shipped
+// `include/fixpp/core/error.hpp` post-PR-#84; the plan.md:84 carve-out covers
+// any future ±1 adjustment without re-running Gate A).
 
 }  // namespace fixpp::transport::errors

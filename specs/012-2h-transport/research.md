@@ -43,14 +43,14 @@ No NEEDS CLARIFICATION items remain. The `/speckit-clarify` pass on 2026-05-27 r
 ### D-4 — 011 F-1 cancellation-seam witness BINDING for 012 Gate B (8-cell matrix)
 
 **Decision**: FR-033 + SC-008 pin the `cancellable_dispatch` recipe witness for `file_cert_source::load_credentials` as an **8-cell test matrix: 4 deterministic cases × 2 executor modes** at THIS feature's Gate B (Clarifications Q3=C). Cells:
-1. Cached-state fast path per `[2g §4.5]:926-929` — no dispatch, returns cached `local_credentials`.
+1. Cached-state fast path per `[2g §6.4]:927-928` (recipe step 4 alternative branch — "or, for already-cached state, just return the prepared local_credentials directly") — no dispatch, returns cached `local_credentials`.
 2. Slot signalled BEFORE handler picked up per `[2d §6.5]` case 1 → `tls_load_cancelled`.
 3. Slot signalled DURING handler execution per `[2d §6.5]` case 2 → `tls_load_cancelled`.
 4. Slot NOT signalled (happy path) per `[2d §6.5]` case 3 → success.
 
 Executor modes: `per_session_strand` (`make_session_executor` wrapping `asio::make_strand(resolved_exec)`) and `direct_executor` (bare attested-serialised). All 8 cells MUST be GREEN.
 
-**Rationale**: `[[project_011_tls_policy_closed.md]]` records that 011 Gate B waived F-1 to 2h's Gate B because constructing the witness required a real `Session*` + `session_executor` fixture only available once the transport wiring exists. Clarifications Q3=C resolved the granularity (4 deterministic cases × 2 executor modes, matching the waiver text verbatim — "per_session_strand AND direct_executor matrix"). The 4 cases bind to `[2d §6.5]` cases 1-3 + the `[2g §4.5]:926-929` cached-state authorization.
+**Rationale**: `[[project_011_tls_policy_closed.md]]` records that 011 Gate B waived F-1 to 2h's Gate B because constructing the witness required a real `Session*` + `session_executor` fixture only available once the transport wiring exists. Clarifications Q3=C resolved the granularity (4 deterministic cases × 2 executor modes, matching the waiver text verbatim — "per_session_strand AND direct_executor matrix"). The 4 cases bind to `[2d §6.5]` cases 1-3 + the `[2g §6.4]:927-928` cached-state authorization. (The earlier `[2g §4.5]:926-929` cite resolved to a wrong section — §4.5 is the `SecurityProfile` / `SslCtxConfig` definition; the cached-state alternative branch lives in §6.4 recipe step 4 at lines 927-928.)
 
 **Alternatives considered**:
 - **End-to-end witness only (1 cell)** — rejected; the 011 waiver explicitly required the matrix.
@@ -119,7 +119,7 @@ The v0.3 design doc's 81 100 ms pre-jitter cumulative wall-clock claim was a num
 
 **Decision**: `Listener::cancel()` does three things and ONLY those three:
 1. **Close the listening socket** so no new TCP connections complete (subsequent client connects receive TCP RST or connection-refused per OS).
-2. **Complete any in-flight `async_accept` awaitable not yet resumed** with `listener_accept_cancelled` per `[2h §6.6]` (the `cancellation_type::total` slot fires on `asio::ip::tcp::acceptor::async_accept`; pending awaitables receive `operation_aborted` which 2h maps to the named variant).
+2. **Complete any in-flight `async_accept` awaitable not yet resumed** with `transport_accept_cancelled` per `[2h §6.6]:1191` (the `cancellation_type::total` slot fires on `asio::ip::tcp::acceptor::async_accept`; pending awaitables receive `operation_aborted` which 2h maps to the named variant).
 3. **Leave already-resumed-but-not-yet-consumed `unique_ptr<Transport>` results UNAFFECTED** — ownership has passed at the `async_accept` return; the listener has no handle to them.
 
 A consumer that wants the stronger "close everything I produced" semantics MUST track its own held Transports and call `transport.close()` on each — that is the consumer's contract, NOT the listener's.
@@ -178,7 +178,7 @@ These defaults are pinned in `Transport::Config` directly per FR-029, NOT deferr
 - `fixpp::tls::verify_peer` predicate (the `SSL_VERIFY_PEER` callback dispatches into it; 2h MUST NOT re-implement validation per FR-012).
 - `fixpp::tls::peer_identity` value type (returned in `handshake_result.peer_id`; consumed by session-Phase-4 for T-041 binding).
 
-The 11 `tls_*` error variants from `[2g §6.6]` surface UNCHANGED through 2h — `transport_handshake_failed` joins `[2g §6.6]` `tls_handshake_failed` group at the C ABI per `[2h §6.6]` (2i coalesces), but 2h does NOT re-translate or coalesce them under a `transport_*` prefix (FR-034).
+The 15 `tls_*` error variants from `[2g §6.6]:986-1004` (per the explicit "(15 variants.)" count at `[2g §6.6]:1004`) surface UNCHANGED through 2h — `transport_handshake_failed` joins `[2g §6.6]` `tls_handshake_failed` group at the C ABI per `[2h §6.6]:1188` (2i coalesces), but 2h does NOT re-translate or coalesce them under a `transport_*` prefix (FR-034 + FR-034a).
 
 **Rationale**: `[2h §1.2]` + `[2h §3.16]` + spec FR-041 codify the negative-ownership boundary. 011 ships SHIPPED (closed 2026-05-26 per `[[project_011_tls_policy_closed.md]]`); its published surfaces are LOCKED. Re-translating tls_* under transport_* would defeat the per-doc-prefix coalescing discipline established by `[2b §6.7]` / `[2c §6.7]` / `[2d §6.7]` / `[2e §6.7]` / `[2f §6.5]` / `[2g §6.6]`.
 
@@ -255,7 +255,7 @@ The session FSM module (post-this-feature) ships:
 
 ### D-16 — `SSL_VERIFY_PEER` callback trampolines into `fixpp::tls::verify_peer` via `SSL_CTX_set_verify`
 
-**Decision**: At `SSL_CTX` construction (in `asio_tls_transport` setup), 2h calls `SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, &asio_tls_transport_verify_trampoline)` where the trampoline (a free C-style function) extracts the per-handshake context from OpenSSL's `SSL_get_ex_data` + `X509_STORE_CTX_get_ex_data`, parses the peer's leaf cert + chain into `fixpp::tls::Certificate` views, and dispatches into `fixpp::tls::verify_peer(cfg, peer_chain)`. The captured `Pinset::snapshot()` reaches `verify_peer` via the per-`SslCtxConfig` pinset_snapshot field (captured ONCE at handshake start per `[2g §6.5.1]` + spec FR-011).
+**Decision**: At `SSL_CTX` construction (in `asio_tls_transport` setup), 2h calls `SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, &asio_tls_transport_verify_trampoline)` where the trampoline (a free C-style function) extracts the per-handshake context from OpenSSL's `SSL_get_ex_data` + `X509_STORE_CTX_get_ex_data`, parses the peer's leaf cert + chain into `fixpp::tls::Certificate` views, and dispatches into `fixpp::tls::verify_peer(cfg, peer_chain)`. The captured `Pinset::snapshot()` (captured ONCE at handshake start per `[2g §6.5.1]` + spec FR-011) reaches `verify_peer` via the trampoline-side `SSL_get_ex_data` context: the captured `shared_ptr<const fixpp::tls::pin_snapshot>` is retrieved with `SSL_get_ex_data` and combined with the underlying `SslCtxConfig` into a per-call augmented view passed to `verify_peer(...)`. The 2g-published `verify_peer(SslCtxConfig const&, std::span<const Certificate>)` predicate signature is preserved unchanged per Appendix D §D.7 (data-model.md:417) — the v0.3 `[2g §4.5]:670-677` `SslCtxConfig` struct does NOT carry a `pinset_snapshot` field; the augmented view's `pinset` field is the captured-snapshot wrapper, not the original `cfg.pinset` shared_ptr. No `.specify/2g-tls.md` edit is required; the snapshot transport mechanism is 2h-private wiring per cross-doc partition `[2h §1.2]`.
 
 **Rationale**: `[2h §4.5]` + `[2g §7.1]` T-039 partition. 2h MUST NOT re-implement validation per FR-012; the trampoline is the wire-side hop only. The `ex_data` pattern is standard OpenSSL.
 
