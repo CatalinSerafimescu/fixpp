@@ -35,13 +35,13 @@
 #include <fixpp/transport/transport_errors.hpp>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Minimal local stub of TlsTransport for fuzz use until T041 ships.
-//
-// NOTE: Replace this stub with #include <fixpp/transport/test/mock_transport.hpp>
-// at T043 wiring time. The stub here exists ONLY to allow this harness to
-// compile and run before US4 Phase 6 lands.
+// This harness fuzzes Framer::feed directly — that is the production path bytes
+// take after async_read_some returns. A mock_transport hop above Framer is
+// incidental (the mock just produces the byte span); a post-MVP enhancement
+// could thread the bytes through mock_transport::async_read_some for symmetry
+// with the read-path executor model, but the byte-vs-Framer fuzz target is
+// equivalent and already covers the ASan/UBSan invariants enumerated below.
 // ─────────────────────────────────────────────────────────────────────────────
-// [US4 T041 DEPENDENCY]: remove the stub below and include the real header.
 
 namespace {
 

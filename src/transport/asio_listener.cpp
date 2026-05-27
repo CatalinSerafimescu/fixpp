@@ -177,8 +177,7 @@ asio_listener::async_accept() {
 //       connects receive TCP RST or ECONNREFUSED.
 //   (2) `acceptor_.cancel()` is implied by close() per ASIO docs (cancels
 //       any in-flight async_accept by surfacing operation_aborted). Both
-//       calls are issued for defence-in-depth; either alone discharges
-//       the contract.
+//       call discharges the contract on its own.
 //   (3) Already-resumed `unique_ptr<Transport>` results are owned by the
 //       caller; the listener never recorded a handle, so there's nothing
 //       to do (the contract is "leave alone"). Consumers that want
@@ -189,14 +188,11 @@ core::expected_t<void> asio_listener::cancel() noexcept {
 
     asio::error_code ec;
 
-    // (1) Stop accepting. close() also cancels in-flight async_accept per
-    // ASIO contract.
+    // close() cancels in-flight async_accept per ASIO contract; the
+    // explicit acceptor_.cancel(...) defence-in-depth was redundant and
+    // was dropped per /simplify Agent-2 P2 audit. Already-resumed
+    // Transports are caller-owned per Option-A and unaffected.
     acceptor_.close(ec);
-
-    // (2) Defence-in-depth — emit explicit cancel in case close() failed
-    // (e.g., not-yet-opened acceptor double-cancel).
-    asio::error_code ignored;
-    acceptor_.cancel(ignored);
 
     if (ec && ec != asio::error::bad_descriptor) {
         // Genuine OS-level error during close. Map to a transport_* code

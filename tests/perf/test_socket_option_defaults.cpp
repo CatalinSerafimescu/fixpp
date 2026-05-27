@@ -97,7 +97,7 @@ TEST(DISABLED_SocketOptionDefaults, InitiatorLegTcpNodelay) {
     //   2. async_connect(Endpoint{"127.0.0.1", loopback_port}).
     //   3. socket.get_option(asio::ip::tcp::no_delay) → ASSERT value == true.
     //   4. socket.get_option(asio::socket_base::linger) → ASSERT enabled == false.
-    GTEST_SKIP() << "Requires asio_tls_transport (T026) — wired by T029";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 2: acceptor leg — verify socket options on the asio_listener-accepted

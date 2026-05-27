@@ -445,7 +445,7 @@ struct EngineConfig {
     // ── Default plugin selections (a session may override each in SessionConfig) ─
     std::shared_ptr<fixpp::session::MessageStoreFactory> default_store_factory;
     std::shared_ptr<fixpp::tls::cert_source>             default_cert_source;
-    std::shared_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
+    std::unique_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
 
     // ── Engine-level fallback trace_context (per N-P2-2) ────────────────
     // Storage: held by the engine in a `std::atomic<trace_context>` snapshot
@@ -551,6 +551,7 @@ struct SessionConfig {
     // ── Plugin overrides (each null → inherit from EngineConfig) ────────
     std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership per [arch §5.6] / [2e §4.4]
     std::shared_ptr<fixpp::tls::cert_source>       cert_source;
+    std::unique_ptr<fixpp::transport::TransportFactory> transport_factory_override; // unique ownership per [arch §5.6] / [2e §4.4] / [2h §4.7.1].
 
     // SecurityProfile per [const §XII.5] — no implicit default; the type
     // must default-construct to a sentinel (e.g. `unset`) and the engine

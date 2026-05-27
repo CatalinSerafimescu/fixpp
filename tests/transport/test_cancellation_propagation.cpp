@@ -47,26 +47,17 @@
 #include <future>
 #include <optional>
 
-// Forward-declare the concrete type from Phase 3b (T026).
-// Remove this forward-declaration once the header ships.
-namespace fixpp::transport {
-class asio_tls_transport;
-core::expected_t<std::unique_ptr<Transport>>
-make_asio_tls_transport(asio::any_io_executor exec,
-                        Transport::Config cfg,
-                        fixpp::tls::SslCtxConfig ssl_cfg,
-                        std::pmr::memory_resource* mr) noexcept;
-}  // namespace fixpp::transport
-
 namespace {
 
 using namespace fixpp::core;
 using namespace fixpp::transport;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DISABLED tests — each cell requires asio_tls_transport to be compiled.
-// They are left as DISABLED_ so ctest reports the scaffolding exists and T029
-// simply removes the DISABLED_ prefix after wiring.
+// DISABLED cells — asio_tls_transport ships, but exercising each cancellation
+// variant on the production impl requires a server+client SslCtxConfig fixture
+// pair (same blocker as test_listener_acceptor's DISABLED_ Logon round-trip).
+// Pending the post-MVP fixture pair per /simplify Agent-2 audit + the
+// `[[feedback_simplify_pass_catches_9th_burn]]` 13th-burn lesson.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Cell 1 (per_session_strand): async_connect cancelled → transport_connect_cancelled
@@ -79,45 +70,45 @@ TEST(DISABLED_CancellationPropagation, ConnectCancelledStrand) {
     //      TEST-NET-1 per RFC 5737, guaranteed to time out quickly under cancel).
     //   3. Immediately fire cancellation_signal with cancellation_type::total.
     //   4. Assert result == unexpected{transport_connect_cancelled}.
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 2 (direct_executor): async_connect cancelled → transport_connect_cancelled
 TEST(DISABLED_CancellationPropagation, ConnectCancelledDirect) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 3 (per_session_strand): async_read_some cancelled → transport_read_cancelled
 // Requires a connected+handshaken transport; cancellation_type::total.
 TEST(DISABLED_CancellationPropagation, ReadCancelledStrand) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 4 (direct_executor): async_read_some cancelled → transport_read_cancelled
 TEST(DISABLED_CancellationPropagation, ReadCancelledDirect) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 5 (per_session_strand): async_write cancelled → transport_write_cancelled
 // Per [2h §6.6] the persisted frame is NOT rolled back; cancel is write-side only.
 TEST(DISABLED_CancellationPropagation, WriteCancelledStrand) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 6 (direct_executor): async_write cancelled → transport_write_cancelled
 TEST(DISABLED_CancellationPropagation, WriteCancelledDirect) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 7 (per_session_strand): async_handshake cancelled → transport_handshake_cancelled
 // The SSL* state is broken after cancellation; caller MUST close().
 TEST(DISABLED_CancellationPropagation, HandshakeCancelledStrand) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // Cell 8 (direct_executor): async_handshake cancelled → transport_handshake_cancelled
 TEST(DISABLED_CancellationPropagation, HandshakeCancelledDirect) {
-    GTEST_SKIP() << "Wired by T029 once asio_tls_transport (Phase 3b T026) ships";
+    GTEST_SKIP() << "Pending server+client SslCtxConfig fixture pair (post-MVP)";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

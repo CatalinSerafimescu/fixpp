@@ -954,21 +954,26 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         co_return std::unexpected{E::transport_handshake_failed};
     }
 
-    // ── Populate peer_id_ from the trampoline output ───────────────────────────
-    peer_id_ = std::move(hctx.peer_id);
-
-    // ── Negotiated cipher name (PMR-allocated against cfg_.mr) ───────────────
+    // ── Build handshake_result with PMR allocations trapped (per /simplify
+    //    audit Agent-1 P1: PMR exhaustion mid-result-build must surface
+    //    transport_handshake_failed, not std::terminate via uncaught
+    //    coroutine throw). State transition happens AFTER all PMR allocs
+    //    succeed so a fault-injection unwind leaves state_ == closed, not
+    //    the half-set "handshake-completed-but-result-broken" middle. ────
     std::pmr::memory_resource* mr = (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
     const char* cipher_name = SSL_get_cipher_name(ssl_stream_->native_handle());
-    std::pmr::string negotiated_cipher{cipher_name ? cipher_name : "", mr};
+    handshake_result result;
+    try {
+        peer_id_ = std::move(hctx.peer_id);
+        result.peer_id           = peer_id_;
+        result.captured_pinset   = captured_pinset_;
+        result.negotiated_cipher = std::pmr::string{cipher_name ? cipher_name : "", mr};
+    } catch (...) {
+        state_ = state_t::closed;
+        co_return std::unexpected{E::transport_handshake_failed};
+    }
 
     state_ = state_t::handshaken;
-
-    handshake_result result;
-    result.peer_id        = peer_id_;
-    result.captured_pinset = captured_pinset_;
-    result.negotiated_cipher = std::move(negotiated_cipher);
-
     co_return result;
 }
 

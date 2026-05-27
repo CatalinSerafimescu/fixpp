@@ -46,6 +46,11 @@ class cert_source;
 namespace fixpp::log {
 class Sink;
 }
+namespace fixpp::transport {
+class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-off; the actual
+                         // SessionConfig::transport_factory_override field wiring lands in
+                         // the post-012 session-Phase-4 spec (this is reachability only).
+}
 
 namespace fixpp::session {
 
