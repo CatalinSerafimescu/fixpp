@@ -95,3 +95,29 @@ target_include_directories(fuzz_message_store PRIVATE
 set_target_properties(fuzz_message_store PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# ── Phase 3a fuzz harnesses (wired by T029): ─────────────────────────────────
+
+# T024 — [2h §9 seam #11] — read-path libFuzzer harness.
+# Drives Framer::feed directly; US4 T041 will add Session-FSM wiring.
+add_executable(fuzz_transport_read_path fuzz_transport_read_path.cpp)
+target_link_libraries(fuzz_transport_read_path PRIVATE
+  fixpp_transport  fixpp_wire  fixpp_core)
+target_compile_options(fuzz_transport_read_path PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_transport_read_path PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+set_target_properties(fuzz_transport_read_path PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# T025 — [2h §9 seam #12] — handshake libFuzzer harness.
+# Uses a local stub until US4 T041 mock_transport ships.
+add_executable(fuzz_transport_handshake fuzz_transport_handshake.cpp)
+target_link_libraries(fuzz_transport_handshake PRIVATE
+  fixpp_transport  fixpp_core)
+target_compile_options(fuzz_transport_handshake PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_transport_handshake PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+set_target_properties(fuzz_transport_handshake PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

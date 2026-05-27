@@ -17,7 +17,7 @@
 2. **Lock the `fixpp::transport::TlsTransport` sub-interface** as the TLS-aware extension at **exactly 1 additional pure-virtual method** (`async_handshake`) returning a value-typed `handshake_result` POD (§4.2). The handshake's negotiated artefacts (`peer_identity`, the captured `Pinset` snapshot, the negotiated cipher-suite name) are returned by value inside `handshake_result`; the FSM holds `handshake_result` for the session lifetime as a value. **No accessor pure-virtuals** are published on the sub-interface — the v0.1 trio of `peer_identity_view()` / `captured_pinset_snapshot()` / `negotiated_cipher_suite()` accessors collapse into `handshake_result` per the `[2g §4.5]` `peer_identity` owning-by-value precedent and the `[2c §4.8]` `owning_message_t<>` cross-strand-boundary precedent. The sub-interface has its own ≤5 cap budget per `[const §XIV.2]` and uses **1 of 5** slots, leaving 4 slots of headroom for a future PSK session callback (T-012 P2 hook), an explicit renegotiation control point (post-v1), or an early-data hook (post-v1, currently banned per `[const §XII.3]` 0-RTT non-goal). Sub-interface inherits virtually from `Transport` so a `TlsTransport*` is also a `Transport*`.
 3. **Lock the `fixpp::transport::asio_tls_transport` default impl** as the v1.0-shipped reference: ASIO `tcp::socket` + `asio::ssl::stream<tcp::socket>` over OpenSSL on both Linux and Windows per `[const §XII.1]`. The impl consumes `[2g §4.5]`'s `SslCtxConfig` value at session open to construct the OpenSSL `SSL_CTX`; the `SSL_VERIFY_PEER` callback dispatches into `[2g §4.5]`'s `verify_peer` predicate; the handshake-time `Pinset` access uses `[2g §6.5.1]`'s captured-once contract (capture `Pinset::snapshot()` at handshake start, scan the snapshot directly per peer-cert lookup). Reconnect with exponential back-off per `[FIX-SL §4.3.1]` is built into the impl as opt-in via `ReconnectPolicy` (§4.4).
 4. **Lock the `fixpp::transport::Endpoint`** value type — `(host, port)` for client connections; `(bind_addr, bind_port, backlog)` for server (acceptor) sockets. Address family is auto-detected from the host string (`IPv4` / `IPv6` / hostname-resolved-via-`asio::ip::resolver`); IPv6 zone-id support is in scope. Acceptor / initiator distinction is reflected by two construction paths on the default impl (§4.6).
-5. **Lock the `fixpp::transport::ReconnectPolicy`** value type per `[FIX-SL §4.3.1]`: `initial_delay`, `max_delay`, `multiplier` (default `2.0`, exponential), `max_attempts` (default **`10`** per §4.4.1 normative `defaults()` factory; numeric ceiling per `[const §XV]` thunder-herd-pattern intent; opt-in to unbounded by explicit override), and `jitter` (`±10%` default to avoid thundering-herd). The session FSM (Phase-4 spec) drives reconnection by re-issuing `async_connect` against the same `Transport` instance; the `ReconnectPolicy` is policy data that the session-module FSM consults — 2h owns the value type + the normative `defaults()`, the session-module Phase-4 spec owns the FSM that consumes it (per §7.2).
+5. **Lock the `fixpp::transport::ReconnectPolicy`** value type per `[FIX-SL §4.3.1]` (Clarifications 2026-05-27 Q2=C / Appendix D §D.5 shape): `schedule` (`std::pmr::vector<std::chrono::milliseconds>` — caller-supplied per-attempt delays; QuickFIX/J-aligned shape), `jitter` (`±10%` default to avoid thundering-herd), and `max_attempts` (default **`10`** per §4.4.1 normative `defaults()` factory; numeric ceiling per `[const §XV]` thunder-herd-pattern intent; opt-in to unbounded by explicit override). `defaults()` materialises the v0.2 exponential envelope as the explicit schedule `[100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s, 12.8s, 25.6s, 30s]` with `jitter = 0.10`, `max_attempts = 10`. New `defaults_quickfix_compat()` factory returns `{[30s], 0.0, 0}` for industry-canonical operators. The session FSM (Phase-4 spec) drives reconnection per Clarifications 2026-05-27 Q1=B (Appendix D §D.4) by destroying the dead `Transport`, sleeping for `delay_for_attempt(n)`, minting a fresh `Transport` via the same `TransportFactory`, and calling `async_connect` on the new instance — matching the QuickFIX-cpp / QuickFIX/J / Fix8 fresh-per-attempt pattern. The `ReconnectPolicy` is policy data that the session-module FSM consults — 2h owns the value type + the normative `defaults()`, the session-module Phase-4 spec owns the FSM that consumes it (per §7.2).
 6. **Lock the `fixpp::transport::Listener`** acceptor surface (T-005) — multi-session TCP acceptor that produces `Transport` instances on each `accept()` completion. The listener is itself a small pluggable abstraction (one pure-virtual `async_accept`) that ships with one default impl (`asio_listener`) wrapping `asio::ip::tcp::acceptor`.
 7. **Lock the `fixpp::transport::TransportFactory`** factory surface per `[arch §6]` rule 4: `make()` returns `expected_t<std::unique_ptr<Transport>>`. **Factory ownership = `unique_ptr<TransportFactory>` on `SessionConfig::transport_factory_override`** matching the `[2e §4.4]` precedent for `MessageStoreFactory` (and the cross-doc-amendment pattern that landed there) — see §4.7 + Appendix D §D.1. Engine-anchor + session-`*_override` matches `[2d §4.4]` `default_transport_factory` (already typed) + `[arch §5.6]` frozen-at-open rule.
 8. **Lock the `fixpp::transport::mock_transport`** test seam — a deterministic in-memory `Transport` impl living in a public test header `<fixpp/transport/test/mock_transport.hpp>` (consumed by `tests/`-only translation units). Drives the FSM-under-test per `[const §VII]` / `[arch §1.1]` test-seam goal. The mock honours every cancellation contract the production impl does, so the FSM tests catch cancellation-propagation regressions.
@@ -39,7 +39,7 @@ DoS bounds and resource ceilings (matching `[2g §1.1]` / `[2b §1.2]` / `[2e §
 - **TCP `SO_RCVBUF` / `SO_SNDBUF`.** Default to OS auto-tuning (`asio` does not touch them by default). `Transport::Config::tcp_recv_buf_bytes` and `tcp_send_buf_bytes` (default `0` = OS auto-tune) are exposed for HFT users who want to pin them. Tier 2 / Windows benches verify the auto-tune path doesn't pessimise throughput.
 - **TLS handshake timeout.** `Transport::Config::tls_handshake_timeout = 30 s` (default; matches typical exchange/venue gateway). `verify_peer` runs synchronously inside the `SSL_VERIFY_PEER` callback so its cost (`[2g §6.3]` ≤ 50 µs p99) is rolled into the handshake's wall-clock budget. A handshake that exceeds the timeout completes with `transport_handshake_timeout`; cancellation propagates per `[const §XI.2]`.
 - **TCP keepalive.** OS-default off; opt-in via `Transport::Config::tcp_keepalive = false` (default) / `tcp_keepalive_idle_seconds`, `tcp_keepalive_interval_seconds`, `tcp_keepalive_count`. FIX-level Heartbeat per `[FIX-SL §4.5.1]` is the primary keep-alive (owned by the session-module Phase-4 spec); TCP keepalive is defence-in-depth.
-- **Reconnect back-off envelope.** `ReconnectPolicy::defaults()` (per §4.4.1) returns `initial_delay = 100 ms`; `max_delay = 30 s`; `multiplier = 2.0`; **`max_attempts = 10`** (numeric ceiling — opt-in to unbounded by setting `max_attempts = 0` explicitly per `[const §XII.5]` no-implicit-default pattern); `jitter = 0.10`. The exponential schedule produces 100 ms → 200 ms → 400 ms → … capped at 30 s with ±10% jitter; total wall-clock to terminal stop at `max_attempts = 10` ≈ 1 min 21 s (sum of 100 ms + 200 ms + 400 ms + 800 ms + 1.6 s + 3.2 s + 6.4 s + 12.8 s + 25.6 s + 30 s = 81 100 ms; ±10% jitter widens to ≈ 73–89 s; v0.2's "≈ 4 min 25 s" figure was arithmetically wrong — that figure conflated the per-attempt delay at attempt 10 with the cumulative envelope and is corrected here per round-2 Opus N-P1). **Rationale (DoS-surface explicit per `[const §XV]` thunder-herd-pattern intent):** the v0.1 default `max_attempts = 0` (unbounded) shipped an engine that could DDOS a venue under common operational scenarios (10⁵ peers reconnecting against an exchange gateway after a venue outage cluster reconnect attempts in narrow windows once `max_delay` is hit — a known TCP/TLS thundering-herd amplifier). v0.2 picks a numeric ceiling per the `[2g §1.1]` DoS-cap precedent (every cap is numeric, not "unbounded by default"); the resulting ≈ 1 min 21 s default envelope is intentionally tight against the thunder-herd hazard (shorter than typical exchange-gateway recovery windows of 30 s – 5 min). Operators that need a longer envelope opt in by overriding `max_attempts` explicitly OR raising `max_delay`; v1.0 ships the safe default. On exceeding the cap, the FSM surfaces `transport_reconnect_limit_exceeded` (§6.6).
+- **Reconnect back-off envelope.** Per Clarifications 2026-05-27 Q2=C / Appendix D §D.5: `ReconnectPolicy::defaults()` (per §4.4.1) materialises the schedule as `[100 ms, 200 ms, 400 ms, 800 ms, 1.6 s, 3.2 s, 6.4 s, 12.8 s, 25.6 s, 30 s]` with `jitter = 0.10` and **`max_attempts = 10`** (numeric ceiling — opt-in to unbounded by setting `max_attempts = 0` explicitly per `[const §XII.5]` no-implicit-default pattern). Total wall-clock to terminal stop at `max_attempts = 10` ≈ 1 min 21 s (sum = 81 100 ms; ±10% jitter widens to ≈ 73–89 s; v0.2's "≈ 4 min 25 s" figure was arithmetically wrong — that figure conflated the per-attempt delay at attempt 10 with the cumulative envelope and is corrected here per round-2 Opus N-P1). A new `defaults_quickfix_compat()` factory returns `{[30s], 0.0, 0}` for industry-canonical operators. **Rationale (DoS-surface explicit per `[const §XV]` thunder-herd-pattern intent):** the v0.1 default `max_attempts = 0` (unbounded) shipped an engine that could DDOS a venue under common operational scenarios (10⁵ peers reconnecting against an exchange gateway after a venue outage cluster reconnect attempts in narrow windows once the schedule plateaus at its 30 s tail — a known TCP/TLS thundering-herd amplifier). v0.2 picks a numeric ceiling per the `[2g §1.1]` DoS-cap precedent (every cap is numeric, not "unbounded by default"); the resulting ≈ 1 min 21 s default envelope is intentionally tight against the thunder-herd hazard (shorter than typical exchange-gateway recovery windows of 30 s – 5 min). Operators that need a longer envelope opt in by overriding `max_attempts` explicitly OR by extending the schedule tail; v1.0 ships the safe default. On exceeding the cap, the FSM surfaces `transport_reconnect_limit_exceeded` (§6.6).
 
 These are operator-tunable bounds (not invariants of the FIX or FIXS specs) sized for v1.0's named workloads — FX retail / equities / equity-options. Users on derivatives venues (`[2b §1.2]` calls them out specifically) tune `max_read_window_bytes` upward; the §1.1 caps are documented operating points.
 
@@ -84,7 +84,7 @@ These are operator-tunable bounds (not invariants of the FIX or FIXS specs) size
 - **No non-TLS encryption.** Application-layer encryption is banned per `[const §XII.7]` / `[const §XV.10]`; encryption lives at TLS only. A future plain-TCP-with-TLS-tunnel-via-stunnel deployment is the user's concern (the Transport sees plain TCP); v1.0 does not ship a third-party-tunnel adapter.
 - **No Schannel / no Windows-native TLS backend.** OpenSSL on both Linux and Windows per `[const §XII.1]`.
 - **No `dlopen`-based plugin loading** for `Transport` per `[const §XIV.4]`. Compile-time selection only.
-- **No mid-session swap of `Transport`.** Frozen at session open per `[arch §5.6]`. Reconnect re-issues `async_connect` on the **same** `Transport` instance; the FSM does not swap `Transport` factories mid-session.
+- **No mid-session swap of `TransportFactory`.** The factory **selection** is frozen at session open per `[arch §5.6]`. Per Clarifications 2026-05-27 Q1=B (Appendix D §D.4) reconnect destroys the dead `Transport` and mints a fresh one via the same `TransportFactory` — the `Transport` **instance** is short-lived (per-attempt), not frozen; the FSM does not swap `TransportFactory` mid-session.
 - **No transport-internal write queue.** The session strand is the depth-1 queue; outbound writes are serialised by API construction (per `[arch §5.8]`'s `block` mode). v1.0 does not introduce a parallel-writes-on-one-transport facility.
 - **No 0-RTT / TLS 1.3 early data.** Banned per `[const §XII.3]`.
 - **No PSK in v1.0 default impl.** `T-012` is P2 deferred. The `TlsTransport` sub-interface leaves headroom (4 of 5 pure-virtual slots) for a future `psk_session_callback` hook without a major-version bump.
@@ -192,7 +192,7 @@ This is the row's full handoff statement. The mock seam is operationalised in §
 
 ### §3.14 From `[2d §7.6]` — transport ops on session strand
 
-> `Transport::async_connect`, `async_read_some`, `async_write`, `cancel`, `close` all run on the session strand. The default `asio_tls_transport` impl uses ASIO's own composed operations; cancellation propagates through ASIO's slot mechanism. Transport reset (e.g., reconnect after a network blip) re-issues `async_connect` on the same strand. 2d locks the strand-discipline; 2h owns the impl.
+> `Transport::async_connect`, `async_read_some`, `async_write`, `cancel`, `close` all run on the session strand. The default `asio_tls_transport` impl uses ASIO's own composed operations; cancellation propagates through ASIO's slot mechanism. Transport reset (e.g., reconnect after a network blip) destroys the dead `Transport` and mints a fresh one via the same `TransportFactory` (per Appendix D §D.4); `async_connect` is issued on the new instance on the same strand. 2d locks the strand-discipline; 2h owns the impl.
 
 This is the locked contract surface 2h must deliver: every `Transport` async op binds to the awaiter's bound executor (the `[2d §4.8]` `session_executor` wrapper), completing on the same wrapper. Operationalised in §6.1.
 
@@ -358,7 +358,7 @@ struct ConnectInfo {
 
 **`ConnectInfo` is OWNING by value** (mirrors the `[2g §4.5]` `peer_identity` precedent). The session FSM (Phase-4 spec) captures `ConnectInfo` by value across reconnect cycles; no view fields, no cross-doc lifetime contract. Only POD-shaped fields cross the boundary.
 
-**In-flight exclusivity (NORMATIVE — API-level contract per RC#3 / Codex P1 #2 close).** At most one in-flight `async_read_some` and at most one in-flight `async_write` per `Transport` instance. Concurrent calls — a coroutine that issues `async_write` while a previous `async_write`'s awaitable has not yet completed (suspended or in-flight on the strand), or a coroutine that issues `async_read_some` while a previous `async_read_some` is in-flight — complete **immediately** with `expected_t::unexpected{transport_write_in_progress}` (for write overlap) or `expected_t::unexpected{transport_read_in_progress}` (for read overlap) per §6.6. Strand serialisation is defence-in-depth (it serialises completion handlers, not initiation — a strand-bound coroutine A can `co_await transport.async_write(...)` and suspend; a strand-bound coroutine B on the same strand can also `co_await transport.async_write(...)` and reach the underlying ASIO `async_write_some` initiation concurrently because the strand only serialises completion-handler dispatch); the **API-level exclusivity contract is the binding rule**. This matches the ASIO regularity contract for `tcp::socket::async_write_some` ("the caller's responsibility to ensure that this stream performs no other write operations until this operation completes"). The §9 seam #15 (in-flight exclusivity) asserts the second call fails deterministically with `transport_*_in_progress` rather than racing into the underlying ASIO socket. `async_connect` and `async_handshake` are one-shot per Transport lifetime (a Transport admits one connect attempt and one handshake; reconnect re-issues `async_connect` on the same instance per §4.9; a second connect-or-handshake while one is in flight, or a second handshake after the first succeeded, raises `transport_already_connected` per §6.6).
+**In-flight exclusivity (NORMATIVE — API-level contract per RC#3 / Codex P1 #2 close).** At most one in-flight `async_read_some` and at most one in-flight `async_write` per `Transport` instance. Concurrent calls — a coroutine that issues `async_write` while a previous `async_write`'s awaitable has not yet completed (suspended or in-flight on the strand), or a coroutine that issues `async_read_some` while a previous `async_read_some` is in-flight — complete **immediately** with `expected_t::unexpected{transport_write_in_progress}` (for write overlap) or `expected_t::unexpected{transport_read_in_progress}` (for read overlap) per §6.6. Strand serialisation is defence-in-depth (it serialises completion handlers, not initiation — a strand-bound coroutine A can `co_await transport.async_write(...)` and suspend; a strand-bound coroutine B on the same strand can also `co_await transport.async_write(...)` and reach the underlying ASIO `async_write_some` initiation concurrently because the strand only serialises completion-handler dispatch); the **API-level exclusivity contract is the binding rule**. This matches the ASIO regularity contract for `tcp::socket::async_write_some` ("the caller's responsibility to ensure that this stream performs no other write operations until this operation completes"). The §9 seam #15 (in-flight exclusivity) asserts the second call fails deterministically with `transport_*_in_progress` rather than racing into the underlying ASIO socket. `async_connect` and `async_handshake` are one-shot per Transport lifetime (a Transport admits one connect attempt and one handshake; reconnect destroys this Transport and mints a fresh one via `TransportFactory` per §4.9 + Appendix D §D.4; a second connect-or-handshake while one is in flight, or a second handshake after the first succeeded, raises `transport_already_connected` per §6.6).
 
 #### §4.1.1 Cancellation contract — recipe per method
 
@@ -567,6 +567,8 @@ Notes:
 // include/fixpp/transport/reconnect_policy.hpp
 #include <chrono>
 #include <cstdint>
+#include <memory_resource>
+#include <vector>
 
 namespace fixpp::transport {
 
@@ -576,28 +578,50 @@ namespace fixpp::transport {
 // computation. The FSM consults Clock::steady_now() (per [2d §7.9]) to
 // schedule retries.
 //
-// Default values are operationally tunable (§1.1 magnitude domain). The
-// numeric ceiling on max_attempts is normative (§4.4.1 ReconnectPolicy::
+// Shape per Clarifications 2026-05-27 Q2=C / Appendix D §D.5 (QuickFIX/J-
+// aligned schedule-array surface): the caller supplies an explicit per-
+// attempt delay array; the FSM indexes it by attempt number with plateau-
+// at-last semantics (matches QuickFIX/J IoSessionInitiator::
+// computeNextRetryConnectDelay():318-319). Drops the v0.3 5-field
+// {initial_delay, max_delay, multiplier, max_attempts, jitter} shape.
+//
+// The numeric ceiling on max_attempts is normative (§4.4.1 ReconnectPolicy::
 // defaults() returns the binding default-set); operators that need a longer
 // envelope override max_attempts explicitly per [const §XII.5] no-implicit-
-// default pattern.
+// default pattern. New defaults_quickfix_compat() returns the industry-
+// canonical {[30s], 0.0, 0} for operators that opt out of the constitutional
+// thunder-herd-pattern envelope.
 struct ReconnectPolicy {
-    std::chrono::milliseconds initial_delay {100};    // first retry delay.
-    std::chrono::milliseconds max_delay     {30'000};  // cap on per-attempt delay.
-    double                    multiplier    {2.0};     // exponential back-off ratio.
-    std::uint32_t             max_attempts  {10};      // numeric ceiling per §4.4.1; 0 = unbounded (opt-in only).
-    double                    jitter        {0.10};    // ±10% randomisation; anti-thundering-herd.
+    // Per-attempt delay schedule. The FSM indexes by attempt number; once n
+    // >= schedule.size() the FSM plateaus at schedule.back() (matches
+    // QuickFIX/J plateau-at-last). MUST be non-empty.
+    std::pmr::vector<std::chrono::milliseconds> schedule;
+    double                                      jitter        {0.10}; // ±10% randomisation; anti-thundering-herd.
+    std::uint32_t                               max_attempts  {10};   // numeric ceiling per §4.4.1; 0 = unbounded (opt-in only).
 
     // The schedule-formula helper (called by the FSM):
-    //   delay_n = clamp(initial_delay * pow(multiplier, n-1), 0, max_delay)
-    //   actual  = delay_n * (1 + uniform(-jitter, +jitter))
-    // The randomness source is the engine RNG, not std::random_device, to
-    // honour fuzz determinism per [const §VII.7].
+    //   actual = schedule[min(n, schedule.size() - 1)] * (1 + uniform(-jitter, +jitter))
+    // Per Appendix D §D.6 the signature is one-parameter (attempt_n); the
+    // policy owns the deterministic seed source (a session_id_seed field is
+    // wired at /implement-time within 2h's existing surface, either as a
+    // policy field set by the FSM at session open or as an overload taking
+    // the seed as a second parameter). The determinism contract is
+    // preserved (deterministic-per-attempt seed reproducible from session id
+    // + attempt number alone per [const §VII.7] fuzz determinism).
     [[nodiscard]] std::chrono::milliseconds
-        delay_for_attempt(std::uint32_t attempt_index, double rand01) const noexcept;
+        delay_for_attempt(std::uint32_t attempt_n) const noexcept;
 
-    // Normative defaults factory per §4.4.1.
-    [[nodiscard]] static constexpr ReconnectPolicy defaults() noexcept;
+    // Normative defaults factory per §4.4.1. Materialises the v0.2
+    // exponential schedule explicitly: [100ms, 200ms, 400ms, 800ms, 1.6s,
+    // 3.2s, 6.4s, 12.8s, 25.6s, 30s] with jitter = 0.10, max_attempts = 10.
+    [[nodiscard]] static ReconnectPolicy defaults();
+
+    // Industry-canonical defaults per Clarifications 2026-05-27 Q2=C:
+    // {[30s], 0.0 jitter, 0 (unbounded) max_attempts} — matches
+    // QuickFIX-cpp m_reconnectInterval=30 / Fix8 _login_retry_interval
+    // single-fixed shape. Operators that need a QuickFIX-compatible
+    // reconnect cadence pick this factory at session open.
+    [[nodiscard]] static ReconnectPolicy defaults_quickfix_compat();
 };
 
 }  // namespace fixpp::transport
@@ -606,25 +630,40 @@ struct ReconnectPolicy {
 Notes:
 
 - **Disabled by default at the transport surface.** The `Transport` interface itself does NOT carry a `ReconnectPolicy` field — reconnect is an FSM-level concern, not a wire-level concern. The `ReconnectPolicy` is held by `SessionConfig` (or, for HFT users that want per-Endpoint policy, attached to the `Endpoint` indirectly via a per-`Endpoint` config map owned by the FSM). 2h ships the value type; the session-module Phase-4 spec wires it.
-- **Jitter source determinism.** The session FSM's RNG is seeded at session open; the same seed produces the same retry schedule for replay testing. `[const §VII.7]` fuzz determinism extends to reconnect schedule (a fuzz that triggers reconnect must be replayable).
+- **Jitter source determinism.** Per Appendix D §D.6 the RNG moves from FSM-side (caller-supplied `rand01`) to policy-side (the policy hashes a deterministic-per-attempt seed derived from session id + attempt number per FR-021). The same seed produces the same retry schedule for replay testing; `[const §VII.7]` fuzz determinism extends to reconnect schedule (a fuzz that triggers reconnect must be replayable).
 
 #### §4.4.1 `ReconnectPolicy::defaults()` — normative numeric ceilings (RC#3 / Opus N-P1-3 close)
 
-**Binding contract (NORMATIVE).** `ReconnectPolicy::defaults()` returns:
+**Binding contract (NORMATIVE).** Per Clarifications 2026-05-27 Q2=C / Appendix D §D.5 the defaults are materialised as an explicit schedule:
 
 ```cpp
-constexpr ReconnectPolicy ReconnectPolicy::defaults() noexcept {
-    return ReconnectPolicy{
-        .initial_delay = std::chrono::milliseconds(100),
-        .max_delay     = std::chrono::seconds(30),
-        .multiplier    = 2.0,
-        .max_attempts  = 10,         // numeric ceiling per [const §XV] thunder-herd-pattern intent.
-        .jitter        = 0.10,
+// Returns ReconnectPolicy with the v0.2 exponential envelope baked out as
+// an explicit per-attempt schedule. The cumulative wall-clock envelope at
+// max_attempts = 10 is preserved at ≈ 1 min 21 s (73-89 s with ±10% jitter).
+ReconnectPolicy ReconnectPolicy::defaults() {
+    using namespace std::chrono_literals;
+    ReconnectPolicy p;
+    p.schedule = std::pmr::vector<std::chrono::milliseconds>{
+        100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms, 6400ms, 12800ms, 25600ms, 30000ms
     };
+    p.jitter       = 0.10;
+    p.max_attempts = 10;  // numeric ceiling per [const §XV] thunder-herd-pattern intent.
+    return p;
+}
+
+// Industry-canonical (QuickFIX-cpp / Fix8 single-fixed) opt-out per
+// Clarifications 2026-05-27 Q2=C: {[30s], 0.0 jitter, 0 (unbounded) max_attempts}.
+ReconnectPolicy ReconnectPolicy::defaults_quickfix_compat() {
+    using namespace std::chrono_literals;
+    ReconnectPolicy p;
+    p.schedule     = std::pmr::vector<std::chrono::milliseconds>{30000ms};
+    p.jitter       = 0.0;
+    p.max_attempts = 0;
+    return p;
 }
 ```
 
-**Rationale.** v0.1's default `max_attempts = 0` (unbounded) shipped an engine that could DDOS a venue under common operational scenarios — 10⁵ peers reconnecting after a venue outage cluster reconnect attempts in narrow windows once `max_delay = 30 s` is hit, a known TCP/TLS thundering-herd amplifier observed in production at exchange-gateway recoveries. The v1.0 default picks a numeric ceiling per the `[2g §1.1]` DoS-cap precedent (every cap is numeric, not "unbounded by default"). With `max_attempts = 10`, total wall-clock to terminal stop spans ≈ 1 min 21 s under the exponential schedule (cumulative; the geometric tail caps at `max_delay = 30 s` from attempt 9 onward — 100 ms → 200 ms → 400 ms → 800 ms → 1.6 s → 3.2 s → 6.4 s → 12.8 s → 25.6 s → 30 s = 81 100 ms; ±10% jitter widens to ≈ 73–89 s). The v0.2 rationale carried "≈ 4 min 25 s" as the published envelope; that figure was arithmetically wrong against this same exponential schedule (it conflated the per-attempt delay at attempt 10 with the cumulative sum) and is corrected here per round-2 Opus N-P1. The corrected ≈ 1 min 21 s envelope is intentionally tight against the thunder-herd hazard — shorter than typical exchange-gateway recovery windows (30 s – 5 min). Operators that need a longer envelope override `max_attempts` explicitly (e.g., 12 attempts gives ≈ 2 min 21 s) OR raise `max_delay` (e.g., 90 s gives ≈ 3 min 1 s at `max_attempts = 10`); the rebaseline is a numbers question, not a contract question. v1.0 ships the safe default and preserves the engine's right to surrender to a session-FSM-driven escalation.
+**Rationale.** v0.1's default `max_attempts = 0` (unbounded) shipped an engine that could DDOS a venue under common operational scenarios — 10⁵ peers reconnecting after a venue outage cluster reconnect attempts in narrow windows once the schedule plateaus at its 30 s tail, a known TCP/TLS thundering-herd amplifier observed in production at exchange-gateway recoveries. The v1.0 default picks a numeric ceiling per the `[2g §1.1]` DoS-cap precedent (every cap is numeric, not "unbounded by default"). With `max_attempts = 10`, total wall-clock to terminal stop spans ≈ 1 min 21 s under the materialised schedule (cumulative; the geometric envelope's tail caps at 30 s from attempt 9 onward — 100 ms → 200 ms → 400 ms → 800 ms → 1.6 s → 3.2 s → 6.4 s → 12.8 s → 25.6 s → 30 s = 81 100 ms; ±10% jitter widens to ≈ 73–89 s). The v0.2 rationale carried "≈ 4 min 25 s" as the published envelope; that figure was arithmetically wrong against this same exponential schedule (it conflated the per-attempt delay at attempt 10 with the cumulative sum) and is corrected here per round-2 Opus N-P1. The corrected ≈ 1 min 21 s envelope is intentionally tight against the thunder-herd hazard — shorter than typical exchange-gateway recovery windows (30 s – 5 min). Operators that need a longer envelope override `max_attempts` explicitly (e.g., 12 attempts gives ≈ 2 min 21 s) OR raise the schedule tail (e.g., replace the final `30000ms` with `90000ms` gives ≈ 3 min 1 s at `max_attempts = 10`); the rebaseline is a numbers question, not a contract question. v1.0 ships the safe default and preserves the engine's right to surrender to a session-FSM-driven escalation.
 
 **Operator opt-in to unbounded.** Operators that need a longer envelope override `max_attempts` explicitly (e.g., `auto policy = ReconnectPolicy::defaults(); policy.max_attempts = 0;` for unbounded). This matches the `[const §XII.5]` no-implicit-default pattern for `SecurityProfile` — picking unbounded is an explicit operator decision, not the engine default. Per-venue tuning (FX retail, equity, equity-options, derivatives) is the Phase-4 session-module spec's call (or a post-v1 venue-presets library); 2h ships the safe default.
 
@@ -874,6 +913,21 @@ namespace fixpp::transport {
 //   - make() returns std::unique_ptr<Transport> (ownership transferred to
 //     the Session per [arch §5.6] frozen-at-open).
 //
+// FR-026 caching contract (per Clarifications 2026-05-27 / Appendix D §D.4):
+// the factory is invoked at session open AND at every reconnect attempt
+// per FR-028 (fresh-mint-per-attempt). Long-lived state shared across
+// attempts MUST be cached at the factory level — never re-built per
+// attempt. This includes:
+//   - the SslCtxConfig carrying the OpenSSL SSL_CTX* (built ONCE at
+//     session open via [2g §4.5] make_ssl_ctx_config from EngineConfig::
+//     default_cert_source + per-session overrides);
+//   - the engine's PMR root resource;
+//   - the engine clock reference.
+// The factory itself is long-lived (session lifetime); the Transport
+// instances it produces are short-lived (per-attempt). make() MUST be
+// cheap enough that the per-attempt mint cost is bounded by the back-off
+// envelope, not by make() runtime.
+//
 // [2d §4.4] currently declares default_transport_factory as
 // std::shared_ptr<TransportFactory> — flagged as a sibling-doc inconsistency
 // (mirrors the [2e §3.11] / Appendix D §D.1 cross-doc amendment for
@@ -1024,10 +1078,10 @@ Notes:
 
 ### §4.9 Construction / lifetime / ownership rules
 
-- **`Transport` instance is session-owned.** `Session::transport_` holds `std::unique_ptr<Transport>` minted at session open via `TransportFactory::make(...)`. Frozen-at-open per `[arch §5.6]`; reconnect re-issues `async_connect` on the same instance.
+- **`Transport` instance is session-owned and per-attempt.** `Session::transport_` holds `std::unique_ptr<Transport>` minted at session open via `TransportFactory::make(...)`. The factory **selection** is frozen-at-open per `[arch §5.6]` (the resolved `transport_factory_override.value_or(default_transport_factory)` is locked for the session lifetime); the `Transport` **instance** is per-attempt. Per Clarifications 2026-05-27 Q1=B / Appendix D §D.4 reconnect destroys the dead `Transport`, sleeps for `delay_for_attempt(n)`, mints a fresh `Transport` via the same `TransportFactory`, and calls `async_connect` on the new instance — matching the QuickFIX-cpp / QuickFIX/J / Fix8 fresh-per-attempt pattern. The FSM holds at most one live `Transport` per session at any time.
 - **`TlsTransport` is reached via exactly ONE `dynamic_cast<TlsTransport*>(transport_.get())`** at session open (the `async_handshake` issue site). The cast result is stored once on the `Session` object as a typed pointer — `TlsTransport* tls_transport_` — and every subsequent code path uses the typed pointer with no further casts. Post-handshake reads of `peer_identity` / captured pinset / negotiated cipher consume the FSM-held `handshake_result` value (returned by value from `async_handshake` per §4.2 RC#2 close); these reads have no virtual dispatch and no cast. RTTI is therefore opportunistic, not structural — a future `-fno-rtti` build can replace the cast with a non-virtual `as_tls() noexcept -> TlsTransport*` member on `Transport` (post-v1; v1.0 ships RTTI-on per the standard Linux/Clang and Windows/MSVC defaults).
 - **`Endpoint` is owning by value** (`std::string` host); FSM holds it for the session lifetime.
-- **`ReconnectPolicy` is owning by value**; FSM holds it for the session lifetime. The `ReconnectPolicy::delay_for_attempt` helper is `noexcept` and takes a `rand01` argument (caller supplies the engine RNG).
+- **`ReconnectPolicy` is owning by value**; FSM holds it for the session lifetime. Per Appendix D §D.6 the `ReconnectPolicy::delay_for_attempt` helper is `noexcept` and takes a one-parameter `(attempt_n)` shape — the policy owns the deterministic seed source per `[const §VII.7]` fuzz determinism (the session FSM supplies the session-id seed at session open; the policy hashes `(session_id_seed, attempt_n)` into the jitter draw). The schedule is a `std::pmr::vector<std::chrono::milliseconds>` per Appendix D §D.5 — the PMR allocator binds at policy construction (engine or session arena per `[2d §6.6]`).
 - **`Listener` instance is engine-owned.** `Engine::listeners_` (post-v1; v1.0 wires Listeners through `service/` per `[arch §4.11]`) holds `std::unique_ptr<Listener>`. Lifetime is engine lifetime.
 - **`TransportFactory` instance is engine-owned (engine-anchor) or session-owned (session-override).** Per Appendix D §D.1 / §D.2: `EngineConfig::default_transport_factory` is `unique_ptr<TransportFactory>`; `SessionConfig::transport_factory_override` is `unique_ptr<TransportFactory>`. Resolved at session open per `[2d §4.5]` engine-anchor + session-`*_override` pattern.
 - **`peer_identity`** is OWNING (per `[2g §4.5]`). It is returned by value inside `handshake_result` from `async_handshake` (§4.2); the FSM holds `handshake_result` by value across the session lifetime. Phase-4 reads `peer_identity` from the FSM-held `handshake_result` for the T-041 binding.
@@ -1049,7 +1103,7 @@ Every `expected_t<T>`-returning method declared in §4.1–§4.8 carries `[[nodi
 - `fixpp_listener_t` opaque handle wrapping `std::unique_ptr<fixpp::transport::Listener>`.
 - `fixpp_transport_factory_t` opaque handle wrapping `std::unique_ptr<fixpp::transport::TransportFactory>`.
 - `fixpp_endpoint_t` PoD struct mirroring `Endpoint` (`const char* host`, `uint16_t port`, `uint32_t backlog`).
-- `fixpp_reconnect_policy_t` PoD struct mirroring `ReconnectPolicy` (delays + multiplier + max_attempts + jitter).
+- `fixpp_reconnect_policy_t` PoD struct mirroring `ReconnectPolicy` (per Appendix D §D.5 shape: schedule-array + jitter + max_attempts). The C-ABI surface carries the schedule as a `(const uint32_t* delays_ms, size_t delays_len)` pair (delays in milliseconds) plus `double jitter` + `uint32_t max_attempts`; 2i builds the PMR-backed `std::pmr::vector<std::chrono::milliseconds>` at the C-bridge boundary.
 - `fixpp_connect_info_t` PoD struct mirroring `ConnectInfo`.
 - `fixpp_transport_async_connect(...)`, `fixpp_transport_async_read_some(...)`, `fixpp_transport_async_write(...)`, `fixpp_transport_cancel(...)`, `fixpp_transport_close(...)` — async ops mapped through 2i's awaitable-to-C-callback bridge (the same shape 2i uses for `[2g §5]` `fixpp_cert_source_load_credentials`).
 - `fixpp_tls_transport_async_handshake(...)` returning a `fixpp_handshake_result_t` PoD struct mirroring the C++ `handshake_result` value type (§4.2): the C-ABI shape carries the `peer_identity` (raw subject_dn + SAN list crossing as `(const char*, size_t)`), `negotiated_cipher` (string), and a `fixpp_pinset_snapshot_t` opaque handle wrapping `shared_ptr<const pin_snapshot>` per `[2g §5]`. The C-ABI consumer reads from the returned PoD; no separate accessor symbols are needed because the underlying C++ shape is value-typed.
@@ -1109,7 +1163,7 @@ Per `[const §XI.2]` / `[2d §4.7]`:
 - **Phase 2 (teardown).** Root `cancellation_type::total` fires; in-flight `async_read_some` / `async_write` / `async_handshake` complete with their `*_cancelled` variants. The transport's `close()` is invoked (synchronous, on-strand) to issue TLS bidi close-notify and tear down the OS-level socket.
 - **`Session::close(terminal)`** skips phase 1 and goes directly to phase 2; in-flight transport ops are cancelled immediately.
 - **Cancellation surfacing.** Each async method's awaitable completes with the appropriate `transport_*_cancelled` variant per §6.6 (`transport_connect_cancelled`, `transport_read_cancelled`, `transport_write_cancelled`, `transport_handshake_cancelled`, `transport_accept_cancelled`). The C-ABI bridge maps these into `FIXPP_ERR_CANCELLED` per `[const §XI.2]`.
-- **Reconnect interaction.** When the session FSM (Phase-4 spec) drives reconnect, it calls `Transport::cancel()` to interrupt any in-flight op, then `Transport::close()` to tear down the TLS+TCP state, then re-issues `async_connect` on the same `Transport` instance. The reconnect schedule (`ReconnectPolicy::delay_for_attempt`) is FSM-side; 2h is the wire-side hop only.
+- **Reconnect interaction.** When the session FSM (Phase-4 spec) drives reconnect, it calls `Transport::cancel()` to interrupt any in-flight op, then `Transport::close()` to tear down the TLS+TCP state, then **destroys the dead `Transport`** (the `unique_ptr` is reset), **sleeps for `delay_for_attempt(n)`**, **mints a fresh `Transport` via the same `TransportFactory`** (Clarifications 2026-05-27 Q1=B / Appendix D §D.4), and **calls `async_connect` on the new instance**. The reconnect schedule (`ReconnectPolicy::delay_for_attempt`) is FSM-side; 2h is the wire-side hop only. The factory caches `SslCtxConfig` / PMR root / engine clock at factory level per FR-026 — the per-attempt mint cost is therefore the `Transport`-only construction, not a full `SSL_CTX` rebuild.
 
 #### §6.4.1 Per-mode cancellation effect table — 2h-owned ops (extends `[2d §4.7]`)
 
@@ -1248,7 +1302,7 @@ The buffer (`carry_buf.tail_span()`) is sourced from the `framer_carry_arena` pe
 
 **T-041 partition.** Per `[2g §7.2]`: 2g supplies the `peer_identity` value (parsed peer-cert subject DN + SANs); 2h delivers it through the value-typed `handshake_result.peer_id` returned by `TlsTransport::async_handshake` (see §4.2). The session-module Phase-4 spec performs the CompID-to-TLS-identity binding policy and surfaces `error::session_identity_mismatch` on rejection. 2h is the wiring layer between 2g's value and the FSM's policy.
 
-**Reconnect FSM.** The `ReconnectPolicy` value type is held by `SessionConfig` (or attached per-`Endpoint` if the FSM has multi-endpoint failover); the schedule computation is FSM-side (`ReconnectPolicy::delay_for_attempt(attempt_index, rand01)`). The FSM consults `[2d §7.9]` `effective_clock.steady_now()` + `effective_clock.sleep_until(...)` to schedule retries. 2h provides the value type; the session-module Phase-4 spec drives the FSM.
+**Reconnect FSM.** The `ReconnectPolicy` value type is held by `SessionConfig` (or attached per-`Endpoint` if the FSM has multi-endpoint failover); the schedule computation is policy-side per Appendix D §D.6 (`ReconnectPolicy::delay_for_attempt(attempt_n)` one-parameter; the policy owns the deterministic jitter seed source). The FSM consults `[2d §7.9]` `effective_clock.steady_now()` + `effective_clock.sleep_until(...)` to schedule retries; on each attempt it destroys the dead `Transport` and mints a fresh one via the same `TransportFactory` per Appendix D §D.4. 2h provides the value type; the session-module Phase-4 spec drives the FSM.
 
 **Durable-before-transmit ordering.** Per §6.7 + `[2e §6.1.4]`. The FSM sequences `Writer::commit → store → async_write`; 2h's `async_write` is the last hop.
 
@@ -1360,7 +1414,7 @@ Per `[arch §10]` requirement (4) and `[const §VII.4]`. v0.3 ships **15 seams**
 
 12. **TLS-handshake fuzzer — truncated TLS records, partial handshakes.** A separate libFuzzer harness for the handshake hot path: scripted partial TLS records fed through `mock_transport`'s scripted bytes; verify the `async_handshake` completes with `transport_handshake_failed` on every adversarial input, never crashes, never UAFs the captured pinset snapshot. Cross-doc with `[2g §9 seam #6]` cert-parsing fuzzer. Lives in `tests/fuzz/fuzz_transport_handshake.cpp`.
 
-13. **Reconnect schedule determinism — `ReconnectPolicy::delay_for_attempt`.** Property test with deterministic RNG seeds; verify the schedule formula produces the documented exponential-with-jitter envelope; verify replay against fuzz determinism per `[const §VII.7]` (same seed, same schedule). Pin the `ReconnectPolicy::defaults()` numerics declared in §4.4.1 (`initial_delay = 100 ms`; `max_delay = 30 s`; `multiplier = 2.0`; `max_attempts = 10`; `jitter = 0.10`) as the in-test policy: assert the cumulative wall-clock at `max_attempts = 10` equals 81 100 ms before jitter (matches the §1.1 / §4.4.1 rationale arithmetic) so a future tweak to `defaults()` cannot silently desync the published envelope from this seam (round-2 Codex P3-1 close). Lives in `tests/transport/test_reconnect_policy_schedule.cpp`.
+13. **Reconnect schedule determinism — `ReconnectPolicy::delay_for_attempt`.** Property test with deterministic policy seeds (per Appendix D §D.6 the policy owns the seed source); verify the schedule produces the documented schedule-with-jitter envelope; verify replay against fuzz determinism per `[const §VII.7]` (same `session_id_seed`, same schedule). Pin the `ReconnectPolicy::defaults()` schedule declared in §4.4.1 (`schedule = [100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s, 12.8s, 25.6s, 30s]`; `jitter = 0.10`; `max_attempts = 10`) as the in-test policy: assert the cumulative wall-clock at `max_attempts = 10` equals 81 100 ms before jitter (matches the §1.1 / §4.4.1 rationale arithmetic) so a future tweak to `defaults()` cannot silently desync the published envelope from this seam (round-2 Codex P3-1 close). Also pin `defaults_quickfix_compat()` returns `{[30s], 0.0, 0}` (Appendix D §D.5). Lives in `tests/transport/test_reconnect_policy_schedule.cpp`.
 
 14. **`Listener::async_accept` round-trip (T-005).** Construct an `asio_listener` on `127.0.0.1:0` (OS-picked port); spawn a client `asio_tls_transport` connecting to the listener's bound port; verify the listener mints a fresh `Transport`, the handshake succeeds on both sides, and a Logon round-trip works. Lives in `tests/transport/test_listener_acceptor.cpp`.
 

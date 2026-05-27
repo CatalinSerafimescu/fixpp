@@ -113,3 +113,4 @@ book/
 
 # libFuzzer corpus (regenerated on each fuzz run; not source of truth)
 tests/fuzz/corpus/message_store/
+tests/fuzz/corpus/*

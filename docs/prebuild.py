@@ -175,6 +175,13 @@ def _generate_summary(src_dir: Path, spec_ids: list[str]) -> str:
         "- [Feature catalogue](./feature-catalogue.md)",
     ]
 
+    # Static hand-authored top-level pages under docs/src/ (tracked in git
+    # alongside intro.md; not managed by prebuild.py copy logic).
+    if (src_dir / "tls-quickstart.md").exists():
+        lines.append("- [TLS quickstart](./tls-quickstart.md)")
+    if (src_dir / "transport-quickstart.md").exists():
+        lines.append("- [Transport quickstart](./transport-quickstart.md)")
+
     # Static hand-authored docs under docs/src/dictionary/ (tracked in git,
     # not managed by prebuild.py copy logic).
     dict_dir = src_dir / "dictionary"

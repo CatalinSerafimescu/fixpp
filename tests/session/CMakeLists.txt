@@ -394,6 +394,25 @@ target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOK
 # asserts dispatch_aborted return and LogonSent FSM end-state per 005 design.
 add_threading_test(session_initiator_transport_throw initiator_transport_throw_test.cpp)
 
+# ── T040 (012 US4 seam #6) — Session FSM via mock_transport ─────────────────
+# Compile-time smoke that the public mock_transport test header is consumable
+# from tests/session/ TUs. Full Logon/Heartbeat/Logout cells are DISABLED_
+# pending a session-Phase-4 driver entry point on the Session ABI.
+add_executable(session_fsm_via_mock_transport
+  test_session_fsm_via_mock_transport.cpp
+)
+target_link_libraries(session_fsm_via_mock_transport PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME session_fsm_via_mock_transport
+         COMMAND session_fsm_via_mock_transport)
+set_tests_properties(session_fsm_via_mock_transport PROPERTIES
+  LABELS "session;012;us4;seam6;mock")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
