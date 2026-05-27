@@ -93,18 +93,29 @@ add_test(NAME transport_compid_tls_identity_binding
 set_tests_properties(transport_compid_tls_identity_binding PROPERTIES
   LABELS "transport;012;us1;seam9;tls")
 
-# T017 — [2h §9 seam #15] in-flight exclusivity (Phase 3a error code asserts).
+# T017 — [2h §9 seam #15] in-flight exclusivity (Phase 3a + RC#E runtime cells).
 add_executable(transport_inflight_exclusivity
   test_inflight_exclusivity.cpp)
+target_include_directories(transport_inflight_exclusivity PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+  "${CMAKE_SOURCE_DIR}/tests" # for "transport/loopback_tls_fixture.hpp"
+)
 target_link_libraries(transport_inflight_exclusivity PRIVATE
   fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main
+)
+target_compile_definitions(transport_inflight_exclusivity PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME transport_inflight_exclusivity
          COMMAND transport_inflight_exclusivity)
 set_tests_properties(transport_inflight_exclusivity PROPERTIES
-  LABELS "transport;012;us1;seam15")
+  LABELS "transport;012;us1;seam15;gate-b-witness;rc-e")
 
 # ── T030 — [2h §9 seam #13] ReconnectPolicy schedule + delay_for_attempt ─────
 
@@ -140,7 +151,8 @@ set_tests_properties(transport_backpressure PROPERTIES
 add_executable(transport_listener_acceptor
   test_listener_acceptor.cpp)
 target_include_directories(transport_listener_acceptor PRIVATE
-  "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_listener.hpp"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+  "${CMAKE_SOURCE_DIR}/tests" # for "transport/loopback_tls_fixture.hpp"
 )
 # OpenSSL must be linked explicitly: fixpp_transport uses asio::ssl (which
 # pulls in OpenSSL symbols) but exposes it as PRIVATE, so executables that
@@ -153,6 +165,9 @@ target_link_libraries(transport_listener_acceptor PRIVATE
   "${FIXPP_TRANSPORT_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main
+)
+target_compile_definitions(transport_listener_acceptor PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME transport_listener_acceptor
          COMMAND transport_listener_acceptor)
@@ -201,21 +216,30 @@ add_test(NAME transport_load_credentials_seam13_witness
 set_tests_properties(transport_load_credentials_seam13_witness PROPERTIES
   LABELS "transport;012;gate-b-witness;seam13;tls")
 
-# ── RC#D (gate-b/r1) — truncated-close vs EOF distinct variant witness ────────
+# ── RC#D (gate-b/r1 + r2) — truncated-close vs EOF distinct variant witness ──
 #
 # SC-006: stream_truncated → transport_read_truncated (distinct from transport_read_eof).
 # FR-006 internal contradiction resolved: distinct-named-variant path wins over
 # the "v1.0 treats as eof" parenthetical.
+# gate-b/r2 adds a LIVE loopback witness (drop peer TCP without SSL_shutdown).
 
 add_executable(transport_close_truncated_mapping
   test_close_truncated_mapping.cpp)
+target_include_directories(transport_close_truncated_mapping PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+  "${CMAKE_SOURCE_DIR}/tests" # for "transport/loopback_tls_fixture.hpp"
+)
 target_link_libraries(transport_close_truncated_mapping PRIVATE
   fixpp_transport
+  fixpp_tls
   "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
   "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
   "${FIXPP_TRANSPORT_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main
+)
+target_compile_definitions(transport_close_truncated_mapping PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME transport_close_truncated_mapping
          COMMAND transport_close_truncated_mapping)
