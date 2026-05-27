@@ -37,3 +37,19 @@ set_target_properties(tls_fixs_rotation PROPERTIES
 )
 add_test(NAME tls_fixs_rotation COMMAND tls_fixs_rotation)
 set_tests_properties(tls_fixs_rotation PROPERTIES LABELS "tls;011;conformance")
+
+# ── Phase 3a tests (wired by T029): ──────────────────────────────────────────
+
+# T020 — [2h §9 seam #1] — transport interop conformance corpus TC-001..TC-017.
+# All TC-001..TC-017 cells are DISABLED_ pending the QuickFIX test peer binary
+# (Phase 8 / post-012 interop run per [[project_release_interop_quickfix_fix8]]).
+# The error-code scaffolding cell (TransportInteropScaffolding) runs Phase 3a.
+add_executable(transport_interop_conformance
+  test_transport_interop.cpp)
+target_link_libraries(transport_interop_conformance PRIVATE
+  fixpp_transport  fixpp_tls  fixpp_wire
+  GTest::gtest  GTest::gtest_main)
+add_test(NAME transport_interop_conformance
+         COMMAND transport_interop_conformance)
+set_tests_properties(transport_interop_conformance PROPERTIES
+  LABELS "transport;012;us1;seam1;conformance")

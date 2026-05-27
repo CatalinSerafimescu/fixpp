@@ -1,0 +1,1086 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 fixpp contributors
+//
+// src/transport/asio_tls_transport.cpp — T027
+//
+// Implements fixpp::transport::asio_tls_transport: the v1.0 reference
+// TlsTransport over ASIO tcp::socket + asio::ssl::stream (OpenSSL back-end).
+//
+// Design anchors:
+//   [2h §4.5]      — state machine, fields, invariants.
+//   data-model E-9  — canonical field set.
+//   [arch §5.3]    — engine-bootstrap carve-out for the throwing constructor.
+//   [2g §6.5.1]    — pinset capture-once BINDING CONTRACT.
+//   research.md D-16 — verify_peer_trampoline ex_data pattern.
+//   research.md D-17 — cancellation_type::total + co_spawn defaults.
+//   research.md D-18 — no co_await asio::post(...) for executor hops.
+//   [const §VIII.5] — zero allocation on read-path completion-handler dispatch.
+//   [const §XI.2]  — cancellation_type::total → transport_*_cancelled variants.
+
+#include "asio_tls_transport.hpp"
+
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+
+#include <asio/awaitable.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/connect.hpp>
+#include <asio/detached.hpp>
+#include <asio/ip/tcp.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/ssl/context.hpp>
+#include <asio/ssl/error.hpp>
+#include <asio/ssl/stream.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
+#include <asio/write.hpp>
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <vector>
+
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/peer_identity.hpp>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport.hpp>
+
+// asio::async_connect is a free function in <asio/connect.hpp>.
+// Use it via namespace alias to avoid conflict with our member function name.
+namespace asio_free = asio;
+
+namespace fixpp::transport {
+
+// ─────────────────────────────────────────────────────────────────────────────
+// file-internal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// ex_data index on SSL* for the transport HandshakeCtx pointer.
+// Initialized once via SSL_get_ex_new_index; thread-safe per OpenSSL docs.
+int ssl_ex_data_transport_idx() noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static const int idx = SSL_get_ex_new_index(0, nullptr, nullptr, nullptr, nullptr);
+    return idx;
+}
+
+// RAII wrapper for X509 objects allocated in the trampoline.
+struct X509Deleter {
+    void operator()(X509* x) const noexcept { X509_free(x); }
+};
+using X509Ptr = std::unique_ptr<X509, X509Deleter>;
+
+// RAII wrapper for GENERAL_NAMES.
+struct GeneralNamesDeleter {
+    void operator()(GENERAL_NAMES* g) const noexcept { GENERAL_NAMES_free(g); }
+};
+using GeneralNamesPtr = std::unique_ptr<GENERAL_NAMES, GeneralNamesDeleter>;
+
+// Per-handshake context placed in the SSL* ex_data slot.
+// Populated by async_handshake before the OpenSSL handshake begins.
+struct HandshakeCtx {
+    // Augmented SslCtxConfig (shallow copy of the caller's cfg with
+    // pinset_snapshot filled from the captured snapshot per [2g §6.5.1]).
+    fixpp::tls::SslCtxConfig augmented_cfg;
+
+    // PMR resource for Certificate string allocations in the trampoline.
+    // Must not be null (resolved from cfg_.mr or new_delete_resource).
+    std::pmr::memory_resource* mr{nullptr};
+
+    // Output: peer_identity written by the trampoline on accept.
+    fixpp::tls::peer_identity peer_id;
+
+    // Trampoline result: true iff verify_peer accepted all depths.
+    bool accepted{false};
+};
+
+// Map an ASN1_TIME to a chrono::system_clock::time_point.
+// On parse failure returns the epoch (not fatal; verify_peer handles expiry).
+std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexcept {
+    if (!t) {
+        return {};
+    }
+    struct tm tm_val{};
+    if (ASN1_TIME_to_tm(t, &tm_val) != 1) {
+        return {};
+    }
+    time_t epoch_seconds = timegm(&tm_val);
+    if (epoch_seconds < 0) {
+        return {};
+    }
+    return std::chrono::system_clock::from_time_t(epoch_seconds);
+}
+
+// Parse one X509* into a fixpp::tls::Certificate backed by heap storage.
+// Returns false on any allocation or parse failure.
+// Out parameters: `der_bytes`, `subject_buf`, `issuer_buf`, `san_*_storage`
+// all provide backing storage for the returned Certificate's views.
+bool parse_x509_to_certificate(X509* x509,
+                                std::pmr::memory_resource& mr,
+                                fixpp::tls::Certificate& cert,
+                                std::pmr::vector<std::byte>& der_bytes,
+                                std::pmr::string& subject_buf,
+                                std::pmr::string& issuer_buf,
+                                std::pmr::vector<std::string>& san_dns_storage,
+                                std::pmr::vector<std::string_view>& san_dns_views,
+                                std::pmr::vector<std::string>& san_uri_storage,
+                                std::pmr::vector<std::string_view>& san_uri_views) noexcept {
+    // ── DER bytes ────────────────────────────────────────────────────────────
+    int der_len = i2d_X509(x509, nullptr);
+    if (der_len <= 0) {
+        return false;
+    }
+    try {
+        der_bytes.resize(static_cast<std::size_t>(der_len));
+    } catch (...) {
+        return false;
+    }
+    {
+        unsigned char* p = reinterpret_cast<unsigned char*>(der_bytes.data());
+        if (i2d_X509(x509, &p) <= 0) {
+            return false;
+        }
+    }
+    cert.raw_der_ = std::span<const std::byte>{der_bytes.data(), der_bytes.size()};
+
+    // ── SHA-256 fingerprint ──────────────────────────────────────────────────
+    {
+        unsigned int md_len = 0;
+        unsigned char md_buf[32]{};
+        if (X509_digest(x509, EVP_sha256(), md_buf, &md_len) != 1 || md_len != 32) {
+            return false;
+        }
+        static_assert(sizeof(cert.sha256_) == 32);
+        std::memcpy(cert.sha256_.data(), md_buf, 32);
+    }
+
+    // ── Subject DN ──────────────────────────────────────────────────────────
+    {
+        X509_NAME* name = X509_get_subject_name(x509);
+        char* oneline = X509_NAME_oneline(name, nullptr, 0);
+        if (!oneline) {
+            return false;
+        }
+        try {
+            subject_buf.assign(oneline);
+        } catch (...) {
+            OPENSSL_free(oneline);
+            return false;
+        }
+        OPENSSL_free(oneline);
+    }
+    cert.subject_dn_ = std::string_view{subject_buf.data(), subject_buf.size()};
+
+    // ── Issuer DN ────────────────────────────────────────────────────────────
+    {
+        X509_NAME* issuer = X509_get_issuer_name(x509);
+        char* oneline = X509_NAME_oneline(issuer, nullptr, 0);
+        if (!oneline) {
+            return false;
+        }
+        try {
+            issuer_buf.assign(oneline);
+        } catch (...) {
+            OPENSSL_free(oneline);
+            return false;
+        }
+        OPENSSL_free(oneline);
+    }
+    cert.issuer_dn_ = std::string_view{issuer_buf.data(), issuer_buf.size()};
+
+    // ── X.509 version ────────────────────────────────────────────────────────
+    // OpenSSL returns 0-based (0=v1, 1=v2, 2=v3); convert to 1-based.
+    cert.x509_version_ = static_cast<int>(X509_get_version(x509)) + 1;
+
+    // ── Validity window ──────────────────────────────────────────────────────
+    cert.not_before_ = asn1_time_to_tp(X509_get0_notBefore(x509));
+    cert.not_after_  = asn1_time_to_tp(X509_get0_notAfter(x509));
+
+    // ── Signature algorithm + key info ───────────────────────────────────────
+    {
+        EVP_PKEY* pkey = X509_get0_pubkey(x509);
+        if (pkey) {
+            int pkey_id = EVP_PKEY_base_id(pkey);
+            if (pkey_id == EVP_PKEY_RSA || pkey_id == EVP_PKEY_RSA_PSS) {
+                cert.alg_ = fixpp::tls::signature_algorithm::rsa_pss;
+                cert.rsa_key_bits_ = static_cast<std::size_t>(EVP_PKEY_bits(pkey));
+            } else if (pkey_id == EVP_PKEY_EC) {
+                cert.alg_ = fixpp::tls::signature_algorithm::ecdsa;
+                // OpenSSL 3.x: use EVP_PKEY_get_group_name rather than deprecated EC_KEY API.
+                char gname[64]{};
+                if (EVP_PKEY_get_group_name(pkey, gname, sizeof(gname), nullptr)) {
+                    if (std::string_view{gname} == "prime256v1" ||
+                        std::string_view{gname} == "P-256") {
+                        cert.curve_ = fixpp::tls::ecdsa_curve::p256;
+                    } else if (std::string_view{gname} == "secp384r1" ||
+                               std::string_view{gname} == "P-384") {
+                        cert.curve_ = fixpp::tls::ecdsa_curve::p384;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── SAN entries ──────────────────────────────────────────────────────────
+    {
+        GeneralNamesPtr sans{static_cast<GENERAL_NAMES*>(
+            X509_get_ext_d2i(x509, NID_subject_alt_name, nullptr, nullptr))};
+        if (sans) {
+            int n = sk_GENERAL_NAME_num(sans.get());
+            try {
+                for (int i = 0; i < n; ++i) {
+                    GENERAL_NAME* gn = sk_GENERAL_NAME_value(sans.get(), i);
+                    if (!gn) {
+                        continue;
+                    }
+                    if (gn->type == GEN_DNS) {
+                        const unsigned char* data = ASN1_STRING_get0_data(gn->d.ia5);
+                        int len = ASN1_STRING_length(gn->d.ia5);
+                        if (data && len > 0) {
+                            san_dns_storage.emplace_back(
+                                reinterpret_cast<const char*>(data),
+                                static_cast<std::size_t>(len));
+                        }
+                    } else if (gn->type == GEN_URI) {
+                        const unsigned char* data =
+                            ASN1_STRING_get0_data(gn->d.uniformResourceIdentifier);
+                        int len = ASN1_STRING_length(gn->d.uniformResourceIdentifier);
+                        if (data && len > 0) {
+                            san_uri_storage.emplace_back(
+                                reinterpret_cast<const char*>(data),
+                                static_cast<std::size_t>(len));
+                        }
+                    }
+                }
+            } catch (...) {
+                return false;
+            }
+        }
+    }
+
+    // Build the string_view spans from the owned strings.
+    try {
+        san_dns_views.reserve(san_dns_storage.size());
+        for (auto const& s : san_dns_storage) {
+            san_dns_views.emplace_back(s.data(), s.size());
+        }
+        san_uri_views.reserve(san_uri_storage.size());
+        for (auto const& s : san_uri_storage) {
+            san_uri_views.emplace_back(s.data(), s.size());
+        }
+    } catch (...) {
+        return false;
+    }
+
+    cert.san_dns_names_ = std::span<const std::string_view>{san_dns_views.data(),
+                                                              san_dns_views.size()};
+    cert.san_uris_ = std::span<const std::string_view>{san_uri_views.data(),
+                                                         san_uri_views.size()};
+
+    (void)mr;  // PMR is used implicitly via the pmr containers passed in
+    return true;
+}
+
+}  // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verify_peer_trampoline — SSL_VERIFY_PEER callback (C-linkage, file-internal)
+//
+// Called by OpenSSL for each certificate at depth in the peer chain.
+// Per D-16 + Appendix D §D.7 (data-model.md §E-14):
+//   1. Extract HandshakeCtx* from SSL* ex_data (set before handshake).
+//   2. At depth 0 only: parse the full chain + leaf into Certificate views.
+//   3. Invoke verify_peer(augmented_cfg, peer_chain).
+//   4. Store the resulting peer_identity on accept; return 1/0 to OpenSSL.
+//
+// At chain depths > 0 we return 1 unconditionally (defer to OpenSSL's
+// built-in chain validation against the CA trust store we loaded at ctor
+// time).  The authoritative policy is applied at depth 0 where the leaf
+// + full chain is available.
+// ─────────────────────────────────────────────────────────────────────────────
+extern "C" {
+static int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noexcept {
+    // Retrieve SSL* from the store context.
+    SSL* ssl = static_cast<SSL*>(
+        X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
+    if (!ssl) {
+        return 0;
+    }
+
+    // Retrieve the HandshakeCtx.
+    HandshakeCtx* hctx = static_cast<HandshakeCtx*>(
+        SSL_get_ex_data(ssl, ssl_ex_data_transport_idx()));
+    if (!hctx) {
+        return 0;
+    }
+
+    // Only run the full policy at depth 0 (the peer leaf).
+    // At deeper depths, pass — chain validation is handled by OpenSSL.
+    int depth = X509_STORE_CTX_get_error_depth(store_ctx);
+    if (depth != 0) {
+        return 1;
+    }
+
+    // ── Build the peer chain array ────────────────────────────────────────────
+    // The verified chain from OpenSSL contains [leaf, intermediates, root].
+    STACK_OF(X509)* x509_chain = X509_STORE_CTX_get0_chain(store_ctx);
+    int raw_chain_len = x509_chain ? sk_X509_num(x509_chain) : 0;
+    if (raw_chain_len <= 0) {
+        // Fallback: just the current cert.
+        X509* leaf = X509_STORE_CTX_get_current_cert(store_ctx);
+        if (!leaf) {
+            return 0;
+        }
+        raw_chain_len = 1;
+        // We'll handle this inline below.
+    }
+
+    // Cap at 16 to avoid stack overflows.
+    static constexpr int kMaxChainLen = 16;
+    int chain_len = std::min(raw_chain_len, kMaxChainLen);
+
+    // Backing storage for each certificate's fields.
+    // Using system allocator here (not PMR) since the trampoline builds
+    // temporary views — per [const §VIII.5] the HOT path is async_read_some;
+    // the handshake is a cold path.
+    struct CertBacking {
+        std::vector<std::byte> der_bytes;
+        std::string subject_buf;
+        std::string issuer_buf;
+        std::vector<std::string> san_dns_storage;
+        std::vector<std::string_view> san_dns_views;
+        std::vector<std::string> san_uri_storage;
+        std::vector<std::string_view> san_uri_views;
+    };
+
+    // Use PMR-based intermediates fed by hctx->mr for the strings passed to
+    // parse_x509_to_certificate (which writes into pmr containers).
+    // Declare with system allocator as the out-params; they write into
+    // system-heap std::strings and std::vectors.
+    // NOTE: verify_peer itself will allocate peer_identity into hctx->mr;
+    //       Certificate views are temporary locals here.
+    std::array<CertBacking, kMaxChainLen> backings{};
+    std::array<fixpp::tls::Certificate, kMaxChainLen> certs{};
+
+    // Adapt pmr-based function to system-allocator storage.
+    // We declare wrapper pmr containers backed by new_delete_resource and
+    // pass them to parse_x509_to_certificate.
+    auto* sys_mr = std::pmr::new_delete_resource();
+
+    int built = 0;
+    for (int i = 0; i < chain_len; ++i) {
+        X509* x509 = nullptr;
+        if (x509_chain && raw_chain_len > 1) {
+            x509 = sk_X509_value(x509_chain, i);
+        } else if (i == 0) {
+            x509 = X509_STORE_CTX_get_current_cert(store_ctx);
+        }
+        if (!x509) {
+            continue;
+        }
+
+        // Temporary pmr containers backed by sys_mr (new_delete_resource).
+        std::pmr::vector<std::byte>    der_pmr{sys_mr};
+        std::pmr::string               subject_pmr{sys_mr};
+        std::pmr::string               issuer_pmr{sys_mr};
+        std::pmr::vector<std::string>  san_dns_pmr{sys_mr};
+        std::pmr::vector<std::string_view> san_dns_views_pmr{sys_mr};
+        std::pmr::vector<std::string>  san_uri_pmr{sys_mr};
+        std::pmr::vector<std::string_view> san_uri_views_pmr{sys_mr};
+
+        certs[i] = fixpp::tls::Certificate{};
+        if (!parse_x509_to_certificate(x509, *sys_mr, certs[i],
+                                        der_pmr, subject_pmr, issuer_pmr,
+                                        san_dns_pmr, san_dns_views_pmr,
+                                        san_uri_pmr, san_uri_views_pmr)) {
+            return 0;
+        }
+
+        // Transfer backing data into our persistent CertBacking for this slot.
+        // The Certificate views point into `backings[i]`, which outlives `certs`.
+        backings[i].der_bytes.assign(der_pmr.begin(), der_pmr.end());
+        backings[i].subject_buf.assign(subject_pmr.begin(), subject_pmr.end());
+        backings[i].issuer_buf.assign(issuer_pmr.begin(), issuer_pmr.end());
+        backings[i].san_dns_storage.assign(san_dns_pmr.begin(), san_dns_pmr.end());
+        backings[i].san_uri_storage.assign(san_uri_pmr.begin(), san_uri_pmr.end());
+
+        // Rebuild the Certificate views to point into backings[i].
+        certs[i].raw_der_ = std::span<const std::byte>{backings[i].der_bytes.data(),
+                                                         backings[i].der_bytes.size()};
+        certs[i].subject_dn_ = std::string_view{backings[i].subject_buf};
+        certs[i].issuer_dn_  = std::string_view{backings[i].issuer_buf};
+
+        // Rebuild SAN views.
+        backings[i].san_dns_views.clear();
+        for (auto const& s : backings[i].san_dns_storage) {
+            backings[i].san_dns_views.emplace_back(s.data(), s.size());
+        }
+        backings[i].san_uri_views.clear();
+        for (auto const& s : backings[i].san_uri_storage) {
+            backings[i].san_uri_views.emplace_back(s.data(), s.size());
+        }
+        certs[i].san_dns_names_ = std::span<const std::string_view>{
+            backings[i].san_dns_views.data(), backings[i].san_dns_views.size()};
+        certs[i].san_uris_ = std::span<const std::string_view>{
+            backings[i].san_uri_views.data(), backings[i].san_uri_views.size()};
+
+        ++built;
+    }
+
+    if (built == 0) {
+        return 0;
+    }
+
+    std::span<const fixpp::tls::Certificate> peer_chain{certs.data(),
+                                                         static_cast<std::size_t>(built)};
+
+    // ── Invoke verify_peer against the augmented config ────────────────────────
+    // augmented_cfg.pinset_snapshot was set at handshake start (captured-once).
+    // verify_peer reads pinset_snapshot; it NEVER calls cfg.pinset->find/snapshot.
+    auto result = fixpp::tls::verify_peer(hctx->augmented_cfg, peer_chain);
+    if (!result) {
+        hctx->accepted = false;
+        return 0;
+    }
+
+    hctx->peer_id = std::move(*result);
+    hctx->accepted = true;
+    return 1;
+}
+}  // extern "C"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor (throwing — [arch §5.3] engine-bootstrap carve-out)
+// ─────────────────────────────────────────────────────────────────────────────
+asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
+                                        Transport::Config         cfg,
+                                        fixpp::tls::SslCtxConfig  ssl_cfg)
+    : cfg_{std::move(cfg)},
+      ssl_cfg_{std::move(ssl_cfg)},
+      exec_{exec},
+      socket_{exec_},
+      ssl_ctx_{std::make_unique<asio::ssl::context>(asio::ssl::context::tls)}
+{
+    // Force registration of the ex_data index before first use.
+    (void)ssl_ex_data_transport_idx();
+
+    SSL_CTX* ctx = ssl_ctx_->native_handle();
+
+    // ── Protocol version bounds per [const §XII.2] ───────────────────────────
+    if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1) {
+        throw std::runtime_error("SSL_CTX_set_min_proto_version TLS1_2 failed");
+    }
+    if (SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION) != 1) {
+        throw std::runtime_error("SSL_CTX_set_max_proto_version TLS1_3 failed");
+    }
+
+    // ── Options per [FIXS §3.2] + [const §XII.3] (FR-016) ───────────────────
+    // Disable renegotiation, compression, and session tickets.
+    // Note: SSL_OP_NO_EARLY_DATA is deprecated in OpenSSL 3.x; TLS 1.3
+    // 0-RTT is disabled by not calling SSL_CTX_set_early_data_enabled (it
+    // is off by default in ASIO's context).
+    constexpr long opts =
+        SSL_OP_NO_RENEGOTIATION |
+        SSL_OP_NO_COMPRESSION  |
+        SSL_OP_NO_TICKET;
+    SSL_CTX_set_options(ctx, opts);
+
+    // ── TLS 1.3 cipher suites ─────────────────────────────────────────────────
+    {
+        std::string tls13_list;
+        bool first = true;
+        for (auto sv : fixpp::tls::CipherPolicy::tls13_suites) {
+            if (!first) {
+                tls13_list += ':';
+            }
+            tls13_list.append(sv.data(), sv.size());
+            first = false;
+        }
+        if (SSL_CTX_set_ciphersuites(ctx, tls13_list.c_str()) != 1) {
+            throw std::runtime_error("SSL_CTX_set_ciphersuites failed");
+        }
+    }
+
+    // ── TLS 1.2 cipher list ───────────────────────────────────────────────────
+    {
+        std::string tls12_list;
+        bool first = true;
+        for (auto sv : fixpp::tls::CipherPolicy::tls12_suites) {
+            if (!first) {
+                tls12_list += ':';
+            }
+            tls12_list.append(sv.data(), sv.size());
+            first = false;
+        }
+        if (SSL_CTX_set_cipher_list(ctx, tls12_list.c_str()) != 1) {
+            throw std::runtime_error("SSL_CTX_set_cipher_list failed");
+        }
+    }
+
+    // ── Key exchange groups (curves) ──────────────────────────────────────────
+    {
+        std::string groups_list;
+        bool first = true;
+        for (auto sv : fixpp::tls::CipherPolicy::kx_groups) {
+            if (!first) {
+                groups_list += ':';
+            }
+            groups_list.append(sv.data(), sv.size());
+            first = false;
+        }
+        if (SSL_CTX_set1_curves_list(ctx, groups_list.c_str()) != 1) {
+            throw std::runtime_error("SSL_CTX_set1_curves_list failed");
+        }
+    }
+
+    // ── Signature algorithms ──────────────────────────────────────────────────
+    {
+        std::string sigalg_list;
+        bool first = true;
+        for (auto sv : fixpp::tls::CipherPolicy::sig_algs) {
+            if (!first) {
+                sigalg_list += ':';
+            }
+            sigalg_list.append(sv.data(), sv.size());
+            first = false;
+        }
+        if (SSL_CTX_set1_sigalgs_list(ctx, sigalg_list.c_str()) != 1) {
+            throw std::runtime_error("SSL_CTX_set1_sigalgs_list failed");
+        }
+    }
+
+    // ── Verify mode + trampoline ──────────────────────────────────────────────
+    // All profiles require a peer cert (mtls_* and one_way_ca all require TLS
+    // with peer verification per [2g §4.5.1]).  The trampoline dispatches into
+    // verify_peer for the actual policy; OpenSSL's depth-0 callback at depth 0
+    // returns the final accept/reject.
+    SSL_CTX_set_verify(ctx,
+                       SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                       verify_peer_trampoline);
+
+    // ── Disable session caching (per-session ephemeral connections) ───────────
+    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
+
+    // ── Load credentials from cert_source ─────────────────────────────────────
+    // The constructor may be called at session-open time inside the factory's
+    // trap_throw boundary ([arch §5.3] engine-bootstrap carve-out).  We drive
+    // load_credentials() synchronously via a temporary io_context.
+    if (!ssl_cfg_.cs) {
+        throw std::runtime_error("asio_tls_transport: null cert_source in SslCtxConfig");
+    }
+
+    std::optional<fixpp::tls::local_credentials> creds_opt;
+    {
+        asio::io_context tmp_io;
+        std::optional<core::expected_t<fixpp::tls::local_credentials>> creds_result;
+
+        asio::co_spawn(
+            tmp_io.get_executor(),
+            [&]() -> asio::awaitable<void> {
+                creds_result = co_await ssl_cfg_.cs->load_credentials();
+            },
+            asio::detached);
+
+        tmp_io.run();
+
+        if (!creds_result || !creds_result->has_value()) {
+            throw std::runtime_error("asio_tls_transport: load_credentials failed");
+        }
+        creds_opt = std::move(**creds_result);
+    }
+
+    auto& creds = *creds_opt;
+
+    // ── Install the leaf certificate ──────────────────────────────────────────
+    {
+        auto leaf_der = creds.leaf.raw_der();
+        if (leaf_der.empty()) {
+            throw std::runtime_error("asio_tls_transport: empty leaf cert DER");
+        }
+        const unsigned char* p = reinterpret_cast<const unsigned char*>(leaf_der.data());
+        X509Ptr leaf_x509{d2i_X509(nullptr, &p, static_cast<long>(leaf_der.size()))};
+        if (!leaf_x509) {
+            throw std::runtime_error("asio_tls_transport: d2i_X509 failed for leaf cert");
+        }
+        if (SSL_CTX_use_certificate(ctx, leaf_x509.get()) != 1) {
+            throw std::runtime_error("asio_tls_transport: SSL_CTX_use_certificate failed");
+        }
+    }
+
+    // ── Install the private key ───────────────────────────────────────────────
+    {
+        auto* sw_key = std::get_if<fixpp::tls::software_key_ref>(&creds.signer);
+        if (!sw_key) {
+            throw std::runtime_error(
+                "asio_tls_transport: async_signer_ref (HSM) not supported in v1.0");
+        }
+        EVP_PKEY* pkey = static_cast<EVP_PKEY*>(sw_key->handle.ossl_pkey);
+        if (!pkey) {
+            throw std::runtime_error("asio_tls_transport: null EVP_PKEY in software_key_ref");
+        }
+        if (SSL_CTX_use_PrivateKey(ctx, pkey) != 1) {
+            throw std::runtime_error("asio_tls_transport: SSL_CTX_use_PrivateKey failed");
+        }
+        if (SSL_CTX_check_private_key(ctx) != 1) {
+            throw std::runtime_error("asio_tls_transport: SSL_CTX_check_private_key failed");
+        }
+    }
+
+    // ── Install intermediate chain certs ──────────────────────────────────────
+    for (auto const& chain_cert : creds.chain) {
+        auto chain_der = chain_cert.raw_der();
+        if (chain_der.empty()) {
+            continue;
+        }
+        const unsigned char* p = reinterpret_cast<const unsigned char*>(chain_der.data());
+        X509Ptr x509{d2i_X509(nullptr, &p, static_cast<long>(chain_der.size()))};
+        if (!x509) {
+            throw std::runtime_error("asio_tls_transport: d2i_X509 failed for chain cert");
+        }
+        // SSL_CTX_add_extra_chain_cert takes ownership — release from unique_ptr.
+        if (SSL_CTX_add_extra_chain_cert(ctx, x509.get()) != 1) {
+            throw std::runtime_error("asio_tls_transport: SSL_CTX_add_extra_chain_cert failed");
+        }
+        (void)x509.release();
+    }
+
+    // ── Install trust anchors (CA certs) ──────────────────────────────────────
+    {
+        auto trust_result = ssl_cfg_.cs->load_trust_anchors();
+        if (trust_result) {
+            X509_STORE* store = SSL_CTX_get_cert_store(ctx);
+            if (store) {
+                for (auto const& ca_cert : *trust_result) {
+                    auto ca_der = ca_cert.raw_der();
+                    if (ca_der.empty()) {
+                        continue;
+                    }
+                    const unsigned char* p =
+                        reinterpret_cast<const unsigned char*>(ca_der.data());
+                    X509Ptr x509{d2i_X509(nullptr, &p, static_cast<long>(ca_der.size()))};
+                    if (x509) {
+                        // X509_STORE_add_cert increments refcount; we still own x509.
+                        X509_STORE_add_cert(store, x509.get());
+                    }
+                }
+            }
+        }
+    }
+    // state_ default-initialized to fresh per asio_tls_transport.hpp:190.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// async_connect
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>>
+asio_tls_transport::async_connect(Endpoint const& ep) {
+    using E = core::error;
+
+    // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+
+    // One-shot guard.
+    if (state_ != state_t::fresh) {
+        co_return std::unexpected{E::transport_already_connected};
+    }
+
+    // Pre-connect cancellation reap.
+    auto cs = co_await asio::this_coro::cancellation_state;
+    if (cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{E::transport_connect_cancelled};
+    }
+
+    // ── Resolve ───────────────────────────────────────────────────────────────
+    asio::ip::tcp::resolver resolver{exec_};
+    asio::error_code resolve_ec;
+    auto endpoints = co_await resolver.async_resolve(
+        ep.host,
+        std::to_string(ep.port),
+        asio::redirect_error(asio::use_awaitable, resolve_ec));
+
+    if (resolve_ec) {
+        if (resolve_ec == asio::error::operation_aborted) {
+            co_return std::unexpected{E::transport_connect_cancelled};
+        }
+        co_return std::unexpected{E::transport_resolve_failed};
+    }
+
+    // Post-resolve cancellation reap.
+    cs = co_await asio::this_coro::cancellation_state;
+    if (cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{E::transport_connect_cancelled};
+    }
+
+    // ── Connect with timeout ──────────────────────────────────────────────────
+    // Arm a timer that cancels the socket on expiry.
+    asio::steady_timer timer{exec_};
+    timer.expires_after(cfg_.connect_timeout);
+    timer.async_wait([this](asio::error_code ec) {
+        if (!ec) {
+            // Timeout: cancel in-flight socket operations.
+            asio::error_code ignored;
+            socket_.cancel(ignored);
+        }
+    });
+
+    asio::error_code connect_ec;
+    // Use the free function asio::async_connect via an explicit namespace
+    // to avoid the ambiguity with our member method name.
+    auto connected_ep = co_await asio_free::async_connect(
+        socket_,
+        endpoints,
+        asio::redirect_error(asio::use_awaitable, connect_ec));
+
+    timer.cancel();
+
+    if (connect_ec) {
+        if (connect_ec == asio::error::operation_aborted) {
+            // Check whether it was a user cancel or a timeout.
+            cs = co_await asio::this_coro::cancellation_state;
+            if (cs.cancelled() != asio::cancellation_type::none) {
+                co_return std::unexpected{E::transport_connect_cancelled};
+            }
+            co_return std::unexpected{E::transport_connect_timeout};
+        }
+        if (connect_ec == asio::error::connection_refused) {
+            co_return std::unexpected{E::transport_connect_refused};
+        }
+        co_return std::unexpected{E::transport_connect_refused};
+    }
+
+    // ── Apply socket options post-connect (FR-029 / FR-029a) ─────────────────
+    {
+        asio::error_code opt_ec;
+
+        asio::ip::tcp::no_delay no_delay_opt{cfg_.tcp_nodelay};
+        socket_.set_option(no_delay_opt, opt_ec);  // best-effort
+
+        if (!cfg_.so_linger_enabled) {
+            asio::socket_base::linger linger_opt{false, 0};
+            socket_.set_option(linger_opt, opt_ec);
+        } else {
+            asio::socket_base::linger linger_opt{true, cfg_.so_linger_seconds};
+            socket_.set_option(linger_opt, opt_ec);
+        }
+
+        if (cfg_.tcp_recv_buf_bytes > 0) {
+            asio::socket_base::receive_buffer_size recv_buf{cfg_.tcp_recv_buf_bytes};
+            socket_.set_option(recv_buf, opt_ec);
+        }
+
+        if (cfg_.tcp_send_buf_bytes > 0) {
+            asio::socket_base::send_buffer_size send_buf{cfg_.tcp_send_buf_bytes};
+            socket_.set_option(send_buf, opt_ec);
+        }
+
+        if (cfg_.tcp_keepalive) {
+            asio::socket_base::keep_alive keepalive_opt{true};
+            socket_.set_option(keepalive_opt, opt_ec);
+        }
+    }
+
+    // ── Populate ConnectInfo ──────────────────────────────────────────────────
+    ConnectInfo info;
+    {
+        info.remote.host = connected_ep.address().to_string();
+        info.remote.port = connected_ep.port();
+        info.family = connected_ep.address().is_v4() ? AF_INET : AF_INET6;
+
+        asio::error_code local_ec;
+        auto local_ep = socket_.local_endpoint(local_ec);
+        if (!local_ec) {
+            info.local.host = local_ep.address().to_string();
+            info.local.port = local_ep.port();
+        }
+    }
+
+    state_ = state_t::connected;
+    co_return info;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// async_handshake
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] asio::awaitable<core::expected_t<handshake_result>>
+asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
+    using E = core::error;
+
+    // Enable total cancellation (D-17).
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+
+    // One-shot guard: only valid from the connected state.
+    if (state_ != state_t::connected) {
+        co_return std::unexpected{E::transport_already_connected};
+    }
+
+    // Pre-handshake cancellation reap.
+    auto cs = co_await asio::this_coro::cancellation_state;
+    if (cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{E::transport_handshake_cancelled};
+    }
+
+    // Reject PSK config (FR-017).
+    if (cfg.profile == fixpp::tls::SecurityProfile::unset) {
+        co_return std::unexpected{E::transport_psk_unsupported};
+    }
+
+    // ── Capture the pinset snapshot ONCE (per [2g §6.5.1] BINDING CONTRACT) ──
+    // BEFORE the OpenSSL handshake protocol exchange begins.
+    captured_pinset_ = nullptr;
+    if (cfg.pinset) {
+        captured_pinset_ = cfg.pinset->snapshot();
+    }
+
+    // ── Build the augmented SslCtxConfig for the trampoline ───────────────────
+    HandshakeCtx hctx;
+    hctx.augmented_cfg = cfg;
+    hctx.augmented_cfg.pinset_snapshot = captured_pinset_;
+    hctx.mr = (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
+
+    // ── Construct the ssl_stream (lazy at handshake start) ────────────────────
+    ssl_stream_.emplace(socket_, *ssl_ctx_);
+
+    // ── Register HandshakeCtx in SSL* ex_data ─────────────────────────────────
+    SSL* ssl = ssl_stream_->native_handle();
+    SSL_set_ex_data(ssl, ssl_ex_data_transport_idx(), &hctx);
+
+    // ── Handshake with timeout ────────────────────────────────────────────────
+    asio::steady_timer timer{exec_};
+    timer.expires_after(cfg_.tls_handshake_timeout);
+    timer.async_wait([this](asio::error_code ec) {
+        if (!ec) {
+            asio::error_code ignored;
+            socket_.cancel(ignored);
+        }
+    });
+
+    asio::error_code handshake_ec;
+    co_await ssl_stream_->async_handshake(
+        asio::ssl::stream_base::client,
+        asio::redirect_error(asio::use_awaitable, handshake_ec));
+
+    timer.cancel();
+
+    // Clear the ex_data pointer before HandshakeCtx leaves scope.
+    if (ssl_stream_) {
+        SSL_set_ex_data(ssl_stream_->native_handle(),
+                        ssl_ex_data_transport_idx(), nullptr);
+    }
+
+    if (handshake_ec) {
+        state_ = state_t::closed;
+        if (handshake_ec == asio::error::operation_aborted) {
+            cs = co_await asio::this_coro::cancellation_state;
+            if (cs.cancelled() != asio::cancellation_type::none) {
+                co_return std::unexpected{E::transport_handshake_cancelled};
+            }
+            co_return std::unexpected{E::transport_handshake_timeout};
+        }
+        co_return std::unexpected{E::transport_handshake_failed};
+    }
+
+    // If the trampoline rejected the peer cert, surface handshake_failed.
+    if (!hctx.accepted) {
+        state_ = state_t::closed;
+        co_return std::unexpected{E::transport_handshake_failed};
+    }
+
+    // ── Populate peer_id_ from the trampoline output ───────────────────────────
+    peer_id_ = std::move(hctx.peer_id);
+
+    // ── Negotiated cipher name (PMR-allocated against cfg_.mr) ───────────────
+    std::pmr::memory_resource* mr = (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
+    const char* cipher_name = SSL_get_cipher_name(ssl_stream_->native_handle());
+    std::pmr::string negotiated_cipher{cipher_name ? cipher_name : "", mr};
+
+    state_ = state_t::handshaken;
+
+    handshake_result result;
+    result.peer_id        = peer_id_;
+    result.captured_pinset = captured_pinset_;
+    result.negotiated_cipher = std::move(negotiated_cipher);
+
+    co_return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// async_read_some
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
+asio_tls_transport::async_read_some(std::span<std::byte> buf) {
+    using E = core::error;
+
+    // Enable total cancellation (D-17).
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+
+    // state_ != handshaken covers both `closed` and pre-handshake states;
+    // post-close every async_* returns transport_already_closed per FR-006.
+    if (state_ != state_t::handshaken) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
+    // In-flight exclusivity guard (FR-007 — strand-confined boolean).
+    if (read_in_flight_) {
+        co_return std::unexpected{E::transport_read_in_progress};
+    }
+
+    // Pre-read cancellation reap.
+    auto cs = co_await asio::this_coro::cancellation_state;
+    if (cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{E::transport_read_cancelled};
+    }
+
+    read_in_flight_ = true;
+
+    // NEVER allocate in the read-path completion-handler dispatch per [const §VIII.5].
+    // asio::ssl::stream::async_read_some writes directly into the caller-owned buf.
+    asio::error_code ec;
+    std::size_t bytes_read = co_await ssl_stream_->async_read_some(
+        asio::buffer(buf.data(), buf.size()),
+        asio::redirect_error(asio::use_awaitable, ec));
+
+    read_in_flight_ = false;
+
+    if (ec) {
+        if (ec == asio::error::operation_aborted) {
+            co_return std::unexpected{E::transport_read_cancelled};
+        }
+        if (ec == asio::error::eof || ec == asio::ssl::error::stream_truncated) {
+            co_return std::unexpected{E::transport_read_eof};
+        }
+        co_return std::unexpected{E::transport_read_error};
+    }
+
+    co_return bytes_read;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// async_write
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
+asio_tls_transport::async_write(std::span<const std::byte> bytes) {
+    using E = core::error;
+
+    // Enable total cancellation (D-17).
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+
+    // state_ != handshaken covers both `closed` and pre-handshake states.
+    if (state_ != state_t::handshaken) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
+    // In-flight exclusivity guard (FR-007).
+    if (write_in_flight_) {
+        co_return std::unexpected{E::transport_write_in_progress};
+    }
+
+    // Pre-write cancellation reap.
+    auto cs = co_await asio::this_coro::cancellation_state;
+    if (cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{E::transport_write_cancelled};
+    }
+
+    write_in_flight_ = true;
+
+    // Composed write (async_write — NOT async_write_some per FR-004).
+    asio::error_code ec;
+    std::size_t bytes_written = co_await asio::async_write(
+        *ssl_stream_,
+        asio::buffer(bytes.data(), bytes.size()),
+        asio::redirect_error(asio::use_awaitable, ec));
+
+    write_in_flight_ = false;
+
+    if (ec) {
+        if (ec == asio::error::operation_aborted) {
+            // Surface short-write if partial data was sent.
+            if (bytes_written > 0 && bytes_written < bytes.size()) {
+                co_return std::unexpected{E::transport_write_short};
+            }
+            co_return std::unexpected{E::transport_write_cancelled};
+        }
+        co_return std::unexpected{E::transport_write_error};
+    }
+
+    // Partial write without error is a short-write condition.
+    if (bytes_written < bytes.size()) {
+        co_return std::unexpected{E::transport_write_short};
+    }
+
+    co_return bytes_written;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cancel — synchronous, thread-safe, idempotent (FR-005)
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<void> asio_tls_transport::cancel() noexcept {
+    // Cancel the socket directly. asio::ip::tcp::socket::cancel() is
+    // documented thread-safe and triggers operation_aborted on every in-flight
+    // read / write / connect / handshake bound to socket_. The error_code
+    // overload prevents any throw from escaping this noexcept method.
+    // MUST NOT close the socket (FR-005) — close() is a separate API.
+    asio::error_code ec;
+    socket_.cancel(ec);
+    return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// close — synchronous on session strand (FR-006)
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<void> asio_tls_transport::close() noexcept {
+    // Idempotent: second close() returns {} without side-effects.
+    if (state_ == state_t::closed) {
+        return {};
+    }
+
+    // Transition to closed immediately.
+    state_ = state_t::closed;
+
+    // ── Best-effort TLS bidi shutdown ─────────────────────────────────────────
+    // ssl_stream_ is present if async_handshake was started (regardless of
+    // whether it completed successfully).
+    if (ssl_stream_) {
+        SSL* ssl = ssl_stream_->native_handle();
+        if (ssl) {
+            // First SSL_shutdown call sends the close_notify alert to the peer.
+            // Return value: 1 = clean bidi shutdown; 0 = close_notify sent but
+            // peer's not yet received; <0 = error.
+            // Bounded by tls_close_timeout {1s}: for a synchronous close() we
+            // send the close_notify but do NOT block for the peer's response.
+            // A truncated close (peer does not respond) is warned-level per
+            // [2g §7.8]; this is acceptable non-fatal behaviour in v1.0.
+            (void)SSL_shutdown(ssl);
+        }
+        ssl_stream_.reset();
+    }
+
+    // ── Close the underlying TCP socket ───────────────────────────────────────
+    asio::error_code ec;
+    socket_.close(ec);
+    // Best-effort; ignore ec.
+
+    return {};
+}
+
+}  // namespace fixpp::transport

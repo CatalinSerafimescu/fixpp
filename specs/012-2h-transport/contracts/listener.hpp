@@ -37,7 +37,7 @@
 #include <memory>
 #include <memory_resource>
 
-#include <fixpp/core/expected.hpp>
+#include <fixpp/core/error.hpp>   // defines core::expected_t<T>
 #include <fixpp/tls/security_profile.hpp>   // [2g §4.5] SslCtxConfig (LOCKED)
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport.hpp>

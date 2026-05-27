@@ -29,7 +29,7 @@
 #include <memory>
 #include <memory_resource>
 
-#include <fixpp/core/error.hpp>   // defines core::expected_t<T>
+#include <fixpp/core/error.hpp>             // defines core::expected_t<T>
 #include <fixpp/tls/security_profile.hpp>   // [2g §4.5] SslCtxConfig (LOCKED)
 #include <fixpp/transport/transport.hpp>
 
@@ -74,9 +74,16 @@ public:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // asio_tls_transport_factory — default factory wrapping the asio_tls_transport
-// reference impl. Caches the SslCtxConfig (and OpenSSL SSL_CTX* inside it) at
-// factory level per FR-026 — long-lived state shared across reconnect attempts
-// is cached HERE, NOT re-built per attempt.
+// reference impl.
+//
+// FR-026 long-lived caching contract: the SslCtxConfig (carrying the
+// OpenSSL SSL_CTX*), the engine PMR root, and the engine clock are SHARED
+// across all reconnect attempts and MUST NOT be rebuilt per attempt. In this
+// impl, the factory caches `Transport::Config` (socket knobs) at construction;
+// `SslCtxConfig` flows through `make(...)` per call, but the session-open
+// sequencer holds it by value for the session lifetime and passes the SAME
+// instance on every reconnect attempt — its underlying `SSL_CTX*` is therefore
+// also long-lived. The factory itself never rebuilds the SSL_CTX.
 //
 // Signature only; body lives in src/transport/transport_factory.cpp.
 // ─────────────────────────────────────────────────────────────────────────────

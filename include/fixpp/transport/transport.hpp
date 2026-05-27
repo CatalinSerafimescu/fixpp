@@ -20,7 +20,7 @@
 #include <memory_resource>
 #include <span>
 
-#include <fixpp/core/error.hpp>   // defines core::expected_t<T>
+#include <fixpp/core/error.hpp>        // defines core::expected_t<T>
 #include <fixpp/transport/endpoint.hpp>
 
 namespace fixpp::transport {

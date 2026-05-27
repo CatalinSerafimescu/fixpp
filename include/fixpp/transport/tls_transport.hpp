@@ -17,7 +17,7 @@
 #include <memory_resource>
 #include <string>
 
-#include <fixpp/core/error.hpp>   // defines core::expected_t<T>
+#include <fixpp/core/error.hpp>             // defines core::expected_t<T>
 #include <fixpp/tls/peer_identity.hpp>      // [2g §4.5] peer_identity (LOCKED)
 #include <fixpp/tls/pinset.hpp>             // [2g §4.3] pin_snapshot (LOCKED)
 #include <fixpp/tls/security_profile.hpp>   // [2g §4.5] SslCtxConfig (LOCKED)
