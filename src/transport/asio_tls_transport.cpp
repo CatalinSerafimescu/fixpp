@@ -1058,8 +1058,15 @@ asio_tls_transport::async_read_some(std::span<std::byte> buf) {
         if (ec == asio::error::operation_aborted) {
             co_return std::unexpected{E::transport_read_cancelled};
         }
-        if (ec == asio::error::eof || ec == asio::ssl::error::stream_truncated) {
+        if (ec == asio::error::eof) {
             co_return std::unexpected{E::transport_read_eof};
+        }
+        // RC#D (P2-1): stream_truncated (peer dropped TCP without SSL close-notify)
+        // surfaces as the DISTINCT transport_read_truncated variant per SC-006.
+        // FR-006 had an internal contradiction ("surfaces as truncated" vs "v1.0
+        // treats as eof"); SC-006 (distinct named variant per failure mode) wins.
+        if (ec == asio::ssl::error::stream_truncated) {
+            co_return std::unexpected{E::transport_read_truncated};
         }
         co_return std::unexpected{E::transport_read_error};
     }

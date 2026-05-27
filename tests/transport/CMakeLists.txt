@@ -201,6 +201,27 @@ add_test(NAME transport_load_credentials_seam13_witness
 set_tests_properties(transport_load_credentials_seam13_witness PROPERTIES
   LABELS "transport;012;gate-b-witness;seam13;tls")
 
+# ── RC#D (gate-b/r1) — truncated-close vs EOF distinct variant witness ────────
+#
+# SC-006: stream_truncated → transport_read_truncated (distinct from transport_read_eof).
+# FR-006 internal contradiction resolved: distinct-named-variant path wins over
+# the "v1.0 treats as eof" parenthetical.
+
+add_executable(transport_close_truncated_mapping
+  test_close_truncated_mapping.cpp)
+target_link_libraries(transport_close_truncated_mapping PRIVATE
+  fixpp_transport
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_close_truncated_mapping
+         COMMAND transport_close_truncated_mapping)
+set_tests_properties(transport_close_truncated_mapping PROPERTIES
+  LABELS "transport;012;gate-b-witness;rc-d;sc006")
+
 # ── RC#C (gate-b/r1) — verify_peer noexcept PMR OOM boundary witness ──────────
 #
 # Tests that verify_peer(noexcept) does NOT propagate std::bad_alloc when the PMR
