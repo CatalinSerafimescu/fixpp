@@ -174,6 +174,16 @@ public:
 
     [[nodiscard]] asio::awaitable<expected_t<local_credentials>>
     load_credentials() override {
+        // RC#F (P2-3): D-17 reset per .specify/2d-threading.md §6.5 recipe step 0.
+        // Production file_cert_source::load_credentials begins with this reset;
+        // the stub must replicate it so the seam #13 witness exercises the same
+        // D-17 cancellable_dispatch recipe path as production code.
+        // Without this reset, co_spawn defaults to terminal-only cancellation
+        // per [[feedback_asio_cospawn_total_cancellation_default]], silently
+        // filtering cancellation_type::total and making Cases 2-4 non-representative.
+        co_await asio::this_coro::reset_cancellation_state(
+            asio::enable_total_cancellation());
+
         // Step 4: post work via cancellable_dispatch per [2g §6.4].
         // Uses dispatch_slot (a fresh slot independent of co_spawn machinery).
         auto dispatched = co_await cancellable_dispatch(
