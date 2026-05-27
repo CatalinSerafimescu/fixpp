@@ -38,7 +38,9 @@
 #include <system_error>
 #include <utility>
 
-#include "asio_tls_transport.hpp"  // make_accepted_asio_tls_transport
+#include <fixpp/transport/transport_factory.hpp>
+
+#include "asio_tls_transport.hpp"
 
 namespace fixpp::transport {
 
@@ -164,18 +166,21 @@ asio_listener::async_accept() {
 
     // Mint a fresh Transport adopting the accepted socket (FR-024).
     // PMR comes from cfg_.accepted_transport_config.mr (engine default if null).
-    auto minted = make_accepted_asio_tls_transport(
-        exec_,
-        cfg_.accepted_transport_config,
-        cfg_.ssl_cfg,
-        std::move(accepted_socket),
-        /*mr=*/nullptr);  // factory respects cfg.mr if non-null
+    if (!accept_factory_) {
+        auto made = make_asio_tls_transport_factory(cfg_.accepted_transport_config, cfg_.ssl_cfg);
+        if (!made.has_value()) {
+            co_return std::unexpected{E::transport_factory_failed};
+        }
+        accept_factory_ = std::shared_ptr<asio_tls_transport_factory>{
+            static_cast<asio_tls_transport_factory*>(made->release())};
+    }
+    auto minted = accept_factory_->make_accepted(std::move(accepted_socket), nullptr);
 
     if (!minted) {
         co_return std::unexpected{minted.error()};
     }
 
-    co_return std::move(*minted);
+    co_return std::unique_ptr<Transport>(std::move(*minted));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

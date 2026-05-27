@@ -117,28 +117,22 @@ make_asio_tls_transport(asio::any_io_executor      exec,
 // ─────────────────────────────────────────────────────────────────────────────
 // make_accepted_asio_tls_transport — noexcept free function
 //
-// US3 / FR-024 mint path for asio_listener::async_accept. Adopts an
-// already-connected TCP socket via the asio_tls_transport accept-adoption
-// ctor and returns a fresh Transport in state_t::connected. The session FSM
-// (or test) calls async_handshake on the result to drive the TLS handshake.
+// US3 / FR-024 mint path for tests still wiring the legacy accept-adoption
+// seam directly. Production callers use asio_tls_transport_factory::make_accepted().
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
 make_accepted_asio_tls_transport(asio::any_io_executor      exec,
-                                  Transport::Config           cfg,
-                                  fixpp::tls::SslCtxConfig    ssl_cfg,
-                                  asio::ip::tcp::socket       accepted_socket,
-                                  std::pmr::memory_resource*  mr) noexcept
+                                 Transport::Config          cfg,
+                                 fixpp::tls::SslCtxConfig   ssl_cfg,
+                                 asio::ip::tcp::socket      accepted_socket,
+                                 std::pmr::memory_resource* mr) noexcept
 {
     if (mr != nullptr) {
         cfg.mr = mr;
     }
-
     try {
         auto ptr = std::make_unique<asio_tls_transport>(
-            std::move(exec),
-            std::move(cfg),
-            std::move(ssl_cfg),
-            std::move(accepted_socket));
+            std::move(exec), std::move(cfg), std::move(ssl_cfg), std::move(accepted_socket));
         return std::unique_ptr<Transport>(std::move(ptr));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
@@ -157,9 +151,11 @@ make_accepted_asio_tls_transport(asio::any_io_executor      exec,
 // make_asio_tls_transport_factory() instead.
 // ─────────────────────────────────────────────────────────────────────────────
 asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag,
-                                                         Transport::Config cfg,
-                                                         std::shared_ptr<void> ctx) noexcept
+                                                       Transport::Config cfg,
+                                                       fixpp::tls::SslCtxConfig ssl_cfg,
+                                                       std::shared_ptr<void> ctx) noexcept
     : cfg_{std::move(cfg)},
+      ssl_cfg_{std::move(ssl_cfg)},
       ssl_ctx_{std::move(ctx)}
 {}
 
@@ -198,6 +194,33 @@ asio_tls_transport_factory::make(asio::any_io_executor     exec,
             std::move(ssl_cfg),
             std::move(typed_ctx));  // shared_ptr — safe; asio::ssl::stream refs SSL_CTX
         return std::unique_ptr<Transport>(std::move(ptr));
+    } catch (std::bad_alloc const&) {
+        return std::unexpected{core::error::transport_factory_failed};
+    } catch (std::system_error const&) {
+        return std::unexpected{core::error::transport_factory_failed};
+    } catch (...) {
+        return std::unexpected{core::error::transport_factory_failed};
+    }
+}
+
+[[nodiscard]] core::expected_t<std::unique_ptr<asio_tls_transport>>
+asio_tls_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socket,
+                                          std::pmr::memory_resource* mr) noexcept
+{
+    Transport::Config cfg = cfg_;
+    if (mr != nullptr) {
+        cfg.mr = mr;
+    }
+    auto typed_ctx = std::shared_ptr<asio::ssl::context>{
+        ssl_ctx_, static_cast<asio::ssl::context*>(ssl_ctx_.get())};
+    try {
+        return std::make_unique<asio_tls_transport>(
+            asio_tls_transport::from_factory_tag{},
+            accepted_socket.get_executor(),
+            std::move(cfg),
+            ssl_cfg_,
+            std::move(typed_ctx),
+            std::move(accepted_socket));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
     } catch (std::system_error const&) {
@@ -430,6 +453,7 @@ make_asio_tls_transport_factory(Transport::Config         cfg,
         auto factory = std::make_unique<asio_tls_transport_factory>(
             asio_tls_transport_factory::shared_ctx_tag{},
             std::move(cfg),
+            std::move(ssl_cfg),
             std::move(ctx_void));
         return std::unique_ptr<TransportFactory>(std::move(factory));
     } catch (std::bad_alloc const&) {

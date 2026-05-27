@@ -26,6 +26,7 @@
 #pragma once
 
 #include <asio/any_io_executor.hpp>
+#include <asio/ip/tcp.hpp>
 #include <memory>
 #include <memory_resource>
 
@@ -34,6 +35,8 @@
 #include <fixpp/transport/transport.hpp>
 
 namespace fixpp::transport {
+
+class asio_tls_transport;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TransportFactory — abstract pluggable factory.
@@ -113,16 +116,22 @@ public:
     // The actual type is asio::ssl::context*; the factory's make() casts it back.
     struct shared_ctx_tag {};
     asio_tls_transport_factory(shared_ctx_tag,
-                                Transport::Config    cfg,
-                                std::shared_ptr<void> ctx) noexcept;
+                               Transport::Config cfg,
+                               fixpp::tls::SslCtxConfig ssl_cfg,
+                               std::shared_ptr<void> ctx) noexcept;
 
     [[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
         make(asio::any_io_executor             exec,
              fixpp::tls::SslCtxConfig          ssl_cfg,
              std::pmr::memory_resource*        mr) noexcept override;
 
+    [[nodiscard]] core::expected_t<std::unique_ptr<asio_tls_transport>>
+        make_accepted(asio::ip::tcp::socket accepted_socket,
+                      std::pmr::memory_resource* mr) noexcept;
+
 private:
     Transport::Config     cfg_;
+    fixpp::tls::SslCtxConfig ssl_cfg_;
     std::shared_ptr<void> ssl_ctx_;  // actually asio::ssl::context*; type-erased in header
 };
 

@@ -36,10 +36,12 @@
 #include <thread>
 
 #include <fixpp/core/error.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -50,6 +52,20 @@ using namespace std::chrono_literals;
 using fixpp::core::error;
 using fixpp::transport::Endpoint;
 using fixpp::transport::asio_listener;
+
+class counting_cert_source final : public fixpp::tls::cert_source {
+public:
+    explicit counting_cert_source(std::shared_ptr<fixpp::tls::cert_source> inner) : inner_{std::move(inner)} {}
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>> load_credentials() override {
+        ++calls_;
+        co_return co_await inner_->load_credentials();
+    }
+    [[nodiscard]] fixpp::core::expected_t<std::span<const fixpp::tls::Certificate>> load_trust_anchors() [[clang::lifetimebound]] override { return inner_->load_trust_anchors(); }
+    [[nodiscard]] int calls() const noexcept { return calls_.load(); }
+private:
+    std::shared_ptr<fixpp::tls::cert_source> inner_;
+    std::atomic<int> calls_{0};
+};
 
 // ── Stub SslCtxConfig for cells that don't exercise the mint path ───────────
 // asio_listener's ctor + cancel + acceptor-side accept surface do NOT touch
@@ -457,4 +473,40 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     EXPECT_NE(write_result.error_or(error::transport_read_eof),
               error::transport_accept_cancelled)
         << "listener cancel() must NOT affect already-resumed Transport";
+}
+
+TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    namespace tls = fixpp::tls;
+    using fixpp::core::expected_t;
+    tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.pem";
+    cs_cfg.private_key_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.key";
+    cs_cfg.ca_bundle_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/ca.pem";
+    auto server_inner = tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
+    auto client_cs = tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
+    ASSERT_TRUE(server_inner.has_value() && client_cs.has_value());
+    auto server_cs = std::make_shared<counting_cert_source>(std::move(*server_inner));
+    tls::SslCtxConfig server_ssl_cfg; server_ssl_cfg.profile = tls::SecurityProfile::mtls_ca; server_ssl_cfg.cs = server_cs;
+    tls::SslCtxConfig client_ssl_cfg; client_ssl_cfg.profile = tls::SecurityProfile::mtls_ca; client_ssl_cfg.cs = std::move(*client_cs);
+    auto client_factory = fixpp::transport::make_asio_tls_transport_factory({}, client_ssl_cfg);
+    ASSERT_TRUE(client_factory.has_value());
+    asio::io_context ioc;
+    asio_listener::Config cfg; cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, 16}; cfg.ssl_cfg = server_ssl_cfg;
+    asio_listener listener{ioc.get_executor(), std::move(cfg)};
+    ASSERT_EQ(server_cs->calls(), 0);
+    for (int i = 0; i != 3; ++i) {
+        expected_t<std::unique_ptr<fixpp::transport::Transport>> accepted = std::unexpected{error::transport_accept_cancelled};
+        expected_t<fixpp::transport::handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled}, client_hs = std::unexpected{error::transport_handshake_cancelled};
+        asio::co_spawn(ioc.get_executor(), [&]() -> asio::awaitable<void> { accepted = co_await listener.async_accept(); if (accepted) server_hs = co_await dynamic_cast<fixpp::transport::TlsTransport*>(accepted->get())->async_handshake(server_ssl_cfg); }, asio::detached);
+        auto client = (*client_factory)->make(ioc.get_executor(), client_ssl_cfg, nullptr); ASSERT_TRUE(client.has_value());
+        auto* client_tls = dynamic_cast<fixpp::transport::TlsTransport*>(client->get()); ASSERT_NE(client_tls, nullptr);
+        asio::co_spawn(ioc.get_executor(), [&, client = std::move(*client), client_tls]() mutable -> asio::awaitable<void> { auto conn = co_await client->async_connect(Endpoint{"127.0.0.1", listener.bound_endpoint().port, 0}); if (conn) client_hs = co_await client_tls->async_handshake(client_ssl_cfg); }, asio::detached);
+        ioc.run_for(std::chrono::seconds{10});
+        ioc.restart();
+        ASSERT_TRUE(accepted.has_value());
+        EXPECT_TRUE(server_hs.has_value());
+        EXPECT_TRUE(client_hs.has_value());
+        EXPECT_EQ(server_cs->calls(), 1);
+    }
 }

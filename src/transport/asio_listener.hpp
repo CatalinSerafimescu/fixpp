@@ -54,6 +54,8 @@
 
 namespace fixpp::transport {
 
+class asio_tls_transport_factory;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // asio_listener — concrete Listener wrapping asio::ip::tcp::acceptor.
 //
@@ -124,9 +126,10 @@ public:
     [[nodiscard]] Endpoint bound_endpoint() const noexcept { return cfg_.bind_endpoint; }
 
 private:
-    Config                     cfg_;
-    asio::any_io_executor      exec_;
-    asio::ip::tcp::acceptor    acceptor_;
+    Config                                        cfg_;
+    asio::any_io_executor                         exec_;
+    asio::ip::tcp::acceptor                       acceptor_;
+    std::shared_ptr<asio_tls_transport_factory>  accept_factory_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

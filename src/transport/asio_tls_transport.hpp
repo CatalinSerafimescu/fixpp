@@ -319,9 +319,9 @@ make_asio_tls_transport(asio::any_io_executor      exec,
 // mint helper.
 [[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
 make_accepted_asio_tls_transport(asio::any_io_executor      exec,
-                                  Transport::Config           cfg,
-                                  fixpp::tls::SslCtxConfig    ssl_cfg,
-                                  asio::ip::tcp::socket       accepted_socket,
-                                  std::pmr::memory_resource*  mr) noexcept;
+                                 Transport::Config          cfg,
+                                 fixpp::tls::SslCtxConfig   ssl_cfg,
+                                 asio::ip::tcp::socket      accepted_socket,
+                                 std::pmr::memory_resource* mr) noexcept;
 
 }  // namespace fixpp::transport
