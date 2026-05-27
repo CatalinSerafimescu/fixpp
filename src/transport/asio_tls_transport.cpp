@@ -320,7 +320,10 @@ bool parse_x509_to_certificate(X509* x509,
 // + full chain is available.
 // ─────────────────────────────────────────────────────────────────────────────
 extern "C" {
-static int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noexcept {
+// verify_peer_trampoline — NOT static: transport_factory.cpp registers it on
+// the factory-built SSL_CTX via a forward declaration. The extern "C" linkage
+// ensures the function pointer is compatible with the OpenSSL C-ABI.
+int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noexcept {
     // RC#C (P1-3): wrap entire body in try/catch(bad_alloc) so that any heap or
     // PMR exhaustion during cert parsing or peer_identity construction does NOT
     // escape the noexcept boundary (which would terminate the process via
@@ -503,6 +506,10 @@ static int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ct
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor (throwing — [arch §5.3] engine-bootstrap carve-out)
+//
+// Builds its own asio::ssl::context from ssl_cfg_ fields. Used when no
+// pre-built context is available (tests, standalone usage, legacy callers).
+// For production use via the factory, use the from_factory_tag ctor instead.
 // ─────────────────────────────────────────────────────────────────────────────
 asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
                                         Transport::Config         cfg,
@@ -511,10 +518,54 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{exec_},
-      ssl_ctx_{std::make_unique<asio::ssl::context>(asio::ssl::context::tls)}
+      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)}
 {
     setup_ssl_ctx_();
     // state_ default-initialized to fresh per asio_tls_transport.hpp.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Factory-path constructor (FR-026 shared-context path — initiator).
+//
+// Takes the pre-built shared context from asio_tls_transport_factory::make().
+// Does NOT call setup_ssl_ctx_() — the context is already configured.
+// ─────────────────────────────────────────────────────────────────────────────
+asio_tls_transport::asio_tls_transport(from_factory_tag,
+                                        asio::any_io_executor               exec,
+                                        Transport::Config                   cfg,
+                                        fixpp::tls::SslCtxConfig            ssl_cfg,
+                                        std::shared_ptr<asio::ssl::context> shared_ctx)
+    : cfg_{std::move(cfg)},
+      ssl_cfg_{std::move(ssl_cfg)},
+      exec_{exec},
+      socket_{exec_},
+      ssl_ctx_{std::move(shared_ctx)}
+{
+    // ssl_ctx_ already configured by the factory; no setup_ssl_ctx_() call.
+    // state_ default-initialized to fresh; role_ default-initialized to client.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Factory-path accept-adoption constructor (FR-026 + US3 combined).
+//
+// Adopts an already-connected TCP socket + uses the factory's shared context.
+// Sets state_ = connected + role_ = server (TLS server mode).
+// ─────────────────────────────────────────────────────────────────────────────
+asio_tls_transport::asio_tls_transport(from_factory_tag,
+                                        asio::any_io_executor               exec,
+                                        Transport::Config                   cfg,
+                                        fixpp::tls::SslCtxConfig            ssl_cfg,
+                                        std::shared_ptr<asio::ssl::context> shared_ctx,
+                                        asio::ip::tcp::socket               accepted_socket)
+    : cfg_{std::move(cfg)},
+      ssl_cfg_{std::move(ssl_cfg)},
+      exec_{exec},
+      socket_{std::move(accepted_socket)},
+      ssl_ctx_{std::move(shared_ctx)}
+{
+    apply_socket_options_();
+    state_ = state_t::connected;
+    role_  = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -538,7 +589,7 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor      exec,
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{std::move(accepted_socket)},
-      ssl_ctx_{std::make_unique<asio::ssl::context>(asio::ssl::context::tls)}
+      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)}
 {
     setup_ssl_ctx_();
     apply_socket_options_();

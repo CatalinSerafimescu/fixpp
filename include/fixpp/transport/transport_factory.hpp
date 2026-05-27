@@ -76,20 +76,45 @@ public:
 // asio_tls_transport_factory — default factory wrapping the asio_tls_transport
 // reference impl.
 //
-// FR-026 long-lived caching contract: the SslCtxConfig (carrying the
-// OpenSSL SSL_CTX*), the engine PMR root, and the engine clock are SHARED
-// across all reconnect attempts and MUST NOT be rebuilt per attempt. In this
-// impl, the factory caches `Transport::Config` (socket knobs) at construction;
-// `SslCtxConfig` flows through `make(...)` per call, but the session-open
-// sequencer holds it by value for the session lifetime and passes the SAME
-// instance on every reconnect attempt — its underlying `SSL_CTX*` is therefore
-// also long-lived. The factory itself never rebuilds the SSL_CTX.
+// FR-026 long-lived caching contract: the factory builds the asio::ssl::context
+// (SSL_CTX) ONCE at factory construction, then shares it across every
+// asio_tls_transport instance minted by make(). Sharing is safe because
+// asio::ssl::stream<> holds the SSL_CTX by reference (reference-counted
+// internally by OpenSSL via SSL_CTX_up_ref). The per-attempt mint cost is
+// therefore Transport-only construction — NOT a full SSL_CTX rebuild.
+//
+// cert_source::load_credentials() is also called ONCE at factory construction
+// to resolve the local_credentials (leaf cert + private key). The resolved
+// credentials are installed into the cached SSL_CTX immediately; subsequent
+// reconnect attempts share the same SSL_CTX without reloading credentials.
+//
+// NOTE: mid-session cert rotation via a future 2j `ReloadCertSource` mechanism
+// will require minting a NEW factory (or replacing ssl_ctx_ + credentials_).
+// That is out of 012 scope per [[project_2e_recovery_v1_upgrade_obligation]]
+// parallel pattern.
+//
+// NOTE: both the initiator ctor and the accept-adoption ctor share the single
+// cached SSL_CTX from this factory. A future per-connection SslCtxConfig
+// override path is not supported by 012; document this deferral here.
+//
+// Factory construction is NOT noexcept — it runs cert loading synchronously and
+// may fail if cert_source::load_credentials() fails. Use the noexcept factory
+// function make_asio_tls_transport_factory() for safe construction.
 //
 // Signature only; body lives in src/transport/transport_factory.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
 class asio_tls_transport_factory final : public TransportFactory {
 public:
-    explicit asio_tls_transport_factory(Transport::Config c = {}) noexcept;
+    // Internal constructor — takes the pre-built shared context + transport config.
+    // Called by make_asio_tls_transport_factory(). NOT for direct use.
+    // The shared context is type-erased as shared_ptr<void> to avoid pulling
+    // <asio/ssl/context.hpp> into this public header (which would require every
+    // test executable to link OpenSSL even if it never constructs a factory).
+    // The actual type is asio::ssl::context*; the factory's make() casts it back.
+    struct shared_ctx_tag {};
+    asio_tls_transport_factory(shared_ctx_tag,
+                                Transport::Config    cfg,
+                                std::shared_ptr<void> ctx) noexcept;
 
     [[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
         make(asio::any_io_executor             exec,
@@ -97,8 +122,26 @@ public:
              std::pmr::memory_resource*        mr) noexcept override;
 
 private:
-    Transport::Config cfg_;
+    Transport::Config     cfg_;
+    std::shared_ptr<void> ssl_ctx_;  // actually asio::ssl::context*; type-erased in header
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// make_asio_tls_transport_factory — noexcept factory function.
+//
+// Builds the SSL_CTX and loads credentials ONCE via ssl_cfg. Returns an
+// expected_t<unique_ptr<TransportFactory>> so callers can handle cert-load
+// failures without exceptions.
+//
+// On success: the returned factory's make() mints fresh Transport instances
+// sharing the pre-built SSL_CTX (FR-026 caching contract).
+// On failure: returns transport_factory_failed.
+//
+// Body lives in src/transport/transport_factory.cpp.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
+make_asio_tls_transport_factory(Transport::Config         cfg,
+                                 fixpp::tls::SslCtxConfig  ssl_cfg) noexcept;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SessionConfig::transport_factory_override field shape (Appendix D §D.2 —

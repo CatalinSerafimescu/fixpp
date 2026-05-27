@@ -125,7 +125,27 @@ public:
                                 Transport::Config          cfg,
                                 fixpp::tls::SslCtxConfig   ssl_cfg);
 
-    // Accept-adoption constructor (US3 — asio_listener mint path per FR-024).
+    // ── Factory-path constructor (FR-026 shared-context path) ──────────────
+    //
+    // Called by asio_tls_transport_factory::make() when the factory holds a
+    // pre-built asio::ssl::context. The shared context was built ONCE at
+    // factory construction (setup_ssl_ctx_() equivalent ran there) and is
+    // referenced here without rebuilding. This ctor DOES NOT call setup_ssl_ctx_().
+    //
+    // ssl_cfg is forwarded for handshake-time fields (pinset, mr, profile,
+    // caps) — the crypto configuration (ciphers, key material) is already
+    // baked into shared_ctx.
+    //
+    // May throw on socket initialisation failure (ENOMEM from socket(2)).
+    // Wrapped in trap_throw by the factory's make().
+    struct from_factory_tag {};
+    asio_tls_transport(from_factory_tag,
+                       asio::any_io_executor                 exec,
+                       Transport::Config                     cfg,
+                       fixpp::tls::SslCtxConfig              ssl_cfg,
+                       std::shared_ptr<asio::ssl::context>   shared_ctx);
+
+    // ── Accept-adoption constructor (US3 — asio_listener mint path per FR-024) ─
     //
     // Adopts an already-connected TCP socket produced by
     // asio::ip::tcp::acceptor::async_accept. The OS-side 3-way handshake has
@@ -142,6 +162,17 @@ public:
                        Transport::Config           cfg,
                        fixpp::tls::SslCtxConfig    ssl_cfg,
                        asio::ip::tcp::socket       accepted_socket);
+
+    // ── Accept-adoption factory-path constructor (FR-026 + US3 combined) ───
+    //
+    // Like the from_factory_tag ctor but also adopts an already-connected socket
+    // (server-mode acceptor path). Sets state_ = connected + role_ = server.
+    asio_tls_transport(from_factory_tag,
+                       asio::any_io_executor                 exec,
+                       Transport::Config                     cfg,
+                       fixpp::tls::SslCtxConfig              ssl_cfg,
+                       std::shared_ptr<asio::ssl::context>   shared_ctx,
+                       asio::ip::tcp::socket                 accepted_socket);
 
     // Non-copyable; non-movable (ssl_stream_ holds a ref to socket_).
     asio_tls_transport(asio_tls_transport const&)            = delete;
@@ -210,10 +241,11 @@ private:
     // socket_ MUST be declared before ssl_stream_ so it is destroyed last.
     asio::ip::tcp::socket      socket_;    // underlying TCP socket
 
-    // ssl_ctx_ is the RAII-owned SSL_CTX*. Built at construction time from
-    // ssl_cfg_ fields (proto version, ciphers, verify mode, cert material).
-    // Must outlive ssl_stream_.
-    std::unique_ptr<asio::ssl::context>    ssl_ctx_;
+    // ssl_ctx_ holds the asio::ssl::context (wrapping OpenSSL SSL_CTX*).
+    // In the per-ctor build path it is an owned unique_ptr converted to shared_ptr.
+    // In the factory path it is a shared_ptr pointing to the factory's cached
+    // context (FR-026). All paths satisfy: ssl_ctx_ must outlive ssl_stream_.
+    std::shared_ptr<asio::ssl::context>    ssl_ctx_;
 
     // ssl_stream_ is constructed lazily at async_handshake start. It wraps
     // socket_ by reference — therefore socket_ and ssl_ctx_ MUST outlive it.
