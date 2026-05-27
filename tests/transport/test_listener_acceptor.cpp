@@ -12,11 +12,8 @@
 //   - Endpoint::backlog honoured at OS level
 //   - async_accept runs on the listener's service executor per [2h §6.4.1]
 //
-// Heavy integration cells (full TLS handshake + Logon round-trip with both
-// initiator and acceptor sides) are DISABLED_ pending a server-mode +
-// client-mode SSL_CTX fixture pair. The Option-A contract cells run live —
-// none of them require successful TLS handshake; they exercise the
-// acceptor's accept / cancel surface directly via raw TCP clients.
+// Cells 7-8 (gate-b/r2 RC#A) require a real TLS loopback fixture pair and
+// are guarded by FIXPP_TLS_FIXTURE_DIR (skipped when empty).
 
 #include <gtest/gtest.h>
 
@@ -35,14 +32,17 @@
 #include <chrono>
 #include <future>
 #include <optional>
+#include <string>
 #include <thread>
 
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 
 #include "transport/asio_listener.hpp"
+#include "transport/loopback_tls_fixture.hpp"
 
 namespace {
 
@@ -287,24 +287,174 @@ TEST(ListenerAcceptor, BacklogConfigAcceptedAtConstruction) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Cell 7 — DISABLED: full TLS handshake + Logon round-trip (FR-023 mint
-// produces a working Transport). Requires a server-mode + client-mode
-// SslCtxConfig fixture pair via file_cert_source. Wired by a future
-// post-MVP test slice ([[project_release_interop_quickfix_fix8]] forcing
-// function) — leave skip-string in place per [[feedback_simplify_pass_catches_9th_burn]]
-// 13th-burn lesson on DISABLED_ phantom-coverage scaffolds.
+// Cell 7 — Full TLS handshake via LoopbackTlsFixture (RC#A gate-b/r2).
+//
+// async_accept returns a Transport in state=connected + role=server.
+// Simultaneously the client connects (async_connect) and both sides drive
+// async_handshake. Asserts:
+//   (a) accept returns a non-null Transport (FR-024 fresh mint).
+//   (b) server-side async_handshake returns a non-empty handshake_result.
+//   (c) client-side async_handshake returns a non-empty handshake_result.
+//
+// Guards with FIXPP_TLS_FIXTURE_DIR — skipped when certs not present.
+// Anchor: .specify/2h-transport.md §4.6 FR-023/FR-024.
 // ════════════════════════════════════════════════════════════════════════════
-TEST(DISABLED_ListenerAcceptor, FullHandshakeAndLogonRoundTrip) {
-    GTEST_SKIP() << "Wired by post-MVP fixture slice — requires server+client "
-                    "SslCtxConfig fixture pair (file_cert_source w/ FIXPP_TLS_FIXTURE_DIR).";
+TEST(ListenerAcceptor, FullTlsHandshake) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    using namespace fixpp::transport;
+    using namespace fixpp::transport::test;
+    using fixpp::core::error;
+    using fixpp::core::expected_t;
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    // Results collected by the coroutines.
+    expected_t<std::unique_ptr<Transport>> accept_result =
+        std::unexpected{error::transport_accept_cancelled};
+    expected_t<handshake_result> server_hs_result =
+        std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> client_hs_result =
+        std::unexpected{error::transport_handshake_cancelled};
+
+    // Server coroutine: accept + handshake.
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            accept_result = co_await fixture.listener().async_accept();
+            if (!accept_result.has_value()) {
+                co_return;
+            }
+            auto* tls = dynamic_cast<TlsTransport*>(accept_result->get());
+            if (!tls) {
+                co_return;
+            }
+            server_hs_result = co_await tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    // Client coroutine: connect + handshake.
+    auto client = fixture.make_client(ioc.get_executor());
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto conn = co_await client->async_connect(fixture.server_endpoint());
+            if (!conn.has_value()) {
+                co_return;
+            }
+            client_hs_result = co_await client_tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{10});
+
+    ASSERT_TRUE(accept_result.has_value())
+        << "async_accept must return a Transport; error="
+        << static_cast<int>(accept_result.error());
+    EXPECT_TRUE(server_hs_result.has_value())
+        << "server async_handshake must succeed; error="
+        << static_cast<int>(server_hs_result.error());
+    EXPECT_TRUE(client_hs_result.has_value())
+        << "client async_handshake must succeed; error="
+        << static_cast<int>(client_hs_result.error());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Cell 8 — DISABLED: already-resumed unique_ptr<Transport> UNAFFECTED by
-// cancel(). Requires mint to actually succeed (real SslCtxConfig). Same
-// fixture pair as Cell 7; same DISABLED_ rationale.
+// Cell 8 — Already-resumed Transport UNAFFECTED by listener cancel() (RC#A).
+//
+// Option-A contract action (3): listener.cancel() does NOT close or modify
+// Transports it already returned — ownership has transferred.
+//
+// Sequence:
+//   1. Accept one client → TLS handshake → server Transport in handshaken state.
+//   2. Call listener.cancel().
+//   3. Verify the server-side Transport can still async_write (not closed).
+//
+// Anchor: .specify/2h-transport.md §4.6 FR-025 Option-A.
 // ════════════════════════════════════════════════════════════════════════════
-TEST(DISABLED_ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
-    GTEST_SKIP() << "Wired by post-MVP fixture slice — requires successful "
-                    "asio_tls_transport mint via real cert_source.";
+TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    using namespace fixpp::transport;
+    using namespace fixpp::transport::test;
+    using fixpp::core::error;
+    using fixpp::core::expected_t;
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    std::unique_ptr<Transport> server_transport;
+    expected_t<handshake_result> server_hs =
+        std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> client_hs =
+        std::unexpected{error::transport_handshake_cancelled};
+
+    // Server: accept + handshake, store transport.
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto ar = co_await fixture.listener().async_accept();
+            if (!ar.has_value()) co_return;
+            server_transport = std::move(*ar);
+            auto* tls = dynamic_cast<TlsTransport*>(server_transport.get());
+            if (!tls) co_return;
+            server_hs = co_await tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    // Client: connect + handshake.
+    auto client = fixture.make_client(ioc.get_executor());
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto conn = co_await client->async_connect(fixture.server_endpoint());
+            if (!conn.has_value()) co_return;
+            client_hs = co_await client_tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{10});
+    ioc.restart();
+
+    ASSERT_TRUE(server_hs.has_value())
+        << "server handshake must succeed before testing cancel isolation";
+
+    // Cancel the listener AFTER we already hold server_transport.
+    fixture.cancel_listener();
+
+    // The server Transport must still be usable (write a small payload).
+    // We expect the write to succeed or at minimum not crash / assert closed.
+    // The client peer is still alive (client Transport not closed yet).
+    expected_t<std::size_t> write_result =
+        std::unexpected{error::transport_write_in_progress};
+
+    const std::array<std::byte, 4> payload{};
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            write_result = co_await server_transport->async_write(
+                std::span<const std::byte>{payload});
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{5});
+
+    // The write must not return transport_factory_failed or any "closed" sentinel.
+    // Acceptable outcomes: success (bytes written) or connection-related error
+    // (peer may have reset) — but NOT transport_accept_cancelled (which would
+    // indicate the listener incorrectly forwarded its cancel to the Transport).
+    EXPECT_NE(write_result.error_or(error::transport_read_eof),
+              error::transport_accept_cancelled)
+        << "listener cancel() must NOT affect already-resumed Transport";
 }

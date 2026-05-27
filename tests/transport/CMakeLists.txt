@@ -172,7 +172,7 @@ target_compile_definitions(transport_listener_acceptor PRIVATE
 add_test(NAME transport_listener_acceptor
          COMMAND transport_listener_acceptor)
 set_tests_properties(transport_listener_acceptor PROPERTIES
-  LABELS "transport;012;us3;seam14")
+  LABELS "transport;012;us3;seam14;gate-b-witness;rc-a")
 
 # ── T029 wiring: transport_cancellation_propagation ──────────────────────────
 
