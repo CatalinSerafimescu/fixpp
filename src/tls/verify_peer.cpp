@@ -57,6 +57,14 @@ core::expected_t<peer_identity> handshake_failed(const char* sub_reason) noexcep
 // NOLINTNEXTLINE(misc-use-internal-linkage) -- declared non-static in security_profile.hpp
 core::expected_t<peer_identity> verify_peer(SslCtxConfig const& cfg,
                                             std::span<const Certificate> peer_chain) noexcept {
+    // RC#C (P1-3): wrap entire body in try/catch(bad_alloc) so PMR or heap OOM
+    // during peer_identity construction surfaces as tls_pinset_alloc_failed rather
+    // than escaping the noexcept boundary and terminating the process.
+    //
+    // Design anchor: spec.md FR-035; .specify/2h-transport.md §1 item 5.
+    // Constitutional binding: [arch §5.3] — no exceptions across the public surface.
+    try {
+
     // Empty chain is a degenerate case; treat as handshake failure.
     if (peer_chain.empty()) {
         return handshake_failed("empty_chain");
@@ -170,6 +178,16 @@ core::expected_t<peer_identity> verify_peer(SslCtxConfig const& cfg,
     id.not_after = leaf.not_after();
 
     return id;
+
+    } catch (const std::bad_alloc&) {
+        // PMR or heap exhaustion building peer_identity: surface as a distinct
+        // allocation-failure variant. The trampoline maps this to
+        // hctx->accepted=false → transport_handshake_failed upstream.
+        return std::unexpected{core::error::tls_pinset_alloc_failed};
+    } catch (...) {
+        // Any other unexpected exception: treat as handshake failure.
+        return handshake_failed("verify_peer_unexpected");
+    }
 }
 
 }  // namespace fixpp::tls

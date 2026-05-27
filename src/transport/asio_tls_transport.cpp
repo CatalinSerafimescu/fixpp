@@ -321,6 +321,21 @@ bool parse_x509_to_certificate(X509* x509,
 // ─────────────────────────────────────────────────────────────────────────────
 extern "C" {
 static int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noexcept {
+    // RC#C (P1-3): wrap entire body in try/catch(bad_alloc) so that any heap or
+    // PMR exhaustion during cert parsing or peer_identity construction does NOT
+    // escape the noexcept boundary (which would terminate the process via
+    // std::terminate rather than surface transport_handshake_failed).
+    //
+    // On OOM: reject the peer (return 0) and mark hctx->accepted = false so
+    // async_handshake maps to transport_handshake_failed at line 952-955.
+    //
+    // The noexcept declaration is load-bearing for the OpenSSL C-ABI: OpenSSL
+    // calls this as a C function pointer; a throw across the extern "C"
+    // boundary is undefined behaviour per [arch §5.3] / C++23 rules.
+    //
+    // Design anchor: spec.md FR-035; .specify/2h-transport.md §1 item 5.
+    try {
+
     // Retrieve SSL* from the store context.
     SSL* ssl = static_cast<SSL*>(
         X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
@@ -467,6 +482,22 @@ static int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ct
     hctx->peer_id = std::move(*result);
     hctx->accepted = true;
     return 1;
+
+    } catch (const std::bad_alloc&) {
+        // OOM during cert parsing or peer_identity construction: reject the peer.
+        // hctx may or may not be valid here (OOM could occur before hctx retrieval),
+        // but the recoverable path is to return 0 (reject) so OpenSSL surfaces a
+        // handshake failure. If hctx is reachable, mark it explicitly rejected.
+        //
+        // We cannot safely call SSL_get_ex_data again here (it might allocate
+        // depending on implementation) so we use the simplest constant-time path:
+        // return 0 to signal OpenSSL "chain verification failed". The async_handshake
+        // wrapper will then map the resulting handshake error to transport_handshake_failed.
+        return 0;
+    } catch (...) {
+        // Any other exception (logic_error, etc.) — same treatment: reject.
+        return 0;
+    }
 }
 }  // extern "C"
 

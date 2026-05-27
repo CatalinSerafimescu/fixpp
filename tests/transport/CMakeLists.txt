@@ -200,3 +200,22 @@ add_test(NAME transport_load_credentials_seam13_witness
          COMMAND transport_load_credentials_seam13_witness)
 set_tests_properties(transport_load_credentials_seam13_witness PROPERTIES
   LABELS "transport;012;gate-b-witness;seam13;tls")
+
+# ── RC#C (gate-b/r1) — verify_peer noexcept PMR OOM boundary witness ──────────
+#
+# Tests that verify_peer(noexcept) does NOT propagate std::bad_alloc when the PMR
+# resource throws on the N-th allocation. Covers boundary (N=1), mid (N=2),
+# tail (N=3), and no-throw success per [[feedback_trap_throw_pmr_witness_enumerate_sites]].
+# Design anchor: spec.md FR-035; .specify/2h-transport.md §1 item 5.
+
+add_executable(transport_verify_peer_pmr_oom
+  test_verify_peer_pmr_oom.cpp)
+target_link_libraries(transport_verify_peer_pmr_oom PRIVATE
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_verify_peer_pmr_oom
+         COMMAND transport_verify_peer_pmr_oom)
+set_tests_properties(transport_verify_peer_pmr_oom PROPERTIES
+  LABELS "transport;012;gate-b-witness;rc-c;pmr-oom;tls")
