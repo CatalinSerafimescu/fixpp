@@ -73,11 +73,11 @@
 
 These items capture the requirement-quality questions raised by today's `/speckit-analyze` second pass (C1 — no-client-cert / `one_way_ca` edge case on FR-019). The amendment itself has already landed; these CHKs let the next `/speckit-checklist-audit` pass disposition the amendment-as-written quality.
 
-- [ ] CHK039 Does FR-019 specify the behaviour when `handshake_result.peer_id` is ABSENT (e.g., `SecurityProfile::one_way_ca` per 011 — no client cert presented; `peer_identity` default-constructed)? [Completeness, Spec §FR-019]
-- [ ] CHK040 Is the all-zero 32-byte fingerprint fallback for an absent client cert traceable to FR-022's canonical-fixed-order extraction rule (CN → SAN-DNS → SAN-URI → SHA-256-fingerprint, first-non-empty wins), with explicit handling of the "all-empty" boundary? [Consistency, Spec §FR-019 + §FR-022]
-- [ ] CHK041 Does FR-019 specify whether the operator's explicit `add_binding("0000...00", compid)` for the all-zero fingerprint principal is a PERMITTED (intentional non-mTLS opt-in) or PROHIBITED operator action in v1.0? [Clarity, Spec §FR-019]
-- [ ] CHK042 Is the operator guidance "declare NO bindings (or only the empty-cert principal binding if intentional) to enforce fail-closed default" verifiable via a documented example or test cell? [Measurability, Spec §FR-019, Gap]
-- [ ] CHK043 Does the `[const §VI]` security-default-deny anchor invoked by FR-019's fail-closed semantics correspond to a specific written constitution principle (not just a slogan)? [Traceability, Spec §FR-019]
+- [x] CHK039 Does FR-019 specify the behaviour when `handshake_result.peer_id` is ABSENT (e.g., `SecurityProfile::one_way_ca` per 011 — no client cert presented; `peer_identity` default-constructed)? [Completeness, Spec §FR-019] — PASS: spec.md §FR-019 C1 amendment (2026-05-28) explicitly covers this: "when `handshake_result.peer_id` is ABSENT (e.g., `SecurityProfile::one_way_ca` per 011 — no client cert presented; `peer_identity` is default-constructed with all CN / SAN / fingerprint fields empty)..." — the behaviour is fully specified. No gap.
+- [x] CHK040 Is the all-zero 32-byte fingerprint fallback for an absent client cert traceable to FR-022's canonical-fixed-order extraction rule (CN → SAN-DNS → SAN-URI → SHA-256-fingerprint, first-non-empty wins), with explicit handling of the "all-empty" boundary? [Consistency, Spec §FR-019 + §FR-022] — PASS: spec.md §FR-019 C1 amendment traces through FR-022's canonical-fixed-order: "falls through CN → SAN-DNS → SAN-URI all-empty paths to the SHA-256-fingerprint slot where the leaf-fingerprint is the all-zero 32-byte array." The all-empty boundary is explicitly walked step-by-step. The resulting 64-char hex `"00...00"` principal flows into FR-023's `authorize()` lookup — consistent with FR-022's canonical-fixed-order. Fully traceable.
+- [x] CHK041 Does FR-019 specify whether the operator's explicit `add_binding("0000...00", compid)` for the all-zero fingerprint principal is a PERMITTED (intentional non-mTLS opt-in) or PROHIBITED operator action in v1.0? [Clarity, Spec §FR-019] — PASS: spec.md §FR-019 C1 amendment is explicit: "it FAILS CLOSED with `session_compid_unauthorized` unless the operator has explicitly added an `add_binding("0000...00", compid)` entry (which would be a deliberate operator choice to allow non-mTLS sessions, NOT a default behavior)." The action is PERMITTED (an explicit opt-in), not PROHIBITED. Clear.
+- [x] CHK042 Is the operator guidance "declare NO bindings (or only the empty-cert principal binding if intentional) to enforce fail-closed default" verifiable via a documented example or test cell? [Measurability, Spec §FR-019, Gap] — SPEC-FIXED: spec.md §FR-019 C1 amendment says "Operators using `SecurityProfile::one_way_ca` SHOULD declare NO bindings" — a guidance SHOULD without a measurable test cell. Added to spec.md §FR-019 C1 amendment: "Measurable test cell for the empty-policy / one_way_ca scenario: configure `SecurityProfile::one_way_ca` with an empty `CompIdAuthorizationPolicy`; attempt a Logon from a peer with no client cert presented; assert `session_compid_unauthorized` is returned and `session_event_compid_authorization_failed` is emitted with `principal_source = SHA256_FINGERPRINT` and `asserted_compid = <whatever-was-in-the-Logon>`; assert the `cn` field in the event reflects the all-zero fingerprint principal. This cell MUST appear in `tests/session/test_compid_binding_one_way_ca.cpp` (US2 edge case per T038)."
+- [x] CHK043 Does the `[const §VI]` security-default-deny anchor invoked by FR-019's fail-closed semantics correspond to a specific written constitution principle (not just a slogan)? [Traceability, Spec §FR-019] — SPEC-FIXED: `[const §VI]` resolves in the constitution to Article VI — "Spec Coverage Discipline (the 100% FIX Rule)" — which has nothing to do with security-default-deny. The actual relevant constitutional principle is Article XII §5: "`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default" — which establishes the no-implicit-default / explicit-opt-in design pattern. Amended all security-default-deny occurrences of `[const §VI]` to `[const §XII.5]` across spec.md (FR-019 C1, FR-023, Clarifications Q1, Clarifications Q3, §A.4), research.md (lines 85, 92, 136, 139, 143), and contracts/session_config_ext.hpp:29. Two additional research.md occurrences (lines 170, 179) cited `[const §VI]` for "operator-burden reduction" — also misapplied (Article VI is spec coverage, not operator UX), and the constitution has no clear "operator-burden" Article; those cites were REMOVED rather than re-anchored (the underlying rationale stands on its own merits). Note: the constitution does NOT have a stand-alone "security-default-deny" article; `[const §XII.5]` is the best-fit anchor for explicit-opt-in design patterns. Affected: `spec.md:§FR-019/§FR-023/§Clarifications/§A.4`, `research.md:85/92/136/139/143/170/179`, `contracts/session_config_ext.hpp:29`. *(Disposition expanded 2026-05-28 per orchestrator spot-check — original disposition under-reported scope.)*
 
 ## Notes
 
@@ -91,11 +91,11 @@ These items capture the requirement-quality questions raised by today's `/specki
 
 | Disposition | Count |
 |---|---|
-| PASS | 21 |
-| SPEC-FIXED | 12 |
+| PASS | 24 |
+| SPEC-FIXED | 14 |
 | DD-DECIDED | 5 |
 | WAIVED | 0 |
-| **Total** | **38** |
+| **Total** | **43** |
 
 ### SPEC-FIXED items
 - CHK004 — exact byte comparison for principal matching; affected: `spec.md:§FR-022`.
@@ -110,6 +110,8 @@ These items capture the requirement-quality questions raised by today's `/specki
 - CHK021 — invariant-counting symmetric test shape for FR-024 half-restructure guard; affected: `spec.md:§FR-024`.
 - CHK030 — benchmark cell shape for ≤5 µs p99 authorize() budget; affected: `spec.md:§SC-003`.
 - CHK032 — timing side-channel: constant-time NOT required in v1.0 (documented + rationale); affected: `spec.md:§FR-023`.
+- CHK042 — measurable test cell for empty-policy/one_way_ca scenario added; affected: `spec.md:§FR-019`.
+- CHK043 — `[const §VI]` is Article VI (Spec Coverage Discipline), NOT security-default-deny; corrected all security-default-deny occurrences to `[const §XII.5]` (Article XII §5 — no-implicit-default SecurityProfile choice); affected: `spec.md` (Clarifications/FR-017/FR-019/FR-023/§A.4), `research.md:85/92/136/139/143`, `contracts/session_config_ext.hpp:29`. Two operator-burden occurrences in research.md:170/179 were misapplied with no clear constitution mapping; removed entirely (rationale stands on its own).
 
 ### DD-DECIDED items
 - CHK002 — anchor `[arch §5.6]`; rationale: SessionConfig frozen-at-open; no mid-session mutation API.
@@ -121,4 +123,4 @@ These items capture the requirement-quality questions raised by today's `/specki
 ### WAIVED items
 (none)
 
-Anchors spot-verified: `[arch §5.6]` (architecture.md lines 407-411, confirmed "frozen at session open"); `[FIXS §4.4]` (spec cites FR-019); `[const §VI]` (security-default-deny, cited FR-023); `[const §VIII.2]` (≤5 ms p99 budget, SC-003); `[[feedback_half_restructure_symmetric_api]]` (CHK021/CHK037). All resolve in the signed-off revision of their anchor documents.
+Anchors spot-verified (Pass 2, 2026-05-28): `[arch §5.6]` (architecture.md — confirmed "frozen at session open"); `[FIXS §4.4]` (external FIX Security spec §4.4 — cited in FR-019 and research.md); `[const §XII.5]` (constitution.md Article XII §5 — confirmed "`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default"); `[const §VIII.2]` (constitution.md Article VIII §2 — NOTE: this resolves to "Regression budget: ±5%" NOT a ≤5 ms latency budget; SC-003's ≤5 ms budget is a design-level target not constitutionally anchored; this cite is inaccurate but was in a prior SPEC-FIXED item (CHK020) and is out of scope for Pass 2 re-disposioning; noted for v1.0 release gate review); `[[feedback_half_restructure_symmetric_api]]` (MEMORY.md — confirmed). Pass 2 SPEC-FIXED: `[const §VI]` was incorrect; replaced with `[const §XII.5]` throughout.

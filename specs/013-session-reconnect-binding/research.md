@@ -82,14 +82,14 @@ This document records the binding decisions D-1..D-N consumed or established by 
 
 ### D-6 — Per-session operator-configured policy: bilateral_strict default
 
-**Decision**: `SessionConfig::reset_seqnum_policy` enum with three modes — `bilateral_strict` (default; QFJ-style; refuse Logon if peer's response lacks 141=Y), `bilateral_lenient` (QFC-mirror; auto-mirror 141=Y in our Logon response), `unilateral` (Fix8-style; honour any received 141=Y regardless of our outbound flag). Default = `bilateral_strict` per `[const §VI]` security-default-deny + 2-of-3 industry convergence (QFC + QFJ favour bilateral; Fix8 unilateral is the outlier).
+**Decision**: `SessionConfig::reset_seqnum_policy` enum with three modes — `bilateral_strict` (default; QFJ-style; refuse Logon if peer's response lacks 141=Y), `bilateral_lenient` (QFC-mirror; auto-mirror 141=Y in our Logon response), `unilateral` (Fix8-style; honour any received 141=Y regardless of our outbound flag). Default = `bilateral_strict` per `[const §XII.5]` no-implicit-default (Article XII §5 mandates an explicit `SecurityProfile` choice — same explicit-opt-in design pattern; the constitution has no stand-alone "security-default-deny" article, §XII.5 is the nearest anchor) + 2-of-3 industry convergence (QFC + QFJ favour bilateral; Fix8 unilateral is the outlier). *(Anchor corrected from `[const §VI]` 2026-05-28 per `/speckit-checklist-audit` Pass 2 binding.md CHK043.)*
 
 **Rationale (Clarifications Q1)**: Reference-engine sweep showed industry-divergent semantics:
 - QuickFIX-cpp `Session.cpp:203-207,684,705` mirrors peer's 141=Y (bilateral lenient).
 - QuickFIX/J `Session.java:2282-2285` strictly enforces bilateral consent.
 - Fix8 `session.cpp:479,581-585,946` unilaterally resets on any peer 141=Y.
 
-Operator-config-per-session resolves the divergence without forcing a fixpp opinion on which engine is "right". Default-strict matches `[const §VI]` security-default. The two non-default modes are escape hatches for operators with QFC-style or Fix8-style counterparty pairings.
+Operator-config-per-session resolves the divergence without forcing a fixpp opinion on which engine is "right". Default-strict matches `[const §XII.5]` no-implicit-default. The two non-default modes are escape hatches for operators with QFC-style or Fix8-style counterparty pairings.
 
 **Alternatives considered**:
 - (a) Pick one industry mode (e.g., always bilateral_strict): rejected — locks out operators paired with QFC or Fix8 counterparties.
@@ -133,14 +133,14 @@ This is a fixpp greenfield surface (per FIXS §4.4 normative "authorization link
 
 **Decision**: `CompIdAuthorizationPolicy` is allow-list only in v1.0 — operator MUST enumerate every `{principal → {compid_set}}` binding; empty policy rejects ALL Logons (default-deny). NO deny-list mode; NO hybrid mode. Adding deny-list / hybrid modes in a later feature is BACKWARD-COMPATIBLE (one-way restriction); removing the allow-list semantic is NOT.
 
-**Rationale (Clarifications Q3)**: Same reference-engine sweep as Q2 — no industry precedent. `[const §VI]` security-default-deny rules absent precedent. The allow-list shape matches 011's `Pinset` + `SecurityProfile::mtls_pinned` allow-list contract — same operator mental model, single audit surface. Misconfigured deploys fail CLOSED.
+**Rationale (Clarifications Q3)**: Same reference-engine sweep as Q2 — no industry precedent. `[const §XII.5]` no-implicit-default (Article XII §5 mandates an explicit `SecurityProfile` choice) is the nearest constitutional anchor for explicit-deny-unless-configured — applied here. The allow-list shape matches 011's `Pinset` + `SecurityProfile::mtls_pinned` allow-list contract — same operator mental model, single audit surface. Misconfigured deploys fail CLOSED.
 
 **Alternatives considered**:
-- (a) Deny-list only (default-allow): rejected — `[const §VI]` security-default-deny rules.
+- (a) Deny-list only (default-allow): rejected — `[const §XII.5]` no-implicit-default rules out an opt-out-only safety model for a security surface.
 - (b) Hybrid per-entry: rejected — adds operator-config complexity for marginal flexibility; defer.
 - (c) Two-tier: rejected — same as (b).
 
-**Anchor**: `[const §VI]` security-default + 011 FR-023 (Pinset allow-list precedent) + Clarifications Q3=A.
+**Anchor**: `[const §XII.5]` no-implicit-default + 011 FR-023 (Pinset allow-list precedent) + Clarifications Q3=A. *(Anchor corrected from `[const §VI]` 2026-05-28 per `/speckit-checklist-audit` Pass 2 binding.md CHK043.)*
 
 ### D-10 — Binding event surfaces principal_source for operator audit
 
@@ -167,7 +167,7 @@ If a `reload_credentials` lands BETWEEN steps 1 and 3 (or during the handshake t
 
 **Captured-by-value-copy invariant** (closes the `[[feedback_weak_ptr_cache_needs_owning_context]]` axis): the FSM's `snap` is a `std::shared_ptr<cert_source>` (strong-ref) — never a raw `cert_source*` and never a `weak_ptr`. The strong-ref keeps the OLD cert_source alive past the factory's `cert_source_slot_.store(new)`; the OLD cert_source is destructed when (a) the in-flight handshake completes AND (b) every captured snapshot's shared_ptr count drops to 0. This is the SAFE-by-construction lifetime story; document it as a binding invariant in §8 anti-pattern guards.
 
-**Rationale (Clarifications Q4)**: Reference-engine sweep found NO engine supports in-process cert rotation at all (QFC + QFJ initialize SSL_CTX once at startup; Fix8 same; all require full process restart). This is a fixpp greenfield surface — `[const §VI]` operator-burden reduction + SLA-visibility minimisation drives the design.
+**Rationale (Clarifications Q4)**: Reference-engine sweep found NO engine supports in-process cert rotation at all (QFC + QFJ initialize SSL_CTX once at startup; Fix8 same; all require full process restart). This is a fixpp greenfield surface — operator-burden reduction + SLA-visibility minimisation drives the design (no constitution Article maps directly to "operator-burden reduction" as a normative principle; rationale stands on its own merits). *(`[const §VI]` cite removed 2026-05-28 per `/speckit-checklist-audit` Pass 2 — Article VI is "Spec Coverage Discipline", unrelated to operator UX.)*
 
 Atomicity inside the factory (with per-attempt FSM-side snapshot reads from the atomic slot) is the safe-by-construction choice. Worst-case rotation latency = one in-flight HANDSHAKE duration (~50–500 ms typical for TLS 1.3 1-RTT) — NOT an in-flight `make()` window; `make()` itself is one-shot per call.
 
@@ -176,7 +176,7 @@ Atomicity inside the factory (with per-attempt FSM-side snapshot reads from the 
 - (b) Cooperative (operator-guaranteed quiescence): rejected — too easy to misconfigure; operator must reason about cross-thread races.
 - (c) Two-phase stage + commit (operator calls reload_credentials twice — once to stage, once to commit): rejected — adds API complexity for an edge-case need; the atomic-swap shape covers 99 %.
 
-**Anchor**: `[2j §3.12]` IN-PROCESS variant reservation + `[const §VI]` operator-burden + Clarifications Q4=A.
+**Anchor**: `[2j §3.12]` IN-PROCESS variant reservation + Clarifications Q4=A. (Operator-burden rationale is non-constitutionally-anchored; see Rationale paragraph above.)
 
 ### D-12 — credentials_rotated event semantics
 

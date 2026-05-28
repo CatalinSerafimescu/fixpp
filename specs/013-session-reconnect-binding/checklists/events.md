@@ -76,11 +76,11 @@
 
 These items capture the requirement-quality questions raised by today's `/speckit-analyze` second pass (E1 — FR-035 ring drop-oldest test cell coverage). The amendment itself has already landed in tasks.md T040; these CHKs let the next `/speckit-checklist-audit` pass disposition the amendment-as-written quality.
 
-- [ ] CHK042 Does FR-035 specify the drop-oldest overflow semantic precisely enough to author a 17-emit test cell (which entry is evicted on overflow, which entries remain, in what order)? [Completeness, Spec §FR-035]
-- [ ] CHK043 Are the `Session::recent_events_` AND `ListenerEvents::events_` rings BOTH required to exhibit drop-oldest semantics on the 17th emit (i.e., is the FR-035 contract uniform across the two ring surfaces)? [Consistency, Spec §FR-035 + §FR-028]
-- [ ] CHK044 Is the FR-035 ring capacity (`kSessionEventRingCapacity = 16`) anchored to a `static_assert` in a shipped header per T013a (a) — locked against silent drift like FR-026's `static_assert(tls_handshake_failed == 88)`? [Traceability, Spec §FR-035 + Tasks §T013a]
-- [ ] CHK045 Does T040's E1-amendment "ring-overflow drop-oldest test cell" specify a measurable assertion shape (count = 16, FIRST entry == 2nd-emit, LAST entry == 17th-emit) sufficient for the implementer to author without re-clarification? [Measurability, Tasks §T040]
-- [ ] CHK046 Is the parallel test cell for `ListenerEvents` (acceptor-side, pre-Session emit surface per FR-028) explicitly required at T040 alongside the `Session::recent_events_` cell, with the same drop-oldest assertion shape? [Coverage, Tasks §T040]
+- [x] CHK042 Does FR-035 specify the drop-oldest overflow semantic precisely enough to author a 17-emit test cell (which entry is evicted on overflow, which entries remain, in what order)? [Completeness, Spec §FR-035] — PASS: spec.md §FR-035 (CHK002 SPEC-FIXED) specifies: "Overflow policy: drop-oldest (17th emit overwrites entry 0)"; capacity = 16 entries; "entries are in emission order (oldest at index 0)." The test invariant is fully derived: emit 17 events → `recent_events().size() == 16` → entry 0 == 2nd-emitted (1st was overwritten) → entry 15 == 17th-emitted. No ambiguity remains.
+- [x] CHK043 Are the `Session::recent_events_` AND `ListenerEvents::events_` rings BOTH required to exhibit drop-oldest semantics on the 17th emit (i.e., is the FR-035 contract uniform across the two ring surfaces)? [Consistency, Spec §FR-035 + §FR-028] — PASS: spec.md §FR-028 (CHK009/CHK018 SPEC-FIXED) says: "The `Listener` holds its OWN `recent_events()` ring (same 16-entry capacity, same drop-oldest policy as Session)." Both rings are explicitly required to be uniform (same capacity, same overflow policy). Consistent.
+- [x] CHK044 Is the FR-035 ring capacity (`kSessionEventRingCapacity = 16`) anchored to a `static_assert` in a shipped header per T013a (a) — locked against silent drift like FR-026's `static_assert(tls_handshake_failed == 88)`? [Traceability, Spec §FR-035 + Tasks §T013a] — PASS: tasks.md T013a(a) explicitly mandates: "declare `inline constexpr std::size_t kSessionEventRingCapacity = 16;` in `session.hpp` (or in `session_event.hpp`)... AND add `static_assert(kSessionEventRingCapacity == 16, "FR-035 v1.0 contract: ring capacity is 16 entries; future capacity changes require a spec amendment + Gate A re-review");`". The constant name, the static_assert text, and the anti-drift rationale are all specified at the task level — parallel to FR-026's static_assert discipline.
+- [x] CHK045 Does T040's E1-amendment "ring-overflow drop-oldest test cell" specify a measurable assertion shape (count = 16, FIRST entry == 2nd-emit, LAST entry == 17th-emit) sufficient for the implementer to author without re-clarification? [Measurability, Tasks §T040] — PASS: tasks.md T040 E1 amendment states: "emit 17 events; assert `recent_events()` returns 16 entries; assert the FIRST entry emitted is gone (overwritten by the 17th); assert the LAST 16 entries are the 2nd through 17th in emit order." count=16, first==2nd-emit, last==17th-emit — all three assertions are specified. Measurable without re-clarification.
+- [x] CHK046 Is the parallel test cell for `ListenerEvents` (acceptor-side, pre-Session emit surface per FR-028) explicitly required at T040 alongside the `Session::recent_events_` cell, with the same drop-oldest assertion shape? [Coverage, Tasks §T040] — PASS: tasks.md T040 E1 amendment says: "Together this is 2 cells × {Session, Listener} = 2 cells per surface (overflow + non-overflow witness). Parallel cell for `ListenerEvents`." The Listener parallel cell is explicitly required with the same drop-oldest assertion shape in the same test file (`tests/session/test_session_event_ring_overflow.cpp`). Covered.
 
 ## Notes
 
@@ -94,11 +94,11 @@ These items capture the requirement-quality questions raised by today's `/specki
 
 | Disposition | Count |
 |---|---|
-| PASS | 20 |
+| PASS | 25 |
 | SPEC-FIXED | 21 |
 | DD-DECIDED | 0 |
 | WAIVED | 0 |
-| **Total** | **41** |
+| **Total** | **46** |
 
 ### SPEC-FIXED items
 - CHK002 — ring-buffer capacity = 16 elements, compile-time fixed, drop-oldest overflow; affected: `spec.md:§FR-035`.
@@ -129,4 +129,11 @@ These items capture the requirement-quality questions raised by today's `/specki
 ### WAIVED items
 (none)
 
-Anchors spot-verified: `[const §X.2]` (ABI-locked error slots; confirmed error.hpp:403-429 tls_handshake_failed=88..tls_load_cancelled=93); `[arch §5.6]` (frozen-at-open for reset_seqnum_policy); `[const §XI.2]` (cancellation-end-to-end; recent_events noexcept); `[const §XV.15]` (drop-oldest permitted for observability rings); `[2g §6.6]` (tls_handshake_failed grouping with sub-reason taxonomy). All resolve in signed-off revision of their respective anchor documents.
+### Pass 2 (2026-05-28) items
+- CHK042 — PASS: drop-oldest overflow semantic fully specified in spec.md §FR-035 (count=16, 17th overwrites entry 0).
+- CHK043 — PASS: both Session and Listener rings specified as uniform 16-entry drop-oldest in spec.md §FR-028.
+- CHK044 — PASS: tasks.md T013a(a) mandates `kSessionEventRingCapacity = 16` constant + static_assert.
+- CHK045 — PASS: tasks.md T040 E1 specifies all three assertion values (count=16, first=2nd-emit, last=17th-emit).
+- CHK046 — PASS: tasks.md T040 E1 explicitly requires parallel Listener cell in same test file.
+
+Anchors spot-verified (Pass 2, 2026-05-28): `[const §X.2]` — NOTE: Article X §2 is "No C++ symbol leakage through C ABI" (not the ABI append-only rule; the relevant stability clause is in §X.4); this anchor is consistently misapplied in the spec but the intended rule is unambiguous from context — flagged for correction in recovery.md CHK049 SPEC-FIXED; `[arch §5.6]` (frozen-at-open — confirmed); `[const §XI.2]` (Article XI §2 — "Cancellation: ASIO native cancellation slots end-to-end" — confirmed, resolves correctly); `[const §XV.15]` (Article XV §15 — "Application-layer message drops on slow consumer" — confirmed drop-oldest permitted for observability rings per its text); `[2g §6.6]` (confirmed tls_handshake_failed grouping in 2g-tls.md §6.6).

@@ -2,7 +2,7 @@
 //
 // fixpp — 013-session-reconnect-binding
 // Contract: error::session_* variant family extension.
-// Anchors: FR-008, FR-017, FR-021, FR-033, D-7, D-9, D-13; [const §X.2] ABI append-only.
+// Anchors: FR-008, FR-017, FR-021, FR-033, D-7, D-9, D-13; [const §X.4] ABI append-only.
 //
 // NOTE: This contract documents the FOUR NEW slots 116..119 appended to
 // include/fixpp/core/error.hpp after 012's transport_* block, plus the reuse of

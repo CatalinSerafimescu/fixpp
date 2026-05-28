@@ -394,7 +394,7 @@ private:
 
 **Reconciliation rule** (carry-forward from 012): the `/speckit-implement`-time rewriter MUST cross-check the actual `include/fixpp/core/error.hpp` to confirm the boundary remains at 115 (no ±N drift from a 012 carry-forward waiver-close shipping an additional `transport_*` variant); future ±1 adjustment is reconciled at /implement-time without re-running Gate A. NEVER renumber existing slots.
 
-**Anchor**: D-7, D-9, D-13; FR-008, FR-017, FR-021; `[const §X.2]` ABI append-only; Assumption A.8; F1/D1 resolution 2026-05-28 per `/speckit-analyze`.
+**Anchor**: D-7, D-9, D-13; FR-008, FR-017, FR-021; `[const §X.4]` ABI append-only; Assumption A.8; F1/D1 resolution 2026-05-28 per `/speckit-analyze`.
 
 ---
 

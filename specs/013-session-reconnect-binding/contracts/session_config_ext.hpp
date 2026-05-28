@@ -26,7 +26,7 @@ class TransportFactory;
 namespace fixpp::session {
 
 // FR-017 / D-6 — operator-configured per-session policy for ResetSeqNumFlag(141)=Y
-// handshake. Default = bilateral_strict per [const §VI] security-default-deny +
+// handshake. Default = bilateral_strict per [const §XII.5] no-implicit-default +
 // 2-of-3 industry convergence (QFC + QFJ favour bilateral; Fix8 unilateral is the
 // outlier). Three modes:
 //   - bilateral_strict — refuse Logon if peer's response lacks 141=Y (when we
