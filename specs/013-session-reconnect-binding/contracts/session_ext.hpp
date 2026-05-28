@@ -61,19 +61,23 @@ public:
     // duration (~50–500 ms typical for TLS 1.3 1-RTT).
     //
     // Returns expected_t::ok() on swap-accepted. Rejects nullptr (returns
-    // error::session_invalid_argument — uses existing slot, NOT in 013's 5-new-slot
-    // budget). Emits SessionEvent::credentials_rotated{old_sha256, new_sha256}
-    // BEFORE the first handshake on the rotated source (per D-12 / FR-032 — not
-    // at the reload_credentials call-site).
+    // error::session_invalid_argument — slot 119 per contracts/session_errors.hpp;
+    // renumbered from 121 to 119 per /speckit-analyze F1/D1 2026-05-28; added
+    // 2026-05-28 per /speckit-analyze C3 resolution because no existing
+    // session_invalid_* slot fits the runtime-API-argument-validation semantic).
+    // Emits
+    // SessionEvent::credentials_rotated{old_sha256, new_sha256} BEFORE the
+    // first handshake on the rotated source (per D-12 / FR-032 — not at the
+    // reload_credentials call-site).
     [[nodiscard]] expected_t<void>
     reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
 
     // FR-008 / US1 AC5 / D-13 — initiator-graceful Logout. Emits Logout(5),
     // awaits peer reply for `timeout`, closes Transport, transitions to
-    // Disconnected. Surfaces error::session_logout_disconnect_timeout (slot 118)
-    // if elapsed before peer reply. Symmetric on acceptor side (acceptor
-    // receives Logout from peer; same code path completes with the same
-    // timeout).
+    // Disconnected. Surfaces error::session_logout_timeout (slot 73, 005-era
+    // reused per F1/D1 2026-05-28) if elapsed before peer reply. Symmetric on
+    // acceptor side (acceptor receives Logout from peer; same code path
+    // completes with the same timeout).
     //
     // Default timeout = SessionConfig::logout_disconnect_timeout_ms (2000 ms
     // per Clarifications Q5=A).

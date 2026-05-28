@@ -137,7 +137,7 @@ auto run_multi_tenant_acceptor() -> asio::awaitable<void> {
 }
 ```
 
-**Independent test**: `tests/session/test_compid_binding_default_deny.cpp` + `test_compid_binding_principal_extraction.cpp` + `test_compid_binding_symmetry.cpp` cover the 3-axis matrix (default-deny / 4 principal sources / initiator-vs-acceptor symmetry).
+**Independent test**: `tests/session/test_compid_binding_default_deny.cpp` + `test_compid_binding_principal_extraction.cpp` + `test_compid_binding_symmetric.cpp` cover the 3-axis matrix (default-deny / 4 principal sources / initiator-vs-acceptor symmetry).
 
 ---
 
@@ -316,7 +316,7 @@ TEST(SessionRecovery, AdminSpanCollapsesToGapFill) {
 
 Per research.md §8:
 
-1. **FR-024 binding-policy symmetry** — `test_compid_binding_symmetry.cpp` exercises initiator AND acceptor halves; invariant-counting witness on `CompIdAuthorizationPolicy::authorize` call site (count = 1 per Logon). Closed-by-construction note: rotation half-restructure is closed by routing both initiator + acceptor through `TransportFactory::reload_credentials` (the factory IS the symmetric authority); binding half-restructure still needs explicit test coverage of both paths.
+1. **FR-024 binding-policy symmetry** — `test_compid_binding_symmetric.cpp` exercises initiator AND acceptor halves; invariant-counting witness on `CompIdAuthorizationPolicy::authorize` call site (count = 1 per Logon). Closed-by-construction note: rotation half-restructure is closed by routing both initiator + acceptor through `TransportFactory::reload_credentials` (the factory IS the symmetric authority); binding half-restructure still needs explicit test coverage of both paths.
 2. **FR-026 6-master-enum-cells + 3 representative sub_reason cells** — `test_tls_validation_failed_taxonomy.cpp` has 6 master-enum cells (`tls_handshake_failed` GROUPING + `tls_rsa_key_too_large` + `tls_cert_der_too_large` + `tls_san_entries_exceeded` + `tls_pin_mismatch` + `tls_load_cancelled`) + 3 representative sub_reason cells (`expired` peer-cert / `tls_pin_empty_at_open` operator-config / `sigalg_disallowed` cipher-policy) covering both top-level master-enum cardinality and the `sub_reason` discriminator within the `tls_handshake_failed` GROUPING.
 3. **FR-033 reload_credentials in-flight defer** — `test_reload_credentials_in_flight.cpp` drives the race deterministically.
 4. **FR-022 canonical-fixed principal extraction** — `test_compid_binding_principal_extraction.cpp` has 4 cells (one per `principal_source` enum value).

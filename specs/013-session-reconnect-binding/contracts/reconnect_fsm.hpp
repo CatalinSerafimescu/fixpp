@@ -76,13 +76,14 @@ public:
 
     // FR-004 / FR-007 — emit TestRequest(1) when no inbound traffic for 1.2×
     // HeartBtInt; if no inbound within 2× HeartBtInt total, Logout(5) and
-    // disconnect with session_heartbeat_timeout (slot 119).
+    // disconnect with session_test_request_unanswered (slot 74, 005-era reused
+    // per F1/D1 2026-05-28).
     [[nodiscard]] asio::awaitable<expected_t<void>>
     run_inbound_liveness_watch() noexcept;
 
     // FR-006 — validate inbound Heartbeat's TestReqID(112) matches the most
     // recent outbound TestRequest's TestReqID. Mismatch → session_testreqid_mismatch
-    // (slot 120).
+    // (slot 118).
     [[nodiscard]] expected_t<void>
     validate_inbound_heartbeat_testreqid(std::string_view inbound_testreqid) const noexcept;
 
@@ -111,8 +112,9 @@ public:
 
     // FR-008 / US1 AC5 — initiator-graceful Logout. Emits Logout(5), awaits peer
     // reply for logout_disconnect_timeout_, closes Transport, transitions to
-    // Disconnected. Surfaces session_logout_disconnect_timeout (slot 118) if
-    // elapsed before peer reply. Symmetric on acceptor side per [[feedback_half_restructure_symmetric_api]].
+    // Disconnected. Surfaces session_logout_timeout (slot 73, 005-era reused per
+    // F1/D1 2026-05-28) if elapsed before peer reply. Symmetric on acceptor side
+    // per [[feedback_half_restructure_symmetric_api]].
     [[nodiscard]] asio::awaitable<expected_t<void>>
     drive_logout(std::chrono::milliseconds timeout) noexcept;
 

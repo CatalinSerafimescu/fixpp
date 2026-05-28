@@ -53,10 +53,17 @@ struct session_event_peer_identity_bound {
 // FR-021 — emitted when CompIdAuthorizationPolicy::authorize returns
 // session_compid_unauthorized; surfaces BEFORE the Transport closes so the
 // operator's event handler can correlate with the Logout reject reason.
+// CHK015/CHK018 SPEC-FIXED: principal_source added for symmetric operator audit —
+// carries which cert field was extracted as the principal before the compid
+// mismatch was detected (mirrors peer_identity_bound::principal_source).
+// expected_compids is empty if the principal was not found in the policy at all
+// (unrecognized principal), or contains the authorized set if the principal was
+// found but the asserted_compid was not in the set.
 struct session_event_compid_authorization_failed {
     std::string_view cn;                              // [[clang::lifetimebound]]
     std::string_view asserted_compid;                 // [[clang::lifetimebound]]
     std::span<std::string_view const> expected_compids;  // empty if no binding for principal
+    bound_principal::source principal_source;         // CHK015 — which cert field was extracted
 };
 
 // FR-026 / FR-027 — emitted when 011's verify_peer returns an error::tls_*

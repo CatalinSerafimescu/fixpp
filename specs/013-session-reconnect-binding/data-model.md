@@ -21,7 +21,7 @@ This document enumerates the entities E-1..E-7 introduced or extended by this fe
 | `factory_` | `TransportFactory*` (non-owning) | non-owning ref | session | consumed from 012; the smart-pointer to TransportFactory is owned by SessionConfig::transport_factory_override (storage type `shared_ptr<TransportFactory>` per 013 E-4 ownership reconciliation; behaviour-equivalent to 2h Appendix D §D.1+§D.2 unique_ptr sign-off via Session::open-time hygiene assertion); ReconnectFsm holds a raw pointer (the engine guarantees the factory outlives the FSM per [arch §5.6] frozen-at-open rule); the atomic-swap slot for cert_source lives INSIDE the factory (`cert_source_slot_: std::atomic<std::shared_ptr<cert_source>>`), so `reload_credentials` does NOT need to swap the factory pointer itself |
 | `heartbeat_timer_` | `asio::steady_timer` | by-value | Active | armed on Active entry; rearmed on every outbound; cancelled on Disconnected entry |
 | `test_request_timer_` | `asio::steady_timer` | by-value | Active | armed when inbound liveness window > 1.2× HeartBtInt; cancelled on inbound traffic |
-| `logout_timer_` | `asio::steady_timer` | by-value | LogoutSent | armed on Session::logout() call; fires session_logout_disconnect_timeout |
+| `logout_timer_` | `asio::steady_timer` | by-value | LogoutSent | armed on Session::logout() call; fires session_logout_timeout (slot 73, 005-era reused per F1/D1 2026-05-28) |
 | `awaiting_resend_` | `bool` | by-value | Active | TRANSIENT FLAG, NOT a new fsm_state value per D-1; set on FR-009 entry; cleared on gap close |
 | `resend_state_` | `ResendState` (value; see E-2) | by-value | AwaitingResend | populated on FR-009 entry; reset on gap close or session exit |
 | `last_outbound_testreqid_` | `std::optional<std::string>` | by-value | Active | echoed by inbound Heartbeat per FR-006; mismatch → session_testreqid_mismatch |
@@ -56,15 +56,24 @@ Active (awaiting_resend=false)
 
 | Field | Type | Ownership | Lifetime | Notes |
 |---|---|---|---|---|
-| `outstanding_begin_` | `std::uint32_t` | by-value | AwaitingResend | BeginSeqNo we sent in ResendRequest(2) |
-| `outstanding_end_` | `std::uint32_t` | by-value | AwaitingResend | EndSeqNo we sent; 0 means "infinity" per D-2 |
-| `started_at_` | `std::chrono::steady_clock::time_point` | by-value | AwaitingResend | populated on ResendRequest emit; consumed for recovery-elapsed metric |
-| `inbound_filled_through_` | `std::uint32_t` | by-value | AwaitingResend | high-water-mark of what we've received in the replay; advances as PossDup=Y or GapFill arrives |
-| `outbound_replay_cursor_` | `std::uint32_t` | by-value | AwaitingResend | current position in our outbound replay (if peer issued a counter-ResendRequest); not always populated |
+| `outstanding_begin` | `std::uint32_t` | by-value | AwaitingResend | BeginSeqNo we sent in ResendRequest(2) |
+| `outstanding_end` | `std::uint32_t` | by-value | AwaitingResend | EndSeqNo we sent; 0 means "infinity" per D-2 |
+| `started_at` | `std::chrono::steady_clock::time_point` | by-value | AwaitingResend | populated on ResendRequest emit; consumed for recovery-elapsed metric |
+| `inbound_filled_through` | `std::uint32_t` | by-value | AwaitingResend | high-water-mark of what we've received in the replay; advances as PossDup=Y or GapFill arrives |
+| `outbound_replay_cursor` | `std::uint32_t` | by-value | AwaitingResend | current position in our outbound replay (if peer issued a counter-ResendRequest); not always populated |
+| `inbound_held` | `std::pmr::vector<held_inbound_msg>` | owning (PMR-allocated) | AwaitingResend | inbound messages with `MsgSeqNum > next_expected_inbound` that arrived during AwaitingResend; held in strict-MsgSeqNum order until the gap closes. Empty in the default-constructed shape (no heap alloc until first push). Drained on `reset()`. Added 2026-05-28 per `/speckit-analyze` C1 resolution to back FR-009 SPEC-FIX. |
 
-**Validation rules**: `outstanding_begin_ <= outstanding_end_ OR outstanding_end_ == 0`; `inbound_filled_through_ <= outstanding_end_ OR outstanding_end_ == 0`.
+**`held_inbound_msg` sub-struct** (sibling type declared in `contracts/resend_state.hpp`):
 
-**Allocator**: none (POD-like; embedded in `ReconnectFsm`).
+| Field | Type | Notes |
+|---|---|---|
+| `msg_seqnum` | `std::uint32_t` | the inbound MsgSeqNum (drives strict-order replay when the gap closes) |
+| `sending_time` | `std::chrono::system_clock::time_point` | the wire `SendingTime(52)` — preserved for FR-015 PossDupFlag dedup and any later `OrigSendingTime(122)` re-emit |
+| `payload` | `std::pmr::vector<std::byte>` | the raw inbound frame bytes (deep-copied into held storage; the inbound `string_view` from the framer does not outlive AwaitingResend) |
+
+**Validation rules**: `outstanding_begin <= outstanding_end OR outstanding_end == 0`; `inbound_filled_through <= outstanding_end OR outstanding_end == 0`; every `held_inbound_msg.msg_seqnum > next_expected_inbound` (callers MUST enforce — the queue is not self-validating).
+
+**Allocator**: the struct itself is value-typed and embedded in `ReconnectFsm`; the `inbound_held` `std::pmr::vector` uses a PMR allocator threaded through from the Session's session-arena (typically `[2a §4.2]`-class PMR). Default-construction is alloc-free (empty vector). Push (`inbound_held.emplace_back(...)`) allocates from the PMR arena; this is COLD-PATH (only fires when inbound arrives during AwaitingResend, which is rare). The "no allocations on the FSM transition Active↔AwaitingResend" plan.md §Constraints invariant holds: the transition is just `awaiting_resend_ = true/false` + `ResendState::reset()` (which calls `inbound_held.clear()`, deallocating any held buffers back to the arena — the vector's storage may shrink but does not necessarily release to the arena, depending on PMR policy).
 
 **Anchor**: D-2, D-3, D-4, D-5; FR-009..FR-015.
 
@@ -195,6 +204,7 @@ struct compid_authorization_failed {
     std::string_view cn;                             // [[clang::lifetimebound]]
     std::string_view asserted_compid;                // [[clang::lifetimebound]]
     std::span<std::string_view const> expected_compids;  // empty if no binding for principal
+    bound_principal::source principal_source;        // CHK015 SPEC-FIXED — which cert field was extracted
 };
 
 struct tls_validation_failed {
@@ -278,7 +288,7 @@ public:
     // FR-008 / US1 AC5 — initiator-graceful Logout. Emits Logout(5), awaits peer
     // reply for `timeout` (default = SessionConfig::logout_disconnect_timeout_ms),
     // closes Transport, transitions to Disconnected. Surfaces
-    // error::session_logout_disconnect_timeout if elapsed before peer reply.
+    // error::session_logout_timeout (slot 73, 005-era reused per F1/D1 2026-05-28) if elapsed before peer reply.
     [[nodiscard]] asio::awaitable<expected_t<void>>
     logout(std::chrono::milliseconds timeout) noexcept;
 
@@ -301,7 +311,7 @@ public:
 }  // namespace fixpp::session
 ```
 
-**Validation rules**: `reload_credentials(new_source)` rejects `new_source == nullptr` (returns `expected_t::unexpected(error::session_invalid_argument)` — slot allocation TBD at /speckit-tasks-time, NOT in 013's 5-new-slot budget; uses existing `session_invalid_*` family if present). `logout(timeout)` validates `timeout > 0ms`.
+**Validation rules**: `reload_credentials(new_source)` rejects `new_source == nullptr` and returns `expected_t::unexpected(error::session_invalid_argument)` — slot 119 per contracts/session_errors.hpp (added 2026-05-28 per `/speckit-analyze` finding C3 resolution; renumbered from 121 to 119 per F1/D1 2026-05-28). No existing `session_invalid_*` slot fits the runtime-API-argument-validation semantic (66 is FIX-protocol Logon-shape; 76 is Session::open config-time; 77 is FSM-state-wrong-for-send). `logout(timeout)` validates `timeout > 0ms`.
 
 **Anchor**: D-11, D-12, D-13; FR-008, FR-030..FR-033; FR-035.
 
@@ -329,8 +339,7 @@ public:
     // FR-030 / FR-033 / D-11 — atomic swap on the factory-internal cert_source
     // slot. Both initiator-side and acceptor-side rotation route through this
     // SAME call (symmetric authority per [[feedback_half_restructure_symmetric_api]]).
-    // O(1), strand-free. Rejects nullptr -> error::session_invalid_argument
-    // (or equivalent existing slot).
+    // O(1), strand-free. Rejects nullptr -> error::session_invalid_argument (slot 119, renumbered from 121 per F1/D1 2026-05-28).
     [[nodiscard]] virtual core::expected_t<void>
         reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept = 0;
 };
@@ -362,7 +371,7 @@ private:
 
 **Pluggable-interface caps post-013**: `TransportFactory` pure-virtual count moves 1 → 2 (was just `make`; +1 for `reload_credentials`). Still well under `[const §XIV.2]` 5/5 cap. `Listener` stays at 1 (no acceptor-side reload method).
 
-**Validation rules**: `reload_credentials(nullptr)` returns `error::session_invalid_argument` (or equivalent existing slot, NOT in 013's 5-new-slot budget per E-6 validation).
+**Validation rules**: `reload_credentials(nullptr)` returns `error::session_invalid_argument` (slot 119 per contracts/session_errors.hpp; renumbered from 121 to 119 per F1/D1 2026-05-28; 4 new slots total 116..119).
 
 **Anchor**: D-11, D-14; FR-030; `[[feedback_half_restructure_symmetric_api]]`; `[[feedback_weak_ptr_cache_needs_owning_context]]`; `include/fixpp/transport/transport_factory.hpp:52-76` (existing abstract base shape).
 
@@ -370,21 +379,22 @@ private:
 
 ## §Error slot allocation — append to `include/fixpp/core/error.hpp`
 
-5 new `error::session_*` variants at the contiguous block 116..120, appended after 012's `transport_*` block (which occupies 94..115 per shipped post-PR-#85 header — `transport_accept_cancelled = 115` per `[2h §6.6]:1199`):
+4 new `error::session_*` variants at the contiguous block 116..119, appended after 012's `transport_*` block (which occupies 94..115 per shipped post-PR-#85 header — `transport_accept_cancelled = 115` per `[2h §6.6]:1199`). Slots 73 (`session_logout_timeout`) and 74 (`session_test_request_unanswered`) are REUSED from 005-era for FR-008 and FR-004 emissions per F1/D1 resolution 2026-05-28 — reference-engine sweep across QuickFIX-cpp / QuickFIX-J / Fix8 confirmed zero precedent for typed code-level discrimination of these timeout classes:
 
 | Slot | Variant | FR | Notes |
 |---|---|---|---|
+| 73 | `session_logout_timeout` | FR-008 / US1 AC5 | REUSED from 005-era; Logout-reply window elapsed; per D-13; F1/D1 resolution 2026-05-28 |
+| 74 | `session_test_request_unanswered` | FR-004 / US1 AC4 | REUSED from 005-era; inbound liveness window elapsed (2× HeartBtInt without inbound); F1/D1 resolution 2026-05-28 |
 | 116 | `session_seqnum_reset_mismatch` | FR-017 / US1 AC7 | bilateral_strict mode; peer's Logon-response lacks 141=Y when ours had 141=Y; per D-7 |
 | 117 | `session_compid_unauthorized` | FR-021 / US2 AC2 | binding-policy reject (unmatched principal OR principal→compid pair); per D-9 |
-| 118 | `session_logout_disconnect_timeout` | FR-008 / US1 AC5 | Logout-reply window elapsed; per D-13 |
-| 119 | `session_heartbeat_timeout` | FR-004 / US1 AC4 | inbound liveness window elapsed (2× HeartBtInt without inbound) |
-| 120 | `session_testreqid_mismatch` | FR-006 | inbound Heartbeat carries TestReqID(112) that doesn't match the most recent outbound TestRequest's TestReqID |
+| 118 | `session_testreqid_mismatch` | FR-006 | inbound Heartbeat carries TestReqID(112) that doesn't match the most recent outbound TestRequest's TestReqID |
+| 119 | `session_invalid_argument` | FR-033 | runtime nullptr rejection on `reload_credentials` (and future public-API runtime argument validation); added 2026-05-28 per `/speckit-analyze` C3 resolution — no existing `session_invalid_*` slot fits (66 FIX-Logon-shape; 76 config-time; 77 FSM-state); per D-11; renumbered from 121 to 119 per `/speckit-analyze` F1/D1 2026-05-28 |
 
-**C-ABI coalescing** (owned by 2i, NOT 013): these 5 slots join the existing `FIXPP_ERR_SESSION` group at the C-ABI boundary. NO new C-ABI symbol; NO new gRPC RPC.
+**C-ABI coalescing** (owned by 2i, NOT 013): the 4 new slots (116..119) join the existing `FIXPP_ERR_SESSION` group at the C-ABI boundary. Slots 73 and 74 are already in the group. NO new C-ABI symbol; NO new gRPC RPC.
 
 **Reconciliation rule** (carry-forward from 012): the `/speckit-implement`-time rewriter MUST cross-check the actual `include/fixpp/core/error.hpp` to confirm the boundary remains at 115 (no ±N drift from a 012 carry-forward waiver-close shipping an additional `transport_*` variant); future ±1 adjustment is reconciled at /implement-time without re-running Gate A. NEVER renumber existing slots.
 
-**Anchor**: D-7, D-9, D-13; FR-008, FR-017, FR-021; `[const §X.2]` ABI append-only; Assumption A.8.
+**Anchor**: D-7, D-9, D-13; FR-008, FR-017, FR-021; `[const §X.2]` ABI append-only; Assumption A.8; F1/D1 resolution 2026-05-28 per `/speckit-analyze`.
 
 ---
 
@@ -487,12 +497,13 @@ Both the `make(...)` caller (the FSM) and any in-flight handshake CAPTURE a `std
 
 ## §Validation summary
 
-All E-1..E-7 entities + the 5 new error slots cover the spec's FR-001..FR-038 and SC-001..SC-008 surfaces. Cross-walk:
+All E-1..E-7 entities + the 4 new error slots 116..119 (plus reused 005-era slots 73/74 per F1/D1 2026-05-28) cover the spec's FR-001..FR-038 and SC-001..SC-008 surfaces. Cross-walk:
 
 - **FR-001..FR-008** (reconnect FSM cadence): E-1 ReconnectFsm; E-6 Session::logout
 - **FR-009..FR-016** (recovery sub-protocol): E-1 + E-2; FR-016 catalogue flips covered in plan.md §Phase 2
 - **FR-017..FR-018** (ResetSeqNumFlag handshake): E-4 reset_seqnum_policy + E-5 sequence_numbers_reset event + slot 116
 - **FR-019..FR-025** (CompID↔TLS-identity binding): E-3 CompIdAuthorizationPolicy + E-4 field + E-5 peer_identity_bound + compid_authorization_failed events + slot 117
+- **FR-004 / FR-008** (Heartbeat timeout / Logout timeout): reuse shipped slots 74 (session_test_request_unanswered) / 73 (session_logout_timeout) per F1/D1 2026-05-28
 - **FR-026..FR-029** (TLS validation outcome → SessionEvent): E-5 tls_validation_failed event
 - **FR-030..FR-034** (in-process reload_credentials): E-6 Session::reload_credentials (operator-facing forwarder) + E-7 TransportFactory::reload_credentials (binding atomic-swap entry; symmetric authority for initiator + acceptor halves) + E-5 credentials_rotated event
 - **FR-035..FR-038** (cross-cutting symmetry + completeness): E-5 SessionEvent extension shape; FR-037 symmetry obligation tracked in plan.md test plan; FR-038 production-shaped exercise tracked in plan.md test plan.
