@@ -61,16 +61,22 @@ auto run_long_lived_initiator() -> asio::awaitable<void> {
 }
 ```
 
-**Observability** — operator's SessionEvent handler receives a structured event stream:
+**Observability** — operator polls the 013-introduced ring-buffer accessor for SessionEvent values:
 
 ```cpp
-auto on_session_event(fixpp::session::SessionEvent const& ev) -> void {
+// FR-035 — NEW 013 accessor; distinct from 010 F-04's
+// `fsm_visit_history()` (which observes fsm_state transitions, UNCHANGED).
+// Membership-witness: physical-buffer order, NOT chronologically ordered;
+// consumer asserts via Contains / std::find / std::visit pattern-match.
+auto events_view = session.recent_events();  // std::span<const SessionEvent>
+for (auto const& ev : events_view) {
     std::visit([](auto const& e) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, fixpp::session::session_event_sequence_numbers_reset>) {
             // FR-018: sequence numbers reset; by_peer_request distinguishes who requested
         }
-        // ... existing 010 variants ...
+        // ... other 013 variants: peer_identity_bound / compid_authorization_failed /
+        //     tls_validation_failed / credentials_rotated ...
     }, ev);
 }
 ```
@@ -109,7 +115,15 @@ auto run_multi_tenant_acceptor() -> asio::awaitable<void> {
     //    (a) consumes handshake_result.peer_id (from 011's verify_peer)
     //    (b) extracts the principal per FR-022 canonical-fixed order
     //          (CN → SAN-DNS → SAN-URI → SHA-256-fingerprint, first-non-empty wins)
-    //    (c) consults cfg.compid_authorization_policy.authorize(peer_id, asserted_compid)
+    //    (c) consults cfg.compid_authorization_policy.authorize(peer_id, asserted_compid):
+    //          // Call-shape (types inlined for clarity):
+    //          //   auto result = cfg.compid_authorization_policy.authorize(
+    //          //       /* fixpp::tls::peer_identity const& = */ pid,
+    //          //       /* std::string_view asserted_compid = */ logon_senderCompID);
+    //          // result: expected_t<bound_principal>
+    //          //   bound_principal::value  -> std::string_view (extracted principal value)
+    //          //   bound_principal::from   -> source enum: CN / SAN_DNS / SAN_URI / SHA256_FINGERPRINT
+    //          //   on failure: expected_t::unexpected(error::session_compid_unauthorized)
     //    (d) on success: emits SessionEvent::peer_identity_bound; session reaches Active
     //    (e) on failure: emits SessionEvent::compid_authorization_failed;
     //          session rejects Logon with session_compid_unauthorized (slot 117);
@@ -133,39 +147,59 @@ auto run_multi_tenant_acceptor() -> asio::awaitable<void> {
 
 ```cpp
 #include <fixpp/session/session_event.hpp>
-#include <fixpp/tls/tls_verify_error.hpp>
+#include <fixpp/core/error.hpp>
 
-// Operator's SessionEvent handler — same channel as 010's F-04 ring-buffer
-// accessor; the event surfaces even when no Session ever opens (FR-028 — channel
-// is bound to Listener / SessionConfig, not to a Session-instance lifecycle).
-auto on_session_event(fixpp::session::SessionEvent const& ev) -> void {
-    std::visit([](auto const& e) {
-        using T = std::decay_t<decltype(e)>;
-        if constexpr (std::is_same_v<T, fixpp::session::session_event_tls_validation_failed>) {
-            // FR-026: variant is the precise [2g §6.6]:986-1004 enum value,
-            //          NOT a coalesced "tls error".
-            // FR-027: operator_config_error variants (e.g., tls_pin_empty_at_open)
-            //          vs peer-cert errors (e.g., cert_expired) are different
-            //          enum values; the operator switches on variant for triage.
-            switch (e.variant) {
-                case fixpp::tls::tls_verify_error::cert_expired:
-                    // page on-call; cert rotation needed
-                    break;
-                case fixpp::tls::tls_verify_error::pin_mismatch:
-                    // potential MITM; investigate
-                    break;
-                case fixpp::tls::tls_verify_error::tls_pin_empty_at_open:
-                    // operator-config error per 011 /clarify Q2 — fix Pinset config
-                    break;
-                // ... 12 more variants — fault-injection-tested in
-                //     test_tls_validation_failed_all_variants.cpp (all 15 cells)
+// Operator polls the 013-introduced recent_events() ring-buffer accessor;
+// the event surfaces even when no Session ever opens (FR-028 — channel is
+// bound to Listener / SessionConfig, not to a Session-instance lifecycle).
+auto handle_recent_events(std::span<const fixpp::session::SessionEvent> events) -> void {
+    for (auto const& ev : events) {
+        std::visit([](auto const& e) {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, fixpp::session::session_event_tls_validation_failed>) {
+                // FR-026: `code` is the precise master-enum error::tls_* variant
+                //          per shipped include/fixpp/core/error.hpp:403-429
+                //          (6 cells: tls_handshake_failed GROUPING + 5 specifics).
+                // FR-027: operator-config errors vs peer-cert errors share the
+                //          GROUPING `code = tls_handshake_failed` but the
+                //          `sub_reason` field discriminates (per 011 /clarify Q2).
+                //          Triage: switch on `code` first; for `tls_handshake_failed`,
+                //          switch on `sub_reason`.
+                switch (e.code) {
+                    case fixpp::core::error::tls_pin_mismatch:
+                        // potential MITM; investigate
+                        break;
+                    case fixpp::core::error::tls_rsa_key_too_large:
+                    case fixpp::core::error::tls_cert_der_too_large:
+                    case fixpp::core::error::tls_san_entries_exceeded:
+                        // DoS-cap violations; log + drop
+                        break;
+                    case fixpp::core::error::tls_load_cancelled:
+                        // operator-initiated cancellation; no action
+                        break;
+                    case fixpp::core::error::tls_handshake_failed:
+                        // GROUPING — discriminate via sub_reason:
+                        if (e.sub_reason == "expired") {
+                            // page on-call; peer cert rotation needed
+                        } else if (e.sub_reason == "tls_pin_empty_at_open") {
+                            // operator-config error per 011 /clarify Q2 — fix Pinset config
+                        } else if (e.sub_reason == "sigalg_disallowed") {
+                            // cipher / sig-alg policy violation
+                        }
+                        // ... other sub_reasons: rsa_under_min / ecdsa_curve /
+                        //     chain_too_deep / x509_v1 / not_yet_valid / empty_chain ...
+                        break;
+                    default:
+                        // future master-enum tls_* variant — log + ignore
+                        break;
+                }
             }
-        }
-    }, ev);
+        }, ev);
+    }
 }
 ```
 
-**Independent test**: `tests/session/test_tls_validation_failed_all_variants.cpp` fault-injects each of the 15 `tls_verify_error` variants from `[2g §6.6]:986-1004` and verifies the matching `SessionEvent::tls_validation_failed{variant=...}` surfaces. Mitigates `[[feedback_trap_throw_pmr_witness_enumerate_sites]]` — all 15 variants exercised, not just the first.
+**Independent test**: `tests/session/test_tls_validation_failed_taxonomy.cpp` fault-injects each of the 6 master-enum cells (`tls_handshake_failed` GROUPING + `tls_rsa_key_too_large` + `tls_cert_der_too_large` + `tls_san_entries_exceeded` + `tls_pin_mismatch` + `tls_load_cancelled`) PLUS at least 3 representative sub_reason cells (`expired`, `tls_pin_empty_at_open`, `sigalg_disallowed`) and verifies the matching `SessionEvent::tls_validation_failed{code, sub_reason, ...}` surfaces. Mitigates `[[feedback_trap_throw_pmr_witness_enumerate_sites]]` — 6+3 representative cells exercised, covering both top-level master-enum cardinality and the `sub_reason` discriminator within the GROUPING.
 
 ---
 
@@ -185,9 +219,13 @@ auto run_quarterly_cert_rotation(fixpp::session::Session& active_session) -> voi
         /* key_pem_path  = */ "/etc/fixpp/certs/2026-Q3/server.key",
         /* trust_pem_path = */ "/etc/fixpp/certs/2026-Q3/ca.pem");
 
-    // 2. Atomically swap. O(1) under no contention; strand-free. The active
-    //    session continues exchanging application messages WITHOUT INTERRUPTION
-    //    (FR-030 — no Logout emitted; no TLS teardown).
+    // 2. Atomically swap via the operator-facing forwarder. Session::reload_credentials
+    //    delegates to TransportFactory::reload_credentials, which performs an
+    //    atomic store on the factory-internal
+    //    `cert_source_slot_: std::atomic<std::shared_ptr<cert_source>>`.
+    //    O(1) under no contention; strand-free. The active session continues
+    //    exchanging application messages WITHOUT INTERRUPTION (FR-030 — no
+    //    Logout emitted; no TLS teardown).
     auto rotation_result = active_session.reload_credentials(std::move(new_source));
     if (!rotation_result) {
         // nullptr rejected; or other config-level error
@@ -195,28 +233,37 @@ auto run_quarterly_cert_rotation(fixpp::session::Session& active_session) -> voi
     }
 
     // 3. Any in-flight handshake (concurrent reconnect on a flaky link) observes
-    //    the OLD source per FR-033 / D-11. The NEXT transport_factory::make(...)
-    //    call observes the NEW source. Worst-case rotation latency = one handshake
-    //    (~50–500 ms typical for TLS 1.3 1-RTT).
+    //    the OLD source per FR-033 / D-11 — the FSM captured a strong-ref
+    //    std::shared_ptr<cert_source> BY VALUE COPY via
+    //    factory_->cert_source_snapshot() before calling make(...); the captured
+    //    copy keeps the OLD cert_source alive past the atomic store. The NEXT
+    //    drive_reconnect_attempt reads the NEW snapshot. Worst-case rotation
+    //    latency = one in-flight HANDSHAKE duration (~50–500 ms typical for
+    //    TLS 1.3 1-RTT) — NOT an in-flight `make()` window.
     //
     // 4. On the first handshake using the rotated source, the operator's
-    //    SessionEvent handler receives
+    //    recent_events() poll receives
     //    SessionEvent::credentials_rotated{old_sha256, new_sha256} BEFORE the
     //    handshake's Logon completes (per D-12 / FR-032).
 }
 ```
 
-**Symmetric — acceptor side** (per FR-030 acceptor half + `[[feedback_half_restructure_symmetric_api]]`):
+**Symmetric — acceptor side** (per FR-030 + `[[feedback_half_restructure_symmetric_api]]`):
+
+Both initiator and acceptor rotation route through the SAME `TransportFactory::reload_credentials(...)` call — the factory IS the symmetric authority. The acceptor operator reaches the factory via the listener-built factory handle (the listener consumes the same `SessionConfig::transport_factory_override` field as the initiator), so there is no separate `Listener::reload_credentials` method:
 
 ```cpp
-auto rotate_acceptor_credentials(fixpp::transport::asio_listener& listener,
+auto rotate_acceptor_credentials(fixpp::transport::TransportFactory& factory,
                                  std::shared_ptr<fixpp::tls::cert_source> new_source) -> void {
-    auto result = listener.reload_credentials(std::move(new_source));
-    // ... same semantics as Session::reload_credentials ...
+    auto result = factory.reload_credentials(std::move(new_source));
+    // ... same semantics as Session::reload_credentials forwarder ...
+    // (The Session::reload_credentials forwarder for the initiator side ALSO
+    //  delegates to this exact factory call — eliminating the half-restructure
+    //  trap by construction.)
 }
 ```
 
-**Independent test**: `tests/session/test_reload_credentials_in_flight.cpp` drives the in-flight-handshake-defer race deterministically via `mock_clock` + `mock_transport` scripted handshake delay; verifies the in-flight handshake observes OLD; next handshake observes NEW; `credentials_rotated` event emits with correct old/new SHA-256.
+**Independent test**: `tests/session/test_reload_credentials_in_flight.cpp` drives the in-flight-handshake-defer race deterministically via `mock_clock` + `mock_transport` scripted handshake delay; verifies the in-flight handshake observes OLD (because it captured a strong-ref shared_ptr<cert_source> via the snapshot); next handshake observes NEW; `credentials_rotated` event emits with correct old/new SHA-256.
 
 ---
 
@@ -269,8 +316,9 @@ TEST(SessionRecovery, AdminSpanCollapsesToGapFill) {
 
 Per research.md §8:
 
-1. **FR-024 binding-policy symmetry** — `test_compid_binding_symmetry.cpp` exercises initiator AND acceptor halves; invariant-counting witness on `CompIdAuthorizationPolicy::authorize` call site (count = 1 per Logon).
-2. **FR-026 all-15-variants** — `test_tls_validation_failed_all_variants.cpp` has 15 cells (one per `tls_verify_error` variant).
+1. **FR-024 binding-policy symmetry** — `test_compid_binding_symmetry.cpp` exercises initiator AND acceptor halves; invariant-counting witness on `CompIdAuthorizationPolicy::authorize` call site (count = 1 per Logon). Closed-by-construction note: rotation half-restructure is closed by routing both initiator + acceptor through `TransportFactory::reload_credentials` (the factory IS the symmetric authority); binding half-restructure still needs explicit test coverage of both paths.
+2. **FR-026 6-master-enum-cells + 3 representative sub_reason cells** — `test_tls_validation_failed_taxonomy.cpp` has 6 master-enum cells (`tls_handshake_failed` GROUPING + `tls_rsa_key_too_large` + `tls_cert_der_too_large` + `tls_san_entries_exceeded` + `tls_pin_mismatch` + `tls_load_cancelled`) + 3 representative sub_reason cells (`expired` peer-cert / `tls_pin_empty_at_open` operator-config / `sigalg_disallowed` cipher-policy) covering both top-level master-enum cardinality and the `sub_reason` discriminator within the `tls_handshake_failed` GROUPING.
 3. **FR-033 reload_credentials in-flight defer** — `test_reload_credentials_in_flight.cpp` drives the race deterministically.
 4. **FR-022 canonical-fixed principal extraction** — `test_compid_binding_principal_extraction.cpp` has 4 cells (one per `principal_source` enum value).
 5. **FR-009 005-FR-008-amendment-in-place** — /speckit-tasks-time task row + completeness-audit cross-check per `[[feedback_simplify_pass_catches_9th_burn]]`.
+6. **FR-033 captured-by-value-copy strong-ref** — `[[feedback_weak_ptr_cache_needs_owning_context]]`: the FSM's per-attempt cert_source snapshot via `factory_->cert_source_snapshot()` MUST be `std::shared_ptr<cert_source>` (strong-ref) — NEVER raw `cert_source*`, NEVER `weak_ptr`. Invariant-counting witness on `cert_source::~cert_source()` destructor + concurrent-rotation race test in `test_reload_credentials_in_flight.cpp`.

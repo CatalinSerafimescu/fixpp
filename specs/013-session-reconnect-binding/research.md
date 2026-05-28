@@ -125,6 +125,8 @@ This is a fixpp greenfield surface (per FIXS §4.4 normative "authorization link
 - (b) Per-binding operator declaration of source field: rejected — adds operator-config complexity for marginal flexibility; defer to v1.x if demand emerges.
 - (c) Fingerprint-only: rejected — operators lose the human-readable principal name in audit logs.
 
+**Backward-compatibility note**: Adding per-binding-entry override modes (operator-declared source field per entry) in a later feature is BACKWARD-COMPATIBLE — the canonical-fixed order is the v1.0 default that future overrides extend, not replace. Existing operator configs that rely on the default order remain valid; new configs may opt-in to per-binding overrides without breaking existing bindings.
+
 **Anchor**: `[FIXS §4.4]` normative + Clarifications Q2=A.
 
 ### D-9 — CompIdAuthorizationPolicy is allow-list only in v1.0 (default-deny)
@@ -152,13 +154,22 @@ This is a fixpp greenfield surface (per FIXS §4.4 normative "authorization link
 
 ## §4 reload_credentials concurrency — Clarifications Q4=A
 
-### D-11 — Atomic swap at transport_factory::make(...) entry; defer rotation until in-flight handshake completes
+### D-11 — Atomic swap INSIDE the factory; defer rotation effects until in-flight handshake completes
 
-**Decision**: `Session::reload_credentials(new_cert_source)` (and `asio_listener::reload_credentials(new_cert_source)`) atomically swap the underlying `cert_source` slot on the held `TransportFactory`. The swap is `std::atomic<std::shared_ptr<cert_source>>::store(...)` — strand-free, race-free, O(1). The next `transport_factory::make(...)` call observes the NEW; any in-flight handshake (already past `make`) observes the OLD. NO mid-handshake `SSL_CTX` mutation (would invoke OpenSSL undefined behaviour per OpenSSL 3.x documentation on `SSL_CTX` lifetime).
+**Decision**: `Session::reload_credentials(new_cert_source)` is the operator-facing forwarder; it delegates to `TransportFactory::reload_credentials(new_cert_source)` which is the binding atomic-swap entry. The factory owns `std::atomic<std::shared_ptr<cert_source>> cert_source_slot_`; `reload_credentials` performs `cert_source_slot_.store(new_cert_source)` — strand-free, race-free, O(1). Both initiator-side rotation AND acceptor-side rotation route through the SAME factory call per `[[feedback_half_restructure_symmetric_api]]` — the factory IS the symmetric authority (no per-side reload entry). `TransportFactory` ownership stays BEHAVIOURALLY per-Session per 2h Appendix D §D.1+§D.2 sign-off (`include/fixpp/transport/transport_factory.hpp:156-164`) — see D-14 for the 013-specific storage-type reconciliation (the storage type is `shared_ptr<TransportFactory>` for SessionConfig-copy semantics per 010 FR-001a precedent, BUT the 2h "no factory shared across Sessions" invariant is preserved via a `/speckit-implement`-time hygiene assertion at `Session::open`); the atomic `cert_source_slot_` lives INSIDE the factory, NOT around it.
+
+**`make(...)` consumption path**: `TransportFactory::make(exec, ssl_cfg, mr) noexcept -> expected_t<unique_ptr<Transport>>` (per `[2h §4.7]:961-964`) takes `SslCtxConfig` BY VALUE — built by the FSM caller (`ReconnectFsm::drive_reconnect_attempt`) from a per-attempt atomic snapshot of `cert_source_slot_`. The FSM-side sequence is:
+1. `auto snap = factory_->cert_source_slot_load();` — atomic snapshot of the current `shared_ptr<cert_source>` (factory exposes a typed accessor; caller now holds a strong-ref keeping the cert_source alive past the swap).
+2. `auto ssl_cfg = fixpp::tls::make_ssl_ctx_config(profile, snap, clock, pinset, mr);` — per `[2g §4.5]`.
+3. `auto tr = factory_->make(exec, std::move(ssl_cfg), mr);` — minted Transport carries the snapshot's leaf cert + key.
+
+If a `reload_credentials` lands BETWEEN steps 1 and 3 (or during the handshake that follows), the in-flight handshake completes against the OLD `cert_source` (held strong-ref via `snap`); the NEXT `drive_reconnect_attempt` reads the NEW snapshot. NO mid-handshake `SSL_CTX` mutation (would invoke OpenSSL undefined behaviour per OpenSSL 3.x documentation on `SSL_CTX` lifetime).
+
+**Captured-by-value-copy invariant** (closes the `[[feedback_weak_ptr_cache_needs_owning_context]]` axis): the FSM's `snap` is a `std::shared_ptr<cert_source>` (strong-ref) — never a raw `cert_source*` and never a `weak_ptr`. The strong-ref keeps the OLD cert_source alive past the factory's `cert_source_slot_.store(new)`; the OLD cert_source is destructed when (a) the in-flight handshake completes AND (b) every captured snapshot's shared_ptr count drops to 0. This is the SAFE-by-construction lifetime story; document it as a binding invariant in §8 anti-pattern guards.
 
 **Rationale (Clarifications Q4)**: Reference-engine sweep found NO engine supports in-process cert rotation at all (QFC + QFJ initialize SSL_CTX once at startup; Fix8 same; all require full process restart). This is a fixpp greenfield surface — `[const §VI]` operator-burden reduction + SLA-visibility minimisation drives the design.
 
-Atomicity at `transport_factory::make(...)` entry (not mid-handshake) is the safe-by-construction choice. Worst-case rotation latency = one handshake duration (~50–500 ms typical for TLS 1.3 1-RTT).
+Atomicity inside the factory (with per-attempt FSM-side snapshot reads from the atomic slot) is the safe-by-construction choice. Worst-case rotation latency = one in-flight HANDSHAKE duration (~50–500 ms typical for TLS 1.3 1-RTT) — NOT an in-flight `make()` window; `make()` itself is one-shot per call.
 
 **Alternatives considered**:
 - (a) Abort + restart in-flight handshake on rotation: rejected — leaks side-effects (peer sees connect→close→reconnect); operationally noisy.
@@ -198,25 +209,47 @@ Atomicity at `transport_factory::make(...)` entry (not mid-handshake) is the saf
 
 ### D-14 — Transport / TransportFactory contract from 012 (LOCKED)
 
-**Consumed**: `[2h §4.7]:907-910` — `TransportFactory::make(asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg, std::pmr::memory_resource* mr) noexcept -> expected_t<std::unique_ptr<Transport>>`. The cached-SSL-CTX FR-026 contract is BINDING for `reload_credentials` invariant — the cache invalidation point IS the atomic swap at `make(...)` entry (D-11).
+**Consumed**: `[2h §4.7]:961-964` — `TransportFactory::make(asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg, std::pmr::memory_resource* mr) noexcept -> expected_t<std::unique_ptr<Transport>>` (the design-doc signature; the shipped header lives at `include/fixpp/transport/transport_factory.hpp:72-75`). The cached-SSL-CTX FR-026 contract is BINDING for `reload_credentials` invariant — the swap point is `TransportFactory::reload_credentials(new_source)` (013-introduced pure-virtual; pushes the factory's pure-virtual count 1→2, still under 5/5 cap), an atomic store on the factory-internal `cert_source_slot_: std::atomic<std::shared_ptr<cert_source>>`. The subsequent `make(...)` call's `SslCtxConfig` is built by the FSM caller from a per-attempt atomic snapshot read (see D-11).
 
-**Half-restructure obligation** per `[[feedback_half_restructure_symmetric_api]]` + 012 RC#B precedent: the FR-026 cache covers BOTH initiator AND accept paths (012 Codex r3 caught the half-restructure); 013's `reload_credentials` must verify the invariant holds for BOTH halves (initiator-side rotation via `Session::reload_credentials`; acceptor-side rotation via `asio_listener::reload_credentials`).
+**`SessionConfig::transport_factory_override` field** (consumed from 2h Appendix D §D.2 reservation per `transport_factory.hpp:156-164`): 2h declared as `std::unique_ptr<fixpp::transport::TransportFactory>`; 013 stores as `std::shared_ptr<fixpp::transport::TransportFactory>` per the 010 FR-001a precedent (SessionConfig copy-constructibility — see data-model.md E-4 "Ownership reconciliation"). Default `nullptr`. Engine substitutes the default factory at `Session::open`-time when `nullptr`. Resolution rule: `resolved_factory = SessionConfig::transport_factory_override.value_or(EngineConfig::default_transport_factory)`. 2h reserved this field for "the post-012 session-Phase-4 spec" — i.e., this feature; the wiring lands in 013's `SessionConfig` delta (4th new field per E-4).
 
-**Anchor**: `[2h §4.7]` + `[[project_012_2h_transport_closed]]` RC#B saga + `[[feedback_half_restructure_symmetric_api]]`.
+**Factory ownership BEHAVIOUR stays "per-Session, no cross-Session sharing"** per 2h Appendix D §D.1+§D.2 sign-off. The storage type is `shared_ptr<TransportFactory>` (013-specific) — see data-model.md E-4 "Ownership reconciliation" for the rationale. The 2h binding constraint is preserved via `/speckit-implement`-time hygiene assertion at `Session::open`. The atomic-swap slot for `cert_source` lives INSIDE the factory; `ReconnectFsm::factory_` is a non-owning `TransportFactory*` (the SessionConfig owns the shared_ptr; the engine guarantees the factory outlives the FSM per `[arch §5.6]` frozen-at-open rule).
+
+**Half-restructure obligation closed by construction** per `[[feedback_half_restructure_symmetric_api]]` + 012 RC#B precedent: by routing BOTH initiator-side rotation AND acceptor-side rotation through the SAME `TransportFactory::reload_credentials(...)` call, the factory IS the symmetric authority. There is no per-side reload entry to keep in sync — eliminating the half-restructure trap by construction (the 012 RC#B saga where FR-026 caching covered only the initiator half cost 2 extra Gate B rounds; 013's design closes this class by making the factory the single authority).
+
+**Anchor**: `[2h §4.7]:961-964` + `include/fixpp/transport/transport_factory.hpp:72-75,156-164` + `[[project_012_2h_transport_closed]]` RC#B saga + `[[feedback_half_restructure_symmetric_api]]`.
 
 ### D-15 — TLS verify_peer + peer_identity from 011 (LOCKED)
 
-**Consumed**: `[2g §6.6]:986-1004` — 15 `tls_verify_error` variants; `verify_peer(...) -> expected_t<peer_identity, tls_verify_error>`; `peer_identity` carries `cn`, `sans`, `sha256_fingerprint`, `cipher_suite`.
+**Consumed**: Shipped `verify_peer(SslCtxConfig const& cfg, std::span<const Certificate> peer_chain) noexcept -> core::expected_t<peer_identity>` (`include/fixpp/tls/security_profile.hpp:121-122`) — **single-arg `expected_t`** over the master `core::error` enum (`expected_t<T> = std::expected<T, error>` per `include/fixpp/core/error.hpp:588`). NOT a two-arg `expected_t<peer_identity, tls_verify_error>` (that form is not a valid alias signature — `tls_verify_error` is not a type at all; earlier drafts of this bundle invented it).
 
-**FR-026 binding**: 013 surfaces EACH of the 15 variants as a distinct `SessionEvent::tls_validation_failed{variant=...}` — NOT coalesced to a generic "tls error". Per `[[feedback_trap_throw_pmr_witness_enumerate_sites]]`, 013's test plan enumerates all 15 (not just first) to avoid the false-pass axis 011 round-2 closed.
+**Master-enum surface — 6 distinct `error::tls_*` variants** per shipped `include/fixpp/core/error.hpp:403-429`:
+- `tls_handshake_failed = 88` — GROUPING variant per `[2g §6.6]`; collapses 10+ sub-reasons.
+- `tls_rsa_key_too_large = 89` — DoS bound.
+- `tls_cert_der_too_large = 90` — DoS bound.
+- `tls_san_entries_exceeded = 91` — DoS bound.
+- `tls_pin_mismatch = 92` — peer cert SHA-256 not in Pinset.
+- `tls_load_cancelled = 93` — cancellation.
 
-**Anchor**: `[2g §6.6]` + 011 `/clarify` Q2 operator_config_error vs cert_expired distinction (FR-027).
+**Sub-reason surface — thread-local `last_handshake_sub_reason() noexcept -> std::string_view`** (`security_profile.hpp:124-144`) per 011 v0.1 T037 brief — "enum-only return + thread-local sub-reason carrier". When `verify_peer` returns `tls_handshake_failed`, the thread-local carries the specific sub-reason as a static-storage string literal: `"rsa_under_min"`, `"ecdsa_curve"`, `"sigalg_disallowed"`, `"chain_too_deep"`, `"x509_v1"`, `"expired"`, `"not_yet_valid"`, `"empty_chain"`, etc. The `[2g §6.6]` 15-variant table is the DESIGN-DOC ENUMERATION of these sub-reasons — they surface via the thread-local string, NOT as distinct master-enum variants.
 
-### D-16 — SessionEvent ring-buffer accessor from 010 F-04 (LOCKED)
+**`peer_identity`** carries `cn`, `sans`, `sha256_fingerprint`, `cipher_suite` — UNCHANGED.
 
-**Consumed**: 010 F-04 closure added the ring-buffer accessor for SessionEvent observability (per `[[project_010_session_cfg_lifetime_closed]]`). 013 EXTENDS the variant set with 5 new variants on the same ring; NO new event channel, NO breaking change to existing variants. Verified at /speckit-implement-time that the variant union from 010 is `std::variant<...>` or `boost::variant<...>` (or equivalent extensible shape); add new variants append-only.
+**FR-026 binding (corrected)**: 013 surfaces the actual master-enum `error::code` + the `last_handshake_sub_reason()` diagnostic string as a single `SessionEvent::tls_validation_failed{code, sub_reason, peer_endpoint, reason_string}`. The test plan covers all 6 master-enum cells + 3 representative sub_reason cells (per `[[feedback_trap_throw_pmr_witness_enumerate_sites]]` — enumerate REPRESENTATIVE sites of the action, not coalesce). The 15-variant design-doc enumeration drives test case selection for the `sub_reason` axis but is NOT the enum cardinality on the wire.
 
-**Anchor**: 010 F-04 + Assumption A.3 + FR-035.
+**Anchor**: `include/fixpp/tls/security_profile.hpp:121-144` + `include/fixpp/core/error.hpp:403-429` + `[2g §6.6]` (design-doc sub-reason enumeration) + 011 `/clarify` Q2 operator_config_error vs cert_expired distinction (FR-027, discriminated via `sub_reason`).
+
+### D-16 — SessionEvent is a NEW 013-introduced surface; 010 F-04 shipped a DIFFERENT accessor
+
+**Ground-truth**: 010 F-04 shipped `Session::fsm_visit_history() const noexcept -> std::span<const fsm_state>` (`include/fixpp/session/session.hpp:237-250`) — a fixed 16-entry `std::array<fsm_state, 16>` ring of `fsm_state` enum values (FSM-state observation; the ring records the set of transitions over the most recent ≤16 `record_state_transition_()` calls; physical-buffer order, NOT chronologically ordered; membership-witness only). It is **NOT a variant union of session events**; it is a fixed array of enum values.
+
+**No shipped `SessionEvent` type**: `grep -rn 'SessionEvent\\b' include/ src/` returns zero hits. The bundle's earlier framing — "extend the existing 010 F-04 SessionEvent variant union with 5 new alternatives" — was based on a misreading of 010's shipped surface.
+
+**Decision**: 013 introduces `SessionEvent` as a NEW public variant union in `include/fixpp/session/session_event.hpp` with 5 initial alternatives (`peer_identity_bound`, `compid_authorization_failed`, `tls_validation_failed`, `credentials_rotated`, `sequence_numbers_reset`). 013 also introduces a NEW ring-buffer accessor `Session::recent_events() const noexcept -> std::span<const SessionEvent>` (013-defined; distinct from `fsm_visit_history()`). The two accessors are complementary: `fsm_visit_history()` observes FSM-state-transition values (UNCHANGED); `recent_events()` observes the new variant-event stream (013's contribution).
+
+**Future evolution**: post-013 features may append additional `SessionEvent` variants append-only; this is the standard `std::variant<...>`-extension pattern. No breaking change to 013's 5 initial alternatives.
+
+**Anchor**: `include/fixpp/session/session.hpp:237-250` (shipped `fsm_visit_history` accessor) + Assumption A.3 + FR-035; NOT extending 010's surface.
 
 ### D-17 — MessageStore::retrieve + PossDupFlag from 008 (LOCKED)
 
@@ -242,8 +275,9 @@ Atomicity at `transport_factory::make(...)` entry (not mid-handshake) is the saf
 Per `[[feedback_simplify_pass_catches_9th_burn]]` — /simplify catches binding-contract drifts after completeness PASS. Surfaces in 013 most at-risk for this class:
 
 1. **FR-024 binding-policy symmetry** — initiator path AND acceptor path must consume the SAME `CompIdAuthorizationPolicy`; 012 RC#B's saga (FR-026 covered only initiator half until Codex r3) is the precedent. Mitigation: `test_compid_binding_symmetry.cpp` exercises both halves; invariant-counting witness on `CompIdAuthorizationPolicy::authorize` call site.
-2. **FR-026 enumerate-all-15-variants** — `[[feedback_trap_throw_pmr_witness_enumerate_sites]]`: test plan must drive EACH of the 15 `tls_verify_error` variants (not just first). Mitigation: `test_tls_validation_failed_all_variants.cpp` has 15 cells.
-3. **FR-033 reload_credentials in-flight handshake defer** — atomicity at `make(...)` entry is the binding contract; if a future fixer commits modify `make` to evaluate `cert_source` lazily inside the handshake coroutine, the invariant breaks silently. Mitigation: `test_reload_credentials_in_flight.cpp` cell drives the race deterministically via `mock_clock` + `mock_transport` scripted handshake delay.
+2. **FR-026 6-master-enum-cells + 3 representative sub_reason cells** — `[[feedback_trap_throw_pmr_witness_enumerate_sites]]`: test plan must drive ALL 6 master-enum cells (`tls_handshake_failed` GROUPING + `tls_rsa_key_too_large` + `tls_cert_der_too_large` + `tls_san_entries_exceeded` + `tls_pin_mismatch` + `tls_load_cancelled` per shipped `error.hpp:403-429`) AND at least 3 representative sub_reason cells (covering peer-cert / operator-config / cipher-policy axes — e.g., `"expired"`, `"tls_pin_empty_at_open"`, `"sigalg_disallowed"`). Mitigation: `test_tls_validation_failed_taxonomy.cpp` has 6+3 cells.
+3. **FR-033 reload_credentials in-flight handshake defer** — atomicity inside the factory (`cert_source_slot_: std::atomic<std::shared_ptr<cert_source>>`) is the binding contract; the FSM-side `drive_reconnect_attempt` reads the atomic snapshot before building `SslCtxConfig` for `make(...)`. If a future fixer modifies the FSM to capture a raw `cert_source*` from the snapshot or to read the slot lazily inside the handshake coroutine, the invariant breaks silently. Mitigation: `test_reload_credentials_in_flight.cpp` cell drives the race deterministically via `mock_clock` + `mock_transport` scripted handshake delay.
+6. **FR-033 captured-by-value-copy strong-ref lifetime** — `[[feedback_weak_ptr_cache_needs_owning_context]]`: the FSM's per-attempt cert_source snapshot MUST be captured as `std::shared_ptr<cert_source>` (strong-ref) — NEVER a raw `cert_source*` and NEVER a `weak_ptr`. The strong-ref keeps the OLD cert_source alive past the factory's `cert_source_slot_.store(new)`; the OLD cert_source is destructed only when (a) the in-flight handshake completes AND (b) every captured snapshot's shared_ptr count drops to 0. If a future fixer "optimises" the snapshot to a raw pointer (or worse, a weak_ptr-keyed cache without a strong-ref-keeping owner), an in-flight handshake on the OLD source reads dead memory after the operator's rotate call returns. Mitigation: invariant-counting witness on `cert_source::~cert_source()` destructor + concurrent-rotation race test in `test_reload_credentials_in_flight.cpp`.
 4. **FR-022 principal-extraction canonical-fixed** — if a fixer "improves" the principal extraction to SAN-first or operator-overridable, the v1.0 lock-in breaks. Mitigation: `test_compid_binding_principal_extraction.cpp` pins the order with 4 explicit cells.
 5. **FR-009 005-FR-008-amendment-in-place** — the spec amendment to 005 must propagate to 005's plan / data-model / tests; if missed, a future audit might re-trigger the "fatal-disconnect" interpretation. Mitigation: /speckit-tasks-time task row to amend 005 in-place + cross-check at completeness-audit per `[[feedback_simplify_pass_catches_9th_burn]]`.
 

@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // fixpp — 013-session-reconnect-binding
-// Contract: SessionEvent variant extensions (5 new variants on the 010 F-04
-// ring-buffer accessor). NO new event channel; NO breaking change to existing
-// 010 variants.
+// Contract: SessionEvent — NEW PUBLIC VARIANT UNION introduced by 013.
 // Anchors: FR-018, FR-020, FR-021, FR-026, FR-027, FR-032, FR-035, D-10, D-12,
-// D-15, D-16; [2g §6.6]:986-1004; Clarifications Q2=A, Q3=A, Q4=A.
+// D-15, D-16; shipped `include/fixpp/core/error.hpp:403-429` (6-cell
+// master-enum surface); shipped `include/fixpp/tls/security_profile.hpp:121-144`
+// (verify_peer + last_handshake_sub_reason); Clarifications Q2=A, Q3=A, Q4=A.
 //
-// NOTE: This contract documents the FIVE NEW variants. The shipped form merges
-// these into the existing 010-F-04 SessionEvent variant union; the merge
-// preserves all existing 010 variants verbatim (no renumbering, no reordering
-// that would break operator-side switch coverage).
+// NOTE: SessionEvent is a NEW 013-introduced public type — it is NOT an
+// extension of any shipped 010 variant union. 010 F-04 shipped
+// `Session::fsm_visit_history() const noexcept -> std::span<const fsm_state>`
+// (`include/fixpp/session/session.hpp:237-250`), a fixed 16-entry std::array
+// ring of FSM-state enum values (FSM-state observation; NOT a variant-event
+// channel). The 010 F-04 accessor remains UNCHANGED and complementary.
+//
+// 013 introduces:
+//   1. `using SessionEvent = std::variant<...>` — this header (5 initial
+//      alternatives; future features append append-only).
+//   2. `Session::recent_events() const noexcept -> std::span<const SessionEvent>` —
+//      NEW 013 ring-buffer accessor (declared in session_ext.hpp / shipped
+//      session.hpp).
 
 #pragma once
 
@@ -19,9 +28,10 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <variant>
 
+#include "fixpp/core/error.hpp"                           // for error::code (master enum)
 #include "fixpp/session/compid_authorization_policy.hpp"  // for bound_principal::source
-#include "fixpp/tls/tls_verify_error.hpp"                 // for tls_verify_error (15 variants)
 
 namespace fixpp::session {
 
@@ -49,14 +59,34 @@ struct session_event_compid_authorization_failed {
     std::span<std::string_view const> expected_compids;  // empty if no binding for principal
 };
 
-// FR-026 / FR-027 — emitted when 011's verify_peer returns a tls_verify_error;
-// surfaced even when no Session ever opens (handshake fails before Logon) per
-// FR-028. variant is the precise [2g §6.6]:986-1004 enum value, NOT coalesced.
-// FR-027 distinction: operator_config_error variants (e.g., tls_pin_empty_at_open)
-// vs peer-cert errors (e.g., cert_expired) are different enum values; the consumer
-// switches on variant for triage.
+// FR-026 / FR-027 — emitted when 011's verify_peer returns an error::tls_*
+// master-enum variant; surfaced even when no Session ever opens (handshake
+// fails before Logon) per FR-028. `code` is the precise master-enum value per
+// shipped `include/fixpp/core/error.hpp:403-429` (6 cells: tls_handshake_failed
+// GROUPING + tls_rsa_key_too_large + tls_cert_der_too_large +
+// tls_san_entries_exceeded + tls_pin_mismatch + tls_load_cancelled). The 10+
+// sub-reasons collapsed under tls_handshake_failed (RSA-low / ECDSA-curve /
+// expired / sigalg-disallowed / etc.) surface via the `sub_reason` field
+// captured from 011's thread-local last_handshake_sub_reason() at the moment
+// verify_peer returned.
+//
+// FR-027 distinction: operator-config errors (e.g., sub_reason="tls_pin_empty_at_open")
+// and peer-cert errors (e.g., code=tls_pin_mismatch or code=tls_handshake_failed
+// with sub_reason="expired") are discriminated by the (code, sub_reason) pair;
+// consumers triage by switching on `code` first, then on `sub_reason` when
+// code == tls_handshake_failed.
+//
+// Sub-reason capture semantics: sub_reason is captured BY COPY into a session-
+// arena string at event-emit time (NOT a view into 011's thread-local storage);
+// the consumer may further copy if it needs to outlive the event-emit
+// synchronous context.
 struct session_event_tls_validation_failed {
-    fixpp::tls::tls_verify_error variant;             // precise [2g §6.6] variant
+    fixpp::core::error code;                          // precise master-enum variant (6 cells)
+    std::string_view sub_reason;                      // [[clang::lifetimebound]] — 011 sub-reason
+                                                      // diagnostic ("expired" / "rsa_under_min" /
+                                                      // "sigalg_disallowed" / "tls_pin_empty_at_open" /
+                                                      // ...); empty when code is one of the 5 specific
+                                                      // tls_* variants
     std::string_view peer_endpoint;                   // [[clang::lifetimebound]] — "host:port"
     std::string_view reason_string;                   // [[clang::lifetimebound]] — operator-readable
 };
@@ -76,18 +106,32 @@ struct session_event_sequence_numbers_reset {
     bool by_peer_request;
 };
 
-// SessionEvent (the existing 010-F-04 variant union) gains these 5 alternatives.
-// The shipped form lives at include/fixpp/session/session_event.hpp; this
-// contract documents only the 013 delta.
+// SessionEvent — NEW 013-introduced public variant union. 5 initial
+// alternatives; future features APPEND alternatives append-only (consumer-side
+// std::visit fall-throughs are responsible for tolerating future variants).
 //
-// Approximate shipped shape (010 variants elided):
-//   using SessionEvent = std::variant<
-//       /* existing 010 variants */,
-//       session_event_peer_identity_bound,
-//       session_event_compid_authorization_failed,
-//       session_event_tls_validation_failed,
-//       session_event_credentials_rotated,
-//       session_event_sequence_numbers_reset
-//   >;
+// The shipped form lives at include/fixpp/session/session_event.hpp:
+using SessionEvent = std::variant<
+    session_event_peer_identity_bound,
+    session_event_compid_authorization_failed,
+    session_event_tls_validation_failed,
+    session_event_credentials_rotated,
+    session_event_sequence_numbers_reset
+>;
+
+// Companion accessor on Session (declared in session_ext.hpp / shipped
+// session.hpp; mentioned here for cross-reference):
+//
+//   class Session {
+//   public:
+//       // 010 F-04 — UNCHANGED, complementary, FSM-state observation:
+//       std::span<const fsm_state> fsm_visit_history() const noexcept;
+//
+//       // 013-introduced ring-buffer accessor for SessionEvent observability:
+//       std::span<const SessionEvent> recent_events() const noexcept;
+//   };
+//
+// Membership-witness semantics per 010 F-04 contract (NOT chronologically
+// ordered; tests assert via Contains / std::find).
 
 }  // namespace fixpp::session

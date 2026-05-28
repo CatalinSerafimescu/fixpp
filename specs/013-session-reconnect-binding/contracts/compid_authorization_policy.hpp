@@ -45,9 +45,21 @@ public:
     // PMR-allocated form for operator-supplied long-lived arenas.
     explicit CompIdAuthorizationPolicy(std::pmr::memory_resource* mr) noexcept;
 
-    // Move-only (binding storage carries PMR allocations).
-    CompIdAuthorizationPolicy(CompIdAuthorizationPolicy const&) = delete;
-    CompIdAuthorizationPolicy& operator=(CompIdAuthorizationPolicy const&) = delete;
+    // COPY-CONSTRUCTIBLE per 010 W-5 SessionConfig static_assert
+    // (`include/fixpp/session/session_config.hpp:176-180`); the underlying
+    // std::pmr::unordered_map<std::pmr::string, std::pmr::flat_set<std::pmr::string>>
+    // storage already supports copy. Copy is value-semantics deep-copy of the
+    // bindings using the destination's PMR memory_resource. SessionConfig is
+    // held BY VALUE by Session per 010 FR-001 by-value membership; every
+    // SessionConfig field MUST be copy-constructible.
+    //
+    // Copy cost is acceptable at SessionConfig copy time (engine bootstrap /
+    // Session::open path, NOT the hot path). The std::shared_ptr<store_factory>
+    // pattern (010 FR-001a) is NOT applied here — the value-semantics copy is
+    // operator-visible and intentional (operator may copy a SessionConfig to
+    // open a parallel session against the same binding policy).
+    CompIdAuthorizationPolicy(CompIdAuthorizationPolicy const&);
+    CompIdAuthorizationPolicy& operator=(CompIdAuthorizationPolicy const&);
     CompIdAuthorizationPolicy(CompIdAuthorizationPolicy&&) noexcept;
     CompIdAuthorizationPolicy& operator=(CompIdAuthorizationPolicy&&) noexcept;
     ~CompIdAuthorizationPolicy();

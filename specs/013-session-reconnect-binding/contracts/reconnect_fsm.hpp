@@ -33,10 +33,18 @@ namespace fixpp::session {
 // cadence timers, and the Logout / force-disconnect timeout.
 class ReconnectFsm {
 public:
-    // Constructed by Session at SessionConfig-build time. Holds a shared_ptr to
-    // TransportFactory so reload_credentials can atomically swap the underlying
-    // cert_source slot without invalidating the factory pointer.
-    ReconnectFsm(std::shared_ptr<fixpp::transport::TransportFactory> factory,
+    // Constructed by Session at SessionConfig-build time. Holds a non-owning
+    // raw pointer to TransportFactory; the factory itself is owned by
+    // SessionConfig::transport_factory_override (per 2h Appendix D §D.1+§D.2
+    // sign-off, `transport_factory.hpp:156-164`). The engine guarantees the
+    // factory outlives the FSM per `[arch §5.6]` frozen-at-open rule. The
+    // atomic-swap slot for `cert_source` lives INSIDE the factory
+    // (`cert_source_slot_: std::atomic<std::shared_ptr<cert_source>>`); the
+    // FSM reads the atomic snapshot via `factory_->cert_source_snapshot()` per
+    // drive_reconnect_attempt and captures the strong-ref shared_ptr BY VALUE
+    // COPY (NEVER a raw pointer, NEVER a weak_ptr — per
+    // `[[feedback_weak_ptr_cache_needs_owning_context]]`).
+    ReconnectFsm(fixpp::transport::TransportFactory* factory,
                  fixpp::transport::ReconnectPolicy policy,
                  std::chrono::seconds heartbeat_interval,
                  std::chrono::milliseconds logout_disconnect_timeout) noexcept;
@@ -45,6 +53,18 @@ public:
     // Transport via factory_->make(...), re-Logon. Returns transport_*
     // variants on connect / handshake failure, session_* variants on Logon
     // protocol failure.
+    //
+    // FR-033 cert_source consumption: this method reads the factory's
+    // atomic cert_source slot via factory_->cert_source_snapshot() at attempt
+    // entry (returns a strong-ref std::shared_ptr<cert_source> BY VALUE COPY),
+    // builds an SslCtxConfig from the snapshot via
+    // fixpp::tls::make_ssl_ctx_config(...), and passes it by-value into
+    // factory_->make(exec, std::move(ssl_cfg), mr). The captured strong-ref
+    // keeps the OLD cert_source alive for the handshake's duration even if an
+    // operator-driven reload_credentials lands during the handshake; the NEXT
+    // drive_reconnect_attempt reads the NEW snapshot. NEVER captures a raw
+    // cert_source* or a weak_ptr<cert_source> from the snapshot — per
+    // [[feedback_weak_ptr_cache_needs_owning_context]] anti-pattern guard.
     [[nodiscard]] asio::awaitable<expected_t<void>>
     drive_reconnect_attempt() noexcept;
 
@@ -103,7 +123,7 @@ public:
     [[nodiscard]] ResendState const& current_resend_state() const noexcept;
 
 private:
-    std::shared_ptr<fixpp::transport::TransportFactory> factory_;
+    fixpp::transport::TransportFactory* factory_;  // non-owning; owned by SessionConfig::transport_factory_override
     fixpp::transport::ReconnectPolicy policy_;
     std::uint32_t attempt_index_;
     std::chrono::seconds heartbeat_interval_;
