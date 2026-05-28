@@ -118,6 +118,24 @@ std::span<const fsm_state> Session::fsm_visit_history() const noexcept {
                                       std::min<std::size_t>(fsm_visit_count_, 16)};
 }
 
+// ── 013 FR-035 — SessionEvent ring-buffer helpers ────────────────────────
+// emit_event: write ev into the kSessionEventRingCapacity-slot ring on the
+// per-session strand ([const §XI.4]). Body wired fully in Phase 5 T040;
+// this stub is link-green for Phase 2/3/4. [data-model §E-6]
+void Session::emit_event(SessionEvent ev) noexcept {
+    recent_events_[events_write_idx_++ % kSessionEventRingCapacity] = std::move(ev);
+    if (events_count_ < kSessionEventRingCapacity) {
+        ++events_count_;
+    }
+}
+
+// recent_events: membership-witness view over the last ≤16 emitted SessionEvents
+// (physical-buffer order; NOT chronologically meaningful). [data-model §E-6]
+std::span<const SessionEvent> Session::recent_events() const noexcept {
+    return std::span<const SessionEvent>{recent_events_.data(),
+                                         std::min(events_count_, kSessionEventRingCapacity)};
+}
+
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
 // Marked so a later phase's task body substitutes (not appends to) these.
 
@@ -624,8 +642,10 @@ struct SendingTimeStamp {
 //       session stays Active (no loop for Reject/Logout).
 //
 // Seqnum check (T031/T032/T035):
-//   Too-low  → session_seqnum_too_low (69)   → fatal: Disconnected
-//   Too-high → session_seqnum_gap_unrecoverable (70) → fatal: Disconnected
+//   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected
+//   Too-high → session_test_request_unanswered (74)     → fatal: Disconnected
+//              (slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
+//               2e-recovery: migrate to FR-009 once 013 Phase 3 lands)
 //   In-seq   → advance counter, proceed
 //
 // For the NotConnected/Logon path the peer's first Logon carries seq=1.
@@ -860,7 +880,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
                     // Too-low (session_seqnum_too_low=69) or
-                    // too-high (session_seqnum_gap_unrecoverable=70) → session-fatal.
+                    // too-high (session_test_request_unanswered=74, stand-in;
+                    //   slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
+                    //   2e-recovery: migrate to FR-009 once 013 Phase 3 lands)
+                    // → session-fatal.
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }

@@ -248,8 +248,10 @@ enum class error : std::uint8_t {
     //      FIXPP_ERR_SESSION_REFUSAL     ← { session_invalid_logon,
     //                                        session_compid_mismatch,
     //                                        session_begin_string_unsupported }
-    //      FIXPP_ERR_SESSION_FATAL       ← { session_seqnum_too_low,
-    //                                        session_seqnum_gap_unrecoverable }
+    //      FIXPP_ERR_SESSION_FATAL       ← { session_seqnum_too_low }
+    //                                       (slot 70 session_seqnum_gap_unrecoverable
+    //                                        deleted pre-v1.0 per 013 T006a Option D;
+    //                                        slot 70 is a numeric hole [const §X.4])
     //      FIXPP_ERR_SESSION_REJECT      ← { session_sending_time_accuracy,
     //                                        session_msg_type_invalid_for_state,
     //                                        session_admin_not_supported }
@@ -272,13 +274,13 @@ enum class error : std::uint8_t {
                                               //   (ordered-sequence integrity). PossDup handling
                                               //   is deferred (S-010); treated as the no-PossDup
                                               //   case in 005. → FIXPP_ERR_SESSION_FATAL
-    session_seqnum_gap_unrecoverable = 70,    // FR-008/FR-001, Session-2026-05-18 — inbound
-                                              //   MsgSeqNum too-high: session-fatal disconnect.
-                                              //   Replaces the removed session_recovery_pending
-                                              //   (D-2 Gate A round 1). Real ResendRequest-driven
-                                              //   recovery is the deferred session-recovery feature
-                                              //   ([2e §3.1] / [2e §4 last bullet]).
-                                              //   → FIXPP_ERR_SESSION_FATAL
+    // slot 70: session_seqnum_gap_unrecoverable — DELETED pre-v1.0 per 013
+    //   T006a Option D (2026-05-28). Too-high inbound seqnum transitions are
+    //   handled by the 013 recovery sub-protocol (FR-009 ResendRequest path);
+    //   emit-sites migrated to session_test_request_unanswered (slot 74) as
+    //   a safe stand-in pending FR-009 wiring (Phase 3 T023–T026).
+    //   2e-recovery: migrate to FR-009 once 013 Phase 3 lands.
+    //   Slot 70 is a NUMERIC HOLE per [const §X.4] — never renumber.
     session_sending_time_accuracy = 71,       // Clarification Q3, FR-013, [FIX-SL §4.2.3] —
                                               //   inbound SendingTime(52) diverges > MaxLatency
                                               //   (default 120 s, D-8). Disposition: emit
@@ -291,16 +293,23 @@ enum class error : std::uint8_t {
                                               //   before Active). Surfaced as a session Reject
                                               //   with RefMsgType. No reject loop (I-5).
                                               //   → FIXPP_ERR_SESSION_REJECT
-    session_logout_timeout = 73,              // FR-005, [FIX-SL §4.6.2] — graceful-close
-                                              //   (Logout exchange) timed out: phase-1 child
-                                              //   cancellation_state expires; session force-
-                                              //   disconnects → Disconnected (I-9, D-8: 2 s
-                                              //   QuickFIX LogoutTimeout default).
+    session_logout_timeout = 73,              // FR-005 (005 admin path) + 013 FR-008
+                                              //   (FSM-driven graceful Logout timeout) —
+                                              //   [FIX-SL §4.6.2] graceful-close timed out:
+                                              //   phase-1 child cancellation_state expires;
+                                              //   session force-disconnects → Disconnected
+                                              //   (I-9, D-8: 2 s QuickFIX LogoutTimeout
+                                              //   default; 013 Q5=A confirmation).
                                               //   → FIXPP_ERR_SESSION_LIFECYCLE
-    session_test_request_unanswered = 74,     // FR-006, [FIX-SL §4.5.5] — inbound silence
+    session_test_request_unanswered = 74,     // FR-006 (005 admin path) + 013 FR-004
+                                              //   (FSM-driven inbound liveness watch) —
+                                              //   [FIX-SL §4.5.2]/§4.5.5 — inbound silence
                                               //   exceeded test_request_threshold (1×HeartBtInt,
-                                              //   D-8) without a Heartbeat echo: session unhealthy
-                                              //   → disconnect. → FIXPP_ERR_SESSION_LIFECYCLE
+                                              //   D-8) without a Heartbeat echo; OR too-high
+                                              //   seqnum stand-in pending 013 FR-009 recovery
+                                              //   wiring (2e-recovery: Phase 3 T023–T026).
+                                              //   Session unhealthy → disconnect.
+                                              //   → FIXPP_ERR_SESSION_LIFECYCLE
     session_admin_not_supported = 75,         // FR-017, [FIX-SL §4.10] — deferred admin type
                                               //   received (ResendRequest/SequenceReset): defined
                                               //   bounded transition (session-level Reject, never
@@ -582,6 +591,53 @@ enum class error : std::uint8_t {
     transport_accept_cancelled = 115,     // [2h §6.6]:1199 — async_accept awaitable
                                           //   on Listener cancelled (US3 acceptor path).
                                           //   → FIXPP_ERR_CANCELLED (reused)
+
+    // ── 013-session-reconnect-binding: 4 session_* variants per
+    //    contracts/session_errors.hpp + data-model.md §E-1/§E-3/§E-7.
+    //    Non-renumbering append at unused slots 116–119, next contiguous range
+    //    after 012's transport_* block (95–115) per [const §X.4].
+    //    Boundary confirmed: transport_accept_cancelled=115 is the 012 boundary;
+    //    013 starts at 116.
+    //
+    //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
+    //    surface added by this feature):
+    //      FIXPP_ERR_SESSION_FATAL       ← { session_seqnum_reset_mismatch }
+    //      FIXPP_ERR_SESSION_REFUSAL     ← { session_compid_unauthorized }
+    //      FIXPP_ERR_SESSION_REJECT      ← { session_testreqid_mismatch,
+    //                                        session_invalid_argument }
+    //      (slots 73 + 74 already in FIXPP_ERR_SESSION_LIFECYCLE — no new C-ABI symbol)
+    //
+    //    Slots 73 (session_logout_timeout) + 74 (session_test_request_unanswered)
+    //    REUSED from 005-era per contracts/session_errors.hpp F1/D1 2026-05-28
+    //    reference-engine sweep (QFC + QFJ + Fix8 confirmed zero precedent for
+    //    typed code-level discrimination of logout timeout classes).
+    session_seqnum_reset_mismatch = 116,  // FR-017 / US1 AC7 / D-7 — bilateral_strict:
+                                          //   we sent Logon with ResetSeqNumFlag(141)=Y;
+                                          //   peer's response Logon lacks 141=Y; we Logout
+                                          //   + disconnect.
+                                          //   → FIXPP_ERR_SESSION_FATAL
+    session_compid_unauthorized = 117,    // FR-021 / US2 AC2 / D-9 —
+                                          //   CompIdAuthorizationPolicy::authorize returned
+                                          //   unauthorized: principal not in bindings, OR
+                                          //   principal exists but asserted CompID not in
+                                          //   its allow-list, OR policy is empty (default-deny).
+                                          //   → FIXPP_ERR_SESSION_REFUSAL
+    session_testreqid_mismatch = 118,     // FR-006 / US1 AC4 — inbound Heartbeat(0) carried
+                                          //   TestReqID(112) that does NOT match the most
+                                          //   recent outbound TestRequest's TestReqID; per
+                                          //   [FIX-SL §4.5.4] this is a session-level error.
+                                          //   → FIXPP_ERR_SESSION_REJECT
+    session_invalid_argument = 119,       // FR-033 — runtime rejection of an invalid argument
+                                          //   to a public API entry point (currently:
+                                          //   reload_credentials(nullptr)). Returned via
+                                          //   expected_t::unexpected from noexcept boundaries
+                                          //   per data-model.md §E-6/§E-7. Distinct from
+                                          //   session_invalid_config (slot 76, operator
+                                          //   config-time) and session_invalid_state_for_send
+                                          //   (slot 77, FSM-state-wrong-for-operation).
+                                          //   (Renumbered 121→119 per /speckit-analyze F1/D1
+                                          //   2026-05-28.)
+                                          //   → FIXPP_ERR_SESSION_REJECT
 };
 
 template <class T>

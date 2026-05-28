@@ -10,14 +10,16 @@
 //      → FSM transitions to Disconnected (session-fatal).
 //      → At least one outbound frame is emitted (the Logout-with-text).
 //      → The emitted frame has MsgType=5 (Logout) — NOT MsgType=2 (ResendRequest).
-//      → Session error callback receives session_seqnum_gap_unrecoverable.
+//      → Session error callback receives session_test_request_unanswered (stand-in;
+//         slot 70 session_seqnum_gap_unrecoverable deleted pre-v1.0 per 013 T006a).
 //   2. LogonSent-state too-high: same fatal disposition.
 //   3. NO ResendRequest(35=2) is EVER emitted (I-4 absolute).
 //   4. Too-low in Active → FSM transitions to Disconnected (session-fatal).
 //      → Logout emitted, NOT ResendRequest.
 //
 // Anchors: data-model.md E3/E2 transition matrix (Active / LogonSent rows);
-//   invariant I-4; error slot 70 (session_seqnum_gap_unrecoverable).
+//   invariant I-4; slot 74 (session_test_request_unanswered, stand-in;
+//   slot 70 session_seqnum_gap_unrecoverable deleted pre-v1.0 per 013 T006a).
 //   [FIX-SL §4.1] ordered-sequence integrity.
 //   Session-2026-05-18 Q1 re-clarification: too-high = session-fatal, recovery deferred.
 //

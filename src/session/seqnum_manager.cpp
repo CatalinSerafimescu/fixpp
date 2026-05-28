@@ -40,8 +40,10 @@ namespace fixpp::session {
 // Return error variants without advancing on mismatch.
 //
 // Error variants:
-//   session_seqnum_too_low (69)      — seq < next_inbound_ (no PossDup — S-010 OOS)
-//   session_seqnum_gap_unrecoverable (70) — seq > next_inbound_ (too-high; I-4)
+//   session_seqnum_too_low (69)          — seq < next_inbound_ (no PossDup — S-010 OOS)
+//   session_test_request_unanswered (74) — seq > next_inbound_ (too-high; I-4 stand-in;
+//     slot 70 session_seqnum_gap_unrecoverable deleted pre-v1.0 per 013 T006a;
+//     2e-recovery: migrate to FR-009 once 013 Phase 3 T023–T026 land)
 //
 // The mutex serialises both inbound and outbound counter operations (D-7).
 // Under the per-session-strand discipline the fast-path CAS always succeeds;
@@ -68,7 +70,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     if (seq > next_inbound_) {
         // Too-high: session-fatal, recovery deferred (I-4 / Session-2026-05-18).
         // No ResendRequest(35=2) emitted by 005. Counter NOT advanced.
-        co_return std::unexpected(error::session_seqnum_gap_unrecoverable);
+        // Stand-in: session_test_request_unanswered (74); slot 70
+        // session_seqnum_gap_unrecoverable deleted pre-v1.0 per 013 T006a.
+        // 2e-recovery: migrate to FR-009 once 013 Phase 3 T023–T026 land.
+        co_return std::unexpected(error::session_test_request_unanswered);
     }
 
     // In-sequence: advance exactly by 1 (I-2 zero drift).

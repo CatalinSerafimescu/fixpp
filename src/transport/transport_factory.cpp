@@ -156,8 +156,44 @@ asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag,
                                                        std::shared_ptr<void> ctx) noexcept
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
-      ssl_ctx_{std::move(ctx)}
+      ssl_ctx_{std::move(ctx)},
+      cert_source_slot_{ssl_cfg_.cs}           // 013 T012: init from already-moved ssl_cfg_
+                                               // (ssl_cfg_ initialized before cert_source_slot_
+                                               //  per member-declaration order in header)
 {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 013 T012 — reload_credentials (FR-033 / D-11)
+//
+// Atomic-stores new_source into cert_source_slot_. O(1), strand-free.
+// Both initiator and acceptor paths share this single factory slot per
+// [[feedback_half_restructure_symmetric_api]].
+// nullptr → session_invalid_argument (slot 119) per data-model §E-7.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<void>
+asio_tls_transport_factory::reload_credentials(
+    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept
+{
+    if (!new_source) {
+        return std::unexpected{core::error::session_invalid_argument};
+    }
+    cert_source_slot_.store(std::move(new_source), std::memory_order_release);
+    return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 013 T012 — cert_source_snapshot (FR-033)
+//
+// Returns the current cert_source strong-ref BY VALUE (never raw or weak_ptr
+// per [[feedback_weak_ptr_cache_needs_owning_context]]). Called by ReconnectFsm
+// at drive_reconnect_attempt entry; the captured strong-ref keeps the OLD source
+// alive for the handshake duration even if reload_credentials lands mid-handshake.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
+asio_tls_transport_factory::cert_source_snapshot() const noexcept
+{
+    return cert_source_slot_.load(std::memory_order_acquire);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // asio_tls_transport_factory::make

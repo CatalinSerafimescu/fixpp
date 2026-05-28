@@ -11,8 +11,8 @@
 //      and the counter advances by exactly 1 per call (I-2).
 //   3. Too-low inbound → session_seqnum_too_low (slot 69, session-fatal).
 //      No PossDup path (S-010 out of scope).
-//   4. Too-high inbound → session_seqnum_gap_unrecoverable (slot 70, session-fatal).
-//      I-4: no ResendRequest.
+//   4. Too-high inbound → session_test_request_unanswered (slot 74, stand-in; slot 70
+//      session_seqnum_gap_unrecoverable deleted pre-v1.0 per 013 T006a). I-4: no ResendRequest.
 //   5. seqnum_max overflow: next_outbound_ == seqnum_max → assign_outbound()
 //      returns store_seqnum_overflow (slot 60, I-8). No wrap.
 //   6. In-seq after too-low returns error (counter not advanced on error).
@@ -127,7 +127,12 @@ TEST_F(SeqnumManagerTest, TooLowInboundIsSessionFatal) {
     run_sync(ioc, mgr.drain());
 }
 
-// ── T4: Too-high inbound → session_seqnum_gap_unrecoverable, no ResendRequest ─
+// ── T4: Too-high inbound → session_test_request_unanswered (stand-in), no ResendRequest ─
+//
+// NOTE: slot 70 session_seqnum_gap_unrecoverable was deleted pre-v1.0 per 013
+// T006a Option D. The too-high emit-site returns session_test_request_unanswered
+// (74) as a safe stand-in pending 013 FR-009 recovery wiring (Phase 3 T023–T026).
+// 2e-recovery: update this assertion once Phase 3 lands.
 
 TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
     SeqnumManager mgr;
@@ -135,8 +140,10 @@ TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
     // Initial next_inbound_ = 1; seq=5 is too high (gap 1→5).
     auto r = run_sync(ioc, mgr.check_inbound(5));
     ASSERT_FALSE(r.has_value()) << "Too-high must return error";
-    EXPECT_EQ(r.error(), fixpp::core::error::session_seqnum_gap_unrecoverable)
-        << "Expected session_seqnum_gap_unrecoverable (slot 70); recovery deferred I-4";
+    EXPECT_EQ(r.error(), fixpp::core::error::session_test_request_unanswered)
+        << "Expected session_test_request_unanswered (slot 74, stand-in for deleted "
+           "slot 70 session_seqnum_gap_unrecoverable); 2e-recovery: update after "
+           "013 Phase 3 T023-T026 land";
 
     // Counter must NOT advance on error.
     EXPECT_EQ(mgr.next_inbound_unsafe(), 1u)

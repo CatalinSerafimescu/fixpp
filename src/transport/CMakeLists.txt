@@ -51,4 +51,5 @@ target_sources(fixpp_transport PUBLIC
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/transport_errors.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/reconnect_policy.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/transport/listener.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/transport/listener_events.hpp"  # 013 T013a
 )

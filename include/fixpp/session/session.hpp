@@ -46,6 +46,7 @@
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
+#include <fixpp/session/session_event.hpp>   // 013 T013a — SessionEvent + kSessionEventRingCapacity
 #include <fixpp/session/session_fsm.hpp>  // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core {
@@ -249,6 +250,15 @@ public:
     // Empty before the first record_state_transition_() call.
     [[nodiscard]] std::span<const fsm_state> fsm_visit_history() const noexcept;
 
+    // 013 FR-035 — NEW ring-buffer accessor for SessionEvent observability.
+    // DISTINCT from fsm_visit_history() (FSM-state observation; unchanged).
+    // Returns a std::span view over the underlying fixed-capacity ring of
+    // SessionEvent values (capacity = kSessionEventRingCapacity = 16).
+    // Membership-witness semantics per 010 F-04 contract — NOT chronologically
+    // ordered. Body wired in Phase 5 T040; declaration here satisfies Phase 2.
+    // [data-model §E-6 / contracts/session_ext.hpp]
+    [[nodiscard]] std::span<const SessionEvent> recent_events() const noexcept;
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto
@@ -397,6 +407,20 @@ private:
     // FR-004 / D-2 — route every FSM transition through this helper so the
     // ring-buffer is always in sync with fsm_state_.
     void record_state_transition_(fsm_state new_state) noexcept;
+
+    // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
+    // Stores the most recent ≤16 SessionEvent values emitted via emit_event().
+    // Written exclusively from the per-session strand ([const §XI.4]).
+    // Ring wraps at kSessionEventRingCapacity; membership-witness semantics
+    // (NOT chronologically ordered). [data-model §E-6]
+    std::array<SessionEvent, kSessionEventRingCapacity> recent_events_{};
+    std::size_t  events_count_     = 0;
+    std::size_t  events_write_idx_ = 0;
+
+    // 013 FR-035 — emit a SessionEvent into recent_events_. Called from the
+    // per-session strand only ([const §XI.4]). Body wired in Phase 5 T040;
+    // declaration here satisfies Phase 2 (link-green via session.cpp stub).
+    void emit_event(SessionEvent ev) noexcept;
 
     // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).

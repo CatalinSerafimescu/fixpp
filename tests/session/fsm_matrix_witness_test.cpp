@@ -885,7 +885,8 @@ TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
 
 // S3×E11: seqnum too-high → fatal Logout-with-text+disconnect.
 TEST_F(FsmMatrixWitness, Active_SeqnumTooHigh_FatalTransitionsToDisconnected) {
-    // FR-006: E11 from Active → session_seqnum_gap_unrecoverable (slot 70) → Disconnected.
+    // FR-006: E11 from Active → session_test_request_unanswered (slot 74, stand-in;
+    //   slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a) → Disconnected.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));

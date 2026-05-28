@@ -16,7 +16,9 @@
 //   - Inbound: check_inbound(seq) — compare seq vs next-expected:
 //       in-seq  → advance next_inbound_, return ok
 //       too-low → return session_seqnum_too_low (no PossDup — S-010 out of scope)
-//       too-high → return session_seqnum_gap_unrecoverable (recovery deferred I-4)
+//       too-high → return session_test_request_unanswered (74, stand-in; recovery
+//                  deferred I-4; slot 70 session_seqnum_gap_unrecoverable deleted
+//                  pre-v1.0 per 013 T006a; 2e-recovery: migrate Phase 3 T023–T026)
 //   - Outbound: next_outbound() — read next counter without advancing
 //               advance_outbound() — advance and return the ASSIGNED seq
 //       Overflow at seqnum_max → return store_seqnum_overflow (I-8 — reuse [2e §6.7])
@@ -68,8 +70,9 @@ public:
     //
     // check_inbound(seq): compare seq against next-expected inbound counter.
     //   in-seq  → advance counter, return ok.
-    //   too-low  → return unexpected{session_seqnum_too_low=69}   (session-fatal).
-    //   too-high → return unexpected{session_seqnum_gap_unrecoverable=70} (session-fatal).
+    //   too-low  → return unexpected{session_seqnum_too_low=69}              (session-fatal).
+    //   too-high → return unexpected{session_test_request_unanswered=74}     (session-fatal;
+    //              slot 70 deleted pre-v1.0 per 013 T006a; 2e-recovery: Phase 3 T023–T026).
     //
     // Caller is responsible for the session-fatal disposition (emitting
     // Logout-with-text + disconnect) on any unexpected return. I-4: no
