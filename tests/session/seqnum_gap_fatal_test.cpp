@@ -206,13 +206,13 @@ protected:
     }
 };
 
-// ── Test 1: Too-high MsgSeqNum in Active → session-fatal ─────────────────────
+// ── Test 1: Too-high MsgSeqNum in Active → AwaitingResend + ResendRequest ────
 //
-// After reaching Active (next expected = 2), inject a Heartbeat with seq=10
-// (gap of 8). The session must:
-//   a) Transition to Disconnected (or LogoutSent).
-//   b) Emit at least one outbound frame that is a Logout (35=5).
-//   c) NOT emit any ResendRequest (35=2) — I-4 absolute.
+// 013 FR-009 amendment: too-high inbound seqnum in Active → AwaitingResend
+// (NOT session-fatal per the 2e-recovery upgrade). Session STAYS Active and
+// emits a ResendRequest(2) to fill the gap. [spec.md FR-009; 013 T006a]
+// Pre-013 behavior was fatal-disconnect (005 FR-008); this test is updated
+// per T006a catch-site migration.
 
 TEST_F(SeqnumGapFatalTest, ActiveTooHighBecomesSessionFatal) {
     auto cfg = make_cfg();
@@ -222,29 +222,25 @@ TEST_F(SeqnumGapFatalTest, ActiveTooHighBecomesSessionFatal) {
     ASSERT_TRUE(drive_to_active(sess))
         << "Failed to drive session to Active/LogonReceived state";
 
-    // Capture outbound through transport_double by observing session state.
     // At this point next expected inbound = 2.
     // Inject a Heartbeat with seq=10 (too high by 8).
     auto hb = make_heartbeat_frame("FIX.4.2", 10, "TW", "ISLD");
     auto r = feed_sync(sess, hb);
-    // The feed may return ok (the session processes it and then transitions
-    // internally to fatal) or an error. Either is acceptable — the observable
-    // is the FSM state.
+    (void)r;
 
+    // 013 FR-009: too-high → AwaitingResend; session stays Active.
+    // (Pre-013 behavior was Disconnected; amended per 013 T006a catch-site migration.)
     const auto st = sess.state();
-    EXPECT_TRUE(st == fsm_state::Disconnected || st == fsm_state::LogoutSent)
-        << "Session must enter Disconnected or LogoutSent after too-high seqnum; "
+    EXPECT_EQ(st, fsm_state::Active)
+        << "013 FR-009: too-high seqnum → AwaitingResend; session stays Active; "
         << "got state=" << static_cast<int>(st);
 }
 
-// ── Test 2: No ResendRequest(35=2) emitted on too-high gap ────────────────────
+// ── Test 2: Too-high gap → ResendRequest(35=2) emitted, session stays Active ──
 //
-// This is the I-4 absolute requirement. We use a TransportDouble-aware
-// approach: we check that the session does NOT emit a ResendRequest.
-// Since Phase 4 tests don't fully wire the transport_double to session,
-// we verify the invariant by confirming the session's FSM state shows
-// the fatal disposition (if a ResendRequest were emitted, the session
-// would be in RecoveryPending — which doesn't exist in 005).
+// 013 FR-009: on too-high inbound seqnum, session emits ResendRequest(2) to
+// fill the gap and remains Active (AwaitingResend transient flag set).
+// Pre-013 behavior: no ResendRequest, session-fatal. Updated per T006a.
 
 TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
     auto cfg = make_cfg();
@@ -255,37 +251,35 @@ TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
     auto hb = make_heartbeat_frame("FIX.4.2", 99, "TW", "ISLD");
     feed_sync(sess, hb);
 
-    // The session FSM must NOT be in any state that implies "ResendRequest sent,
-    // waiting for recovery". 005 has NO RecoveryPending state. The gap is
-    // session-fatal: Disconnected or LogoutSent.
+    // 013 FR-009: session stays Active (AwaitingResend) after too-high gap.
+    // (Pre-013: must be Disconnected or LogoutSent; amended per 013 T006a.)
     const auto st = sess.state();
-    EXPECT_NE(st, fsm_state::Active)
-        << "Active state would imply seqnum gap not treated as fatal";
-    EXPECT_NE(st, fsm_state::LogonReceived)
-        << "LogonReceived state would imply seqnum gap not treated as fatal";
-    // The ONLY valid post-gap states are Disconnected or LogoutSent.
-    EXPECT_TRUE(st == fsm_state::Disconnected || st == fsm_state::LogoutSent)
-        << "After too-high gap: must be Disconnected or LogoutSent (no RecoveryPending). "
+    EXPECT_EQ(st, fsm_state::Active)
+        << "013 FR-009: too-high seqnum gap → AwaitingResend, session stays Active. "
         << "Got state=" << static_cast<int>(st);
 }
 
-// ── Test 3: Too-low MsgSeqNum in Active → session-fatal ───────────────────────
+// ── Test 3: Too-low Heartbeat(35=0) in Active → silently ignored (stays Active)
 //
-// After reaching Active, inject a message with seq=1 (too low, expected 2).
-// Must become session-fatal (Disconnected or LogoutSent). [FIX-SL §4.1].
+// 013 T020-A / T026: too-low Heartbeat(0) is silently dropped (no disconnect)
+// so that liveness-warmup passes (which re-send the same seq) don't disrupt
+// an otherwise healthy session. Non-Heartbeat too-low messages remain fatal.
+// [spec.md FR-009 warmup behaviour; T020-A dual-gate; T006a catch-site migration]
 
 TEST_F(SeqnumGapFatalTest, ActiveTooLowBecomesSessionFatal) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
 
-    // In Active: next expected = 2. Send seq=1 (too low).
+    // In Active: next expected = 2. Send Heartbeat at seq=1 (too low).
+    // 013: too-low Heartbeat is silently ignored; session stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
     feed_sync(sess, hb);
 
     const auto st = sess.state();
-    EXPECT_TRUE(st == fsm_state::Disconnected || st == fsm_state::LogoutSent)
-        << "Too-low seqnum must be session-fatal. Got state=" << static_cast<int>(st);
+    EXPECT_EQ(st, fsm_state::Active)
+        << "013: too-low Heartbeat(0) silently ignored; session stays Active. "
+        << "Got state=" << static_cast<int>(st);
 }
 
 // ── Test 4: LogonSent + unexpected inbound → Disconnected (matrix-strict) ────

@@ -93,12 +93,14 @@ public:
     [[nodiscard]] expected_t<void>
     validate_inbound_heartbeat_testreqid(std::string_view inbound_testreqid) const noexcept;
 
-    // FR-009 — enter AwaitingResend transient on inbound MsgSeqNum > next_expected_inbound.
-    // Emits ResendRequest(2){[next_expected_inbound, inbound_msgseqnum-1]}; populates
-    // resend_state_. Active outbound traffic continues during AwaitingResend per spec
-    // §FR-009; inbound above next_expected_inbound is HELD until gap closes.
+    // FR-009 — enter AwaitingResend transient: set awaiting_resend_=true and
+    // populate resend_state_ with [begin_seqno, end_seqno].
+    // The caller (Session::on_inbound_frame) emits ResendRequest(2) inline
+    // (it has access to seqnum_mgr_ + store_then_emit); this method owns the
+    // STATE transition only. [data-model §E-1; spec.md FR-009; plan.md T023]
     [[nodiscard]] asio::awaitable<expected_t<void>>
-    enter_awaiting_resend(std::uint32_t inbound_msgseqnum) noexcept;
+    enter_awaiting_resend(std::uint32_t begin_seqno,
+                          std::uint32_t end_seqno) noexcept;
 
     // FR-013 / FR-014 — process inbound SequenceReset(4). GapFillFlag=Y → advance
     // next_expected_inbound to NewSeqNo without storing; GapFillFlag=N (forced reset)
@@ -129,6 +131,11 @@ public:
 
     // Accessor — current resend state (only valid when is_awaiting_resend()).
     [[nodiscard]] ResendState const& current_resend_state() const noexcept;
+
+    // Exit AwaitingResend: clear the transient flag and reset resend_state_.
+    // Called by Session when the gap closes (seqnum_mgr_.next_inbound_unsafe()
+    // advances past resend_state_.outstanding_end). [data-model §E-1]
+    void exit_awaiting_resend() noexcept;
 
 private:
     // NON-OWNING; owned by SessionConfig::transport_factory_override (shared_ptr).

@@ -43,6 +43,7 @@
 #include <utility>
 // (the unique_ptr<MessageStore> member's
 // nested type alias flush_hook_fn requires it).
+#include <fixpp/session/reconnect_fsm.hpp>    // 013 T023 — ReconnectFsm driver (FR-009 state owner)
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
@@ -484,6 +485,21 @@ private:
     // run_logout_phase1 coroutine polls this to determine whether the
     // graceful-close completes normally or times out. Single-writer on strand.
     bool logout_confirmed_ = false;
+
+    // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
+    // Owns the AwaitingResend transient bool (NOT a new fsm_state per D-1),
+    // the ResendState, and FR-001..FR-016 recovery state. Constructed from
+    // cfg_.transport_factory_override (non-owning raw ptr), cfg_.reconnect_policy,
+    // cfg_.heartbeat_interval, and cfg_.logout_disconnect_timeout_ms.
+    // Session::on_inbound_frame delegates state tracking to reconnect_fsm_;
+    // the ResendRequest emit remains inline (has access to seqnum_mgr_ + store).
+    // [data-model §E-1; contracts/reconnect_fsm.hpp]
+    ReconnectFsm reconnect_fsm_;
+
+    // last_outbound_steady_: monotonic time of the last outbound frame sent.
+    // Seeded at open() → updated on every store_then_emit() call.
+    // Used by the liveness loop to detect outbound idle → Heartbeat (T018 Cell A).
+    fixpp::core::steady_time_point last_outbound_steady_;
 
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed

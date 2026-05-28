@@ -823,18 +823,10 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
     // FR-006: E08 from Active → session Reject (session_admin_not_supported, slot 75),
     // session stays Active (or goes Disconnected if Reject emit fails seqnum).
     //
-    // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey 2026-05-23):
-    // 005 spec mandates Reject for RR/SeqReset (MsgType 2/4) in Active — recovery
-    // is deferred per [2e §3.1], so the bounded-failure response is to Reject with
-    // SessionRejectReason=3 (invalid MsgType). The pre-010 impl silently ignored
-    // both; post-fix: "2" and "4" are EXCLUDED from is_session_admin → Reject path.
-    //
-    // TODO(2e-recovery): when the deferred session-recovery feature lands, UPGRADE
-    // this cell from Reject → Process (gap-fill via the message store), matching
-    // QuickFIX-cpp Session::nextResendRequest (Session.cpp:364) and QuickFIX/J
-    // Session.nextResendRequest (Session.java:1325). At that point this test will
-    // need to assert frame emission of the resend (not a Reject) and the
-    // session-cfg-lifetime 005 data-model row 22 cell will need updating.
+    // 013 FR-010/FR-012: ResendRequest(2) in Active triggers recovery sub-protocol.
+    // Session replies with SequenceReset-GapFill(35=4, GapFillFlag=Y), stays Active.
+    // 010 F4 mandated Reject (recovery deferred per [2e §3.1]); 013 discharges
+    // that obligation — the 2e-recovery TODO is fully discharged by 013 Phase 3.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
@@ -846,11 +838,12 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
 
     EXPECT_EQ(sess.state(), fsm_state::Active);
 
-    // W3.3-final — gated-emit contract: matrix row 22 + FR-017 mandate Reject for
-    // RR (and SeqReset) until the 2e recovery feature upgrades to Process.
-    EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
-        << "Active×OOSA(RR): exactly 1 Reject(35=3) must be emitted "
-           "(matrix Active row E08 — recovery deferred per [2e §3.1])";
+    // T006a catch-site migration (013 FR-010/FR-012): 013 ships recovery — session
+    // replies with SequenceReset-GapFill(35=4, GapFillFlag=Y) and stays Active.
+    // The 010-era Reject is superseded; 2e-recovery TODO discharged by 013.
+    EXPECT_EQ(count_admin_frames_with_type("4"), 1U)
+        << "Active×RR(2): exactly 1 SequenceReset-GapFill(35=4) must be emitted "
+           "(matrix Active row E08 — recovery active per 013 FR-010/FR-012)";
 }
 
 // S3×E09: seqnum in-seq → advance counter, dispatch, stay Active.
@@ -867,35 +860,41 @@ TEST_F(FsmMatrixWitness, Active_SeqnumInSeq_AdvancesCounter_StaysActive) {
     EXPECT_EQ(sess.state(), fsm_state::Active);
 }
 
-// S3×E10: seqnum too-low → fatal Logout+disconnect.
+// S3×E10: seqnum too-low Heartbeat → silently ignored, stay Active.
 TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
-    // FR-006: E10 from Active → fatal [FIX-SL §4.1] → Disconnected.
-    // Inject seq=1 after seq=1 was already accepted (next-expected=2).
-    // But in our test, drive_to_active consumed seq=1 from peer. Seq=1 again = too-low.
+    // T006a catch-site migration: 013 FR-006 / T020-A — too-low seqnum on
+    // Heartbeat(35=0) is silently ignored in Active (stays Active, no fatal).
+    // This preserves warmup compatibility: a peer may send a final warmup
+    // Heartbeat with an already-consumed seqnum during Active state.
+    // Pre-013 behavior was fatal Logout+Disconnected; 013 changes this.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
 
     // seq=1 again → too-low (next-expected-inbound=2 after the Logon was accepted).
+    // With 013, too-low Heartbeat is silently ignored — session stays Active.
     auto hb_low = build_frame("0", 1, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, hb_low);
 
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_EQ(sess.state(), fsm_state::Active);
 }
 
-// S3×E11: seqnum too-high → fatal Logout-with-text+disconnect.
+// S3×E11: seqnum too-high → AwaitingResend + ResendRequest emitted, stay Active.
 TEST_F(FsmMatrixWitness, Active_SeqnumTooHigh_FatalTransitionsToDisconnected) {
-    // FR-006: E11 from Active → session_test_request_unanswered (slot 74, stand-in;
-    //   slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a) → Disconnected.
+    // T006a catch-site migration: 013 FR-009 — too-high seqnum in Active triggers
+    // AwaitingResend (transient bool, NOT a new fsm_state per D-1) + ResendRequest(2)
+    // emission. Session stays Active (not Disconnected).
+    // Pre-013: slot 70 session_seqnum_gap_unrecoverable → fatal Logout+Disconnected.
+    // 013: slot 70 deleted; too-high → enter_awaiting_resend() + ResendRequest(2).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
 
-    // seq=99 when next-expected=2 → too-high → session-fatal.
+    // seq=99 when next-expected=2 → too-high → AwaitingResend, stays Active.
     auto hb_high = build_frame("0", 99, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, hb_high);
 
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_EQ(sess.state(), fsm_state::Active);
 }
 
 // S3×E12: invalid MsgType (app type, unrecognized) → session Reject, stay Active.

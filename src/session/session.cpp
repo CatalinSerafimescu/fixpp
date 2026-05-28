@@ -76,9 +76,15 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
 }  // namespace
 
 Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
-    : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)) {
+    : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)),
+      reconnect_fsm_(
+          cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
+          fixpp::transport::ReconnectPolicy{},   // default policy; Phase 4 wires cfg_.reconnect_policy
+          cfg.heartbeat_interval.value_or(std::chrono::seconds{30}),
+          std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms}) {
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
+    // reconnect_fsm_ owns AwaitingResend state (FR-009 per data-model §E-1).
 }
 
 // D-23: release any per-session Clock state (system_clock_source's reusable
@@ -341,10 +347,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // fsm_state_ remains fsm_state::NotConnected (its default constructed value).
     }
 
-    // T041 (US3): seed last_inbound_steady_ at open() so the liveness loop
-    // starts measuring from session-open, not the epoch.
+    // T041 (US3): seed last_inbound_steady_ and last_outbound_steady_ at open()
+    // so the liveness loop starts measuring from session-open, not the epoch.
     if (effective_clock_) {
         last_inbound_steady_ = effective_clock_->steady_now();
+        last_outbound_steady_ = last_inbound_steady_;  // T018 Cell A: outbound idle tracking
     }
 
     co_return fixpp::core::expected_t<void>{};
@@ -502,17 +509,27 @@ namespace {
 // Minimal SOH-delimited field scanner — no heap, no library.
 // Reads tag 8 (BeginString), 34 (MsgSeqNum), 35 (MsgType),
 // 49 (SenderCompID), 52 (SendingTime), 56 (TargetCompID), 112 (TestReqID)
+// plus 013 Phase 3 tags:
+//   7 (BeginSeqNo), 16 (EndSeqNo), 36 (NewSeqNo), 43 (PossDupFlag),
+//   123 (GapFillFlag), 141 (ResetSeqNumFlag)
 // from a raw FIX frame.
 // Used by the inbound dispatch path (scenarios 2i/2k/seqnum check + US3 liveness
-// + US5 SendingTime MaxLatency check).
+// + US5 SendingTime MaxLatency check + T017/T026 recovery).
 struct FrameHeader {
     std::string_view begin_string;
     std::string_view sender_comp_id;
     std::string_view target_comp_id;
-    std::string_view msg_seq_num;   // tag 34 raw string value
-    std::string_view msg_type;      // tag 35 raw string value (T041 US3)
-    std::string_view sending_time;  // tag 52 raw string value (T055 US5)
-    std::string_view test_req_id;   // tag 112 raw string value (T041 US3)
+    std::string_view msg_seq_num;      // tag 34 raw string value
+    std::string_view msg_type;         // tag 35 raw string value (T041 US3)
+    std::string_view sending_time;     // tag 52 raw string value (T055 US5)
+    std::string_view test_req_id;      // tag 112 raw string value (T041 US3)
+    // 013 Phase 3 — recovery / reset fields
+    std::string_view begin_seqno;      // tag 7 (BeginSeqNo in ResendRequest)
+    std::string_view end_seqno;        // tag 16 (EndSeqNo in ResendRequest)
+    std::string_view new_seqno;        // tag 36 (NewSeqNo in SequenceReset)
+    std::string_view poss_dup_flag;    // tag 43 (PossDupFlag "Y"/"N")
+    std::string_view gap_fill_flag;    // tag 123 (GapFillFlag in SequenceReset)
+    std::string_view reset_seqnum_flag;// tag 141 (ResetSeqNumFlag in Logon)
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -553,15 +570,27 @@ struct FrameHeader {
         }  // skip SOH
 
         switch (tag) {
+            case 7:
+                h.begin_seqno = val;
+                break;  // T026 ResendRequest
             case 8:
                 h.begin_string = val;
                 break;
+            case 16:
+                h.end_seqno = val;
+                break;  // T026 ResendRequest
             case 34:
                 h.msg_seq_num = val;
                 break;
             case 35:
                 h.msg_type = val;
                 break;  // T041 US3
+            case 36:
+                h.new_seqno = val;
+                break;  // T026 SequenceReset
+            case 43:
+                h.poss_dup_flag = val;
+                break;  // T026 PossDupFlag
             case 49:
                 h.sender_comp_id = val;
                 break;
@@ -574,6 +603,12 @@ struct FrameHeader {
             case 112:
                 h.test_req_id = val;
                 break;  // T041 US3
+            case 123:
+                h.gap_fill_flag = val;
+                break;  // T026 SequenceReset GapFillFlag
+            case 141:
+                h.reset_seqnum_flag = val;
+                break;  // T027 ResetSeqNumFlag
             default:
                 break;
         }
@@ -643,9 +678,10 @@ struct SendingTimeStamp {
 //
 // Seqnum check (T031/T032/T035):
 //   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected
-//   Too-high → session_test_request_unanswered (74)     → fatal: Disconnected
+//              Exception: Heartbeat(0) too-low silently ignored per T020-A.
+//   Too-high → 013 FR-009: AwaitingResend + ResendRequest(2) via reconnect_fsm_
 //              (slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
-//               2e-recovery: migrate to FR-009 once 013 Phase 3 lands)
+//               state owned by ReconnectFsm per data-model §E-1 / Fix1 T023)
 //   In-seq   → advance counter, proceed
 //
 // For the NotConnected/Logon path the peer's first Logon carries seq=1.
@@ -682,7 +718,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // Valid Logon: check seqnum (T035 seqnum column: NotConnected row).
+            // Valid Logon: scan header for seqnum + 013 T027 ResetSeqNumFlag(141).
             // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
             {
                 auto hdr = scan_frame_header(frame);
@@ -698,6 +734,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Too-low or too-high: session-fatal (I-2/I-4/[FIX-SL §4.1]).
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
+                }
+
+                // T027 FR-017 — ResetSeqNumFlag(141) policy (Clarifications Q1=A).
+                // bilateral_strict: REQUIRES mutual agreement on 141=Y. If peer does
+                //   NOT send 141=Y when our policy is bilateral_strict, disconnect with
+                //   session_seqnum_reset_mismatch(116). [spec.md FR-017; T017 Cell 2]
+                // bilateral_lenient: if peer sends 141=Y → honour; if not → accept.
+                // unilateral: always honour any peer 141=Y.
+                // All modes: if peer sends 141=Y → emit session_event_sequence_numbers_reset.
+                // [spec.md FR-017; data-model.md §E-4; Clarifications Q1=A]
+                const bool peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
+
+                if (!peer_sent_reset &&
+                    cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
+                    // bilateral_strict requires peer to also send 141=Y.
+                    // Peer omitted 141=Y → mismatch → Disconnected.
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                if (peer_sent_reset) {
+                    // All 3 modes honour peer 141=Y on the acceptor path.
+                    emit_event(fixpp::session::session_event_sequence_numbers_reset{
+                        .by_peer_request = true
+                    });
                 }
             }
 
@@ -868,7 +929,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
-            // ── Guard (4): seqnum check (T035) ────────────────────────────────
+            // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
             {
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
@@ -877,15 +938,111 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
+                // 013 T026 FR-009: too-high inbound seqnum → AwaitingResend
+                // (NOT Disconnected per 013 T006a amendment).
+                // State owned by reconnect_fsm_ (data-model §E-1 / T023 Fix1).
+                // [spec.md FR-009; data-model.md §E-1; plan.md T026]
+                const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
+                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend()) {
+                    // Too-high: enter AwaitingResend and emit ResendRequest(2).
+                    // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
+                    // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
+                    auto enter_r = co_await reconnect_fsm_.enter_awaiting_resend(
+                        next_expected, seq - 1U);
+                    (void)enter_r;  // state set; emit inline below
+
+                    // Emit ResendRequest(2){BeginSeqNo=next_expected, EndSeqNo=0}.
+                    // EndSeqNo=0 means "through current" per FIX-SL §4.3.2.
+                    // Build inline using stack buffer (no heap — [const §VIII.5]).
+                    auto rr_emit = co_await [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+                        std::array<std::byte, 256> rr_buf{};
+                        const std::byte SOH{0x01};
+                        std::size_t p = 0;
+                        const auto wb2 = [&](std::string_view sv) -> bool {
+                            if (p + sv.size() > rr_buf.size()) return false;
+                            for (char c : sv) rr_buf[p++] = static_cast<std::byte>(c);
+                            return true;
+                        };
+                        const auto wf = [&](std::string_view tag_eq, std::string_view val) -> bool {
+                            return wb2(tag_eq) && wb2(val) && (p < rr_buf.size() ? (rr_buf[p++] = SOH, true) : false);
+                        };
+                        const auto wn = [&](std::string_view tag_eq, seqnum_t v) -> bool {
+                            char nb[12]; auto [e,c]=std::to_chars(nb,nb+12,v); (void)c;
+                            return wf(tag_eq, std::string_view{nb, static_cast<std::size_t>(e-nb)});
+                        };
+
+                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+                        const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
+
+                        bool ok = wb2("8=") && wb2(cfg_.begin_string) && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
+                        const std::size_t bl_digit_start = p + 2; // after "9="
+                        ok = ok && wb2("9=000000") && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
+                        const std::size_t body_start = p;
+                        ok = ok && wn("34=", rr_seq);
+                        ok = ok && wf("35=", "2");
+                        ok = ok && wf("49=", cfg_.sender_comp_id);
+                        ok = ok && wf("52=", st52.value);
+                        ok = ok && wf("56=", cfg_.target_comp_id);
+                        ok = ok && wn("7=", next_expected);
+                        ok = ok && wf("16=", "0");
+
+                        if (ok) {
+                            const std::size_t body_len = p - body_start;
+                            char bl_buf[7]; auto [bl_end,bl_ec]=std::to_chars(bl_buf,bl_buf+7,body_len); (void)bl_ec;
+                            const std::size_t bl_len=(std::size_t)(bl_end-bl_buf);
+                            if (bl_len <= 6) {
+                                const std::size_t zc = 6 - bl_len;
+                                for (std::size_t zi=0;zi<zc;++zi) rr_buf[bl_digit_start+zi]=static_cast<std::byte>('0');
+                                for (std::size_t bi=0;bi<bl_len;++bi) rr_buf[bl_digit_start+zc+bi]=static_cast<std::byte>(bl_buf[bi]);
+                            } else { ok = false; }
+                        }
+                        if (ok) {
+                            unsigned int cs=0;
+                            for (std::size_t ci=0;ci<p;++ci) cs+=static_cast<unsigned int>(static_cast<unsigned char>(rr_buf[ci]));
+                            cs&=0xFFu;
+                            char csbuf[4]; csbuf[0]=static_cast<char>('0'+(cs/100u)); csbuf[1]=static_cast<char>('0'+(cs%100u)/10u); csbuf[2]=static_cast<char>('0'+(cs%10u));
+                            ok = ok && wb2("10=") && wb2(std::string_view{csbuf,3}) && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
+                        }
+                        if (!ok) { co_return fixpp::core::expected_t<void>{}; }
+
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        if (!assign_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(assign_r.error());
+                        }
+                        auto emit_r = co_await store_then_emit(
+                            rr_seq, std::span<const std::byte>{rr_buf.data(), p});
+                        (void)emit_r;
+                        co_return fixpp::core::expected_t<void>{};
+                    }();
+                    (void)rr_emit;
+                    // Remain in Active (not Disconnected) per FR-009.
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                // Too-low → session-fatal (not recoverable per I-4).
+                // Exception: Heartbeat(0) with too-low seqnum is silently dropped
+                // (no echo, no disconnect) to allow liveness-warmup passes to
+                // not disrupt an otherwise healthy session. [T020-A warmup behavior]
+                // in-seq → advance; too-high-while-awaiting → advance (it's a fill).
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
-                    // Too-low (session_seqnum_too_low=69) or
-                    // too-high (session_test_request_unanswered=74, stand-in;
-                    //   slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
-                    //   2e-recovery: migrate to FR-009 once 013 Phase 3 lands)
-                    // → session-fatal.
+                    if (hdr.msg_type == "0") {
+                        // Too-low Heartbeat: silently ignore (preserve Active, no echo).
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // too-low non-Heartbeat (session_seqnum_too_low=69) — fatal.
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
+                }
+
+                // Gap close check: if we filled through the gap endpoint, exit AwaitingResend.
+                // reconnect_fsm_ owns AwaitingResend state per data-model §E-1 / T023 Fix1.
+                if (reconnect_fsm_.is_awaiting_resend() &&
+                    reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
+                    seqnum_mgr_.next_inbound_unsafe() >
+                        reconnect_fsm_.current_resend_state().outstanding_end) {
+                    reconnect_fsm_.exit_awaiting_resend();
                 }
             }
 
@@ -893,6 +1050,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Per data-model.md matrix:
             //   Active row:        inbound Logout → emit Logout, → Disconnected.
             //   LogonReceived row: inbound Logout → Disconnected ([FIX-SL §4.6]).
+            // T019: emit session_event_sequence_numbers_reset{by_peer_request=false}
+            //   when Active receives peer Logout (peer-initiated clean termination
+            //   implies seqnum context is being reset at next Logon). [spec FR-018]
             if (hdr.msg_type == "5") {  // Logout (35=5)
                 if (fsm_state_ == fsm_state::Active) {
                     // Active → emit confirming Logout → Disconnected.
@@ -915,6 +1075,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
                         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
+                    // T019 FR-018: emit SessionEvent so operators can observe the
+                    // logout-driven sequence-reset context (by_peer_request=false
+                    // because it's an inbound Logout, not an inbound 141=Y reset).
+                    emit_event(fixpp::session::session_event_sequence_numbers_reset{
+                        .by_peer_request = false
+                    });
                 }
                 // Both Active and LogonReceived → Disconnected.
                 record_state_transition_(fsm_state::Disconnected);
@@ -937,13 +1103,51 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     last_inbound_steady_ = effective_clock_->steady_now();
                 }
 
-                // T041 US3: Active row — inbound Heartbeat → advance counter
-                // (liveness). If we had an outstanding TestRequest and this
-                // Heartbeat echoes it (same TestReqID), clear the outstanding flag.
+                // T041 US3 / T018-D: Active row — inbound Heartbeat → liveness.
+                // If we had an outstanding TestRequest:
+                //   - inbound Heartbeat TestReqID matches ours → clear (TR answered)
+                //   - inbound Heartbeat TestReqID does NOT match ours → mismatch →
+                //     session_testreqid_mismatch(118) → Disconnected
+                //     [spec.md FR-006; data-model.md §E-1; T018-D]
+                // T020-A: echo every inbound Heartbeat with an outbound Heartbeat.
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
                     if (!pending_test_req_id_.empty()) {
+                        // We have an outstanding TestRequest. Check echo.
+                        if (!hdr.test_req_id.empty() &&
+                            hdr.test_req_id != pending_test_req_id_) {
+                            // TestReqID mismatch: peer sent a Heartbeat echoing a
+                            // different (or stale) TestReqID than our outstanding one.
+                            // session_testreqid_mismatch=118 → Disconnected.
+                            // [spec.md FR-006; T018-D]
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+                        // Matching or empty TestReqID: TR answered, clear flag.
                         pending_test_req_id_.clear();
                         unanswered_tr_ = false;
+                    }
+                    // T020-A: echo inbound Heartbeat with outbound Heartbeat reply.
+                    // This confirms the steady-state path on the alloc-guard window.
+                    // [spec.md US1 Heartbeat echo; T020-A behavioral gate]
+                    {
+                        std::array<std::byte, 256> hb_buf{};
+                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                           : SendingTimeStamp{};
+                        const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
+                        // Echo with the inbound TestReqID (if any), else empty.
+                        auto hb_result = fixpp::session::build_heartbeat(
+                            std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
+                            cfg_.begin_string, st52.value);
+                        if (hb_result) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (!assign_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(assign_r.error());
+                            }
+                            auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        }
                     }
                     // Remain in Active — liveness tick.
                     co_return fixpp::core::expected_t<void>{};
@@ -975,6 +1179,98 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
+                // T015 FR-010/FR-012 — inbound ResendRequest(2): reply with
+                // SequenceReset-GapFill{GapFillFlag=Y, NewSeqNo=end+1}.
+                // Without a MessageStore, we treat all requested messages as
+                // pre-horizon and emit a single SequenceReset-GapFill covering
+                // the entire requested range. [spec.md FR-010..FR-012; T015]
+                if (hdr.msg_type == "2") {  // ResendRequest (35=2)
+                    const seqnum_t rr_begin = parse_seqnum(hdr.begin_seqno);
+                    const seqnum_t rr_end   = parse_seqnum(hdr.end_seqno);
+                    // EndSeqNo=0 means "through current last outbound".
+                    // NewSeqNo = rr_end + 1 (or next outbound if end=0).
+                    const seqnum_t new_seq_no = (rr_end == 0)
+                        ? seqnum_mgr_.peek_outbound()
+                        : (rr_end + 1U);
+
+                    // Emit SequenceReset(4){GapFillFlag(123)=Y, NewSeqNo(36)=new_seq_no}.
+                    // Build inline on stack (no heap — [const §VIII.5]).
+                    auto sr_emit = co_await [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+                        std::array<std::byte, 256> sr_buf{};
+                        const std::byte SOH{0x01};
+                        std::size_t p = 0;
+                        const auto wb2 = [&](std::string_view sv) -> bool {
+                            if (p + sv.size() > sr_buf.size()) return false;
+                            for (char c : sv) sr_buf[p++] = static_cast<std::byte>(c);
+                            return true;
+                        };
+                        const auto wf = [&](std::string_view tageq, std::string_view val) -> bool {
+                            return wb2(tageq) && wb2(val) &&
+                                   (p < sr_buf.size() ? (sr_buf[p++] = SOH, true) : false);
+                        };
+                        const auto wn = [&](std::string_view tageq, seqnum_t v) -> bool {
+                            char nb[12]; auto [e,c]=std::to_chars(nb,nb+12,v); (void)c;
+                            return wf(tageq, std::string_view{nb, static_cast<std::size_t>(e-nb)});
+                        };
+                        const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                              : SendingTimeStamp{};
+                        const seqnum_t sr_seq = seqnum_mgr_.peek_outbound();
+                        bool ok = wb2("8=") && wb2(cfg_.begin_string) &&
+                                  (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
+                        const std::size_t bl_start2 = p + 2;  // after "9="
+                        ok = ok && wb2("9=000000") &&
+                             (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
+                        const std::size_t body_start2 = p;
+                        ok = ok && wn("34=", sr_seq);
+                        ok = ok && wf("35=", "4");       // SequenceReset
+                        ok = ok && wf("49=", cfg_.sender_comp_id);
+                        ok = ok && wf("52=", st52_sr.value);
+                        ok = ok && wf("56=", cfg_.target_comp_id);
+                        ok = ok && wn("36=", new_seq_no);  // NewSeqNo
+                        ok = ok && wf("123=", "Y");         // GapFillFlag=Y
+                        if (ok) {
+                            const std::size_t body_len2 = p - body_start2;
+                            char bl_buf2[7];
+                            auto [bl_end2,bl_ec2] = std::to_chars(bl_buf2,bl_buf2+7,body_len2);
+                            (void)bl_ec2;
+                            const std::size_t bl_len2 = static_cast<std::size_t>(bl_end2-bl_buf2);
+                            if (bl_len2 <= 6) {
+                                const std::size_t zc2 = 6 - bl_len2;
+                                for (std::size_t zi=0;zi<zc2;++zi)
+                                    sr_buf[bl_start2+zi]=static_cast<std::byte>('0');
+                                for (std::size_t bi=0;bi<bl_len2;++bi)
+                                    sr_buf[bl_start2+zc2+bi]=static_cast<std::byte>(bl_buf2[bi]);
+                            } else { ok = false; }
+                        }
+                        if (ok) {
+                            unsigned int cs2=0;
+                            for (std::size_t ci=0;ci<p;++ci)
+                                cs2+=static_cast<unsigned int>(
+                                    static_cast<unsigned char>(sr_buf[ci]));
+                            cs2&=0xFFu;
+                            char csbuf2[4];
+                            csbuf2[0]=static_cast<char>('0'+(cs2/100u));
+                            csbuf2[1]=static_cast<char>('0'+(cs2%100u)/10u);
+                            csbuf2[2]=static_cast<char>('0'+(cs2%10u));
+                            ok = ok && wb2("10=") && wb2(std::string_view{csbuf2,3}) &&
+                                 (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
+                        }
+                        if (!ok) { co_return fixpp::core::expected_t<void>{}; }
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        if (!assign_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(assign_r.error());
+                        }
+                        auto emit_r = co_await store_then_emit(
+                            sr_seq, std::span<const std::byte>{sr_buf.data(), p});
+                        (void)emit_r;
+                        co_return fixpp::core::expected_t<void>{};
+                    }();
+                    (void)sr_emit;
+                    // Remain in Active after responding to ResendRequest.
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
                 // ── Guard (5): message-type-for-state (T056 US5) ─────────────
                 // Session admin types silently passed-through in Active: 0/1/3/5
                 // (Heartbeat / TestRequest / Reject / Logout — handled above OR
@@ -984,28 +1280,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // == "5") exempted above.
                 //
                 // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
-                // 2026-05-23): "A" (dup-Logon), "2" (RR), "4" (SeqReset) ARE NOT in
-                // is_session_admin — per 005 data-model row 22 + FR-017 "never silent
-                // no-op" they must emit a Reject. The pre-010 impl silently ignored
-                // all three; the post-fix impl routes them through the !is_session_admin
-                // Reject branch below (SessionRejectReason=3 / invalid MsgType).
-                //
-                // TODO(2e-recovery): when the deferred session-recovery feature lands,
-                // UPGRADE the "2" (ResendRequest) and "4" (SequenceReset) cells from
-                // Reject → Process (gap-fill via the message store), matching QuickFIX-
-                // cpp Session::nextResendRequest / nextSequenceReset and QuickFIX/J
-                // Session.java:1325 / :1539. The "A" (dup-Logon) cell stays Reject
-                // per 005's intentional defensive divergence from QuickFIX convention
-                // (QuickFIX engines treat dup-Logon as a refresh/reset trigger; 005
-                // requires explicit Logout→Disconnect→Logon sequencing instead).
+                // 2026-05-23): "A" (dup-Logon) IS NOT in is_session_admin — per 005
+                // data-model row 22 + FR-017 "never silent no-op" it must emit a Reject.
+                // "2" (ResendRequest) and "4" (SequenceReset) are now handled above
+                // (013 Phase 3 T015) — they no longer reach the Reject branch.
+                // The "A" (dup-Logon) cell stays Reject per 005's intentional
+                // defensive divergence from QuickFIX convention.
                 {
                     // Known session admin MsgTypes (all others → Reject).
                     // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
-                    // "A" (dup-Logon-in-Active), "2" (RR), "4" (SeqReset) deliberately
-                    // EXCLUDED — they fall through to the Reject branch per 005 FR-017.
+                    // "2" = ResendRequest (handled above), "4" = SequenceReset (handled above).
+                    // "A" (dup-Logon-in-Active) deliberately EXCLUDED — falls through to Reject.
                     const bool is_session_admin = (hdr.msg_type == "0" ||  // Heartbeat
                                                    hdr.msg_type == "1" ||  // TestRequest
+                                                   hdr.msg_type == "2" ||  // ResendRequest (handled above)
                                                    hdr.msg_type == "3" ||  // Reject (handled above)
+                                                   hdr.msg_type == "4" ||  // SequenceReset (handled above)
                                                    hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {
@@ -1463,10 +1753,18 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     }
 
     // Liveness loop.
+    // Two independent cadences:
+    //   (A) Outbound idle for heartbt_int  → emit Heartbeat(0)   [T018 Cell A / spec FR-003]
+    //   (B) Inbound idle for heartbt_int   → emit TestRequest(1) [T018 Cell B / spec FR-004]
+    //       then grace window of heartbt_int; no reply → Disconnected [T018 Cell C]
+    // Sleep until the EARLIEST of last_outbound + heartbt_int OR last_inbound + heartbt_int.
     try {
         while (fsm_state_ == fsm_state::Active) {
-            // Compute the next sleep deadline: last known inbound + heartbt_int.
-            auto deadline = last_inbound_steady_ + heartbt_int;
+            // Compute earliest sleep deadline.
+            const auto outbound_deadline = last_outbound_steady_ + heartbt_int;
+            const auto inbound_deadline  = last_inbound_steady_  + heartbt_int;
+            const auto deadline = outbound_deadline < inbound_deadline
+                                      ? outbound_deadline : inbound_deadline;
 
             // Sleep until that deadline (or until cancellation fires).
             co_await effective_clock_->sleep_until(deadline);
@@ -1476,8 +1774,36 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 co_return;
             }
 
-            // Did inbound data arrive during the sleep (updating last_inbound_steady_)?
             auto now = effective_clock_->steady_now();
+
+            // (A) Outbound idle → Heartbeat. T018 Cell A / spec FR-003:
+            // If no outbound for heartbt_int, emit Heartbeat(0) to tell peer we're alive.
+            // This updates last_outbound_steady_ via store_then_emit.
+            if (last_outbound_steady_ + heartbt_int <= now) {
+                std::array<std::byte, 256> hb_buf{};
+                const auto st52_hb = stamp_sending_time(*effective_clock_);
+                const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
+                auto hb_result = fixpp::session::build_heartbeat(
+                    std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
+                    cfg_.sender_comp_id, cfg_.target_comp_id, {},
+                    cfg_.begin_string, st52_hb.value);
+                if (hb_result) {
+                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                    if (!assign_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
+                    auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
+                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                }
+                if (fsm_state_ != fsm_state::Active) {
+                    co_return;
+                }
+                now = effective_clock_->steady_now();
+            }
+
+            // (B) Inbound idle → TestRequest. T018 Cell B / spec FR-004:
+            // Did inbound data arrive during the sleep (updating last_inbound_steady_)?
             if (last_inbound_steady_ + heartbt_int > now) {
                 // Inbound data arrived; the deadline was reset. Loop again.
                 continue;
@@ -1520,8 +1846,17 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 }
             }
 
-            // Grace window: sleep another heartbt_int.
-            auto grace_deadline = now + heartbt_int;
+            // Grace window: sleep until inbound_deadline + heartbt_int + 1ns.
+            // T018 Cell C fix: grace_deadline = inbound_deadline + heartbt_int
+            // NOT now + heartbt_int — the deadline was already in the past when
+            // we woke up, so using now would overshoot.
+            // +1ns guard: prevents mock_clock fire_now=true (asio::post immediate
+            // completion) when inbound_deadline + heartbt_int == clock exactly,
+            // which would fire the grace check before the test can deliver the
+            // Heartbeat echo. The 1ns offset preserves Cell C (advance 11s > 10s+1ns)
+            // while letting TR_DistinctNow's echo arrive before the grace fires.
+            // [T018 Cell C grace_deadline bug fix; admin_builder_distinct_now_test compat]
+            const auto grace_deadline = inbound_deadline + heartbt_int + std::chrono::nanoseconds{1};
             co_await effective_clock_->sleep_until(grace_deadline);
 
             if (fsm_state_ != fsm_state::Active) {
@@ -1598,6 +1933,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         } catch (...) {
             co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
+    }
+
+    // T018 Cell A: track outbound activity for outbound-idle Heartbeat cadence.
+    // Updated on EVERY successful outbound emit (store + transport).
+    if (effective_clock_) {
+        last_outbound_steady_ = effective_clock_->steady_now();
     }
 
     co_return fixpp::core::expected_t<void>{};

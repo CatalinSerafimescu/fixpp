@@ -127,12 +127,14 @@ TEST_F(SeqnumManagerTest, TooLowInboundIsSessionFatal) {
     run_sync(ioc, mgr.drain());
 }
 
-// ── T4: Too-high inbound → session_test_request_unanswered (stand-in), no ResendRequest ─
+// ── T4: Too-high inbound → session_test_request_unanswered (stand-in) ─────────
 //
-// NOTE: slot 70 session_seqnum_gap_unrecoverable was deleted pre-v1.0 per 013
-// T006a Option D. The too-high emit-site returns session_test_request_unanswered
-// (74) as a safe stand-in pending 013 FR-009 recovery wiring (Phase 3 T023–T026).
-// 2e-recovery: update this assertion once Phase 3 lands.
+// NOTE: slot 70 session_seqnum_gap_unrecoverable was deleted per 013 T006a.
+// check_inbound() returns session_test_request_unanswered (74) for too-high.
+// 013 Phase 3 T026: session.cpp intercepts too-high in Active state BEFORE
+// calling check_inbound, routing via reconnect_fsm_.enter_awaiting_resend()
+// per FR-009. check_inbound(too-high) is still reached for LogonSent/
+// LogonReceived states where too-high remains session-fatal. Assertion stable.
 
 TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
     SeqnumManager mgr;
@@ -142,8 +144,7 @@ TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
     ASSERT_FALSE(r.has_value()) << "Too-high must return error";
     EXPECT_EQ(r.error(), fixpp::core::error::session_test_request_unanswered)
         << "Expected session_test_request_unanswered (slot 74, stand-in for deleted "
-           "slot 70 session_seqnum_gap_unrecoverable); 2e-recovery: update after "
-           "013 Phase 3 T023-T026 land";
+           "slot 70 session_seqnum_gap_unrecoverable); assertion stable post-013 Phase 3";
 
     // Counter must NOT advance on error.
     EXPECT_EQ(mgr.next_inbound_unsafe(), 1u)

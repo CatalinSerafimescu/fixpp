@@ -235,10 +235,14 @@ TEST_F(TcSeqnumTest, Tc2a_MsgSeqNumCorrect) {
 // ── 2c_MsgSeqNumTooLow ────────────────────────────────────────────────────────
 //
 // Oracle: a message with MsgSeqNum < next-expected and no PossDupFlag=Y →
-// session-fatal ([FIX-SL §4.1]).
+// session-fatal ([FIX-SL §4.1]) for non-Heartbeat messages.
+//
+// T006a catch-site migration (013): Heartbeat(35=0) with too-low seqnum is
+// silently ignored in Active state per 013 T020-A warmup compatibility.
+// The general [FIX-SL §4.1] fatal rule applies to all other MsgTypes.
 //
 // 2c scenario: after reaching Active (next expected=2), send a Heartbeat with
-// seq=1. Must become session-fatal (Disconnected or LogoutSent).
+// seq=1. With 013, too-low Heartbeat is silently ignored → session stays Active.
 
 TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     auto cfg = make_acceptor_cfg();
@@ -249,14 +253,16 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
         << "2c: Failed to drive to Active";
 
     // Send a Heartbeat with seq=1 (too low; no PossDupFlag).
+    // 013 FR-009 / T020-A: too-low Heartbeat is silently ignored → stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
     feed_sync(sess, hb);
 
-    // Session must be session-fatal.
+    // With 013, too-low Heartbeat → Active (not fatal).
+    // The general [FIX-SL §4.1] fatal rule still applies to non-Heartbeat
+    // messages; those paths are verified in fsm_matrix_witness_test.cpp.
     const auto st = sess.state();
-    EXPECT_TRUE(st == fixpp::session::fsm_state::Disconnected ||
-                st == fixpp::session::fsm_state::LogoutSent)
-        << "2c: Too-low MsgSeqNum must cause session-fatal (Disconnected or LogoutSent); "
+    EXPECT_EQ(st, fixpp::session::fsm_state::Active)
+        << "2c: Too-low Heartbeat must be silently ignored (Active) per 013 T020-A; "
         << "got state=" << static_cast<int>(st);
 }
 

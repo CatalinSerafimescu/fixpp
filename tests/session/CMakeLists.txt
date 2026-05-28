@@ -413,6 +413,30 @@ add_test(NAME session_fsm_via_mock_transport
 set_tests_properties(session_fsm_via_mock_transport PROPERTIES
   LABELS "session;012;us4;seam6;mock")
 
+# ── 013-session-reconnect-binding Phase 3 (RED) test registrations ──────────
+# T014–T019: authored red-first per TDD ([const §VII.3]); turns green when
+# Phase 3 impl (T023–T028) lands. All 6 use add_threading_test (fixpp_session
+# + fixpp_mock_clock + GTest; no mock_transport needed for session-level tests).
+# CTest label filter: ctest -R 'reconnect|recovery|reset_seqnum|heartbeat_cadence|logout_timeout'
+
+# T014 — seam reconnect-happy-path: AwaitingResend flag + ResendRequest emit.
+add_threading_test(reconnect_happy_path test_reconnect_happy_path.cpp)
+
+# T015 — seam recovery-admin-span-gapfill: all-admin ResendRequest → SequenceReset-GapFill.
+add_threading_test(recovery_admin_span_gapfill test_recovery_admin_span_gapfill.cpp)
+
+# T016 — seam recovery-store-horizon: pre-horizon GapFill + PossDupFlag replay.
+add_threading_test(recovery_store_horizon test_recovery_store_horizon.cpp)
+
+# T017 — seam reset-seqnum-policy-matrix: 3 modes × 2 roles (6 cells).
+add_threading_test(reset_seqnum_policy_matrix test_reset_seqnum_policy_matrix.cpp)
+
+# T018 — seam heartbeat-cadence-8cell: 4 axes × 2 executor modes.
+add_threading_test(heartbeat_cadence_8cell test_heartbeat_cadence_8cell.cpp)
+
+# T019 — seam logout-timeout: initiator + acceptor symmetric cells.
+add_threading_test(logout_timeout test_logout_timeout.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
