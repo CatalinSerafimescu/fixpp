@@ -32,3 +32,30 @@ add_store_bench(fsm_bench       fsm_bench.cpp)
 add_store_bench(seqnum_bench    seqnum_bench.cpp)
 add_store_bench(fix_time_bench  fix_time_bench.cpp)
 add_store_bench(heartbeat_bench heartbeat_bench.cpp)
+
+# T022 — 013-session-reconnect-binding Phase 3 — heartbeat cadence end-to-end bench.
+# Ceiling: ≤ 2 µs p99 on warm cache. ±5% regression gate per [const §VIII.2].
+# Replaces the 005 scope-placeholder heartbeat_bench.cpp for the real
+# timer-fire decision measurement (mock_clock::advance → Heartbeat emit).
+# Phase 3 stubs co_return {} immediately → near-zero measured time (RED).
+function(add_bench_with_test_include name)
+  add_executable(${name} ${ARGN})
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    benchmark::benchmark
+    benchmark::benchmark_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${name} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  )
+endfunction()
+add_bench_with_test_include(bench_heartbeat_cadence bench_heartbeat_cadence.cpp)
+
+# T033 — 013-session-reconnect-binding Phase 4 (US2) bench.
+# CompIdAuthorizationPolicy::authorize() latency: ≤ 5 µs p99 per SC-003 /
+# [const §VIII.2]. Does NOT need test-include headers (no Session; pure policy API).
+add_store_bench(bench_compid_authorize bench_compid_authorize.cpp)

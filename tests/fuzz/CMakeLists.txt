@@ -121,3 +121,23 @@ target_link_options(fuzz_transport_handshake PRIVATE
   -fsanitize=fuzzer,address,undefined)
 set_target_properties(fuzz_transport_handshake PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# T021 — 013-session-reconnect-binding Phase 3 — session recovery + admin parse fuzzer.
+# Feeds random bytes into Session::on_inbound_frame() covering Logon+141=Y,
+# ResendRequest, SequenceReset-GapFill, Heartbeat+TestReqID, Logout paths.
+# Per [const §IX.4] voluntary coverage obligation for the recovery parse surface.
+add_executable(fuzz_session_recovery_admin_parse
+  fuzz_session_recovery_admin_parse.cpp)
+target_link_libraries(fuzz_session_recovery_admin_parse PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  fixpp_core)
+target_compile_options(fuzz_session_recovery_admin_parse PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_session_recovery_admin_parse PRIVATE
+  -fsanitize=fuzzer,address,undefined)
+target_include_directories(fuzz_session_recovery_admin_parse PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(fuzz_session_recovery_admin_parse PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

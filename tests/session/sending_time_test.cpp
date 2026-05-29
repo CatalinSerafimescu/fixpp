@@ -204,6 +204,8 @@ struct SendingTimeFixture {
         cfg.transport_send     = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

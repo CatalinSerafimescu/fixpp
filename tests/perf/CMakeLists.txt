@@ -14,6 +14,42 @@
 #       this helper does NOT set LD_PRELOAD (see cmake/fixpp_store_test.cmake).
 find_package(GTest CONFIG REQUIRED)
 
+# perf_socket_option_defaults links fixpp_transport, whose TLS impl
+# (asio_tls_transport / asio_listener) calls OpenSSL. fixpp_transport's
+# PRIVATE OpenSSL is not auto-propagated to test executables when linking the
+# static library, and in Debug cmake builds the OpenSSL imported targets have
+# no IMPORTED_LOCATION. Same fallback-variable pattern as tests/transport and
+# tests/tls CMakeLists.
+find_package(OpenSSL 3.0 REQUIRED)
+find_library(FIXPP_PERF_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_library(FIXPP_PERF_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_package(ZLIB REQUIRED)
+find_library(FIXPP_PERF_ZLIB_LIB
+    NAMES z libz
+    PATHS "${zlib_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+if(FIXPP_PERF_OPENSSL_CRYPTO_LIB STREQUAL "FIXPP_PERF_OPENSSL_CRYPTO_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_OPENSSL_CRYPTO_LIB)
+    set(FIXPP_PERF_OPENSSL_CRYPTO_LIB OpenSSL::Crypto)
+endif()
+if(FIXPP_PERF_OPENSSL_SSL_LIB STREQUAL "FIXPP_PERF_OPENSSL_SSL_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_OPENSSL_SSL_LIB)
+    set(FIXPP_PERF_OPENSSL_SSL_LIB OpenSSL::SSL)
+endif()
+if(FIXPP_PERF_ZLIB_LIB STREQUAL "FIXPP_PERF_ZLIB_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_ZLIB_LIB)
+    set(FIXPP_PERF_ZLIB_LIB ZLIB::ZLIB)
+endif()
+
 # ── 008-message-store seam registrations ────────────────────────────────────
 # T050 — seam 14: MemoryStore alloc-guard (SC-007 / FR-027 / [const §VIII.5])
 # Run with:
@@ -53,9 +89,50 @@ target_include_directories(perf_socket_option_defaults PRIVATE
 target_link_libraries(perf_socket_option_defaults PRIVATE
   fixpp_transport
   fixpp_tls
+  "${FIXPP_PERF_OPENSSL_SSL_LIB}"
+  "${FIXPP_PERF_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_PERF_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main)
 add_test(NAME perf_socket_option_defaults
          COMMAND perf_socket_option_defaults)
 set_tests_properties(perf_socket_option_defaults PROPERTIES
   LABELS "transport;012;us1;us3;fr029")
+
+# T020 — 013-session-reconnect-binding Phase 3 (RED) — session recovery alloc-guard.
+# Dual-gate: counting_resource (in-band PMR) + mallocnesia LD_PRELOAD (global heap).
+# CTest name: perf_session_recovery_alloc_guard
+# Run with: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so <binary>
+add_executable(perf_session_recovery_alloc_guard
+  test_session_recovery_alloc_guard.cpp)
+target_link_libraries(perf_session_recovery_alloc_guard PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main)
+target_include_directories(perf_session_recovery_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME perf_session_recovery_alloc_guard
+         COMMAND perf_session_recovery_alloc_guard)
+set_tests_properties(perf_session_recovery_alloc_guard PROPERTIES
+  LABELS "session;013;us1;perf;alloc_guard"
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+set_property(TEST perf_session_recovery_alloc_guard APPEND PROPERTY
+  ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+
+# T020 DUAL gate companion: mallocnesia interception gate.
+# Runs the same binary through check_alloc.py (LD_PRELOAD interception of global
+# malloc) to confirm zero global-heap allocations on the recovery alloc-guard path.
+# Precedent: tls_handshake_alloc_guard_mallocnesia (tests/tls/CMakeLists.txt:224-234).
+# [[feedback_tracking_pmr_resource_false_pass]] REQUIRES both gates.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+    add_test(
+        NAME perf_session_recovery_alloc_guard_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:perf_session_recovery_alloc_guard>"
+    )
+    set_tests_properties(perf_session_recovery_alloc_guard_mallocnesia PROPERTIES
+        LABELS "session;013;us1;perf;alloc_guard"
+        DEPENDS perf_session_recovery_alloc_guard)
+endif()

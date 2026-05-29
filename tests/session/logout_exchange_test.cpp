@@ -157,6 +157,8 @@ protected:
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 
@@ -302,6 +304,55 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     // but the close() contract is idempotent ok result; the error is surfaced
     // via error slot 73 as an observable. Accept either: Disconnected state is
     // the decisive assertion.)
+    (void)close_fut.get();
+}
+
+// ── Test 2a: ConfigurableTimeoutHonored (RC#D gate-b/r1) ─────────────────────
+//
+// Verifies that logout_disconnect_timeout_ms IS wired into run_logout_phase1
+// and is NOT hardcoded to 2 s. Sets a short 200 ms timeout; advances clock by
+// 300 ms (> 200 ms but << 2 s = 2000 ms). If the timeout were still hardcoded
+// to 2 s, the session would remain in LogoutSent after 300 ms; with the config
+// wired correctly, the session is Disconnected.
+//
+// Anchors: spec FR-008; SessionConfig::logout_disconnect_timeout_ms; RC#D.
+TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
+    // Use 200ms timeout — far below the (formerly hardcoded) 2000ms default.
+    auto cfg = make_cfg();
+    cfg.logout_disconnect_timeout_ms = 200;
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) {
+        td.capture_outbound(frame);
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active_initiator(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    // Trigger graceful close.
+    auto close_fut = asio::co_spawn(
+        ioc, sess.close(close_mode::graceful), asio::use_future);
+
+    // Run briefly so run_logout_phase1 starts and registers sleep_until.
+    ioc.run_for(100ms);
+    ioc.restart();
+
+    // Must be in LogoutSent (Logout sent, waiting for peer reply or timeout).
+    EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
+        << "RC#D: session should be in LogoutSent after emitting Logout.";
+    ASSERT_GE(td.sent_count(), 1u) << "Logout frame must have been emitted.";
+
+    // Advance clock by 300 ms — past the 200 ms configured timeout but only
+    // 15% of the formerly-hardcoded 2000 ms. If hardcoded: still LogoutSent.
+    // If configured correctly: Disconnected.
+    clock->advance(std::chrono::milliseconds{300});
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "RC#D: configured 200ms timeout must fire at 300ms clock advance. "
+        << "If session is still LogoutSent, the timeout is hardcoded to 2s (FAIL).";
+
     (void)close_fut.get();
 }
 

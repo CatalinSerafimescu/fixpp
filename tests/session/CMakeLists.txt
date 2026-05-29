@@ -413,6 +413,76 @@ add_test(NAME session_fsm_via_mock_transport
 set_tests_properties(session_fsm_via_mock_transport PROPERTIES
   LABELS "session;012;us4;seam6;mock")
 
+# ── 013-session-reconnect-binding Phase 3 (RED) test registrations ──────────
+# T014–T019: authored red-first per TDD ([const §VII.3]); turns green when
+# Phase 3 impl (T023–T028) lands. All 6 use add_threading_test (fixpp_session
+# + fixpp_mock_clock + GTest; no mock_transport needed for session-level tests).
+# CTest label filter: ctest -R 'reconnect|recovery|reset_seqnum|heartbeat_cadence|logout_timeout'
+
+# T014 — seam reconnect-happy-path: AwaitingResend flag + ResendRequest emit.
+add_threading_test(reconnect_happy_path test_reconnect_happy_path.cpp)
+
+# T015 — seam recovery-admin-span-gapfill: all-admin ResendRequest → SequenceReset-GapFill.
+add_threading_test(recovery_admin_span_gapfill test_recovery_admin_span_gapfill.cpp)
+
+# T016 — seam recovery-store-horizon: pre-horizon GapFill + PossDupFlag replay.
+add_threading_test(recovery_store_horizon test_recovery_store_horizon.cpp)
+
+# T017 — seam reset-seqnum-policy-matrix: 3 modes × 2 roles (6 cells).
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session for RC#C-1
+# counter assertions (gate-b/r2: verify both counters reset to 1 after 141=Y).
+add_threading_test(reset_seqnum_policy_matrix test_reset_seqnum_policy_matrix.cpp)
+target_compile_definitions(reset_seqnum_policy_matrix PRIVATE FIXPP_TEST_HOOKS)
+
+# T018 — seam heartbeat-cadence-8cell: 4 axes × 2 executor modes.
+add_threading_test(heartbeat_cadence_8cell test_heartbeat_cadence_8cell.cpp)
+
+# T019 — seam logout-timeout: initiator + acceptor symmetric cells.
+add_threading_test(logout_timeout test_logout_timeout.cpp)
+
+# ── 013-session-reconnect-binding Phase 4 (US2) test registrations ──────────
+# T029–T032: CompID↔TLS-identity authorization at Logon. Authored RED-first
+# per TDD ([const §VII.3]). Turned GREEN when T034–T036 impl lands.
+# CTest filter: ctest -R 'compid_binding'
+
+# T029 — FR-023 / US2 AC6: empty policy rejects ALL Logons (default-deny).
+add_threading_test(compid_binding_default_deny
+  test_compid_binding_default_deny.cpp)
+
+# T030 — FR-022 / US2 AC5: 4-cell principal-extraction order matrix.
+add_threading_test(compid_binding_principal_extraction
+  test_compid_binding_principal_extraction.cpp)
+
+# T031 — FR-024 / US2 AC4: symmetric acceptor + initiator coverage.
+add_threading_test(compid_binding_symmetric
+  test_compid_binding_symmetric.cpp)
+
+# T032 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+add_threading_test(session_invariant_counter_witness
+  test_session_invariant_counter_witness.cpp)
+
+# RC#A (gate-b/r1) — fail-closed mTLS CompID footgun fix counter-test.
+# Asserts: mTLS profile + no peer_identity → Disconnected + event.
+# Asserts: one_way_ca (non-mTLS) + no override → still reaches Active.
+add_threading_test(compid_binding_mtls_fail_closed
+  test_compid_binding_mtls_fail_closed.cpp)
+
+# ── 013-session-reconnect-binding Phase 5 (US3) — T040 ring-overflow tests ───
+# FR-035 / data-model §E-6: both Session and ListenerEvents rings have capacity
+# kSessionEventRingCapacity = 16; emit 17 → oldest dropped, last-16 retained.
+# T040 also adds asio_listener::recent_events() (T039 accessor test) but those
+# integration cells live in tests/transport/ (transport_tls_validation_failed_taxonomy).
+add_threading_test(session_event_ring_overflow
+  test_session_event_ring_overflow.cpp)
+target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
+
+# ── 013-session-reconnect-binding Phase 6 (US4) — T042 credential rotation ───
+# FR-030 / FR-031 / FR-032 / FR-033 / US4 AC1+AC2+AC3 / Clarifications Q4=A
+# Tests: null-reject, forwarder-delegates, strong-ref invariant, call-count witness.
+# TSan critical: atomic-swap + snapshot read race-free under cross-strand calls.
+add_threading_test(session_reload_credentials_in_flight
+  test_reload_credentials_in_flight.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

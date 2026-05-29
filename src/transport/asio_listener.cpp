@@ -180,6 +180,13 @@ asio_listener::async_accept() {
         co_return std::unexpected{minted.error()};
     }
 
+    // 013 T039: wire the listener's event ring into the accepted transport so
+    // async_handshake can emit session_event_tls_validation_failed on verify_peer
+    // rejection. ListenerEvents is owned by cfg_.events (lifetime = listener);
+    // the transport holds a non-owning pointer valid for the listener lifetime.
+    // [FR-028 / data-model §E-5 / §E-6]
+    (*minted)->set_listener_events(&cfg_.events);
+
     co_return std::unique_ptr<Transport>(std::move(*minted));
 }
 

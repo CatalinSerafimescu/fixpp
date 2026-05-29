@@ -65,8 +65,9 @@
 #include <fixpp/tls/peer_identity.hpp>      // fixpp::tls::peer_identity
 #include <fixpp/tls/pinset.hpp>             // fixpp::tls::pin_snapshot
 #include <fixpp/tls/security_profile.hpp>   // fixpp::tls::SslCtxConfig
-#include <fixpp/transport/tls_transport.hpp>  // TlsTransport + handshake_result
-#include <fixpp/transport/transport.hpp>      // Transport + ConnectInfo + Config
+#include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
+#include <fixpp/transport/tls_transport.hpp>    // TlsTransport + handshake_result
+#include <fixpp/transport/transport.hpp>        // Transport + ConnectInfo + Config
 
 namespace fixpp::transport {
 
@@ -203,6 +204,15 @@ public:
         async_handshake(fixpp::tls::SslCtxConfig const& cfg
                             [[clang::lifetimebound]]) override;
 
+    // ── 013 T039 — ListenerEvents association ──────────────────────────────
+    //
+    // Called by asio_listener after make_accepted returns an accepted transport.
+    // The pointer is non-owning; ListenerEvents is owned by asio_listener::Config
+    // whose lifetime spans the listener (and therefore outlives every transport
+    // minted by it). Null by default (initiator side); set only on the acceptor.
+    // [FR-028 / data-model §E-5]
+    void set_listener_events(ListenerEvents* le) noexcept { listener_events_ = le; }
+
     // ── Test-access friend ──────────────────────────────────────────────────
     //
     // Grants state_ visibility to integration tests that need to verify the
@@ -273,6 +283,13 @@ private:
     // NOT touch these flags — it only fires cancel_signal_.
     bool  read_in_flight_  {false};
     bool  write_in_flight_ {false};
+
+    // ── 013 T039 — ListenerEvents sink (null on initiator side) ─────────────
+    // Non-owning pointer to the listener's event ring. Non-null only when this
+    // transport was minted via make_accepted (acceptor path). Used by
+    // async_handshake to emit session_event_tls_validation_failed on verify_peer
+    // rejection. [FR-026 / FR-028 / data-model §E-5]
+    ListenerEvents* listener_events_{nullptr};
 
     // ── Cancellation ────────────────────────────────────────────────────────
     //

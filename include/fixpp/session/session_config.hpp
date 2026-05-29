@@ -24,6 +24,8 @@
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
+#include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
+#include <fixpp/tls/peer_identity.hpp>                    // 013 T036 seam: logon_peer_identity_override
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
@@ -55,6 +57,24 @@ class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-of
 namespace fixpp::session {
 
 enum class RejectPolicy : std::uint8_t;  // owned by 005; declared for the field
+
+// FR-017 / D-6 / Clarifications Q1=A — per-session ResetSeqNumFlag(141)=Y
+// policy. Default = bilateral_strict per [const §XII.5] no-implicit-default +
+// 2-of-3 industry convergence (QFC + QFJ favour bilateral; Fix8 unilateral is
+// the outlier). Three modes:
+//   - bilateral_strict  — refuse Logon if peer's response lacks 141=Y (when we
+//                         sent 141=Y); QFJ-style.
+//   - bilateral_lenient — auto-mirror 141=Y in our response Logon when peer
+//                         sends 141=Y; QFC-style.
+//   - unilateral        — honour any received 141=Y regardless of our outbound
+//                         flag; Fix8-style.
+// Per-session granularity (not engine-wide) so multi-tenant acceptors can pair
+// counterparties running different engines. [data-model §E-4]
+enum class reset_seqnum_policy : std::uint8_t {
+    bilateral_strict  = 0,
+    bilateral_lenient = 1,
+    unilateral        = 2,
+};
 
 enum class threading_mode : std::uint8_t {
     per_session_strand = 0,  // default — make_strand wrap; callbacks serialised
@@ -164,6 +184,58 @@ struct SessionConfig {
     // NO std::mutex — must only be called from the session executor strand.
     // ([const §XV.9] grep gate: this field is a std::function, not std::mutex.)
     std::function<void(std::span<const std::byte>)> transport_send;
+
+    // ── 013-session-reconnect-binding extensions (4 new fields) [data-model §E-4] ──
+
+    // FR-017 / Clarifications Q1=A — per-session ResetSeqNumFlag policy.
+    // Default bilateral_strict per spec FR-017 + [const §XII.5] no-implicit-default.
+    // bilateral_strict: we send 141=Y in our outbound Logon AND require the peer
+    //   to also send 141=Y; a peer Logon without 141=Y disconnects with
+    //   session_seqnum_reset_mismatch(116). [FIX-SL §4.1.1: mutual seqnum reset]
+    // bilateral_lenient: honour peer 141=Y if received; accept without refusing.
+    // unilateral: honour any peer 141=Y regardless of our own flag (Fix8-style).
+    // RC#C (gate-b/r1): restored from bilateral_lenient → bilateral_strict per FR-017.
+    // Pre-013 tests updated to send 141=Y in their test Logon frames to comply.
+    // [FR-017; Clarifications Q1=A; triage RC#C(a)]
+    reset_seqnum_policy reset_seqnum_policy_field{
+        reset_seqnum_policy::bilateral_strict};
+
+    // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
+    // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
+    // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
+    // SessionConfig-build time per [arch §5.3] construction-time carve-out.
+    std::uint32_t logout_disconnect_timeout_ms{2000};
+
+    // FR-023 / Clarifications Q3=A — operator-supplied allow-list of
+    // {principal → {compid_set}} bindings. Default-constructed = empty
+    // allow-list = default-deny (rejects ALL Logons). Operator MUST enumerate
+    // bindings before opening any session. COPY-CONSTRUCTIBLE per [data-model §E-3]
+    // + 010 W-5 (CompIdAuthorizationPolicy pimpl supports copy). [data-model §E-4]
+    CompIdAuthorizationPolicy compid_authorization_policy{};
+
+    // 013 T036 US2 — test-seam for injecting a scripted peer_identity at
+    // Logon time. When set, the Session Logon path uses this peer_identity
+    // in place of the real handshake_result.peer_id (which is unavailable
+    // with mock_transport). Production wiring (real TLS) leaves this empty
+    // and reads peer_id from the handshake_result. [FR-019/FR-024; D-10]
+    // Optional: std::nullopt means "use real handshake peer_id" (the default).
+    // Declared here (not under FIXPP_TEST_HOOKS) so SessionConfig copy
+    // semantics remain clean; no runtime penalty when nullopt.
+    std::optional<fixpp::tls::peer_identity> logon_peer_identity_override{};
+
+    // FR-030 / 2h Appendix D §D.2 reservation — operator-supplied per-session
+    // transport factory override. Default nullptr => engine substitutes
+    // EngineConfig::default_transport_factory at Session::open-time per:
+    //   resolved_factory = transport_factory_override.value_or(
+    //                          EngineConfig::default_transport_factory).
+    // OWNERSHIP TYPE: std::shared_ptr<TransportFactory> (NOT unique_ptr) per
+    // 010 FR-001a precedent — unique_ptr would break the
+    // static_assert(std::is_copy_constructible_v<SessionConfig>) invariant at
+    // line 176. The "no factory shared across Sessions" invariant is preserved
+    // via a Session::open-time hygiene assertion (Phase 3 T030) checking
+    // use_count()==1. The shared_ptr type is for SessionConfig COPY SEMANTICS
+    // ONLY; cross-Session sharing is FORBIDDEN. [2h Appendix D §D.1+§D.2]
+    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override{};
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

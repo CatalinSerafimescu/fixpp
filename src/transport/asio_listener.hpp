@@ -45,11 +45,13 @@
 #include <asio/ip/tcp.hpp>
 #include <memory>
 #include <memory_resource>
+#include <span>
 
 #include <fixpp/core/error.hpp>             // core::expected_t<T>
 #include <fixpp/tls/security_profile.hpp>   // fixpp::tls::SslCtxConfig
 #include <fixpp/transport/endpoint.hpp>     // Endpoint
 #include <fixpp/transport/listener.hpp>     // abstract Listener
+#include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
 #include <fixpp/transport/transport.hpp>    // Transport + Transport::Config
 
 namespace fixpp::transport {
@@ -94,6 +96,13 @@ public:
         // the engine bootstrap. Per-counterparty profiles use one Listener
         // per counterparty per [2h §4.6] notes.
         fixpp::tls::SslCtxConfig   ssl_cfg;
+
+        // 013 T039 — per-listener session-event ring for pre-Session TLS
+        // validation events. Owned by Config (and therefore by asio_listener).
+        // Lifetime: spans the Listener instance — any non-owning pointer into
+        // this member (e.g., held by an accepted asio_tls_transport) is valid
+        // for the listener's lifetime. [FR-028 / data-model §E-5 / §E-6]
+        ListenerEvents             events;
     };
 
     // Throwing constructor — engine-bootstrap carve-out per [arch §5.3].
@@ -124,6 +133,15 @@ public:
     // so consumers (e.g., the engine or tests) can connect clients to the
     // listener without out-of-band coordination.
     [[nodiscard]] Endpoint bound_endpoint() const noexcept { return cfg_.bind_endpoint; }
+
+    // 013 T040 — operator-observation surface for pre-Session TLS validation
+    // events (FR-028 / FR-035). Returns a membership-witness view over the
+    // last ≤16 emitted SessionEvents (physical ring order; NOT chronological).
+    // Parallel shape to Session::recent_events(). [data-model §E-6]
+    [[nodiscard]] std::span<const fixpp::session::SessionEvent>
+    recent_events() const noexcept {
+        return cfg_.events.recent_events();
+    }
 
 private:
     Config                                        cfg_;

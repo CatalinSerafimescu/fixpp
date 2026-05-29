@@ -150,6 +150,8 @@ struct MinimalSession {
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
+        // RC#C (gate-b/r1): bilateral_lenient — test exercises seqnum drain, not reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     }
 
     template <class Coro>

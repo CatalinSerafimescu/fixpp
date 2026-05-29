@@ -180,6 +180,7 @@ protected:
     }
 
     // Build a session config for the given begin_string.
+    // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     SessionConfig make_cfg(std::string_view begin_string) {
         SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
@@ -189,6 +190,7 @@ protected:
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

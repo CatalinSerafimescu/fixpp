@@ -64,6 +64,10 @@ target_sources(fixpp_session PRIVATE
   seqnum_manager.cpp   # T018: Phase 2 stub; full impl T031/T032/T033 (Phase 4 / US2)
   admin_messages.cpp   # T018: Phase 2 stub; full impl T021/T040/T046/T054 (Phase 3-7)
   sending_time.cpp     # T018: Phase 2 stub; full impl T022/T055 (Phase 3/7)
+  # ── 013-session-reconnect-binding Phase 2 (T006–T013a) ────────────────────
+  compid_authorization_policy.cpp  # T008: Phase 2 shape; behavioral body Phase 3 T023/T024
+  resend_state.cpp                 # T009: Phase 2 shape; behavioral body Phase 3 T025/T026
+  reconnect_fsm.cpp                # T010: Phase 2 stubs; behavioral body Phase 3 T027–T031
 )
 
 target_link_libraries(fixpp_session PRIVATE Crc32c::crc32c)
