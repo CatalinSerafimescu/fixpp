@@ -2319,12 +2319,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         co_return std::unexpected(fixpp::core::error::session_logout_timeout);
     }
 
-    // Sleep until the 2 s graceful-close timeout (D-8: session_logout_timeout).
+    // Sleep until the configurable graceful-close timeout (cfg_.logout_disconnect_timeout_ms).
+    // Default 2000 ms (matching QuickFIX/J SessionState.logoutTimeoutMs). Wired from
+    // SessionConfig per FR-008 / RC#D (gate-b/r1); previously hardcoded seconds{2}.
     // on_inbound_frame() will set logout_confirmed_=true AND call
     // effective_clock_->cancel_sleeps() when the peer's confirming Logout arrives,
     // waking us up early. When cancel_sleeps fires, sleep_until throws
     // system_error(operation_aborted); we catch it and check logout_confirmed_.
-    auto deadline = effective_clock_->steady_now() + seconds{2};
+    auto deadline = effective_clock_->steady_now() +
+                    std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms};
     try {
         co_await effective_clock_->sleep_until(deadline);
     } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — wake-early signal: the
