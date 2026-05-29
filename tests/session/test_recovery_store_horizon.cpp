@@ -12,14 +12,16 @@
 //
 // Production-shape: drives bytes through Session::on_inbound_frame().
 //
-// RED witness: reply_to_inbound_resend_request stub returns {} without
-//   probing the store or emitting the pre-horizon GapFill or replays.
-//   Both EXPECT assertions FAIL RED until T026 impl lands.
+// GREEN witness (013 FR-010/FR-012 extension slice): the session walks the
+//   per-session MessageStore (here a HorizonStore double modelling outbound
+//   [7..12]), emits the pre-horizon SequenceReset-GapFill{NewSeqNo=7}, then
+//   replays [7..12] with PossDupFlag(43)=Y + OrigSendingTime(122).
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -35,6 +37,11 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/direction.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
+#include <fixpp/session/retrieve_visitor.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -110,6 +117,84 @@ struct OutboundCapture {
     }
 };
 
+// ── HorizonStore: in-test MessageStore double modelling a purged store ─────────
+// Outbound seqs [7..12] are retained as application messages (35=D); seqs
+// [1..6] are below the store horizon (purged) and report store_seqnum_gap.
+// next_seqnum(outbound) == 13 ⇒ our_last_outbound == 12. Inbound stores and
+// the acceptor's own Logon-ack outbound store() are accepted as no-ops.
+using fixpp::session::direction_t;
+using fixpp::session::MessageStore;
+using fixpp::session::MessageStoreFactory;
+using fixpp::session::retrieve_visitor;
+using fixpp::session::seqnum_t;
+using fixpp::session::visit_result;
+
+class HorizonStore final : public MessageStore {
+public:
+    HorizonStore() : MessageStore(flush_thunk_for<HorizonStore>()) {
+        for (std::uint32_t k = kHorizon; k <= kLast; ++k) {
+            frames_[k] = make_fix_frame("FIX.4.2", "D", k, "ISLD", "TW",
+                                        field(11, "ORD" + std::to_string(k)));
+        }
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    store(seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
+          direction_t /*dir*/) noexcept override {
+        co_return fixpp::core::expected_t<void>{};  // accept (incl. Logon-ack)
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
+             retrieve_visitor& visitor) noexcept override {
+        if (dir != direction_t::outbound) {
+            co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
+        }
+        const seqnum_t hi = (end == 0) ? kLast : end;
+        bool visited_any = false;
+        for (seqnum_t k = begin; k <= hi; ++k) {
+            auto it = frames_.find(k);
+            if (it == frames_.end()) {
+                // Gap at k: stop (matches the store contract — gap → store_seqnum_gap).
+                co_return visited_any ? fixpp::core::expected_t<void>{}
+                                      : std::unexpected(fixpp::core::error::store_seqnum_gap);
+            }
+            visited_any = true;
+            auto r = co_await visitor.on_frame(
+                k, std::span<const std::byte>{it->second.data(), it->second.size()});
+            if (!r) co_return std::unexpected(r.error());
+            if (*r != visit_result::cont) break;
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>>
+    next_seqnum(direction_t dir, bool /*increment*/) noexcept override {
+        co_return fixpp::core::expected_t<seqnum_t>{
+            dir == direction_t::outbound ? (kLast + 1U) : seqnum_t{1}};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    reset() noexcept override {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+private:
+    static constexpr std::uint32_t kHorizon = 7;
+    static constexpr std::uint32_t kLast    = 12;
+    std::map<seqnum_t, std::vector<std::byte>> frames_;
+};
+
+class HorizonStoreFactory final : public MessageStoreFactory {
+public:
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view /*sender*/, std::string_view /*target*/,
+         std::pmr::memory_resource* /*mr*/, std::size_t /*max_store_memory_bytes*/,
+         asio::any_io_executor /*file_io_executor*/) noexcept override {
+        return std::unique_ptr<MessageStore>(new HorizonStore());
+    }
+};
+
 static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
@@ -161,6 +246,7 @@ protected:
         cfg.executor_override = ioc.get_executor();
         cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.store_factory     = std::make_shared<HorizonStoreFactory>();
         return cfg;
     }
 

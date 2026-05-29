@@ -125,11 +125,13 @@ ReconnectFsm::process_inbound_sequence_reset(std::uint32_t /*new_seqno*/,
 // ── reply_to_inbound_resend_request ──────────────────────────────────────────
 //
 // FR-010 / FR-011 / FR-012: walk MessageStore [begin, end] and emit replays.
-// Phase 3 stub — the actual emit is inline in session.cpp on_inbound_frame
-// (which has access to the MessageStore + store_then_emit). The T016 store-
-// horizon test requires a pre-populated MessageStore fixture; without one,
-// session.cpp emits a single SequenceReset-GapFill covering the entire range.
-// Full store-walk implementation deferred to Phase 4 per T016 escalation.
+// The reply logic lives INLINE in session.cpp on_inbound_frame (which has the
+// MessageStore + transport_send + scan_frame_header it needs): per-slot store
+// walk, replay stored application messages with PossDupFlag(43)=Y +
+// OrigSendingTime(122), and collapse absent/admin runs into SequenceReset-
+// GapFill. This method remains a thin no-op hook for symmetry with the other
+// ReconnectFsm driver entry points (state ownership only, no emit). The T016
+// store-horizon witness drives the inline path via a seeded MessageStore.
 [[nodiscard]] asio::awaitable<expected_t<void>>
 ReconnectFsm::reply_to_inbound_resend_request(std::uint32_t /*begin_seqno*/,
                                                std::uint32_t /*end_seqno*/) noexcept {

@@ -40,6 +40,8 @@
 #include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
+#include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
+#include <fixpp/wire/writer.hpp>                     // 013 FR-010: replay-frame re-serialization
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 #include <fixpp/session/sending_time.hpp>  // 005 US5: check_sending_time (T055)
 #include <fixpp/session/seqnum.hpp>
@@ -697,6 +699,90 @@ struct SendingTimeStamp {
     return s;
 }
 
+// 013 FR-010 [FIX-SL §4.3.5] — re-serialize a STORED outbound frame for resend
+// reply: copy every original field (preserving MsgSeqNum 34), append
+// PossDupFlag(43)=Y and OrigSendingTime(122)=<the stored SendingTime(52)>, and
+// recompute BodyLength(9)/CheckSum(10) via fixpp::wire::Writer. The replayed
+// message keeps its ORIGINAL sequence number and does NOT advance the live
+// outbound counter (resend semantics). Stack-only; the 9=/10= source fields are
+// skipped (the Writer rebuilds them on commit).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
+    std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
+    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    const std::byte SOH{0x01};
+    const std::byte EQ{static_cast<std::byte>('=')};
+    std::string_view orig_sending_time;
+    std::size_t i = 0;
+    const std::size_t n = stored.size();
+    while (i < n) {
+        std::uint32_t tag = 0;
+        bool tag_ok = true;
+        while (i < n && stored[i] != EQ && stored[i] != SOH) {
+            auto c = static_cast<unsigned char>(stored[i]);
+            if (c < '0' || c > '9') tag_ok = false;
+            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+            ++i;
+        }
+        if (i >= n || stored[i] != EQ || !tag_ok) {
+            while (i < n && stored[i] != SOH) ++i;
+            if (i < n) ++i;
+            continue;
+        }
+        ++i;  // skip '='
+        const std::size_t vstart = i;
+        while (i < n && stored[i] != SOH) ++i;
+        std::span<const std::byte> val{stored.data() + vstart, i - vstart};
+        if (i < n) ++i;  // skip SOH
+        if (tag == 9 || tag == 10) continue;  // BodyLength/CheckSum recomputed on commit
+        if (tag == 52) {
+            orig_sending_time = std::string_view{reinterpret_cast<const char*>(val.data()),
+                                                 val.size()};
+        }
+        if (auto r = w.append_raw(tag, val); !r) return std::unexpected(r.error());
+    }
+    // PossDupFlag(43)=Y
+    {
+        std::byte y[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    // OrigSendingTime(122) = the stored SendingTime(52) value.
+    {
+        std::span<const std::byte> ost{
+            reinterpret_cast<const std::byte*>(orig_sending_time.data()), orig_sending_time.size()};
+        if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
+    }
+    auto committed = std::move(w).commit();
+    if (!committed) return std::unexpected(committed.error());
+    return out.subspan(0, *committed);
+}
+
+// 013 FR-010 — a retrieve_visitor that copies a single stored frame into a
+// stack buffer for the resend store-walk (one retrieve(K,K) per slot). Frames
+// in the recovery window are small; oversized frames (> buffer) are reported
+// via `truncated` so the caller folds the slot into a GapFill instead.
+class CaptureVisitor final : public fixpp::session::retrieve_visitor {
+public:
+    std::array<std::byte, 1024> buf{};
+    std::size_t len = 0;
+    bool captured = false;
+    bool truncated = false;
+
+    asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+        fixpp::session::seqnum_t /*seq*/,
+        std::span<const std::byte> frame) noexcept override {
+        if (frame.size() <= buf.size()) {
+            std::copy(frame.begin(), frame.end(), buf.begin());
+            len = frame.size();
+            captured = true;
+        } else {
+            truncated = true;
+        }
+        co_return fixpp::session::visit_result::cont;
+    }
+};
+
 }  // namespace
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -1246,40 +1332,105 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
-                // T015 FR-010/FR-012 — inbound ResendRequest(2): reply with
-                // SequenceReset-GapFill{GapFillFlag=Y, NewSeqNo=end+1}.
-                // Without a MessageStore, we treat all requested messages as
-                // pre-horizon and emit a single SequenceReset-GapFill covering
-                // the entire requested range. [spec.md FR-010..FR-012; T015]
+                // 013 FR-010/FR-011/FR-012 [FIX-SL §4.3.5] — inbound
+                // ResendRequest(2): reply by walking our outbound MessageStore.
+                //   - stored application message → replay it with PossDupFlag(43)=Y
+                //     + OrigSendingTime(122), keeping its ORIGINAL MsgSeqNum;
+                //   - absent (pre-/post-store-horizon, internal gap) OR admin
+                //     message → collapse the run into one SequenceReset-GapFill(4)
+                //     {GapFillFlag(123)=Y, NewSeqNo(36)=<next live seq>} (admin
+                //     replay forbidden, FR-011).
+                // Resend-reply messages reuse the replayed sequence numbers and
+                // are transmit-only — they do NOT advance the live outbound
+                // counter and are not re-stored.
                 if (hdr.msg_type == "2") {  // ResendRequest (35=2)
                     const seqnum_t rr_begin = parse_seqnum(hdr.begin_seqno);
                     const seqnum_t rr_end   = parse_seqnum(hdr.end_seqno);
-                    // EndSeqNo=0 means "through current last outbound".
-                    // NewSeqNo = rr_end + 1 (or next outbound if end=0).
-                    const seqnum_t new_seq_no = (rr_end == 0)
-                        ? seqnum_mgr_.peek_outbound()
-                        : (rr_end + 1U);
-
-                    // Emit SequenceReset(4){GapFillFlag(123)=Y, NewSeqNo(36)=new_seq_no}.
-                    // Build inline on stack (no heap — [const §VIII.5]).
-                    // Build via the shared admin builder into a stack buffer
-                    // (no heap — [const §VIII.5]). GapFillFlag(123)=Y is implied.
-                    std::array<std::byte, 256> sr_buf{};
                     const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                           : SendingTimeStamp{};
-                    const seqnum_t sr_seq = seqnum_mgr_.peek_outbound();
-                    auto sr_result = fixpp::session::build_sequence_reset_gapfill(
-                        std::span<std::byte>{sr_buf.data(), sr_buf.size()}, sr_seq,
-                        cfg_.sender_comp_id, cfg_.target_comp_id, new_seq_no, cfg_.begin_string,
-                        st52_sr.value);
-                    if (sr_result) {
-                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        if (!assign_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                        } else {
-                            auto emit_r = co_await store_then_emit(sr_seq, *sr_result);
-                            (void)emit_r;
+
+                    // Transmit-only emit (no store, no counter advance). Returns
+                    // false on transport throw → caller force-disconnects.
+                    const auto transmit = [&](std::span<const std::byte> f) -> bool {
+                        if (!transport_send_) return true;
+                        try {
+                            transport_send_(f);
+                            return true;
+                        } catch (...) {  // NOLINT(bugprone-empty-catch)
+                            return false;
                         }
+                    };
+                    const auto is_admin_type = [](std::string_view mt) -> bool {
+                        return mt == "0" || mt == "1" || mt == "2" || mt == "3" ||
+                               mt == "4" || mt == "5" || mt == "A";
+                    };
+                    const auto emit_gapfill = [&](seqnum_t at_seq, seqnum_t new_seqno) -> bool {
+                        std::array<std::byte, 256> gf_buf{};
+                        auto gf = fixpp::session::build_sequence_reset_gapfill(
+                            std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
+                            st52_sr.value);
+                        return !gf || transmit(*gf);
+                    };
+
+                    // Resolve the effective end: EndSeqNo=0 → "through current
+                    // last outbound"; clamp anything past our last stored seq
+                    // (CHK031). Discovered via the shipped 008 next_seqnum read.
+                    seqnum_t our_last = 0;
+                    if (store_) {
+                        auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
+                        if (ns) our_last = (*ns > 0) ? (*ns - 1U) : 0;
+                    }
+                    const seqnum_t eff_end =
+                        (rr_end == 0 || (our_last > 0 && rr_end > our_last)) ? our_last : rr_end;
+
+                    // No store, or nothing to replay in range → single GapFill
+                    // covering the whole requested range (empty-store CHK032).
+                    if (!store_ || our_last == 0 || rr_begin > eff_end) {
+                        const seqnum_t new_seq_no = (rr_end == 0)
+                            ? seqnum_mgr_.peek_outbound()
+                            : (rr_end + 1U);
+                        (void)emit_gapfill(rr_begin > 0 ? rr_begin : 1U, new_seq_no);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+
+                    // Per-slot store-walk over [rr_begin, eff_end]. Accumulate
+                    // absent/admin runs into one GapFill; flush before each replay.
+                    bool gap_open = false;
+                    seqnum_t gap_start = 0;
+                    for (seqnum_t k = rr_begin; k <= eff_end; ++k) {
+                        CaptureVisitor cv;
+                        auto rr = co_await store_->retrieve(k, k, direction_t::outbound, cv);
+                        const bool app_present =
+                            rr && cv.captured && !cv.truncated &&
+                            !is_admin_type(scan_frame_header(
+                                 std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
+                        if (app_present) {
+                            if (gap_open) {
+                                if (!emit_gapfill(gap_start, k)) {
+                                    record_state_transition_(fsm_state::Disconnected);
+                                    co_return fixpp::core::expected_t<void>{};
+                                }
+                                gap_open = false;
+                            }
+                            std::array<std::byte, 1280> rp_buf{};
+                            auto rp = build_replay_frame(
+                                std::span<std::byte>{rp_buf.data(), rp_buf.size()},
+                                std::span<const std::byte>{cv.buf.data(), cv.len});
+                            if (rp && !transmit(*rp)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return fixpp::core::expected_t<void>{};
+                            }
+                        } else {
+                            // Absent slot or admin message → fold into a GapFill run.
+                            if (!gap_open) {
+                                gap_open = true;
+                                gap_start = k;
+                            }
+                        }
+                    }
+                    if (gap_open) {
+                        (void)emit_gapfill(gap_start, eff_end + 1U);
                     }
                     // Remain in Active after responding to ResendRequest.
                     co_return fixpp::core::expected_t<void>{};
