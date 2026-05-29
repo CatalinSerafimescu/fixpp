@@ -137,11 +137,11 @@ description: "Task list — 014-transport-active-binding"
 
 **Purpose**: Catalogue closure, completeness gate, and the SC-007 suite-green discipline (pre-`/simplify`/`/speckit-verify`).
 
-- [ ] T028 Update `feature-catalogue.md` + `coverage-index.md` with the 014 row; flip the FR-012/013/014/015/016 carry-forward rows `waived`/`carry-forward` → `done`; record **T-041 stays `implementing`** (advanced on the initiator live path, full closure → 015) (`[[feedback_feature_completeness_gate]]`; plan §Catalogue rows).
-- [ ] T029 Run the feature-completeness audit (tasks ↔ FR/SC ↔ catalogue, 100% or explicitly waived) — Gate-B precondition per `[const §XVII.8]` / `[[feedback_feature_completeness_gate]]` — depends on T028.
-- [ ] T030 [P] Run the quickstart.md walkthroughs (US1 reconnect, US2 binding, US3 rotation, US4 witnesses) and confirm each command/behaviour matches.
-- [ ] T031 Run the **unfiltered** Tier-1 ctest (and `-L sync`) — the suite-green claim must NOT come from a name-scoped `-R` subset (SC-007; new includes into the awaitable-corpus headers `reconnect_fsm.hpp`/`session.hpp` per `[[feedback_awaitable_header_mutex_include_edge]]`; the `8e2d362` regression class).
-- [ ] T032 [P] Re-sync the CodeGraph index from the submodule (`codegraph sync`) after the code-changing phases so search/impact stay accurate (project CLAUDE.md).
+- [X] T028 Update `feature-catalogue.md` + `coverage-index.md` with the 014 row; flip the FR-012/013/014/015/016 carry-forward rows `waived`/`carry-forward` → `done`; record **T-041 stays `implementing`** (advanced on the initiator live path, full closure → 015) (`[[feedback_feature_completeness_gate]]`; plan §Catalogue rows).
+- [X] T029 Run the feature-completeness audit (tasks ↔ FR/SC ↔ catalogue, 100% or explicitly waived) — Gate-B precondition per `[const §XVII.8]` / `[[feedback_feature_completeness_gate]]` — depends on T028.
+- [X] T030 [P] Run the quickstart.md walkthroughs (US1 reconnect, US2 binding, US3 rotation, US4 witnesses) and confirm each command/behaviour matches.
+- [X] T031 Run the **unfiltered** Tier-1 ctest (and `-L sync`) — the suite-green claim must NOT come from a name-scoped `-R` subset (SC-007; new includes into the awaitable-corpus headers `reconnect_fsm.hpp`/`session.hpp` per `[[feedback_awaitable_header_mutex_include_edge]]`; the `8e2d362` regression class).
+- [X] T032 [P] Re-sync the CodeGraph index from the submodule (`codegraph sync`) after the code-changing phases so search/impact stay accurate (project CLAUDE.md).
 
 ---
 
