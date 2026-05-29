@@ -14,6 +14,42 @@
 #       this helper does NOT set LD_PRELOAD (see cmake/fixpp_store_test.cmake).
 find_package(GTest CONFIG REQUIRED)
 
+# perf_socket_option_defaults links fixpp_transport, whose TLS impl
+# (asio_tls_transport / asio_listener) calls OpenSSL. fixpp_transport's
+# PRIVATE OpenSSL is not auto-propagated to test executables when linking the
+# static library, and in Debug cmake builds the OpenSSL imported targets have
+# no IMPORTED_LOCATION. Same fallback-variable pattern as tests/transport and
+# tests/tls CMakeLists.
+find_package(OpenSSL 3.0 REQUIRED)
+find_library(FIXPP_PERF_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_library(FIXPP_PERF_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_package(ZLIB REQUIRED)
+find_library(FIXPP_PERF_ZLIB_LIB
+    NAMES z libz
+    PATHS "${zlib_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+if(FIXPP_PERF_OPENSSL_CRYPTO_LIB STREQUAL "FIXPP_PERF_OPENSSL_CRYPTO_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_OPENSSL_CRYPTO_LIB)
+    set(FIXPP_PERF_OPENSSL_CRYPTO_LIB OpenSSL::Crypto)
+endif()
+if(FIXPP_PERF_OPENSSL_SSL_LIB STREQUAL "FIXPP_PERF_OPENSSL_SSL_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_OPENSSL_SSL_LIB)
+    set(FIXPP_PERF_OPENSSL_SSL_LIB OpenSSL::SSL)
+endif()
+if(FIXPP_PERF_ZLIB_LIB STREQUAL "FIXPP_PERF_ZLIB_LIB-NOTFOUND"
+   OR NOT FIXPP_PERF_ZLIB_LIB)
+    set(FIXPP_PERF_ZLIB_LIB ZLIB::ZLIB)
+endif()
+
 # ── 008-message-store seam registrations ────────────────────────────────────
 # T050 — seam 14: MemoryStore alloc-guard (SC-007 / FR-027 / [const §VIII.5])
 # Run with:
@@ -53,6 +89,9 @@ target_include_directories(perf_socket_option_defaults PRIVATE
 target_link_libraries(perf_socket_option_defaults PRIVATE
   fixpp_transport
   fixpp_tls
+  "${FIXPP_PERF_OPENSSL_SSL_LIB}"
+  "${FIXPP_PERF_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_PERF_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main)
 add_test(NAME perf_socket_option_defaults
