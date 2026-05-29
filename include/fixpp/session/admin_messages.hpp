@@ -97,4 +97,27 @@ namespace fixpp::session {
     std::string_view ref_msg_type, int session_reject_reason,
     std::string_view begin_string, std::string_view sending_time) noexcept;
 
+// ── ResendRequest (35=2) ─────────────────────────────────────────────────────
+// FR-009, [FIX-SL §4.3.2]. 013 recovery sub-protocol.
+//
+// Build an outbound ResendRequest with BeginSeqNo(7)/EndSeqNo(16).
+// end_seqno=0 means "through current last outbound" per [FIX-SL §4.3.2].
+// begin_string: negotiated FIX version string for tag 8 (FR-002/RC#4).
+// sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_resend_request(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t begin_seqno, seqnum_t end_seqno,
+    std::string_view begin_string, std::string_view sending_time) noexcept;
+
+// ── SequenceReset (35=4) — GapFill mode ──────────────────────────────────────
+// FR-009, [FIX-SL §4.4]. 013 recovery sub-protocol (reply to inbound ResendRequest).
+//
+// Build an outbound SequenceReset with GapFillFlag(123)=Y and NewSeqNo(36).
+// begin_string: negotiated FIX version string for tag 8 (FR-002/RC#4).
+// sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_sequence_reset_gapfill(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t new_seqno, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
+
 }  // namespace fixpp::session

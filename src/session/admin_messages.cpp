@@ -633,4 +633,172 @@ namespace {
     return out.subspan(0, *committed);
 }
 
+// ── ResendRequest (35=2) ───────────────────────────────────────────────────────
+// FR-009, [FIX-SL §4.3.2]. 013 recovery sub-protocol.
+// Fields: 8=begin_string, 35=2, 34=seq, 49=SenderCompID, 52=sending_time,
+//         56=TargetCompID, 7=BeginSeqNo, 16=EndSeqNo.
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / begin_seqno / end_seqno / begin_string / sending_time).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_resend_request(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t begin_seqno, seqnum_t end_seqno,
+    std::string_view begin_string, std::string_view sending_time) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
+    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
+    if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 35=2 (MsgType: ResendRequest)
+    {
+        std::byte val[] = {static_cast<std::byte>('2')};
+        if (auto r = w.append_raw(35, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 34=seq (MsgSeqNum)
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 49=SenderCompID
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
+    if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 56=TargetCompID
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 7=BeginSeqNo
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(begin_seqno), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(7, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 16=EndSeqNo (0 = "through current last outbound" per [FIX-SL §4.3.2]).
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(end_seqno), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(16, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
+    auto committed = std::move(w).commit();
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
+    return out.subspan(0, *committed);
+}
+
+// ── SequenceReset (35=4) — GapFill mode ─────────────────────────────────────────
+// FR-009, [FIX-SL §4.4]. 013 recovery sub-protocol (reply to inbound ResendRequest).
+// Fields: 8=begin_string, 35=4, 34=seq, 49=SenderCompID, 52=sending_time,
+//         56=TargetCompID, 36=NewSeqNo, 123=Y (GapFillFlag).
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// / new_seqno / begin_string / sending_time).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_sequence_reset_gapfill(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t new_seqno, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
+    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
+    if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 35=4 (MsgType: SequenceReset)
+    {
+        std::byte val[] = {static_cast<std::byte>('4')};
+        if (auto r = w.append_raw(35, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 34=seq (MsgSeqNum)
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 49=SenderCompID
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
+    if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 56=TargetCompID
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 36=NewSeqNo
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(new_seqno), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(36, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 123=Y (GapFillFlag)
+    {
+        std::byte val[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(123, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
+    auto committed = std::move(w).commit();
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
+    return out.subspan(0, *committed);
+}
+
 }  // namespace fixpp::session

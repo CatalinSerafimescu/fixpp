@@ -31,17 +31,13 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                             fixpp::transport::ReconnectPolicy   policy,
                             std::chrono::seconds                heartbeat_interval,
                             std::chrono::milliseconds           logout_disconnect_timeout) noexcept
+    // Remaining members (attempt_index_, the three timer optionals,
+    // awaiting_resend_, resend_state_, last_outbound_testreqid_) take their
+    // header NSDMI / default-constructed empty state. [data-model §E-1]
     : factory_{factory},
       policy_{std::move(policy)},
-      attempt_index_{0},
       heartbeat_interval_{heartbeat_interval},
-      logout_disconnect_timeout_{logout_disconnect_timeout},
-      heartbeat_timer_{},
-      test_request_timer_{},
-      logout_timer_{},
-      awaiting_resend_{false},
-      resend_state_{},
-      last_outbound_testreqid_{}
+      logout_disconnect_timeout_{logout_disconnect_timeout}
 {}
 
 // ── drive_reconnect_attempt ───────────────────────────────────────────────────

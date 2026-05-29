@@ -1063,71 +1063,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         next_expected, seq - 1U);
                     (void)enter_r;  // state set; emit inline below
 
-                    // Emit ResendRequest(2){BeginSeqNo=next_expected, EndSeqNo=0}.
-                    // EndSeqNo=0 means "through current" per FIX-SL §4.3.2.
-                    // Build inline using stack buffer (no heap — [const §VIII.5]).
-                    auto rr_emit = co_await [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-                        std::array<std::byte, 256> rr_buf{};
-                        const std::byte SOH{0x01};
-                        std::size_t p = 0;
-                        const auto wb2 = [&](std::string_view sv) -> bool {
-                            if (p + sv.size() > rr_buf.size()) return false;
-                            for (char c : sv) rr_buf[p++] = static_cast<std::byte>(c);
-                            return true;
-                        };
-                        const auto wf = [&](std::string_view tag_eq, std::string_view val) -> bool {
-                            return wb2(tag_eq) && wb2(val) && (p < rr_buf.size() ? (rr_buf[p++] = SOH, true) : false);
-                        };
-                        const auto wn = [&](std::string_view tag_eq, seqnum_t v) -> bool {
-                            char nb[12]; auto [e,c]=std::to_chars(nb,nb+12,v); (void)c;
-                            return wf(tag_eq, std::string_view{nb, static_cast<std::size_t>(e-nb)});
-                        };
-
-                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
-                        const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
-
-                        bool ok = wb2("8=") && wb2(cfg_.begin_string) && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
-                        const std::size_t bl_digit_start = p + 2; // after "9="
-                        ok = ok && wb2("9=000000") && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
-                        const std::size_t body_start = p;
-                        ok = ok && wn("34=", rr_seq);
-                        ok = ok && wf("35=", "2");
-                        ok = ok && wf("49=", cfg_.sender_comp_id);
-                        ok = ok && wf("52=", st52.value);
-                        ok = ok && wf("56=", cfg_.target_comp_id);
-                        ok = ok && wn("7=", next_expected);
-                        ok = ok && wf("16=", "0");
-
-                        if (ok) {
-                            const std::size_t body_len = p - body_start;
-                            char bl_buf[7]; auto [bl_end,bl_ec]=std::to_chars(bl_buf,bl_buf+7,body_len); (void)bl_ec;
-                            const std::size_t bl_len=(std::size_t)(bl_end-bl_buf);
-                            if (bl_len <= 6) {
-                                const std::size_t zc = 6 - bl_len;
-                                for (std::size_t zi=0;zi<zc;++zi) rr_buf[bl_digit_start+zi]=static_cast<std::byte>('0');
-                                for (std::size_t bi=0;bi<bl_len;++bi) rr_buf[bl_digit_start+zc+bi]=static_cast<std::byte>(bl_buf[bi]);
-                            } else { ok = false; }
-                        }
-                        if (ok) {
-                            unsigned int cs=0;
-                            for (std::size_t ci=0;ci<p;++ci) cs+=static_cast<unsigned int>(static_cast<unsigned char>(rr_buf[ci]));
-                            cs&=0xFFu;
-                            char csbuf[4]; csbuf[0]=static_cast<char>('0'+(cs/100u)); csbuf[1]=static_cast<char>('0'+(cs%100u)/10u); csbuf[2]=static_cast<char>('0'+(cs%10u));
-                            ok = ok && wb2("10=") && wb2(std::string_view{csbuf,3}) && (p < rr_buf.size() ? (rr_buf[p++]=SOH, true) : false);
-                        }
-                        if (!ok) { co_return fixpp::core::expected_t<void>{}; }
-
+                    // Emit ResendRequest(2){BeginSeqNo=next_expected, EndSeqNo=0}
+                    // via the shared admin builder into a stack buffer (no heap —
+                    // [const §VIII.5]). EndSeqNo=0 → "through current" per FIX-SL §4.3.2.
+                    std::array<std::byte, 256> rr_buf{};
+                    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                       : SendingTimeStamp{};
+                    const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
+                    auto rr_result = fixpp::session::build_resend_request(
+                        std::span<std::byte>{rr_buf.data(), rr_buf.size()}, rr_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, next_expected, 0U,
+                        cfg_.begin_string, st52.value);
+                    if (rr_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(assign_r.error());
+                        } else {
+                            auto emit_r = co_await store_then_emit(rr_seq, *rr_result);
+                            (void)emit_r;
                         }
-                        auto emit_r = co_await store_then_emit(
-                            rr_seq, std::span<const std::byte>{rr_buf.data(), p});
-                        (void)emit_r;
-                        co_return fixpp::core::expected_t<void>{};
-                    }();
-                    (void)rr_emit;
+                    }
                     // Remain in Active (not Disconnected) per FR-009.
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -1307,78 +1262,25 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                     // Emit SequenceReset(4){GapFillFlag(123)=Y, NewSeqNo(36)=new_seq_no}.
                     // Build inline on stack (no heap — [const §VIII.5]).
-                    auto sr_emit = co_await [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-                        std::array<std::byte, 256> sr_buf{};
-                        const std::byte SOH{0x01};
-                        std::size_t p = 0;
-                        const auto wb2 = [&](std::string_view sv) -> bool {
-                            if (p + sv.size() > sr_buf.size()) return false;
-                            for (char c : sv) sr_buf[p++] = static_cast<std::byte>(c);
-                            return true;
-                        };
-                        const auto wf = [&](std::string_view tageq, std::string_view val) -> bool {
-                            return wb2(tageq) && wb2(val) &&
-                                   (p < sr_buf.size() ? (sr_buf[p++] = SOH, true) : false);
-                        };
-                        const auto wn = [&](std::string_view tageq, seqnum_t v) -> bool {
-                            char nb[12]; auto [e,c]=std::to_chars(nb,nb+12,v); (void)c;
-                            return wf(tageq, std::string_view{nb, static_cast<std::size_t>(e-nb)});
-                        };
-                        const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                              : SendingTimeStamp{};
-                        const seqnum_t sr_seq = seqnum_mgr_.peek_outbound();
-                        bool ok = wb2("8=") && wb2(cfg_.begin_string) &&
-                                  (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
-                        const std::size_t bl_start2 = p + 2;  // after "9="
-                        ok = ok && wb2("9=000000") &&
-                             (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
-                        const std::size_t body_start2 = p;
-                        ok = ok && wn("34=", sr_seq);
-                        ok = ok && wf("35=", "4");       // SequenceReset
-                        ok = ok && wf("49=", cfg_.sender_comp_id);
-                        ok = ok && wf("52=", st52_sr.value);
-                        ok = ok && wf("56=", cfg_.target_comp_id);
-                        ok = ok && wn("36=", new_seq_no);  // NewSeqNo
-                        ok = ok && wf("123=", "Y");         // GapFillFlag=Y
-                        if (ok) {
-                            const std::size_t body_len2 = p - body_start2;
-                            char bl_buf2[7];
-                            auto [bl_end2,bl_ec2] = std::to_chars(bl_buf2,bl_buf2+7,body_len2);
-                            (void)bl_ec2;
-                            const std::size_t bl_len2 = static_cast<std::size_t>(bl_end2-bl_buf2);
-                            if (bl_len2 <= 6) {
-                                const std::size_t zc2 = 6 - bl_len2;
-                                for (std::size_t zi=0;zi<zc2;++zi)
-                                    sr_buf[bl_start2+zi]=static_cast<std::byte>('0');
-                                for (std::size_t bi=0;bi<bl_len2;++bi)
-                                    sr_buf[bl_start2+zc2+bi]=static_cast<std::byte>(bl_buf2[bi]);
-                            } else { ok = false; }
-                        }
-                        if (ok) {
-                            unsigned int cs2=0;
-                            for (std::size_t ci=0;ci<p;++ci)
-                                cs2+=static_cast<unsigned int>(
-                                    static_cast<unsigned char>(sr_buf[ci]));
-                            cs2&=0xFFu;
-                            char csbuf2[4];
-                            csbuf2[0]=static_cast<char>('0'+(cs2/100u));
-                            csbuf2[1]=static_cast<char>('0'+(cs2%100u)/10u);
-                            csbuf2[2]=static_cast<char>('0'+(cs2%10u));
-                            ok = ok && wb2("10=") && wb2(std::string_view{csbuf2,3}) &&
-                                 (p < sr_buf.size() ? (sr_buf[p++]=SOH, true) : false);
-                        }
-                        if (!ok) { co_return fixpp::core::expected_t<void>{}; }
+                    // Build via the shared admin builder into a stack buffer
+                    // (no heap — [const §VIII.5]). GapFillFlag(123)=Y is implied.
+                    std::array<std::byte, 256> sr_buf{};
+                    const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                          : SendingTimeStamp{};
+                    const seqnum_t sr_seq = seqnum_mgr_.peek_outbound();
+                    auto sr_result = fixpp::session::build_sequence_reset_gapfill(
+                        std::span<std::byte>{sr_buf.data(), sr_buf.size()}, sr_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, new_seq_no, cfg_.begin_string,
+                        st52_sr.value);
+                    if (sr_result) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(assign_r.error());
+                        } else {
+                            auto emit_r = co_await store_then_emit(sr_seq, *sr_result);
+                            (void)emit_r;
                         }
-                        auto emit_r = co_await store_then_emit(
-                            sr_seq, std::span<const std::byte>{sr_buf.data(), p});
-                        (void)emit_r;
-                        co_return fixpp::core::expected_t<void>{};
-                    }();
-                    (void)sr_emit;
+                    }
                     // Remain in Active after responding to ResendRequest.
                     co_return fixpp::core::expected_t<void>{};
                 }
