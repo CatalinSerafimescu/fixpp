@@ -31,6 +31,11 @@
 // tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
 // [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
 #include "fixpp/transport/transport_factory.hpp"
+// Full cert_source definition — needed here to call snap->load_credentials()
+// for computing the leaf SHA-256 fingerprint (T017 rotation-detect step 2).
+// Forward-declared in reconnect_fsm.hpp; full definition safe in .cpp.
+// [data-model §E-3; FR-010; §XV.9]
+#include "fixpp/tls/cert_source.hpp"
 // TlsTransport — needed for the dynamic_cast<TlsTransport*> in E-1 step 6.
 // [data-model §E-1; tls_transport.hpp:61-67]
 #include "fixpp/transport/tls_transport.hpp"
@@ -143,10 +148,66 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
             co_return std::unexpected{error::transport_connect_cancelled};
         }
 
-        // ── Step 2: cert_source snapshot (rotation detection, E-3 / US3 T017)
-        // For US1 (T009) we just capture the snapshot for ssl_cfg construction.
-        // US3 T017 will add rotation-detect state (last_active_source_ + emit).
-        [[maybe_unused]] auto snap = factory_->cert_source_snapshot();
+        // ── Step 2: cert_source snapshot + rotation detection (E-3 / T017) ────
+        // Read the current cert_source through the abstract factory pointer.
+        // cert_source_snapshot() is now a pure-virtual on the abstract base (C4).
+        //
+        // Rotation detection logic (data-model §E-3; contracts C3; FR-009/010/011):
+        //   - If last_active_source_ == nullptr (first-ever load): set baseline
+        //     (load fingerprint + store source), NO emit.  FR-009 SPEC-FIXED rule.
+        //   - If snap != last_active_source_ (rotation staged): compute new_fp
+        //     from snap->load_credentials() leaf SHA-256; invoke the strand-bound
+        //     emit callback with {old=last_active_fp_, new=new_fp} BEFORE make();
+        //     update both members.  No-op rotation (new_fp == old_fp) still emits
+        //     (FR-011 — not fingerprint-gated).
+        //
+        // Computing the fingerprint: co_await snap->load_credentials() to get
+        // the local_credentials bundle; leaf.sha256() is the pre-computed SHA-256
+        // of the raw DER bytes.  On load failure the fingerprint stays all-zero
+        // (degenerate but non-fatal: the attempt will fail at async_handshake
+        // regardless since the cert_source is broken).
+        //
+        // §XV.9 safety: cert_source.hpp is included only in this .cpp, not the
+        // header. The full type is needed here for the virtual load_credentials().
+        auto snap = factory_->cert_source_snapshot();
+
+        // FR-013a: load credentials here ONLY when a fingerprint is actually
+        // needed — the first-ever load (baseline) or a detected rotation. A
+        // no-rotation reconnect (snap == last_active_source_) must NOT load,
+        // else load_credentials() would run twice per handshake (this
+        // rotation-detect + the handshake itself at transport_factory.cpp:378),
+        // breaking the FR-013a "load_credentials() == 1 per handshake" witness.
+        const bool first_load = (last_active_source_ == nullptr);
+        const bool rotated    = !first_load && (snap != last_active_source_);
+
+        if (first_load || rotated) {
+            // Compute the SHA-256 fingerprint of snap's leaf via load_credentials()
+            // — an awaitable call on the coroutine stack.
+            std::array<std::byte, 32> new_fp{};
+            if (snap) {
+                auto creds_r = co_await snap->load_credentials();
+                if (creds_r.has_value()) {
+                    new_fp = creds_r->leaf.sha256();
+                }
+            }
+
+            if (rotated && emit_credentials_rotated_) {
+                // ── Rotation detected: emit BEFORE make() (FR-009) ───────────
+                // Even if new_fp == last_active_fp_ (no-op rotation), emit
+                // (FR-011). The callback is strand-bound and set by
+                // Session::open() (T018); the standalone-FSM test path injects
+                // it directly. old=last_active_fp_ is read before the update.
+                emit_credentials_rotated_(session_event_credentials_rotated{
+                    .old_sha256 = last_active_fp_,
+                    .new_sha256 = new_fp,
+                });
+            }
+            // First load sets the baseline (NO event, FR-009 SPEC-FIXED);
+            // rotation updates AFTER the emit above.
+            last_active_source_ = snap;
+            last_active_fp_     = new_fp;
+        }
+        // else: snap == last_active_source_ → no rotation, no load, no emit.
 
         // ── Step 3: build per-attempt SslCtxConfig (held in attempt scope) ──
         // ssl_cfg is held across both make() and async_handshake() — the arg

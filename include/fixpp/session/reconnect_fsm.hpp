@@ -33,8 +33,12 @@
 // public signatures, preserving [const §XV.9].
 #pragma once
 
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -52,8 +56,17 @@
 // → tls/pinset.hpp → shared_mutex (§XV.9 guard). C++ allows forward-declaring
 // scoped enums with explicit underlying type. The full definition is available
 // in reconnect_fsm.cpp via transport_factory.hpp (which includes security_profile.hpp).
+//
+// fixpp::tls::cert_source — forward-declare so the FSM can hold a
+// std::shared_ptr<cert_source> member (last_active_source_) without pulling in
+// cert_source.hpp → (transitively) into the asio::awaitable closure.
+// A shared_ptr<T> data member requires only T to be forward-declared; the full
+// definition is available in reconnect_fsm.cpp via cert_source.hpp (included
+// alongside transport_factory.hpp). [data-model §E-3; I-7;
+// [[feedback_weak_ptr_cache_needs_owning_context]]; §XV.9]
 namespace fixpp::tls {
 enum class SecurityProfile : std::uint8_t;
+class cert_source;
 }
 
 // TransportFactory is used only as a non-owning raw pointer in this header (ctor
@@ -73,6 +86,14 @@ namespace fixpp::transport { class TransportFactory; }
 // Session::install_reconnected_transport() is in reconnect_fsm.cpp which
 // includes the full session.hpp definition. [data-model §E-1 step 8]
 namespace fixpp::session { class Session; }
+
+// session_event.hpp defines session_event_credentials_rotated (the payload of
+// the emit callback).  It does NOT transitively include any mutex type, so
+// including it here is safe for the §XV.9 awaitable-closure check.
+// Verified: session_event.hpp → compid_authorization_policy.hpp → peer_identity.hpp
+// (no shared_mutex / mutex anywhere in that chain).
+// [data-model §E-3; §XV.9 safety-verified]
+#include "fixpp/session/session_event.hpp"
 
 namespace fixpp::session {
 
@@ -121,6 +142,20 @@ public:
     // awaitable-corpus header. [data-model §E-1 step 3; §XV.9]
     void set_tls_profile(fixpp::tls::SecurityProfile profile) noexcept {
         tls_profile_ = profile;
+    }
+
+    // 014 T017/T018 — Inject the strand-bound credential-rotation emit callback.
+    // Called by Session::open() (T018) to wire the on-strand emit of
+    // SessionEvent::credentials_rotated.  The FSM invokes this callback at step 2
+    // of drive_reconnect_attempt when a rotation is detected, BEFORE make().
+    // [data-model §E-3; contracts C3; FR-009; §XI.4]
+    //
+    // When no callback is set (nullptr or default-constructed function):
+    //   the emit is silently skipped (test-only path where FSM runs standalone
+    //   without a Session owner and the caller will inject the callback manually).
+    void set_emit_credentials_rotated(
+        std::function<void(session_event_credentials_rotated)> cb) noexcept {
+        emit_credentials_rotated_ = std::move(cb);
     }
 
     // FR-001 / FR-002 / FR-003 / FR-004 — bounded reconnect loop (014 T009).
@@ -248,6 +283,40 @@ private:
     // TestReqID of the most recently emitted outbound TestRequest; nullopt
     // when no TestRequest is outstanding.
     std::optional<std::string> last_outbound_testreqid_;
+
+    // 014 T017 — Credential-rotation detect state (data-model §E-3 / contracts C3).
+    //
+    // last_active_source_ — STRONG-REF owning the previously-active cert_source.
+    // nullptr on construction (no prior active source).  Set to the snapshot at
+    // step 2 on every drive_reconnect_attempt entry.
+    //
+    // INVARIANT (I-7 / [[feedback_weak_ptr_cache_needs_owning_context]]): this is a
+    // std::shared_ptr (strong ref), NOT a weak_ptr.  A weak_ptr with no other owner
+    // would expire after every attempt, re-firing the rotation event on every
+    // reconnect and making a no-cache.  The strong ref keeps the previous cert_source
+    // alive until the NEXT rotation so old_sha256 remains computable.
+    //
+    // cert_source is forward-declared above; the full definition is in
+    // reconnect_fsm.cpp (via cert_source.hpp).  A shared_ptr data member only
+    // needs the forward declaration for the pointer itself; ~shared_ptr needs
+    // the complete type — ensured by the explicit destructor in .cpp. [§XV.9]
+    std::shared_ptr<fixpp::tls::cert_source> last_active_source_{};
+
+    // last_active_fp_ — SHA-256 of last_active_source_'s leaf DER.
+    // All-zero while last_active_source_ == nullptr (first-load state).
+    // Updated in lockstep with last_active_source_ at each rotation detection.
+    // [data-model §E-3; FR-010]
+    std::array<std::byte, 32> last_active_fp_{};
+
+    // 014 T017/T018 — Strand-bound emit callback injected by Session::open().
+    // Invoked at drive_reconnect_attempt step 2 (before make()) when a rotation
+    // is detected (snap != last_active_source_).
+    // The Session lambda calls Session::emit_event() to land the event on the
+    // session strand per §XI.4.
+    // Default-constructed (empty function): emit is silently skipped (standalone
+    // FSM test path where the caller injects the callback via set_emit_credentials_rotated).
+    // [data-model §E-3; contracts C3; FR-009; §XI.4]
+    std::function<void(session_event_credentials_rotated)> emit_credentials_rotated_{};
 };
 
 }  // namespace fixpp::session

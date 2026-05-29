@@ -606,6 +606,38 @@ set_tests_properties(compid_binding_seam PROPERTIES
 # We patch the existing target to add the session/compid_authorization headers.
 # (The executable already links fixpp_session which brings all required libs.)
 
+# ── 014-transport-active-binding Phase 5 (US3) — T016 ────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T017/T018 impl lands.
+# CTest filter: ctest -R 'credentials_rotated_emit'
+#
+# T016 — credential rotation emit: real SHA-256 fingerprints, emit-before-make,
+#         first-load no-event, no-op-still-emits.  All 4 cells must execute.
+# SC-005 / FR-009/010/011 / US3 AC1/AC2 / I-5/I-6/I-7 / data-model E-3 / C3.
+# FIXPP_TLS_FIXTURE_DIR wired unconditionally (Cell 4 needs the live cert).
+add_executable(credentials_rotated_emit
+  test_credentials_rotated_emit.cpp)
+target_link_libraries(credentials_rotated_emit PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(credentials_rotated_emit PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(credentials_rotated_emit PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME credentials_rotated_emit COMMAND credentials_rotated_emit)
+set_tests_properties(credentials_rotated_emit PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us3;live_tls;credentials_rotated")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

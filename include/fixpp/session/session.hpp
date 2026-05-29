@@ -276,12 +276,15 @@ public:
     // TransportFactory::make() call (next reconnect cycle) observes the rotated
     // source per FR-031.
     //
-    // session_event_credentials_rotated is DEFERRED to 014: the event must fire
-    // BEFORE the first handshake on the rotated cert_source (data-model E-7) with
-    // the real cert SHA-256 fingerprint (only available in async load_credentials).
-    // Both the correct emit-site (drive_reconnect_attempt) and fingerprint require
-    // the live-transport lifecycle, which is a stub in 013.
-    // [[project_013_carryforwards_to_014]] / FR-032 / data-model §E-7.
+    // session_event_credentials_rotated WIRED in 014 T017/T018:
+    // The event fires BEFORE the first handshake on the rotated cert_source
+    // (data-model E-3; contracts C3; FR-009) via the FSM's
+    // emit_credentials_rotated_ callback injected by Session::open() at T018.
+    // Session::open() wires: reconnect_fsm_.set_emit_credentials_rotated(
+    //     [this](session_event_credentials_rotated ev){ emit_event(std::move(ev)); });
+    // The real leaf SHA-256 fingerprint is computed inside drive_reconnect_attempt
+    // via co_await snap->load_credentials() per FR-010.
+    // DEFERRED comment from 013 RESOLVED. [FR-032; data-model §E-3; T017/T018]
     [[nodiscard]] fixpp::core::expected_t<void>
     reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
 

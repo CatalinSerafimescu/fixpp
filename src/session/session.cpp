@@ -359,6 +359,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // async_handshake(), and install_reconnected_transport() on success.
     reconnect_fsm_.set_session_owner(this);
     reconnect_fsm_.set_reconnect_endpoint(cfg_.reconnect_endpoint);
+
+    // 014 T018 — Wire the strand-bound credentials_rotated emit callback on the
+    // Session's internal reconnect_fsm_.  The FSM detects rotation at step 2 of
+    // drive_reconnect_attempt and invokes this lambda, which calls emit_event()
+    // (private, defined in session.cpp) to push the event into recent_events_.
+    // The lambda captures `this` by pointer; lifetime is guaranteed because the
+    // FSM is a value member of Session (reconnect_fsm_, session.hpp:517) and is
+    // destroyed before Session is — so `this` is always valid when the callback fires.
+    // §XI.4: emit_event() is always called from the session strand (the FSM
+    //   coroutine runs on the session executor set in Session::open()).
+    // Resolves the "DEFERRED to 014" comment at session.hpp:274.
+    // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
+    reconnect_fsm_.set_emit_credentials_rotated(
+        [this](fixpp::session::session_event_credentials_rotated ev) noexcept {
+            emit_event(std::move(ev));
+        });
     // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
     // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
     // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
