@@ -175,3 +175,33 @@ The engineering team closes the test/quality obligations carried as Gate-B waive
 - 011 TLS validation surface (`verify_peer`, `peer_identity`, leaf-fingerprint extraction).
 - 012 transport surface (`Transport` / `TlsTransport` / `TransportFactory` / `ReconnectPolicy` / `handshake_result.peer_id`).
 - 013 reconnect FSM driver, `CompIdAuthorizationPolicy`, TLS-outcome `SessionEvent`, in-process credential-reload control plane.
+
+## Normative References
+
+Per `[const §VI.5]` (applies per-artifact). All entries below are referenced inline in the FRs/scenarios above; this section consolidates them. 014 is a brownfield realization of merged 011/012/013 surfaces — its normative anchors are the FIX/FIXS sections those features already map (no new coverage-index rows), plus the signed-off design surfaces.
+
+**FIX specification:**
+
+- `[FIX-SL §4.3]` *Establishing a FIX connection* — binding for FR-001/FR-005 (the initiator reconnect re-establishes the session); coverage S-001/S-015/S-021/S-022, catalogue T-004 (reconnect/back-off — the FSM-side loop realized here).
+- `[FIX-SL §4.10]` *FIX session state matrix* — binding for FR-003/FR-007 (reconnect attempt → terminal `Disconnected` at cap; reconnect-path authorize disposition); the 6-state `fsm_state` machine inherited from 005/009.
+- `[FIX-SL §4.2.2]` *Identification of FIX session peers (CompID)* — binding for FR-006/FR-007 (the authenticated TLS identity → CompID authorization decision); coverage S-016.
+- `[FIXS §4.4]` *Authorization linked to authentication* — **central** binding for FR-006/FR-007/FR-008 (catalogue T-041: authenticated TLS identity must map to an authorized FIX CompID); T-041 advances on the initiator live path and stays `implementing` (full closure → 015).
+- `[FIXS §4.1]` *Sharing secrets (supports rotation)* — binding for FR-009/FR-010/FR-011 (credential-rotation observability via `credentials_rotated`); catalogue T-040 (in-process rotation half shipped in 013; the emit was deferred to 014 per 013 FR-032).
+- `[FIXS §3.4]` *Certificate parameters* — binding for FR-012 (the `sigalg_disallowed` cell exercises the signature-algorithm allow-list against an Ed25519/Ed448 leaf); catalogue T-039.
+
+**Project Phase-2 / signed-off design anchors:**
+
+- `[2h]` *2h-transport* — `Transport`/`TlsTransport`/`handshake_result`/`TransportFactory`/`ReconnectPolicy` consumed verbatim — binding for FR-001..006/FR-009 (the only widening is the Gate-A-blessed `cert_source_snapshot()` promotion).
+- `[2g]` *2g-tls* — `peer_identity` + pinset snapshot-once — binding for FR-006 (identity source) / FR-012.
+- `[2j]` *2j-controlplane* — the in-process `reload_credentials` control plane (gRPC trigger remains v1.x) — context for FR-009.
+- `005`/`009` session-establishment FSM (6-state matrix + Logon/terminal-disconnected outcomes) — binding for FR-001/FR-003/FR-007.
+
+**Source contracts (binding, merged, consumed unchanged):**
+
+- `011` `include/fixpp/tls/{cert_source,peer_identity}.hpp` + `verify_peer` + the `[const §XII.3]` sigalg allow-list — FR-006/FR-010/FR-012.
+- `012` `include/fixpp/transport/{tls_transport,transport_factory,reconnect_policy}.hpp` (`async_handshake(SslCtxConfig const& [[clang::lifetimebound]])`, `handshake_result.peer_id`, `ReconnectPolicy`) — FR-001..006/FR-009.
+- `013` `include/fixpp/session/{reconnect_fsm,session_event,compid_authorization_policy}.hpp` (`ReconnectFsm::drive_reconnect_attempt` stub, `SessionEvent::credentials_rotated` definition, `CompIdAuthorizationPolicy::authorize`) — FR-001/FR-006/FR-009; FR-032 lineage.
+
+**Constitutional invariants (cited in plan.md Constitution Check):**
+
+- `[const §VI.5]` (this section), `[const §VII.1/§VII.3]` (TDD), `[const §IX.1/§IX.2]` (coverage + sanitizers), `[const §X.4]` (append-only error slots — slot 120, FR-016), `[const §XI.2]` (ASIO native cancellation — FR-004), `[const §XI.4]` (per-session strand — FR-009), `[const §XII]`/`[const §XII.3]` (security + sigalg allow-list — FR-006/FR-012), `[const §XIV.2]` (pluggable-interface cap — the `cert_source_snapshot()` 2/5→3/5 promotion), `[const §XV.9]` (no `std::mutex` in awaitable headers — SC-007), `[const §XVII.1]` (Gate A blocks `/tasks`), `[const §XVII.8]` (`/speckit-verify` mandatory).

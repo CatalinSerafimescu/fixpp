@@ -31,7 +31,7 @@ description: "Task list — 014-transport-active-binding"
 **⚠️ CRITICAL**: No user-story work can begin until this phase is complete — once `cert_source_snapshot()` becomes pure-virtual every test-local factory must override it or the whole suite stops compiling.
 
 - [ ] T003 Promote `cert_source_snapshot() const noexcept -> std::shared_ptr<fixpp::tls::cert_source>` from the concrete `asio_tls_transport_factory` to a **pure-virtual on the abstract `TransportFactory`** in `include/fixpp/transport/transport_factory.hpp` (count 2/5 → 3/5, under the `[const §XIV.2]` cap). The concrete asio override already exists (`src/transport/transport_factory.cpp:193`) — no body change, it now overrides an abstract method. (C4; plan §XIV.2)
-- [ ] T004 Add a trivial `cert_source_snapshot()` override (return the held source) to **every** test-local `TransportFactory` subclass so the existing suite compiles — enumerate them via `grep -rn "public.*TransportFactory\|: .*TransportFactory" tests/` (known: `tests/session/test_reconnect_happy_path.cpp`, `tests/session/test_reload_credentials_in_flight.cpp`); fix all hits. (C4) — depends on T003.
+- [ ] T004 Add a trivial `cert_source_snapshot()` override (return the held source) to the test-local `TransportFactory` subclasses so the existing suite compiles. Exactly two exist (verified at /analyze): `tests/session/test_reconnect_happy_path.cpp:325` (`TestTransportFactory` — override **MISSING**, ADD it) and `tests/session/test_reload_credentials_in_flight.cpp:107` (`mock_transport_factory` — override **already present at `:137`**, VERIFY only). Re-confirm no new subclass appeared via `grep -rnE 'public.*TransportFactory' tests/`. (C4) — depends on T003.
 - [ ] T005 [P] Provide a shared live-loopback-TLS session test harness/helper (loopback acceptor + initiator `Session` wired to a real `asio_tls_transport_factory` + `ReconnectFsm`, fixtures via `FIXPP_TLS_FIXTURE_DIR`, inbound fed through the existing `Session::on_inbound_frame` seam `src/session/session.cpp:862`) reused by the US1/US2/US3 live tests — so US2/US3 do not depend on US1's test file. (research R2; plan §Testing)
 
 **Checkpoint**: Base contract widened, suite compiles, live harness available — user stories can begin.
@@ -48,7 +48,7 @@ description: "Task list — 014-transport-active-binding"
 
 - [ ] T006 [P] [US1] `tests/session/test_reconnect_live_happy_path.cpp` — drop → `drive_reconnect_attempt` → `async_connect` → `async_handshake(ssl_cfg)` → resume to `Active` over the loopback-TLS harness (FR-001/002; US1 AC1; SC-001).
 - [ ] T007 [P] [US1] `tests/session/test_reconnect_backoff_cap.cpp` — connect-fail / handshake-fail / make-fail each consume exactly one attempt and retry per `delay_for_attempt(n)` to `max_attempts`, then `fsm_state::Disconnected`; no infinite retry; deterministic via `mock_clock` (FR-002/003; US1 AC2; SC-002). (Auth-fail cell added by US2 T013.)
-- [ ] T008 [P] [US1] `tests/session/test_reconnect_cancel_mid_handshake.cpp` — `cancellation_type::total` mid-handshake aborts the attempt and releases the in-flight transport; ASan no-leak / no orphaned socket across N cancelled attempts; exercises `enable_total_cancellation()` (FR-004; US1 AC3; SC-004; `[[feedback_asio_cospawn_total_cancellation_default]]`).
+- [ ] T008 [P] [US1] `tests/session/test_reconnect_cancel_mid_handshake.cpp` — `cancellation_type::total` mid-handshake aborts the attempt and releases the in-flight transport; ASan no-leak / no orphaned socket across N ≥ 3 cancelled attempts; exercises `enable_total_cancellation()` (FR-004; US1 AC3; SC-004; `[[feedback_asio_cospawn_total_cancellation_default]]`).
 
 ### Implementation for User Story 1
 
@@ -69,7 +69,7 @@ description: "Task list — 014-transport-active-binding"
 
 - [ ] T011 [P] [US2] `tests/session/test_live_identity_binding.cpp` — on the live initiator reconnect path the identity passed to `CompIdAuthorizationPolicy::authorize()` is the real `handshake_result.peer_id`; assert no fabricated/stand-in identity on the live path (FR-006; US2 AC1; SC-003; I-4).
 - [ ] T012 [P] [US2] `tests/session/test_compid_binding_seam.cpp` — drive the `logon_peer_identity_override` seam (`session_config.hpp:224`): on-list → admit to Active; off-list / absent → fail-closed (`session_compid_unauthorized` + `session_event_compid_authorization_failed`), not Active; inherited 013 extraction order/shapes unchanged (FR-007; US2 AC2/AC3; SC-003).
-- [ ] T013 [P] [US2] Extend `tests/session/test_reconnect_backoff_cap.cpp` with the **auth-fail** cell: an off-list/absent identity under a binding policy consumes exactly one attempt and retries to the cap (reason-agnostic, NOT terminal-early, NO new code/cap) (FR-003/FR-007; Clarifications Q1; research R4; US1 AC2).
+- [ ] T013 [P] [US2] Extend `tests/session/test_reconnect_backoff_cap.cpp` with the **auth-fail** cell: an off-list/absent identity under a binding policy consumes exactly one attempt and retries to the cap (reason-agnostic, NOT terminal-early, NO new code/cap) (FR-003/FR-007; Clarifications Q1; research R4; US1 AC2) — extends T007's file (author after T007 lands; the `[P]` is relative to T011/T012 only).
 
 ### Implementation for User Story 2
 
@@ -88,7 +88,7 @@ description: "Task list — 014-transport-active-binding"
 
 ### Tests for User Story 3 (write FIRST, confirm FAIL) ⚠️
 
-- [ ] T016 [P] [US3] `tests/session/test_credentials_rotated_emit.cpp` — after `reload_credentials`, exactly one `credentials_rotated` emitted on the session strand BEFORE `make()`, carrying the REAL SHA-256 leaf fingerprints (not the 013 all-zero stub); first-ever load emits NO event; no-op rotation emits `old==new` (not suppressed) (FR-009/010/011; US3 AC1/AC2; SC-005; I-5/I-6).
+- [ ] T016 [P] [US3] `tests/session/test_credentials_rotated_emit.cpp` — after `reload_credentials`, exactly one `credentials_rotated` emitted on the session strand BEFORE `make()`, carrying the REAL SHA-256 leaf fingerprints (not the 013 all-zero stub); first-ever load emits NO event; no-op rotation emits `old==new` (not suppressed). All cells run over the live loopback harness (the real-fingerprint cells require it) — depends on T005. (FR-009/010/011; US3 AC1/AC2; SC-005; I-5/I-6).
 
 ### Implementation for User Story 3
 
@@ -113,7 +113,7 @@ description: "Task list — 014-transport-active-binding"
 ### FR-013 — once-per-handshake counter + handshake bench
 
 - [ ] T021 [P] [US4] Re-target `tests/session/test_session_invariant_counter_witness.cpp` (today infeasible/zero under `mock_transport`, `:22-35`) at the live loopback fixture so `cert_source::load_credentials()` == 1 per handshake is genuinely asserted (FR-013a; I-3; SC-006) — depends on T005.
-- [ ] T022 [P] [US4] Wire the `bench/transport/bench_tls_handshake_loopback.cpp` scaffold (T029 TODO `:16`/`:42-49`/`:52-67`) to the live `asio_tls_transport_factory` + loopback acceptor using `leaf_rsa2048.pem` + `ca.pem` (`:44`); CMake target `bench_tls_handshake_loopback` (`bench/transport/CMakeLists.txt:22`); establish the first real 1-RTT handshake baseline (FR-013b; SC-006; plan §Performance).
+- [ ] T022 [P] [US4] Wire the `bench/transport/bench_tls_handshake_loopback.cpp` scaffold (its in-file TODOs at `:16`/`:42-49`/`:52-67`) to the live `asio_tls_transport_factory` + loopback acceptor using `leaf_rsa2048.pem` + `ca.pem` (`:44`); CMake target `bench_tls_handshake_loopback` (`bench/transport/CMakeLists.txt:22`); establish the first real 1-RTT handshake baseline (FR-013b; SC-006; plan §Performance).
 
 ### FR-014 — PMR-OOM witness depth
 
@@ -154,7 +154,7 @@ description: "Task list — 014-transport-active-binding"
 - **US1 (P3)** → after Foundational. **MVP.**
 - **US2 (P4)** → after US1 (shares `reconnect_fsm.cpp`/`session.cpp`; needs the live handshake `peer_id` source from US1).
 - **US3 (P5)** → after US1 (injects the rotation emit into `drive_reconnect_attempt`; shares `reconnect_fsm.cpp`/`session.cpp`).
-- **US4 (P6)** → FR-012/014/015/016 independent of US1–US3 (run anytime after Setup); FR-013 (T021/T022) needs the Foundational live harness (T005).
+- **US4 (P6)** → FR-012/014/015/016 independent of US1–US3 (run anytime after Setup); FR-013a (T021) needs the Foundational live harness (T005); FR-013b (T022) stands up its own loopback in `bench/transport/` (independent of T005).
 - **Polish (P7)** → after all desired stories.
 
 > **Honest cross-story coupling**: the spec states US1 is the central value — "until this works… every other behaviour here is unreachable." US2/US3 therefore genuinely depend on US1's live path (not artificial). US4's FR-012/014/015/016 are the only truly independent slice and can proceed in parallel with US1–US3.
