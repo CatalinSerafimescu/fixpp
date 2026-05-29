@@ -193,16 +193,59 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
         }
         auto hr = std::move(*handshake_result_r);
 
-        // ── Step 7: Authorization (US2 T014 — deferred; permissive for US1) ──
-        // After T014: run cfg_.compid_authorization_policy.authorize(hr.peer_id, ...)
-        // here; on fail-closed: emit event, release t, count attempt, continue.
-        // For US1 (T009) the permissive path is taken (no auth check).
-        // hr is captured above and will be used by US2 T015.
-        (void)hr;
+        // ── Step 7: Authorization (US2 T014) ─────────────────────────────────
+        // Run CompIdAuthorizationPolicy::authorize(hr.peer_id, ...) via the
+        // session's config. On fail-closed: emit the inherited 013 event shape
+        // (session_event_compid_authorization_failed + session_compid_unauthorized),
+        // release t (RAII), count the attempt, and continue (retry-to-cap).
+        //
+        // Reconnect-path disposition (E-2 / C2 / Q1):
+        //   - Auth failure counts as exactly ONE attempt and is retried per the
+        //     backoff schedule to the cap (reason-agnostic per Clarifications Q1).
+        //   - This is NOT a terminal Disconnected (unlike 013's open-Logon path
+        //     at session.cpp:1004-1005 / :1799-1800); only loop-exhaustion is.
+        //   - Only when session_ != nullptr (session-bound FSM path).
+        //
+        // [data-model §E-1 step 7; E-2; contracts C2; FR-006; FR-007; Q1]
+        if (session_ != nullptr) {
+            const auto& cfg = session_->cfg_;
+            const bool is_mtls =
+                cfg.security_profile.k ==
+                    fixpp::session::SecurityProfile::kind::mtls_ca ||
+                cfg.security_profile.k ==
+                    fixpp::session::SecurityProfile::kind::mtls_pinned;
+
+            if (is_mtls) {
+                const std::string_view asserted_compid = cfg.target_comp_id;
+                auto auth_r = cfg.compid_authorization_policy.authorize(
+                    hr.peer_id, asserted_compid);
+                if (!auth_r) {
+                    // Authorization failed: emit event, release t, count attempt.
+                    // The subject_dn_view() is a view into hr.peer_id which lives
+                    // in the current attempt's scope (hr is on the coroutine
+                    // stack); safe for the synchronous emit_event call.
+                    session_->emit_event(
+                        fixpp::session::session_event_compid_authorization_failed{
+                            .cn               = hr.peer_id.subject_dn_view(),
+                            .asserted_compid  = asserted_compid,
+                            .expected_compids = {},
+                            .principal_source =
+                                fixpp::session::bound_principal::source::CN,
+                        });
+                    // t is released here (RAII unique_ptr); count attempt,
+                    // continue to next iteration (retry-to-cap, NOT terminal).
+                    continue;
+                }
+                // Authorization succeeded: fall through to step 8.
+                // (bound_principal is not stored on the reconnect path; T015
+                // wires it into the Session's Logon-ack guard via live_peer_id_.)
+            }
+            // Non-mTLS: gate skipped (permissive), fall through to step 8.
+        }
 
         // ── Step 8: Success handoff → Session::install_reconnected_transport ──
         if (session_ != nullptr) {
-            session_->install_reconnected_transport(std::move(t));
+            session_->install_reconnected_transport(std::move(t), std::move(hr));
         }
         // (If session_ is null the transport is simply dropped — test-only path
         // where ReconnectFsm is tested standalone without a Session owner.)

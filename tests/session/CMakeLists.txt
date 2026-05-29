@@ -552,6 +552,60 @@ set_tests_properties(reconnect_cancel_mid_handshake PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us1;reconnect;cancel")
 
+# ── 014-transport-active-binding Phase 4 (US2) — T011/T012/T013 ─────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T014/T015 impl lands.
+# CTest filter: ctest -R 'live_identity|compid_binding_seam|auth_fail_cap'
+
+# T011 — live identity binding witness: real handshake peer_id drives authorize().
+# SC-003 / FR-006 / US2 AC1 / I-4.
+add_executable(live_identity_binding
+  test_live_identity_binding.cpp)
+target_link_libraries(live_identity_binding PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(live_identity_binding PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(live_identity_binding PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME live_identity_binding COMMAND live_identity_binding)
+set_tests_properties(live_identity_binding PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us2;live_tls;identity_binding")
+
+# T012 — CompID binding seam: on-list/off-list/absent via logon_peer_identity_override.
+# FR-007 / US2 AC2/AC3 / SC-003.
+add_executable(compid_binding_seam
+  test_compid_binding_seam.cpp)
+target_link_libraries(compid_binding_seam PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(compid_binding_seam PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME compid_binding_seam COMMAND compid_binding_seam)
+set_tests_properties(compid_binding_seam PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us2;compid;seam")
+
+# T013 auth-fail cell lives in reconnect_backoff_cap (already registered above
+# as reconnect_backoff_cap). The new AuthFailReconnectCapTest class is compiled
+# into the same executable — rebuild it with additional dependencies.
+# We patch the existing target to add the session/compid_authorization headers.
+# (The executable already links fixpp_session which brings all required libs.)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
