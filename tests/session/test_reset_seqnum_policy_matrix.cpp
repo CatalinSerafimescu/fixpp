@@ -115,6 +115,17 @@ static bool has_session_reset_event(const fixpp::session::Session& sess) {
     });
 }
 
+// frame_has_141Y: check whether a raw FIX frame contains "141=Y\x01".
+// Used to verify that the outbound reply Logon echoes ResetSeqNumFlag(141)=Y.
+// (RC#C-2 gate-b/r2 false-pass closure — outbound-frame assertion.)
+static bool frame_has_141Y(const std::vector<std::byte>& frame) {
+    static constexpr std::string_view needle = "141=Y\x01";
+    if (frame.size() < needle.size()) return false;
+    const auto* data = reinterpret_cast<const char*>(frame.data());
+    std::string_view sv(data, frame.size());
+    return sv.find(needle) != std::string_view::npos;
+}
+
 }  // namespace
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -399,6 +410,216 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "unilateral acceptor: must reach Active after 141=Y.";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RC#C-2 (gate-b/r2) — outbound reply Logon frame assertions.
+//
+// The existing cells assert only the reset event; they never inspect the
+// outbound reply Logon captured in `capture.frames`. This closes that hole.
+//
+// RC#C-2 fix (session.cpp:1044-1046): bilateral_lenient now mirrors 141=Y
+// in its acceptor reply (same as bilateral_strict). unilateral does NOT.
+//
+// For each acceptor cell below:
+//   bilateral_strict  → reply frame MUST contain "141=Y\x01"
+//   bilateral_lenient → reply frame MUST contain "141=Y\x01"   (RC#C-2 fix)
+//   unilateral        → reply frame must NOT contain "141=Y\x01"
+//
+// Anchors: spec.md FR-017:148-149; [[feedback_simplify_pass_catches_9th_burn]];
+//   [[feedback_half_restructure_symmetric_api]].
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_ReplyContains141Y) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::bilateral_strict);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    // At least one outbound frame must have been captured (the reply Logon).
+    ASSERT_FALSE(capture.frames.empty())
+        << "bilateral_strict acceptor: expected an outbound reply Logon frame.";
+    // The reply Logon MUST contain 141=Y (bilateral_strict mirrors peer 141=Y).
+    bool found = false;
+    for (const auto& f : capture.frames) {
+        if (frame_has_141Y(f)) { found = true; break; }
+    }
+    EXPECT_TRUE(found)
+        << "bilateral_strict acceptor: reply Logon must carry 141=Y. "
+        << "FR-017: bilateral_strict mirrors peer ResetSeqNumFlag(141)=Y.";
+}
+
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    // At least one outbound frame must have been captured (the reply Logon).
+    ASSERT_FALSE(capture.frames.empty())
+        << "bilateral_lenient acceptor: expected an outbound reply Logon frame.";
+    // The reply Logon MUST contain 141=Y.
+    // RC#C-2: bilateral_lenient is the mode whose defining behavior IS the mirror
+    // (FR-017:148). Before this fix the predicate gated only on bilateral_strict.
+    bool found = false;
+    for (const auto& f : capture.frames) {
+        if (frame_has_141Y(f)) { found = true; break; }
+    }
+    EXPECT_TRUE(found)
+        << "bilateral_lenient acceptor: reply Logon must carry 141=Y when peer sends it. "
+        << "FR-017:148: bilateral_lenient mirrors peer ResetSeqNumFlag(141)=Y (RC#C-2).";
+}
+
+TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::unilateral);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
+    // The reply Logon must NOT echo 141=Y just because the peer sent it.
+    for (const auto& f : capture.frames) {
+        EXPECT_FALSE(frame_has_141Y(f))
+            << "unilateral acceptor: reply Logon must NOT carry 141=Y "
+            << "(FR-017:149 — outbound 141 is config-driven, not mirror-driven).";
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RC#C-1 (gate-b/r2) — counter-reset assertions.
+//
+// The existing cells never assert seqnum counter values. They pass with fresh
+// sessions (counters already at 1) where the missing reset is a no-op.
+// These cells pre-advance next_outbound_ to 10 via set_counters_for_test so
+// that the reset is non-trivial (without reset, reply Logon gets seq=10; with
+// reset it gets seq=1) and then assert the FR-mandated post-reset counter values.
+//
+// Post-reset expected values per FR-017:150 + FIX-SL §4.4.1:
+//   Acceptor (cells 1/3/5):
+//     next_inbound_  = 1 (reset rewinds; peer's next post-reset message is seq=1)
+//     next_outbound_ = 2 (reply Logon consumed seq=1 → next to send is seq=2)
+//   Initiator (cell 2a):
+//     next_inbound_  = 1 (reset rewinds; peer's next post-reset message is seq=1)
+//     next_outbound_ = 1 (reset rewinds; Logon was pre-reset, next send is seq=1)
+//
+// Requires FIXPP_TEST_HOOKS (seqnum_mgr_test_access() on Session).
+//
+// Anchors: spec.md FR-017:150; data-model.md §E-4;
+//   [[feedback_simplify_pass_catches_9th_burn]] (false-pass via fresh-session).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#ifdef FIXPP_TEST_HOOKS
+
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::bilateral_strict);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    // Pre-advance outbound counter to 10 so the reset is non-trivial.
+    // Keep inbound at 1 (peer will send Logon seq=1; check_inbound(1) must pass).
+    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    // FR-017:150: after successful 141=Y reset, both sides start from 1.
+    // next_inbound_ = 1 (reset to 1; peer's next message is seq=1)
+    // next_outbound_ = 2 (reply Logon consumed seq=1; next to send is seq=2)
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
+        << "bilateral_strict acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "bilateral_strict acceptor: next_outbound_ must be 2 after successful 141=Y reset "
+        << "(reply Logon consumed seq=1).";
+}
+
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    // Pre-advance outbound counter to 10 so the reset is non-trivial.
+    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
+        << "bilateral_lenient acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "bilateral_lenient acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
+}
+
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne) {
+    clear_capture();
+    // Pre-seed outbound to 10 BEFORE open() so the initiator's Logon is seq=10.
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_strict);
+    fixpp::session::Session sess(engine, cfg);
+    // Set counters before open() so the outbound Logon uses seq=10 (non-trivial).
+    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+
+    ASSERT_TRUE(run_open(sess).has_value());
+    // open() consumed seq=10 → next_outbound_=11.
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer (acceptor) acks with Logon seq=1 + 141=Y (mutual reset confirm).
+    auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_with_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    // FR-017:150: after mutual reset:
+    //   next_inbound_ = 1 (reset; peer's next post-reset message is seq=1)
+    //   next_outbound_ = 1 (reset; initiator's next send is seq=1)
+    // (Initiator's Logon was seq=10, pre-reset. After reset both sides restart at 1.)
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
+        << "bilateral_strict initiator: next_inbound_ must be 1 after 141=Y mutual reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
+        << "bilateral_strict initiator: next_outbound_ must be 1 after 141=Y mutual reset "
+        << "(Logon was pre-reset; post-reset next outbound is seq=1).";
+}
+
+TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::acceptor,
+                        fixpp::session::reset_seqnum_policy::unilateral);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    // Pre-advance outbound counter to 10 so the reset is non-trivial.
+    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+
+    auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
+    feed(sess, logon_with_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
+        << "unilateral acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "unilateral acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
+}
+
+#endif  // FIXPP_TEST_HOOKS
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 6: unilateral × initiator (modelled via acceptor accepting without echo)
