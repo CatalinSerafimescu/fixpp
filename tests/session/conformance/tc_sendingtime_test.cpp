@@ -138,6 +138,8 @@ struct SendingTimeConformanceFixture {
         cfg.transport_send     = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
+        // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

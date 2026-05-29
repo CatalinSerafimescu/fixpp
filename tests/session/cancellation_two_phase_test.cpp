@@ -131,6 +131,8 @@ protected:
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

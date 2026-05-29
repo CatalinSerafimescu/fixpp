@@ -176,6 +176,8 @@ protected:
         };
         cfg.role              = fixpp::session::session_role::acceptor;
         cfg.message_arena     = &pmr;
+        // RC#C (gate-b/r1): bilateral_lenient — test exercises alloc-guard, not reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

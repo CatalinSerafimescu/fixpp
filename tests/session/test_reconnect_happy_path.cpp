@@ -171,6 +171,8 @@ protected:
         cfg.executor_override = ioc.get_executor();
         cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role              = fixpp::session::session_role::acceptor;
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

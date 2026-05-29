@@ -153,6 +153,8 @@ struct HeartbeatCadenceFixture {
         cfg.mode              = mode;
         if (mode == fixpp::session::threading_mode::direct_executor)
             cfg.already_serialized_executor = true;
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

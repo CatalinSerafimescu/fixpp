@@ -173,6 +173,8 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     // Policy: SAN-DNS → authorized for SenderCompID "TW".
     cfg.compid_authorization_policy.add_binding("tw-prod.example.com", "TW");
@@ -229,6 +231,8 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::initiator;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     // Policy: CN "ISLD-PROD-01" → authorized for TargetCompID "ISLD".
     cfg.compid_authorization_policy.add_binding("ISLD-PROD-01", "ISLD");
@@ -277,6 +281,8 @@ TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     // Policy: only "TW-PROD-01" (CN) → "TW" is allowed.
     // But peer's CN is "STRANGER" — not in the policy.

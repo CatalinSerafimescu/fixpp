@@ -101,6 +101,7 @@ protected:
     }
 
     // Initiator config: sender=TW, target=ISLD, FIX.4.2, heartbeat disabled.
+    // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_initiator_cfg() {
         fixpp::session::SessionConfig cfg;
         cfg.sender_comp_id     = "TW";
@@ -111,6 +112,7 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = fixpp::session::session_role::initiator;
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

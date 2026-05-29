@@ -348,10 +348,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
         // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
         const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
+        // RC#C (gate-b/r1): bilateral_strict → send 141=Y in our outbound Logon.
+        // [spec.md FR-017; Clarifications Q1=A]
+        const bool initr_reset_seqnum =
+            (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
         auto logon_result =
             fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
                                         logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                                        cfg_.begin_string, heartbt_sec, sending_time_view);
+                                        cfg_.begin_string, heartbt_sec, sending_time_view,
+                                        initr_reset_seqnum);
         if (!logon_result) {
             // build_logon failed (oversized IDs → wire_frame_too_large).
             // Session-fatal — initiator handshake never reached the wire; transition
@@ -882,6 +887,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Valid Logon: scan header for seqnum + 013 T027 ResetSeqNumFlag(141).
             // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
+            // peer_sent_reset declared at case scope so the acceptor-reply block below
+            // can read it when deciding whether to mirror 141=Y in our reply Logon.
+            // [spec.md FR-017; RC#C gate-b/r1]
+            bool peer_sent_reset = false;
             {
                 auto hdr = scan_frame_header(frame);
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
@@ -906,14 +915,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // unilateral: always honour any peer 141=Y.
                 // All modes: if peer sends 141=Y → emit session_event_sequence_numbers_reset.
                 // [spec.md FR-017; data-model.md §E-4; Clarifications Q1=A]
-                const bool peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
+                peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
 
                 if (!peer_sent_reset &&
                     cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
                     // bilateral_strict requires peer to also send 141=Y.
-                    // Peer omitted 141=Y → mismatch → Disconnected.
+                    // Peer omitted 141=Y → session_seqnum_reset_mismatch(116) + Disconnected.
+                    // RC#C (gate-b/r1): surface the typed error code instead of bare
+                    // Disconnected, per triage RC#C(b) + spec.md FR-017 / US1 AC7.
                     record_state_transition_(fsm_state::Disconnected);
-                    co_return fixpp::core::expected_t<void>{};
+                    co_return std::unexpected(
+                        fixpp::core::error::session_seqnum_reset_mismatch);
                 }
 
                 if (peer_sent_reset) {
@@ -1026,11 +1038,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
                 // RC#B: gate the advance on build success; gate Active on emit success.
+                // RC#C (gate-b/r1): bilateral_strict → mirror 141=Y in acceptor reply.
+                // peer_sent_reset captured before this block from the seqnum-check block.
+                // [spec.md FR-017: acceptor echoes 141=Y when peer sent it + bilateral_strict]
+                const bool acpt_reset_seqnum =
+                    (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) &&
+                    peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
-                    reply_sending_time_view);
+                    reply_sending_time_view, acpt_reset_seqnum);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
@@ -1662,6 +1680,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Too-low or too-high → fatal (recovery deferred; I-2/I-4).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
+            }
+
+            // RC#C (gate-b/r1): bilateral_strict initiator path — symmetric to acceptor.
+            // We sent 141=Y in our outbound Logon (see open() above). If the peer's
+            // Logon-ack omits 141=Y, reject with session_seqnum_reset_mismatch(116).
+            // [spec.md FR-017; triage RC#C(b); [[feedback_half_restructure_symmetric_api]]]
+            {
+                const bool peer_ack_sent_reset = (hdr.reset_seqnum_flag == "Y");
+                if (!peer_ack_sent_reset &&
+                    cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return std::unexpected(
+                        fixpp::core::error::session_seqnum_reset_mismatch);
+                }
+                if (peer_ack_sent_reset) {
+                    // FR-018 mode mapping: bilateral_strict initiator-confirm path →
+                    // WE sent 141=Y first, peer confirmed → by_peer_request=false (WE initiated).
+                    // bilateral_lenient / unilateral: WE did NOT send 141=Y, peer sent it →
+                    // by_peer_request=true (peer initiated).
+                    const bool we_initiated =
+                        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
+                    emit_event(fixpp::session::session_event_sequence_numbers_reset{
+                        .by_peer_request = !we_initiated});
+                }
             }
 
             // 013 T036 US2: CompID authorization BEFORE FSM transition to Active

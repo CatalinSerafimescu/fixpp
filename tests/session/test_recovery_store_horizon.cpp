@@ -247,6 +247,8 @@ protected:
         cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role              = fixpp::session::session_role::acceptor;
         cfg.store_factory     = std::make_shared<HorizonStoreFactory>();
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

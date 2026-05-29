@@ -198,6 +198,8 @@ struct SessionFixture {
         cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ex;
         cfg.transport_send = [this](std::span<const std::byte> frame) { transport.capture(frame); };
+        // RC#C (gate-b/r1): bilateral_lenient — test exercises TestReqID cross-session, not reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
         session = std::make_unique<fixpp::session::Session>(engine, cfg);
     }

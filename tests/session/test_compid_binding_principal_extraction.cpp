@@ -294,6 +294,8 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests principal extraction, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     // Configure policy: CN "TW-PROD-01" → CompID "TW".
     cfg.compid_authorization_policy.add_binding("TW-PROD-01", "TW");

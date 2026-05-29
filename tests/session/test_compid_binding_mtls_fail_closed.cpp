@@ -167,6 +167,8 @@ TEST_F(MtlsFailClosedTest, Acceptor_MtlsCa_NoPeerIdentity_FailsClosed) {
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests mTLS fail-closed, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // Non-empty policy with a valid binding for "TW".
     cfg.compid_authorization_policy.add_binding("CN=TW-PROD-01,O=Acme,C=US", {"TW"});
     // logon_peer_identity_override is NOT set (nullopt) — simulates production path
@@ -206,6 +208,8 @@ TEST_F(MtlsFailClosedTest, Initiator_MtlsCa_NoPeerIdentity_FailsClosed) {
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::initiator;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests mTLS fail-closed, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.compid_authorization_policy.add_binding("CN=ISLD-PROD-01,O=Exchange,C=US", {"ISLD"});
     // logon_peer_identity_override NOT set.
 
@@ -245,6 +249,8 @@ TEST_F(MtlsFailClosedTest, Acceptor_OneWayCa_NoPeerIdentity_Accepts) {
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests one_way_ca gate, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // No override, no policy needed.
 
     fixpp::session::Session sess(engine, cfg);

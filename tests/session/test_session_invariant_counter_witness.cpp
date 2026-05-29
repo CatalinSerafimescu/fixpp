@@ -184,6 +184,8 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.role              = fixpp::session::session_role::acceptor;
+        // RC#C (gate-b/r1): bilateral_lenient — tests compid invariant, not reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.compid_authorization_policy = base_policy;
 
         // Inject peer_identity with matching CN.
@@ -238,6 +240,8 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
         cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.role              = fixpp::session::session_role::initiator;
+        // RC#C (gate-b/r1): bilateral_lenient — tests compid invariant, not reset.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.compid_authorization_policy = base_policy;
 
         fixpp::tls::peer_identity pid;

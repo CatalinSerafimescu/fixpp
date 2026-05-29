@@ -160,6 +160,7 @@ protected:
 
     // Build a minimal acceptor config (sender=ISLD, target=TW).
     // FR-004: role=acceptor set explicitly per T010.
+    // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_acceptor_cfg(int heartbt_int = 30,
                                                      std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
@@ -171,11 +172,13 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = fixpp::session::session_role::acceptor;  // FR-004 / T010
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 
     // Build a minimal initiator config (sender=TW, target=ISLD).
     // FR-004: role=initiator set explicitly per T010 (same as default, explicit for clarity).
+    // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_initiator_cfg(int heartbt_int = 30) {
         fixpp::session::SessionConfig cfg;
         cfg.sender_comp_id     = "TW";
@@ -186,6 +189,7 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = fixpp::session::session_role::initiator;  // FR-004 / T010 (explicit)
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

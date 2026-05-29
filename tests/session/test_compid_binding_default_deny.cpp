@@ -169,6 +169,8 @@ protected:
         // compid_authorization_policy is default-constructed = empty = default-deny.
         // logon_peer_identity_override: set a peer_identity so authorize() is called.
         cfg.logon_peer_identity_override = make_peer_identity("CN=TW-PROD-01,O=Acme,C=US");
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 
@@ -251,6 +253,8 @@ TEST_F(CompidBindingDefaultDenyTest, Initiator_EmptyPolicy_RejectsLogonAck) {
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::initiator;
+    // RC#C (gate-b/r1): bilateral_lenient — cell tests default-deny, not reset semantics.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // Empty policy — default-deny.
     cfg.logon_peer_identity_override = make_peer_identity("CN=ISLD-PROD-01,O=Exchange,C=US");
 

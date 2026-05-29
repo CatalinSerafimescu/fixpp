@@ -167,6 +167,8 @@ protected:
         cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role              = role;
         cfg.logout_disconnect_timeout_ms = timeout_ms;
+        // RC#C (gate-b/r1): bilateral_lenient — tests here drive to Active without 141=Y.
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

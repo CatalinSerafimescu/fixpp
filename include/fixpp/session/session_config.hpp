@@ -188,14 +188,17 @@ struct SessionConfig {
     // ── 013-session-reconnect-binding extensions (4 new fields) [data-model §E-4] ──
 
     // FR-017 / Clarifications Q1=A — per-session ResetSeqNumFlag policy.
-    // Default bilateral_lenient (QFC-style): honour peer 141=Y if received;
-    // accept Logon without 141=Y without refusing. bilateral_strict (QFJ-style)
-    // must be set explicitly when mutual-reset agreement is required.
-    // Rationale: most test fixtures and real deployments do not use 141=Y on
-    // every session open; bilateral_strict as default would break all pre-013
-    // tests that do not explicitly set 141=Y. [FR-017; Clarifications Q1=A]
+    // Default bilateral_strict per spec FR-017 + [const §XII.5] no-implicit-default.
+    // bilateral_strict: we send 141=Y in our outbound Logon AND require the peer
+    //   to also send 141=Y; a peer Logon without 141=Y disconnects with
+    //   session_seqnum_reset_mismatch(116). [FIX-SL §4.1.1: mutual seqnum reset]
+    // bilateral_lenient: honour peer 141=Y if received; accept without refusing.
+    // unilateral: honour any peer 141=Y regardless of our own flag (Fix8-style).
+    // RC#C (gate-b/r1): restored from bilateral_lenient → bilateral_strict per FR-017.
+    // Pre-013 tests updated to send 141=Y in their test Logon frames to comply.
+    // [FR-017; Clarifications Q1=A; triage RC#C(a)]
     reset_seqnum_policy reset_seqnum_policy_field{
-        reset_seqnum_policy::bilateral_lenient};
+        reset_seqnum_policy::bilateral_strict};
 
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J

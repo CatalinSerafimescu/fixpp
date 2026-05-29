@@ -139,6 +139,7 @@ struct Harness {
     }
 
     // make_cfg: basic config without transport capture.
+    // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset semantics.
     fixpp::session::SessionConfig make_cfg(
             std::string sender, std::string target,
             std::string begin_string = "FIX.4.2",
@@ -151,6 +152,7 @@ struct Harness {
         cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 

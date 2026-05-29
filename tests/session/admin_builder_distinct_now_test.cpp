@@ -169,6 +169,8 @@ protected:
         cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override  = ioc.get_executor();
         cfg.role               = session_role::initiator;
+        // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.transport_send     = [this](std::span<const std::byte> frame) {
             captured_frames.emplace_back(frame.begin(), frame.end());
         };

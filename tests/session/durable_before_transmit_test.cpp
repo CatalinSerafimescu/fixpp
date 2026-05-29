@@ -104,6 +104,8 @@ TEST_F(DurableBeforeTransmitTest, InboundStoreBeforeFromAdminDispatch) {
     cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
+    // RC#C (gate-b/r1): bilateral_lenient — test exercises I-3 ordering, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     Session sess(engine, cfg);
     auto open_r = open_sync(sess);
@@ -245,6 +247,8 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     cfg.transport_send     = [&order](std::span<const std::byte> /*frame*/) {
         order.push_back("transport_send");
     };
+    // RC#C (gate-b/r1): bilateral_lenient — test exercises I-3 ordering, not reset.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
     Session sess(engine, cfg);
     auto open_r = open_sync(sess);

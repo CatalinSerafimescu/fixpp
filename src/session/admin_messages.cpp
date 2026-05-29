@@ -75,7 +75,7 @@ namespace {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
-    std::string_view sending_time) noexcept {
+    std::string_view sending_time, bool reset_seqnum) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -140,6 +140,16 @@ namespace {
             return std::unexpected(fixpp::core::error::wire_field_value_truncated);
         }
         if (auto r = w.append_raw(108, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 141=Y (ResetSeqNumFlag) — emitted only when reset_seqnum=true.
+    // RC#C (gate-b/r1): bilateral_strict callers set this to request mutual reset.
+    // [spec.md FR-017; Clarifications Q1=A]
+    if (reset_seqnum) {
+        std::byte val[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(141, std::span<const std::byte>{val}); !r) {
             return std::unexpected(r.error());
         }
     }

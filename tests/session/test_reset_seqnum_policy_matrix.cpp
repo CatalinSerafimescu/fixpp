@@ -292,6 +292,91 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerOmits141Y) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cell 2a: bilateral_strict × initiator — peer ack WITH 141=Y
+//   We (initiator, bilateral_strict) send Logon with 141=Y in open().
+//   Peer ack confirms with 141=Y → mutual reset → Active +
+//   session_event_sequence_numbers_reset{by_peer_request=false} (WE initiated).
+//
+// FR-018 mode mapping: bilateral_strict initiator-confirm → by_peer_request=false.
+// [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor Cell 1.
+//
+// RC#C (gate-b/r1): new cell covering the missing initiator strict-path.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_strict);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+    // Initiator open() emits Logon with 141=Y (bilateral_strict) → state=LogonSent.
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer (acceptor, ISLD→TW) sends Logon-ack WITH 141=Y — mutual reset.
+    auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_with_reset);
+
+    // (a) Session reaches Active after bilateral confirmation.
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "bilateral_strict initiator: peer ack with 141=Y → Active.";
+
+    // (b) Exactly one sequence_numbers_reset event, by_peer_request=false (WE initiated).
+    // FR-018: bilateral_strict confirm path → we sent 141=Y first → by_peer_request=false.
+    auto events = sess.recent_events();
+    std::size_t reset_events = 0;
+    bool by_peer_request_correct = false;
+    for (const auto& ev : events) {
+        if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            ++reset_events;
+            by_peer_request_correct = !r->by_peer_request;  // must be false (we initiated)
+        }
+    }
+    EXPECT_EQ(reset_events, 1u)
+        << "bilateral_strict initiator confirm: exactly one sequence_numbers_reset event.";
+    EXPECT_TRUE(by_peer_request_correct)
+        << "FR-018: bilateral_strict initiator-confirm → by_peer_request must be false "
+        << "(WE sent 141=Y first, peer confirmed).";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 2b: bilateral_strict × initiator — peer ack WITHOUT 141=Y → reject.
+//   We (initiator) send Logon with 141=Y; peer responds WITHOUT 141=Y.
+//   bilateral_strict MUST reject → session_seqnum_reset_mismatch(116) + Disconnected.
+//
+// This is the DIRECT initiator test (not the acceptor-proxy from Cell 2).
+// [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor rejection above.
+//
+// RC#C (gate-b/r1): direct initiator strict-reject cell.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerOmits141Y_DirectReject) {
+    clear_capture();
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_strict);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(run_open(sess).has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer ack does NOT include 141=Y — bilateral_strict requires it.
+    auto logon_ack_no_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/false);
+    auto feed_r = feed(sess, logon_ack_no_reset);
+
+    // Must reject with session_seqnum_reset_mismatch(116) + Disconnected.
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "bilateral_strict initiator: peer ack without 141=Y must disconnect "
+        << "with session_seqnum_reset_mismatch(116).";
+    EXPECT_FALSE(feed_r.has_value())
+        << "bilateral_strict initiator: on_inbound_frame must return an error when "
+        << "peer Logon-ack omits 141=Y.";
+    if (!feed_r.has_value()) {
+        EXPECT_EQ(feed_r.error(), fixpp::core::error::session_seqnum_reset_mismatch)
+            << "bilateral_strict initiator: error must be session_seqnum_reset_mismatch(116).";
+    }
+    // No sequence_numbers_reset event (rejected before reset was confirmed).
+    EXPECT_FALSE(has_session_reset_event(sess))
+        << "bilateral_strict initiator: rejected exchange must NOT emit "
+        << "sequence_numbers_reset event.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cell 5: unilateral × acceptor
 //   Peer sends 141=Y; unilateral honours it regardless of our own flag.
 //   Emits sequence_numbers_reset{by_peer_request=true} and goes Active.
