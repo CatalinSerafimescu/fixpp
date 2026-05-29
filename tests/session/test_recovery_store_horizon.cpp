@@ -359,3 +359,137 @@ TEST_F(RecoveryStoreHorizonTest, ReplayFramesCarryOrigSendingTime) {
         << "Each replayed application frame must carry OrigSendingTime(122). "
         << "RED: stub emits no replays — FAILS RED per T016 design.";
 }
+
+// ── RC#B (gate-b/r1): >1024-byte app message store double ───────────────────
+// A NewOrderSingle with repeating NoPartyIDs group large enough to exceed
+// the old 1024-byte CaptureVisitor buffer. The session MUST replay it with
+// PossDupFlag(43)=Y + OrigSendingTime(122), NOT collapse it to a GapFill.
+// [triage RC#B; spec.md FR-010/FR-012]
+
+class LargeFrameStore final : public MessageStore {
+public:
+    explicit LargeFrameStore(std::vector<std::byte> big_frame, seqnum_t seq)
+        : MessageStore(flush_thunk_for<LargeFrameStore>()),
+          big_frame_(std::move(big_frame)), seq_(seq) {}
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    store(seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
+          direction_t /*dir*/) noexcept override {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
+             retrieve_visitor& visitor) noexcept override {
+        if (dir != direction_t::outbound) {
+            co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
+        }
+        const seqnum_t hi = (end == 0) ? seq_ : end;
+        bool visited_any = false;
+        for (seqnum_t k = begin; k <= hi && k <= seq_; ++k) {
+            if (k == seq_) {
+                visited_any = true;
+                auto r = co_await visitor.on_frame(
+                    k, std::span<const std::byte>{big_frame_.data(), big_frame_.size()});
+                if (!r) co_return std::unexpected(r.error());
+                if (*r != visit_result::cont) break;
+            }
+        }
+        if (!visited_any) co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>>
+    next_seqnum(direction_t dir, bool /*increment*/) noexcept override {
+        co_return fixpp::core::expected_t<seqnum_t>{
+            dir == direction_t::outbound ? (seq_ + 1U) : seqnum_t{1}};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    reset() noexcept override {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+private:
+    std::vector<std::byte> big_frame_;
+    seqnum_t seq_;
+};
+
+class LargeFrameStoreFactory final : public MessageStoreFactory {
+public:
+    explicit LargeFrameStoreFactory(std::vector<std::byte> big_frame, seqnum_t seq)
+        : big_frame_(std::move(big_frame)), seq_(seq) {}
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
+    make(std::string_view /*sender*/, std::string_view /*target*/,
+         std::pmr::memory_resource* /*mr*/, std::size_t /*max_store_memory_bytes*/,
+         asio::any_io_executor /*file_io_executor*/) noexcept override {
+        return std::unique_ptr<MessageStore>(new LargeFrameStore(big_frame_, seq_));
+    }
+
+private:
+    std::vector<std::byte> big_frame_;
+    seqnum_t seq_;
+};
+
+// Build a FIX NewOrderSingle-like app frame with padding to exceed 1024B.
+// Uses ClOrdID (tag 11) with a large filler string in the "extra" field.
+static std::vector<std::byte> make_large_app_frame(seqnum_t seq) {
+    // Build a "D" (NewOrderSingle) with a 1200-byte filler value in tag 58 (Text)
+    // to push the total frame size well above 1024 bytes.
+    std::string filler(1100, 'X');  // 1100-char padding in tag 58 (Text)
+    std::string extra;
+    extra += field(11, "ORDER-RC-B-1");
+    extra += field(58, filler);  // tag 58 = Text
+    return make_fix_frame("FIX.4.2", "D", seq, "ISLD", "TW", extra);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T016-D (RC#B gate-b/r1): Stored app message > 1024B replayed intact.
+//
+// Before fix: CaptureVisitor::buf=1024 → truncated=true → app_present=false
+//   → slot collapsed to GapFill. Silent data loss.
+// After fix: buffer enlarged → captured=true → replayed with 43=Y + 122=...
+//
+// RED (before fix): replay not found; gapfill found instead.
+// GREEN (after fix): replay with 43=Y and 122= present.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
+    capture.frames.clear();
+
+    // Build a large frame at seq=7 (store horizon aligns with test).
+    constexpr seqnum_t kLargeSeq = 7;
+    auto big_frame = make_large_app_frame(kLargeSeq);
+    ASSERT_GT(big_frame.size(), 1024u)
+        << "Test prerequisite: large frame must exceed old 1024B capture limit.";
+
+    auto cfg = make_acceptor_cfg();
+    cfg.store_factory = std::make_shared<LargeFrameStoreFactory>(big_frame, kLargeSeq);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(drive_to_active(sess));
+
+    // Peer asks to resend [7..7].
+    auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 7, 7);
+    feed(sess, rr);
+
+    // Find the replay frame (43=Y + seq=7).
+    bool found_replay = false;
+    bool found_gapfill = false;
+    for (const auto& frame : capture.frames) {
+        std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
+        if (is_replay_with_poss_dup(frame, kLargeSeq)) {
+            found_replay = true;
+        }
+        if (wire.find("35=4\x01") != std::string::npos &&
+            wire.find("123=Y\x01") != std::string::npos) {
+            found_gapfill = true;
+        }
+    }
+
+    EXPECT_TRUE(found_replay)
+        << "Large app frame (>1024B) MUST be replayed with PossDupFlag(43)=Y. "
+        << "RED (before fix): CaptureVisitor buf=1024 silently truncates → GapFill.";
+    EXPECT_FALSE(found_gapfill)
+        << "Large app frame (>1024B) must NOT be collapsed into a GapFill. "
+        << "RED (before fix): truncated=true → treated as absent → GapFill emitted.";
+}

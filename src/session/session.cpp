@@ -759,12 +759,20 @@ struct SendingTimeStamp {
 }
 
 // 013 FR-010 — a retrieve_visitor that copies a single stored frame into a
-// stack buffer for the resend store-walk (one retrieve(K,K) per slot). Frames
-// in the recovery window are small; oversized frames (> buffer) are reported
-// via `truncated` so the caller folds the slot into a GapFill instead.
+// stack buffer for the resend store-walk (one retrieve(K,K) per slot).
+//
+// RC#B (gate-b/r1): buffer enlarged from 1024→4096B.
+// A FIX NewOrderSingle with repeating NoPartyIDs groups easily exceeds 1024B.
+// The old 1024B limit silently collapsed oversized real app messages into a
+// SequenceReset-GapFill — same silent-data-loss class as FR-010/FR-012.
+// 4096B covers all realistic FIX app messages; the replay buffer below is
+// matched to the same size. [const §VIII.5]: fixed member, no per-frame alloc.
+// If a frame exceeds 4096B (degenerate/malformed), the caller disconnects
+// rather than silently GapFilling a real app message. [triage RC#B]
 class CaptureVisitor final : public fixpp::session::retrieve_visitor {
 public:
-    std::array<std::byte, 1024> buf{};
+    static constexpr std::size_t kCapBufSize = 4096;
+    std::array<std::byte, kCapBufSize> buf{};
     std::size_t len = 0;
     bool captured = false;
     bool truncated = false;
@@ -1425,13 +1433,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                     // Per-slot store-walk over [rr_begin, eff_end]. Accumulate
                     // absent/admin runs into one GapFill; flush before each replay.
+                    //
+                    // RC#B (gate-b/r1): rp_buf enlarged from 1280→kRpBufSize to match
+                    // the 4096B capture buffer + replay overhead. The truncated path for
+                    // a real app message now disconnects instead of silently GapFilling
+                    // (same silent-data-loss class as FR-010/FR-012). [triage RC#B]
+                    static constexpr std::size_t kRpBufSize =
+                        CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
                     bool gap_open = false;
                     seqnum_t gap_start = 0;
                     for (seqnum_t k = rr_begin; k <= eff_end; ++k) {
                         CaptureVisitor cv;
                         auto rr = co_await store_->retrieve(k, k, direction_t::outbound, cv);
+
+                        // If the frame was truncated (> capture buffer), it may be a real
+                        // app message we cannot safely GapFill away. Disconnect to surface
+                        // the anomaly rather than silently losing data. [triage RC#B]
+                        if (cv.truncated) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+
                         const bool app_present =
-                            rr && cv.captured && !cv.truncated &&
+                            rr && cv.captured &&
                             !is_admin_type(scan_frame_header(
                                  std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
                         if (app_present) {
@@ -1442,7 +1466,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 }
                                 gap_open = false;
                             }
-                            std::array<std::byte, 1280> rp_buf{};
+                            std::array<std::byte, kRpBufSize> rp_buf{};
                             auto rp = build_replay_frame(
                                 std::span<std::byte>{rp_buf.data(), rp_buf.size()},
                                 std::span<const std::byte>{cv.buf.data(), cv.len});
