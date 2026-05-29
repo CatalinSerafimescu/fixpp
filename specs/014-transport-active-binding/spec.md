@@ -7,7 +7,7 @@
 
 ## Overview
 
-013 shipped the session-Phase-4 *control surface* — the reconnect FSM, the recovery sub-protocol, the CompID-authorization *policy*, the TLS-outcome `SessionEvent` shape, and the in-process credential-reload control plane — but with the **live-transport lifecycle stubbed**. Verified shipped reality: `ReconnectFsm::drive_reconnect_attempt()` mints a transport via the factory and immediately discards it (`reconnect_fsm.cpp:53-61`); the CompID-authorization Logon gate is a three-way guard at both call sites (`session.cpp:953-1008` acceptor, `:1757-1803` initiator) — (1) test-only identity override present → `authorize()`; (2) `else if (is_mtls)` → **fail CLOSED** (emit `compid_authorization_failed` + Disconnected); (3) non-mTLS → skip (permissive). So under mTLS-without-override 013 already fails CLOSED — but it cannot *admit* a legitimate peer on the live initiator path for want of any real identity source. And the credential-rotation event is defined-but-unemitted (no emit site exists in 013; `session.hpp:274`).
+013 shipped the session-Phase-4 *control surface* — the reconnect FSM, the recovery sub-protocol, the CompID-authorization *policy*, the TLS-outcome `SessionEvent` shape, and the in-process credential-reload control plane — but with the **live-transport lifecycle stubbed**. Verified shipped reality: `ReconnectFsm::drive_reconnect_attempt()` mints a transport via the factory and immediately discards it (`reconnect_fsm.cpp:53-61`); the CompID-authorization Logon gate is a three-way guard at both call sites (`session.cpp:953-1008` acceptor, `:1757-1803` initiator) — (1) test-only identity override present → `authorize()`; (2) `else if (is_mtls)` → **fail CLOSED** (emit `session_event_compid_authorization_failed` + Disconnected); (3) non-mTLS → skip (permissive). So under mTLS-without-override 013 already fails CLOSED — but it cannot *admit* a legitimate peer on the live initiator path for want of any real identity source. And the credential-rotation event is defined-but-unemitted (no emit site exists in 013; `session.hpp:274`).
 
 This feature makes those three behaviours real **at the session / reconnect-FSM / transport level**, using 012's `TransportFactory` and `handshake_result` directly:
 
@@ -55,7 +55,7 @@ When a handshake yields an authenticated peer identity, that identity — taken 
 **Acceptance Scenarios**:
 
 1. **Given** a live initiator reconnect, **When** the handshake completes, **Then** the peer identity passed to `CompIdAuthorizationPolicy::authorize()` is the real `handshake_result.peer_id` — there is no fabricated identity on this path.
-2. **Given** a binding allow-list policy, **When** an off-list or absent identity is evaluated, **Then** the decision fails closed — the session does not reach Active and a `compid_authorization_failed` event with `session_compid_unauthorized` is emitted.
+2. **Given** a binding allow-list policy, **When** an off-list or absent identity is evaluated, **Then** the decision fails closed — the session does not reach Active and a `session_event_compid_authorization_failed` event with `session_compid_unauthorized` is emitted.
 3. **Given** the canonical extraction order and policy semantics from 013 (FR-019/020/022), **When** authorization runs, **Then** those semantics are inherited unchanged; 014 changes only the *source* of the identity (stub → live handshake).
 
 ---
