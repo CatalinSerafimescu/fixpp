@@ -114,4 +114,22 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outboun
     co_return fixpp::core::expected_t<seqnum_t>{assigned};
 }
 
+// ── reset_to_one ──────────────────────────────────────────────────────────────
+//
+// Acquire the mutex, reset both counters to seqnum_min (1).
+// Called on a successful ResetSeqNumFlag(141)=Y handshake (FR-017:150).
+// Production path — NOT FIXPP_TEST_HOOKS-gated.
+
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noexcept {
+    auto lk_result = co_await mutex_.async_lock();
+    if (!lk_result) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
+    auto lk = std::move(*lk_result);
+
+    next_inbound_  = seqnum_min;
+    next_outbound_ = seqnum_min;
+    co_return fixpp::core::expected_t<void>{};
+}
+
 }  // namespace fixpp::session

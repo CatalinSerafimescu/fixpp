@@ -928,12 +928,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         fixpp::core::error::session_seqnum_reset_mismatch);
                 }
 
-                if (peer_sent_reset) {
-                    // All 3 modes honour peer 141=Y on the acceptor path.
-                    emit_event(fixpp::session::session_event_sequence_numbers_reset{
-                        .by_peer_request = true
-                    });
-                }
+                // peer_sent_reset: reset + event emission deferred to after the
+                // reply-Logon block so the event fires with consistent post-reset
+                // counters (FR-018) and the reply Logon is stamped at seq=1 (FR-017).
             }
 
             // 013 T036 US2: CompID authorization BEFORE FSM transition to
@@ -1036,13 +1033,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                             ? static_cast<int>(cfg_.heartbeat_interval->count())
                                             : 30;  // D-8 default 30 s
 
+                // RC#C-1 (gate-b/r2): reset live counters + store on successful 141=Y.
+                // FR-017:150: "both sides advance next_expected_inbound and
+                // next_expected_outbound to 1" on a successful reset handshake.
+                // Reset BEFORE peek_outbound() so the reply Logon is stamped seq=1
+                // (the first message after the reset is our Logon seq=1).
+                // Then emit the event so it fires with post-reset state consistent
+                // (FR-018: event after counters at 1).
+                // [spec.md FR-017/FR-018; [[feedback_half_restructure_symmetric_api]]]
+                if (peer_sent_reset) {
+                    auto rst_r = co_await seqnum_mgr_.reset_to_one();
+                    if (!rst_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(rst_r.error());
+                    }
+                    if (store_) {
+                        auto store_rst_r = co_await store_->reset();
+                        (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
+                    }
+                    // FR-018: event fires AFTER post-reset state is consistent.
+                    emit_event(fixpp::session::session_event_sequence_numbers_reset{
+                        .by_peer_request = true
+                    });
+                }
+
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
                 // RC#B: gate the advance on build success; gate Active on emit success.
-                // RC#C (gate-b/r1): bilateral_strict → mirror 141=Y in acceptor reply.
+                // RC#C-2 (gate-b/r2): bilateral_lenient also mirrors 141=Y in reply —
+                // it is the defining behavior of bilateral_lenient (FR-017:148-149).
+                // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
                 // peer_sent_reset captured before this block from the seqnum-check block.
-                // [spec.md FR-017: acceptor echoes 141=Y when peer sent it + bilateral_strict]
+                // [spec.md FR-017: bilateral_strict + bilateral_lenient mirror 141=Y in reply]
                 const bool acpt_reset_seqnum =
-                    (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) &&
+                    (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict ||
+                     cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_lenient) &&
                     peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 auto reply_logon = fixpp::session::build_logon(
@@ -1695,6 +1719,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         fixpp::core::error::session_seqnum_reset_mismatch);
                 }
                 if (peer_ack_sent_reset) {
+                    // RC#C-1 (gate-b/r2): reset live counters + store before event.
+                    // FR-017:150: mutual reset → both sides advance to 1.
+                    // FR-018: event fires AFTER post-reset state is consistent.
+                    // [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor arm.
+                    auto rst_r = co_await seqnum_mgr_.reset_to_one();
+                    if (!rst_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(rst_r.error());
+                    }
+                    if (store_) {
+                        auto store_rst_r = co_await store_->reset();
+                        (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
+                    }
                     // FR-018 mode mapping: bilateral_strict initiator-confirm path →
                     // WE sent 141=Y first, peer confirmed → by_peer_request=false (WE initiated).
                     // bilateral_lenient / unilateral: WE did NOT send 141=Y, peer sent it →

@@ -429,7 +429,10 @@ add_threading_test(recovery_admin_span_gapfill test_recovery_admin_span_gapfill.
 add_threading_test(recovery_store_horizon test_recovery_store_horizon.cpp)
 
 # T017 — seam reset-seqnum-policy-matrix: 3 modes × 2 roles (6 cells).
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session for RC#C-1
+# counter assertions (gate-b/r2: verify both counters reset to 1 after 141=Y).
 add_threading_test(reset_seqnum_policy_matrix test_reset_seqnum_policy_matrix.cpp)
+target_compile_definitions(reset_seqnum_policy_matrix PRIVATE FIXPP_TEST_HOOKS)
 
 # T018 — seam heartbeat-cadence-8cell: 4 axes × 2 executor modes.
 add_threading_test(heartbeat_cadence_8cell test_heartbeat_cadence_8cell.cpp)

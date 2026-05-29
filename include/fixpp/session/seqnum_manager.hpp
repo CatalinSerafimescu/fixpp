@@ -104,6 +104,14 @@ public:
     [[nodiscard]] seqnum_t next_inbound_unsafe() const noexcept { return next_inbound_; }
     [[nodiscard]] seqnum_t next_outbound_unsafe() const noexcept { return next_outbound_; }
 
+    // reset_to_one(): reset both counters to seqnum_min (1) for a successful
+    // ResetSeqNumFlag(141)=Y handshake (FR-017 §150: "both sides advance
+    // next_expected_inbound and next_expected_outbound to 1").
+    // Mutex-guarded; production path — NOT test-hook-gated.
+    // Must be called BEFORE the caller emits session_event_sequence_numbers_reset
+    // so the event fires after post-reset state is consistent (FR-018).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to_one() noexcept;
+
     // drain(): required before destruction to satisfy async_mutex destructor
     // precondition. Safe to call even if no lock was ever acquired.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drain() noexcept {
