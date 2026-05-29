@@ -17,7 +17,14 @@ This feature makes those three behaviours real **at the session / reconnect-FSM 
 
 It also discharges the test/quality carry-forwards from the 013 and 012 Gate-B waivers, most of which were deferred precisely because they need a live TLS handshake (which the real reconnect path now provides).
 
-**Explicitly carved out to feature 015**: the public multi-session **Initiator/Acceptor runtime engine** (accept/connect loops as a public component, a `SessionConfig`-keyed session registry, programmatic multi-session lifecycle, the acceptor accept→Session-create→byte-feed production path, and the consequent removal of the test-only authorization override). 014 is the per-session wiring; 015 is the engine that productionizes both roles on top of it and fully closes the **T-041** row. This boundary — in particular how much of the acceptor-side binding 014 proves via the existing test seam versus defers to 015 — is the primary question for 014's clarification pass.
+**Explicitly carved out to feature 015**: the public multi-session **Initiator/Acceptor runtime engine** (accept/connect loops as a public component, a `SessionConfig`-keyed session registry, programmatic multi-session lifecycle, the acceptor accept→Session-create→byte-feed production path, and the consequent removal of the test-only authorization override). 014 is the per-session wiring; 015 is the engine that productionizes both roles on top of it and fully closes the **T-041** row. The acceptor-binding boundary is resolved (Clarifications, Session 2026-05-29): 014 wires the live identity into `authorize()` and proves it **only on the live initiator reconnect path**; acceptor binding-logic is proven solely through the existing `logon_peer_identity_override` test seam; the live acceptor accept→handshake→`authorize()` production path and the test-seam removal are 015, where **T-041** fully closes.
+
+## Clarifications
+
+### Session 2026-05-29
+
+- Q: When a live reconnect handshake completes at the TLS layer but the authenticated peer identity fails the binding CompID-authorization policy (off-list / absent), how should the reconnect loop treat that failure? → A: Reason-agnostic — it consumes one attempt and is retried per the backoff schedule to the configured cap (identical to any connect/handshake failure), then terminal-disconnected. No fail-fast and no distinct cap or terminal cause for the authorization-failure case.
+- Q: What is the exact 014/015 boundary for the acceptor-side identity→authorize() binding? → A: 014 wires the live identity into `authorize()` and proves it only on the live initiator reconnect path; acceptor binding-logic is proven solely via the existing `logon_peer_identity_override` test seam (on-list / off-list / absent). The live acceptor accept→handshake→`authorize()` production path and test-seam removal are 015, where T-041 fully closes; T-041 stays `implementing` after 014.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -85,7 +92,7 @@ The engineering team closes the test/quality obligations carried as Gate-B waive
 ### Edge Cases
 
 - **Cancellation mid-handshake**: a stop / total-teardown request during the handshake aborts the attempt and releases the in-flight transport without a leak (sanitizer-verified).
-- **TCP up, identity unauthorized**: handshake completes at the transport layer but the identity is off-list under a binding policy → fail closed.
+- **TCP up, identity unauthorized**: handshake completes at the transport layer but the identity is off-list under a binding policy → fail closed; the failed attempt counts as one reconnect attempt and is retried to the cap reason-agnostically (FR-003).
 - **No identity under a binding policy**: no authenticated identity → fail closed (the all-empty principal is unauthorized unless deliberately bound), per 013 FR-019.
 - **Permissive (no binding policy)**: behaviour inherited unchanged from 013.
 - **Reconnect exclusivity**: a new attempt does not start while a prior attempt's transport is still in flight.
@@ -99,14 +106,14 @@ The engineering team closes the test/quality obligations carried as Gate-B waive
 
 - **FR-001**: When an initiator session loses its transport (connection drop, handshake failure, or transport read/write error), the reconnect FSM MUST drive a real reconnect attempt that opens a new connection, completes the TLS handshake, and hands a live transport to the session — replacing the placeholder that mints and immediately discards a transport.
 - **FR-002**: The reconnect loop MUST honour the configured `ReconnectPolicy` backoff schedule and attempt cap unchanged (it consumes 012's policy; it does not redefine it).
-- **FR-003**: Every failed reconnect attempt MUST consume one attempt and be retried per the backoff schedule until the cap is reached, at which point the session transitions to the FSM's terminal disconnected outcome (no infinite retry). *(Treatment of an authorization-failure cause specifically is a clarification item — see Assumptions.)*
+- **FR-003**: Every failed reconnect attempt MUST consume one attempt and be retried per the backoff schedule until the cap is reached, at which point the session transitions to the FSM's terminal disconnected outcome (no infinite retry). This is **reason-agnostic**: an attempt that fails authorization (off-list / absent identity under a binding policy) MUST consume one attempt and be retried to the same cap exactly like a connect or handshake failure — no fail-fast, and no distinct cap or terminal cause for the authorization-failure case.
 - **FR-004**: The reconnect loop MUST honour cooperative cancellation — a stop / total-teardown request MUST abort an in-flight attempt promptly and release any partially-constructed transport (no leak, no orphaned socket).
 - **FR-005**: The 013 stubbed reconnect-driver hooks MUST be fully realized — no production code path may remain that creates a transport and discards it.
 
 ### Functional Requirements — authenticated identity binding (Story 2)
 
 - **FR-006**: When a handshake yields an authenticated peer identity (`handshake_result.peer_id`), the live identity MUST be supplied to `CompIdAuthorizationPolicy::authorize()` — there must be no fabricated/stand-in identity on the live path.
-- **FR-007**: Under a binding policy, an absent or off-allow-list authenticated identity MUST fail closed — disconnect, refuse Active, and emit `session_compid_unauthorized` + `session_event_compid_authorization_failed`. The fail-closed/permissive semantics, canonical extraction order, and event shapes are inherited unchanged from 013 (FR-019/FR-020/FR-022).
+- **FR-007**: Under a binding policy, an absent or off-allow-list authenticated identity MUST fail closed — disconnect, refuse Active, and emit `session_compid_unauthorized` + `session_event_compid_authorization_failed`. The fail-closed/permissive semantics, canonical extraction order, and event shapes are inherited unchanged from 013 (FR-019/FR-020/FR-022). On the live reconnect path this fail-closed outcome counts as one reconnect attempt and is retried to the cap reason-agnostically per FR-003.
 - **FR-008**: The residual fabricated auth payload from 013 MUST be removed from the live path. (The test-only `logon_peer_identity_override` may remain as the binding-logic test seam until the 015 engine removes the dependency; full production closure of **T-041** for the acceptor role lands with 015.)
 
 ### Functional Requirements — credential-rotation observability / FR-032 (Story 3)
@@ -155,8 +162,8 @@ The engineering team closes the test/quality obligations carried as Gate-B waive
 - **Reconnect is initiator-side** — acceptor sessions re-accept rather than driving a reconnect loop; the acceptor live path is part of the 015 engine.
 - **`credentials_rotated` semantics are locked by merged 013 FR-032** — our own rotated `cert_source` leaf fingerprints, emitted at `drive_reconnect_attempt` before `make()`, not change-gated.
 - **CompID policy/extraction/events inherited from 013**; 014 changes only the identity *source* (stub → live handshake) and removes the fabricated payload on the live path. The test-only override may persist until 015.
-- **`T-041` advances but may not fully close in 014** — 014 wires the live identity into the decision and proves it on the initiator path; full production closure for the acceptor role (test-seam removal) lands with the 015 engine. The exact 014/015 binding boundary is the primary clarification question for 014.
-- **Uniform retry-to-cap** is the working default for failed reconnect attempts (bounded by 012's cap; matches QFC/QFJ reason-agnostic reconnect); whether an authorization-failure cause is treated identically is a clarification item.
+- **`T-041` advances but does not fully close in 014** — 014 wires the live identity into the decision and proves it on the live initiator path only; acceptor binding-logic is proven via the existing test seam. Full production closure for the acceptor role (live acceptor path + test-seam removal) lands with the 015 engine. (014/015 binding boundary resolved — Clarifications, Session 2026-05-29.)
+- **Uniform retry-to-cap** for all failed reconnect attempts (bounded by 012's cap; matches QFC/QFJ reason-agnostic reconnect) — including the authorization-failure cause, which is treated identically (resolved — Clarifications, Session 2026-05-29).
 - **Error-slot allocation continues the existing envelope** — 013 occupies session slots 116..119; any new code (e.g. the seqnum-too-high replacement for FR-016) takes the next free slot; retired slots remain permanent numeric holes.
 - **No new Phase-2 design doc** — anchored by 005's FSM spec plus the signed-off 010/011/012/013 surfaces and decisions 2g/2h/2j. Gate A is mandatory (touches the security boundary + reconnect lifecycle).
 - **Existing test fixtures extended** — the 011/012 loopback-TLS and mock fixtures supply the live-handshake and drop/reconnect scenarios; new cert fixtures (Ed25519/Ed448; multi-SAN) are added.
