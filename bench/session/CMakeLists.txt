@@ -54,3 +54,8 @@ function(add_bench_with_test_include name)
   )
 endfunction()
 add_bench_with_test_include(bench_heartbeat_cadence bench_heartbeat_cadence.cpp)
+
+# T033 — 013-session-reconnect-binding Phase 4 (US2) bench.
+# CompIdAuthorizationPolicy::authorize() latency: ≤ 5 µs p99 per SC-003 /
+# [const §VIII.2]. Does NOT need test-include headers (no Session; pure policy API).
+add_store_bench(bench_compid_authorize bench_compid_authorize.cpp)

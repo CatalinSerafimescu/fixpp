@@ -437,6 +437,27 @@ add_threading_test(heartbeat_cadence_8cell test_heartbeat_cadence_8cell.cpp)
 # T019 — seam logout-timeout: initiator + acceptor symmetric cells.
 add_threading_test(logout_timeout test_logout_timeout.cpp)
 
+# ── 013-session-reconnect-binding Phase 4 (US2) test registrations ──────────
+# T029–T032: CompID↔TLS-identity authorization at Logon. Authored RED-first
+# per TDD ([const §VII.3]). Turned GREEN when T034–T036 impl lands.
+# CTest filter: ctest -R 'compid_binding'
+
+# T029 — FR-023 / US2 AC6: empty policy rejects ALL Logons (default-deny).
+add_threading_test(compid_binding_default_deny
+  test_compid_binding_default_deny.cpp)
+
+# T030 — FR-022 / US2 AC5: 4-cell principal-extraction order matrix.
+add_threading_test(compid_binding_principal_extraction
+  test_compid_binding_principal_extraction.cpp)
+
+# T031 — FR-024 / US2 AC4: symmetric acceptor + initiator coverage.
+add_threading_test(compid_binding_symmetric
+  test_compid_binding_symmetric.cpp)
+
+# T032 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+add_threading_test(session_invariant_counter_witness
+  test_session_invariant_counter_witness.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

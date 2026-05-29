@@ -46,7 +46,12 @@
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_event.hpp>    // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
+// NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
+// → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
+// session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
+// We rely on the transitive include to access fixpp::tls::peer_identity.
 #include <functional>
 #include <limits>
 #include <memory>
@@ -662,6 +667,37 @@ struct SendingTimeStamp {
 
 }  // namespace
 
+// ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
+//
+// parse_cn_from_dn_local: extract the first "CN=" value from an OpenSSL
+// text-form DN string. Mirrors the implementation in
+// compid_authorization_policy.cpp (which is in an anonymous namespace there).
+// Declared locally here to avoid cross-TU linkage of an internal helper.
+// noexcept — pure string scanning.
+[[nodiscard]] static std::string_view
+parse_cn_from_dn_local(std::string_view dn) noexcept {
+    std::size_t pos = 0;
+    while (pos < dn.size()) {
+        const auto found = dn.find("CN=", pos);
+        if (found == std::string_view::npos) return {};
+        if (found > 0) {
+            const char pre = dn[found - 1];
+            if (pre != ',' && pre != ' ' && pre != '/') {
+                pos = found + 3;
+                continue;
+            }
+        }
+        const std::size_t vstart = found + 3;
+        if (vstart >= dn.size()) return {};
+        std::size_t vend = vstart;
+        while (vend < dn.size() && dn[vend] != ',') ++vend;
+        const std::string_view value = dn.substr(vstart, vend - vstart);
+        if (!value.empty()) return value;
+        pos = vend;
+    }
+    return {};
+}
+
 // T024/T025 (US1, Phase 3) + T032/T034/T035 (US2, Phase 4) +
 // T056 (US5, Phase 7): Inbound FSM dispatch.
 //
@@ -760,6 +796,50 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .by_peer_request = true
                     });
                 }
+            }
+
+            // 013 T036 US2: CompID authorization BEFORE FSM transition to
+            // LogonReceived/Active (FR-019/FR-020/FR-021/FR-024).
+            // Acceptor: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
+            // Authorization gate: runs when a peer_identity is available (either from
+            // the test seam cfg_.logon_peer_identity_override, or in production from
+            // handshake_result.peer_id after real TLS wiring). Without a peer_identity
+            // (no TLS / no override set), the gate is skipped to preserve backward
+            // compatibility with non-TLS session paths.
+            // [FR-019; FR-024 symmetric; data-model.md §D-10]
+            if (cfg_.logon_peer_identity_override.has_value()) {
+                const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
+                const std::string_view asserted_compid = cfg_.target_comp_id;
+                auto auth_r = cfg_.compid_authorization_policy.authorize(
+                    auth_pid, asserted_compid);
+                if (!auth_r) {
+                    // Authorization failed: emit session_event_compid_authorization_failed,
+                    // close transport, transition to Disconnected.
+                    // [FR-021; US2 AC6]
+                    const std::string_view cn_view =
+                        parse_cn_from_dn_local(auth_pid.subject_dn_view());
+                    emit_event(fixpp::session::session_event_compid_authorization_failed{
+                        .cn              = cn_view,
+                        .asserted_compid = asserted_compid,
+                        .expected_compids = {},
+                        .principal_source = fixpp::session::bound_principal::source::CN,
+                    });
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+                // Authorization succeeded: emit session_event_peer_identity_bound.
+                // bound_compid = the authorized CompID (= asserted_compid, which is
+                // cfg_.target_comp_id, a string with session lifetime).
+                // auth_r->value = view into the principal key (e.g. "TW-PROD-01").
+                // [FR-020; US2 AC2]
+                emit_event(fixpp::session::session_event_peer_identity_bound{
+                    .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
+                    .sans              = {},
+                    .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                    .cipher            = {},
+                    .bound_compid      = asserted_compid,
+                    .principal_source  = auth_r->from,
+                });
             }
 
             // Valid Logon + in-seq: transition to LogonReceived, then emit
@@ -1444,6 +1524,41 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Too-low or too-high → fatal (recovery deferred; I-2/I-4).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
+            }
+
+            // 013 T036 US2: CompID authorization BEFORE FSM transition to Active
+            // (FR-019/FR-020/FR-021/FR-024 symmetric initiator path).
+            // Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
+            // Same policy, same code path as acceptor (FR-024 symmetric coverage).
+            // [[feedback_half_restructure_symmetric_api]]: both arms wired in ONE pass.
+            if (cfg_.logon_peer_identity_override.has_value()) {
+                const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
+                const std::string_view asserted_compid = cfg_.target_comp_id;
+                auto auth_r = cfg_.compid_authorization_policy.authorize(
+                    auth_pid, asserted_compid);
+                if (!auth_r) {
+                    // Authorization failed: emit event, close transport, Disconnected.
+                    const std::string_view cn_view =
+                        parse_cn_from_dn_local(auth_pid.subject_dn_view());
+                    emit_event(fixpp::session::session_event_compid_authorization_failed{
+                        .cn              = cn_view,
+                        .asserted_compid = asserted_compid,
+                        .expected_compids = {},
+                        .principal_source = fixpp::session::bound_principal::source::CN,
+                    });
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+                // Authorization succeeded: emit session_event_peer_identity_bound.
+                // bound_compid = the authorized CompID (= asserted_compid = cfg_.target_comp_id).
+                emit_event(fixpp::session::session_event_peer_identity_bound{
+                    .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
+                    .sans              = {},
+                    .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                    .cipher            = {},
+                    .bound_compid      = asserted_compid,
+                    .principal_source  = auth_r->from,
+                });
             }
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).

@@ -25,6 +25,7 @@
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
+#include <fixpp/tls/peer_identity.hpp>                    // 013 T036 seam: logon_peer_identity_override
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
@@ -208,6 +209,16 @@ struct SessionConfig {
     // bindings before opening any session. COPY-CONSTRUCTIBLE per [data-model §E-3]
     // + 010 W-5 (CompIdAuthorizationPolicy pimpl supports copy). [data-model §E-4]
     CompIdAuthorizationPolicy compid_authorization_policy{};
+
+    // 013 T036 US2 — test-seam for injecting a scripted peer_identity at
+    // Logon time. When set, the Session Logon path uses this peer_identity
+    // in place of the real handshake_result.peer_id (which is unavailable
+    // with mock_transport). Production wiring (real TLS) leaves this empty
+    // and reads peer_id from the handshake_result. [FR-019/FR-024; D-10]
+    // Optional: std::nullopt means "use real handshake peer_id" (the default).
+    // Declared here (not under FIXPP_TEST_HOOKS) so SessionConfig copy
+    // semantics remain clean; no runtime penalty when nullopt.
+    std::optional<fixpp::tls::peer_identity> logon_peer_identity_override{};
 
     // FR-030 / 2h Appendix D §D.2 reservation — operator-supplied per-session
     // transport factory override. Default nullptr => engine substitutes
