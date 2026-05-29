@@ -50,6 +50,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>    // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
+#include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).

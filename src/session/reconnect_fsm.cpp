@@ -20,6 +20,10 @@
 #include <asio/this_coro.hpp>
 
 #include "fixpp/session/reconnect_fsm.hpp"
+// Full TransportFactory definition (forward-declared in the header to keep
+// tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
+// [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
+#include "fixpp/transport/transport_factory.hpp"
 
 namespace fixpp::session {
 

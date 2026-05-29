@@ -36,7 +36,16 @@
 #include "fixpp/session/resend_state.hpp"
 #include "fixpp/session/session_fsm.hpp"
 #include "fixpp/transport/reconnect_policy.hpp"
-#include "fixpp/transport/transport_factory.hpp"
+
+// TransportFactory is used only as a non-owning raw pointer in this header (ctor
+// arg + factory_ member); the full definition is needed only in reconnect_fsm.cpp
+// (factory_->make() + SslCtxConfig). Forward-declare here rather than #include
+// transport_factory.hpp: that header transitively pulls tls/pinset.hpp's
+// std::shared_mutex, and this header includes <asio/awaitable.hpp> — so the
+// include would drag a std::mutex type into the asio::awaitable closure of every
+// consumer (session.hpp), violating [const §XV.9] / [2f §6.6] (caught by the
+// check_no_std_mutex_corpus Tier-1 gate).
+namespace fixpp::transport { class TransportFactory; }
 
 namespace fixpp::session {
 
