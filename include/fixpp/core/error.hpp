@@ -277,9 +277,8 @@ enum class error : std::uint8_t {
     // slot 70: session_seqnum_gap_unrecoverable — DELETED pre-v1.0 per 013
     //   T006a Option D (2026-05-28). Too-high inbound seqnum transitions are
     //   handled by the 013 recovery sub-protocol (FR-009 ResendRequest path);
-    //   emit-sites migrated to session_test_request_unanswered (slot 74) as
-    //   a safe stand-in pending FR-009 wiring (Phase 3 T023–T026).
-    //   2e-recovery: migrate to FR-009 once 013 Phase 3 lands.
+    //   emit-sites migrated to FR-009 AwaitingResend path per 013 Phase 3
+    //   T023–T026 (discharged).
     //   Slot 70 is a NUMERIC HOLE per [const §X.4] — never renumber.
     session_sending_time_accuracy = 71,       // Clarification Q3, FR-013, [FIX-SL §4.2.3] —
                                               //   inbound SendingTime(52) diverges > MaxLatency
@@ -305,9 +304,7 @@ enum class error : std::uint8_t {
                                               //   (FSM-driven inbound liveness watch) —
                                               //   [FIX-SL §4.5.2]/§4.5.5 — inbound silence
                                               //   exceeded test_request_threshold (1×HeartBtInt,
-                                              //   D-8) without a Heartbeat echo; OR too-high
-                                              //   seqnum stand-in pending 013 FR-009 recovery
-                                              //   wiring (2e-recovery: Phase 3 T023–T026).
+                                              //   D-8) without a Heartbeat echo.
                                               //   Session unhealthy → disconnect.
                                               //   → FIXPP_ERR_SESSION_LIFECYCLE
     session_admin_not_supported = 75,         // FR-017, [FIX-SL §4.10] — deferred admin type
