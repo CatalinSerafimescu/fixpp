@@ -13,3 +13,5 @@ V	271231235959Z		100B	unknown	/CN=fixpp-leaf-rsa1024-negative
 V	271231235959Z		100C	unknown	/CN=fixpp-leaf-rsa16384-negative
 V	271231235959Z		100D	unknown	/CN=fixpp-leaf-san-65-negative
 V	271231235959Z		100E	unknown	/CN=fixpp-leaf-der-16KiB-negative
+V	251231235959Z		100F	unknown	/CN=fixpp-leaf-expired
+V	271231235959Z		1010	unknown	/CN=fixpp-leaf-multi-san

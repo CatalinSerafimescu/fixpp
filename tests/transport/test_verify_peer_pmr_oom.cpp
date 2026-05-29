@@ -96,6 +96,37 @@ Certificate make_valid_cert_with_san() {
     return c;
 }
 
+// ── Build a Certificate with 3 SAN-DNS entries (mirrors leaf_multi_san.pem) ──
+//
+// T024 / FR-014 / [[feedback_trap_throw_pmr_witness_enumerate_sites]]:
+// With 3 SAN-DNS entries, throw_on_nth_resource can exercise:
+//   N=1: boundary  — subject_dn.assign
+//   N=2: mid       — first san_dns_names_owned.emplace_back
+//   N=3: tail-1    — second san_dns_names_owned.emplace_back
+//   N=4: tail-2    — third san_dns_names_owned.emplace_back
+// All must surface as tls_pinset_alloc_failed (not terminate).
+// Mirrors leaf_multi_san.pem (3 SAN-DNS entries, T023 fixture).
+Certificate make_valid_cert_with_multi_san() {
+    static const std::string_view kSubjectDn{"CN=fixpp-leaf-multi-san"};
+    static const std::array<std::string_view, 3> kSanDnsArr{{
+        "host-1-fixpp-test-fixtures-very-long-subdomain.fixpp.example.invalid",
+        "host-2-fixpp-test-fixtures-very-long-subdomain.fixpp.example.invalid",
+        "host-3-fixpp-test-fixtures-very-long-subdomain.fixpp.example.invalid",
+    }};
+    static const std::span<const std::string_view> kSanDnsSpan{kSanDnsArr.data(), 3};
+    static const std::span<const std::string_view> kNoSanUri{};
+
+    Certificate c{};
+    c.subject_dn_    = kSubjectDn;
+    c.issuer_dn_     = kSubjectDn;
+    c.san_dns_names_ = kSanDnsSpan;
+    c.san_uris_      = kNoSanUri;
+    c.x509_version_  = 3;
+    c.alg_           = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_  = 2048;
+    return c;
+}
+
 // ── Build an SslCtxConfig that passes all verify_peer profile checks ─────────
 //
 // profile = mtls_ca: pinset is not checked (step 9 skipped).
@@ -126,6 +157,19 @@ error call_verify_peer_with_throwing_mr(std::pmr::memory_resource& mr) {
     // The process must still be alive here (no terminate).
     EXPECT_FALSE(result.has_value())
         << "verify_peer must reject on PMR OOM, not return a peer_identity";
+    return result.has_value() ? error{} : result.error();
+}
+
+// ── Helper: call verify_peer with multi-SAN cert and expect no terminate ──────
+error call_verify_peer_multi_san_with_throwing_mr(std::pmr::memory_resource& mr) {
+    const auto cert = make_valid_cert_with_multi_san();
+    const std::span<const Certificate> chain{&cert, 1};
+    SslCtxConfig cfg = make_cfg(&mr);
+
+    auto result = verify_peer(cfg, chain);
+
+    EXPECT_FALSE(result.has_value())
+        << "verify_peer must reject on PMR OOM (multi-SAN cert), not return a peer_identity";
     return result.has_value() ? error{} : result.error();
 }
 
@@ -178,4 +222,71 @@ TEST(VerifyPeerPmrOom, NoThrowSucceedsNormally) {
     EXPECT_TRUE(result.has_value())
         << "verify_peer must succeed when PMR does not exhaust; "
            "got error: " << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// T024 / FR-014 / [[feedback_trap_throw_pmr_witness_enumerate_sites]]:
+// Multi-SAN cert (mirrors leaf_multi_san.pem — T023 fixture, 3 SAN-DNS entries).
+//
+// Per the anti-pattern: a 1-SAN cert trips at boundary/mid/tail of its own
+// short allocation sequence. The multi-SAN cert EXTENDS the sequence:
+//   N=2 → MID: first san_dns_names_owned.emplace_back (after subject_dn)
+//   N=3 → TAIL-1: second san_dns_names_owned.emplace_back
+//   N=4 → TAIL-2: third san_dns_names_owned.emplace_back
+// Confirms verify_peer catches bad_alloc at EVERY SAN-DNS allocation site
+// and surfaces tls_pinset_alloc_failed (not terminate / crash).
+//
+// The multi-SAN fixture is required because with 1 SAN, N=3 is already the
+// san_uris_owned path (no DNS san left to witness). With 3 SAN-DNS entries,
+// N=3 and N=4 witness distinct mid-SAN-body sites: the 2nd and 3rd DNS SANs.
+// This is the FR-014 carry-forward from 012 RC#C per tasks.md T024.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Multi-SAN boundary: N=1 — first allocation (subject_dn.assign).
+TEST(VerifyPeerPmrOomMultiSan, BoundaryFirstAllocation) {
+    throw_on_nth_resource mr{/*throw_on=*/1};
+    const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
+    EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
+        << "multi-SAN boundary OOM (first alloc, subject_dn) must surface as tls_pinset_alloc_failed";
+}
+
+// Multi-SAN mid: N=2 — second allocation (first san_dns_names_owned.emplace_back).
+// This is the MID site in the peer_identity construction sequence.
+TEST(VerifyPeerPmrOomMultiSan, MidFirstSanDnsAllocation) {
+    throw_on_nth_resource mr{/*throw_on=*/2};
+    const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
+    EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
+        << "multi-SAN mid OOM (second alloc, first SAN-DNS) must surface as tls_pinset_alloc_failed";
+}
+
+// Multi-SAN tail-1: N=3 — third allocation (second san_dns_names_owned.emplace_back).
+TEST(VerifyPeerPmrOomMultiSan, TailSecondSanDnsAllocation) {
+    throw_on_nth_resource mr{/*throw_on=*/3};
+    const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
+    EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
+        << "multi-SAN tail-1 OOM (third alloc, second SAN-DNS) must surface as tls_pinset_alloc_failed";
+}
+
+// Multi-SAN tail-2: N=4 — fourth allocation (third san_dns_names_owned.emplace_back).
+TEST(VerifyPeerPmrOomMultiSan, TailThirdSanDnsAllocation) {
+    throw_on_nth_resource mr{/*throw_on=*/4};
+    const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
+    EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
+        << "multi-SAN tail-2 OOM (fourth alloc, third SAN-DNS) must surface as tls_pinset_alloc_failed";
+}
+
+// Multi-SAN no-throw: all allocations succeed, verify_peer returns a peer_identity.
+TEST(VerifyPeerPmrOomMultiSan, NoThrowSucceedsNormally) {
+    throw_on_nth_resource mr{/*throw_on=*/1000};
+    const auto cert = make_valid_cert_with_multi_san();
+    const std::span<const Certificate> chain{&cert, 1};
+    SslCtxConfig cfg = make_cfg(&mr);
+
+    auto result = verify_peer(cfg, chain);
+    EXPECT_TRUE(result.has_value())
+        << "multi-SAN cert: verify_peer must succeed when PMR does not exhaust";
+    if (result.has_value()) {
+        EXPECT_EQ(result->san_dns_names_owned.size(), 3u)
+            << "multi-SAN peer_identity must have 3 SAN-DNS entries";
+    }
 }

@@ -494,6 +494,32 @@ TEST(TlsValidationFailedTaxonomy, PinEmptyAtOpenEmitsEvent) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Sub-reason Cell C NOTE: tls_handshake_failed + sub_reason="sigalg_disallowed"
+//
+// T019/T020 analysis (014 FR-012): The leaf_ed25519.pem fixture exists (T019
+// done). However, the sigalg_disallowed rejection CANNOT be exercised via the
+// full asio_listener path:
+//
+// Root cause: fixpp's setup_ssl_ctx_ sets SSL_CTX_set1_sigalgs_list to only
+// RSA/ECDSA. In TLS 1.3, the server announces this list in CertificateRequest.
+// OpenSSL's TLS 1.3 client respects this list and will NOT send an Ed25519 cert
+// when Ed25519 is absent from the server's advertised sigalgs — the client sends
+// an empty Certificate instead. The server's verify_peer_trampoline is never
+// called with an Ed25519 cert, so no session_event_tls_validation_failed is
+// emitted. This was confirmed by empirical test (Ed25519 raw client connected,
+// server got transport_handshake_failed but events were empty).
+//
+// Resolution: sigalg_disallowed IS genuinely tested at the unit level in
+// test_verify_peer_t039.cpp::UnspecifiedSigAlgRejected (which calls verify_peer
+// directly with alg_=unspecified). The listener-event path for sigalg_disallowed
+// is a 015-era concern (would require either modifying asio_listener to support
+// a custom SSL_CTX injection OR adding Ed25519 to the sigalg list for test
+// purposes — neither is within 014's scope per the anti-runaway constraint).
+//
+// The fixture leaf_ed25519.pem is committed (T019 done) for future use.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Ring non-empty sanity: successful handshake produces NO tls_validation_failed.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TlsValidationFailedTaxonomy, SuccessfulHandshakeProducesNoEvent) {

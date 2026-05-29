@@ -69,12 +69,16 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     }
 
     if (seq > next_inbound_) {
-        // Too-high: stand-in error (I-4). session.cpp intercepts too-high
-        // BEFORE calling check_inbound in Active state (via reconnect_fsm_
-        // per 013 Phase 3 FR-009). This path is reached for LogonSent/
-        // LogonReceived states where too-high is still session-fatal.
-        // slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a.
-        co_return std::unexpected(error::session_test_request_unanswered);
+        // Too-high: session_seqnum_too_high (slot 120, 014 FR-016 / E-4).
+        // session.cpp intercepts too-high BEFORE calling check_inbound in
+        // Active state (via reconnect_fsm_ per 013 Phase 3 FR-009). This
+        // path is reached for LogonSent / LogonReceived states where too-high
+        // is still session-fatal. Slot 70 session_seqnum_gap_unrecoverable
+        // deleted per 013 T006a; slot 74 session_test_request_unanswered
+        // was the stand-in — replaced here by the semantically-correct slot.
+        // Zero behavioural change: all 3 callers (session.cpp) discard the
+        // returned code and disconnect (I-8; contracts/error_slots.hpp).
+        co_return std::unexpected(error::session_seqnum_too_high);
     }
 
     // In-sequence: advance exactly by 1 (I-2 zero drift).

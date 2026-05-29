@@ -1,6 +1,8 @@
 // tests/tls/test_verify_peer_t039.cpp
 // T038 — seam #14: verify_peer cert-parameter validation + FR-020a
 // short-circuit first-violation-hit order.
+// + T020 (014 FR-012): real Ed25519 fixture cell — sigalg_disallowed via
+// a cert loaded from leaf_ed25519.pem (T019 fixture) through file_cert_source.
 //
 // Design anchor: .specify/2g-tls.md v0.4 §6.5.1 + contracts/security_profile.hpp.
 // Spec anchors: FR-019 (DoS bounds), FR-020 (full enforcement),
@@ -27,9 +29,18 @@
 #include <chrono>
 #include <cstddef>
 #include <memory>
+#include <memory_resource>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
+
+// For T020 Ed25519 fixture loading.
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/io_context.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 
 using namespace fixpp::tls;
 using fixpp::core::error;
@@ -399,6 +410,10 @@ TEST(VerifyPeerT039, MtlsPinnedNullSnapshotFailsClosed) {
 // FR-020 envelope: a leaf whose key algorithm is neither RSA nor ECDSA
 // (Ed25519/Ed448/unknown EVP_PKEY) must be rejected. Without this, step 10
 // (cipher gate, TODO 2h) is the only hardening barrier and the cert passes.
+//
+// This cell uses a SYNTHETIC Certificate with alg_=unspecified to test the
+// verify_peer logic in isolation. The companion cell below (Ed25519Fixture)
+// tests the FULL path: real OpenSSL cert parsing → alg_ field → verify_peer.
 TEST(VerifyPeerT039, UnspecifiedSigAlgRejected) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
@@ -409,4 +424,98 @@ TEST(VerifyPeerT039, UnspecifiedSigAlgRejected) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::tls_handshake_failed);
     EXPECT_EQ(last_handshake_sub_reason(), "sigalg_disallowed");
+}
+
+// ── T020 (014 FR-012): real Ed25519 fixture → sigalg_disallowed ──────────────
+// Loads the leaf_ed25519.pem fixture (T019) via file_cert_source, which parses
+// the cert with OpenSSL. OpenSSL sets alg_ based on EVP_PKEY_base_id():
+//   EVP_PKEY_ED25519 → not RSA_PSS, not ECDSA → alg_ stays unspecified.
+//
+// This cell witnesses the REAL cert-parsing path, not a synthetic Certificate:
+//   file_cert_source::load_credentials() → local_credentials.leaf (Certificate)
+//   → verify_peer(cfg, chain) → step 1.5 sigalg check fires → sigalg_disallowed.
+//
+// [const §XII.3] allow-list: {rsa_pss, ecdsa} only. Ed25519 is outside it.
+// FR-012; 014 data-model E-5; tasks.md T020.
+//
+// Why unit-level (not integration/taxonomy): the full TLS handshake path cannot
+// deliver an Ed25519 cert to verify_peer_trampoline — OpenSSL TLS 1.3 filters
+// Ed25519 certs at the CertificateRequest protocol level (server's sigalg list
+// excludes Ed25519). The unit-level test is the appropriate witness location.
+// See test_tls_validation_failed_taxonomy.cpp T020 comment for the full analysis.
+//
+// GTEST_SKIP if FIXPP_TLS_FIXTURE_DIR is absent (CI without fixtures).
+TEST(VerifyPeerT039, Ed25519FixtureRejectedAsSigalgDisallowed) {
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kFixtureDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kFixtureDir = nullptr;
+#endif
+    const char* dir_env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+    const char* fixture_dir = dir_env ? dir_env : kFixtureDir;
+    if (!fixture_dir || fixture_dir[0] == '\0') {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    const std::string ed25519_pem = std::string(fixture_dir) + "/leaf_ed25519.pem";
+    const std::string ed25519_key = std::string(fixture_dir) + "/leaf_ed25519.key";
+    const std::string ca_pem      = std::string(fixture_dir) + "/ca.pem";
+
+    // Load the real Ed25519 cert via file_cert_source (same path as
+    // make_asio_tls_transport_factory → prepare_ssl_ctx_ → load_credentials).
+    fixpp::tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path        = ed25519_pem;
+    cs_cfg.private_key_path = ed25519_key;
+    cs_cfg.ca_bundle_path   = ca_pem;
+
+    auto cs_result = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
+    if (!cs_result.has_value()) {
+        GTEST_SKIP() << "leaf_ed25519.pem not available or failed to load";
+    }
+    auto cs = std::move(*cs_result);
+
+    // Synchronously run load_credentials() — same pattern as prepare_ssl_ctx_.
+    std::optional<fixpp::tls::local_credentials> creds_opt;
+    {
+        asio::io_context tmp_io;
+        std::optional<fixpp::core::expected_t<fixpp::tls::local_credentials>> creds_result;
+        asio::co_spawn(
+            tmp_io.get_executor(),
+            [&]() -> asio::awaitable<void> {
+                creds_result = co_await cs->load_credentials();
+            },
+            asio::detached);
+        tmp_io.run();
+        ASSERT_TRUE(creds_result.has_value()) << "load_credentials did not complete";
+        ASSERT_TRUE(creds_result->has_value()) << "load_credentials failed: "
+            << static_cast<int>(creds_result->error());
+        creds_opt = std::move(**creds_result);
+    }
+
+    // The leaf Certificate has alg_ set by OpenSSL parsing. For Ed25519,
+    // EVP_PKEY_base_id() returns EVP_PKEY_ED25519 — not RSA_PSS, not ECDSA —
+    // so alg_ stays at signature_algorithm::unspecified (the default).
+    const Certificate& leaf = creds_opt->leaf;
+
+    // Build a minimal SslCtxConfig (mtls_ca, no expiry check).
+    // cfg.clock = nullptr → step 8 (expiry) is skipped; the fixture has a valid
+    // date range (2025-01-01 .. 2027-12-31) but we skip for simplicity.
+    SslCtxConfig cfg;
+    cfg.profile = SecurityProfile::mtls_ca;
+    cfg.clock   = nullptr;
+    cfg.caps    = CertSourceCaps{};
+    cfg.cs      = cs;  // cert_source must remain alive (leaf views its storage)
+
+    // Call verify_peer with the real Ed25519 leaf.
+    // Step 1.5 (sigalg check): alg_ != rsa_pss && alg_ != ecdsa → fires.
+    auto r = verify_peer(cfg, {&leaf, 1});
+
+    ASSERT_FALSE(r.has_value())
+        << "verify_peer must REJECT Ed25519 cert (sigalg not in [const §XII.3] allow-list)";
+    EXPECT_EQ(r.error(), error::tls_handshake_failed)
+        << "Ed25519 cert must return tls_handshake_failed (GROUPING variant)";
+    EXPECT_EQ(last_handshake_sub_reason(), "sigalg_disallowed")
+        << "sub_reason must be 'sigalg_disallowed' for Ed25519 cert "
+           "(EVP_PKEY_base_id = EVP_PKEY_ED25519, not RSA_PSS/ECDSA)";
 }

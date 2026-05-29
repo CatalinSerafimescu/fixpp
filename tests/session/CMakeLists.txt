@@ -457,9 +457,24 @@ add_threading_test(compid_binding_principal_extraction
 add_threading_test(compid_binding_symmetric
   test_compid_binding_symmetric.cpp)
 
-# T032 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+# T032 + T021 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+# T021 (014 FR-013a): adds live loopback load_credentials() == 1 counter cell;
+# requires fixpp_transport + fixpp_tls + loopback_tls_fixture include path.
 add_threading_test(session_invariant_counter_witness
   test_session_invariant_counter_witness.cpp)
+target_link_libraries(session_invariant_counter_witness PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+)
+target_include_directories(session_invariant_counter_witness PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+)
+target_compile_definitions(session_invariant_counter_witness PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
 
 # RC#A (gate-b/r1) — fail-closed mTLS CompID footgun fix counter-test.
 # Asserts: mTLS profile + no peer_identity → Disconnected + event.

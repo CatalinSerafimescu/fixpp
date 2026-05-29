@@ -635,6 +635,33 @@ enum class error : std::uint8_t {
                                           //   (Renumbered 121→119 per /speckit-analyze F1/D1
                                           //   2026-05-28.)
                                           //   → FIXPP_ERR_SESSION_REJECT
+
+    // ── 014-transport-active-binding: 1 session_* variant per
+    //    contracts/error_slots.hpp + data-model.md §E-4.
+    //    Non-renumbering append at unused slot 120, next contiguous slot
+    //    after 013's session_* block (116–119) per [const §X.4].
+    //    Boundary confirmed: session_invalid_argument=119 is the 013 boundary;
+    //    014 starts at 120. Slot 70 remains a PERMANENT NUMERIC HOLE
+    //    (session_seqnum_gap_unrecoverable, deleted per 013 T006a Option D;
+    //    never renumber). Slot 74 (session_test_request_unanswered) keeps its
+    //    real meaning (FR-004 inbound liveness window) — 014 stops misusing it
+    //    as the seqnum-too-high stand-in (see seqnum_manager.cpp).
+    //
+    //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
+    //    surface added by this feature — contracts/error_slots.hpp):
+    //      FIXPP_ERR_SESSION_FATAL ← { session_seqnum_too_high } (new member)
+    session_seqnum_too_high = 120,        // FR-016 / E-4 — inbound seqnum > next_expected
+                                          //   in LogonSent / LogonReceived states where
+                                          //   too-high is session-fatal (Active-state
+                                          //   too-high is intercepted earlier →
+                                          //   AwaitingResend per 013 FR-009). Replaces
+                                          //   the slot-74 stand-in
+                                          //   (session_test_request_unanswered) that was
+                                          //   returned by SeqnumManager::check_inbound's
+                                          //   too-high branch as a semantic misnomer.
+                                          //   Zero behavioural change — all 3 production
+                                          //   callers discard the code (session.cpp).
+                                          //   → FIXPP_ERR_SESSION_FATAL
 };
 
 template <class T>

@@ -4,16 +4,24 @@
 // tests/fuzz/fuzz_transport_handshake.cpp
 // T025 — [2h §9 seam #12] — libFuzzer handshake harness.
 //
-// Feeds scripted partial TLS records via mock_transport. Verifies that
-// async_handshake completes transport_handshake_failed on adversarial input
-// and that no crash / UAF of the captured pinset snapshot occurs.
+// FR-015 catalogue / scope entry (re-labelled 014 T025 — doc-only):
+//
+// CURRENT SCOPE (post-014 MVP): adversarial-input crash-safety witness at the
+//   transport-layer boundary. The harness validates that the stub boundary is
+//   crash-free under ASan/UBSan. The stub exercises the TLS record-header
+//   parsing invariant (no crash on any byte sequence).
+//
+// DEFERRED SCOPE (015 + mock_transport T041):
+//   Feed scripted partial TLS records via mock_transport (currently a MINIMAL
+//   LOCAL STUB; see body). Verify async_handshake completes with
+//   transport_handshake_failed on adversarial input and that no crash / UAF
+//   of the captured pinset snapshot occurs. Replace the stub_handshake call
+//   with the real mock_transport wiring once T041 ships.
 //
 // DEPENDENCY: US4 T041 mock_transport (include/fixpp/transport/test/mock_transport.hpp).
-// Until T041 ships, this harness uses a MINIMAL LOCAL STUB. The stub's
-// async_handshake returns transport_handshake_failed when the scripted TLS
-// record is adversarial (cannot be parsed by OpenSSL).
+// Until T041 ships, this harness uses a MINIMAL LOCAL STUB.
 //
-// In the production path (T026/T027):
+// In the production path (post-T041):
 //   asio_tls_transport::async_handshake runs OpenSSL's state machine against
 //   the provided byte stream. Adversarial TLS records cause SSL_do_handshake()
 //   to return an OpenSSL error → transport_handshake_failed.

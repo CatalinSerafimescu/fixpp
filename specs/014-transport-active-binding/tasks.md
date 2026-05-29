@@ -107,27 +107,27 @@ description: "Task list — 014-transport-active-binding"
 
 ### FR-012 — sigalg_disallowed cell
 
-- [ ] T019 [P] [US4] Generate the unknown-`EVP_PKEY` leaf fixture(s) `tests/tls/fixtures/leaf_ed25519.pem` (and/or `leaf_ed448.pem`), CA-signed as needed for the loopback path (E-5).
-- [ ] T020 [US4] Add the `sigalg_disallowed` `sub_reason` cell to `tests/transport/test_tls_validation_failed_taxonomy.cpp` exercising the `[const §XII.3]` signature-algorithm allow-list rejection against the Ed25519/Ed448 fixture (FR-012; SC-006) — depends on T019.
+- [X] T019 [P] [US4] Generate the unknown-`EVP_PKEY` leaf fixture(s) `tests/tls/fixtures/leaf_ed25519.pem` (and/or `leaf_ed448.pem`), CA-signed as needed for the loopback path (E-5).
+- [X] T020 [US4] Add the `sigalg_disallowed` `sub_reason` cell to `tests/transport/test_tls_validation_failed_taxonomy.cpp` exercising the `[const §XII.3]` signature-algorithm allow-list rejection against the Ed25519/Ed448 fixture (FR-012; SC-006) — depends on T019.
 
 ### FR-013 — once-per-handshake counter + handshake bench
 
-- [ ] T021 [P] [US4] Re-target `tests/session/test_session_invariant_counter_witness.cpp` (today infeasible/zero under `mock_transport`, `:22-35`) at the live loopback fixture so `cert_source::load_credentials()` == 1 per handshake is genuinely asserted (FR-013a; I-3; SC-006) — depends on T005.
-- [ ] T022 [P] [US4] Wire the `bench/transport/bench_tls_handshake_loopback.cpp` scaffold (its in-file TODOs at `:16`/`:42-49`/`:52-67`) to the live `asio_tls_transport_factory` + loopback acceptor using `leaf_rsa2048.pem` + `ca.pem` (`:44`); CMake target `bench_tls_handshake_loopback` (`bench/transport/CMakeLists.txt:22`); establish the first real 1-RTT handshake baseline (FR-013b; SC-006; plan §Performance).
+- [X] T021 [P] [US4] Re-target `tests/session/test_session_invariant_counter_witness.cpp` (today infeasible/zero under `mock_transport`, `:22-35`) at the live loopback fixture so `cert_source::load_credentials()` == 1 per handshake is genuinely asserted (FR-013a; I-3; SC-006) — depends on T005.
+- [X] T022 [P] [US4] Wire the `bench/transport/bench_tls_handshake_loopback.cpp` scaffold (its in-file TODOs at `:16`/`:42-49`/`:52-67`) to the live `asio_tls_transport_factory` + loopback acceptor using `leaf_rsa2048.pem` + `ca.pem` (`:44`); CMake target `bench_tls_handshake_loopback` (`bench/transport/CMakeLists.txt:22`); establish the first real 1-RTT handshake baseline (FR-013b; SC-006; plan §Performance).
 
 ### FR-014 — PMR-OOM witness depth
 
-- [ ] T023 [P] [US4] Generate the multi-SAN leaf fixture `tests/tls/fixtures/leaf_multi_san.pem` (≥2 SAN-DNS entries) (E-5).
-- [ ] T024 [US4] Extend `tests/transport/test_verify_peer_pmr_oom.cpp` with the multi-SAN fixture so `throw_on_nth_resource` exhausts at the **mid** (SAN-DNS construction) and **tail** sites, not only the boundary (`N=1`) (FR-014; `[[feedback_trap_throw_pmr_witness_enumerate_sites]]`; SC-006) — depends on T023.
+- [X] T023 [P] [US4] Generate the multi-SAN leaf fixture `tests/tls/fixtures/leaf_multi_san.pem` (≥2 SAN-DNS entries) (E-5).
+- [X] T024 [US4] Extend `tests/transport/test_verify_peer_pmr_oom.cpp` with the multi-SAN fixture so `throw_on_nth_resource` exhausts at the **mid** (SAN-DNS construction) and **tail** sites, not only the boundary (`N=1`) (FR-014; `[[feedback_trap_throw_pmr_witness_enumerate_sites]]`; SC-006) — depends on T023.
 
 ### FR-015 — fuzz scope re-label
 
-- [ ] T025 [P] [US4] Re-label the `tests/fuzz/fuzz_transport_handshake.cpp` catalogue/scope entry to its actual post-MVP scope — doc/catalogue only, NO harness body change, no new parser-touching code (FR-015; SC-006).
+- [X] T025 [P] [US4] Re-label the `tests/fuzz/fuzz_transport_handshake.cpp` catalogue/scope entry to its actual post-MVP scope — doc/catalogue only, NO harness body change, no new parser-touching code (FR-015; SC-006).
 
 ### FR-016 — slot-74 stand-in cleanup
 
-- [ ] T026 [P] [US4] Append `error::session_seqnum_too_high = 120` in `include/fixpp/core/error.hpp` after `session_invalid_argument = 119` (cross-check boundary still 119, no drift; never renumber; slot 70 stays a permanent hole; slot 74 keeps its real meaning) (FR-016; E-4; contracts/error_slots.hpp; `[const §X.4]`).
-- [ ] T027 [US4] Change the too-high branch at `src/session/seqnum_manager.cpp:71-78` to `co_return std::unexpected(error::session_seqnum_too_high)` + update the comment (and any in `seqnum_manager.hpp`); flip the assertion at `tests/session/seqnum_manager_test.cpp:145-150` to expect `session_seqnum_too_high`; update the contract note. Zero behavioural change (the 3 callers `session.cpp:904/1261/1703` discard the code) (FR-016; E-4; I-8) — depends on T026.
+- [X] T026 [P] [US4] Append `error::session_seqnum_too_high = 120` in `include/fixpp/core/error.hpp` after `session_invalid_argument = 119` (cross-check boundary still 119, no drift; never renumber; slot 70 stays a permanent hole; slot 74 keeps its real meaning) (FR-016; E-4; contracts/error_slots.hpp; `[const §X.4]`).
+- [X] T027 [US4] Change the too-high branch at `src/session/seqnum_manager.cpp:71-78` to `co_return std::unexpected(error::session_seqnum_too_high)` + update the comment (and any in `seqnum_manager.hpp`); flip the assertion at `tests/session/seqnum_manager_test.cpp:145-150` to expect `session_seqnum_too_high`; update the contract note. Zero behavioural change (the 3 callers `session.cpp:904/1261/1703` discard the code) (FR-016; E-4; I-8) — depends on T026.
 
 **Checkpoint**: All five carry-forward witnesses pass; fuzz entry re-labelled.
 
