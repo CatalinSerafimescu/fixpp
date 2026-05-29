@@ -63,7 +63,7 @@ description: "Task list — 014-transport-active-binding"
 
 **Goal**: Swap the authorization identity **source** to the real `handshake_result.peer_id` on the live initiator path, making the already-fail-CLOSED mTLS gate *operable* (admit on-list, fail-close off-list/absent) and removing the fabricated stand-in on that path. (FR-006..008; E-2; C2)
 
-**Independent Test**: On the live initiator path confirm the identity reaching `authorize()` is the real handshake `peer_id` (no fabricated payload); via the `logon_peer_identity_override` binding-logic seam drive on-list (admit) / off-list / absent (fail-closed: `session_compid_unauthorized` + `compid_authorization_failed`, not Active).
+**Independent Test**: On the live initiator path confirm the identity reaching `authorize()` is the real handshake `peer_id` (no fabricated payload); via the `logon_peer_identity_override` binding-logic seam drive on-list (admit) / off-list / absent (fail-closed: `session_compid_unauthorized` + `session_event_compid_authorization_failed`, not Active).
 
 ### Tests for User Story 2 (write FIRST, confirm FAIL) ⚠️
 
@@ -73,7 +73,7 @@ description: "Task list — 014-transport-active-binding"
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] In `src/session/reconnect_fsm.cpp` thread the captured `handshake_result.peer_id` into the reconnect-path authorization decision (E-1 step 7): on a binding-policy fail-closed emit the inherited `compid_authorization_failed` + `session_compid_unauthorized`, release the transport, **count one attempt and continue** (retry-to-cap, NOT the terminal `Disconnected` of 013's open-Logon path); only loop-exhaustion is terminal. Pass `bound_principal` to the success handoff. (FR-006/007; E-1 step 7; E-2; C2; Q1) — depends on T009/T010.
+- [ ] T014 [US2] In `src/session/reconnect_fsm.cpp` thread the captured `handshake_result.peer_id` into the reconnect-path authorization decision (E-1 step 7): on a binding-policy fail-closed emit the inherited `session_event_compid_authorization_failed` + `session_compid_unauthorized`, release the transport, **count one attempt and continue** (retry-to-cap, NOT the terminal `Disconnected` of 013's open-Logon path); only loop-exhaustion is terminal. Pass `bound_principal` to the success handoff. (FR-006/007; E-1 step 7; E-2; C2; Q1) — depends on T009/T010.
 - [ ] T015 [US2] In `src/session/session.cpp` add the live-identity arm to the three-way guard at the **initiator** site `:1757-1803`: identity SOURCE = FSM-held live `handshake_result.peer_id` ahead of the override-seam arm; keep the override-seam arm + the `else if (is_mtls)` fail-CLOSED arm + the non-mTLS permissive skip; remove the residual fabricated auth payload on the live path (FR-008). KEEP the `logon_peer_identity_override` seam. The acceptor site `:953-1008` stays seam-only — **document the acceptor live-binding deferral to 015** (clarified asymmetry per `[[feedback_half_restructure_symmetric_api]]`; T-041 stays `implementing`). (FR-006/007/008; E-2; C2) — depends on T014.
 
 **Checkpoint**: Under a binding policy the live identity admits the on-list peer and fails closed otherwise on the initiator path; auth-fail retries to cap.

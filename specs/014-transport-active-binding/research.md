@@ -38,7 +38,7 @@ All `NEEDS CLARIFICATION` resolved. 014 is a realization of three 013 stubs + fi
 
 ## R4 — Authorization-failure treatment in the reconnect loop (Clarifications Q1)
 
-**Decision.** **Reason-agnostic retry-to-cap.** An `authorize()` failure on a reconnect attempt (off-list / absent identity under a binding policy) emits the inherited fail-closed signals (`session_compid_unauthorized` + `compid_authorization_failed`) **and** consumes exactly one attempt, backing off per the schedule and retrying until the `ReconnectPolicy` cap, then terminal-disconnected — identical to a connect or handshake failure. No fail-fast, no distinct cap, **no new terminal cause/code**.
+**Decision.** **Reason-agnostic retry-to-cap.** An `authorize()` failure on a reconnect attempt (off-list / absent identity under a binding policy) emits the inherited fail-closed signals (`session_compid_unauthorized` + `session_event_compid_authorization_failed`) **and** consumes exactly one attempt, backing off per the schedule and retrying until the `ReconnectPolicy` cap, then terminal-disconnected — identical to a connect or handshake failure. No fail-fast, no distinct cap, **no new terminal cause/code**.
 
 **Rationale.** Matches the spec's stated working default and the resolved Clarification. Reference-engine sweep: QuickFIX-cpp / QuickFIX-J reconnect is reason-agnostic (a rejected/invalid Logon still reschedules a reconnect via the configured interval) — there is no "auth failure stops forever" precedent. Reason-agnostic is also the simplest FSM wiring (one failure path, one counter) and avoids inventing a new error slot.
 
