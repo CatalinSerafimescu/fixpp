@@ -131,10 +131,12 @@ public:
         return {};
     }
 
-    // Returns current source BY VALUE (strong-ref).
+    // 014 T004 — C4: cert_source_snapshot() promoted to pure-virtual on the
+    // abstract TransportFactory base; this override was already present.
+    // Added override keyword. Returns current source BY VALUE (strong-ref).
     // [[feedback_weak_ptr_cache_needs_owning_context]]
     [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept {
+    cert_source_snapshot() const noexcept override {
         return cert_source_slot_.load(std::memory_order_acquire);
     }
 };

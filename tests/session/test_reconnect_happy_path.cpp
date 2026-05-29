@@ -344,6 +344,15 @@ public:
     {
         return {};
     }
+
+    // 014 T004 — C4: cert_source_snapshot() promoted to pure-virtual on the
+    // abstract TransportFactory base; trivial override returns nullptr (this
+    // factory holds no cert_source; only make() call-count is tested here).
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
+    cert_source_snapshot() const noexcept override
+    {
+        return nullptr;
+    }
 };
 
 }  // namespace (inner)
