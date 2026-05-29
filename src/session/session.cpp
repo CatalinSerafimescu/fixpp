@@ -147,6 +147,38 @@ std::span<const SessionEvent> Session::recent_events() const noexcept {
                                          std::min(events_count_, kSessionEventRingCapacity)};
 }
 
+// ── 013 T044 — FR-030 / D-11 — Operator-facing credential rotation forwarder ──
+//
+// Pure forwarder: validates nullptr + factory-present, then delegates to
+// cfg_.transport_factory_override->reload_credentials(new_source).
+// Session is forwarder-only — no direct atomic-swap per
+// [[feedback_half_restructure_symmetric_api]] (factory IS the symmetric authority
+// for both initiator and acceptor rotation paths).
+//
+// session_event_credentials_rotated emission is DEFERRED to 014:
+//   The event must fire BEFORE the first handshake on the rotated cert_source
+//   (data-model E-7) and must carry the real cert SHA-256 fingerprint (old + new),
+//   which is only available inside the async load_credentials() path. Both the
+//   correct emit-site (drive_reconnect_attempt, before TransportFactory::make)
+//   and the fingerprint computation require the live-transport lifecycle.
+//   ReconnectFsm::drive_reconnect_attempt() is a stub in 013; wiring lands in
+//   the 014 transport-active / interop slice.
+//   [[project_013_carryforwards_to_014]] / data-model §E-7 / FR-032.
+//
+// [FR-030 / FR-033 / US4 AC1+AC2 / D-11]
+fixpp::core::expected_t<void>
+Session::reload_credentials(
+    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept
+{
+    if (!new_source) {
+        return std::unexpected{fixpp::core::error::session_invalid_argument};
+    }
+    if (!cfg_.transport_factory_override) {
+        return std::unexpected{fixpp::core::error::session_invalid_argument};
+    }
+    return cfg_.transport_factory_override->reload_credentials(std::move(new_source));
+}
+
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
 // Marked so a later phase's task body substitutes (not appends to) these.
 

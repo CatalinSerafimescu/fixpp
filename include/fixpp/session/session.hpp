@@ -260,6 +260,26 @@ public:
     // [data-model §E-6 / contracts/session_ext.hpp]
     [[nodiscard]] std::span<const SessionEvent> recent_events() const noexcept;
 
+    // 013 T044 — FR-030 / D-11 — Operator-facing credential rotation forwarder.
+    // Pure forwarder: validates nullptr + factory-present, then delegates to
+    // cfg_.transport_factory_override->reload_credentials(new_source).
+    // Returns error::session_invalid_argument (slot 119) if new_source is nullptr
+    // or no transport_factory_override is configured. NO direct atomic-swap in
+    // Session — the factory IS the symmetric authority per
+    // [[feedback_half_restructure_symmetric_api]].
+    // Active session / Transport state UNAFFECTED — only the NEXT
+    // TransportFactory::make() call (next reconnect cycle) observes the rotated
+    // source per FR-031.
+    //
+    // session_event_credentials_rotated is DEFERRED to 014: the event must fire
+    // BEFORE the first handshake on the rotated cert_source (data-model E-7) with
+    // the real cert SHA-256 fingerprint (only available in async load_credentials).
+    // Both the correct emit-site (drive_reconnect_attempt) and fingerprint require
+    // the live-transport lifecycle, which is a stub in 013.
+    // [[project_013_carryforwards_to_014]] / FR-032 / data-model §E-7.
+    [[nodiscard]] fixpp::core::expected_t<void>
+    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
+
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
     // fromApp,store op,clock wake,transport completion}) is submitted onto

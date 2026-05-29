@@ -467,6 +467,13 @@ add_threading_test(session_event_ring_overflow
   test_session_event_ring_overflow.cpp)
 target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
 
+# ── 013-session-reconnect-binding Phase 6 (US4) — T042 credential rotation ───
+# FR-030 / FR-031 / FR-032 / FR-033 / US4 AC1+AC2+AC3 / Clarifications Q4=A
+# Tests: null-reject, forwarder-delegates, strong-ref invariant, call-count witness.
+# TSan critical: atomic-swap + snapshot read race-free under cross-strand calls.
+add_threading_test(session_reload_credentials_in_flight
+  test_reload_credentials_in_flight.cpp)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
