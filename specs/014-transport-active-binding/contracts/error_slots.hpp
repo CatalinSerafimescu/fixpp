@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 fixpp contributors
 //
-// CONTRACT FRAGMENT — the ONLY genuine public-surface delta in feature
-// 014-transport-active-binding. Published by /speckit-plan (Phase 1). The
+// CONTRACT FRAGMENT — ONE of the two genuine public-surface deltas in feature
+// 014-transport-active-binding (this error-enum append; the other is the
+// TransportFactory::cert_source_snapshot() pure-virtual promotion, documented
+// in realized-behavior.md C4). Published by /speckit-plan (Phase 1). The
 // implementing change lands in include/fixpp/core/error.hpp. NO behavioural
 // change is permitted between this contract and the implementing header
 // without re-running Gate A.
