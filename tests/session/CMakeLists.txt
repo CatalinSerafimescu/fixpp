@@ -458,6 +458,12 @@ add_threading_test(compid_binding_symmetric
 add_threading_test(session_invariant_counter_witness
   test_session_invariant_counter_witness.cpp)
 
+# RC#A (gate-b/r1) — fail-closed mTLS CompID footgun fix counter-test.
+# Asserts: mTLS profile + no peer_identity → Disconnected + event.
+# Asserts: one_way_ca (non-mTLS) + no override → still reaches Active.
+add_threading_test(compid_binding_mtls_fail_closed
+  test_compid_binding_mtls_fail_closed.cpp)
+
 # ── 013-session-reconnect-binding Phase 5 (US3) — T040 ring-overflow tests ───
 # FR-035 / data-model §E-6: both Session and ListenerEvents rings have capacity
 # kSessionEventRingCapacity = 16; emit 17 → oldest dropped, last-16 retained.

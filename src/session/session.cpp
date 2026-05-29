@@ -919,45 +919,74 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // 013 T036 US2: CompID authorization BEFORE FSM transition to
             // LogonReceived/Active (FR-019/FR-020/FR-021/FR-024).
             // Acceptor: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
-            // Authorization gate: runs when a peer_identity is available (either from
-            // the test seam cfg_.logon_peer_identity_override, or in production from
-            // handshake_result.peer_id after real TLS wiring). Without a peer_identity
-            // (no TLS / no override set), the gate is skipped to preserve backward
-            // compatibility with non-TLS session paths.
+            //
+            // Three-way guard (RC#A gate-b/r1 — fail-closed footgun fix):
+            //   (1) logon_peer_identity_override set → authorize as today (test seam).
+            //   (2) mTLS variant (mtls_ca / mtls_pinned) + no override available →
+            //       FAIL CLOSED: peer_identity is required but unavailable. In
+            //       production the 014 slice will supply handshake_result.peer_id here;
+            //       until then, silent-admit of any cert→CompID pairing is a footgun.
+            //       Emit session_event_compid_authorization_failed + Disconnected.
+            //       [FR-019; FR-021; FR-023; triage RC#A]
+            //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip:
+            //       no client cert → CompID binding is inapplicable.
+            //       Backward compat for one_way_ca and non-TLS session paths.
             // [FR-019; FR-024 symmetric; data-model.md §D-10]
-            if (cfg_.logon_peer_identity_override.has_value()) {
-                const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
-                const std::string_view asserted_compid = cfg_.target_comp_id;
-                auto auth_r = cfg_.compid_authorization_policy.authorize(
-                    auth_pid, asserted_compid);
-                if (!auth_r) {
-                    // Authorization failed: emit session_event_compid_authorization_failed,
-                    // close transport, transition to Disconnected.
-                    // [FR-021; US2 AC6]
-                    const std::string_view cn_view =
-                        parse_cn_from_dn_local(auth_pid.subject_dn_view());
+            {
+                const bool is_mtls =
+                    cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
+                    cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+
+                if (cfg_.logon_peer_identity_override.has_value()) {
+                    // (1) Test seam: authorize against the injected peer_identity.
+                    const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
+                    auto auth_r = cfg_.compid_authorization_policy.authorize(
+                        auth_pid, asserted_compid);
+                    if (!auth_r) {
+                        // Authorization failed: emit session_event_compid_authorization_failed,
+                        // close transport, transition to Disconnected.
+                        // [FR-021; US2 AC6]
+                        const std::string_view cn_view =
+                            parse_cn_from_dn_local(auth_pid.subject_dn_view());
+                        emit_event(fixpp::session::session_event_compid_authorization_failed{
+                            .cn              = cn_view,
+                            .asserted_compid = asserted_compid,
+                            .expected_compids = {},
+                            .principal_source = fixpp::session::bound_principal::source::CN,
+                        });
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Authorization succeeded: emit session_event_peer_identity_bound.
+                    // bound_compid = the authorized CompID (= asserted_compid, which is
+                    // cfg_.target_comp_id, a string with session lifetime).
+                    // auth_r->value = view into the principal key (e.g. "TW-PROD-01").
+                    // [FR-020; US2 AC2]
+                    emit_event(fixpp::session::session_event_peer_identity_bound{
+                        .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
+                        .sans              = {},
+                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                        .cipher            = {},
+                        .bound_compid      = asserted_compid,
+                        .principal_source  = auth_r->from,
+                    });
+                } else if (is_mtls) {
+                    // (2) mTLS + no peer_identity available → fail CLOSED.
+                    // Peer_identity required for mTLS CompID binding but unavailable
+                    // (production wiring deferred to 014; test seam not set).
+                    // Silent-admit here would bake a fail-open default. [triage RC#A]
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
-                        .cn              = cn_view,
-                        .asserted_compid = asserted_compid,
+                        .cn               = {},
+                        .asserted_compid  = asserted_compid,
                         .expected_compids = {},
                         .principal_source = fixpp::session::bound_principal::source::CN,
                     });
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-                // Authorization succeeded: emit session_event_peer_identity_bound.
-                // bound_compid = the authorized CompID (= asserted_compid, which is
-                // cfg_.target_comp_id, a string with session lifetime).
-                // auth_r->value = view into the principal key (e.g. "TW-PROD-01").
-                // [FR-020; US2 AC2]
-                emit_event(fixpp::session::session_event_peer_identity_bound{
-                    .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
-                    .sans              = {},
-                    .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                    .cipher            = {},
-                    .bound_compid      = asserted_compid,
-                    .principal_source  = auth_r->from,
-                });
+                // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
             }
 
             // Valid Logon + in-seq: transition to LogonReceived, then emit
@@ -1616,34 +1645,57 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
             // Same policy, same code path as acceptor (FR-024 symmetric coverage).
             // [[feedback_half_restructure_symmetric_api]]: both arms wired in ONE pass.
-            if (cfg_.logon_peer_identity_override.has_value()) {
-                const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
-                const std::string_view asserted_compid = cfg_.target_comp_id;
-                auto auth_r = cfg_.compid_authorization_policy.authorize(
-                    auth_pid, asserted_compid);
-                if (!auth_r) {
-                    // Authorization failed: emit event, close transport, Disconnected.
-                    const std::string_view cn_view =
-                        parse_cn_from_dn_local(auth_pid.subject_dn_view());
+            //
+            // Three-way guard (RC#A gate-b/r1 — symmetric to acceptor arm above):
+            //   (1) logon_peer_identity_override set → authorize as today.
+            //   (2) mTLS + no override → fail CLOSED (same semantics as acceptor).
+            //   (3) Non-mTLS → skip (backward compat).
+            {
+                const bool is_mtls =
+                    cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
+                    cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+
+                if (cfg_.logon_peer_identity_override.has_value()) {
+                    const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
+                    auto auth_r = cfg_.compid_authorization_policy.authorize(
+                        auth_pid, asserted_compid);
+                    if (!auth_r) {
+                        // Authorization failed: emit event, close transport, Disconnected.
+                        const std::string_view cn_view =
+                            parse_cn_from_dn_local(auth_pid.subject_dn_view());
+                        emit_event(fixpp::session::session_event_compid_authorization_failed{
+                            .cn              = cn_view,
+                            .asserted_compid = asserted_compid,
+                            .expected_compids = {},
+                            .principal_source = fixpp::session::bound_principal::source::CN,
+                        });
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Authorization succeeded: emit session_event_peer_identity_bound.
+                    // bound_compid = the authorized CompID (= asserted_compid = cfg_.target_comp_id).
+                    emit_event(fixpp::session::session_event_peer_identity_bound{
+                        .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
+                        .sans              = {},
+                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                        .cipher            = {},
+                        .bound_compid      = asserted_compid,
+                        .principal_source  = auth_r->from,
+                    });
+                } else if (is_mtls) {
+                    // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
-                        .cn              = cn_view,
-                        .asserted_compid = asserted_compid,
+                        .cn               = {},
+                        .asserted_compid  = asserted_compid,
                         .expected_compids = {},
                         .principal_source = fixpp::session::bound_principal::source::CN,
                     });
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-                // Authorization succeeded: emit session_event_peer_identity_bound.
-                // bound_compid = the authorized CompID (= asserted_compid = cfg_.target_comp_id).
-                emit_event(fixpp::session::session_event_peer_identity_bound{
-                    .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
-                    .sans              = {},
-                    .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                    .cipher            = {},
-                    .bound_compid      = asserted_compid,
-                    .principal_source  = auth_r->from,
-                });
+                // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
             }
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
