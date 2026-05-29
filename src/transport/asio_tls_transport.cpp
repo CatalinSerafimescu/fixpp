@@ -62,6 +62,7 @@
 #include <fixpp/tls/pinset.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/listener_events.hpp>   // 013 T039: ListenerEvents emit
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 
@@ -113,6 +114,26 @@ struct HandshakeCtx {
 
     // Trampoline result: true iff verify_peer accepted all depths.
     bool accepted{false};
+
+    // 013 T039 — precise tls_* error code captured by the trampoline when
+    // verify_peer rejects. Populated only when accepted==false AND the rejection
+    // came from verify_peer (not from OOM or other exception path).
+    // async_handshake reads this to emit session_event_tls_validation_failed.
+    // [FR-026 / FR-027 / D-15]
+    std::optional<fixpp::core::error> verify_error;
+
+    // 013 T039 — copy of last_handshake_sub_reason() at the moment verify_peer
+    // returned. Captured here (by-value copy into std::string) so the value
+    // survives past the trampoline return and across any thread-boundary before
+    // async_handshake reads it. [data-model §E-5 sub_reason capture semantics]
+    std::string sub_reason_copy;
+
+    // 013 T039 — pointer to the listener's ListenerEvents ring. Set by
+    // asio_tls_transport when a ListenerEvents is associated (acceptor side).
+    // Null on initiator side — no emission on that path.
+    // Lifetime: ListenerEvents is owned by asio_listener::Config which outlives
+    // the transport. [FR-028 pre-Session event surface]
+    fixpp::transport::ListenerEvents* listener_events{nullptr};
 };
 
 // Map an ASN1_TIME to a chrono::system_clock::time_point.
@@ -479,6 +500,17 @@ int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noex
     auto result = fixpp::tls::verify_peer(hctx->augmented_cfg, peer_chain);
     if (!result) {
         hctx->accepted = false;
+        // 013 T039: capture the precise tls_* error code + sub_reason BY COPY.
+        // async_handshake reads these AFTER the handshake completes to emit
+        // session_event_tls_validation_failed. The copy happens here inside the
+        // trampoline (same thread); the values are then stable for the
+        // async_handshake resume. [FR-027 / data-model §E-5]
+        hctx->verify_error = result.error();
+        // Copy last_handshake_sub_reason() into a std::string (not a view) so
+        // the value survives the thread-local being reset by any subsequent call.
+        // String literal storage is static, but defensive copy is required per
+        // data-model §E-5 sub_reason capture semantics.
+        hctx->sub_reason_copy = std::string{fixpp::tls::last_handshake_sub_reason()};
         return 0;
     }
 
@@ -988,6 +1020,9 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     hctx.augmented_cfg = cfg;
     hctx.augmented_cfg.pinset_snapshot = captured_pinset_;
     hctx.mr = (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
+    // 013 T039: propagate listener_events_ so async_handshake can emit after
+    // the handshake completes (trampoline captures error; C++ side emits).
+    hctx.listener_events = listener_events_;
 
     // ── Construct the ssl_stream (lazy at handshake start) ────────────────────
     ssl_stream_.emplace(socket_, *ssl_ctx_);
@@ -1031,10 +1066,45 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
             }
             co_return std::unexpected{E::transport_handshake_timeout};
         }
+        // 013 T039: if the trampoline captured a precise tls_* error code
+        // (verify_peer rejection path), emit session_event_tls_validation_failed
+        // to the listener's event ring BEFORE returning. The handshake_ec is the
+        // OpenSSL-level SSL error that resulted from the trampoline returning 0.
+        // We emit here (not in the !hctx.accepted block below) because
+        // OpenSSL errors from a rejected peer cert reach this branch FIRST.
+        // [013 FR-026 / FR-027 / FR-028 / data-model §E-5]
+        if (hctx.listener_events != nullptr && hctx.verify_error.has_value()) {
+            const auto code = *hctx.verify_error;
+
+            // Read peer endpoint as "host:port". The TCP connection is still
+            // live even though TLS was rejected; use best-effort read.
+            std::string peer_ep_str;
+            {
+                asio::error_code ep_ec;
+                auto remote = socket_.remote_endpoint(ep_ec);
+                if (!ep_ec) {
+                    peer_ep_str = remote.address().to_string()
+                                  + ":" + std::to_string(remote.port());
+                }
+            }
+
+            // Emit with owning-string copies for the string_view fields.
+            // The listener's parallel string arrays hold the copies; the
+            // string_views in the event point into those arrays. [data-model §E-5]
+            hctx.listener_events->emit_with_strings(
+                fixpp::session::session_event_tls_validation_failed{},
+                code,
+                hctx.sub_reason_copy,
+                peer_ep_str,
+                "TLS peer cert rejected: " + hctx.sub_reason_copy);
+        }
+
         co_return std::unexpected{E::transport_handshake_failed};
     }
 
-    // If the trampoline rejected the peer cert, surface handshake_failed.
+    // If the trampoline rejected the peer cert without causing a handshake_ec
+    // (unusual case where OpenSSL did not propagate its error), surface failure.
+    // No verify_error capture expected here, but guard defensively.
     if (!hctx.accepted) {
         state_ = state_t::closed;
         co_return std::unexpected{E::transport_handshake_failed};

@@ -246,6 +246,37 @@ add_test(NAME transport_close_truncated_mapping
 set_tests_properties(transport_close_truncated_mapping PROPERTIES
   LABELS "transport;012;gate-b-witness;rc-d;sc006")
 
+# ── 013 Phase 5 T038 — TLS validation outcome → session_event ring taxonomy ──
+#
+# 5 master-enum cells (tls_handshake_failed/expired, tls_rsa_key_too_large,
+# tls_cert_der_too_large, tls_san_entries_exceeded, tls_pin_mismatch) +
+# sub_reason sub-cells (expired, tls_pin_empty_at_open) via real TLS loopback.
+# tls_load_cancelled NOT exercisable via this path (factory-construction failure).
+# [013 FR-026 / FR-027 / FR-028 / D-15 / data-model §E-5/§E-6]
+
+add_executable(transport_tls_validation_failed_taxonomy
+  test_tls_validation_failed_taxonomy.cpp)
+target_include_directories(transport_tls_validation_failed_taxonomy PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+  "${CMAKE_SOURCE_DIR}/tests" # for "transport/loopback_tls_fixture.hpp"
+)
+target_link_libraries(transport_tls_validation_failed_taxonomy PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+)
+target_compile_definitions(transport_tls_validation_failed_taxonomy PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME transport_tls_validation_failed_taxonomy
+         COMMAND transport_tls_validation_failed_taxonomy)
+set_tests_properties(transport_tls_validation_failed_taxonomy PROPERTIES
+  LABELS "transport;013;us3;tls;taxonomy;gate-b-witness"
+  TIMEOUT 60)
+
 # ── RC#C (gate-b/r1) — verify_peer noexcept PMR OOM boundary witness ──────────
 #
 # Tests that verify_peer(noexcept) does NOT propagate std::bad_alloc when the PMR

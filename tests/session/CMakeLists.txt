@@ -458,6 +458,15 @@ add_threading_test(compid_binding_symmetric
 add_threading_test(session_invariant_counter_witness
   test_session_invariant_counter_witness.cpp)
 
+# ── 013-session-reconnect-binding Phase 5 (US3) — T040 ring-overflow tests ───
+# FR-035 / data-model §E-6: both Session and ListenerEvents rings have capacity
+# kSessionEventRingCapacity = 16; emit 17 → oldest dropped, last-16 retained.
+# T040 also adds asio_listener::recent_events() (T039 accessor test) but those
+# integration cells live in tests/transport/ (transport_tls_validation_failed_taxonomy).
+add_threading_test(session_event_ring_overflow
+  test_session_event_ring_overflow.cpp)
+target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
