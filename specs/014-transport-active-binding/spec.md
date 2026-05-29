@@ -1,4 +1,4 @@
-# Feature Specification: Transport-Active Session Lifecycle (Live Transport ↔ Identity Binding)
+# Feature Specification: Transport-Active Session Lifecycle (Programmatic Runtime Engine + Identity Binding)
 
 **Feature Branch**: `014-transport-active-binding`
 **Created**: 2026-05-29
@@ -7,139 +7,181 @@
 
 ## Overview
 
-013 shipped the session-Phase-4 *control surface* — the reconnect FSM, the recovery sub-protocol, the CompID-authorization *policy*, the TLS-outcome `SessionEvent` shape, and in-process credential reload — but with the **live transport lifecycle stubbed**. The reconnect driver mints a transport and immediately discards it; the authenticated peer identity that gates a session is supplied from a fabricated stand-in rather than the real handshake; and the credential-rotation event carries a placeholder payload.
+013 shipped the session-Phase-4 *control surface* — the reconnect FSM, the recovery sub-protocol, the CompID-authorization *policy*, the TLS-outcome `SessionEvent` shape, and the in-process credential-reload control plane — but with **no live-transport lifecycle**. Verified shipped reality: `ReconnectFsm::drive_reconnect_attempt()` mints a transport via the factory and immediately discards it; there is **no production path that creates a Session from an accepted or handshaked transport** for either role; CompID authorization in production is **fail-OPEN** (it runs only when a test-only identity override is set); and the credential-rotation event is unemitted (stub payload only).
 
-This feature replaces those stubs with the real wiring so that a session actually re-establishes a live, TLS-authenticated connection on its own, only proceeds when the connected peer is authorized, and reports genuine credential rotation. It is **production-wiring only** — no new protocol surface and no new external dependency. Completing it makes the full session/transport surface live end-to-end, which in turn **unblocks** (but does not include) the per-release cross-engine interop conformance matrix.
+This feature builds the missing layer: a **programmatic multi-session runtime engine** (initiator + acceptor) that accepts/connects live transports, drives the TLS handshake, creates Sessions, feeds inbound bytes, and owns per-session lifecycle through a `SessionConfig`-keyed registry. On top of that engine it makes the three stubbed behaviours real — a genuine reconnect loop, fail-CLOSED CompID binding from the live handshake identity (closing **T-041**), and real credential-rotation events — and discharges the 013/012 Gate-B carry-forwards.
+
+It is **production-wiring of existing surfaces plus the runtime engine that connects them** — no new wire protocol. The engine is deliberately bounded *below* the Phase-5 service wrapper (no config-file parsing, no application-callback ecosystem, no store/log factories, no C ABI). Completing it makes the full session/transport surface live end-to-end for both roles, which in turn **unblocks** (but does not include) the per-release cross-engine interop conformance matrix.
+
+## Clarifications
+
+### Session 2026-05-29
+
+- Q: Which session roles should the live transport↔session integration cover? → A: **Both initiator and acceptor.**
+- Q: When a reconnect attempt fails, how are the different failure causes treated? → A: **Uniform** — every failure (connect error, TLS handshake failure, CompID authorization failure) consumes one attempt and is retried per the `ReconnectPolicy` backoff until the cap, then terminal.
+- Q: How much public surface does the integration layer add? → A: **A full public Initiator/Acceptor engine/manager component** (not a minimal stub-closer).
+- Q: Where is the engine's boundary against Phase-5 service-wrapper work? → A: **Programmatic runtime engine** — owns accept/connect loops, handshake, Session creation, byte-feed, and a `SessionConfig`-keyed session registry; **excludes** config-file/`SessionSettings` parsing, the application-callback ecosystem, `MessageStore`/`Log` factories, and the C ABI (those stay Phase-5).
+- Q: `credentials_rotated` semantics (reconciled against merged 013 FR-032, not user-chosen). → A: The event reports **our own** rotated `cert_source` end-entity (leaf) SHA-256 (`{old_sha256, new_sha256}`), emitted on the session strand at the next `drive_reconnect_attempt` *before* the new snapshot is passed to `make()`; **not** change-gated (a no-op rotation still emits with `old==new`). This corrects an earlier draft that wrongly modelled it as peer-cert change-detection.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Initiator session self-heals after a dropped connection (Priority: P1)
+### User Story 1 - Acceptor engine admits only authenticated, authorized peers (Priority: P1)
 
-An operator runs an initiator FIX session against a counterparty. The underlying connection drops (network blip, peer restart, transient TLS failure). Without operator intervention, the session establishes a brand-new connection, completes the TLS handshake, and resumes the FIX session — backing off and capping retries exactly as the configured reconnect policy dictates.
+An operator registers an acceptor session with the engine. When a counterparty connects, the engine completes the TLS handshake, derives the peer's authenticated identity, and — at the inbound Logon — admits the session to Active only if that identity is authorized by the configured policy. A peer whose authenticated identity is missing or not on the allow-list is refused; the session never reaches Active.
 
-**Why this priority**: This is the central value of the feature. Today the reconnect driver is a stub that throws away the transport it creates, so a dropped session never actually recovers its transport. Until this works, the session/transport surface is not live and every other behaviour in this feature is unreachable in production.
+**Why this priority**: This is the security backbone and the **T-041** closure. Today, with no test-only override set (i.e. in production), the authorization check is skipped entirely — a fail-OPEN hole. Building the live acceptor path so the real handshake identity flows into `authorize()` is what makes CompID authorization actually enforced.
 
-**Independent Test**: Drive an initiator session over a loopback TLS fixture, force the transport to drop, and observe that a new live connection is established, the handshake completes, and the session returns to its established state — all governed by the configured backoff schedule and attempt cap. Fully testable with the existing mock/loopback transport fixtures; delivers a self-healing session on its own.
+**Independent Test**: Register an acceptor over the loopback-TLS fixture and connect peers presenting (a) an on-list identity, (b) an off-list identity, (c) no client identity, with the test-only override UNSET. Confirm the session reaches Active only in (a) and fails closed (disconnect, no Active, authorization-failed event) in (b) and (c). Delivers an enforced acceptor on its own.
 
 **Acceptance Scenarios**:
 
-1. **Given** an established initiator session whose transport drops, **When** the reconnect driver runs, **Then** a new connection is opened, the TLS handshake completes, a live transport is handed to the session, and the session re-establishes.
-2. **Given** a counterparty that is unreachable, **When** the reconnect driver runs, **Then** attempts follow the configured backoff schedule and stop at the configured attempt cap, ending in the FSM's terminal disconnected outcome (no infinite retry).
-3. **Given** a reconnect attempt in flight, **When** the session is asked to stop (cooperative cancellation / total teardown), **Then** the in-flight attempt aborts promptly and the partially-constructed transport is released (no leak, no orphaned socket).
+1. **Given** a registered acceptor with a binding allow-list policy and the test-only override unset, **When** a peer with an on-list authenticated identity Logons, **Then** the engine admits the session to Active and emits `peer_identity_bound`.
+2. **Given** the same acceptor, **When** a peer with an off-list authenticated identity Logons, **Then** the engine fails closed — disconnects, never reaches Active, and emits `compid_authorization_failed` with `session_compid_unauthorized`.
+3. **Given** the same acceptor under a binding policy, **When** a peer presents no client identity, **Then** the engine fails closed (the all-empty principal is not authorized unless the operator deliberately bound it, per 013 FR-019).
+4. **Given** the production path (override unset), **When** any session is admitted, **Then** the identity used for the decision originates from the live handshake — there is no fabricated/stand-in identity and no dependency on the test-only override.
 
 ---
 
-### User Story 2 - A session only proceeds with an authorized, TLS-authenticated peer (Priority: P1)
+### User Story 2 - Initiator engine self-heals after a dropped connection (Priority: P1)
 
-An operator configures a CompID authorization policy (an allow-list of permitted peers). When a connection's TLS handshake yields an authenticated peer identity, the session establishes only if that identity is on the allow-list. A connection whose authenticated identity is missing or not on the allow-list is refused — the session never reaches its established state.
+An operator registers an initiator session. The engine connects, completes the handshake, binds the server's identity, and runs the session. When the connection drops, the engine drives a real reconnect loop — opening a new connection, completing the handshake, and resuming the session — honouring the configured backoff and attempt cap, and treating every failure cause uniformly.
 
-**Why this priority**: This closes the **T-041** full row and is the security backbone of the feature. 013 shipped the policy and the identity-extraction logic plus the "fail-closed when mTLS is present" gate, but the *source* of the identity in the production path is a fabricated stand-in. Wiring the real handshake identity into the gate is what makes the authorization meaningful; a fabricated source is a silent security hole.
+**Why this priority**: This closes the central reconnect stub (`drive_reconnect_attempt` mints+discards today) and the initiator half of the live path. Until it works, a dropped initiator session never recovers its transport in production.
 
-**Independent Test**: With a binding allow-list policy, drive handshakes that produce (a) an on-list identity, (b) an off-list identity, and (c) no identity, and confirm the session establishes only in case (a) and fails closed (disconnects, no establishment) in (b) and (c). Testable with the loopback TLS fixture presenting different peer certificates.
+**Independent Test**: Register an initiator over the loopback-TLS fixture, force the transport to drop, and observe a new live connection, handshake completion, identity binding, and session resumption — all governed by the configured backoff/cap. Drive failing attempts (unreachable peer, TLS failure, off-list server identity) and confirm each consumes one attempt and the loop terminates at the cap.
 
 **Acceptance Scenarios**:
 
-1. **Given** a binding allow-list policy and a handshake yielding an on-list authenticated identity, **When** the session establishes, **Then** establishment is permitted and the bound identity is recorded for the session.
-2. **Given** a binding allow-list policy and a handshake yielding an off-list identity, **When** establishment is attempted, **Then** the session fails closed — it disconnects and emits the appropriate session authorization error, never reaching established.
-3. **Given** a binding allow-list policy and a handshake yielding no authenticated identity, **When** establishment is attempted, **Then** the session fails closed.
-4. **Given** the production session path, **When** a session establishes, **Then** the peer identity used for the authorization decision originates from the live handshake result — there is no fabricated/stand-in identity anywhere in the production path.
+1. **Given** an established initiator session whose transport drops, **When** the engine runs the reconnect loop, **Then** a new connection opens, the handshake completes, a live transport is handed to the session, and the session resumes.
+2. **Given** an unreachable or persistently-failing peer, **When** the reconnect loop runs, **Then** each failed attempt (connect / TLS / authorization) consumes one attempt per the backoff schedule and the loop stops at the configured cap in the FSM's terminal disconnected outcome (no infinite retry).
+3. **Given** a reconnect attempt in flight, **When** the engine/session is stopped (cooperative / total-teardown cancellation), **Then** the in-flight attempt aborts promptly and the partially-constructed transport is released (no leak, no orphaned socket).
+4. **Given** an initiator under a binding policy, **When** the connected server's authenticated identity is not authorized, **Then** the session fails closed for that attempt (and the attempt is retried per the uniform policy until the cap).
 
 ---
 
 ### User Story 3 - Operators observe genuine credential rotation (Priority: P2)
 
-An operator monitoring session events sees a credential-rotation notification carrying the actual peer-certificate fingerprint whenever the counterparty's certificate changes between connections. They do not see spurious notifications when nothing changed.
+An operator rotates the local credentials in-process (013's `reload_credentials`). On the next reconnect handshake, before the rotated certificate is used, the engine emits a credential-rotation event carrying the real old and new leaf fingerprints, so operators can confirm the rotation took effect.
 
-**Why this priority**: Observability of credential rotation (FR-032) is valuable for operations and audit, but it rides on top of the live handshake established by Stories 1–2 and is not itself a safety gate. 013 emits this event with a fabricated payload; this story makes the payload real.
+**Why this priority**: Observability of credential rotation (FR-032) is valuable for operations/audit but rides on top of the live reconnect path (Stories 1–2) and is not itself a safety gate. 013 shipped only the rotation control plane; 014 emits the event with the real computed fingerprints.
 
-**Independent Test**: Drive two successive handshakes for the same session — first with certificate A, then with certificate B — and confirm exactly one rotation event is emitted on the change, carrying B's real fingerprint; drive a reconnect with the same certificate and confirm no rotation event is emitted.
+**Independent Test**: Register an initiator, call `reload_credentials` to stage a new `cert_source`, force a reconnect, and confirm exactly one `credentials_rotated{old_sha256, new_sha256}` event is emitted on the session strand before the rotated cert is used, carrying the real leaf fingerprints; confirm a no-op rotation (same cert) still emits with `old==new`.
 
 **Acceptance Scenarios**:
 
-1. **Given** a session that has established once with a given peer certificate, **When** a subsequent connection presents a different certificate, **Then** exactly one credential-rotation event is emitted carrying the real fingerprint of the new certificate.
-2. **Given** a session that reconnects with the same peer certificate, **When** the new connection establishes, **Then** no credential-rotation event is emitted.
+1. **Given** a session whose credentials were rotated via `reload_credentials`, **When** the next `drive_reconnect_attempt` runs, **Then** exactly one `credentials_rotated{old_sha256, new_sha256}` is emitted on the session strand, before the new snapshot is passed to `make()`, carrying the real SHA-256 leaf fingerprints of the old and new `cert_source`.
+2. **Given** a no-op rotation (the new `cert_source` leaf fingerprint equals the current one), **When** the next reconnect runs, **Then** the event is still emitted with `old_sha256 == new_sha256` (not suppressed), per 013 FR-032.
+
+---
+
+### User Story 4 - Carry-forward hardening discharged (Priority: P3)
+
+The engineering team closes the test/quality obligations carried as Gate-B waivers from 013 and 012, so the catalogue rows they block can reach `done`.
+
+**Why this priority**: These are correctness-adjacent hardening items, not user-facing flows, but they are explicit waivers that block catalogue closure and were deferred precisely because they need the live-transport lifecycle this feature introduces.
+
+**Independent Test**: Each obligation has its own witness — the `sigalg_disallowed` cell against an Ed25519/Ed448 fixture; the once-per-handshake credential-load counter and handshake benchmark against a live TLS fixture; the deepened PMR-OOM fault-injection cell; the re-labelled fuzz scope; the corrected seqnum too-high error code.
+
+**Acceptance Scenarios**:
+
+1. **Given** the live TLS fixtures introduced here, **When** the carry-forward witnesses run, **Then** each previously-waived item produces a passing witness and its catalogue row is updated.
 
 ---
 
 ### Edge Cases
 
-- **Cancellation mid-handshake**: a stop/total-teardown request during the TLS handshake aborts the attempt and releases the in-flight transport without a leak (sanitizer-verified).
-- **TCP up, identity unauthorized**: handshake completes at the transport layer but the peer identity is off-list under a binding policy → fail closed before session establishment.
-- **One-way TLS / no client identity under a binding policy**: no authenticated identity available → fail closed (consistent with 013's fail-closed-when-binding semantics).
-- **No policy configured (permissive)**: behaviour is inherited unchanged from 013 — absence of a binding policy does not by itself block establishment.
-- **Reconnect exclusivity**: a new reconnect attempt does not start while a prior attempt's transport is still in flight (one live attempt at a time).
-- **Policy cap exhausted**: the loop terminates at the configured cap in the FSM's terminal disconnected outcome rather than retrying forever.
-- **Seqnum too-high during handshake states**: the seqnum manager reports a *semantically correct* too-high condition (not the slot-74 liveness/TestRequest stand-in carried since 013).
+- **Cancellation mid-handshake**: a stop / total-teardown request during the handshake aborts the attempt and releases the in-flight transport without a leak (sanitizer-verified).
+- **TCP up, identity unauthorized**: handshake completes at the transport layer but the peer identity is off-list under a binding policy → fail closed before the session reaches Active (acceptor) / for that attempt (initiator).
+- **No client identity under a binding policy**: no authenticated identity → fail closed (the all-empty principal is unauthorized unless deliberately bound), per 013 FR-019.
+- **Permissive (no binding policy)**: behaviour inherited unchanged from 013 — absence of a binding policy does not by itself block establishment.
+- **Reconnect exclusivity**: a new reconnect attempt does not start while a prior attempt's transport is still in flight.
+- **Cap exhausted**: the loop terminates at the configured cap in the FSM's terminal disconnected outcome.
+- **No-op credential rotation**: `credentials_rotated` still emits with `old==new`.
+- **Seqnum too-high during handshake states**: the seqnum manager reports a semantically-correct too-high condition, not the slot-74 liveness/TestRequest stand-in carried since 013.
 
 ## Requirements *(mandatory)*
 
-### Functional Requirements — live reconnect (Story 1)
+### Functional Requirements — runtime engine (Stories 1 & 2)
 
-- **FR-001**: When an initiator session loses its transport (connection drop, handshake failure, or transport read/write error), the system MUST drive a real reconnect attempt that opens a new connection, completes the TLS handshake, and hands a live transport to the session — replacing the current placeholder that mints and immediately discards a transport.
-- **FR-002**: The reconnect loop MUST honour the configured reconnect policy's backoff schedule and attempt cap unchanged (it consumes the existing policy; it does not redefine it).
-- **FR-003**: The reconnect loop MUST honour cooperative cancellation — a stop / total-teardown request MUST abort an in-flight attempt promptly and release any partially-constructed transport (no leak, no orphaned socket/connection).
-- **FR-004**: When the attempt cap is exhausted without a successful authenticated handshake, the system MUST transition to the FSM's terminal disconnected outcome and stop retrying.
-- **FR-005**: The stubbed reconnect-driver hooks introduced in 013 MUST be fully realized — no production code path may remain that creates a transport and discards it.
+- **FR-001**: The system MUST provide a programmatic multi-session runtime engine that owns the lifecycle of FIX sessions over live transports for both initiator and acceptor roles, with sessions registered programmatically and keyed by their `SessionConfig`.
+- **FR-002** (acceptor path): For a registered acceptor session, the engine MUST accept an inbound connection, drive the TLS handshake to completion, create a `Session` from the handshake result, and feed inbound transport bytes into the session's frame-processing entry point.
+- **FR-003** (initiator path): For a registered initiator session, the engine MUST establish an outbound connection, drive the TLS handshake, create/attach a `Session`, and feed inbound transport bytes into the session.
+- **FR-004**: The engine MUST support multiple concurrent registered sessions and expose lifecycle control (start/stop) per session and for the engine as a whole, including orderly teardown that releases all transports.
+- **FR-005** (boundary): Engine scope MUST EXCLUDE config-file/`SessionSettings` parsing, the application-callback ecosystem, `MessageStore`/`Log` factories, and the C ABI; these remain Phase-5 service-wrapper work. Sessions are registered via `SessionConfig` objects (as 010 provides).
 
-### Functional Requirements — authenticated identity binding / T-041 (Story 2)
+### Functional Requirements — live reconnect (Story 2)
 
-- **FR-006**: When a handshake yields an authenticated peer identity, the system MUST supply that identity from the live handshake result to the session's CompID authorization gate before the session is permitted to establish.
-- **FR-007**: Under a binding authorization policy, if the authenticated identity is absent or not on the configured allow-list, the system MUST fail closed — disconnect, refuse establishment, and surface the appropriate session authorization error.
-- **FR-008**: The production session path MUST contain no fabricated/stand-in peer identity; the residual fabricated auth payload from 013 MUST be removed.
-- **FR-009**: The CompID authorization policy semantics (allow-list matching, the canonical identity-extraction order, and the fail-closed-when-binding rule) MUST be inherited unchanged from 013; this feature changes only the *source* of the identity (stub → live handshake), closing the **T-041** catalogue row to `done`.
+- **FR-006**: When an initiator session loses its transport, the engine MUST drive a real reconnect attempt (open connection → complete handshake → hand live transport to the session), replacing the 013 stub that mints and discards a transport.
+- **FR-007**: The reconnect loop MUST honour the configured `ReconnectPolicy` backoff schedule and attempt cap unchanged (it consumes the 012 policy; it does not redefine it).
+- **FR-008** (uniform retry, Clarification Q2): Every failed reconnect attempt — connect error, TLS handshake failure, OR CompID authorization failure — MUST consume one attempt and be retried per the backoff schedule until the cap is reached, at which point the session transitions to the FSM's terminal disconnected outcome. No failure cause is treated as immediately terminal before the cap.
+- **FR-009**: The reconnect loop MUST honour cooperative cancellation — a stop / total-teardown request MUST abort an in-flight attempt promptly and release any partially-constructed transport (no leak, no orphaned socket).
+- **FR-010**: The 013 stubbed reconnect-driver hooks MUST be fully realized — no production code path may remain that creates a transport and discards it.
+
+### Functional Requirements — authenticated identity binding / T-041 (Story 1, both roles)
+
+- **FR-011**: When a handshake yields an authenticated peer identity (`handshake_result.peer_id`), the engine MUST supply that LIVE identity to the session's CompID authorization gate (`CompIdAuthorizationPolicy::authorize`) at inbound Logon, before the session transitions to Active.
+- **FR-012** (fail-OPEN closure): The production authorization path MUST NOT depend on the test-only `SessionConfig::logon_peer_identity_override`; with the override unset (production), `authorize()` MUST run against the live identity. This closes the 013 fail-OPEN gap and is the substance of the **T-041** production wiring.
+- **FR-013**: Under a binding policy, an absent or off-allow-list authenticated identity MUST fail closed — disconnect, refuse Active, and emit `session_compid_unauthorized` + `session_event_compid_authorization_failed`. The fail-closed/permissive semantics, the canonical extraction order, and the event shapes are inherited unchanged from 013 (FR-019/FR-020/FR-022).
+- **FR-014**: The residual fabricated auth payload from 013 MUST be removed from the production session path.
+- **FR-015** (both roles, Clarification Q1): Binding MUST apply to both roles — the acceptor binds the peer's `SenderCompID` ↔ certificate identity (013 FR-019); the initiator binds the connected server's presented identity to the configured `TargetCompID` expectation, fail-closed under a binding policy. The initiator-side binding extends 013's acceptor-side policy/extraction to the initiator role.
 
 ### Functional Requirements — credential-rotation observability / FR-032 (Story 3)
 
-- **FR-010**: When a connection establishes, the system MUST capture the peer certificate's real SHA-256 fingerprint at the handshake site.
-- **FR-011**: The credential-rotation session event MUST carry the real captured fingerprint — the fabricated stub payload from 013 MUST be removed.
-- **FR-012**: The system MUST emit the credential-rotation event when the captured fingerprint differs from the fingerprint recorded for the most recent prior successful handshake on that session, and MUST NOT emit it when the fingerprint is unchanged. *(Rotation = change; see Assumptions — candidate for `/speckit-clarify` confirmation.)*
+- **FR-016**: After `reload_credentials` has staged a new `cert_source`, the engine MUST emit `SessionEvent::credentials_rotated{old_sha256, new_sha256}` on the session strand at the next `drive_reconnect_attempt`, immediately BEFORE the new `cert_source_snapshot()` is passed to `make()` (i.e. before the first handshake on the rotated source), per 013 FR-032.
+- **FR-017**: The event MUST carry the REAL SHA-256 end-entity (leaf) fingerprints of the old and new `cert_source` as raw 32-byte arrays, computed inside the credential-load path — replacing 013's fabricated/all-zero stub payload.
+- **FR-018**: The event MUST NOT be suppressed on a no-op rotation (`old_sha256 == new_sha256`), per 013 FR-032.
 
-### Carry-forward obligations (absorbed from 013 + 012 Gate-B waivers)
+### Carry-forward obligations (Story 4 — absorbed from 013 + 012 Gate-B waivers)
 
-These are tracked obligations this feature discharges; each is testable and must be reflected in the catalogue at close-out.
-
-- **FR-013** (013 slot-74 cleanup): The vestigial too-high branch in the seqnum manager that returns the slot-74 `session_test_request_unanswered` code as a documented stand-in MUST be replaced with a dedicated, semantically-correct seqnum-too-high error code (allocated at the next free error slot; the retired slot remains a permanent numeric hole), with the corresponding comments, the seqnum-manager test assertion, and the contract note updated to match.
-- **FR-014** (012 RC#C): The PMR-out-of-memory witness coverage MUST be extended to the depth deferred in 012 — a multi-SAN certificate fixture plus a trampoline-targeted fault-injection cell exercising the mid/tail allocation sites, not only the boundary site.
-- **FR-015** (012 RC#G): A live handshake benchmark fixture MUST be added now that the post-cache transport-factory shape is stable and measurable.
-- **FR-016** (012 RC#I): The fuzz-scope catalogue entry MUST be re-labelled to reflect its actual post-MVP scope.
+- **FR-019** (013 item 3): Add the `sigalg_disallowed` `sub_reason` cell, exercised with an Ed25519/Ed448 (or unknown-`EVP_PKEY`) certificate fixture, bringing the 013 US3 `sub_reason` coverage to its full set.
+- **FR-020** (013 item 2 / 012 RC#G): On a live TLS handshake fixture, add (a) the `cert_source::load_credentials()` once-per-handshake counter witness and (b) the handshake benchmark fixture (post-cache transport-factory shape is stable and measurable now).
+- **FR-021** (012 RC#C): Extend the PMR-out-of-memory witness depth — a multi-SAN certificate fixture plus a trampoline-targeted fault-injection cell exercising mid/tail allocation sites, not only the boundary site.
+- **FR-022** (012 RC#I): Re-label the fuzz-scope catalogue entry to reflect its actual post-MVP scope.
+- **FR-023** (013 slot-74 cleanup): Replace the vestigial too-high branch in the seqnum manager that returns the slot-74 `session_test_request_unanswered` stand-in with a dedicated, semantically-correct seqnum-too-high error code (next free error slot; the retired slot remains a permanent numeric hole), updating the comments, the seqnum-manager test assertion, and the contract note to match.
 
 ### Key Entities
 
-- **Reconnect attempt**: one governed cycle of opening a connection, completing the TLS handshake, and yielding (or failing to yield) a live transport, bounded by the reconnect policy's backoff and cap.
-- **Authenticated peer identity**: the identity extracted from the completed TLS handshake (the canonical CN → SAN-DNS → SAN-URI → certificate-fingerprint order established by 011/013), used as the input to the CompID authorization decision.
-- **Credential-rotation observation**: the peer certificate's SHA-256 fingerprint captured at the handshake, compared against the prior recorded fingerprint to decide whether rotation occurred.
+- **Session engine (Initiator/Acceptor runtime)**: the new public component that owns accept/connect loops, drives handshakes, creates Sessions from handshake results, feeds inbound bytes, and maintains a `SessionConfig`-keyed registry with per-session and engine-wide lifecycle control. Bounded below the Phase-5 service wrapper.
+- **Reconnect attempt**: one governed cycle of opening a connection, completing the handshake, and yielding (or failing to yield) a live authenticated transport, bounded by the `ReconnectPolicy` backoff and cap; every failure cause counts as one attempt.
+- **Authenticated peer identity**: the identity extracted from the completed handshake (canonical CN → SAN-DNS → SAN-URI → leaf-fingerprint order from 011/013), used as the input to the CompID authorization decision for both roles.
+- **Credential-rotation observation**: our own `cert_source` end-entity SHA-256 (old and new), emitted at the rotated-source handshake site.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: An initiator session whose transport drops re-establishes a live, TLS-authenticated session with no operator intervention in 100% of cases where the peer is reachable and authorized, within the bounds of the configured backoff schedule.
-- **SC-002**: Zero unauthorized sessions reach the established state — fail-closed is verified for both the off-list-identity and the absent-identity cases under a binding policy.
-- **SC-003**: Every credential change across a reconnect produces exactly one rotation event carrying the real new fingerprint; an unchanged-credential reconnect produces zero rotation events.
-- **SC-004**: Across N consecutive failed-then-succeeded reconnect attempts (including cancelled-mid-handshake attempts), the system leaks no transport, socket, or memory, as verified under the sanitizer matrix.
-- **SC-005**: The **T-041** catalogue row is `done` with full production wiring, and no fabricated authentication payload remains anywhere in the production session path.
-- **SC-006**: The unfiltered Tier-1 test suite (including the label-scoped corpus/sync gates) passes — i.e., the suite-green claim is not produced by a name-filtered subset (lesson carried from the 013 close-out).
+- **SC-001**: A registered acceptor session admits an authorized peer over a live TLS transport and runs an end-to-end session (Logon → application message → Logout) with no hand-fed bytes, in 100% of authorized-peer cases.
+- **SC-002**: A registered initiator session whose transport drops re-establishes a live, authenticated session with no operator intervention in 100% of reachable-and-authorized cases, within the configured backoff schedule.
+- **SC-003**: Zero unauthorized sessions reach Active in production (test-only override unset) — fail-closed verified for both off-list and absent-identity cases, for both roles.
+- **SC-004**: Every failed reconnect attempt (connect / TLS / authorization) consumes exactly one attempt; the loop terminates at the configured cap; no infinite retry.
+- **SC-005**: Across N consecutive failed-then-succeeded and cancelled-mid-handshake attempts, the system leaks no transport, socket, or memory, as verified under the sanitizer matrix.
+- **SC-006**: Every staged credential rotation produces exactly one `credentials_rotated` event at the next handshake carrying the real new leaf fingerprint (including no-op rotations, which emit `old==new`).
+- **SC-007**: The **T-041** catalogue row is `done` with full production wiring — no fabricated authentication payload and no dependency on the test-only override remain in the production session path.
+- **SC-008**: The unfiltered Tier-1 test suite (including the label-scoped corpus/sync gates) passes — i.e., the suite-green claim is not produced by a name-filtered subset (lesson carried from the 013 close-out, per the standing `-L sync` rule).
 
 ## Out of Scope
 
-- **Cross-engine interop conformance matrix** (QuickFIX-cpp / QuickFIX-J / Fix8, both roles, multiple FIX versions, historical thorny-bug replay). This feature *unblocks* that work by making the session/transport surface live end-to-end, but the matrix itself is a separate later feature.
+- **Cross-engine interop conformance matrix** (QuickFIX-cpp / QuickFIX-J / Fix8, both roles, multiple FIX versions, historical thorny-bug replay). 014 *unblocks* it by making the session/transport surface live end-to-end, but the matrix is a separate later feature.
+- **Phase-5 service-wrapper scope**: config-file/`SessionSettings` parsing, the application-callback ecosystem, `MessageStore`/`Log` factories, and the C ABI (per Clarification Q4).
 - **Repo-wide clang-format / clang-tidy / iwyu / coverage cleanup** — a separate `chore/` branch off `main`.
-- **Acceptor-side "reconnect"** — reconnect is an initiator-side concern; acceptor sessions re-accept inbound connections rather than driving a reconnect loop.
-- **New protocol surface** — no new public message types, FSM states, or external dependencies; this is wiring of existing surfaces.
+- **`tls_load_cancelled` 6th master-enum cell** — permanently N/A for the listener event path (it fires pre-accept at `load_credentials`, with no handshake to emit from); documented and closed in 013, NOT 014 work.
+- **New wire protocol surface** — no new FIX message types or FSM states beyond what the engine lifecycle requires.
 
 ## Assumptions
 
-- **Reconnect is initiator-side.** The reconnect driver applies to initiator sessions; acceptor sessions are out of scope for the reconnect loop (they re-accept). This matches the existing driver's role.
-- **CompID authorization semantics are inherited from 013** unchanged (allow-list `CompIdAuthorizationPolicy`, canonical CN → SAN-DNS → SAN-URI → SHA-256 extraction order, fail-closed when a binding policy is in effect). 014 changes only the identity *source* (stub → live handshake).
-- **Permissive default preserved.** Absence of a configured binding policy does not by itself block establishment — 013's behaviour is preserved.
-- **Rotation = fingerprint change** (FR-012). Emitting on observed-fingerprint change (versus on every handshake) is the chosen default; this is the most likely `/speckit-clarify` question and may be revised there.
-- **Error-slot allocation continues the existing envelope.** 013 occupies session slots 116..119; any new code introduced here (e.g., the seqnum-too-high replacement for FR-013) takes the next free slot, and retired slots remain permanent numeric holes per the constitution's error-taxonomy rule.
-- **No new Phase-2 design doc.** The feature is anchored by 005's session FSM spec plus the already-signed-off 011 (TLS verify/peer-identity), 012 (Transport / TransportFactory / ReconnectPolicy / handshake_result.peer_id), and 013 (reconnect FSM / policy / SessionEvent) surfaces, and decisions 2g/2h/2j.
-- **Existing test fixtures suffice.** The loopback-TLS and mock-transport fixtures from 011/012 provide the live-handshake and drop/reconnect scenarios needed; no new external test harness is required.
+- **Engine is programmatic** (Clarification Q4): sessions are registered via `SessionConfig` objects and tracked in a `SessionConfig`-keyed registry; no config-file parsing or service-wrapper ecosystem is introduced.
+- **Both roles in scope** (Clarification Q1); reconnect remains an initiator concern (acceptor sessions re-accept rather than driving a reconnect loop).
+- **Uniform retry-to-cap** (Clarification Q2), bounded by the 012 `ReconnectPolicy` cap — fixpp already diverges from QuickFIX/Fix8's unbounded reconnect by capping; the cap bounds the cost of retrying deterministic failures.
+- **`credentials_rotated` semantics are locked by merged 013 FR-032** — our own rotated `cert_source` leaf fingerprints, emitted at `drive_reconnect_attempt` before `make()`, not change-gated.
+- **CompID policy/extraction/events inherited from 013**; the only new behaviour is the initiator-side server-identity binding (extending the acceptor-side policy to the initiator role).
+- **Error-slot allocation continues the existing envelope** — 013 occupies session slots 116..119; any new code (e.g. the seqnum-too-high replacement for FR-023) takes the next free slot, and retired slots remain permanent numeric holes per the constitution's error-taxonomy rule.
+- **No new Phase-2 design doc** — anchored by 005's session FSM spec plus the signed-off 010 (`SessionConfig`), 011 (TLS verify/peer-identity), 012 (`Transport` / `TransportFactory` / `ReconnectPolicy` / `handshake_result.peer_id`), and 013 (reconnect FSM / policy / `SessionEvent`) surfaces, and decisions 2g/2h/2j. Gate A is mandatory and substantial because the engine is a new public component with new threading/lifecycle surface.
+- **Existing test fixtures extended** — the 011/012 loopback-TLS and mock fixtures supply the live-handshake and drop/reconnect scenarios; new cert fixtures (Ed25519/Ed448 for the sigalg cell; multi-SAN for PMR depth) are added.
 
 ## Dependencies
 
-- 005 session-establishment FSM (terminal/disconnected outcomes, establishment gate).
-- 011 TLS validation surface (`verify_peer`, `peer_identity`, certificate-fingerprint extraction).
-- 012 transport surface (`Transport` / `TlsTransport` / `TransportFactory` / `ReconnectPolicy` / `handshake_result.peer_id`, cached SSL_CTX).
-- 013 reconnect FSM driver, `CompIdAuthorizationPolicy`, TLS-outcome `SessionEvent`, in-process credential reload.
+- 005 session-establishment FSM (Active/terminal-disconnected outcomes, establishment gate, Logon handling).
+- 010 `SessionConfig` (programmatic session configuration + the registry key).
+- 011 TLS validation surface (`verify_peer`, `peer_identity`, leaf-fingerprint extraction).
+- 012 transport surface (`Transport` / `TlsTransport` / `TransportFactory` / `ReconnectPolicy` / `handshake_result.peer_id`, cached SSL_CTX, `asio_listener`).
+- 013 reconnect FSM driver, `CompIdAuthorizationPolicy`, TLS-outcome `SessionEvent`, in-process credential-reload control plane.
