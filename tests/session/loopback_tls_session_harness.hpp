@@ -114,7 +114,9 @@ public:
         }
 
         // Build the transport-layer loopback (acceptor + factory).
-        auto h = std::make_unique<LoopbackTlsSessionHarness>();
+        // Use raw new (not std::make_unique) because the default ctor is private;
+        // std::make_unique is not a member and cannot access private ctors.
+        auto h = std::unique_ptr<LoopbackTlsSessionHarness>(new LoopbackTlsSessionHarness{});
         h->fixture_dir_ = fixture_dir;
 
         h->transport_fixture_ = std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(

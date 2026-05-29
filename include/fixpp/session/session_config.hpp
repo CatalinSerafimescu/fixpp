@@ -48,6 +48,11 @@ class cert_source;
 namespace fixpp::log {
 class Sink;
 }
+// Endpoint is a value type used by reconnect_endpoint field; needs full def.
+// [const §XV.9] check: endpoint.hpp only includes <cstdint>/<string>/<utility>
+// — no shared_mutex or awaitable chains. Safe to include here.
+#include <fixpp/transport/endpoint.hpp>
+
 namespace fixpp::transport {
 class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-off; the actual
                          // SessionConfig::transport_factory_override field wiring lands in
@@ -236,6 +241,13 @@ struct SessionConfig {
     // use_count()==1. The shared_ptr type is for SessionConfig COPY SEMANTICS
     // ONLY; cross-Session sharing is FORBIDDEN. [2h Appendix D §D.1+§D.2]
     std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override{};
+
+    // 014 T009 — peer endpoint for initiator reconnect attempts.
+    // Set by the operator at SessionConfig-build time; consumed by
+    // Session::open() which calls reconnect_fsm_.set_reconnect_endpoint().
+    // Default-constructed Endpoint (empty host, port=0) means "not configured".
+    // [data-model §E-1 step 5 — async_connect(ep)]
+    fixpp::transport::Endpoint reconnect_endpoint{};
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

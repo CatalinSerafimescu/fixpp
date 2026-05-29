@@ -483,6 +483,75 @@ target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
 add_threading_test(session_reload_credentials_in_flight
   test_reload_credentials_in_flight.cpp)
 
+# ── 014-transport-active-binding Phase 3 (US1) — T006/T007/T008 ─────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T009/T010 impl lands.
+# CTest filter: ctest -R 'reconnect_live|reconnect_backoff|reconnect_cancel'
+#
+# T006 — live loopback-TLS reconnect happy-path (SC-001 / FR-001 MVP witness).
+# Cell B drives a REAL TLS connect+handshake via loopback and asserts Active.
+# FIXPP_TLS_FIXTURE_DIR is wired unconditionally (follows the convention used
+# by transport live-TLS tests, e.g. transport_inflight_exclusivity). The cell
+# GTEST_SKIP()s only when the cert files are genuinely absent at runtime.
+add_executable(reconnect_live_happy_path
+  test_reconnect_live_happy_path.cpp)
+target_link_libraries(reconnect_live_happy_path PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_live_happy_path PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"    # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(reconnect_live_happy_path PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME reconnect_live_happy_path COMMAND reconnect_live_happy_path)
+set_tests_properties(reconnect_live_happy_path PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;live_tls;reconnect")
+
+# T007 — backoff/cap: connect-fail/handshake-fail/make-fail each consume one attempt.
+add_executable(reconnect_backoff_cap
+  test_reconnect_backoff_cap.cpp)
+target_link_libraries(reconnect_backoff_cap PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_backoff_cap PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(reconnect_backoff_cap PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_test(NAME reconnect_backoff_cap COMMAND reconnect_backoff_cap)
+set_tests_properties(reconnect_backoff_cap PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;reconnect")
+
+# T008 — total-cancel mid-handshake: releases in-flight transport (ASan no-leak).
+add_executable(reconnect_cancel_mid_handshake
+  test_reconnect_cancel_mid_handshake.cpp)
+target_link_libraries(reconnect_cancel_mid_handshake PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_cancel_mid_handshake PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(reconnect_cancel_mid_handshake PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_test(NAME reconnect_cancel_mid_handshake COMMAND reconnect_cancel_mid_handshake)
+set_tests_properties(reconnect_cancel_mid_handshake PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;reconnect;cancel")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

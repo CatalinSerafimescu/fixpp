@@ -55,6 +55,11 @@ struct EngineConfig;
 class Clock;
 }  // namespace fixpp::core
 
+namespace fixpp::transport {
+class Transport;
+struct handshake_result;
+}  // namespace fixpp::transport
+
 namespace fixpp::session {
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
@@ -443,6 +448,31 @@ private:
     // declaration here satisfies Phase 2 (link-green via session.cpp stub).
     void emit_event(SessionEvent ev) noexcept;
 
+    // 014 T010 — PRIVATE handoff from ReconnectFsm on a successful attempt.
+    // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
+    // session_ back-pointer. ReconnectFsm is a value member of Session
+    // (reconnect_fsm_, session.hpp:517) so the call is always in-domain.
+    //
+    // Responsibilities (US1 / T010):
+    //   - Take ownership of the live transport via reconnected_transport_.
+    //   - Re-enter LogonSent so the session re-drives Logon to Active.
+    //
+    // US2 (T015) will extend this to also bind handshake_result.peer_id
+    // into the authorize() call site. The handshake_result type lives in
+    // tls_transport.hpp which includes pinset.hpp (shared_mutex) — keeping
+    // it OUT of this header preserves [const §XV.9] / the 8e2d362 guard.
+    // The FSM stores the result and Session reads it via a separate getter
+    // in the US2 pass.
+    //
+    // [data-model §E-1 step 8; contracts C1; FR-001]
+    void install_reconnected_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport) noexcept;
+
+    // ReconnectFsm is a value member of Session and needs access to the
+    // private install_reconnected_transport() method. The friend declaration
+    // enables the call from reconnect_fsm.cpp (which includes session.hpp).
+    friend class ReconnectFsm;
+
     // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).
     // Lifetime: bound to Session; drained at close().
@@ -494,6 +524,13 @@ private:
     // Non-null only when SessionConfig::transport_send was set.
     // Always called from the session strand (single-writer, no races).
     std::function<void(std::span<const std::byte>)> transport_send_;
+
+    // 014 T010 — live reconnected transport (owned by Session after a successful
+    // drive_reconnect_attempt). Null until the first successful reconnect.
+    // The type is forward-declared in this header; the destructor is
+    // instantiated in session.cpp where the full Transport definition is visible.
+    // [data-model §E-1 step 8; contracts C1; FR-001]
+    std::unique_ptr<fixpp::transport::Transport> reconnected_transport_;
 
     // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
     // Use seqnum_mgr_.peek_outbound() to read; seqnum_mgr_.assign_outbound() to advance.

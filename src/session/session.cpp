@@ -182,6 +182,35 @@ Session::reload_credentials(
     return cfg_.transport_factory_override->reload_credentials(std::move(new_source));
 }
 
+// ── 014 T010 — Session::install_reconnected_transport ────────────────────────
+//
+// Called by ReconnectFsm::drive_reconnect_attempt() on a successful attempt
+// (step 8 of data-model E-1). Performs the cross-object handoff:
+//   1. Take ownership of the live transport (reconnected_transport_).
+//   2. Re-enter LogonSent so Session::on_inbound_frame drives the session
+//      back to Active when the peer Logon-ack arrives.
+//
+// US2 (T015) will extend this to bind handshake_result.peer_id into the
+// authorize() site (E-2). The handshake_result type is in tls_transport.hpp
+// (which pulls pinset.hpp → shared_mutex) — keeping it out of the session.hpp
+// declaration preserves [const §XV.9] / the 8e2d362 guard. The FSM stores
+// the result internally; US2 T015 will add a getter path.
+//
+// noexcept: move + record_state_transition_ are non-throwing.
+// [data-model §E-1 step 8; contracts C1; FR-001]
+void Session::install_reconnected_transport(
+    std::unique_ptr<fixpp::transport::Transport> transport) noexcept
+{
+    // 1. Take ownership of the live transport.
+    reconnected_transport_ = std::move(transport);
+
+    // 2. Re-enter LogonSent so on_inbound_frame drives back to Active.
+    //    The session's next peer Logon-ack will be processed by the LogonSent
+    //    row of the FSM matrix, transitioning back to Active.
+    //    [data-model §E-1 step 8; FR-001; US1 AC1]
+    record_state_transition_(fsm_state::LogonSent);
+}
+
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
 // Marked so a later phase's task body substitutes (not appends to) these.
 
@@ -313,6 +342,33 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // US4 (T046): capture transport_send from config (null if not set).
     // Called from store_then_emit() AFTER store(outbound) completes (I-3).
     transport_send_ = cfg_.transport_send;
+
+    // 014 T009/T010: wire the FSM back-pointer, reconnect endpoint, and TLS profile.
+    // ReconnectFsm::drive_reconnect_attempt() uses these to call async_connect(),
+    // async_handshake(), and install_reconnected_transport() on success.
+    reconnect_fsm_.set_session_owner(this);
+    reconnect_fsm_.set_reconnect_endpoint(cfg_.reconnect_endpoint);
+    // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
+    // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
+    // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
+    // one_way_ca=3). [data-model §E-1 step 3]
+    {
+        auto k = cfg_.security_profile.k;
+        using SK = fixpp::session::SecurityProfile::kind;
+        using TK = fixpp::tls::SecurityProfile;
+        TK tls_profile = TK::unset;
+        if      (k == SK::mtls_ca)     tls_profile = TK::mtls_ca;
+        else if (k == SK::mtls_pinned) tls_profile = TK::mtls_pinned;
+        else if (k == SK::one_way_ca) {
+            // one_way_ca is deprecated in the TLS layer but still supported
+            // for legacy interop (session layer retains it per [const §XII.5]).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            tls_profile = TK::one_way_ca;
+#pragma clang diagnostic pop
+        }
+        reconnect_fsm_.set_tls_profile(tls_profile);
+    }
 
     // T011 (US2, Phase 4): branch on cfg_.role per FR-004 + Opus triage RC#2.
     // Initiator arm: NotConnected → LogonSent; emit initial Logon frame via

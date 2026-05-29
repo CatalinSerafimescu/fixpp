@@ -17,10 +17,20 @@
 // precedent; 013 T011). The engine guarantees the factory outlives the FSM
 // per [arch §5.6] frozen-at-open rule.
 //
-// cert_source snapshot discipline: the FSM reads factory_->cert_source_snapshot()
-// at drive_reconnect_attempt entry (returns a strong-ref std::shared_ptr<cert_source>
-// BY VALUE COPY). NEVER captures a raw cert_source* or a weak_ptr<cert_source>
+// cert_source snapshot discipline (014 T009): the FSM reads
+// factory_->cert_source_snapshot() at each drive_reconnect_attempt attempt entry
+// (now a pure-virtual on the abstract TransportFactory base per C4 T003/T009).
+// Returns a strong-ref std::shared_ptr<cert_source> BY VALUE COPY.
+// NEVER captures a raw cert_source* or a weak_ptr<cert_source>
 // — per [[feedback_weak_ptr_cache_needs_owning_context]].
+//
+// Live-transport handoff (014 T009/T010): on a successful attempt the FSM calls
+// Session::install_reconnected_transport(unique_ptr<Transport>, handshake_result,
+// bound_principal) via the session_ back-pointer (set by Session::open() via
+// set_session_owner()). Session is forward-declared here; the call happens in
+// reconnect_fsm.cpp which includes the full session.hpp. The heavy
+// handshake_result / bound_principal types never appear in this header's
+// public signatures, preserving [const §XV.9].
 #pragma once
 
 #include <chrono>
@@ -37,6 +47,15 @@
 #include "fixpp/session/session_fsm.hpp"
 #include "fixpp/transport/reconnect_policy.hpp"
 
+// fixpp::tls::SecurityProfile — forward-declare as a uint8_t-backed scoped enum
+// so the FSM can store the TLS profile without including tls/security_profile.hpp
+// → tls/pinset.hpp → shared_mutex (§XV.9 guard). C++ allows forward-declaring
+// scoped enums with explicit underlying type. The full definition is available
+// in reconnect_fsm.cpp via transport_factory.hpp (which includes security_profile.hpp).
+namespace fixpp::tls {
+enum class SecurityProfile : std::uint8_t;
+}
+
 // TransportFactory is used only as a non-owning raw pointer in this header (ctor
 // arg + factory_ member); the full definition is needed only in reconnect_fsm.cpp
 // (factory_->make() + SslCtxConfig). Forward-declare here rather than #include
@@ -46,6 +65,14 @@
 // consumer (session.hpp), violating [const §XV.9] / [2f §6.6] (caught by the
 // check_no_std_mutex_corpus Tier-1 gate).
 namespace fixpp::transport { class TransportFactory; }
+// Endpoint is a lightweight value type (std::string + uint16_t + uint32_t);
+// include the header directly (it has no heavy transitive includes).
+#include "fixpp/transport/endpoint.hpp"
+// Session* back-pointer — forward-declared to avoid circular include
+// (session.hpp includes reconnect_fsm.hpp). The actual call to
+// Session::install_reconnected_transport() is in reconnect_fsm.cpp which
+// includes the full session.hpp definition. [data-model §E-1 step 8]
+namespace fixpp::session { class Session; }
 
 namespace fixpp::session {
 
@@ -68,18 +95,52 @@ public:
                  std::chrono::seconds                heartbeat_interval,
                  std::chrono::milliseconds           logout_disconnect_timeout) noexcept;
 
-    // FR-001 / FR-002 — drive a reconnect attempt: walk policy_, mint fresh
-    // Transport via factory_->make(...), re-Logon. Returns transport_*
-    // variants on connect / handshake failure, session_* variants on Logon
-    // protocol failure.
-    //
-    // cert_source consumption: reads factory_->cert_source_snapshot() at
-    // attempt entry (strong-ref shared_ptr BY VALUE COPY). The captured
-    // strong-ref keeps the OLD cert_source alive for the handshake duration
-    // even if an operator-driven reload_credentials lands during the handshake;
-    // the NEXT drive_reconnect_attempt reads the NEW snapshot. NEVER captures
-    // raw cert_source* or weak_ptr<cert_source> per
-    // [[feedback_weak_ptr_cache_needs_owning_context]]. [FR-033 / data-model §E-1]
+    // 014 T009 — Set the peer endpoint for reconnect attempts.
+    // Called by Session::open() before the first drive_reconnect_attempt.
+    // [data-model §E-1 step 5 — async_connect(ep)]
+    void set_reconnect_endpoint(fixpp::transport::Endpoint ep) noexcept {
+        endpoint_ = std::move(ep);
+    }
+
+    // 014 T009/T010 — Set the owning Session back-pointer.
+    // Called by Session::open() so drive_reconnect_attempt can call
+    // Session::install_reconnected_transport() on success.
+    // Session is forward-declared; the call happens in reconnect_fsm.cpp
+    // which includes the full session.hpp. [data-model §E-1 step 8]
+    void set_session_owner(Session* session) noexcept {
+        session_ = session;
+    }
+
+    // 014 T009 — Set the TLS security profile for per-attempt SslCtxConfig
+    // construction. Called by Session::open() from cfg_.security_profile's TLS
+    // profile (mapped from the session-layer SecurityProfile to the TLS-layer
+    // SecurityProfile). Without this the FSM would build ssl_cfg with
+    // SecurityProfile::unset, causing async_handshake to reject the attempt.
+    // The type is forward-declared (uint8_t-backed enum) to avoid pulling
+    // tls/security_profile.hpp → tls/pinset.hpp → shared_mutex into this
+    // awaitable-corpus header. [data-model §E-1 step 3; §XV.9]
+    void set_tls_profile(fixpp::tls::SecurityProfile profile) noexcept {
+        tls_profile_ = profile;
+    }
+
+    // FR-001 / FR-002 / FR-003 / FR-004 — bounded reconnect loop (014 T009).
+    // Per attempt (0..max_attempts-1):
+    //   (1) await delay_for_attempt(n) (skip for n==0), honouring total-cancel;
+    //   (2) read cert_source snapshot for rotation detection (E-3, US3);
+    //   (3) build per-attempt SslCtxConfig ssl_cfg from the snapshot — held in
+    //       attempt scope across both make() and async_handshake() (the arg is
+    //       const& [[clang::lifetimebound]] at tls_transport.hpp:116-118);
+    //   (4) factory_->make(exec, ssl_cfg, mr) → on failure count attempt, continue;
+    //   (5) t->async_connect(endpoint_) → on failure release t, count, continue;
+    //   (6) dynamic_cast<TlsTransport*>(t.get()) null-check → on null count, continue;
+    //       tls->async_handshake(ssl_cfg) → on failure release t, count, continue;
+    //   (7) (US2 T014) authorize via handshake_result.peer_id;
+    //   (8) on success call session_->install_reconnected_transport(…) (T010)
+    //       and co_return expected_t<void>{}.
+    // At loop exhaustion → co_return error (transport_reconnect_limit_exceeded).
+    // Cancellation: enable_total_cancellation() resets the co_await state;
+    //   total-cancel → abort in-flight attempt + RAII-release t.
+    //   [[feedback_asio_cospawn_total_cancellation_default]]
     [[nodiscard]] asio::awaitable<expected_t<void>>
     drive_reconnect_attempt() noexcept;
 
@@ -154,6 +215,23 @@ private:
     std::uint32_t                       attempt_index_ = 0;
     std::chrono::seconds                heartbeat_interval_;
     std::chrono::milliseconds           logout_disconnect_timeout_;
+
+    // 014 T009 — peer endpoint for async_connect (set by Session::open via
+    // set_reconnect_endpoint before drive_reconnect_attempt is first called).
+    fixpp::transport::Endpoint          endpoint_{};
+
+    // 014 T009/T010 — NON-OWNING back-pointer to the owning Session (set by
+    // Session::open via set_session_owner). Used to call the private
+    // Session::install_reconnected_transport() on success. Forward-declared
+    // above; full definition in reconnect_fsm.cpp (which includes session.hpp).
+    Session*                            session_ = nullptr;
+
+    // 014 T009 — TLS security profile for per-attempt SslCtxConfig construction.
+    // Set by Session::open() via set_tls_profile(). Default = unset (enum value 0);
+    // must be set before drive_reconnect_attempt is called on a live TLS path.
+    // Forward-declared as uint8_t-backed enum above; full definition via
+    // transport_factory.hpp in reconnect_fsm.cpp. [data-model §E-1 step 3; §XV.9]
+    fixpp::tls::SecurityProfile         tls_profile_{};
     // Timers are optional so ReconnectFsm is constructible without an executor;
     // populated at first use in Phase 3 (drive_reconnect_attempt binds the
     // session executor at call time). [data-model §E-1 Phase 2 shape]

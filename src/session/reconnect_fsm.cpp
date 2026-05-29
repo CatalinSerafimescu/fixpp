@@ -6,24 +6,37 @@
 // Anchors: FR-001..FR-016, D-1..D-5; [FIX-SL §4.3]/§4.5/§4.6;
 // data-model.md §E-1; contracts/reconnect_fsm.hpp.
 //
-// Phase 3: FR-009 state entry/exit wired (T023/T026). State is owned here;
+// Phase 3 (013): FR-009 state entry/exit wired (T023/T026). State is owned here;
 // the ResendRequest emit logic lives in session.cpp (which calls into these
 // methods) because it requires Session's seqnum_mgr_ + store_then_emit
 // infrastructure — injecting those would require a 5th ctor parameter
 // that breaks test fixtures constructing ReconnectFsm directly with 4 args.
-// Escalation: session.cpp inline emit + ReconnectFsm state ownership is the
-// correct partition given the test-fixture constraint.
+//
+// Phase 3 (014) T009: drive_reconnect_attempt realized — bounded retry loop
+// per data-model E-1 steps 1,3–6,8 + C1 contract:
+//   connect → handshake → success handoff (session_->install_reconnected_transport).
+//   Cancellation: enable_total_cancellation + RAII release of in-flight transport.
+//   [[feedback_asio_cospawn_total_cancellation_default]].
 //
 // ABI NOTE: awaiting_resend_ is a TRANSIENT BOOL on Active — NOT a new
 // fsm_state value per D-1 / [arch §5.6]. Do NOT extend fsm_state.
 
+#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
+#include <asio/redirect_error.hpp>
 
 #include "fixpp/session/reconnect_fsm.hpp"
 // Full TransportFactory definition (forward-declared in the header to keep
 // tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
 // [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
 #include "fixpp/transport/transport_factory.hpp"
+// TlsTransport — needed for the dynamic_cast<TlsTransport*> in E-1 step 6.
+// [data-model §E-1; tls_transport.hpp:61-67]
+#include "fixpp/transport/tls_transport.hpp"
+// Session — full definition needed to call Session::install_reconnected_transport.
+// [data-model §E-1 step 8; const §XV.9: kept out of reconnect_fsm.hpp]
+#include "fixpp/session/session.hpp"
 
 namespace fixpp::session {
 
@@ -46,18 +59,160 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 
 // ── drive_reconnect_attempt ───────────────────────────────────────────────────
 //
-// FR-001 / FR-002: mint fresh Transport via factory_->make() per attempt.
-// Phase 3 stub: calls make() once. Full retry loop (policy walk + limit) is
-// deferred to Phase 4 US2 per plan.md task ordering.
+// 014 T009: bounded reconnect loop per data-model E-1 steps 1,3–6,8 + C1.
+//
+// For each attempt n in [0, max_attempts):
+//   (1) await delay_for_attempt(n) — skip for n==0 (first attempt, no delay);
+//       honour total-cancel (release and abort).
+//   (2) Rotation check (E-3 / US3 T017): snapshot = factory_->cert_source_snapshot().
+//       [US3 wiring deferred to T017 — for now just capture snap for ssl_cfg build]
+//   (3) Build per-attempt SslCtxConfig ssl_cfg from the snapshot.
+//       HOLD ssl_cfg in attempt scope: async_handshake takes it by const&
+//       [[clang::lifetimebound]] (tls_transport.hpp:116-118) — never a temporary.
+//   (4) t = factory_->make(exec, ssl_cfg, nullptr); on failure count + continue.
+//   (5) t->async_connect(endpoint_); on failure release t, count + continue.
+//   (6) dynamic_cast<TlsTransport*>(t.get()) null-check.
+//       On null (non-TLS transport) release t, count + continue.
+//       tls->async_handshake(ssl_cfg); on failure release t, count + continue.
+//       Capture hr : handshake_result.
+//   (7) Authorization (E-2 / US2 T014): deferred; permissive for US1.
+//   (8) Success: call session_->install_reconnected_transport(move(t), hr)
+//       and co_return expected_t<void>{}.
+//
+// Loop exhaustion → co_return error (session_seqnum_too_high reused as
+//   transport_reconnect_limit_exceeded — exact error slot resolved by T026;
+//   FR-003 / C1 contract). [data-model §E-1; contracts C1]
+//
+// Cancellation: co_await asio::this_coro::reset_cancellation_state(
+//   asio::enable_total_cancellation()) at the top of the coroutine so that
+//   cancellation_type::total (from root_cancel_ at Session::close) propagates
+//   through the nested awaits and releases the partially-built transport via
+//   RAII (SC-004). [[feedback_asio_cospawn_total_cancellation_default]].
+//
+// factory_ null guard: if no factory is configured the coroutine co_returns
+// an error immediately (non-retried; test fixtures may construct a ReconnectFsm
+// without a factory when testing FSM state transitions only).
 [[nodiscard]] asio::awaitable<expected_t<void>>
 ReconnectFsm::drive_reconnect_attempt() noexcept {
-    if (factory_ != nullptr) {
-        auto exec = co_await asio::this_coro::executor;
-        fixpp::tls::SslCtxConfig ssl_cfg{};
-        auto t = factory_->make(exec, std::move(ssl_cfg), nullptr);
-        (void)t;
+    using fixpp::core::error;
+
+    // Enable total-cancellation so cancellation_type::total from the root
+    // cancellation signal propagates through nested co_awaits.
+    // [[feedback_asio_cospawn_total_cancellation_default]]: co_spawn defaults
+    // to terminal-only; we must explicitly reset here. [const §XI.2]
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation());
+
+    if (factory_ == nullptr) {
+        co_return std::unexpected{error::transport_factory_failed};
     }
-    co_return expected_t<void>{};
+
+    auto exec = co_await asio::this_coro::executor;
+
+    const std::uint32_t max_attempts = policy_.max_attempts;
+    // max_attempts == 0 means unbounded (QuickFIX-cpp / Fix8 compat mode).
+    // [reconnect_policy.hpp: "0 = UNBOUNDED (opt-in only)"]
+    for (std::uint32_t n = 0; max_attempts == 0 || n < max_attempts; ++n) {
+
+        // ── Step 1: inter-attempt backoff delay (skip for n==0) ──────────────
+        if (n > 0) {
+            auto delay = policy_.delay_for_attempt(n);
+            if (delay.count() > 0) {
+                asio::steady_timer timer{exec};
+                timer.expires_after(delay);
+                asio::error_code wait_ec;
+                co_await timer.async_wait(
+                    asio::redirect_error(asio::use_awaitable, wait_ec));
+
+                // Re-check cancellation state after the sleep.
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+                if (auto cs = co_await asio::this_coro::cancellation_state;
+                    cs.cancelled() != asio::cancellation_type::none) {
+                    co_return std::unexpected{error::transport_connect_cancelled};
+                }
+                if (wait_ec == asio::error::operation_aborted) {
+                    co_return std::unexpected{error::transport_connect_cancelled};
+                }
+            }
+        }
+
+        // Re-check cancellation after the backoff sleep (or at attempt 0).
+        if (auto cs = co_await asio::this_coro::cancellation_state;
+            cs.cancelled() != asio::cancellation_type::none) {
+            co_return std::unexpected{error::transport_connect_cancelled};
+        }
+
+        // ── Step 2: cert_source snapshot (rotation detection, E-3 / US3 T017)
+        // For US1 (T009) we just capture the snapshot for ssl_cfg construction.
+        // US3 T017 will add rotation-detect state (last_active_source_ + emit).
+        [[maybe_unused]] auto snap = factory_->cert_source_snapshot();
+
+        // ── Step 3: build per-attempt SslCtxConfig (held in attempt scope) ──
+        // ssl_cfg is held across both make() and async_handshake() — the arg
+        // to async_handshake is const& [[clang::lifetimebound]]; MUST NOT pass
+        // a temporary (tls_transport.hpp:116-118).
+        // tls_profile_ is set by Session::open() via set_tls_profile(); without
+        // it async_handshake rejects the attempt with transport_psk_unsupported.
+        fixpp::tls::SslCtxConfig ssl_cfg{};
+        ssl_cfg.profile = tls_profile_;
+        if (snap) {
+            ssl_cfg.cs = snap;  // bind the cert_source for this attempt
+        }
+
+        // ── Step 4: factory_->make ────────────────────────────────────────────
+        auto make_result = factory_->make(exec, ssl_cfg, nullptr);
+        if (!make_result) {
+            // make() failure counts as one attempt; retry per policy.
+            continue;
+        }
+        auto t = std::move(*make_result);
+
+        // ── Step 5: async_connect ─────────────────────────────────────────────
+        auto connect_result = co_await t->async_connect(endpoint_);
+        if (!connect_result) {
+            // Release t (RAII) and count the attempt.
+            continue;
+        }
+
+        // ── Step 6: dynamic_cast to TlsTransport + async_handshake ────────────
+        // TlsTransport inherits virtually from Transport — static_cast down that
+        // edge is ill-formed; dynamic_cast is required (E-1 / C1 / tls_transport.hpp:61-67).
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(t.get());
+        if (tls == nullptr) {
+            // Non-TLS transport (or cast fail): release t, count, continue.
+            continue;
+        }
+
+        // ssl_cfg is still in scope — required by [[clang::lifetimebound]]
+        // on async_handshake's cfg parameter (tls_transport.hpp:116-118).
+        auto handshake_result_r = co_await tls->async_handshake(ssl_cfg);
+        if (!handshake_result_r) {
+            // Handshake failure: release t, count, continue.
+            continue;
+        }
+        auto hr = std::move(*handshake_result_r);
+
+        // ── Step 7: Authorization (US2 T014 — deferred; permissive for US1) ──
+        // After T014: run cfg_.compid_authorization_policy.authorize(hr.peer_id, ...)
+        // here; on fail-closed: emit event, release t, count attempt, continue.
+        // For US1 (T009) the permissive path is taken (no auth check).
+        // hr is captured above and will be used by US2 T015.
+        (void)hr;
+
+        // ── Step 8: Success handoff → Session::install_reconnected_transport ──
+        if (session_ != nullptr) {
+            session_->install_reconnected_transport(std::move(t));
+        }
+        // (If session_ is null the transport is simply dropped — test-only path
+        // where ReconnectFsm is tested standalone without a Session owner.)
+
+        co_return expected_t<void>{};
+    }
+
+    // Loop exhausted at max_attempts — terminal Disconnected disposition.
+    // [FR-003; C1; data-model §E-1]
+    co_return std::unexpected{error::transport_factory_failed};
 }
 
 // ── run_heartbeat_cadence ─────────────────────────────────────────────────────
