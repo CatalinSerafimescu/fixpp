@@ -321,9 +321,11 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
         co_return expected_t<void>{};
     }
 
-    // Loop exhausted at max_attempts — terminal Disconnected disposition.
+    // Loop exhausted at max_attempts — surface the terminal limit-exceeded error.
+    // The owning Session's driver (015) effects the Disconnected state transition;
+    // drive_reconnect_attempt only co_returns the error.
     // [FR-003; C1; data-model §E-1]
-    co_return std::unexpected{error::transport_factory_failed};
+    co_return std::unexpected{error::transport_reconnect_limit_exceeded};
 }
 
 // ── run_heartbeat_cadence ─────────────────────────────────────────────────────

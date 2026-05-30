@@ -230,6 +230,12 @@ TEST_F(ReconnectBackoffCapTest, ReturnsErrorOnCapExhaustion) {
     EXPECT_FALSE(result.has_value())
         << "Expected error on cap exhaustion; got success. "
         << "RED: stub always returns success.";
+    // The terminal error code must be transport_reconnect_limit_exceeded (C1).
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), fixpp::core::error::transport_reconnect_limit_exceeded)
+            << "Cap-exhaustion must surface transport_reconnect_limit_exceeded, "
+            << "not transport_factory_failed or any other code. [C1; FR-003]";
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -402,6 +408,12 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     EXPECT_FALSE(result.has_value())
         << "Auth-fail exhausting the cap must return an error. "
         << "RED: step 7 no-op → attempt 0 succeeds → result.has_value()==true.";
+    // The terminal error code must be transport_reconnect_limit_exceeded (C1).
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), fixpp::core::error::transport_reconnect_limit_exceeded)
+            << "Auth-fail cap-exhaustion must surface transport_reconnect_limit_exceeded. "
+            << "[C1; FR-003; Q1 reason-agnostic: same terminal code regardless of per-attempt cause]";
+    }
 
     // Session must NOT be in Active (auth always fails → never transitions).
     // After T014: auth-fail in step 7 releases the transport and counts the
