@@ -1906,8 +1906,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .principal_source  = auth_r->from,
                     });
                     live_peer_id_.reset();  // consume (one-shot per Logon-ack)
-                } else if (cfg_.logon_peer_identity_override.has_value()) {
+                } else if (is_mtls && cfg_.logon_peer_identity_override.has_value()) {
                     // (2) Test seam: authorize against the injected peer_identity.
+                    // Guarded by is_mtls: the seam is an mTLS-identity-binding test
+                    // fixture and has no meaning on a non-mTLS session.  Without this
+                    // guard a non-mTLS session with an override set would enter this
+                    // arm and call authorize() — a latent fail-OPEN footgun.
+                    // Non-mTLS sessions fall through to arm (4) permissive. [FR-007]
                     const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     auto auth_r = cfg_.compid_authorization_policy.authorize(

@@ -470,4 +470,88 @@ TEST_F(CompIdBindingSeamTest, NonMtlsAbsentIdentityPermissiveSkip) {
         << "FR-007: non-mTLS gate is skipped; backward compat for one_way_ca sessions.";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 5 — non-mTLS (one_way_ca) + override SET → seam NOT consulted → Active.
+//
+// Regression witness for gate-b/r1 RC#1 fix: arm (2) must be guarded by
+// `is_mtls &&` so that a non-mTLS session with logon_peer_identity_override set
+// does NOT call authorize() and does NOT emit compid_authorization_failed.
+// The session must follow the arm-(4) permissive path and reach Active.
+//
+// Without the fix, arm (2) is entered (override.has_value() is true), authorize()
+// is called against an empty policy → authorization fails → Disconnected + event.
+// With the fix, arm (2) condition is `is_mtls && override.has_value()` → false for
+// non-mTLS → falls through to arm (4) permissive → Active.
+//
+// Anchors: FR-007; US2 AC4; spec §Assumptions (non-mTLS skip); contracts C2.
+// Anti-pattern: [[feedback_simplify_pass_catches_9th_burn]] — production guard
+//   gated only by test seam = silent fail-OPEN in non-mTLS sessions with override.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(CompIdBindingSeamTest, NonMtlsWithOverrideSeamIgnored) {
+    // Empty policy: if authorize() were called, it would deny all identities.
+    fixpp::session::CompIdAuthorizationPolicy policy;
+
+    // Override set to a CN that is NOT in the policy (would fail if arm (2) fires).
+    fixpp::tls::peer_identity override_pid;
+    {
+        std::pmr::memory_resource* mr = std::pmr::get_default_resource();
+        override_pid.subject_dn = std::pmr::string{"CN=ROGUE-PEER", mr};
+        override_pid.leaf_fingerprint = {};
+    }
+
+    // Non-mTLS (one_way_ca) profile: the seam override must be ignored.
+    auto cfg = add_null_transport_send(
+        make_cfg(std::move(policy),
+                 std::move(override_pid),
+                 fixpp::session::SecurityProfile::kind::one_way_ca));
+
+    fixpp::session::Session session{engine, cfg};
+
+    {
+        auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        auto open_r = open_fut.get();
+        ASSERT_TRUE(open_r.has_value())
+            << "Session::open() failed: " << static_cast<int>(open_r.error());
+    }
+
+    ASSERT_EQ(session.state(), fixpp::session::fsm_state::LogonSent)
+        << "Session must be in LogonSent after open().";
+
+    auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
+    {
+        auto feed_fut = asio::co_spawn(
+            ioc,
+            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
+            asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
+        (void)feed_fut.get();
+    }
+
+    // Non-mTLS + override: seam arm (2) must NOT be consulted.
+    // Expected: permissive skip (arm 4) → Active, no auth-failed event.
+    EXPECT_EQ(session.state(), fixpp::session::fsm_state::Active)
+        << "one_way_ca (non-mTLS) + override set → seam ignored (arm 2 guarded by "
+        << "is_mtls) → permissive arm (4) → Active. "
+        << "RC#1 fix: `is_mtls &&` gates arm (2) to prevent fail-OPEN on non-mTLS.";
+
+    // No compid_authorization_failed event should be emitted.
+    bool auth_failed_emitted = false;
+    for (const auto& ev : session.recent_events()) {
+        if (std::holds_alternative<
+                fixpp::session::session_event_compid_authorization_failed>(ev)) {
+            auth_failed_emitted = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(auth_failed_emitted)
+        << "Non-mTLS + override: authorize() must NOT be called (seam ignored). "
+        << "No compid_authorization_failed event must be emitted. "
+        << "RC#1: arm (2) gated on is_mtls prevents spurious auth failure.";
+}
+
 }  // namespace
