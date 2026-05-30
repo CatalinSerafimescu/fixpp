@@ -653,6 +653,28 @@ set_tests_properties(credentials_rotated_emit PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us3;live_tls;credentials_rotated")
 
+# ── 015-runtime-engine Phase 2 (T004) — SessionId unit test ─────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T004 impl lands in
+# include/fixpp/session/engine.hpp.
+# CTest filter: ctest -R 'engine_session_id'
+
+add_executable(engine_session_id_test
+  engine_session_id_test.cpp
+)
+target_link_libraries(engine_session_id_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_session_id_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME engine_session_id COMMAND engine_session_id_test)
+set_tests_properties(engine_session_id PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;foundational;session_id")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

@@ -243,6 +243,8 @@ For each module: the public-facing types/functions, the design-doc that owns the
 - `fixpp::session::SecurityProfile` — enum: `mtls_ca` / `mtls_pinned` / `one_way_ca [[deprecated]]` `[const §XII.5]`.
 - `fixpp::session::RejectPolicy`, `fixpp::session::LockPolicy` — enums per `[SYN §3.2 Q8, Q9]`.
 - `fixpp::session::Listener` — multi-session acceptor.
+- `fixpp::session::Engine` — public multi-session runtime engine (accept/connect loops, `SessionId`-keyed registry, programmatic lifecycle: `register_session` / `start` / `stop` / `lookup`). Added by `015-runtime-engine` (T005 / R1 / [const §VI.4]). **No new module** — lives in the existing `session/` module (`include/fixpp/session/engine.hpp`); no `check_layers.py` ALLOWED-map change required.
+- `fixpp::session::SessionId` — FIX session identity tuple (`begin_string`, `sender_comp_id`, `target_comp_id`); regular value type (copyable, equality-comparable, hashable). Registry key for `Engine`. Added by `015-runtime-engine` (T004 / R6 / E-1 / Gate A New-5: no `qualifier` field).
 
 **Threading default (locked):** every `Session` runs on a `strand` derived from a user-supplied executor. Application callbacks dispatch onto that strand by default `[const §XI.4]` `[SYN §3.2 Q6c]`. Owned by **2d**.
 
