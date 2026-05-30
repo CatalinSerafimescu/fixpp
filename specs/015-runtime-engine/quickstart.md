@@ -35,11 +35,11 @@ io.run();
 ```
 
 On each inbound connection the accept loop (C1):
-1. `co_await listener.async_accept()` → handshaken `Transport` (+ `handshake_result.peer_id`).
-2. Reads the first frame (the Logon) via `wire::Framer` and resolves
+1. `co_await listener.async_accept()` → a **TCP-connected, NOT-yet-TLS-handshaken** `Transport` (no `peer_id` yet). The loop **runs the TLS handshake itself** (`async_handshake`) and harvests `handshake_result.peer_id`.
+2. **Bounded** first-frame read (byte cap + Logon deadline, FR-014) of the Logon via the real `wire::Framer::feed(incoming, carry, out)` surface, then resolves
    `SessionId::reversed_from_logon(begin_string, logon.Sender(49), logon.Target(56))`.
-3. **Match** → binds the transport, `install_reconnected_transport(handshake_result)` (sets `live_peer_id_`), spawns the read-pump, delivers the Logon to `on_inbound_frame`.
-4. **No match** → rejects (close transport, `session_unknown_acceptor_session`), no session created.
+3. **Match** → attaches via the **acceptor attach primitive** (`attach_accepted_transport`, design intent) — takes the transport, rebinds outbound, sets `live_peer_id_`, and does NOT transition the FSM (NOT `install_reconnected_transport`, which re-enters `LogonSent` — initiator-only). Spawns the read-pump, delivers the Logon to `on_inbound_frame`, where the acceptor gate authorizes against `live_peer_id_`.
+4. **No match** → rejects at the connection level (close transport + log `session_unknown_acceptor_session = 121`), no session created.
 
 ## T-041 closure: live acceptor authorization (fail-CLOSED)
 
@@ -50,7 +50,7 @@ On each inbound connection the accept loop (C1):
 //     session_compid_unauthorized + session_event_compid_authorization_failed + Disconnected
 ```
 
-Both gate sites (`session.cpp:1048`, `:1913`) now have the live-identity arm (C3, mirror of the 014 initiator arm at `:1864`). The `logon_peer_identity_override` seam is **removed** (C4) — the binding-logic tests drive a live handshake identity over the loopback-TLS fixture. **T-041 → `done`** for both roles.
+The live-identity arm is added at the **single acceptor gate** `session.cpp:1048` (C3, mirror of the 014 initiator arm at `:1864`). Note `session.cpp:1913` is the **initiator** seam arm in the `LogonSent` case, NOT a second acceptor gate — the live arm goes at `:1048` only, while the `logon_peer_identity_override` seam is **removed** from BOTH `:1048` and `:1913` (C4). The binding-logic tests drive a live handshake identity over the loopback-TLS fixture. **T-041 → `done`** for both roles.
 
 ## What you can verify
 

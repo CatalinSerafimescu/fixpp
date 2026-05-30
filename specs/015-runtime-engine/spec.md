@@ -10,8 +10,22 @@
 ### Session 2026-05-30
 
 - Q: How does the engine handle an inbound acceptor connection's Logon — static pre-configured matching, dynamic session creation, or both? → A: **Both, static by default.** Static pre-configured matching (an inbound Logon matched by *reversed* SenderCompID/TargetCompID to an already-registered acceptor `SessionConfig`) is the default and mandatory path on which T-041 fail-CLOSED binding is proven; an unmatched Logon under static-only is rejected with NO session created. An **optional dynamic-session-provider hook** MAY create a session on first Logon (mirroring QFJ `DynamicAcceptorSessionProvider`), routing through the *identical* `authorize()` gate. (Grounded against QFC `Acceptor::getSession` reverse-route + QFJ Static/Dynamic `AcceptorSessionProvider`.)
-- Q: What defines "SessionConfig identity" for registry lookup and the FR-002 duplicate rejection? → A: The **FIX SessionID tuple** — BeginString + SenderCompID + TargetCompID, plus an optional session qualifier — derived from each `SessionConfig`. Role-agnostic, canonical, matches QFC/QFJ SessionID keying; two `SessionConfig`s resolving to the same tuple are duplicates and the second registration is rejected.
+- Q: What defines "SessionConfig identity" for registry lookup and the FR-002 duplicate rejection? → A: The **FIX SessionID tuple** — BeginString + SenderCompID + TargetCompID — derived from each `SessionConfig`. Role-agnostic, canonical, matches QFC/QFJ SessionID keying; two `SessionConfig`s resolving to the same tuple are duplicates and the second registration is rejected.
 - Q: How do `start()`/`stop()` and threading work for the public engine? → A: **Injected executor, non-blocking start.** The engine takes a caller-supplied asio executor (e.g. an `io_context`); `start()` launches the connect/accept loops and returns (does not block); `stop()` cancels all loops and is idempotent; the caller drives the executor. No engine-owned worker threads — matches the existing asio tree and `[const §XI]`.
+
+### Session 2026-05-30 (Gate A round 1)
+
+Decisions made during the Gate A re-plan (resolving ambiguities surfaced by the review; the prior Phase-0/1 baseline was partly fabricated and is re-derived from first-hand source — see plan.md `## Gate A`):
+
+- Q: How is a `Session` constructed, and is there an `Application&` dependency? → A: Via the **public, synchronous ctor `Session(const EngineConfig&, const SessionConfig&)`** (`session.hpp:95`) + the awaitable `open()`. There is **NO `make_session` factory, no private ctor, and no `Application&` parameter** — the prior research.md baseline row was fabricated. `register_session` takes only a `SessionConfig`. (Resolves Gate A Codex-3 / New-2.)
+- Q: How does the acceptor obtain a live peer identity, and how is the live transport attached for the FIRST connection? → A: `Listener::async_accept()` returns a TCP-connected transport with TLS NOT yet issued; the accept loop **runs `async_handshake` itself** and harvests `handshake_result.peer_id`. Attach uses a **new acceptor-specific primitive** (design-named `attach_accepted_transport`) that sets `live_peer_id_` + rebinds outbound **without** an FSM transition — NOT `install_reconnected_transport`, which re-enters `LogonSent` (initiator-only). (Resolves Gate A Codex-1/Codex-2/Codex-4.)
+- Q: Which gate site gets the live-identity arm? → A: The **single acceptor gate `session.cpp:1048`** ONLY. `session.cpp:1913` is the initiator seam arm (in `case LogonSent`), NOT a second acceptor gate; the seam arm is *removed* from both `:1048` and `:1913`. (Resolves Gate A New-7.)
+- Q: What guarantees the acceptor gate authorizes against the live identity? → A: A written **happens-before invariant** — `live_peer_id_` is set on the session strand strictly-happens-before the first `on_inbound_frame` reaching the acceptor gate — plus a delayed-identity fail-CLOSED regression test. (Resolves Gate A New-1.)
+- Q: What bounds the pre-session window (handshake + first-frame read) against a slow-loris peer? → A: A byte budget + a handshake/Logon deadline owned by an engine-level accept-scope cancellation domain (FR-014 / SC-011). (Resolves Gate A Codex-10.)
+- Q: How is engine teardown made UAF-safe? → A: `~Engine()` is a strict `assert(stopped())` (no synchronous best-effort path); `stop()` joins all loops/pumps **before** clearing the registry that owns the sessions; `open()` is awaited inside each loop (not in synchronous `start()`), so `lookup()` may return a not-yet-open / null session. (Resolves Gate A Codex-9 / New-3 / New-4.)
+- Q: Is there an inbound application-message sink? → A: No — 015 is scoped to admin/session-layer flow; application-message delivery to a user is Phase-5 (Application is out of scope, FR-013). (Resolves Gate A New-2.)
+- Q: How many new error slots? → A: Exactly one — `session_unknown_acceptor_session = 121` (next free; no reusable "unknown session" code exists). Duplicate registration reuses `session_invalid_argument = 119`; authz failure reuses `session_compid_unauthorized = 117`. (Resolves Gate A New-6.)
+- Q: Read-pump framing surface? → A: The real `wire::Framer::feed(incoming, carry, out)` + `pending_bytes()` (no `feed(bytes)`/`next()`); over-capacity → `wire_frame_too_large`; backpressure is natural (synchronous `co_await on_inbound_frame`). (Resolves Gate A Codex-5.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -34,7 +48,7 @@ A deployed FIX **acceptor** MUST listen for inbound connections, accept a peer, 
 
 Once a session is established (whether the local role is initiator or acceptor), the engine MUST continuously read the live transport and feed every inbound frame to `Session::on_inbound_frame`, in order and on the session strand, until the session closes — not a single frame, as 014 proved on the reconnect path.
 
-**Why this priority**: A session that only consumed one inbound frame would never process the steady-state message flow (heartbeats, application messages, resend handling). The continuous read-pump is what turns the wired-up transport into a live, running session. It is the shared engine substrate both roles depend on.
+**Why this priority**: A session that only consumed one inbound frame would never process the steady-state message flow (heartbeats, resend handling, and the rest of the admin/session-layer protocol). The continuous read-pump is what turns the wired-up transport into a live, running session. It is the shared engine substrate both roles depend on. (Scope note: 015 has no user sink for inbound *application* messages — the `Application` callback surface is out of scope, FR-013; the read-pump delivers every frame to `Session::on_inbound_frame`, which stores it and runs the admin/session-layer handling. App-message delivery to a user is a Phase-5 concern.)
 
 **Independent Test**: Drive a stream of N inbound frames into an established session's transport and assert all N are dispatched to `Session::on_inbound_frame`, in order, on the session strand, with no drops, duplicates, or off-strand dispatch.
 
@@ -78,7 +92,8 @@ The test-only `logon_peer_identity_override` authorization seam MUST be removed 
 
 ### Edge Cases
 
-- **Acceptor connection → SessionConfig matching**: an inbound connection is associated with exactly one session by the *reversed* SenderCompID/TargetCompID of its inbound Logon (the FR-002 SessionID tuple). Under static-only matching an inbound Logon matching no registered acceptor session is rejected (no session created); when the optional dynamic-session-provider hook is configured it may instead create the session on first Logon, still subject to the FR-006/FR-007 authorization gate. (Confirmed against QFC reverse-route + QFJ Static/Dynamic providers during `/speckit-clarify`.)
+- **Acceptor connection → SessionConfig matching**: an inbound connection is associated with exactly one session by the *reversed* SenderCompID/TargetCompID of its inbound Logon (the FR-002 SessionID tuple). Routing is **static** for this feature: an inbound Logon matching no registered acceptor session is ALWAYS rejected at the connection level (`session_unknown_acceptor_session`, no session created) — there is no fail-open path. The optional dynamic-session-provider hook is deferred (R2); when later configured it may create the session on first Logon, still subject to the identical FR-006/FR-007 authorization gate. (Confirmed against QFC reverse-route + QFJ Static/Dynamic providers during `/speckit-clarify`.)
+- **Acceptor TLS handshake + live identity source**: `Listener::async_accept()` returns a TCP-connected transport with TLS NOT yet issued and no peer identity; the accept loop itself runs `async_handshake` and harvests the live `handshake_result.peer_id`, then sets it on the session (via the acceptor attach primitive) strictly before the Logon gate runs. This is the sole source of the live acceptor identity that closes T-041.
 - **Authorization failure on the acceptor path**: dispositioned by the *open*-path rule (013's terminal fail-CLOSED at the acceptor Logon gate), not the reconnect retry-to-cap rule (which is the initiator reconnect path from 014). The two dispositions are inherited unchanged.
 - **Engine stop while a handshake or reconnect attempt is in flight**: teardown is cancellation-safe; an in-flight attempt is aborted without leak or use-after-free (per the asio total-cancellation lesson — a coroutine that must honor root-total teardown resets to enable total cancellation).
 - **Concurrent sessions sharing the engine executor**: per-session work stays on its own strand; no cross-session data races.
@@ -89,10 +104,10 @@ The test-only `logon_peer_identity_override` authorization seam MUST be removed 
 ### Functional Requirements
 
 - **FR-001**: The system MUST expose a public runtime engine that constructs, registers, starts, and stops FIX sessions for both the initiator and acceptor roles. The engine MUST run on a **caller-supplied asio executor** (e.g. an `io_context`) and MUST NOT own or spawn worker threads; the caller drives the executor. `start()` MUST be **non-blocking** — it launches the connect/accept loops and returns.
-- **FR-002**: The engine MUST maintain a session registry keyed by the **FIX SessionID tuple** (BeginString + SenderCompID + TargetCompID, plus an optional session qualifier) derived from each `SessionConfig`; two `SessionConfig`s resolving to the same tuple are duplicates and the second registration MUST be rejected.
+- **FR-002**: The engine MUST maintain a session registry keyed by the **FIX SessionID tuple** (BeginString + SenderCompID + TargetCompID) derived from each `SessionConfig`; two `SessionConfig`s resolving to the same tuple are duplicates and the second registration MUST be rejected.
 - **FR-003**: Starting the engine MUST begin each initiator session's connect loop (driven by 014's reconnect/connect path) and each acceptor session's accept loop (listening for inbound connections), launched on the caller-supplied executor.
 - **FR-004**: For every established session of either role, the engine MUST continuously read the live transport and deliver each inbound frame to `Session::on_inbound_frame`, in arrival order, on the session strand, until the session closes.
-- **FR-005**: The acceptor MUST, on accepting a connection, complete the TLS handshake, resolve the matching session, and feed the live byte stream into it (the `accept → Session-resolve → byte-feed` production path). Session resolution MUST default to **static pre-configured matching**: the inbound Logon is matched by its *reversed* SenderCompID/TargetCompID to a registered acceptor `SessionConfig` (the FR-002 tuple); an unmatched Logon under static-only matching MUST be rejected with NO session created. The engine MAY additionally support an **optional dynamic-session-provider hook** that creates a session on first Logon; a dynamically-created session MUST route through the identical authorization gate (FR-006/FR-007) — the dynamic path introduces no fail-OPEN.
+- **FR-005**: The acceptor MUST, on accepting a connection, **drive the TLS handshake itself** (the `Listener::async_accept()` result is TCP-connected with TLS not yet issued and carries no peer identity — the accept loop runs `async_handshake` and harvests `handshake_result.peer_id`), then resolve the matching session and feed the live byte stream into it (the `accept → handshake → Session-resolve → byte-feed` production path). Session resolution MUST use **static pre-configured matching**: the inbound Logon is matched by its *reversed* SenderCompID/TargetCompID to a registered acceptor `SessionConfig` (the FR-002 tuple); an unmatched Logon MUST be rejected at the connection level with NO session created — routing is static for this feature, with no fail-open path. An optional dynamic-session-provider hook is deferred (R2); if later added, a dynamically-created session MUST route through the identical authorization gate (FR-006/FR-007).
 - **FR-006**: On the live acceptor path, the post-handshake authenticated peer identity (not the test override or a fabricated stand-in) MUST be the source that drives the CompID authorization decision at the acceptor Logon gate.
 - **FR-007**: The acceptor CompID authorization decision MUST be fail-CLOSED under mTLS when the identity is absent or off-list, mirroring the initiator path and inheriting 013's semantics.
 - **FR-008**: The canonical identity-extraction order (CN→SAN-DNS→SAN-URI→SHA-256) and the `session_event_compid_authorization_failed` / `session_compid_unauthorized` event and code shapes MUST be inherited unchanged from 013/014 (no new shapes).
@@ -100,12 +115,13 @@ The test-only `logon_peer_identity_override` authorization seam MUST be removed 
 - **FR-010**: Catalogue row **T-041** MUST flip from `implementing` to `done` once both roles bind a live identity and fail CLOSED in production.
 - **FR-011**: Stopping the engine MUST tear down all sessions, loops, listeners, and in-flight work cleanly — no leaks, no use-after-free, cancellation-safe (including total-cancellation teardown of in-flight handshake/reconnect attempts). A second stop MUST be a no-op.
 - **FR-012**: The engine MUST NOT alter the established disposition rules: the *open*-path acceptor Logon failure stays terminal fail-CLOSED (013); the initiator *reconnect*-path authorization failure stays retry-to-cap (014). 015 adds no new disposition.
-- **FR-013**: The feature MUST remain bounded below the Phase-5 service wrapper — no configuration-file parsing, no `Application`-style user callbacks, no store/log factory abstractions, and no C ABI / control-plane / observability / pybind surface.
+- **FR-013**: The feature MUST remain bounded below the Phase-5 service wrapper — no configuration-file parsing, no `Application`-style user callbacks, no store/log factory abstractions, and no C ABI / control-plane / observability / pybind surface. (Consequently there is **no user sink for inbound *application* messages** in 015; the read-pump delivers every frame to `Session::on_inbound_frame`, which stores it and processes admin/session-layer types internally — see FR-004. App-message delivery to a user is Phase-5.)
+- **FR-014**: The engine MUST bound the pre-session window on an inbound acceptor connection — both the TLS handshake and the first-frame (Logon) read — with a maximum byte budget AND a handshake/Logon deadline. A peer that exceeds either (slow-loris, partial frame, or an unbounded stream before a valid Logon) MUST be closed and its accept slot reclaimed, without affecting other peers. This window precedes any `Session` object, so it cannot rely on per-session limits; it is owned by an engine-level accept-scope cancellation domain wired into `stop()`.
 
 ### Key Entities
 
 - **Runtime engine**: the public component bound to a caller-supplied executor, owning the session registry and the per-role loops (connect loops for initiators, accept loops for acceptors); the start/stop lifecycle owner. Does not own worker threads.
-- **Session registry**: the collection of live sessions keyed by the FIX SessionID tuple (BeginString + SenderCompID + TargetCompID + optional qualifier); the addressing/lookup surface and the duplicate-rejection authority.
+- **Session registry**: the collection of live sessions keyed by the FIX SessionID tuple (BeginString + SenderCompID + TargetCompID); the addressing/lookup surface and the duplicate-rejection authority.
 - **Accept loop**: the acceptor-side loop that accepts inbound connections, completes handshakes, and resolves each to a session by reversed-CompID SessionID match (static default) or via the optional dynamic-session-provider hook.
 - **Read-pump**: the continuous inbound reader that feeds `Session::on_inbound_frame` for an established session of either role.
 - **Live peer identity**: the authenticated TLS identity extracted in canonical order on the acceptor path; the authorization input that closes T-041.
@@ -124,6 +140,7 @@ The test-only `logon_peer_identity_override` authorization seam MUST be removed 
 - **SC-008**: The full sanitizer ctest matrix is green (ASan/UBSan/TSan), 0 findings.
 - **SC-009**: Out-of-scope items (Phase-5 service wrapper, C ABI, control-plane, observability, pybind) are not present.
 - **SC-010**: The public surface delta is limited to the documented runtime-engine additions and the seam removal.
+- **SC-011**: An inbound acceptor connection that stalls the TLS handshake, sends nothing, sends a partial first frame, or sends more than the first-frame byte budget before a valid Logon is closed within the configured deadline, its transport and accept slot are reclaimed (no leak under sanitizers), and other peers are unaffected (FR-014).
 
 ## Assumptions
 
@@ -148,6 +165,16 @@ The test-only `logon_peer_identity_override` authorization seam MUST be removed 
 - 013 reconnect FSM + CompID authorization policy + recovery sub-protocol (merged).
 - 014 per-session live wiring (merged) — initiator `drive_reconnect_attempt` loop + live `handshake_result.peer_id → authorize()` + real `credentials_rotated`.
 - 015 builds on all three; no new external dependencies.
+
+## Normative References
+
+Per `[const §VI.5]`, the exact normative entries informing this spec:
+
+- `[FIXS §4.4]` *FIX Session Layer — Authorization linked to authentication* — drives FR-006/FR-007/FR-008 and the **T-041** binding (authenticated TLS identity → authorized FIX CompID).
+- `[FIX-SL §4.2.2]` *Logon / CompID identification* — drives FR-002 (SessionID tuple) and the reversed-CompID acceptor resolution in FR-005.
+- `[FIX-SL §4.3]` *Connection establishment* — drives FR-003/FR-005 (accept → handshake → resolve → byte-feed) and FR-014 (bounded pre-session window).
+- `[FIX-SL §4.5.2]` *Heartbeat / steady-state message flow* — drives FR-004 (continuous read-pump).
+- Inherited unchanged from 013/014 (the binding semantics, canonical CN→SAN-DNS→SAN-URI→SHA-256 extraction order, and the `session_event_compid_authorization_failed` / `session_compid_unauthorized` shapes): see the 013/014 specs' Normative References; 015 adds no new FIX-protocol semantics (FR-008/FR-012).
 
 ## Anchors / Catalogue
 

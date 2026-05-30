@@ -1,7 +1,7 @@
 # Contract — Public Engine & SessionId API (015)
 
 **Module**: `fixpp::session` (NOT a new module — R1). Header: `include/fixpp/session/engine.hpp`.
-This is the **public-surface contract** Gate B reviews. Signatures are the design intent; exact spelling is locked at `/speckit-implement` against the shipped `Session`/`EngineConfig`/`SessionConfig` headers (no method name is invented here without a `file:line` anchor).
+This is the **public-surface contract** Gate B reviews. Signatures are the design intent; exact spelling is locked at `/speckit-implement` against the shipped `Session`/`EngineConfig`/`SessionConfig` headers (no method name is invented here without a `file:line` anchor). Anchors re-derived first-hand at Gate A round 1.
 
 ---
 
@@ -11,10 +11,11 @@ This is the **public-surface contract** Gate B reviews. Signatures are the desig
 namespace fixpp::session {
 
 struct SessionId {
-    std::string begin_string;     // SessionConfig::begin_string  (session_config.hpp:153)
-    std::string sender_comp_id;   // SessionConfig::sender_comp_id (:151)
-    std::string target_comp_id;   // SessionConfig::target_comp_id (:152)
-    std::string qualifier;        // reserved; always empty in 015 (no SessionConfig field yet)
+    std::string begin_string;     // SessionConfig::begin_string  (main)
+    std::string sender_comp_id;   // SessionConfig::sender_comp_id (main)
+    std::string target_comp_id;   // SessionConfig::target_comp_id (main)
+    // No qualifier field (Gate A New-5: dropped — speculative until a real
+    // SessionConfig qualifier lands).
 
     friend bool operator==(SessionId const&, SessionId const&) noexcept = default;
 
@@ -29,11 +30,11 @@ struct SessionId {
 };
 
 }  // namespace fixpp::session
-// + std::hash<SessionId> specialization (all four fields) for unordered_map keying.
+// + std::hash<SessionId> specialization (all three fields) for unordered_map keying.
 ```
 
 **Contract**:
-- Value equality over all four fields; `qualifier` empty in 015 ⇒ no behavioural effect.
+- Regular value type — value equality over all three fields; copyable, hashable.
 - `from_config` and `reversed_from_logon` are the only two constructors used by the engine.
 - No validation of empty fields here — `SessionConfig` open()-time validation (005/010) already rejects empties.
 
@@ -52,25 +53,46 @@ public:
     Engine(Engine const&) = delete;
     Engine& operator=(Engine const&) = delete;
     // move: deleted (holds spawned coroutine state + registry); pin via unique_ptr if needed.
-    ~Engine();   // asserts stopped(), or drives a synchronous best-effort teardown
+    //
+    // ~Engine(): STRICT precondition — asserts stopped(). NO synchronous
+    // best-effort teardown (Gate A Codex-9): a synchronous destructor cannot
+    // run the caller-driven executor to drain in-flight coroutines that hold
+    // raw Session*, so freeing the sessions here is a UAF (the 014 Gate-B
+    // burn). Destruction REQUIRES a prior `co_await stop()`.
+    ~Engine();
 
     // FR-002: register a session (initiator or acceptor — role derived from cfg).
-    // Duplicate SessionId::from_config(cfg) → error (R5 #2: reuse session_invalid_argument).
+    // Records the SessionConfig only; does NOT construct a Session here (the
+    // engine owns construction/open() inside the spawned loops — see start()).
+    // Duplicate SessionId::from_config(cfg) → session_invalid_argument (R5 #2).
     // Must be called before start() in 015 (post-start registration is future work).
+    // NO `Application&` parameter — there is no Application surface in 015
+    // (FR-013; Gate A New-2). The real Session ctor is the public, synchronous
+    // `Session(const EngineConfig&, const SessionConfig&)` (session.hpp:95) —
+    // there is no make_session factory.
     [[nodiscard]] fixpp::core::expected_t<void> register_session(SessionConfig cfg);
 
     // FR-001/FR-003: non-blocking. co_spawns a connect loop per initiator and an
     // accept loop per acceptor on `exec`. Legal once. The caller drives `exec`
     // (e.g. io_context::run) — start() does NOT block or run the executor.
+    // Each loop `co_await`s the awaitable Session::open() as its first step
+    // (open() cannot run in this synchronous void start()); a session is thus
+    // constructed-but-not-yet-open until its loop reaches open() (Gate A New-3).
     void start();
 
     // FR-011: idempotent, cancellation-safe teardown. Cancels every accept loop,
-    // connect loop, read-pump, and in-flight handshake via cancellation_type::total,
-    // closes transports, and joins outstanding session work. A second stop() is a
-    // no-op. Returns when teardown is complete (no leaked work, no UAF).
+    // connect loop, read-pump, accept-scope domain, and in-flight handshake via
+    // cancellation_type::total, closes transports, and JOINS all outstanding
+    // session work BEFORE clearing the registry that owns the Session objects
+    // (join-before-clear — Gate A New-4; prevents a session-strand read-pump
+    // from dereferencing a freed Session*). A second stop() is a no-op. Returns
+    // when teardown is complete (no leaked work, no UAF).
     [[nodiscard]] asio::awaitable<void> stop();
 
-    // Registry addressing. Returns nullptr if no session for `id`.
+    // Registry addressing. Returns nullptr if `id` is not registered, OR is
+    // registered but not yet established (e.g. an acceptor with no connected
+    // peer, or a session whose loop has not yet reached open()) — null is not
+    // an error (Gate A New-3).
     [[nodiscard]] Session* lookup(SessionId const& id) const;
 
     [[nodiscard]] bool stopped() const noexcept;
@@ -83,12 +105,14 @@ public:
 
 **Threading / cancellation contract**:
 - All loops/pumps `co_spawn` on `exec`; each MUST `reset_cancellation_state(enable_total_cancellation())` so `stop()`'s total cancel actually propagates (`[const §XI.2]`; `[[feedback_asio_cospawn_total_cancellation_default]]`). A loop that omits this hangs `stop()` silently — the first thing to check on a stop-hang.
-- Registry mutation/iteration is sequenced on an engine strand (E-5), NOT a `std::mutex` (`[const §XV.9]`).
+- Registry mutation/iteration is sequenced on an engine strand (E-5), NOT a `std::mutex` (`[const §XV.9]`). The engine strand protects the map; the join-before-clear rule (`stop()`) protects the pointee lifetime across strands (Gate A New-4).
 - Per-session work stays on that session's strand (`Session::open()` binds it); the read-pump dispatches `on_inbound_frame` on the session strand (FR-004).
 
-**Outbound wiring** (E-1): before constructing a `Session`, the engine sets `SessionConfig::transport_send` (the `std::function<void(span<const std::byte>)>` captured into `transport_send_` at open(), `session.hpp:530-534`) to a closure writing to the live `Transport::async_write`.
+**Acceptor first-attach** (E-2 / research.md R7): on the acceptor path the accept loop runs the TLS handshake itself (`Listener::async_accept` returns a TCP-only transport — `listener.hpp:45-53`), harvests `handshake_result.peer_id`, and attaches via a **new acceptor-specific primitive** (design-named `attach_accepted_transport`) that sets `live_peer_id_` + rebinds outbound **without** an FSM transition. It does **NOT** use `install_reconnected_transport` (which re-enters `LogonSent`, initiator-only — Gate A Codex-2). The acceptor gate at `session.cpp:1048` then authorizes against `live_peer_id_` (live-identity-before-gate invariant, Gate A New-1).
 
-**`EngineConfig`**: the existing core value type (`include/fixpp/core/engine_config.hpp:106`) — supplies `clock`, `default_transport_factory`, dictionaries; the `Session(EngineConfig const&, SessionConfig const&)` ctor (`session.hpp:95`) already consumes it. The engine does NOT introduce a competing config type.
+**Outbound wiring** (E-1 / Gate A Codex-4): `transport_send_` is captured ONCE from `cfg_.transport_send` at `open()` and is immutable thereafter (`session.hpp:530-534`). For an **acceptor** the live transport does not exist at open() (it appears only when a peer connects), so the engine captures a **rebindable forwarding slot** as `cfg.transport_send` at open() and repoints it at the live `Transport::async_write` during the acceptor attach (E-2). This is why `lookup()` can return a registered acceptor session before any connection (SC-004). `install_reconnected_transport` does NOT rewrite `transport_send_`, and the acceptor path does not use it.
+
+**`EngineConfig`**: the existing core value type (`include/fixpp/core/engine_config.hpp:106-148`) — supplies `clock`, `default_transport_factory`, dictionaries, default resources. It carries **NO `Application`**. The public `Session(const EngineConfig&, const SessionConfig&)` ctor (`session.hpp:95`) consumes it. The engine does NOT introduce a competing config type.
 
 ---
 
@@ -100,4 +124,4 @@ Add to architecture.md **§4.4 (`session` public types)** — NO §2.2/§2.3 lay
 Run `tools/check_layers.py` after `engine.hpp` lands (`[[feedback_gate_b_check_layers_post_fixer]]`).
 
 ## Pluggable-interface budget (`[const §XIV.2]`)
-015 adds **no new pluggable interface** (dynamic-session-provider deferred — R2). `Engine` is a concrete type, not a pluggable interface; it does not count against any module cap. If R2 is re-opened, the provider interface (1–2 methods) needs a one-paragraph Gate-A justification.
+015 adds **no new pluggable interface** (dynamic-session-provider deferred — R2). `Engine` is a concrete type, not a pluggable interface; it does not count against any module cap. The new acceptor attach primitive (`attach_accepted_transport`) is a **non-virtual** method on the concrete `Session`, not a pluggable interface — it does not count either. If R2 is re-opened, the provider interface (1–2 methods) needs a one-paragraph Gate-A justification.
