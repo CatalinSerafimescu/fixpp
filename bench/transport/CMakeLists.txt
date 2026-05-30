@@ -18,9 +18,23 @@ target_link_libraries(bench_async_write_issue PRIVATE
 set_target_properties(bench_async_write_issue PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/transport")
 
-# T023 — [2h §6.3] row 4 — TLS 1.3 1-RTT handshake loopback ≤10 ms p99.
+# T022 (014 FR-013b) — TLS 1.3 1-RTT handshake loopback latency baseline.
+# Wired to asio_tls_transport_factory + loopback acceptor via leaf_rsa2048.pem.
+# Original scaffold comment said T023/T029; task renumbered to T022 in 014 tasks.md.
 add_executable(bench_tls_handshake_loopback bench_tls_handshake_loopback.cpp)
 target_link_libraries(bench_tls_handshake_loopback PRIVATE
-  fixpp_transport  fixpp_tls  benchmark::benchmark)
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  benchmark::benchmark
+)
+target_include_directories(bench_tls_handshake_loopback PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+)
+target_compile_definitions(bench_tls_handshake_loopback PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
 set_target_properties(bench_tls_handshake_loopback PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/transport")

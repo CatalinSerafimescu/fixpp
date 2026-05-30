@@ -95,6 +95,20 @@ public:
     [[nodiscard]] virtual core::expected_t<void>
         reload_credentials(
             std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept = 0;
+
+    // 014 T003 — C4 promotion: cert_source_snapshot() moves from the concrete
+    // asio_tls_transport_factory to a pure-virtual on the abstract base.
+    // Pure-virtual count moves 2→3 (under [const §XIV.2] 5/5 cap).
+    //
+    // Returns the current cert_source strong-ref BY VALUE. NEVER returns raw
+    // pointer or weak_ptr per [[feedback_weak_ptr_cache_needs_owning_context]].
+    // Called by ReconnectFsm at drive_reconnect_attempt entry to capture the
+    // snapshot for the rotation-detect check (data-model E-3). The FSM holds
+    // the abstract TransportFactory* (reconnect_fsm.hpp:152); this method must
+    // be on the abstract base for the call to compile through that pointer.
+    // noexcept — no state change; atomic load acquire.
+    [[nodiscard]] virtual std::shared_ptr<fixpp::tls::cert_source>
+        cert_source_snapshot() const noexcept = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,12 +174,13 @@ public:
         reload_credentials(
             std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override;
 
-    // 013 T012 — Returns the current cert_source strong-ref BY VALUE.
+    // 014 T003 — override of the abstract pure-virtual promoted in this pass (C4).
+    // Returns the current cert_source strong-ref BY VALUE.
     // NEVER returns raw pointer or weak_ptr per
     // [[feedback_weak_ptr_cache_needs_owning_context]]. Called by ReconnectFsm
     // at drive_reconnect_attempt entry to capture the snapshot. noexcept.
     [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-        cert_source_snapshot() const noexcept;
+        cert_source_snapshot() const noexcept override;
 
 private:
     Transport::Config        cfg_;

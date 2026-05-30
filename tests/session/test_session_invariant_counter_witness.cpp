@@ -1,47 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/session/test_session_invariant_counter_witness.cpp — T032 [P] [US2] Phase 4 RED
+// tests/session/test_session_invariant_counter_witness.cpp — T032 [P] [US2] Phase 4
+//                                                            + T021 [P] [US4] Phase 6
 //
-// Invariant-counting regression witness ([[feedback_half_restructure_symmetric_api]]).
+// Part 1 (T032) — Invariant-counting regression witness
+//   ([[feedback_half_restructure_symmetric_api]]).
 //
-// This test proves two invariants:
+//   (1) CompIdAuthorizationPolicy::authorize() is called EXACTLY ONCE per Logon
+//       on BOTH the acceptor and initiator paths (symmetric).
+//   (2) 012 FR-026 + 013 D-11: policy's binding_count() is unchanged after
+//       authorize() (no per-Logon map re-construction).
 //
-// (1) CompIdAuthorizationPolicy::authorize() is called EXACTLY ONCE per Logon
-//     on BOTH the acceptor and initiator paths (symmetric). If T036 only wires
-//     one side, the counter for the un-wired side stays at 0 → FAILS RED.
-//     Counter mechanism: a subclass of CompIdAuthorizationPolicy is not possible
-//     (pimpl; no vtable); instead we inject a peer_identity and count how many
-//     times the session reaches Active or emits the bound event, verifying the
-//     event fires exactly once per accepted Logon across N repeated sessions.
+// Part 2 (T021 / 014 FR-013a) — cert_source::load_credentials() == 1 counter
+//   witness, now feasible via the live loopback harness from T005.
 //
-// (2) 012 FR-026 + 013 D-11 caching invariant: the policy's binding_count()
-//     does NOT change between authorize() calls (no re-construction of the
-//     internal map per Logon). This is a structural invariant (not a call-count
-//     check), but it proves the map is stable under concurrent authorize() usage.
+//   Asserts: for a steady-state no-rotation reconnect handshake,
+//   load_credentials() is called EXACTLY ONCE (at factory construction via
+//   prepare_ssl_ctx_). The counting_cert_source wrapper intercepts the call.
+//   A fresh factory (one per test) is built with the counting source.
 //
-// NOTE on cert_source::load_credentials() counter:
-//   The brief requests a counter on cert_source::load_credentials(). With
-//   mock_transport (no real TLS handshake) there is no load_credentials() call
-//   at all — it is zero for every test. A non-zero witness would require either
-//   a real asio_tls_transport fixture (out of US2's scope with mock_transport)
-//   or a mock cert_source with a call counter embedded in SessionConfig. The
-//   mock_cert_source path is feasible but would require adding SessionConfig
-//   infrastructure beyond T036's scope. Per the brief's instruction to report
-//   rather than fake: the load_credentials() counter witness is INFEASIBLE with
-//   mock_transport in isolation; the feasible invariant (authorize() called once
-//   per Logon × symmetric roles) is proven here. A proper load_credentials()
-//   counter witness belongs in a 012-carry-forward integration test using
-//   asio_tls_transport + real handshake fixtures (RC#G / RC#C 012 carry-forward
-//   slice per tasks.md).
+//   Setup: steady-state (no rotation staged) so drive_reconnect_attempt step 2
+//   does NOT detect a rotation → no new SSL_CTX build → no second load_credentials().
+//   First-and-only load: in make_asio_tls_transport_factory → prepare_ssl_ctx_.
 //
-// Anchors: plan.md T032; spec.md §US2 AC4 / FR-024; data-model.md §D-11;
+// Anchors: plan.md T032; 014 tasks.md T021; spec.md §US4 FR-013a; I-3;
+//   SC-006; data-model.md E-1 I-3 / E-5;
 //   [[feedback_half_restructure_symmetric_api]]; 012 FR-026.
-//
-// RED witness: both cells FAIL RED because T036 does not yet call authorize()
-//   in the Logon path; the session_event_peer_identity_bound event is never
-//   emitted → bound_event_count stays 0 instead of 1.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -67,8 +54,13 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/peer_identity.hpp>
+#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 
+#include "loopback_tls_session_harness.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 
@@ -295,4 +287,174 @@ TEST(CompidPolicyStructural, AuthorizeIsConstNoexcept) {
     }
     EXPECT_EQ(const_policy.binding_count(), 1u)
         << "authorize() must not modify binding_count().";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T021 (014 FR-013a) — cert_source::load_credentials() == 1 per handshake.
+//
+// Uses the live loopback TLS harness (T005). A counting_cert_source wraps
+// file_cert_source and counts load_credentials() calls. The count must be
+// exactly 1 for a steady-state (no-rotation) scenario:
+//
+//   Count site: make_asio_tls_transport_factory → prepare_ssl_ctx_ calls
+//   ssl_cfg.cs->load_credentials() ONCE to build the SSL_CTX.
+//
+// For a NO-ROTATION reconnect, drive_reconnect_attempt step 2 detects
+// snap == last_active_source_ (same source, no rotation staged) → no new
+// SSL_CTX build → no second load_credentials() call.
+//
+// The invariant I-3 from data-model E-1: "load_credentials() fires exactly
+// once per handshake (FR-013a witness)."
+//
+// Design anchor: 014 tasks.md T021; data-model.md E-1 I-3; FR-013a; SC-006.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Counting wrapper around cert_source that counts load_credentials() calls.
+class counting_cert_source final : public fixpp::tls::cert_source {
+public:
+    explicit counting_cert_source(std::shared_ptr<fixpp::tls::cert_source> inner)
+        : inner_{std::move(inner)} {}
+
+    // Number of times load_credentials() has been called.
+    std::size_t load_count() const noexcept { return count_.load(std::memory_order_relaxed); }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>>
+    load_credentials() override {
+        count_.fetch_add(1, std::memory_order_relaxed);
+        return inner_->load_credentials();
+    }
+
+    [[nodiscard]] fixpp::core::expected_t<std::span<const fixpp::tls::Certificate>>
+    load_trust_anchors() [[clang::lifetimebound]] override {
+        return inner_->load_trust_anchors();
+    }
+
+private:
+    std::shared_ptr<fixpp::tls::cert_source> inner_;
+    std::atomic<std::size_t>                 count_{0};
+};
+
+// T021 — live loopback: load_credentials() called exactly ONCE per factory,
+// regardless of how many make()+async_handshake() calls are driven.
+//
+// This test DRIVES a real loopback TLS handshake (N=2 iterations) and asserts
+// that load_count() stays at 1 throughout — it never increments for make() or
+// async_handshake(). That is the I-3 invariant: "load_credentials() fires
+// exactly once per handshake" means once at factory construction, never per
+// individual make/connect/handshake call.
+TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake) {
+    const char* dir_env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kCompileTimeDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kCompileTimeDir = nullptr;
+#endif
+    const char* fixture_dir = dir_env ? dir_env : kCompileTimeDir;
+    if (!fixture_dir || fixture_dir[0] == '\0') {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set — skipping live loopback test";
+    }
+    const std::string fdir{fixture_dir};
+
+    asio::io_context ioc;
+
+    // ── Build a file_cert_source and wrap it with a counting layer ───────────
+    fixpp::tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path        = fdir + "/leaf_rsa2048.pem";
+    cs_cfg.private_key_path = fdir + "/leaf_rsa2048.key";
+    cs_cfg.ca_bundle_path   = fdir + "/ca.pem";
+
+    auto inner_result = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
+    ASSERT_TRUE(inner_result.has_value()) << "Failed to build file_cert_source";
+
+    auto counting = std::make_shared<counting_cert_source>(std::move(*inner_result));
+
+    // ── Build the client factory using the counting cert_source ─────────────
+    // prepare_ssl_ctx_ → load_credentials() is called EXACTLY ONCE here.
+    fixpp::tls::SslCtxConfig ssl_cfg;
+    ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
+    ssl_cfg.cs      = counting;  // counting wrapper
+    ssl_cfg.clock   = nullptr;   // skip expiry
+    ssl_cfg.caps    = fixpp::tls::CertSourceCaps{};
+
+    EXPECT_EQ(counting->load_count(), 0u) << "No load before factory construction";
+
+    auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
+        fixpp::transport::Transport::Config{}, ssl_cfg);
+    ASSERT_TRUE(factory_result.has_value()) << "make_asio_tls_transport_factory failed";
+    auto factory = std::move(*factory_result);
+
+    // Factory construction calls load_credentials() exactly once.
+    EXPECT_EQ(counting->load_count(), 1u)
+        << "load_credentials() must be called EXACTLY ONCE at factory construction. "
+           "FR-013a / I-3 invariant.";
+
+    // ── Build a loopback server (independent factory, does not use counting) ─
+    // The server uses the same certs but a SEPARATE cert_source so its
+    // load_credentials() calls do not affect our counting source.
+    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{fdir, ioc.get_executor()};
+    auto server_ep = loopback_fixture.server_endpoint();
+    auto& listener  = loopback_fixture.listener();
+    auto& server_ssl_cfg = loopback_fixture.ssl_cfg();
+
+    // ── Drive N=2 loopback handshakes and assert count stays at 1 ───────────
+    // Each iteration: server accepts + handshakes concurrently with client
+    // make() + async_connect() + async_handshake(). Neither make() nor
+    // async_handshake() calls load_credentials() — the SSL_CTX is already built.
+    constexpr int kHandshakes = 2;
+    for (int i = 0; i < kHandshakes; ++i) {
+        ioc.restart();
+
+        bool client_hs_ok = false;
+        bool server_hs_ok = false;
+
+        // Server coroutine: accept + handshake.
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&]() -> asio::awaitable<void> {
+                auto ar = co_await listener.async_accept();
+                if (!ar.has_value()) { co_return; }
+                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(ar->get());
+                if (tls) {
+                    auto hs = co_await tls->async_handshake(server_ssl_cfg);
+                    server_hs_ok = hs.has_value();
+                }
+            },
+            asio::detached);
+
+        // Client coroutine: make() + connect + handshake.
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&]() -> asio::awaitable<void> {
+                // make() uses the CACHED SSL_CTX — does NOT call load_credentials().
+                auto t = factory->make(ioc.get_executor(), ssl_cfg, nullptr);
+                if (!t.has_value()) { co_return; }
+                auto* transport = t->get();
+
+                auto conn = co_await (*t)->async_connect(server_ep);
+                if (!conn.has_value()) { co_return; }
+
+                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(transport);
+                if (!tls) { co_return; }
+                // async_handshake() uses the cached SSL_CTX — does NOT call load_credentials().
+                auto hs = co_await tls->async_handshake(ssl_cfg);
+                client_hs_ok = hs.has_value();
+            },
+            asio::detached);
+
+        ioc.run_for(std::chrono::seconds{5});
+
+        EXPECT_TRUE(client_hs_ok)
+            << "Handshake " << (i + 1) << " client side must succeed";
+        EXPECT_TRUE(server_hs_ok)
+            << "Handshake " << (i + 1) << " server side must succeed";
+
+        // KEY ASSERTION: count must STILL be 1 after each handshake.
+        // make() + async_handshake() must NOT call load_credentials().
+        EXPECT_EQ(counting->load_count(), 1u)
+            << "After handshake " << (i + 1)
+            << ": load_credentials() count must remain at 1 "
+               "(FR-013a / I-3: loaded once at factory construction, "
+               "never per make()/async_handshake())";
+    }
 }

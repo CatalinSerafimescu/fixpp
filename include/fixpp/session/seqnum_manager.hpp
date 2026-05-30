@@ -16,8 +16,8 @@
 //   - Inbound: check_inbound(seq) — compare seq vs next-expected:
 //       in-seq  → advance next_inbound_, return ok
 //       too-low → return session_seqnum_too_low (no PossDup — S-010 out of scope)
-//       too-high → return session_test_request_unanswered (74, stand-in; 013 Phase 3
-//                  T026 wires FR-009 recovery in session.cpp via reconnect_fsm_;
+//       too-high → return session_seqnum_too_high (120, 014 FR-016 / E-4;
+//                  replaces slot-74 stand-in session_test_request_unanswered;
 //                  slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a)
 //   - Outbound: next_outbound() — read next counter without advancing
 //               advance_outbound() — advance and return the ASSIGNED seq
@@ -71,8 +71,8 @@ public:
     // check_inbound(seq): compare seq against next-expected inbound counter.
     //   in-seq  → advance counter, return ok.
     //   too-low  → return unexpected{session_seqnum_too_low=69}              (session-fatal).
-    //   too-high → return unexpected{session_test_request_unanswered=74}     (session-fatal;
-    //              slot 70 deleted per 013 T006a; 013 Phase 3 FR-009 wired in session.cpp).
+    //   too-high → return unexpected{session_seqnum_too_high=120}            (session-fatal;
+    //              014 FR-016 / E-4; slot 70 deleted per 013 T006a; FR-009 wired in session.cpp).
     //
     // Caller is responsible for the session-fatal disposition (emitting
     // Logout-with-text + disconnect) on any unexpected return. I-4: no

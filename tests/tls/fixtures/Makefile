@@ -26,7 +26,8 @@ EXPIRED_END   := 251231235959Z
 # Order of leaf fixtures (each <name> generates <name>.pem + (where applicable)
 # <name>.key). Negative fixtures are leaf-only (no key needed for the test;
 # the validation predicate rejects on cert content).
-POSITIVE := leaf_rsa2048 leaf_ecdsa_p256 leaf_san_64 leaf_encrypted_pem
+POSITIVE := leaf_rsa2048 leaf_ecdsa_p256 leaf_san_64 leaf_encrypted_pem \
+            leaf_multi_san leaf_ed25519
 NEGATIVE := leaf_rsa1024_negative leaf_rsa16384_negative leaf_ecdsa_p521_negative \
             leaf_x509v1_negative leaf_san_65_negative leaf_der_16KiB_negative \
             leaf_expired
@@ -216,6 +217,38 @@ leaf_encrypted_pem.csr: leaf_encrypted_pem.key
 leaf_encrypted_pem.pem: leaf_encrypted_pem.csr ca.pem ca-db/index.txt ca-db/serial
 	$(call sign-with-ca,leaf_encrypted_pem.csr,leaf_encrypted_pem.pem,v3_leaf,$(VALID_START),$(VALID_END))
 
+# ── leaf_multi_san (positive — 3 SAN-DNS entries, T023 / FR-014 PMR witness) ─
+# Used by T024 (test_verify_peer_pmr_oom.cpp) to exercise mid/tail PMR-OOM sites.
+multi_san.conf:
+	./gen-san-conf.sh 3 multi_san.conf "fixpp-leaf-multi-san"
+
+leaf_multi_san.key:
+	$(OPENSSL) genrsa -out leaf_multi_san.key 2048
+
+leaf_multi_san.csr: leaf_multi_san.key multi_san.conf
+	$(OPENSSL) req -new -key leaf_multi_san.key -out leaf_multi_san.csr \
+	  -config multi_san.conf
+
+leaf_multi_san.pem: leaf_multi_san.csr ca.pem ca-db/index.txt ca-db/serial multi_san.conf
+	$(OPENSSL) ca -batch -config ca.conf -in leaf_multi_san.csr \
+	  -out leaf_multi_san.pem -extfile multi_san.conf -extensions v3_san \
+	  -startdate $(VALID_START) -enddate $(VALID_END) -notext -md sha256
+
+# ── leaf_ed25519 (positive — Ed25519 key, T019 / FR-012 sigalg_disallowed) ───
+# Fixture for [const §XII.3] allow-list rejection test. Ed25519 is outside the
+# allow-list (rsa_pss + ecdsa only). Note: the sigalg_disallowed rejection is
+# exercised at unit level (test_verify_peer_t039.cpp) — see T020 comment in
+# test_tls_validation_failed_taxonomy.cpp for why the full TLS path is infeasible.
+leaf_ed25519.key:
+	$(OPENSSL) genpkey -algorithm Ed25519 -out leaf_ed25519.key
+
+leaf_ed25519.csr: leaf_ed25519.key
+	$(OPENSSL) req -new -key leaf_ed25519.key -out leaf_ed25519.csr \
+	  -subj "/CN=fixpp-leaf-ed25519"
+
+leaf_ed25519.pem: leaf_ed25519.csr ca.pem ca-db/index.txt ca-db/serial
+	$(call sign-with-ca,leaf_ed25519.csr,leaf_ed25519.pem,v3_leaf,$(VALID_START),$(VALID_END))
+
 # ── chain_depth_8.pem (at the cap) ───────────────────────────────────────────
 # 1 root CA (ca.pem) + 7 intermediates + 1 leaf = 9 certs. Per [2g §4.5.1]'s
 # chain depth definition (RFC 5280 path-length-style): max_chain_depth = 8
@@ -230,5 +263,5 @@ chain_depth_9_negative.pem: ca.pem
 
 # ── clean ────────────────────────────────────────────────────────────────────
 clean:
-	rm -f *.pem *.key *.csr *.srl *.der
+	rm -f *.pem *.key *.csr *.srl *.der multi_san.conf
 	rm -rf ca-db

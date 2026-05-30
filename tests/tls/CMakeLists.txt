@@ -200,10 +200,13 @@ target_link_libraries(tls_error_variants PRIVATE
     "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
 
 # T038 — seam #14: verify_peer cert-parameter validation + short-circuit order.
+# + T020 (014 FR-012): real Ed25519 fixture cell (sigalg_disallowed via real cert).
 fixpp_add_tls_test(NAME tls_verify_peer_t039
     SOURCES test_verify_peer_t039.cpp)
 target_link_libraries(tls_verify_peer_t039 PRIVATE
     "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
+target_compile_definitions(tls_verify_peer_t039 PRIVATE
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 # T039 — /clarify Q2: empty Pinset rejection.
 fixpp_add_tls_test(NAME tls_security_profile_empty_pinset

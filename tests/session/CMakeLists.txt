@@ -457,9 +457,24 @@ add_threading_test(compid_binding_principal_extraction
 add_threading_test(compid_binding_symmetric
   test_compid_binding_symmetric.cpp)
 
-# T032 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+# T032 + T021 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
+# T021 (014 FR-013a): adds live loopback load_credentials() == 1 counter cell;
+# requires fixpp_transport + fixpp_tls + loopback_tls_fixture include path.
 add_threading_test(session_invariant_counter_witness
   test_session_invariant_counter_witness.cpp)
+target_link_libraries(session_invariant_counter_witness PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+)
+target_include_directories(session_invariant_counter_witness PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
+)
+target_compile_definitions(session_invariant_counter_witness PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
 
 # RC#A (gate-b/r1) — fail-closed mTLS CompID footgun fix counter-test.
 # Asserts: mTLS profile + no peer_identity → Disconnected + event.
@@ -482,6 +497,161 @@ target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
 # TSan critical: atomic-swap + snapshot read race-free under cross-strand calls.
 add_threading_test(session_reload_credentials_in_flight
   test_reload_credentials_in_flight.cpp)
+
+# ── 014-transport-active-binding Phase 3 (US1) — T006/T007/T008 ─────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T009/T010 impl lands.
+# CTest filter: ctest -R 'reconnect_live|reconnect_backoff|reconnect_cancel'
+#
+# T006 — live loopback-TLS reconnect happy-path (SC-001 / FR-001 MVP witness).
+# Cell B drives a REAL TLS connect+handshake via loopback and asserts Active.
+# FIXPP_TLS_FIXTURE_DIR is wired unconditionally (follows the convention used
+# by transport live-TLS tests, e.g. transport_inflight_exclusivity). The cell
+# GTEST_SKIP()s only when the cert files are genuinely absent at runtime.
+add_executable(reconnect_live_happy_path
+  test_reconnect_live_happy_path.cpp)
+target_link_libraries(reconnect_live_happy_path PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_live_happy_path PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"    # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(reconnect_live_happy_path PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME reconnect_live_happy_path COMMAND reconnect_live_happy_path)
+set_tests_properties(reconnect_live_happy_path PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;live_tls;reconnect")
+
+# T007 — backoff/cap: connect-fail/handshake-fail/make-fail each consume one attempt.
+add_executable(reconnect_backoff_cap
+  test_reconnect_backoff_cap.cpp)
+target_link_libraries(reconnect_backoff_cap PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_backoff_cap PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(reconnect_backoff_cap PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_test(NAME reconnect_backoff_cap COMMAND reconnect_backoff_cap)
+set_tests_properties(reconnect_backoff_cap PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;reconnect")
+
+# T008 — total-cancel mid-handshake: releases in-flight transport (ASan no-leak).
+add_executable(reconnect_cancel_mid_handshake
+  test_reconnect_cancel_mid_handshake.cpp)
+target_link_libraries(reconnect_cancel_mid_handshake PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_cancel_mid_handshake PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(reconnect_cancel_mid_handshake PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_test(NAME reconnect_cancel_mid_handshake COMMAND reconnect_cancel_mid_handshake)
+set_tests_properties(reconnect_cancel_mid_handshake PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us1;reconnect;cancel")
+
+# ── 014-transport-active-binding Phase 4 (US2) — T011/T012/T013 ─────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T014/T015 impl lands.
+# CTest filter: ctest -R 'live_identity|compid_binding_seam|auth_fail_cap'
+
+# T011 — live identity binding witness: real handshake peer_id drives authorize().
+# SC-003 / FR-006 / US2 AC1 / I-4.
+add_executable(live_identity_binding
+  test_live_identity_binding.cpp)
+target_link_libraries(live_identity_binding PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(live_identity_binding PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(live_identity_binding PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME live_identity_binding COMMAND live_identity_binding)
+set_tests_properties(live_identity_binding PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us2;live_tls;identity_binding")
+
+# T012 — CompID binding seam: on-list/off-list/absent via logon_peer_identity_override.
+# FR-007 / US2 AC2/AC3 / SC-003.
+add_executable(compid_binding_seam
+  test_compid_binding_seam.cpp)
+target_link_libraries(compid_binding_seam PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(compid_binding_seam PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME compid_binding_seam COMMAND compid_binding_seam)
+set_tests_properties(compid_binding_seam PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us2;compid;seam")
+
+# T013 auth-fail cell lives in reconnect_backoff_cap (already registered above
+# as reconnect_backoff_cap). The new AuthFailReconnectCapTest class is compiled
+# into the same executable — rebuild it with additional dependencies.
+# We patch the existing target to add the session/compid_authorization headers.
+# (The executable already links fixpp_session which brings all required libs.)
+
+# ── 014-transport-active-binding Phase 5 (US3) — T016 ────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T017/T018 impl lands.
+# CTest filter: ctest -R 'credentials_rotated_emit'
+#
+# T016 — credential rotation emit: real SHA-256 fingerprints, emit-before-make,
+#         first-load no-event, no-op-still-emits.  All 4 cells must execute.
+# SC-005 / FR-009/010/011 / US3 AC1/AC2 / I-5/I-6/I-7 / data-model E-3 / C3.
+# FIXPP_TLS_FIXTURE_DIR wired unconditionally (Cell 4 needs the live cert).
+add_executable(credentials_rotated_emit
+  test_credentials_rotated_emit.cpp)
+target_link_libraries(credentials_rotated_emit PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(credentials_rotated_emit PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(credentials_rotated_emit PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME credentials_rotated_emit COMMAND credentials_rotated_emit)
+set_tests_properties(credentials_rotated_emit PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "014;us3;live_tls;credentials_rotated")
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.

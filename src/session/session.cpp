@@ -51,6 +51,9 @@
 #include <fixpp/session/session_event.hpp>    // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
+// 014 T015: handshake_result full definition needed for install_reconnected_transport.
+// session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
+#include <fixpp/transport/tls_transport.hpp>
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -180,6 +183,43 @@ Session::reload_credentials(
         return std::unexpected{fixpp::core::error::session_invalid_argument};
     }
     return cfg_.transport_factory_override->reload_credentials(std::move(new_source));
+}
+
+// ── 014 T010/T015 — Session::install_reconnected_transport ───────────────────
+//
+// Called by ReconnectFsm::drive_reconnect_attempt() on a successful attempt
+// (step 8 of data-model E-1). Performs the cross-object handoff:
+//   1. Store the live peer identity (hr.peer_id) as live_peer_id_ so the
+//      LogonSent→Active Logon-ack guard can use arm (1-live) (E-2 / T015).
+//   2. Take ownership of the live transport (reconnected_transport_).
+//   3. Re-enter LogonSent so Session::on_inbound_frame drives the session
+//      back to Active when the peer Logon-ack arrives.
+//
+// §XV.9: handshake_result is forward-declared in session.hpp; the by-value
+// parameter here is fine because this function is defined in session.cpp
+// which already #includes "fixpp/transport/tls_transport.hpp" (the full
+// definition). The session.hpp declaration uses the forward-declaration to
+// avoid dragging std::shared_mutex into the awaitable closure.
+//
+// noexcept: move + optional-assign + record_state_transition_ are all
+// non-throwing. [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
+void Session::install_reconnected_transport(
+    std::unique_ptr<fixpp::transport::Transport> transport,
+    fixpp::transport::handshake_result hr) noexcept
+{
+    // 1. Store live peer identity for arm (1-live) in the Logon-ack guard.
+    //    The peer_id is moved out of hr (hr.peer_id is owning-by-value per
+    //    tls_transport.hpp:52-53). [data-model §E-2; contracts C2; FR-006]
+    live_peer_id_ = std::move(hr.peer_id);
+
+    // 2. Take ownership of the live transport.
+    reconnected_transport_ = std::move(transport);
+
+    // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
+    //    The session's next peer Logon-ack will be processed by the LogonSent
+    //    row of the FSM matrix, transitioning back to Active.
+    //    [data-model §E-1 step 8; FR-001; US1 AC1]
+    record_state_transition_(fsm_state::LogonSent);
 }
 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
@@ -313,6 +353,49 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // US4 (T046): capture transport_send from config (null if not set).
     // Called from store_then_emit() AFTER store(outbound) completes (I-3).
     transport_send_ = cfg_.transport_send;
+
+    // 014 T009/T010: wire the FSM back-pointer, reconnect endpoint, and TLS profile.
+    // ReconnectFsm::drive_reconnect_attempt() uses these to call async_connect(),
+    // async_handshake(), and install_reconnected_transport() on success.
+    reconnect_fsm_.set_session_owner(this);
+    reconnect_fsm_.set_reconnect_endpoint(cfg_.reconnect_endpoint);
+
+    // 014 T018 — Wire the strand-bound credentials_rotated emit callback on the
+    // Session's internal reconnect_fsm_.  The FSM detects rotation at step 2 of
+    // drive_reconnect_attempt and invokes this lambda, which calls emit_event()
+    // (private, defined in session.cpp) to push the event into recent_events_.
+    // The lambda captures `this` by pointer; lifetime is guaranteed because the
+    // FSM is a value member of Session (reconnect_fsm_, session.hpp:517) and is
+    // destroyed before Session is — so `this` is always valid when the callback fires.
+    // §XI.4: emit_event() is always called from the session strand (the FSM
+    //   coroutine runs on the session executor set in Session::open()).
+    // Resolves the "DEFERRED to 014" comment at session.hpp:274.
+    // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
+    reconnect_fsm_.set_emit_credentials_rotated(
+        [this](fixpp::session::session_event_credentials_rotated ev) noexcept {
+            emit_event(std::move(ev));
+        });
+    // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
+    // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
+    // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
+    // one_way_ca=3). [data-model §E-1 step 3]
+    {
+        auto k = cfg_.security_profile.k;
+        using SK = fixpp::session::SecurityProfile::kind;
+        using TK = fixpp::tls::SecurityProfile;
+        TK tls_profile = TK::unset;
+        if      (k == SK::mtls_ca)     tls_profile = TK::mtls_ca;
+        else if (k == SK::mtls_pinned) tls_profile = TK::mtls_pinned;
+        else if (k == SK::one_way_ca) {
+            // one_way_ca is deprecated in the TLS layer but still supported
+            // for legacy interop (session layer retains it per [const §XII.5]).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            tls_profile = TK::one_way_ca;
+#pragma clang diagnostic pop
+        }
+        reconnect_fsm_.set_tls_profile(tls_profile);
+    }
 
     // T011 (US2, Phase 4): branch on cfg_.role per FR-004 + Opus triage RC#2.
     // Initiator arm: NotConnected → LogonSent; emit initial Logon frame via
@@ -938,12 +1021,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // LogonReceived/Active (FR-019/FR-020/FR-021/FR-024).
             // Acceptor: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
             //
+            // ACCEPTOR LIVE-BINDING DEFERRAL (014/015 boundary):
+            //   The ACCEPTOR path stays seam-only in 014 (Clarifications Q2;
+            //   T-041 stays `implementing`). The live acceptor accept→handshake→
+            //   authorize() production path and test-seam removal land with the
+            //   015 engine, where T-041 fully closes.
+            //   [[feedback_half_restructure_symmetric_api]]: the asymmetry is
+            //   intentional and documented — 014 wires the live identity on the
+            //   INITIATOR reconnect path only (see :1811 guard below).
+            //
             // Three-way guard (RC#A gate-b/r1 — fail-closed footgun fix):
             //   (1) logon_peer_identity_override set → authorize as today (test seam).
             //   (2) mTLS variant (mtls_ca / mtls_pinned) + no override available →
-            //       FAIL CLOSED: peer_identity is required but unavailable. In
-            //       production the 014 slice will supply handshake_result.peer_id here;
-            //       until then, silent-admit of any cert→CompID pairing is a footgun.
+            //       FAIL CLOSED: peer_identity is required but unavailable.
             //       Emit session_event_compid_authorization_failed + Disconnected.
             //       [FR-019; FR-021; FR-023; triage RC#A]
             //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip:
@@ -1744,22 +1834,84 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
-            // 013 T036 US2: CompID authorization BEFORE FSM transition to Active
-            // (FR-019/FR-020/FR-021/FR-024 symmetric initiator path).
+            // 014 T015 US2 / 013 T036 US2: CompID authorization BEFORE FSM
+            // transition to Active (FR-006/FR-007/FR-008/FR-019/FR-020/FR-021/FR-024
+            // symmetric initiator path).
             // Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
-            // Same policy, same code path as acceptor (FR-024 symmetric coverage).
-            // [[feedback_half_restructure_symmetric_api]]: both arms wired in ONE pass.
             //
-            // Three-way guard (RC#A gate-b/r1 — symmetric to acceptor arm above):
-            //   (1) logon_peer_identity_override set → authorize as today.
-            //   (2) mTLS + no override → fail CLOSED (same semantics as acceptor).
-            //   (3) Non-mTLS → skip (backward compat).
+            // Four-way guard (014 T015 — extends RC#A gate-b/r1 three-way guard):
+            //   (1) live_peer_id_ set (live reconnect path, T014/T015) →
+            //       authorize with the real handshake peer_id, making the
+            //       already-fail-CLOSED mTLS gate *operable* with a live identity
+            //       (admit on-list; fail-close off-list/absent). FR-006/FR-008.
+            //   (2) logon_peer_identity_override set (test seam) → authorize as today
+            //       (retained for binding-logic tests; removed in 015). FR-008.
+            //   (3) mTLS + no identity available → fail CLOSED. RC#A.
+            //   (4) Non-mTLS → skip (backward compat, permissive). FR-019.
+            //
+            // live_peer_id_ is stored by install_reconnected_transport (T015) on a
+            // successful reconnect handshake and reset() one-shot below once this
+            // guard authorizes it. The acceptor site (:953-1008) stays seam-only —
+            // the acceptor live binding deferral to 015 is documented there.
+            // [[feedback_half_restructure_symmetric_api]]: asymmetry is documented
+            // and intentional per spec Clarifications Q2 / T-041 stays `implementing`.
+            // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008]
             {
                 const bool is_mtls =
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
 
-                if (cfg_.logon_peer_identity_override.has_value()) {
+                if (live_peer_id_.has_value() && is_mtls) {
+                    // (1) Live reconnect path: use real handshake peer_id.
+                    // Only active when mTLS is configured (binding gate applicable)
+                    // AND a live peer_id was set by install_reconnected_transport.
+                    // Non-mTLS sessions skip to arm (4) permissive (no client cert).
+                    // FR-006: the identity source is the real handshake_result.peer_id
+                    // (no fabricated/stand-in identity on this path). FR-008: removes
+                    // the residual fabricated auth payload from the live path.
+                    const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
+                    auto auth_r = cfg_.compid_authorization_policy.authorize(
+                        auth_pid, asserted_compid);
+                    if (!auth_r) {
+                        // Fail-closed: emit event, Disconnected.
+                        // On the open-Logon path (not reconnect), Disconnected
+                        // is terminal. The reconnect-path auth fail is handled in
+                        // reconnect_fsm.cpp step 7 BEFORE reaching here; this arm
+                        // fires only if the open-Logon path somehow has a live peer_id
+                        // (future: or if this guard is reached from the reconnect path
+                        // after an auth-pass in the FSM — should not happen, but
+                        // fail-closed is the safe default). [contracts C2; FR-007]
+                        // cn EMPTY: live_peer_id_.reset() below frees the backing
+                        // store, so a view into it would dangle in the persisted
+                        // recent_events_ ring. (Owned-cn fix + the success-arm cn
+                        // lifetime are tracked in the 014 verify doc.)
+                        emit_event(fixpp::session::session_event_compid_authorization_failed{
+                            .cn              = {},
+                            .asserted_compid = asserted_compid,
+                            .expected_compids = {},
+                            .principal_source = fixpp::session::bound_principal::source::CN,
+                        });
+                        live_peer_id_.reset();  // consume the live identity (one-shot)
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Authorization succeeded: emit peer_identity_bound event.
+                    // cn EMPTY: live_peer_id_.reset() below frees the backing store;
+                    // owned-cn deferred — see verify doc. sha256_fingerprint (owned
+                    // std::array) and bound_compid (config-stable) are safe. Matches
+                    // the failure-arm precedent (gate-b/r2 FQ-2).
+                    emit_event(fixpp::session::session_event_peer_identity_bound{
+                        .cn                = {},
+                        .sans              = {},
+                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                        .cipher            = {},
+                        .bound_compid      = asserted_compid,
+                        .principal_source  = auth_r->from,
+                    });
+                    live_peer_id_.reset();  // consume (one-shot per Logon-ack)
+                } else if (cfg_.logon_peer_identity_override.has_value()) {
+                    // (2) Test seam: authorize against the injected peer_identity.
                     const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     auto auth_r = cfg_.compid_authorization_policy.authorize(
@@ -1788,7 +1940,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .principal_source  = auth_r->from,
                     });
                 } else if (is_mtls) {
-                    // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
+                    // (3) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
                         .cn               = {},
@@ -1799,8 +1951,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-                // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
+                // (4) Non-mTLS (one_way_ca): no client cert → gate skipped.
             }
+
+            // ACCEPTOR SITE DEFERRAL NOTE (T-041 / 014–015 boundary):
+            // The acceptor guard at session.cpp:953-1008 stays seam-only (arm 1
+            // logon_peer_identity_override + arm 2 mTLS fail-closed). The live
+            // acceptor accept→handshake→authorize() production path and test-seam
+            // removal land with the 015 engine, where T-041 fully closes.
+            // Per spec Clarifications Q2 / [[feedback_half_restructure_symmetric_api]]
+            // the asymmetry is intentional: 014 wires and proves the live identity
+            // on the INITIATOR reconnect path only. [FR-008; data-model §E-2; C2]
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);

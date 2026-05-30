@@ -55,6 +55,11 @@ struct EngineConfig;
 class Clock;
 }  // namespace fixpp::core
 
+namespace fixpp::transport {
+class Transport;
+struct handshake_result;
+}  // namespace fixpp::transport
+
 namespace fixpp::session {
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
@@ -271,12 +276,15 @@ public:
     // TransportFactory::make() call (next reconnect cycle) observes the rotated
     // source per FR-031.
     //
-    // session_event_credentials_rotated is DEFERRED to 014: the event must fire
-    // BEFORE the first handshake on the rotated cert_source (data-model E-7) with
-    // the real cert SHA-256 fingerprint (only available in async load_credentials).
-    // Both the correct emit-site (drive_reconnect_attempt) and fingerprint require
-    // the live-transport lifecycle, which is a stub in 013.
-    // [[project_013_carryforwards_to_014]] / FR-032 / data-model §E-7.
+    // session_event_credentials_rotated WIRED in 014 T017/T018:
+    // The event fires BEFORE the first handshake on the rotated cert_source
+    // (data-model E-3; contracts C3; FR-009) via the FSM's
+    // emit_credentials_rotated_ callback injected by Session::open() at T018.
+    // Session::open() wires: reconnect_fsm_.set_emit_credentials_rotated(
+    //     [this](session_event_credentials_rotated ev){ emit_event(std::move(ev)); });
+    // The real leaf SHA-256 fingerprint is computed inside drive_reconnect_attempt
+    // via co_await snap->load_credentials() per FR-010.
+    // DEFERRED comment from 013 RESOLVED. [FR-032; data-model §E-3; T017/T018]
     [[nodiscard]] fixpp::core::expected_t<void>
     reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
 
@@ -443,6 +451,36 @@ private:
     // declaration here satisfies Phase 2 (link-green via session.cpp stub).
     void emit_event(SessionEvent ev) noexcept;
 
+    // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
+    // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
+    // session_ back-pointer. ReconnectFsm is a value member of Session
+    // (reconnect_fsm_, session.hpp:517) so the call is always in-domain.
+    //
+    // Responsibilities:
+    //   - Take ownership of the live transport via reconnected_transport_.
+    //   - Store handshake_result.peer_id as live_peer_id_ for the authorize
+    //     site (E-2 / T015): the LogonSent→Active Logon-ack guard reads
+    //     live_peer_id_ as arm (1-live) ahead of the override seam.
+    //   - Re-enter LogonSent so the session re-drives Logon to Active.
+    //
+    // §XV.9 discipline: handshake_result is forward-declared in this header
+    // (line 60 — namespace fixpp::transport { struct handshake_result; }).
+    // A by-value parameter in a non-defining DECLARATION only needs the
+    // forward declaration, so session.hpp stays free of tls_transport.hpp
+    // (which pulls tls/pinset.hpp → std::shared_mutex into the awaitable
+    // closure). The full definition is in session.cpp via #include
+    // "fixpp/transport/tls_transport.hpp". [const §XV.9; 8e2d362 guard]
+    //
+    // [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
+    void install_reconnected_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport,
+        fixpp::transport::handshake_result hr) noexcept;
+
+    // ReconnectFsm is a value member of Session and needs access to the
+    // private install_reconnected_transport() method. The friend declaration
+    // enables the call from reconnect_fsm.cpp (which includes session.hpp).
+    friend class ReconnectFsm;
+
     // ── 005 US2 seqnum counter manager (T031) ────────────────────────────────
     // Serialised by the async_mutex inside SeqnumManager (D-7 / [2f §7.3]).
     // Lifetime: bound to Session; drained at close().
@@ -494,6 +532,24 @@ private:
     // Non-null only when SessionConfig::transport_send was set.
     // Always called from the session strand (single-writer, no races).
     std::function<void(std::span<const std::byte>)> transport_send_;
+
+    // 014 T010 — live reconnected transport (owned by Session after a successful
+    // drive_reconnect_attempt). Null until the first successful reconnect.
+    // The type is forward-declared in this header; the destructor is
+    // instantiated in session.cpp where the full Transport definition is visible.
+    // [data-model §E-1 step 8; contracts C1; FR-001]
+    std::unique_ptr<fixpp::transport::Transport> reconnected_transport_;
+
+    // 014 T015 — live peer identity from the most recent successful reconnect
+    // handshake. Stored by install_reconnected_transport (step 8) and consumed
+    // by arm (1-live) in the LogonSent→Active Logon-ack authorization
+    // guard (session.cpp:1864-1906), which reset()s it after authorizing. Nullopt
+    // until the first successful reconnect; each successful reconnect overwrites
+    // it and the guard reset()s it on consume, so a stale identity from a prior
+    // session is never re-authorized. [data-model §E-2; contracts C2; FR-006]
+    // peer_identity is transitively available via session_config.hpp →
+    // compid_authorization_policy.hpp → peer_identity.hpp.
+    std::optional<fixpp::tls::peer_identity> live_peer_id_{};
 
     // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
     // Use seqnum_mgr_.peek_outbound() to read; seqnum_mgr_.assign_outbound() to advance.
