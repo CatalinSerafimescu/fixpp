@@ -346,6 +346,20 @@ public:
     [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
 #endif
 
+    // 015 T011 — Engine-internal acceptor attach primitive.
+    // Called by the engine's run_accept_loop STRICTLY-BEFORE the first
+    // on_inbound_frame (happens-before invariant Gate A New-1 / E-4).
+    // Actions: set live_peer_id_, rebind transport_send_, take ownership.
+    // Does NOT transition the FSM. NOT install_reconnected_transport (which
+    // re-enters LogonSent — initiator-only; Gate A Codex-2).
+    // Declared public for accessibility from engine.cpp's run_accept_loop.
+    // By convention only the engine's accept loop should call this method.
+    // §XV.9: handshake_result forward-declared on line 60; full def in session.cpp.
+    // [data-model §E-2; T011; contracts C1 step 5; FR-005/006; T-041]
+    void attach_accepted_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport,
+        fixpp::transport::handshake_result hr) noexcept;
+
 private:
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
@@ -539,6 +553,12 @@ private:
     // instantiated in session.cpp where the full Transport definition is visible.
     // [data-model §E-1 step 8; contracts C1; FR-001]
     std::unique_ptr<fixpp::transport::Transport> reconnected_transport_;
+
+    // 015 T011 — live accepted transport (owned by Session after a successful
+    // attach_accepted_transport call). Null until the engine's accept loop
+    // attaches a peer. Destructor instantiated in session.cpp.
+    // [data-model §E-2; T011; contracts C1 step 5]
+    std::unique_ptr<fixpp::transport::Transport> accepted_transport_;
 
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed

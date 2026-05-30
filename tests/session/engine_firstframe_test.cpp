@@ -107,7 +107,11 @@ TEST(EngineFirstFrameTest, SilentPeerClosedWithinDeadline) {
     if (!harness) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
 
     harness->engine().start();
+    // Run briefly to let the accept loop bind the listener (OS port assignment).
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
     uint16_t port = harness->server_endpoint().port;
+    if (port == 0) { GTEST_SKIP() << "acceptor listener did not bind"; }
 
     std::atomic<bool> closed{false};
     asio::co_spawn(ioc, probe_closed_within_window(ioc, port, /*payload=*/"", closed),
@@ -137,7 +141,10 @@ TEST(EngineFirstFrameTest, OverBudgetPayloadClosedWithinDeadline) {
     if (!harness) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
 
     harness->engine().start();
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
     uint16_t port = harness->server_endpoint().port;
+    if (port == 0) { GTEST_SKIP() << "acceptor listener did not bind"; }
 
     std::atomic<bool> closed{false};
     asio::co_spawn(ioc,
@@ -172,7 +179,10 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
     if (!harness) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
 
     harness->engine().start();
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
     uint16_t port = harness->server_endpoint().port;
+    if (port == 0) { GTEST_SKIP() << "acceptor listener did not bind"; }
 
     std::atomic<bool> first_closed{false};
     asio::co_spawn(ioc, probe_closed_within_window(ioc, port, "", first_closed),

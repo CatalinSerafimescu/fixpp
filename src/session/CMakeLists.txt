@@ -28,6 +28,13 @@ target_include_directories(fixpp_session PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
 )
 
+# engine.cpp (015 T012) needs src/transport/asio_listener.hpp (internal header).
+# The src/ path is PRIVATE — not exposed to consumers of fixpp_session.
+# [arch §5.3 engine-bootstrap carve-out]
+target_include_directories(fixpp_session PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+
 # Allowed dependencies: core, dictionary, wire, transport (interface),
 #                        log (interface), otel (interface) [arch §2.3]
 #                        + asio (awaitable / cancellation slots — 007).

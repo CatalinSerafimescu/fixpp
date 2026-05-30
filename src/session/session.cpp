@@ -222,6 +222,52 @@ void Session::install_reconnected_transport(
     record_state_transition_(fsm_state::LogonSent);
 }
 
+// 015 T011 — Acceptor attach primitive.
+// Called by run_accept_loop STRICTLY-BEFORE the first on_inbound_frame (E-4).
+// Three actions (distinct from install_reconnected_transport):
+//   1. Store live peer identity for arm (1-live) at the acceptor gate (:1048).
+//   2. Rebind transport_send_ so outbound frames reach the accepted peer.
+//   3. Take ownership of the transport.
+// Does NOT transition the FSM — the acceptor stays NotConnected; the gate at
+// :1048 fires when on_inbound_frame processes the first Logon.
+// [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041]
+void Session::attach_accepted_transport(
+    std::unique_ptr<fixpp::transport::Transport> transport,
+    fixpp::transport::handshake_result hr) noexcept
+{
+    // 1. Store live peer identity for the acceptor authorization gate (E-4).
+    //    Consumed one-shot by the gate at :1048 in on_inbound_frame.
+    live_peer_id_ = std::move(hr.peer_id);
+
+    // 2. Take ownership of the transport now (before binding transport_send_
+    //    so the raw pointer captured below is to the owned object).
+    accepted_transport_ = std::move(transport);
+
+    // 3. Rebind transport_send_ to the live Transport::async_write.
+    //    transport_send_ is std::function<void(span)> — a sync callback.
+    //    We bridge to the async async_write via fire-and-forget co_spawn on
+    //    the session executor (exec_). The frame bytes are copied into a
+    //    std::vector<std::byte> so the send is independent of the caller's
+    //    frame lifetime. exec_ is bound at open() and is stable.
+    //
+    //    The raw pointer captured here is safe: accepted_transport_ is a
+    //    member of this Session; the session outlives transport_send_.
+    //    [data-model §E-1/E-2; R7(b); contracts C1 step 5]
+    fixpp::transport::Transport* raw = accepted_transport_.get();
+    transport_send_ = [raw, exec = exec_](std::span<const std::byte> frame) {
+        // Copy frame bytes — the caller's buffer may be reused after return.
+        std::vector<std::byte> owned{frame.begin(), frame.end()};
+        asio::co_spawn(exec,
+            [raw, f = std::move(owned)]() -> asio::awaitable<void> {
+                (void)co_await raw->async_write(
+                    std::span<const std::byte>{f.data(), f.size()});
+            },
+            asio::detached);
+    };
+    // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
+    // the acceptor gate (:1048) when the first inbound Logon is processed.
+}
+
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
 // Marked so a later phase's task body substitutes (not appends to) these.
 
@@ -1030,22 +1076,59 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   intentional and documented — 014 wires the live identity on the
             //   INITIATOR reconnect path only (see :1811 guard below).
             //
-            // Three-way guard (RC#A gate-b/r1 — fail-closed footgun fix):
-            //   (1) logon_peer_identity_override set → authorize as today (test seam).
-            //   (2) mTLS variant (mtls_ca / mtls_pinned) + no override available →
-            //       FAIL CLOSED: peer_identity is required but unavailable.
-            //       Emit session_event_compid_authorization_failed + Disconnected.
-            //       [FR-019; FR-021; FR-023; triage RC#A]
-            //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip:
-            //       no client cert → CompID binding is inapplicable.
-            //       Backward compat for one_way_ca and non-TLS session paths.
+            // Four-way guard (015 T013 extends the RC#A three-way guard):
+            //   (1) live_peer_id_ set + is_mtls → arm (1-live): authorize with the
+            //       real handshake peer_id from attach_accepted_transport (T011).
+            //       Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is
+            //       set by attach_accepted_transport STRICTLY-BEFORE the first
+            //       on_inbound_frame reaches this gate — guaranteed by run_accept_loop
+            //       calling attach_accepted_transport before co_awaiting on_inbound_frame.
+            //       Admit on-list / fail-CLOSED off-list-or-absent (T-041 acceptor path).
+            //   (2) logon_peer_identity_override set → authorize as today (test seam,
+            //       retained until US4 T020 removes it).
+            //   (3) mTLS + no identity available → FAIL CLOSED (RC#A). Arm (3) fires
+            //       when is_mtls but live_peer_id_ is absent (happens-before violated
+            //       would land here — the safe default per Gate A New-1).
+            //   (4) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
+            // [015 T013; data-model §E-4; FR-006/007/008; T-041; Gate A New-1/E-4]
             // [FR-019; FR-024 symmetric; data-model.md §D-10]
             {
                 const bool is_mtls =
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
 
-                if (cfg_.logon_peer_identity_override.has_value()) {
+                if (live_peer_id_.has_value() && is_mtls) {
+                    // (1) Live acceptor path: use real handshake peer_id set by
+                    //     attach_accepted_transport. Mirrors the initiator arm at :1864.
+                    const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
+                    const std::string_view asserted_compid = cfg_.target_comp_id;
+                    auto auth_r = cfg_.compid_authorization_policy.authorize(
+                        auth_pid, asserted_compid);
+                    if (!auth_r) {
+                        // Fail-closed: off-list or absent identity.
+                        emit_event(fixpp::session::session_event_compid_authorization_failed{
+                            .cn              = {},
+                            .asserted_compid = asserted_compid,
+                            .expected_compids = {},
+                            .principal_source = fixpp::session::bound_principal::source::CN,
+                        });
+                        live_peer_id_.reset();  // consume (one-shot)
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Authorization succeeded: emit peer_identity_bound event.
+                    // cn EMPTY: live_peer_id_.reset() frees backing store (UAF guard,
+                    // matching the initiator arm pattern at :1900-1911).
+                    emit_event(fixpp::session::session_event_peer_identity_bound{
+                        .cn                = {},
+                        .sans              = {},
+                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
+                        .cipher            = {},
+                        .bound_compid      = asserted_compid,
+                        .principal_source  = auth_r->from,
+                    });
+                    live_peer_id_.reset();  // consume (one-shot per Logon)
+                } else if (cfg_.logon_peer_identity_override.has_value()) {
                     // (1) Test seam: authorize against the injected peer_identity.
                     const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
                     const std::string_view asserted_compid = cfg_.target_comp_id;

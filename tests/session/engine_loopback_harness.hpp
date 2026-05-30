@@ -81,8 +81,13 @@ public:
     fixpp::transport::test::LoopbackTlsFixture& transport_fixture() noexcept {
         return *transport_fixture_;
     }
+    // server_endpoint() returns the engine's acceptor bound endpoint.
+    // The engine builds its asio_listener on start(); the port is OS-assigned
+    // (port 0 in reconnect_endpoint → OS assigns). The endpoint is readable
+    // once the executor has run at least one step after start().
+    // Call engine().acceptor_bound_endpoint(acceptor_id()) for the same value.
     fixpp::transport::Endpoint server_endpoint() const noexcept {
-        return transport_fixture_->server_endpoint();
+        return engine_->acceptor_bound_endpoint(acceptor_id_);
     }
     fixpp::session::SessionId acceptor_id()  const noexcept { return acceptor_id_; }
     fixpp::session::SessionId initiator_id() const noexcept { return initiator_id_; }
@@ -137,15 +142,34 @@ private:
 
         auto acc = make_cfg("ACCEPTOR", "INITIATOR",
                             fixpp::session::session_role::acceptor);
+        // reconnect_endpoint is repurposed as the acceptor's bind endpoint
+        // (SC-010 delta #6 / "Listener acquisition" design decision).
+        // Port 0 → OS-assigned; readable via engine.acceptor_bound_endpoint().
+        acc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
         // Rebindable send-slot: no-op until attach_accepted_transport (T011/E-1/R7(b)).
+        // The engine's run_accept_loop calls attach_accepted_transport which rebinds
+        // transport_send_ to the live Transport::async_write. This no-op is the
+        // initial value that is captured at open() time.
         acc.transport_send = [](std::span<const std::byte>) {};
         acceptor_id_ = fixpp::session::SessionId::from_config(acc);
         if (!engine_->register_session(std::move(acc)))
             throw std::runtime_error{"EngineLoopbackHarness: register acceptor failed"};
 
+        // Initiator: reconnect_endpoint points to the engine's acceptor listener.
+        // The port is 0 here at registration time — the real port is set when
+        // the accept loop binds (after start() + some executor steps).
+        // For tests that drive both roles, they should use:
+        //   ioc.run_for(1ms) after start() to let the listener bind, then
+        //   set the initiator's reconnect_endpoint via the harness accessor.
+        // (This is handled per-test; the harness exposes acceptor_bound_endpoint.)
         auto ini = make_cfg("INITIATOR", "ACCEPTOR",
                             fixpp::session::session_role::initiator);
-        ini.reconnect_endpoint = transport_fixture_->server_endpoint();
+        // Initiator reconnect_endpoint: will be updated by tests that use the
+        // real acceptor port. Set to {127.0.0.1, 0} as a placeholder; the
+        // connect loop (US2) will need the real port at attempt time.
+        // For US1 tests (acceptor-only), the initiator is a standalone TLS
+        // client that connects to acceptor_bound_endpoint after the loop binds.
+        ini.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
         initiator_id_ = fixpp::session::SessionId::from_config(ini);
         if (!engine_->register_session(std::move(ini)))
             throw std::runtime_error{"EngineLoopbackHarness: register initiator failed"};

@@ -34,6 +34,8 @@
 #include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
 #include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
 #include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
+#include <fixpp/transport/endpoint.hpp>  // Endpoint (for acceptor_bound_endpoint return type)
+#include <fixpp/transport/listener.hpp>  // abstract Listener (for listeners_ map)
 
 namespace fixpp::session {
 class Session;
@@ -190,6 +192,16 @@ public:
 
     [[nodiscard]] bool stopped() const noexcept;
 
+    /// SC-010 delta #6: returns the OS-assigned bound port of the acceptor's
+    /// listener for a given acceptor SessionId. Returns Endpoint{} (port==0)
+    /// if the id is not a registered acceptor or the listener has not been
+    /// built yet (i.e. before start() runs the accept loop).
+    /// The accept loop builds the listener synchronously at entry; the endpoint
+    /// is readable once the engine's executor runs at least one step after start().
+    /// [data-model "Listener acquisition"; tasks.md SC-010 delta #6]
+    [[nodiscard]] fixpp::transport::Endpoint
+        acceptor_bound_endpoint(SessionId const& id) const;
+
 private:
     // Injected executor; all loops co_spawn on this.
     asio::any_io_executor exec_;
@@ -209,10 +221,34 @@ private:
     // Distinct from the per-session SessionEntry::session_cancel (E-7).
     std::unordered_map<SessionId, asio::cancellation_signal> accept_scope_signals_;
 
+    // Per-acceptor listeners (SC-010 delta #6 / "Listener acquisition" in data-model).
+    // Built by run_accept_loop from reconnect_endpoint (repurposed as bind endpoint).
+    // Torn down by stop() via total-cancel of accept_scope_signals_.
+    // Key matches the acceptor's SessionId in registry_.
+    std::unordered_map<SessionId, std::unique_ptr<fixpp::transport::Listener>> listeners_;
+
+    // Bound endpoints for each acceptor listener — populated once the listener
+    // is successfully constructed in run_accept_loop. Used by acceptor_bound_endpoint().
+    // Port 0 in the stored Endpoint means the listener is not yet built.
+    std::unordered_map<SessionId, fixpp::transport::Endpoint> listener_endpoints_;
+
     // Stopped flag — ensures stop() is idempotent and dtor assert fires
     // correctly.  Sequenced on the engine strand (no atomic needed while
     // everything runs through the strand).
     bool stopped_ = false;
+
+    // T012 friend: run_accept_loop (engine.cpp, namespace fixpp::session)
+    // accesses Engine's private members (listeners_, listener_endpoints_, etc.)
+    // and Session's public attach_accepted_transport (now public in session.hpp).
+    // The coroutine is declared in the fixpp::session namespace (not anonymous)
+    // so the friend declaration is valid per [dcl.friend].
+    friend asio::awaitable<void>
+        run_accept_loop(fixpp::core::EngineConfig const&,
+                        Engine&,
+                        SessionId const&,
+                        SessionEntry&,
+                        asio::cancellation_signal&,
+                        std::shared_ptr<std::atomic<int>>);
 
     // Rebindable outbound send-slot machinery: for an acceptor session the live
     // transport is unknown at open() time; the engine captures a forwarding
