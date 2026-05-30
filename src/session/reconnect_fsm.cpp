@@ -31,11 +31,16 @@
 // tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
 // [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
 #include "fixpp/transport/transport_factory.hpp"
-// Full cert_source definition — needed here to call snap->load_credentials()
-// for computing the leaf SHA-256 fingerprint (T017 rotation-detect step 2).
-// Forward-declared in reconnect_fsm.hpp; full definition safe in .cpp.
-// [data-model §E-3; FR-010; §XV.9]
-#include "fixpp/tls/cert_source.hpp"
+// cert_source's full definition — needed here to call snap->load_credentials()
+// for the leaf SHA-256 fingerprint (T017 rotation-detect step 2) — is obtained
+// TRANSITIVELY via transport_factory.hpp above, which includes the tls
+// cert_source header for TransportFactory::reload_credentials /
+// cert_source_snapshot. Do NOT add a direct include of the tls cert_source
+// header here: session->tls is not an allowed module edge
+// ([arch §2.3] / tools/check_layers.py); session reaches tls ONLY through the
+// transport interface (session->transport->tls). cert_source is still
+// forward-declared in reconnect_fsm.hpp per [const §XV.9].
+// [data-model §E-3; FR-010]
 // TlsTransport — needed for the dynamic_cast<TlsTransport*> in E-1 step 6.
 // [data-model §E-1; tls_transport.hpp:61-67]
 #include "fixpp/transport/tls_transport.hpp"
