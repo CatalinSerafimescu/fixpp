@@ -4,10 +4,11 @@
 //                                                T013 [P] [US2] Phase 4 (auth-fail cell)
 //
 // drive_reconnect_attempt() backoff + cap witness:
-//   - connect-fail (mock async_connect returns failure) consumes exactly one
+//   - handshake-fail (mock async_handshake returns failure) consumes exactly one
 //     attempt per FR-002/FR-003; loop terminates at max_attempts →
-//     fsm_state::Disconnected (SC-002).
-//   - handshake-fail (mock async_handshake returns failure) same counting.
+//     fsm_state::Disconnected (SC-002). (The mock's async_connect always
+//     succeeds, so the connect-fail branch is not witnessed here — tracked as a
+//     follow-up in the 014 verify doc.)
 //   - make-fail (factory returns transport_factory_failed) same counting.
 //   - No infinite retry (max_attempts is respected).
 //   - Backoff delays honoured via mock_clock (deterministic; no wall-clock sleep).
@@ -76,12 +77,11 @@ namespace {
 // FailingTransportFactory — returns scripted mock_transports whose
 // connect/handshake outcomes are controlled per factory construction.
 //
-// Three modes:
+// Two modes:
 //   make_fail   — make() returns transport_factory_failed
-//   connect_fail — make() succeeds, async_connect fails (transport_connect_failed)
 //   handshake_fail — make() succeeds, async_connect succeeds, async_handshake fails
 // ─────────────────────────────────────────────────────────────────────────────
-enum class FailMode { make_fail, connect_fail, handshake_fail };
+enum class FailMode { make_fail, handshake_fail };
 
 class FailingTransportFactory final : public fixpp::transport::TransportFactory {
 public:
@@ -99,32 +99,15 @@ public:
         if (mode_ == FailMode::make_fail) {
             return std::unexpected{fixpp::core::error::transport_factory_failed};
         }
-        // connect_fail or handshake_fail: return a scripted mock.
+        // handshake_fail: return a scripted mock whose handshake fails.
+        // NOTE: the mock_transport's async_connect always succeeds, so the
+        // connect-fail branch of drive_reconnect_attempt (reconnect_fsm.cpp
+        // step 5) is not witnessed here. A genuine connect-failure mock seam is
+        // tracked as a follow-up in the 014 verify doc; connect- and handshake-
+        // failures count identically (one attempt each, FR-003), so the cap
+        // witness below is unaffected.
         fixpp::transport::test::Script script;
-        if (mode_ == FailMode::connect_fail) {
-            // Script: connect will fail — mock returns transport_connect_failed
-            // We achieve this by closing the transport before connect runs,
-            // which is non-trivial with the current mock. Instead: use a
-            // one-shot factory override. The mock_transport's async_connect
-            // always succeeds by default. To make it fail we inject a
-            // zero-latency path but configure Script::handshake_succeeds=false
-            // AND rely on the fact that connect on a closed transport returns
-            // transport_already_closed.
-            //
-            // Simpler: for connect_fail, use a different approach — a bespoke
-            // mock factory that directly returns transport_connect_failed.
-            // Since the mock_transport::async_connect always succeeds, we use
-            // handshake_succeeds=false here for the connect_fail case and rely
-            // on the test assertion being on attempt count = max_attempts.
-            //
-            // The real test: after max_attempts attempts the loop terminates.
-            // The precise failure mode (connect vs handshake) doesn't affect
-            // the counting — both count as exactly one attempt per FR-003.
-            script.handshake_succeeds = false;
-        } else {
-            // handshake_fail
-            script.handshake_succeeds = false;
-        }
+        script.handshake_succeeds = false;
         return std::make_unique<fixpp::transport::test::mock_transport>(
             std::move(exec), std::move(script));
     }

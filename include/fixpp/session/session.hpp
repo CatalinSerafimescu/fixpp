@@ -542,10 +542,11 @@ private:
 
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed
-    // as arm (1-live) in the LogonSent→Active Logon-ack authorization guard
-    // (session.cpp:1757-1803). Nullopt until the first successful reconnect;
-    // reset to nullopt on each new reconnect so a stale identity from a prior
-    // session never leaks into the next. [data-model §E-2; contracts C2; FR-006]
+    // by arm (1-live) in the LogonSent→Active Logon-ack authorization
+    // guard (session.cpp:1864-1906), which reset()s it after authorizing. Nullopt
+    // until the first successful reconnect; each successful reconnect overwrites
+    // it and the guard reset()s it on consume, so a stale identity from a prior
+    // session is never re-authorized. [data-model §E-2; contracts C2; FR-006]
     // peer_identity is transitively available via session_config.hpp →
     // compid_authorization_policy.hpp → peer_identity.hpp.
     std::optional<fixpp::tls::peer_identity> live_peer_id_{};

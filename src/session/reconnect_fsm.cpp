@@ -282,12 +282,14 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
                     hr.peer_id, asserted_compid);
                 if (!auth_r) {
                     // Authorization failed: emit event, release t, count attempt.
-                    // The subject_dn_view() is a view into hr.peer_id which lives
-                    // in the current attempt's scope (hr is on the coroutine
-                    // stack); safe for the synchronous emit_event call.
+                    // cn is left EMPTY: emit_event PERSISTS the event into the
+                    // session-lifetime recent_events_ ring (session.cpp:142), so a
+                    // view into hr.peer_id (a coroutine-stack temporary destroyed at
+                    // the `continue` below) would dangle for later recent_events()
+                    // readers. Mirrors the mTLS-no-identity arm (session.cpp:1939).
                     session_->emit_event(
                         fixpp::session::session_event_compid_authorization_failed{
-                            .cn               = hr.peer_id.subject_dn_view(),
+                            .cn               = {},
                             .asserted_compid  = asserted_compid,
                             .expected_compids = {},
                             .principal_source =

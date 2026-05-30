@@ -1849,10 +1849,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   (3) mTLS + no identity available → fail CLOSED. RC#A.
             //   (4) Non-mTLS → skip (backward compat, permissive). FR-019.
             //
-            // live_peer_id_ is stored by install_reconnected_transport (T015) and
-            // cleared to nullopt at the start of each reconnect attempt (T014 sets
-            // it fresh). The acceptor site (:953-1008) stays seam-only — the
-            // acceptor live binding deferral to 015 is documented there.
+            // live_peer_id_ is stored by install_reconnected_transport (T015) on a
+            // successful reconnect handshake and reset() one-shot below once this
+            // guard authorizes it. The acceptor site (:953-1008) stays seam-only —
+            // the acceptor live binding deferral to 015 is documented there.
             // [[feedback_half_restructure_symmetric_api]]: asymmetry is documented
             // and intentional per spec Clarifications Q2 / T-041 stays `implementing`.
             // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008]
@@ -1882,10 +1882,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // (future: or if this guard is reached from the reconnect path
                         // after an auth-pass in the FSM — should not happen, but
                         // fail-closed is the safe default). [contracts C2; FR-007]
-                        const std::string_view cn_view =
-                            parse_cn_from_dn_local(auth_pid.subject_dn_view());
+                        // cn EMPTY: live_peer_id_.reset() below frees the backing
+                        // store, so a view into it would dangle in the persisted
+                        // recent_events_ ring. (Owned-cn fix + the success-arm cn
+                        // lifetime are tracked in the 014 verify doc.)
                         emit_event(fixpp::session::session_event_compid_authorization_failed{
-                            .cn              = cn_view,
+                            .cn              = {},
                             .asserted_compid = asserted_compid,
                             .expected_compids = {},
                             .principal_source = fixpp::session::bound_principal::source::CN,
