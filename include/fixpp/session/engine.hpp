@@ -20,6 +20,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -222,6 +223,15 @@ private:
     // inside SessionConfig::transport_send; the engine wraps it.)
     std::unordered_map<SessionId, std::function<void(std::span<const std::byte>)>>
         send_slots_;
+
+    // Joint-before-clear counter (E-7 / Gate A New-4): tracks how many
+    // co_spawned loops are still running. start() initialises this and
+    // each loop decrements on exit. stop() waits until it reaches zero
+    // before clearing the registry that owns the Session objects.
+    // The shared_ptr allows loops to safely decrement after co_return even
+    // if Engine::stop() is executing concurrently.
+    // Strictly required by the join-before-clear invariant — private only.
+    std::shared_ptr<std::atomic<int>> outstanding_counter_;
 };
 
 }  // namespace fixpp::session

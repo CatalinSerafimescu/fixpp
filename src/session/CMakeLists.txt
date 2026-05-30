@@ -13,6 +13,7 @@
 
 add_library(fixpp_session STATIC
   session.cpp
+  engine.cpp             # 015-runtime-engine T006: Engine lifecycle substrate
   session_executor.cpp   # fixpp::core::make_session_executor (T019; the
                          # core-namespace bridge defined session-side so
                          # core/ stays the asio-free leaf — [arch §2.3])

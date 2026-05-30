@@ -675,6 +675,36 @@ set_tests_properties(engine_session_id PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;foundational;session_id")
 
+# ── 015-runtime-engine Phase 2 (T007) — Engine harness compile smoke ─────────
+# Proves engine_loopback_harness.hpp compiles and the Engine ctor/stop() shape
+# is correct. Behavioral coverage is provided by US1/US2/US3 live tests.
+# CTest filter: ctest -R 'engine_harness_compile_smoke'
+add_executable(engine_harness_compile_smoke_test
+  engine_harness_compile_smoke_test.cpp
+)
+target_link_libraries(engine_harness_compile_smoke_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_harness_compile_smoke_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_harness_compile_smoke_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME engine_harness_compile_smoke COMMAND engine_harness_compile_smoke_test)
+set_tests_properties(engine_harness_compile_smoke PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;foundational;harness;compile_smoke")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
