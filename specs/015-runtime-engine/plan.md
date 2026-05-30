@@ -12,7 +12,7 @@
 ## Technical Context
 
 **Language/Version**: C++23 (per constitution; `std::expected`, coroutines, `std::pmr`)
-**Primary Dependencies**: Asio standalone (no Boost flavour — `boost::asio` per existing tree), OpenSSL 3.x (via 011/012 TLS surface), `std::pmr`, fixpp codegen output
+**Primary Dependencies**: Asio standalone (no Boost flavour — standalone `asio` per existing tree, `#include <asio/…>`, `find_package(asio CONFIG)`), OpenSSL 3.x (via 011/012 TLS surface), `std::pmr`, fixpp codegen output
 **Storage**: N/A (in-memory session + registry state; message store is 008, not touched)
 **Testing**: ctest running **GoogleTest/GoogleMock** targets (`[const §VII.1]`; the shipped framework — the prior "Catch2" was an error, Gate A Codex-7), libFuzzer (existing targets), Google Benchmark (existing), sanitizer matrix (ASan/UBSan/TSan)
 **Target Platform**: Linux (WSL2 dev), gcc/clang; CI matrix is the gate
