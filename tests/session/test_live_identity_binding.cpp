@@ -341,6 +341,28 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
         << "GREEN after T014/T015: arm (1-live) fires with CN='PEER-PROD-01' → "
         << "authorize() succeeds → Active. "
         << "SC-003: no fabricated/stand-in identity on the live initiator path.";
+
+    // FQ-2 UAF regression guard: the success-arm peer_identity_bound event must
+    // carry an empty .cn (live_peer_id_.reset() frees the backing store after
+    // emit; owned-cn is intentionally deferred). ASan coverage rides on the
+    // asan-preset ctest. Assert here so a future regression reintroducing the
+    // dangling view fails fast.
+    bool found_bound_event = false;
+    for (const auto& ev : session.recent_events()) {
+        if (std::holds_alternative<
+                fixpp::session::session_event_peer_identity_bound>(ev)) {
+            const auto& bound =
+                std::get<fixpp::session::session_event_peer_identity_bound>(ev);
+            EXPECT_TRUE(bound.cn.empty())
+                << "peer_identity_bound .cn must be empty on the live success arm "
+                << "(backing store freed by live_peer_id_.reset(); gate-b/r2 FQ-2).";
+            found_bound_event = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_bound_event)
+        << "peer_identity_bound event must be present in recent_events() after "
+        << "successful live-arm authorization. GREEN after T014/T015.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1897,8 +1897,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // Authorization succeeded: emit peer_identity_bound event.
+                    // cn EMPTY: live_peer_id_.reset() below frees the backing store;
+                    // owned-cn deferred — see verify doc. sha256_fingerprint (owned
+                    // std::array) and bound_compid (config-stable) are safe. Matches
+                    // the failure-arm precedent (gate-b/r2 FQ-2).
                     emit_event(fixpp::session::session_event_peer_identity_bound{
-                        .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
+                        .cn                = {},
                         .sans              = {},
                         .sha256_fingerprint = auth_pid.leaf_fingerprint,
                         .cipher            = {},
