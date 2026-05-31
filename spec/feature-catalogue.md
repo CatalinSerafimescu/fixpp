@@ -1,5 +1,8 @@
 # Master Feature Catalogue
 
+> **Sibling index:** non-obvious behaviors + known limitations are catalogued in
+> [`behaviors-and-limitations.md`](./behaviors-and-limitations.md) (harvest source for the
+> operator-doc *"Behaviors & Limitations"* section).
 > **Canonical location:** `research/G19-fix-fpml-iso20022/library/spec/feature-catalogue.md`
 > **Schema:** ID | Source | Category | Title | FIX version(s) | Spec ref / Lib ref | Status | /specify | PR | Tests | Verified
 > **Source** ∈ {OFFICIAL, OSS:<lib>, COMMERCIAL:<vendor>}
