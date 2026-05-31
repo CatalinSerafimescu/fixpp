@@ -631,6 +631,30 @@ private:
     // Used by the liveness loop to detect outbound idle → Heartbeat (T018 Cell A).
     fixpp::core::steady_time_point last_outbound_steady_;
 
+    // FQ-A (gate-b/r2) — single serialized live-outbound write gate.
+    // Held ACROSS each live async_write (acquire before write, release after
+    // write completes). Ensures at most one async_write is ever in-flight on
+    // the live Transport, satisfying transport.hpp:47-50 ≤1-in-flight contract.
+    // Every live emit site (store_then_emit direct path, ResendRequest replay,
+    // liveness HB/TR) acquires this gate before submitting to the transport.
+    // Must be drained (cancel_and_drain()) in Session::close() AFTER root
+    // cancellation fires, before seqnum_mgr_ drain, to satisfy the async_mutex
+    // destructor's not_locked precondition. [transport.hpp:47-50; FQ-A D-6]
+    fixpp::sync::async_mutex write_gate_;
+
+    // FQ-A (gate-b/r2) — liveness-loop lifetime counter.
+    // Initialized to 0 at construction. The liveness coroutine increments it at
+    // start (via a shared_ptr<atomic<int>> RAII guard) and decrements at exit.
+    // Session::close() polls until it reaches 0 AFTER firing root_cancel_, so
+    // that registry_.clear() cannot destroy the Session while the liveness
+    // coroutine is still running and touching Session members / the live transport.
+    // Using a shared_ptr avoids async_mutex destructor precondition issues when
+    // tests destroy a Session without calling close() (e.g., after verifying
+    // FSM state but before explicit teardown).
+    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4]
+    std::shared_ptr<std::atomic<int>> liveness_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
@@ -661,29 +685,23 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     emit_initiator_logon_() noexcept;
 
-    // 015 /simplify (Q-1/R-1) — build the live outbound send-slot for the
-    // gap-fill/resend-replay transmit-only path (transport_send_), shared by the
-    // acceptor (attach_accepted_transport) and initiator (install_reconnected_
-    // transport) attach paths. Bridges the sync transport_send_ std::function to
-    // the async Transport::async_write via a fire-and-forget co_spawn on exec_,
-    // copying the frame bytes so the send is independent of the caller's buffer.
-    // Note (FQ-1, gate-b/r1): store_then_emit() no longer calls transport_send_
-    // for live transports — it uses live_transport_ptr_() + co_await async_write
-    // directly for proper error propagation and serialization.
-    // Captures a SHARED keepalive to the transport so an in-flight detached write
-    // cannot be left dereferencing a freed Transport if the owning Session is
-    // destroyed first (e.g. Engine::stop()'s registry clear, which does not track
-    // these detached writes in its join counter).
-    [[nodiscard]] std::function<void(std::span<const std::byte>)>
-    make_live_send_(std::shared_ptr<fixpp::transport::Transport> transport);
+    // FQ-A (gate-b/r2): returns the live transport as a shared_ptr<Transport>.
+    // The keepalive across the async_write co_await ensures the Transport is not
+    // freed by registry_.clear() while the write is in-flight (Q-1 UAF fix).
+    // Returns nullptr if no live transport is attached yet.
+    [[nodiscard]] std::shared_ptr<fixpp::transport::Transport>
+    live_transport_shared_() const noexcept;
 
-    // FQ-1 (gate-b/r1): returns the live Transport* for direct co_await writes in
-    // store_then_emit.  Non-null once attach_accepted_transport or
-    // install_reconnected_transport has stored accepted_transport_ or
-    // reconnected_transport_.  Returns nullptr in the pre-live state (open() not
-    // yet called, or config-time transport_send_ path is in use).
-    // Called ONLY from store_then_emit (session strand; no races).
-    [[nodiscard]] fixpp::transport::Transport* live_transport_ptr_() const noexcept;
+    // FQ-A (gate-b/r2): one serialized live write. Acquires write_gate_, holds a
+    // shared_ptr<Transport> keepalive across the async_write, releases the gate
+    // on completion (success or error). Returns dispatch_aborted on:
+    //   - write_gate_ acquire cancelled (operation_aborted from cancel_and_drain)
+    //   - async_write returns !has_value() (any transport error)
+    // Replay-only callers pass replay=true to skip the clock update in the caller.
+    // NEVER holds the gate across any read — guards write-submit→complete only.
+    // [transport.hpp:47-50; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    live_write_serialized_(std::span<const std::byte> frame) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a

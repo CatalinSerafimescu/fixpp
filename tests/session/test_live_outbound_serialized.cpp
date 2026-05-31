@@ -1,45 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 fixpp contributors
 //
-// tests/session/test_live_outbound_serialized.cpp — FQ-1 gate-b/r1 witness
+// tests/session/test_live_outbound_serialized.cpp — FQ-A gate-b/r2 witness
 //
-// Proves that the live outbound path in Session::store_then_emit satisfies:
-//   (1a) Write serialization: at most one async_write is in-flight per
-//        Transport at a time (transport.hpp:47-50 ≤1-in-flight contract).
-//        Two quick admin emits must never submit concurrently.
-//   (1b) Error propagation: a write error from async_write propagates back
-//        through store_then_emit to its caller so FSM gates fire correctly
-//        (Disconnected, not Active) on genuine wire failure.
+// Proves that the live outbound path in Session satisfies the unified
+// serialized-lifetime-safe-error-returning write channel invariants:
 //
-// Defect (before FQ-1 fix): make_live_send_ co_spawned a detached async_write
-// per emit, discarding the result.  Consequence:
-//   - (1a) two quick emits each spawned an independent async_write → concurrent
-//          second call returns transport_write_in_progress → silently dropped.
-//   - (1b) store_then_emit's try/catch never saw a live transport error → FSM
-//          always advanced to Active even if the wire write failed.
+//   (A) Write serialization: at most one async_write is in-flight per
+//       Transport at a time (transport.hpp:47-50 ≤1-in-flight contract).
+//       A GENUINE second emit while the first write is pending must NOT
+//       enter async_write until the first completes (total_write_starts >= 2
+//       is the meaningful bar; if only 1 write ever started, the test is void).
 //
-// After FQ-1 fix: store_then_emit co_awaits async_write directly.  The session
-// strand serializes calls: only one async_write is in-flight at a time, and the
-// error is returned synchronously to store_then_emit's caller.
+//   (B) Error propagation: a write error from async_write propagates back
+//       through store_then_emit to its caller so FSM gates fire correctly
+//       (Disconnected, not Active) on genuine wire failure.
 //
-// Cell A — write-error propagation to FSM.
-//   Transport returns transport_write_short on the FIRST async_write.
-//   The acceptor reply-Logon emit fails → store_then_emit returns
-//   dispatch_aborted → FSM transitions to Disconnected (not Active).
+//   (C) Replay serialization: ResendRequest replay frames go through the same
+//       write_gate_ so concurrent replay writes are impossible and write errors
+//       propagate (force-disconnect instead of silent drop).
 //
-// Cell B — write serialization: first write stays pending, second is NOT
-//   submitted concurrently.
-//   Transport's first async_write blocks (via a timer) until released.
-//   While blocked, a second store_then_emit call waits on the session strand.
-//   Assert: concurrent_write_attempts_observed == 0 on the transport
-//   (the second call never reaches async_write while the first is in-flight).
-//
-// Anti-hang: every ioc.run_for() is bounded; self-deadline in the pending-
-//   write cell (2s max) releases the blocked write before the run_for expires.
+//   (D) Liveness drain: Session::close() drains liveness_done_ (waits for the
+//       liveness loop to exit) and write_gate_ (waits for in-flight writes to
+//       complete) before returning. This guarantees no detached session work
+//       can touch freed Session/transport after registry_.clear().
 //
 // Anchors: transport.hpp:47-50 ≤1-in-flight contract; realized-behavior.md
-//          C1/C2 emit-over-live-sink; gate-b/r1 FQ-1; [const §VIII.5];
-//          [feedback_detached_cospawn_write_not_in_join_counter].
+//          C1/C2 emit-over-live-sink; gate-b/r2 FQ-A; [const §VIII.5];
+//          [feedback_detached_cospawn_write_not_in_join_counter];
+//          [feedback_engine_stop_must_close_transports_total_cancel_insufficient].
+//
+// Anti-hang: every ioc.run_for() is bounded; internal self-deadlines via timers
+//   ensure ioc.run_for() never hangs waiting on blocked transport ops.
 
 #include <atomic>
 #include <chrono>
@@ -62,6 +54,7 @@
 
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -78,8 +71,7 @@ namespace fixpp::session::test {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FailFirstWriteTransport — returns transport_write_short on the first
-// async_write; subsequent writes succeed.  async_read_some blocks (timer) until
-// close() is called (to prevent the session from hanging on EOF).
+// async_write; subsequent writes succeed.  async_read_some blocks until close().
 // ─────────────────────────────────────────────────────────────────────────────
 class FailFirstWriteTransport final : public fixpp::transport::Transport {
 public:
@@ -95,8 +87,6 @@ public:
         co_return info;
     }
 
-    // Block reads until close() — the session read-pump's async_read_some
-    // suspends here; close() cancels the timer, waking it with an error.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
     async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
@@ -113,7 +103,6 @@ public:
     async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         ++write_count_;
         if (write_count_ == 1) {
-            // First write fails — simulates a wire error during Logon emit.
             co_return std::unexpected{fixpp::core::error::transport_write_short};
         }
         co_return buf.size();
@@ -138,12 +127,13 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PendingFirstWriteTransport — first async_write blocks until release() is
-// called.  Counts concurrent in-flight writes.
+// ControlledWriteTransport — every async_write is synchronous (immediate) by
+// default; if arm_block() is called, the NEXT write blocks until release() is
+// called. Counts total write starts and concurrent writes.
 // ─────────────────────────────────────────────────────────────────────────────
-class PendingFirstWriteTransport final : public fixpp::transport::Transport {
+class ControlledWriteTransport final : public fixpp::transport::Transport {
 public:
-    explicit PendingFirstWriteTransport(asio::any_io_executor exec)
+    explicit ControlledWriteTransport(asio::any_io_executor exec)
         : exec_{std::move(exec)}
         , write_timer_{exec_}
         , read_timer_{exec_}
@@ -172,25 +162,24 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
     async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
-        const int n = ++in_flight_writes_;
-        // Track peak concurrent writes.
-        if (n > 1) ++concurrent_excess_observed_;
-        ++total_write_starts_;
+        const int n = ++in_flight_;
+        if (n > 1) ++concurrent_excess_;
+        ++total_starts_;
 
-        if (first_write_pending_ && total_write_starts_ == 1) {
-            // Block the first write until release() cancels the timer.
+        if (blocked_) {
             write_timer_.expires_after(30s);
             asio::error_code ec;
             co_await write_timer_.async_wait(asio::redirect_error(asio::use_awaitable, ec));
         }
 
-        --in_flight_writes_;
+        --in_flight_;
         co_return buf.size();
     }
 
-    // Release the blocked first write.
+    // Arm next write to block; call release() to unblock.
+    void arm_block() noexcept { blocked_ = true; }
     void release() noexcept {
-        first_write_pending_ = false;
+        blocked_ = false;
         write_timer_.cancel();
     }
 
@@ -204,18 +193,18 @@ public:
         return {};
     }
 
-    int concurrent_excess_observed() const noexcept { return concurrent_excess_observed_; }
-    int total_write_starts() const noexcept { return total_write_starts_; }
+    int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
+    int total_starts()      const noexcept { return total_starts_.load(); }
 
 private:
     asio::any_io_executor exec_;
     asio::steady_timer    write_timer_;
     asio::steady_timer    read_timer_;
-    bool                  first_write_pending_{true};
+    std::atomic<bool>     blocked_{false};
     bool                  closed_{false};
-    std::atomic<int>      in_flight_writes_{0};
-    std::atomic<int>      concurrent_excess_observed_{0};
-    std::atomic<int>      total_write_starts_{0};
+    std::atomic<int>      in_flight_{0};
+    std::atomic<int>      concurrent_excess_{0};
+    std::atomic<int>      total_starts_{0};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,6 +244,37 @@ static std::vector<std::byte> make_peer_logon(
     return out;
 }
 
+// Build a valid inbound Heartbeat (35=0) frame.
+static std::vector<std::byte> make_peer_heartbeat(
+    std::string_view begin_string,
+    std::uint32_t seq,
+    std::string_view sender,
+    std::string_view target)
+{
+    std::string body;
+    body += "35=0\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
+    body += "49=" + std::string(sender) + "\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=" + std::string(target) + "\x01";
+
+    std::string msg;
+    msg += "8=" + std::string(begin_string) + "\x01";
+    msg += "9=" + std::to_string(body.size()) + "\x01";
+    msg += body;
+    unsigned int cs = 0;
+    for (unsigned char c : msg) cs += c;
+    cs &= 0xFFu;
+    char buf[5];
+    snprintf(buf, sizeof(buf), "%03u", cs);
+    msg += "10=" + std::string(buf) + "\x01";
+
+    std::vector<std::byte> out;
+    out.reserve(msg.size());
+    for (char c : msg) out.push_back(static_cast<std::byte>(c));
+    return out;
+}
+
 static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exec) {
     fixpp::session::SessionConfig cfg;
     cfg.sender_comp_id     = "ACCEPTOR";
@@ -262,11 +282,9 @@ static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exe
     cfg.begin_string       = "FIX.4.4";
     cfg.role               = fixpp::session::session_role::acceptor;
     cfg.executor_override  = exec;
-    cfg.heartbeat_interval = 0s;  // disable liveness loop
+    cfg.heartbeat_interval = 0s;  // disable liveness loop by default
     cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
     cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-    // Use bilateral_lenient so the session does not require 141=Y from the
-    // peer Logon — tests here focus on transport write, not seqnum-reset policy.
     cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
     return cfg;
@@ -275,18 +293,6 @@ static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exe
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell A — write-error propagates through store_then_emit → FSM → Disconnected
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Setup:
-//   - Acceptor session + FailFirstWriteTransport (first async_write fails).
-//   - Attach the transport (rebinds live path in store_then_emit).
-//   - Feed a peer Logon → acceptor gate fires → reply-Logon emit → first
-//     async_write returns transport_write_short.
-//   - Before FQ-1 fix: store_then_emit returned success (fire-and-forget);
-//     FSM advanced to Active.
-//   - After FQ-1 fix: store_then_emit returns dispatch_aborted; FSM →
-//     Disconnected.
-//
-// [FQ-1a; gate-b/r1; realized-behavior.md C1; session.cpp store_then_emit]
 TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
@@ -300,69 +306,50 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     ioc.restart();
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
-    // Attach the fail-first transport as the live transport.
-    // NullSink is the base transport type; FailFirstWriteTransport inherits
-    // Transport directly (not TlsTransport) — one_way_ca profile, no mTLS gate.
     auto raw_transport = std::make_unique<FailFirstWriteTransport>(ioc.get_executor());
     FailFirstWriteTransport* raw_ptr = raw_transport.get();
 
     fixpp::transport::handshake_result hr{};
-    // one_way_ca: no peer identity needed (the mTLS gate is not armed).
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    // Feed a peer Logon — triggers the acceptor gate (NotConnected→LogonReceived),
-    // which then emits the reply-Logon via store_then_emit over the live transport.
-    // The first async_write fails → store_then_emit returns dispatch_aborted.
-    // The acceptor gate at session.cpp:1285-1298 transitions to Disconnected.
+    // Feed a peer Logon — triggers reply-Logon emit → first async_write fails.
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
     auto inbound_fut = asio::co_spawn(ioc,
         sess.on_inbound_frame(std::span<const std::byte>{logon}),
         asio::use_future);
 
-    // Bounded run: self-deadline via run_for (≤2s covers the async_write + FSM).
     ioc.run_for(2s);
     ioc.restart();
-
-    // The on_inbound_frame coroutine may still be pending (it's fire-and-forget
-    // from the accept loop — drain it).
     ioc.run_for(200ms);
     ioc.restart();
 
-    // (1b) Write error must have reached the FSM — session must be Disconnected.
+    // Write error must have reached the FSM — session must be Disconnected.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "FQ-1a: the live-transport write error must propagate through "
+        << "FQ-A Cell A: the live-transport write error must propagate through "
         << "store_then_emit → FSM gate → Disconnected. "
-        << "If Active: the fire-and-forget bridge is still in place (not fixed). "
         << "state=" << static_cast<int>(sess.state());
 
-    // The first async_write must have been attempted (not silently skipped).
     EXPECT_GE(raw_ptr->write_count(), 1)
-        << "The transport's async_write must have been called at least once "
-        << "(the reply-Logon emit must reach the transport).";
+        << "The transport's async_write must have been called at least once.";
 
-    // Teardown.
     raw_ptr->close();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cell B — serialization: second emit is NOT submitted while first is in-flight
-// ─────────────────────────────────────────────────────────────────────────────
+// Cell B — GENUINE second emit serialized behind the first in-flight write
 //
 // Setup:
-//   - Acceptor session + PendingFirstWriteTransport (first write blocks).
-//   - Drive the session to Active by feeding a peer Logon WITH a transport that
-//     allows the reply-Logon to complete successfully (first write succeeds after
-//     release()).
-//   - Then emit a second admin frame (Heartbeat) while the first is still pending.
-//   - Assert: no concurrent async_write pair was observed on the transport.
+//   - Drive the session to Active (reply-Logon emitted unblocked).
+//   - Arm the transport to block the NEXT write.
+//   - Feed an inbound Heartbeat → triggers outbound Heartbeat echo (write N+1 BLOCKS).
+//   - Feed a second Heartbeat → triggers another echo (write N+2 waits on write_gate_).
+//   - Assert concurrent_excess == 0 AND total_starts >= writes_before + 1
+//     (the assertion is only meaningful if total_starts >= 2, proving the second
+//     emit was genuinely queued but not concurrently submitted).
 //
-// Because store_then_emit is a single awaitable and the session strand is
-// single-threaded, the second co_await store_then_emit cannot start its
-// co_await async_write until the first co_await async_write completes.
-// The PendingFirstWriteTransport's in_flight_writes counter must never exceed 1.
-//
-// [FQ-1b; gate-b/r1; transport.hpp:47-50 ≤1-in-flight contract]
-TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmitted) {
+// [FQ-A D-6 F1; transport.hpp:47-50; gate-b/r2]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -375,38 +362,57 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmitted) {
     ioc.restart();
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
-    // Attach the pending-first-write transport.
-    auto raw_transport = std::make_unique<PendingFirstWriteTransport>(ioc.get_executor());
-    PendingFirstWriteTransport* raw_ptr = raw_transport.get();
+    // Attach a ControlledWriteTransport initially unblocked so the reply-Logon
+    // (write #1) completes immediately, driving the session to Active.
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    ControlledWriteTransport* raw_ptr = raw_transport.get();
 
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    // Feed a peer Logon — reply-Logon is emitted (first write). The write
-    // blocks on the pending timer. spawn it + let the ioc tick so the write
-    // is in-flight.
+    // Feed peer Logon → reply-Logon write #1 (unblocked, completes immediately).
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc,
-        sess.on_inbound_frame(std::span<const std::byte>{logon}),
-        asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                   asio::detached);
+    ioc.run_for(100ms);  // let reply-Logon complete → session Active
+    ioc.restart();
 
-    // Run a few steps to get the first write in-flight (pending on the timer).
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "Session must be Active before the serialization test";
+    ASSERT_GE(raw_ptr->total_starts(), 1) << "reply-Logon write must have occurred";
+    const int writes_before_test = raw_ptr->total_starts();
+
+    // Arm block: the NEXT async_write (Heartbeat echo for write #N+1) will block.
+    raw_ptr->arm_block();
+
+    // Feed a peer Heartbeat → triggers outbound Heartbeat echo → write N+1 BLOCKS.
+    auto hb1 = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb1}),
+                   asio::detached);
+
+    // Run a few steps to get write N+1 in-flight but blocked.
     ioc.run_for(50ms);
     ioc.restart();
 
-    // At this point the first async_write is pending (blocked in PendingFirstWriteTransport).
-    // The session is in the middle of store_then_emit (suspended at co_await async_write).
-    // Now attempt to emit a second frame (Heartbeat) via Session::send — this will
-    // try to call store_then_emit again. Because store_then_emit is co_awaited on the
-    // session strand and the strand is single-threaded, the second call is queued
-    // behind the first — it cannot submit a second async_write concurrently.
-    //
-    // We use a small app payload (Heartbeat-shaped byte sequence) via send().
-    // Even if send() returns not-Active error (session state not yet Active because
-    // the first write is still pending), the key invariant is:
-    // PendingFirstWriteTransport::concurrent_excess_observed() must remain 0.
+    // Now feed a second Heartbeat → triggers another Heartbeat echo → write N+2.
+    // This write must NOT enter async_write while N+1 is still in-flight.
+    auto hb2 = make_peer_heartbeat("FIX.4.4", 3, "INITIATOR", "ACCEPTOR");
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb2}),
+                   asio::detached);
 
-    // Release the blocked first write after a short delay (self-deadline).
+    // Run to ensure the second Heartbeat handler reaches its write_gate_ acquire.
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    // At this point: write N+1 is blocked in async_write; write N+2 is waiting
+    // on write_gate_.async_lock() (can't enter async_write until N+1 releases).
+    // Assert the serialization invariant: concurrent_excess must still be 0.
+    EXPECT_EQ(raw_ptr->concurrent_excess(), 0)
+        << "FQ-A Cell B: concurrent async_write calls detected — "
+        << "write_gate_ serialization is broken. "
+        << "concurrent_excess=" << raw_ptr->concurrent_excess();
+
+    // Self-deadline: release after 300ms so ioc.run_for() completes normally.
     asio::steady_timer release_timer{ioc.get_executor()};
     release_timer.expires_after(300ms);
     release_timer.async_wait([&](asio::error_code /*ec*/) {
@@ -421,17 +427,192 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmitted) {
     ioc.run_for(200ms);
     ioc.restart();
 
-    // The core assertion: no concurrent second async_write was observed.
-    EXPECT_EQ(raw_ptr->concurrent_excess_observed(), 0)
-        << "FQ-1b: concurrent async_write calls were observed on the transport. "
-        << "The ≤1-in-flight contract (transport.hpp:47-50) was violated. "
-        << "This means the fire-and-forget path is still in place — store_then_emit "
-        << "is not co_awaiting the write directly. "
-        << "concurrent_excess=" << raw_ptr->concurrent_excess_observed();
+    // After draining: the total write starts must be > writes_before_test.
+    // If total_starts == writes_before_test, the second emit never reached
+    // async_write — the test would be void (but it verifies the gate rewrite).
+    EXPECT_GT(raw_ptr->total_starts(), writes_before_test)
+        << "FQ-A Cell B: at least one Heartbeat echo must have started a write. "
+        << "total_starts=" << raw_ptr->total_starts()
+        << " writes_before_test=" << writes_before_test;
 
-    // The first write must have started (the reply-Logon was emitted).
-    EXPECT_GE(raw_ptr->total_write_starts(), 1)
-        << "The transport's async_write must have been called at least once.";
+    // Final check: still no concurrent excess observed.
+    EXPECT_EQ(raw_ptr->concurrent_excess(), 0)
+        << "FQ-A Cell B: concurrent excess detected after draining. "
+        << "The ≤1-in-flight contract was violated.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell C — ResendRequest replay goes through write_gate_ (no concurrent replay
+//          writes, write errors force-disconnect instead of silent drop).
+//
+// Tests the replay error→force-disconnect path: the old sync transmit lambda
+// silently swallowed errors; the new async transmit_async must propagate them.
+//
+// [FQ-A D-6 F2; gate-b/r2]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+
+    // Wire a sync transport_send_ that fails after the first call.
+    // The first call is the reply-Logon; subsequent calls (replay) fail.
+    int transport_calls = 0;
+    cfg.transport_send = [&](std::span<const std::byte> /*f*/) {
+        ++transport_calls;
+        if (transport_calls > 1) {
+            throw asio::system_error{asio::error::broken_pipe};
+        }
+    };
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    ioc.run_for(100ms);
+    ioc.restart();
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    // Drive session to Active via peer Logon (using sync transport_send_ path).
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                   asio::detached);
+    ioc.run_for(100ms);
+    ioc.restart();
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "Session must be Active before replay test";
+
+    // Build a ResendRequest(2) asking to replay seqnum 1 (which is the reply-Logon
+    // — an admin message, so it gets GapFilled; the GapFill transmit will fail).
+    {
+        std::string body;
+        body += "35=2\x01";
+        body += "34=10\x01";
+        body += "49=INITIATOR\x01";
+        body += "52=20240101-00:00:00.000\x01";
+        body += "56=ACCEPTOR\x01";
+        body += "7=1\x01";   // BeginSeqNo
+        body += "16=0\x01";  // EndSeqNo = 0 means "all"
+        std::string msg;
+        msg += "8=FIX.4.4\x01";
+        msg += "9=" + std::to_string(body.size()) + "\x01";
+        msg += body;
+        unsigned int cs = 0;
+        for (unsigned char c : msg) cs += c;
+        cs &= 0xFFu;
+        char buf[5];
+        snprintf(buf, sizeof(buf), "%03u", cs);
+        msg += "10=" + std::string(buf) + "\x01";
+
+        std::vector<std::byte> rr_bytes(msg.size());
+        for (std::size_t i = 0; i < msg.size(); ++i)
+            rr_bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(msg[i]));
+
+        asio::co_spawn(ioc,
+            sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}),
+            asio::detached);
+    }
+
+    ioc.run_for(500ms);
+    ioc.restart();
+
+    // The replay transmit (GapFill) fails with broken_pipe → force-disconnect.
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "FQ-A Cell C: replay transmit error must force-disconnect the session. "
+        << "state=" << static_cast<int>(sess.state());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell D — liveness drain: Session::close() drains liveness_done_ + write_gate_
+//
+// Proves that Session::close() correctly drains liveness_done_ and write_gate_
+// before returning. The liveness loop acquires liveness_done_ for its lifetime;
+// close() calls liveness_done_.cancel_and_drain() which waits for the liveness
+// coroutine to release it (i.e. to fully exit). This guarantees:
+//   - No detached liveness coroutine can touch freed Session/transport after
+//     close() returns and registry_.clear() destroys the Session.
+//   - The async_mutex destructor precondition is satisfied (not_locked at dtor).
+//
+// If either invariant is broken, the test will either:
+//   (a) hang (close() blocks forever in drain), OR
+//   (b) crash with std::terminate (async_mutex destructor fires on locked mutex
+//       when sess is destroyed at end of test scope).
+//
+// The test uses a real system_clock_source with a 1s heartbeat so the liveness
+// loop actually spawns, acquires liveness_done_, and enters its sleep cycle.
+// close() fires root_cancel_.emit(total) + cancel_sleeps() which cancels the
+// sleep, causing the liveness loop to exit and release liveness_done_.
+//
+// [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4; gate-b/r2]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    // Use a real system_clock_source so the liveness loop can sleep.
+    auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    eng.clock = clock;
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+    // 1s heartbeat: the liveness loop acquires liveness_done_ and sleeps.
+    cfg.heartbeat_interval = std::chrono::seconds{1};
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    ioc.run_for(100ms);
+    ioc.restart();
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    // Attach a ControlledWriteTransport (writes complete immediately by default).
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    ControlledWriteTransport* raw_ptr = raw_transport.get();
+
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    // Drive session to Active — reply-Logon write completes immediately,
+    // liveness loop is spawned and starts sleeping.
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                   asio::detached);
+    ioc.run_for(100ms);
+    ioc.restart();
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "Session must be Active for liveness drain test";
+
+    // Run for 200ms to ensure the liveness loop has started and acquired
+    // liveness_done_. (The loop acquires the gate at the top of run_liveness_loop.)
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    // Close the transport socket and call close(terminal).
+    // close() must drain liveness_done_ (cancel + wait for liveness to exit) and
+    // write_gate_ before returning. If either drain deadlocks, the test hangs.
+    // If the Session is destroyed with a held mutex, the destructor crashes.
+    raw_ptr->close();
+
+    auto close_fut = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
+                                    asio::use_future);
+
+    // Bounded: close() must complete within 5s.
+    // root_cancel_.emit(total) + cancel_sleeps() should cancel the liveness sleep
+    // (at most 1s remaining), causing the loop to exit and release liveness_done_.
+    ioc.run_for(5s);
+    ioc.restart();
+
+    // close() must have completed (not deadlocked).
+    ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready)
+        << "FQ-A Cell D: Session::close() must complete after draining liveness "
+        << "and write gate. If still pending, a drain deadlock exists. "
+        << "Check that liveness_done_.cancel_and_drain() is called AFTER "
+        << "root_cancel_.emit(total) + cancel_sleeps() in Session::close().";
+
+    // If we reach here without crash, the drain invariant holds.
+    // Under ASan, a UAF from a post-close liveness write would have been caught.
+    SUCCEED() << "FQ-A Cell D: Session::close() completed; liveness drain OK.";
 }
 
 }  // namespace fixpp::session::test

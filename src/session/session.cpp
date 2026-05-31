@@ -215,13 +215,12 @@ void Session::install_reconnected_transport(
     // 2. Take ownership of the live transport.
     reconnected_transport_ = std::move(transport);
 
-    // 2a. 015 T016(c) — rebind transport_send_ to the live reconnected transport
-    //     (symmetric initiator-attach, E-1a). 014 left transport_send_ pointing at
-    //     the config-time sink; the engine lazy-connect model has NO config-time
-    //     sink, so the post-connect Logon (and all subsequent outbound) must reach
-    //     the live reconnected_transport_. Shared with the acceptor attach path via
-    //     make_live_send_ (015 /simplify R-1). [data-model §E-1a; T016(c); FR-003]
-    transport_send_ = make_live_send_(reconnected_transport_);
+    // 2a. FQ-A (gate-b/r2): live writes now go through live_write_serialized_()
+    //     which reads live_transport_shared_() at call time. No transport_send_
+    //     rebind needed for the live path — the live accessor picks up the new
+    //     reconnected_transport_ automatically. transport_send_ continues to serve
+    //     the pre-live/config-time test path (cfg_.transport_send set at open()).
+    //     [data-model §E-1a; T016(c); FR-003; FQ-A gate-b/r2]
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
@@ -255,24 +254,79 @@ fixpp::transport::Transport& Session::live_transport() noexcept {
     return reconnected_transport_ ? *reconnected_transport_ : *accepted_transport_;
 }
 
-// FQ-1 (gate-b/r1) — nullable live-transport accessor for store_then_emit.
-// Returns non-null once either attach path has stored accepted_transport_ or
-// reconnected_transport_.  Called on the session strand; no races.
-fixpp::transport::Transport* Session::live_transport_ptr_() const noexcept {
-    if (reconnected_transport_) return reconnected_transport_.get();
-    if (accepted_transport_)    return accepted_transport_.get();
+// FQ-A (gate-b/r2): returns the live transport as a shared_ptr<Transport>.
+// The shared_ptr keepalive ensures the Transport is not freed by
+// registry_.clear() while a write is in-flight (restores Q-1 UAF fix).
+// Returns nullptr if no live transport is attached yet.
+std::shared_ptr<fixpp::transport::Transport>
+Session::live_transport_shared_() const noexcept {
+    if (reconnected_transport_) return reconnected_transport_;
+    if (accepted_transport_)    return accepted_transport_;
     return nullptr;
+}
+
+// FQ-A (gate-b/r2): one serialized live write.
+// Acquires write_gate_ so at most one async_write is ever in-flight on the
+// live Transport (satisfies transport.hpp:47-50 ≤1-in-flight contract).
+// Holds a shared_ptr<Transport> keepalive across the co_await so the
+// transport cannot be freed mid-write (restores Q-1 keepalive).
+// Releases the gate on completion (success or error) via RAII.
+// Returns dispatch_aborted if:
+//   - The gate acquire is cancelled (operation_aborted from cancel_and_drain
+//     during Session::close()) — converted per
+//     [feedback_async_mutex_us3_asio_cancel_and_subagent_seams].
+//   - async_write returns !has_value() (any transport error).
+// If no live transport is present, returns ok (no-op; pre-live path).
+// NEVER holds the gate across any read (write-submit→complete window only).
+// [transport.hpp:47-50; FQ-A D-6; gate-b/r2]
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::live_write_serialized_(std::span<const std::byte> frame) noexcept {
+    auto live = live_transport_shared_();
+    if (!live) {
+        // No live transport — pre-live path, no-op.
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // Acquire the write gate across the completion (not just up to suspension).
+    // Wrap in try/catch to convert asio's thrown operation_aborted (from
+    // cancel_and_drain or root cancel propagating through the awaitable) into
+    // the contract's expected_t<void> return.
+    // [feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
+    fixpp::sync::async_lock_guard guard;
+    try {
+        auto lock_r = co_await write_gate_.async_lock();
+        if (!lock_r.has_value()) {
+            // sync_lock_drained or sync_lock_aborted — gate closed/cancelled.
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+        guard = std::move(*lock_r);
+    } catch (const asio::system_error& e) {
+        if (e.code() == asio::error::operation_aborted) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+
+    // Gate held — at most one async_write in-flight. `live` shared_ptr is the
+    // keepalive so the transport cannot be freed while we are suspended here.
+    auto write_r = co_await live->async_write(frame);
+    // guard destructor releases the gate when we leave this scope.
+    if (!write_r.has_value()) {
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+    co_return fixpp::core::expected_t<void>{};
 }
 
 // 015 T011 — Acceptor attach primitive.
 // Called by run_accept_loop STRICTLY-BEFORE the first on_inbound_frame (E-4).
-// Three actions (distinct from install_reconnected_transport):
+// Two actions (distinct from install_reconnected_transport):
 //   1. Store live peer identity for arm (1-live) at the acceptor gate (:1048).
-//   2. Rebind transport_send_ so outbound frames reach the accepted peer.
-//   3. Take ownership of the transport.
+//   2. Take ownership of the transport.
+// Does NOT rebind transport_send_ — live writes go through live_write_serialized_()
+// which reads live_transport_shared_() at call time (FQ-A gate-b/r2).
 // Does NOT transition the FSM — the acceptor stays NotConnected; the gate at
 // :1048 fires when on_inbound_frame processes the first Logon.
-// [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041]
+// [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041; FQ-A]
 void Session::attach_accepted_transport(
     std::unique_ptr<fixpp::transport::Transport> transport,
     fixpp::transport::handshake_result hr) noexcept
@@ -281,36 +335,12 @@ void Session::attach_accepted_transport(
     //    Consumed one-shot by the gate at :1048 in on_inbound_frame.
     live_peer_id_ = std::move(hr.peer_id);
 
-    // 2. Take ownership of the transport now (before binding transport_send_
-    //    so the raw pointer captured below is to the owned object).
+    // 2. Take ownership of the transport.
+    // FQ-A: no transport_send_ rebind needed — live_write_serialized_() picks
+    // up accepted_transport_ via live_transport_shared_() at call time.
     accepted_transport_ = std::move(transport);
-
-    // 3. Rebind transport_send_ to the live Transport::async_write via the shared
-    //    make_live_send_ helper (015 /simplify R-1) — same bridge as the initiator
-    //    install_reconnected_transport path. [data-model §E-1/E-2; R7(b); C1 step 5]
-    transport_send_ = make_live_send_(accepted_transport_);
     // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
     // the acceptor gate (:1048) when the first inbound Logon is processed.
-}
-
-// 015 /simplify (Q-1/R-1) — shared live outbound send-slot builder.
-// One source of truth for the sync-std::function → async_write bridge used by both
-// attach paths (install_reconnected_transport + attach_accepted_transport). The
-// detached write captures a SHARED keepalive (`t`) so it cannot dereference a freed
-// Transport if the owning Session is destroyed first (Engine::stop()'s registry
-// clear does not track these detached writes in its join counter). Frame bytes are
-// copied so the send is independent of the caller's buffer lifetime.
-std::function<void(std::span<const std::byte>)>
-Session::make_live_send_(std::shared_ptr<fixpp::transport::Transport> transport) {
-    return [t = std::move(transport), exec = exec_](std::span<const std::byte> frame) {
-        std::vector<std::byte> owned{frame.begin(), frame.end()};
-        asio::co_spawn(exec,
-            [t, f = std::move(owned)]() -> asio::awaitable<void> {
-                (void)co_await t->async_write(
-                    std::span<const std::byte>{f.data(), f.size()});
-            },
-            asio::detached);
-    };
 }
 
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
@@ -715,6 +745,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // resolve; the slot stays valid until here (seam 17: never read through
     // a destroyed slot — the slot lives in the Session, drained, not freed).
     trace_slot_.clear();
+
+    // FQ-A (gate-b/r2): wait for the liveness loop to exit before the seqnum drain.
+    // root_cancel_.emit() above has already fired total cancellation (which cancels
+    // the liveness sleep_until via cancel_sleeps() + root cancel propagation), and
+    // any in-progress liveness write will fail when the socket is closed (engine
+    // stop() calls transport->close() before joining). We yield the executor until
+    // liveness_counter_ reaches 0, meaning the liveness coroutine has fully exited
+    // run_liveness_loop. This ensures registry_.clear() cannot destroy the Session
+    // while the liveness coroutine is still touching Session members.
+    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F4]
+    {
+        auto lc = liveness_counter_;
+        while (lc->load(std::memory_order_acquire) > 0) {
+            // Yield one step; liveness loop's try/catch converts cancellation to
+            // a clean return, then the RAII guard decrements the counter.
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+    }
+
+    // FQ-A (gate-b/r2): drain the write gate after the liveness loop exits.
+    // Any in-flight live write (started before total cancel propagated) has
+    // its socket closed (engine::stop() called transport->close() before
+    // the join) so the async_write completes with error → write_gate_ released.
+    // cancel_and_drain() cancels any pending waiters (they get dispatch_aborted
+    // from live_write_serialized_) and waits for the current holder (if any)
+    // to unlock — satisfying the async_mutex destructor precondition.
+    // [FQ-A D-6 F1/F3; transport.hpp:47-50]
+    {
+        auto wg_drain_r = co_await write_gate_.cancel_and_drain();
+        (void)wg_drain_r;  // I-07 logged-then-proceed.
+    }
 
     // T022 (009 Phase 6 / FR-011 / RC#7 / D-2):
     // Drain the SeqnumManager's async_mutex before state_ = closed_drained.
@@ -1634,28 +1695,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                           : SendingTimeStamp{};
 
-                    // Transmit-only emit (no store, no counter advance). Returns
-                    // false on transport throw → caller force-disconnects.
-                    const auto transmit = [&](std::span<const std::byte> f) -> bool {
-                        if (!transport_send_) return true;
+                    // FQ-A (gate-b/r2): Transmit-only emit goes through
+                    // live_write_serialized_() (which acquires write_gate_) for live
+                    // transports, or the sync transport_send_ for pre-live/test paths.
+                    // Returns false on write error → caller force-disconnects.
+                    // This ensures replay frames are serialized with every other live
+                    // emit and errors propagate instead of being silently dropped.
+                    // [FQ-A D-6 F2; transport.hpp:47-50; gate-b/r2]
+                    const auto transmit_async =
+                        [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
+                        if (live_transport_shared_()) {
+                            auto wr = co_await live_write_serialized_(f);
+                            co_return wr.has_value();
+                        }
+                        if (!transport_send_) { co_return true; }
                         try {
                             transport_send_(f);
-                            return true;
+                            co_return true;
                         } catch (...) {  // NOLINT(bugprone-empty-catch)
-                            return false;
+                            co_return false;
                         }
                     };
                     const auto is_admin_type = [](std::string_view mt) -> bool {
                         return mt == "0" || mt == "1" || mt == "2" || mt == "3" ||
                                mt == "4" || mt == "5" || mt == "A";
                     };
-                    const auto emit_gapfill = [&](seqnum_t at_seq, seqnum_t new_seqno) -> bool {
+                    const auto emit_gapfill_async =
+                        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
                         std::array<std::byte, 256> gf_buf{};
                         auto gf = fixpp::session::build_sequence_reset_gapfill(
                             std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
                             cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
                             st52_sr.value);
-                        return !gf || transmit(*gf);
+                        if (!gf) { co_return true; }  // build failure treated as no-op
+                        co_return co_await transmit_async(*gf);
                     };
 
                     // Resolve the effective end: EndSeqNo=0 → "through current
@@ -1675,7 +1748,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t new_seq_no = (rr_end == 0)
                             ? seqnum_mgr_.peek_outbound()
                             : (rr_end + 1U);
-                        (void)emit_gapfill(rr_begin > 0 ? rr_begin : 1U, new_seq_no);
+                        if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U, new_seq_no)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                        }
                         co_return fixpp::core::expected_t<void>{};
                     }
 
@@ -1708,7 +1783,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                  std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
                         if (app_present) {
                             if (gap_open) {
-                                if (!emit_gapfill(gap_start, k)) {
+                                if (!co_await emit_gapfill_async(gap_start, k)) {
                                     record_state_transition_(fsm_state::Disconnected);
                                     co_return fixpp::core::expected_t<void>{};
                                 }
@@ -1718,7 +1793,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto rp = build_replay_frame(
                                 std::span<std::byte>{rp_buf.data(), rp_buf.size()},
                                 std::span<const std::byte>{cv.buf.data(), cv.len});
-                            if (rp && !transmit(*rp)) {
+                            if (rp && !co_await transmit_async(*rp)) {
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return fixpp::core::expected_t<void>{};
                             }
@@ -1731,7 +1806,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                     }
                     if (gap_open) {
-                        (void)emit_gapfill(gap_start, eff_end + 1U);
+                        if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                        }
                     }
                     // Remain in Active after responding to ResendRequest.
                     co_return fixpp::core::expected_t<void>{};
@@ -2327,6 +2404,20 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // filter — it does not reassign the slot's backing storage.
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
 
+    // FQ-A (gate-b/r2): increment liveness_counter_ for the entire loop lifetime
+    // so that Session::close() can poll until it reaches 0, ensuring the liveness
+    // coroutine has fully exited before close() returns (and before
+    // registry_.clear() can destroy the Session).
+    // Using a captured shared_ptr so the counter is valid even if the Session
+    // starts destruction while the coroutine is still executing.
+    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F4]
+    auto live_ctr = liveness_counter_;  // shared ownership
+    live_ctr->fetch_add(1, std::memory_order_relaxed);
+    struct liveness_dec {
+        std::shared_ptr<std::atomic<int>> ctr;
+        ~liveness_dec() { ctr->fetch_sub(1, std::memory_order_release); }
+    } live_dec_guard{live_ctr};
+
     // Resolve HeartBtInt from config (D-8 default: 30s; 0 = disabled).
     std::chrono::seconds heartbt_int{30};
     if (cfg_.heartbeat_interval.has_value()) {
@@ -2521,28 +2612,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
 
     // Step 2: transmit (ONLY after store completes — I-3).
     //
-    // FQ-1 (gate-b/r1): for a LIVE transport, co_await async_write directly so
-    // (a) the real error propagates back to the FSM gates (no fire-and-forget),
-    // and (b) at most one async_write is in-flight at a time — natural
-    // serialization because store_then_emit runs on the session strand and only
-    // one call can be suspended at the async_write co_await at a time.
-    // [transport.hpp:47-50 ≤1-in-flight contract; realized-behavior.md C1/C2]
-    //
-    // live_transport_ptr(): returns non-null once attach_accepted_transport or
-    // install_reconnected_transport has set accepted_transport_ or
-    // reconnected_transport_.  Checked first so the live path bypasses the
-    // config-time transport_send_ entirely.
+    // FQ-A (gate-b/r2): for a LIVE transport, route through live_write_serialized_()
+    // which acquires write_gate_ across the async_write completion, holds a
+    // shared_ptr<Transport> keepalive, and returns an error if the write fails.
+    // This satisfies three invariants simultaneously:
+    //   (a) serialization: write_gate_ ensures ≤1 async_write in-flight
+    //       (transport.hpp:47-50 ≤1-in-flight contract);
+    //   (b) error propagation: write error → dispatch_aborted → caller disconnects;
+    //   (c) lifetime safety: shared_ptr keepalive prevents UAF (Q-1 fix).
+    // [transport.hpp:47-50; FQ-A D-6; realized-behavior.md C1/C2]
     //
     // Pre-live (config-time transport_send_): sync std::function set from
-    // cfg_.transport_send at open() — used by direct-Session tests and by
-    // the gap-fill/replay transmit-only path.  Still wrapped in try/catch.
+    // cfg_.transport_send at open() — used by direct-Session tests.
     {
-        auto* live = live_transport_ptr_();
-        if (live) {
-            // Direct awaitable write — returns expected_t<std::size_t>.
-            // The span's lifetime spans the co_await (caller's coroutine frame
-            // is suspended, not destroyed) so no copy is needed here (E-7).
-            auto write_r = co_await live->async_write(frame);
+        if (live_transport_shared_()) {
+            // Live path: serialized write through write_gate_.
+            auto write_r = co_await live_write_serialized_(frame);
             if (!write_r.has_value()) {
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
             }
