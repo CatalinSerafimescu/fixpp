@@ -133,10 +133,14 @@ run_test_initiator(asio::io_context& ioc,
             std::span<const std::byte>{logon_bytes});
         (void)write_r;
 
-        // Wait for the acceptor's reply Logon (or for our deadline).
-        // This lets the acceptor session transition fully.
+        // Stay connected past the test's 3s state-capture window. Since US2
+        // (T015) the acceptor read-pump detects peer EOF and drives the session
+        // to Disconnected via close(terminal); if this client closed at 2s the
+        // SC-001 capture at 3s would observe Disconnected instead of established.
+        // The peer must remain connected while the test asserts established state;
+        // stop() tears the session down at end-of-test.
         asio::steady_timer t{ioc};
-        t.expires_after(2s);
+        t.expires_after(5s);
         co_await t.async_wait(asio::use_awaitable);
 
         (void)client->close();

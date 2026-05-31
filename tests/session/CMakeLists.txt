@@ -796,6 +796,40 @@ set_tests_properties(engine_firstframe PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us1;live_tls;firstframe;window")
 
+# ── 015-runtime-engine Phase 4 (US2) — T014 ────────────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T015 (real read-pump) lands.
+# CTest filter: ctest -R 'engine_readpump'
+#
+# T014 — read-pump delivers subsequent frames exactly-once in order (SC-003 /
+#         US2 AC1/AC2; FR-004/012; C2). Observability via next_inbound_unsafe()
+#         (FIXPP_TEST_HOOKS) and Session::state().
+add_executable(engine_readpump_test
+  engine_readpump_test.cpp
+)
+target_link_libraries(engine_readpump_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_readpump_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_readpump_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_readpump COMMAND engine_readpump_test)
+set_tests_properties(engine_readpump PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us2;live_tls;readpump")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

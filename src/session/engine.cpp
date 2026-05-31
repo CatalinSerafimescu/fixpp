@@ -247,17 +247,113 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
     co_return std::unexpected(error::transport_handshake_timeout);
 }
 
-// ── Minimal read-pump stub (US2 T015 replaces this) ─────────────────────────
-// Spawned per-session after the first Logon is delivered (T012). Reads
-// subsequent frames and feeds them to on_inbound_frame until EOF/cancel.
+// ── Read-pump (US2 T015) ─────────────────────────────────────────────────────
+// Co-awaited inline from run_accept_loop after the first Logon is delivered.
+// Runs on the accept loop's executor (== session strand in the single-executor
+// model used by the tests and the current engine). Reads subsequent frames,
+// parses them with a session-lifetime Framer + pmr_carry_buffer, and delivers
+// each complete frame to session.on_inbound_frame.
+//
+// Termination:
+//   EOF / read-error   → close session terminal, stop pump.
+//   wire_frame_too_large → close session terminal, stop pump (FR-012).
+//   on_inbound_frame error → close session terminal, stop pump (FR-012).
+//   total-cancel (stop()) → async_read_some returns transport_read_cancelled
+//                           → error arm fires, close is a no-op on already-
+//                           closing session, pump unwinds cleanly.
+//
+// Natural backpressure: no inbound queue; each on_inbound_frame call must
+// complete before the next read_some is issued (SC-003 / US2 AC1).
+//
+// Capacity constant: must be < the 128 KiB over-size frame the T014 case sends
+// (kOversizeBody = 128 KiB) so wire_frame_too_large fires in the framer, AND
+// large enough to hold any valid FIX admin frame. 64 KiB is the right value.
+// [tasks.md T015; FR-004/012; C2; [[feedback_asio_cospawn_total_cancellation_default]]]
+constexpr std::size_t kReadPumpCarryCapacity = 64u * 1024u;  // 64 KiB
+
 asio::awaitable<void>
-run_read_pump_stub(fixpp::transport::Transport* /*transport*/,
-                   fixpp::session::Session* /*session*/)
+run_read_pump(fixpp::transport::Transport& transport,
+              fixpp::session::Session&     session,
+              fixpp::session::SessionConfig const& cfg)
 {
+    // MANDATORY total-cancel reset — required if this coroutine is ever
+    // co_spawned (co_spawn defaults to terminal-only). Harmless when co_awaited
+    // inline. [[feedback_asio_cospawn_total_cancellation_default]] / [const §XI.2]
     co_await asio::this_coro::reset_cancellation_state(
         asio::enable_total_cancellation());
-    // US2 T015 will implement the real pump. For now co_return immediately.
-    co_return;
+
+    // Session-lifetime carry buffer. One allocation from the configured arena
+    // (or new_delete if none supplied). Never reallocated; overflow → wire_frame_too_large.
+    std::pmr::memory_resource* arena =
+        cfg.framer_carry_arena ? cfg.framer_carry_arena
+                               : std::pmr::new_delete_resource();
+    fixpp::wire::pmr_carry_buffer carry{kReadPumpCarryCapacity, arena};
+
+    // Per-read scratch buffer — unrelated to the carry; plain stack array.
+    // Size matches the default max_read_window_bytes on Transport::Config.
+    std::array<std::byte, 4096> read_buf{};
+
+    // Per-call output slot. We process one frame at a time to maintain
+    // natural backpressure (no inbound queue, SC-003 / US2 AC1).
+    std::array<fixpp::wire::frame_view, 1> out{};
+
+    fixpp::wire::Framer framer;
+
+    // Helper: close the session terminally on error/EOF, then stop the pump.
+    // close(terminal) transitions FSM → Disconnected and fires root cancellation.
+    // If close() was already called (stop() fired concurrently), the idempotent
+    // three-state model returns session_already_closed — ignored here (no-op).
+    // [data-model §E-5; FR-012; session.hpp close(terminal)]
+    auto stop_pump = [&]() -> asio::awaitable<void> {
+        (void)co_await session.close(fixpp::session::close_mode::terminal);
+    };
+
+    while (true) {
+        auto read_r = co_await transport.async_read_some(
+            std::span<std::byte>{read_buf.data(), read_buf.size()});
+
+        if (!read_r.has_value()) {
+            // EOF (transport_read_eof) or read error (transport_read_cancelled on
+            // total-cancel, or a transport I/O error). Existing disconnect handling:
+            // close(terminal) → FSM → Disconnected. [FR-012]
+            co_await stop_pump();
+            co_return;
+        }
+
+        // Drain ALL complete frames this read produced before issuing the next
+        // read_some. feed() emits at most out.size() frames per call and retains
+        // the surplus in `carry`; multiple complete frames can arrive in a single
+        // read (TLS/TCP coalescing), so we re-feed with an empty span (carry-only)
+        // until no further complete frame is produced. Without this drain a
+        // coalesced frame would sit in carry until the next read and be DROPPED on
+        // EOF — violating exactly-once in-order delivery (SC-003 / US2 AC1).
+        std::span<const std::byte> incoming{read_buf.data(), *read_r};
+        for (;;) {
+            auto feed_r = framer.feed(
+                incoming, carry, std::span<fixpp::wire::frame_view>{out});
+
+            if (!feed_r.has_value()) {
+                // wire_frame_too_large or other framing error.
+                // Per FR-012: no silent truncation; close and stop. [T015]
+                co_await stop_pump();
+                co_return;
+            }
+
+            std::size_t const produced = feed_r->size();
+            for (auto const& frame : *feed_r) {
+                auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
+                if (!deliver_r.has_value()) {
+                    // Session-fatal error from FSM (e.g. seqnum overflow, store I/O).
+                    // Per FR-012: close and stop. [T015]
+                    co_await stop_pump();
+                    co_return;
+                }
+            }
+
+            incoming = {};                      // subsequent drains are carry-only
+            if (produced < out.size()) break;   // framer withheld nothing more
+        }
+    }
 }
 
 }  // anonymous namespace
@@ -422,8 +518,10 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // Step 6: attach the live transport (T011).
         // Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is set
         // here, STRICTLY-BEFORE the first on_inbound_frame call below.
-        // run_accept_loop is a friend of Session (session.hpp) so this private
-        // method call compiles.
+        // Capture raw pointer BEFORE the move — session owns the transport for
+        // the pump's whole lifetime (the pump is co_awaited inline below, joining
+        // before co_return, so no UAF). [T015 locked design decision #2]
+        fixpp::transport::Transport* raw = transport.get();
         session->attach_accepted_transport(std::move(transport), std::move(hr));
 
         // Step 7: direct-deliver the first Logon (DR-7 / E-2).
@@ -434,11 +532,12 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
             (void)deliver_r;
         }
 
-        // Step 8: spawn read-pump stub (US2 T015 replaces with the real pump).
-        asio::co_spawn(exec,
-            run_read_pump_stub(nullptr, session),
-            asio::bind_cancellation_slot(
-                entry.session_cancel.slot(), asio::detached));
+        // Step 8: run the real read-pump inline (T015).
+        // Inline co_await means the pump is part of the counter_guard scope:
+        // stop()'s total-cancel propagates into async_read_some, the pump unwinds,
+        // and the counter only decrements after the pump co_returns. No second
+        // counter or detached spawn needed. [T015 locked design decision #3]
+        co_await run_read_pump(*raw, *session, entry.config);
 
         // Re-spin the accept loop to serve the next peer (C5 — loop continuously).
         // For the current static-registry model (R2), the session stays live for
