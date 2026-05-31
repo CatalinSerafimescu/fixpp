@@ -1,6 +1,45 @@
 # tests/session/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
+# OpenSSL/zlib resolution for the live-TLS engine + CompID-binding tests that
+# link fixpp_transport directly (015 engine_* + 013/014 binding witnesses).
+# fixpp_tls/fixpp_transport's PRIVATE OpenSSL is not propagated to test
+# executables linking the static libs — same pattern as tests/transport and
+# tests/tls. find_library may MISS under sanitizer presets (conan emits a
+# non-_RELEASE config suffix, so openssl_LIB_DIRS_RELEASE is empty); the
+# OpenSSL::/ZLIB:: target fallback then resolves it regardless of config.
+# (015 /speckit-verify: tests/session consumed FIXPP_TRANSPORT_OPENSSL_*_LIB
+# without resolving them itself, breaking the sanitizer/CI build.)
+find_package(OpenSSL 3.0 REQUIRED)
+find_library(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_library(FIXPP_TRANSPORT_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_package(ZLIB REQUIRED)
+find_library(FIXPP_TRANSPORT_ZLIB_LIB
+    NAMES z libz
+    PATHS "${zlib_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+if(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB STREQUAL "FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB)
+    set(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB OpenSSL::Crypto)
+endif()
+if(FIXPP_TRANSPORT_OPENSSL_SSL_LIB STREQUAL "FIXPP_TRANSPORT_OPENSSL_SSL_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_OPENSSL_SSL_LIB)
+    set(FIXPP_TRANSPORT_OPENSSL_SSL_LIB OpenSSL::SSL)
+endif()
+if(FIXPP_TRANSPORT_ZLIB_LIB STREQUAL "FIXPP_TRANSPORT_ZLIB_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_ZLIB_LIB)
+    set(FIXPP_TRANSPORT_ZLIB_LIB ZLIB::ZLIB)
+endif()
+
 # ── 009-session-fsm-finalize T005 — shared test helper ──────────────────────
 # OBJECT library so executables can absorb the helper without an install/link
 # step; consumed via $<TARGET_OBJECTS:session_test_support> in test sources.
