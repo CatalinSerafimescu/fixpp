@@ -962,6 +962,16 @@ set_tests_properties(engine_lifecycle PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us3;live_tls;lifecycle")
 
+# ── gate-b/r1 FQ-1: live outbound serialization + error propagation ──────────
+# Proves (1a) write-error propagates through store_then_emit → FSM → Disconnected
+# and (1b) at most one async_write is in-flight per Transport (≤1-in-flight
+# contract, transport.hpp:47-50). Uses custom transport doubles (no live TLS).
+# CTest filter: ctest -R 'live_outbound_serialized'
+add_threading_test(live_outbound_serialized test_live_outbound_serialized.cpp)
+target_include_directories(live_outbound_serialized PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

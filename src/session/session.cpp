@@ -255,6 +255,15 @@ fixpp::transport::Transport& Session::live_transport() noexcept {
     return reconnected_transport_ ? *reconnected_transport_ : *accepted_transport_;
 }
 
+// FQ-1 (gate-b/r1) — nullable live-transport accessor for store_then_emit.
+// Returns non-null once either attach path has stored accepted_transport_ or
+// reconnected_transport_.  Called on the session strand; no races.
+fixpp::transport::Transport* Session::live_transport_ptr_() const noexcept {
+    if (reconnected_transport_) return reconnected_transport_.get();
+    if (accepted_transport_)    return accepted_transport_.get();
+    return nullptr;
+}
+
 // 015 T011 — Acceptor attach primitive.
 // Called by run_accept_loop STRICTLY-BEFORE the first on_inbound_frame (E-4).
 // Three actions (distinct from install_reconnected_transport):
@@ -2511,15 +2520,41 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     }
 
     // Step 2: transmit (ONLY after store completes — I-3).
-    // RC#B (gate-b/r1-green): convert transport throw → dispatch_aborted so callers
-    // can gate FSM transitions on emit success. [009 spec.md US1 AC3; F-02/F-03]
-    if (transport_send_) {
-        try {
-            transport_send_(frame);
-        } catch (const asio::system_error&) {
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
-        } catch (...) {
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    //
+    // FQ-1 (gate-b/r1): for a LIVE transport, co_await async_write directly so
+    // (a) the real error propagates back to the FSM gates (no fire-and-forget),
+    // and (b) at most one async_write is in-flight at a time — natural
+    // serialization because store_then_emit runs on the session strand and only
+    // one call can be suspended at the async_write co_await at a time.
+    // [transport.hpp:47-50 ≤1-in-flight contract; realized-behavior.md C1/C2]
+    //
+    // live_transport_ptr(): returns non-null once attach_accepted_transport or
+    // install_reconnected_transport has set accepted_transport_ or
+    // reconnected_transport_.  Checked first so the live path bypasses the
+    // config-time transport_send_ entirely.
+    //
+    // Pre-live (config-time transport_send_): sync std::function set from
+    // cfg_.transport_send at open() — used by direct-Session tests and by
+    // the gap-fill/replay transmit-only path.  Still wrapped in try/catch.
+    {
+        auto* live = live_transport_ptr_();
+        if (live) {
+            // Direct awaitable write — returns expected_t<std::size_t>.
+            // The span's lifetime spans the co_await (caller's coroutine frame
+            // is suspended, not destroyed) so no copy is needed here (E-7).
+            auto write_r = co_await live->async_write(frame);
+            if (!write_r.has_value()) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+        } else if (transport_send_) {
+            // Config-time sync sink (pre-live / test path).
+            try {
+                transport_send_(frame);
+            } catch (const asio::system_error&) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            } catch (...) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
         }
     }
 

@@ -566,9 +566,15 @@ private:
     std::uint32_t next_test_request_id_ = 0;
 
     // ── US4 / T046 transport surface ─────────────────────────────────────────
-    // transport_send_ — captured from cfg_.transport_send at open(). Called
-    // from store_then_emit() AFTER the outbound store() call completes (I-3).
-    // Non-null only when SessionConfig::transport_send was set.
+    // transport_send_ — two uses:
+    //   (1) Pre-live / config-time sync sink: captured from cfg_.transport_send
+    //       at open(); used by store_then_emit() when live_transport_ptr_()
+    //       returns null (no live transport attached yet).
+    //   (2) Gap-fill/resend-replay transmit-only path (on_inbound_frame, Active
+    //       state ResendRequest handling): the fire-and-forget bridge is
+    //       acceptable there (errors are synchronously detected and disconnect).
+    // For normal outbound frames, store_then_emit() uses live_transport_ptr_()
+    // for a direct co_await async_write (FQ-1, gate-b/r1).
     // Always called from the session strand (single-writer, no races).
     std::function<void(std::span<const std::byte>)> transport_send_;
 
@@ -655,17 +661,29 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     emit_initiator_logon_() noexcept;
 
-    // 015 /simplify (Q-1/R-1) — build the live outbound send-slot shared by the
+    // 015 /simplify (Q-1/R-1) — build the live outbound send-slot for the
+    // gap-fill/resend-replay transmit-only path (transport_send_), shared by the
     // acceptor (attach_accepted_transport) and initiator (install_reconnected_
     // transport) attach paths. Bridges the sync transport_send_ std::function to
     // the async Transport::async_write via a fire-and-forget co_spawn on exec_,
     // copying the frame bytes so the send is independent of the caller's buffer.
+    // Note (FQ-1, gate-b/r1): store_then_emit() no longer calls transport_send_
+    // for live transports — it uses live_transport_ptr_() + co_await async_write
+    // directly for proper error propagation and serialization.
     // Captures a SHARED keepalive to the transport so an in-flight detached write
     // cannot be left dereferencing a freed Transport if the owning Session is
     // destroyed first (e.g. Engine::stop()'s registry clear, which does not track
     // these detached writes in its join counter).
     [[nodiscard]] std::function<void(std::span<const std::byte>)>
     make_live_send_(std::shared_ptr<fixpp::transport::Transport> transport);
+
+    // FQ-1 (gate-b/r1): returns the live Transport* for direct co_await writes in
+    // store_then_emit.  Non-null once attach_accepted_transport or
+    // install_reconnected_transport has stored accepted_transport_ or
+    // reconnected_transport_.  Returns nullptr in the pre-live state (open() not
+    // yet called, or config-time transport_send_ path is in use).
+    // Called ONLY from store_then_emit (session strand; no races).
+    [[nodiscard]] fixpp::transport::Transport* live_transport_ptr_() const noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
