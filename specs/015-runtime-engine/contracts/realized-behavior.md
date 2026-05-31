@@ -31,9 +31,18 @@ for (;;) {
 }
 ```
 - Every inbound frame delivered to `on_inbound_frame` exactly once, in arrival order, on the session strand (FR-004). **Backpressure is natural** — the pump does not read the next chunk until `on_inbound_frame` completes; there is no inbound queue (Gate A P2-5).
-- A frame exceeding the carry capacity → `wire_frame_too_large` (`error.hpp:60`) → close (no silent truncation).
-- EOF/read-error → pump stops; the session goes through its existing disconnect handling (no new disposition — FR-012). For an initiator, the reconnect FSM (014) may re-drive a connect attempt; the engine respins the pump on the new transport.
+- A frame exceeding the carry capacity → `wire_frame_too_large` (`error.hpp:60`) → `close(close_mode::terminal)` (no silent truncation). **Drain rule (T015 as-built)**: `Framer::feed` emits ≤ `out.size()` frames/call and retains the surplus in `carry`; the pump MUST re-feed (carry-only) until no complete frame remains BEFORE the next `async_read_some`, else a coalesced frame is dropped on EOF.
+- EOF/read-error / `on_inbound_frame` error → pump stops and calls `session.close(close_mode::terminal)` = the existing disconnect path → `Disconnected` (no new disposition — FR-012). **Option A (Clarifications 2026-05-31)**: for an initiator this ends the connect loop — multi-cycle reconnect-respin is DEFERRED (`close(terminal)` is permanent; 014 has no tested multi-cycle reconnect), symmetric with the single-peer acceptor (C2i).
 - **Scope** (Gate A New-2 / research.md R10): admin/session-layer flow only (Logon/Logout/Heartbeat/TestRequest/ResendRequest/SequenceReset). There is no user sink for inbound *application* messages in 015 (Application out of scope, FR-013); `Session` stores every frame + runs fromAdmin for admin types.
+
+## C2i — Initiator connect loop: connect-then-Logon (FR-003; US2; SC-010 (7)/(8))
+Symmetric to C1 (acceptor). `run_connect_loop` establishes in **connect-then-Logon** order — grounded in QuickFIX-cpp (`setResponder` on connect → `Session::next()`→`generateLogon`) and Fix8 (`Session::start`→`_connection->connect()` then `send(generate_logon)`): both emit the Logon strictly **after** the connection + outbound sink exist.
+1. `co_await Session::open()` — session/FSM/executor/clock/arena setup; the engine-driven initiator does **NOT** emit the Logon at open (E-1a; the open()-time emit at `session.cpp:447-518` is valid only in the per-session-direct model).
+2. `co_await session.drive_reconnect()` — public wrapper over `reconnect_fsm_.drive_reconnect_attempt()`; on success `install_reconnected_transport` rebinds `transport_send_` to the live transport (**symmetric initiator-attach — 015 amends 014**) + re-enters `LogonSent`. Exhaustion → `transport_reconnect_limit_exceeded` → loop ends.
+3. Emit the initial Logon **POST-connect** over the now-live `transport_send_` (`build_logon` + `store_then_emit`, seq 1).
+4. Read-pump (C2) on `session.live_transport()` delivers the peer Logon-ack + frames → `LogonSent → Active`; EOF → end (Option A — single connect+pump; respin deferred).
+- **Public surface (SC-010)**: `Session::drive_reconnect()` + `Session::live_transport()`.
+- **Regression watch** (`[[feedback_half_restructure_symmetric_api]]`): amending the shared `install_reconnected_transport` changes 014's reconnect-path outbound sink (config-bound → live `reconnected_transport_`) — re-run the 014 reconnect suite; confirm no test asserted outbound went to the config-time transport.
 
 ## C3 — Acceptor live-identity gate arm (FR-006/007/008; T-041; SC-001/002) — **ONE acceptor site**
 Insert arm **1-live** ahead of the seam arm at the **single acceptor gate** `src/session/session.cpp:1048` (the `NotConnected → LogonReceived` branch), mirroring the initiator arm at `:1864`:

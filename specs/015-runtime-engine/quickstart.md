@@ -23,7 +23,7 @@ io.run();                                  // caller drives; connect → handsha
 co_await engine.stop();                    // idempotent: total-cancel all loops/pumps, no leak
 ```
 
-The connect loop reuses 014's `ReconnectFsm::drive_reconnect_attempt` (bounded reconnect to cap); on a live transport the engine wires `SessionConfig::transport_send` and spawns the read-pump (C2).
+The connect loop reuses 014's `ReconnectFsm::drive_reconnect_attempt` (bounded reconnect to cap) via the public `Session::drive_reconnect()`; on a live transport `install_reconnected_transport` rebinds `SessionConfig::transport_send` to the live sink, the initial Logon is emitted **POST-connect** (NOT at `open()` — connect-then-Logon, FR-003 / E-1a / Clarifications 2026-05-31), and the read-pump runs on `Session::live_transport()` (C2/C2i).
 
 ## Acceptor: listen, resolve by reversed CompID, authorize live
 
