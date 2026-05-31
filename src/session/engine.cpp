@@ -221,11 +221,11 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
         auto read_r = co_await transport.async_read_some(
             std::span<std::byte>{read_buf.data(), read_buf.size()});
         if (!read_r.has_value()) {
+            // Deadline (Q-2): the timer callback cancelled this read → the error
+            // arm closes + reclaims (FR-014). The specific code is unobservable
+            // here (no Session, no log surface) so it is not special-cased; the
+            // between-reads deadline still returns transport_handshake_timeout below.
             timer.cancel();
-            // Deadline-cancelled read (Q-2) surfaces as the handshake/Logon timeout
-            // disposition, not the raw cancellation code (FR-014).
-            if (timed_out)
-                co_return std::unexpected(error::transport_handshake_timeout);
             co_return std::unexpected(read_r.error());
         }
         std::size_t n = *read_r;
