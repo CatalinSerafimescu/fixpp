@@ -147,8 +147,11 @@ struct SessionEntry {
 // Lifecycle:  constructed → started → stopping → stopped
 //   start()  once; stop()  idempotent from any state.
 //
-// Threading:
-//   All registry mutation/iteration sequenced on the engine strand (E-5).
+// Threading (E-5 — single-executor confinement):
+//   015 uses single-threaded confinement, not a strand.
+//   register_session() is called before start() (single-threaded by contract).
+//   lookup(), start(), stop(), and the spawned loops all run on the same
+//   injected executor.  Multi-threaded io_context is NOT supported in 015.
 //   NO std::mutex ([const §XV.9]).  Each spawned loop/pump MUST call
 //     co_await asio::this_coro::reset_cancellation_state(
 //             asio::enable_total_cancellation())
@@ -223,10 +226,6 @@ private:
     // NO Application& (FR-013 / Gate A New-2).
     fixpp::core::EngineConfig engine_cfg_;
 
-    // Engine strand — serialises registry mutation/iteration (E-5).
-    // Derived from exec_ in the ctor.  No std::mutex.
-    asio::any_io_executor engine_strand_;
-
     // Session registry — keyed on SessionId, owned here (join-before-clear E-7).
     std::unordered_map<SessionId, SessionEntry> registry_;
 
@@ -246,8 +245,7 @@ private:
     std::unordered_map<SessionId, fixpp::transport::Endpoint> listener_endpoints_;
 
     // Stopped flag — ensures stop() is idempotent and dtor assert fires
-    // correctly.  Sequenced on the engine strand (no atomic needed while
-    // everything runs through the strand).
+    // correctly.  Safe under single-executor confinement (E-5).
     bool stopped_ = false;
 
     // T012 friend: run_accept_loop (engine.cpp, namespace fixpp::session)

@@ -69,9 +69,7 @@ struct counter_guard {
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)}
     , engine_cfg_{std::move(cfg)}
-    // Derive engine strand from injected executor (E-5 / [const §XV.9]).
-    // NO std::mutex — strand is the sole serialisation mechanism.
-    , engine_strand_{asio::make_strand(exec_)}
+    // E-5: single-executor confinement — no strand, no mutex (015 scope).
     , stopped_{false}
 {}
 
@@ -479,17 +477,12 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
     auto* raw_listener = static_cast<fixpp::transport::asio_listener*>(
         engine.listeners_[session_id].get());
 
-    // ── Lazy Session construction + open() ───────────────────────────────────
-    // (E-1 / Gate A New-3) — open() is awaitable; cannot run in start().
-    entry.session = std::make_unique<Session>(engine_cfg, entry.config);
-    {
-        auto res = co_await entry.session->open();
-        if (!res.has_value()) { entry.session.reset(); co_return; }
-    }
-
-    Session* session = entry.session.get();
-
     // ── Accept loop ──────────────────────────────────────────────────────────
+    // Session construction is LAZY + MATCH-GATED (FQ-2 / data-model C1 step 6):
+    // the Session is constructed and open()'d ONLY after CompID resolution
+    // confirms a match — no-match closes the transport and loops without
+    // constructing any Session (lookup() stays nullptr until a peer matches).
+    // [realized-behavior.md C1 step 6; engine.hpp:200-204; gate-b/r1]
     while (!engine.stopped()) {
         // Step 1: accept the next TCP connection.
         auto accept_r = co_await raw_listener->async_accept();
@@ -563,12 +556,28 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
 
         if (resolved_id != session_id) {
             // No registry match — unknown acceptor session (slot 121).
-            // [data-model "Error model delta"; C7]
+            // Per data-model C1 step 6 and engine.hpp lookup() contract:
+            // close the transport and construct NO session. [FQ-2 / gate-b/r1]
             transport->close();
             continue;
         }
 
-        // Step 6: attach the live transport (T011).
+        // Step 6: construct + open the Session ONLY on a registry match.
+        // (E-1 / Gate A New-3 / data-model C1 step 6 / FQ-2)
+        // open() is awaitable — must run inside the loop, not in start().
+        // On open() failure, close the transport and exit the loop (fatal).
+        entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+        {
+            auto res = co_await entry.session->open();
+            if (!res.has_value()) {
+                transport->close();
+                entry.session.reset();
+                co_return;
+            }
+        }
+        Session* session = entry.session.get();
+
+        // Step 7: attach the live transport (T011).
         // Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is set
         // here, STRICTLY-BEFORE the first on_inbound_frame call below.
         // Capture raw pointer BEFORE the move — session owns the transport for
@@ -582,14 +591,14 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // no peer EOF; total-cancel alone does not break the SSL read). [T018]
         entry.live_transport = raw;
 
-        // Step 7: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
+        // Step 8: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
         // frame, never any coalesced surplus (F-015-002).
         {
             auto deliver_r = co_await session->on_inbound_frame(first_frame);
             (void)deliver_r;
         }
 
-        // Step 8: run the real read-pump inline (T015).
+        // Step 9: run the real read-pump inline (T015).
         // Inline co_await means the pump is part of the counter_guard scope:
         // stop()'s total-cancel propagates into async_read_some, the pump unwinds,
         // and the counter only decrements after the pump co_returns. No second
