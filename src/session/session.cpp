@@ -244,6 +244,31 @@ void Session::install_reconnected_transport(
     record_state_transition_(fsm_state::LogonSent);
 }
 
+// 015 T016(b) — public engine connect-loop driver (SC-010 (7)).
+// Thin awaitable over the private reconnect_fsm_.drive_reconnect_attempt(), with
+// the post-connect Logon emission folded in. On a successful attempt,
+// install_reconnected_transport (called inside drive_reconnect_attempt step 8)
+// has already rebound transport_send_ to the live sink (T016(c)) and re-entered
+// LogonSent; we then emit the initial Logon over that live sink (connect-then-
+// Logon, FR-003 / E-1a). emit_initiator_logon_ handles its own Disconnected-on-
+// failure disposition. [data-model §E-1a; T016(b); FR-003/FR-004]
+asio::awaitable<fixpp::core::expected_t<void>> Session::drive_reconnect() noexcept {
+    auto drive_r = co_await reconnect_fsm_.drive_reconnect_attempt();
+    if (!drive_r.has_value()) {
+        co_return std::unexpected(drive_r.error());
+    }
+    // Transport is live + LogonSent (install_reconnected_transport). Emit the
+    // initial Logon POST-connect over the now-live transport_send_.
+    co_return co_await emit_initiator_logon_();
+}
+
+// 015 T016(b) — live-transport accessor for the read-pump (SC-010 (8)).
+// reconnected_transport_ (initiator) or accepted_transport_ (acceptor). The
+// engine only calls this after a successful install, so exactly one is non-null.
+fixpp::transport::Transport& Session::live_transport() noexcept {
+    return reconnected_transport_ ? *reconnected_transport_ : *accepted_transport_;
+}
+
 // 015 T011 — Acceptor attach primitive.
 // Called by run_accept_loop STRICTLY-BEFORE the first on_inbound_frame (E-4).
 // Three actions (distinct from install_reconnected_transport):

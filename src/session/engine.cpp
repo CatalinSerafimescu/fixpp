@@ -547,7 +547,21 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
     }
 }
 
-// run_connect_loop — STUB (US2 T016 replaces the interior).
+// ── run_connect_loop — T016 production body ──────────────────────────────────
+// Initiator live connect path (Option A — single connect+pump; multi-cycle
+// reconnect-respin DEFERRED per Clarifications 2026-05-31 / E-1a: close(terminal)
+// is permanent and 014 has no tested multi-cycle reconnect — symmetric with US1's
+// single-peer acceptor). Connect-then-Logon ordering (FR-003), grounded in
+// QuickFIX-cpp setResponder→generateLogon and Fix8 connect→send(generate_logon):
+//   1. Mark the config engine_managed so Session::open()'s initiator arm DEFERS
+//      the Logon (no live transport yet — emitting now would violate FR-003).
+//   2. open() — wires reconnect_fsm_ (owner/endpoint/tls/factory) but emits
+//      nothing for the engine-managed initiator.
+//   3. drive_reconnect() — connect + handshake + authorize + install (rebinds
+//      transport_send_ to the live sink, re-enters LogonSent) + emit the initial
+//      Logon POST-connect over that live sink.
+//   4. run_read_pump on the live transport until EOF → close(terminal).
+// [data-model E-1a; FR-003/004; C2/C2i/C5; T016(b)-(e); SC-010 (7)/(8)]
 asio::awaitable<void>
 run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
                  SessionEntry& entry,
@@ -558,11 +572,32 @@ run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
     co_await asio::this_coro::reset_cancellation_state(
         asio::enable_total_cancellation());
 
+    // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
+    entry.config.engine_managed = true;
     entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+
+    // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await entry.session->open();
     if (!res.has_value()) { entry.session.reset(); co_return; }
 
-    // STUB — US2 T016 inserts drive_reconnect_attempt + read-pump loop here.
+    Session* session = entry.session.get();
+
+    // Step 3: connect + handshake + authorize + install + rebind + POST-connect
+    // Logon. On exhaustion/cancel or Logon-emit failure the session is left
+    // Disconnected; close terminally (idempotent) and unwind. [E-1a; FR-003]
+    {
+        auto drive_r = co_await session->drive_reconnect();
+        if (!drive_r.has_value()) {
+            (void)co_await session->close(fixpp::session::close_mode::terminal);
+            co_return;
+        }
+    }
+
+    // Step 4: run the read-pump inline on the live transport until EOF.
+    // Inline co_await keeps the pump in the counter_guard scope (stop()'s
+    // total-cancel propagates into async_read_some; the counter decrements only
+    // after the pump co_returns — mirror of run_accept_loop step 8). [T015/T016(e)]
+    co_await run_read_pump(session->live_transport(), *session, entry.config);
     co_return;
 }
 

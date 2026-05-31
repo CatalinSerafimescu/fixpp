@@ -360,6 +360,31 @@ public:
         std::unique_ptr<fixpp::transport::Transport> transport,
         fixpp::transport::handshake_result hr) noexcept;
 
+    // 015 T016(b) — Engine connect-loop driver (SC-010 delta (7)).
+    // Public awaitable over the private reconnect_fsm_.drive_reconnect_attempt():
+    // connects + handshakes + authorizes + install_reconnected_transport (which
+    // rebinds transport_send_ to the live sink + re-enters LogonSent), and THEN
+    // emits the initial Logon POST-connect over that now-live sink (connect-then-
+    // Logon, FR-003 / E-1a — grounded in QuickFIX-cpp setResponder→generateLogon
+    // and Fix8 connect→send(generate_logon)). On reconnect exhaustion/cancel or a
+    // Logon-emit failure the session is left Disconnected and the error returned.
+    // Declared public for accessibility from engine.cpp's run_connect_loop; by
+    // convention only the engine's connect loop should call it. The post-connect
+    // emit is folded in here (NOT a third public method) to hold the SC-010
+    // surface at exactly the two documented additions.
+    // [data-model §E-1a; T016(b); FR-003/FR-004; SC-010 (7)]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    drive_reconnect() noexcept;
+
+    // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
+    // Returns the live transport installed post-connect: reconnected_transport_
+    // (initiator, via drive_reconnect → install_reconnected_transport) or
+    // accepted_transport_ (acceptor, via attach_accepted_transport). PRECONDITION:
+    // a live transport has been installed (post drive_reconnect / attach); the
+    // engine only calls this after a successful install. Declared public for
+    // accessibility from engine.cpp's run_connect_loop. [T016(b); FR-003; SC-010 (8)]
+    [[nodiscard]] fixpp::transport::Transport& live_transport() noexcept;
+
 private:
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or

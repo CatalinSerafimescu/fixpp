@@ -251,10 +251,16 @@ run_server_driver(
                 std::span<const std::byte>{hb});
         }
 
-        // Keep the connection open long enough for the initiator's read-pump to
-        // deliver all frames before the test's ioc.run_for() window closes.
+        // Stay connected past the test's state-capture window (mirror of the US1
+        // engine_acceptor_test client: a BOUNDED timer hold, not a fixed-duration
+        // hold sized shorter than the capture). The initiator's read-pump drives
+        // the session to Disconnected on peer EOF; if the server closed before the
+        // capture, the test would observe Disconnected instead of Active. The hold
+        // (5s) comfortably exceeds the capture run_for (3s); engine.stop() tears
+        // the session down at end-of-test, and the teardown ioc.run() simply waits
+        // out the remaining hold (bounded — cannot hang). [engine_acceptor_test L142]
         asio::steady_timer hold{executor};
-        hold.expires_after(3s);
+        hold.expires_after(5s);
         co_await hold.async_wait(asio::use_awaitable);
 
     } catch (...) {
@@ -432,10 +438,10 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     //   value of 1 (Logon-ack seq=1 advances 1→2; each heartbeat adds 1 more).
     //   Minimum expected: 2 (Logon-ack delivered).
     //   RED: no frames delivered by the read-pump → next_inbound stays 1.
-    EXPECT_GE(next_inbound, 2)
-        << "SC-010 / C2i: next_inbound_unsafe() must be >= 2 after the "
-        << "Logon-ack (seq=1) is delivered by the read-pump "
-        << "(Logon-ack advances next_inbound 1→2). "
+    EXPECT_EQ(next_inbound, 2 + kN)
+        << "SC-010 / C2i: next_inbound_unsafe() must be exactly 2 + kN after the "
+        << "Logon-ack (seq=1, 1→2) and the " << kN << " heartbeats (seq=2.."
+        << (1 + kN) << ", each +1) are delivered IN ORDER by the read-pump. "
         << "RED: no drive_reconnect() → no live transport → no read-pump → "
         << "no frames delivered → next_inbound stays 1 "
         << "(actual=" << next_inbound << "). "
