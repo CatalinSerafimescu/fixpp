@@ -830,6 +830,41 @@ set_tests_properties(engine_readpump PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us2;live_tls;readpump")
 
+# ── 015-runtime-engine Phase 4 (US2) — T016(a) ──────────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T016(b)-(e) impl lands.
+# CTest filter: ctest -R 'engine_connect'
+#
+# T016(a) — initiator connect-then-Logon: server receives initiator Logon on
+#            the wire; session reaches Active; read-pump advances next_inbound.
+#            (FR-003 / C2i / E-1a / SC-010)
+# Observability via next_inbound_unsafe() (FIXPP_TEST_HOOKS) + Session::state().
+add_executable(engine_connect_test
+  engine_connect_test.cpp
+)
+target_link_libraries(engine_connect_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_connect_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_connect_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_connect COMMAND engine_connect_test)
+set_tests_properties(engine_connect PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us2;live_tls;connect")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
