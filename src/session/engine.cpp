@@ -524,6 +524,11 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         fixpp::transport::Transport* raw = transport.get();
         session->attach_accepted_transport(std::move(transport), std::move(hr));
 
+        // Publish the live transport so stop() can close the socket and unblock
+        // the read-pump's in-flight async_read_some (idle established reads have
+        // no peer EOF; total-cancel alone does not break the SSL read). [T018]
+        entry.live_transport = raw;
+
         // Step 7: direct-deliver the first Logon (DR-7 / E-2).
         // The frame bytes are already in frame_buf; NOT re-fed into a framer carry.
         {
@@ -593,6 +598,10 @@ run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
         }
     }
 
+    // Publish the live transport so stop() can close the socket and unblock the
+    // read-pump's in-flight async_read_some (see SessionEntry::live_transport). [T018]
+    entry.live_transport = &session->live_transport();
+
     // Step 4: run the read-pump inline on the live transport until EOF.
     // Inline co_await keeps the pump in the counter_guard scope (stop()'s
     // total-cancel propagates into async_read_some; the counter decrements only
@@ -645,6 +654,16 @@ asio::awaitable<void> Engine::stop()
         entry.session_cancel.emit(asio::cancellation_type::total);
     for (auto& [id, sig] : accept_scope_signals_)
         sig.emit(asio::cancellation_type::total);
+
+    // Close every live transport (the "closes transports" step in this function's
+    // contract). An established session's read-pump is blocked in async_read_some
+    // with no peer EOF; total-cancel does not break the in-flight SSL read, so the
+    // socket MUST be closed for the read to fail and the pump to unwind. close()
+    // is synchronous + idempotent; the transport is owned by the Session (alive
+    // until the join-before-clear below). [T018; Gate A New-4; E-7]
+    for (auto& [id, entry] : registry_)
+        if (entry.live_transport != nullptr)
+            entry.live_transport->close();
 
     // JOIN: yield until all loops have co_return'd.
     if (outstanding_counter_) {

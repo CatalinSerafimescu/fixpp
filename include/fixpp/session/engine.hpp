@@ -41,6 +41,10 @@ namespace fixpp::session {
 class Session;
 }  // namespace fixpp::session
 
+namespace fixpp::transport {
+class Transport;  // non-owning live_transport pointer in SessionEntry (T018)
+}  // namespace fixpp::transport
+
 // ── SessionId — registry key value type (T004 / R6 / E-1) ───────────────────
 //
 // Regular value type: copyable, equality-comparable, hashable.
@@ -123,6 +127,15 @@ struct SessionEntry {
     /// Per-session teardown handle (read-pump + session work).
     /// Distinct from the per-listener accept-scope domain (E-7).
     asio::cancellation_signal session_cancel;
+
+    /// Non-owning pointer to the live transport once the role loop has attached
+    /// it (acceptor) or connected it (initiator); null until then. Owned by the
+    /// Session (accepted_transport_/reconnected_transport_). stop() closes it to
+    /// unblock the read-pump's in-flight async_read_some — an idle established
+    /// read has no peer EOF and total-cancel alone does not break the SSL read,
+    /// so stop() must close the socket (the "closes transports" step in stop()'s
+    /// contract). Valid until the registry is cleared (after join-before-clear).
+    fixpp::transport::Transport* live_transport = nullptr;
 };
 
 // ── Engine — public multi-session runtime engine (T005 / R1 / E-1) ───────────

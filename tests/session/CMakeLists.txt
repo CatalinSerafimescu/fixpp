@@ -865,6 +865,39 @@ set_tests_properties(engine_connect PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us2;live_tls;connect")
 
+# CTest filter: ctest -R 'engine_lifecycle'
+#
+# T017 [US3] — programmatic multi-session lifecycle: register initiator+acceptor,
+#   non-blocking start, both loops run + both lookup()-retrievable by SessionId
+#   (null before open, non-null after), clean idempotent stop, duplicate-identity
+#   rejection. (FR-001/002/011 / SC-004/005 / C5/C6 / E-5/E-7)
+add_executable(engine_lifecycle_test
+  engine_lifecycle_test.cpp
+)
+target_link_libraries(engine_lifecycle_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_lifecycle_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_lifecycle_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_lifecycle COMMAND engine_lifecycle_test)
+set_tests_properties(engine_lifecycle PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us3;live_tls;lifecycle")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
