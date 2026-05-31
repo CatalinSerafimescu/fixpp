@@ -612,6 +612,21 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
         std::span<const std::byte> app_payload);
 
+    // 015 T016(d) — emit the initial initiator Logon via the admin-builder path
+    // (build_logon + assign_outbound + store_then_emit). Extracted from open()'s
+    // initiator arm so it can be driven from TWO call sites:
+    //   • open() (per-session-direct model, 013/014) — emitted AT open;
+    //   • drive_reconnect() (engine lazy-connect model) — emitted POST-connect
+    //     once install_reconnected_transport has rebound transport_send_ to the
+    //     live sink (connect-then-Logon, FR-003 / E-1a).
+    // On any failure (build overflow / seqnum overflow / store-or-transport
+    // throw) it transitions the session to Disconnected and returns the error —
+    // the caller propagates it. Does NOT perform the LogonSent transition (the
+    // caller owns that: open() before the call, install_reconnected_transport
+    // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    emit_initiator_logon_() noexcept;
+
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.

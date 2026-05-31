@@ -248,6 +248,19 @@ struct SessionConfig {
     // Default-constructed Endpoint (empty host, port=0) means "not configured".
     // [data-model §E-1 step 5 — async_connect(ep)]
     fixpp::transport::Endpoint reconnect_endpoint{};
+
+    // 015 T016(d) — engine-managed lazy-connect discriminator (connect-then-Logon).
+    // Set ONLY by the Engine's run_connect_loop for initiator sessions it drives.
+    // When true, Session::open()'s initiator arm is a NO-OP (no LogonSent
+    // transition, no Logon emission) — exactly like the acceptor arm — because
+    // there is no live transport yet. The connect loop then calls
+    // Session::drive_reconnect(), whose install_reconnected_transport rebinds
+    // transport_send_ and re-enters LogonSent, after which the initial Logon is
+    // emitted POST-connect over the now-live sink (FR-003 / E-1a / Clarifications
+    // 2026-05-31; grounded in QuickFIX-cpp setResponder→generateLogon + Fix8
+    // connect→send(generate_logon)). DEFAULT false preserves the 013/014
+    // per-session-direct model where open() emits the Logon at open.
+    bool engine_managed = false;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

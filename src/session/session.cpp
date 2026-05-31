@@ -215,6 +215,28 @@ void Session::install_reconnected_transport(
     // 2. Take ownership of the live transport.
     reconnected_transport_ = std::move(transport);
 
+    // 2a. 015 T016(c) — rebind transport_send_ to the live reconnected transport
+    //     (symmetric initiator-attach, E-1a). 014 left transport_send_ pointing at
+    //     the config-time sink; the engine lazy-connect model has NO config-time
+    //     sink, so the post-connect Logon (and all subsequent outbound) must reach
+    //     the live reconnected_transport_. Mirror of attach_accepted_transport's
+    //     rebind: bridge the sync std::function to async_write via fire-and-forget
+    //     co_spawn on exec_, copying frame bytes so the send outlives the caller's
+    //     buffer. The raw pointer is safe — reconnected_transport_ is a Session
+    //     member that outlives transport_send_. [data-model §E-1a; T016(c); FR-003]
+    {
+        fixpp::transport::Transport* raw = reconnected_transport_.get();
+        transport_send_ = [raw, exec = exec_](std::span<const std::byte> frame) {
+            std::vector<std::byte> owned{frame.begin(), frame.end()};
+            asio::co_spawn(exec,
+                [raw, f = std::move(owned)]() -> asio::awaitable<void> {
+                    (void)co_await raw->async_write(
+                        std::span<const std::byte>{f.data(), f.size()});
+                },
+                asio::detached);
+        };
+    }
+
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
     //    row of the FSM matrix, transitioning back to Active.
@@ -266,6 +288,80 @@ void Session::attach_accepted_transport(
     };
     // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
     // the acceptor gate (:1048) when the first inbound Logon is processed.
+}
+
+// 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
+// Two call sites: open() (per-session-direct, AT open) and drive_reconnect()
+// (engine lazy-connect, POST-connect). The build/seqnum/store-emit sequence and
+// its Disconnected-on-failure disposition are UNCHANGED from the original open()
+// body — this is a behavior-preserving extraction. The caller owns the LogonSent
+// transition (open() before the call; install_reconnected_transport before
+// drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
+asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() noexcept {
+    // Emit the initial Logon via build_logon + store_then_emit.
+    // This is the SAME admin-builder emission path used by other admin
+    // frames (build_heartbeat, build_test_request, etc.) — NOT the
+    // Session::send() path which is for opaque application payloads.
+    // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
+    // stamp_sending_time internal helper is defined after open() in this TU;
+    // use the public two-arg form from sending_time.hpp with a local buffer.
+    std::array<std::byte, 256> logon_buf{};
+    std::array<char, 32> time_buf{};
+    std::string_view sending_time_view;
+    if (effective_clock_) {
+        auto fmt_r = fixpp::session::stamp_sending_time(
+            effective_clock_->now(), std::span<char>{time_buf.data(), time_buf.size()});
+        if (fmt_r) {
+            sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+        }
+    }
+    const int heartbt_sec = cfg_.heartbeat_interval.has_value()
+                                ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                : 30;  // D-8 default 30 s
+    // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
+    // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
+    // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
+    // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
+    const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
+    // RC#C (gate-b/r1): bilateral_strict → send 141=Y in our outbound Logon.
+    // [spec.md FR-017; Clarifications Q1=A]
+    const bool initr_reset_seqnum =
+        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
+    auto logon_result =
+        fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
+                                    logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                    cfg_.begin_string, heartbt_sec, sending_time_view,
+                                    initr_reset_seqnum);
+    if (!logon_result) {
+        // build_logon failed (oversized IDs → wire_frame_too_large).
+        // Session-fatal — initiator handshake never reached the wire; transition
+        // to Disconnected to match the acceptor send-throw symmetry promised by
+        // FR-009 + the "session-fatal → Disconnected" precedent set by the
+        // liveness loop (assign_outbound failure at session.cpp:~1466) and the
+        // Active send-throw witness in send_path_test.
+        // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
+        //  [FIX-SL §4.3] initiator handshake failure semantics]
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(logon_result.error());
+    }
+    // Advance outbound counter through manager ONLY on build success.
+    // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
+    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+    if (!assign_r) {
+        // Seqnum overflow — same disposition as build_logon failure above.
+        // [W3.4 / /simplify B-8 fix]
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(assign_r.error());  // overflow (I-8)
+    }
+    auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
+    if (!emit_r) {
+        // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
+        // Same disposition: session-fatal → Disconnected.
+        // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(emit_r.error());
+    }
+    co_return fixpp::core::expected_t<void>{};
 }
 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
@@ -451,70 +547,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //   Logon via on_inbound_frame (NotConnected → LogonReceived → Active).
     //   [spec.md FR-004 §US2 AC1; contracts/session_role.hpp]
     if (cfg_.role == session_role::initiator) {
-        record_state_transition_(fsm_state::LogonSent);
-
-        // Emit the initial Logon via build_logon + store_then_emit.
-        // This is the SAME admin-builder emission path used by other admin
-        // frames (build_heartbeat, build_test_request, etc.) — NOT the
-        // Session::send() path which is for opaque application payloads.
-        // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
-        // stamp_sending_time internal helper is defined after open() in this TU;
-        // use the public two-arg form from sending_time.hpp with a local buffer.
-        std::array<std::byte, 256> logon_buf{};
-        std::array<char, 32> time_buf{};
-        std::string_view sending_time_view;
-        if (effective_clock_) {
-            auto fmt_r = fixpp::session::stamp_sending_time(
-                effective_clock_->now(), std::span<char>{time_buf.data(), time_buf.size()});
-            if (fmt_r) {
-                sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+        // 015 T016(d): engine-managed lazy-connect initiators DEFER the entire
+        // initiator arm — there is no live transport at open(), so emitting a
+        // Logon now would either hit a null sink or write before connect
+        // (violating connect-then-Logon, FR-003). The Engine's run_connect_loop
+        // drives Session::drive_reconnect() (install_reconnected_transport →
+        // LogonSent + transport_send_ rebind, T016(c)) and then emits the Logon
+        // POST-connect via emit_initiator_logon_() (E-1a). The per-session-direct
+        // model (013/014, engine_managed=false) keeps emitting at open below.
+        if (!cfg_.engine_managed) {
+            record_state_transition_(fsm_state::LogonSent);
+            auto logon_r = co_await emit_initiator_logon_();
+            if (!logon_r) {
+                // emit_initiator_logon_ has already transitioned to Disconnected.
+                co_return std::unexpected(logon_r.error());
             }
-        }
-        const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-                                    ? static_cast<int>(cfg_.heartbeat_interval->count())
-                                    : 30;  // D-8 default 30 s
-        // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
-        // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
-        // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
-        // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
-        const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
-        // RC#C (gate-b/r1): bilateral_strict → send 141=Y in our outbound Logon.
-        // [spec.md FR-017; Clarifications Q1=A]
-        const bool initr_reset_seqnum =
-            (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
-        auto logon_result =
-            fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
-                                        logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                                        cfg_.begin_string, heartbt_sec, sending_time_view,
-                                        initr_reset_seqnum);
-        if (!logon_result) {
-            // build_logon failed (oversized IDs → wire_frame_too_large).
-            // Session-fatal — initiator handshake never reached the wire; transition
-            // to Disconnected to match the acceptor send-throw symmetry promised by
-            // FR-009 + the "session-fatal → Disconnected" precedent set by the
-            // liveness loop (assign_outbound failure at session.cpp:~1466) and the
-            // Active send-throw witness in send_path_test.
-            // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
-            //  [FIX-SL §4.3] initiator handshake failure semantics]
-            record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(logon_result.error());
-        }
-        // Advance outbound counter through manager ONLY on build success.
-        // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
-        auto assign_r = co_await seqnum_mgr_.assign_outbound();
-        if (!assign_r) {
-            // Seqnum overflow — same disposition as build_logon failure above.
-            // [W3.4 / /simplify B-8 fix]
-            record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(assign_r.error());  // overflow (I-8)
-        }
-        auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
-        if (!emit_r) {
-            // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
-            // Same disposition: session-fatal → Disconnected.
-            // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
-            record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(emit_r.error());
         }
     } else {
         // Acceptor: stay in NotConnected, emit nothing.
