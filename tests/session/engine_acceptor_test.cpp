@@ -147,6 +147,171 @@ run_test_initiator(asio::io_context& ioc,
     } catch (...) {}
 }
 
+// Build a valid FIX Heartbeat (35=0) frame with a given MsgSeqNum.
+static std::vector<std::byte> make_heartbeat_frame(
+    std::string_view begin_str, std::string_view sender,
+    std::string_view target, int seq)
+{
+    auto field = [](int tag, std::string_view v) -> std::string {
+        return std::to_string(tag) + "=" + std::string(v) + "\x01";
+    };
+    std::string body;
+    body += field(35, "0");                         // MsgType = Heartbeat
+    body += field(34, std::to_string(seq));         // MsgSeqNum
+    body += field(49, sender);
+    body += field(56, target);
+
+    std::string msg;
+    msg += "8=" + std::string(begin_str) + "\x01";
+    msg += "9=" + std::to_string(body.size()) + "\x01";
+    msg += body;
+    unsigned int cs = 0;
+    for (unsigned char c : msg) cs += c;
+    cs &= 0xFFu;
+    char csbuf[5];
+    snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+    msg += "10=" + std::string(csbuf) + "\x01";
+
+    std::vector<std::byte> out;
+    out.reserve(msg.size());
+    for (char c : msg) out.push_back(static_cast<std::byte>(c));
+    return out;
+}
+
+// F-015-001: send the first Logon SPLIT across two writes with a gap, so the
+// acceptor's bounded first-frame read observes it as TWO separate reads. The
+// incremental-feed fix must reassemble + admit it (the pre-fix whole-buffer
+// re-feed duplicated the carried prefix → malformed → rejected).
+static asio::awaitable<void>
+run_test_initiator_fragmented(asio::io_context& ioc,
+                              fixpp::transport::test::LoopbackTlsFixture& fixture,
+                              uint16_t acceptor_port,
+                              std::string sender, std::string target)
+{
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation());
+    try {
+        auto client = fixture.make_client(ioc.get_executor());
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
+        if (!tls) co_return;
+        fixpp::transport::Endpoint ep{"127.0.0.1", acceptor_port};
+        if (!(co_await client->async_connect(ep)).has_value()) co_return;
+        if (!(co_await tls->async_handshake(fixture.ssl_cfg())).has_value()) co_return;
+
+        auto logon = make_logon_frame("FIX.4.2", sender, target);
+        std::size_t split = logon.size() / 2;
+        (void)co_await client->async_write(
+            std::span<const std::byte>{logon.data(), split});
+        // Gap forces the acceptor's first read to see only the first half.
+        asio::steady_timer gap{ioc};
+        gap.expires_after(150ms);
+        co_await gap.async_wait(asio::use_awaitable);
+        (void)co_await client->async_write(
+            std::span<const std::byte>{logon.data() + split, logon.size() - split});
+
+        asio::steady_timer t{ioc};
+        t.expires_after(5s);
+        co_await t.async_wait(asio::use_awaitable);
+        (void)client->close();
+    } catch (...) {}
+}
+
+// F-015-002: send Logon (seq 1) + Heartbeat (seq 2) COALESCED in a single write.
+// The acceptor must admit the Logon AND drain the Heartbeat surplus through the
+// read-pump (next_inbound advances past the post-Logon value of 2 to 3). The
+// pre-fix code delivered the whole buffer as the "Logon" and dropped the surplus.
+static asio::awaitable<void>
+run_test_initiator_coalesced(asio::io_context& ioc,
+                             fixpp::transport::test::LoopbackTlsFixture& fixture,
+                             uint16_t acceptor_port,
+                             std::string sender, std::string target)
+{
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation());
+    try {
+        auto client = fixture.make_client(ioc.get_executor());
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
+        if (!tls) co_return;
+        fixpp::transport::Endpoint ep{"127.0.0.1", acceptor_port};
+        if (!(co_await client->async_connect(ep)).has_value()) co_return;
+        if (!(co_await tls->async_handshake(fixture.ssl_cfg())).has_value()) co_return;
+
+        auto logon = make_logon_frame("FIX.4.2", sender, target);
+        auto hb    = make_heartbeat_frame("FIX.4.2", sender, target, /*seq=*/2);
+        std::vector<std::byte> both;
+        both.reserve(logon.size() + hb.size());
+        both.insert(both.end(), logon.begin(), logon.end());
+        both.insert(both.end(), hb.begin(), hb.end());
+        (void)co_await client->async_write(std::span<const std::byte>{both});
+
+        asio::steady_timer t{ioc};
+        t.expires_after(5s);
+        co_await t.async_wait(asio::use_awaitable);
+        (void)client->close();
+    } catch (...) {}
+}
+
+// Shared mTLS-acceptor rig for the fragmented/coalesced first-frame tests:
+// builds the TLS factory + on-list policy {CN fixpp-leaf-rsa2048 → INITIATOR},
+// registers the acceptor {ACCEPTOR,INITIATOR} on `engine`, starts it, and returns
+// {acc_id, bound_port}. `fac_keepalive` must outlive `engine` (the Session holds
+// the factory). Returns nullopt if the fixtures are missing or bind fails.
+static std::optional<std::pair<fixpp::session::SessionId, uint16_t>>
+start_mtls_acceptor(asio::io_context& ioc,
+                    fixpp::session::Engine& engine,
+                    const std::string& fixture_dir,
+                    std::shared_ptr<fixpp::transport::TransportFactory>& fac_keepalive)
+{
+    fixpp::tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path        = fixture_dir + "/leaf_rsa2048.pem";
+    cs_cfg.private_key_path = fixture_dir + "/leaf_rsa2048.key";
+    cs_cfg.ca_bundle_path   = fixture_dir + "/ca.pem";
+    auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
+    if (!cs_r.has_value()) return std::nullopt;
+
+    fixpp::tls::SslCtxConfig ssl;
+    ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
+    ssl.cs      = std::move(*cs_r);
+    ssl.clock   = nullptr;
+    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
+        fixpp::transport::Transport::Config{}, ssl);
+    if (!fac_r.has_value()) return std::nullopt;
+    fac_keepalive = std::move(*fac_r);
+
+    fixpp::session::CompIdAuthorizationPolicy authz;
+    authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+
+    fixpp::session::SessionConfig acc;
+    acc.sender_comp_id  = "ACCEPTOR";
+    acc.target_comp_id  = "INITIATOR";
+    acc.begin_string    = "FIX.4.2";
+    acc.role            = fixpp::session::session_role::acceptor;
+    acc.executor_override = ioc.get_executor();
+    acc.security_profile = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.compid_authorization_policy = authz;
+    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.transport_factory_override = fac_keepalive;
+    acc.heartbeat_interval = std::chrono::seconds{30};
+    acc.logout_disconnect_timeout_ms = 2000;
+    acc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
+    acc.transport_send = [](std::span<const std::byte>) {};
+
+    auto acc_id = fixpp::session::SessionId::from_config(acc);
+    if (!engine.register_session(std::move(acc)).has_value()) return std::nullopt;
+
+    engine.start();
+    ioc.run_for(50ms);
+    ioc.restart();
+    uint16_t port = engine.acceptor_bound_endpoint(acc_id).port;
+    if (port == 0) return std::nullopt;
+    return std::make_pair(acc_id, port);
+}
+
 }  // namespace
 
 // ── SC-001: acceptor admits an on-list live identity to established state ─────
@@ -268,6 +433,115 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
         << "state=" << state_str
         << ". GREEN after T011/T012/T013: full accept→handshake→resolve→"
         << "attach→arm(1-live)→admit; session reaches established state.";
+}
+
+// ── F-015-001: a Logon fragmented across two reads is reassembled + admitted ──
+// Regression witness for the GPT-5.5 review finding. The acceptor's bounded
+// first-frame read must feed only newly-read bytes into the stateful Framer; the
+// pre-fix code re-fed the whole accumulated buffer, duplicating the carried prefix
+// so a split Logon parsed as malformed and was rejected (the acceptor would never
+// reach established state for a peer whose Logon spans two TLS reads).
+
+TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
+    const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kDir = nullptr;
+#endif
+    const char* fixture_dir = dir ? dir : kDir;
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+    std::shared_ptr<fixpp::transport::TransportFactory> fac;
+    auto rig = start_mtls_acceptor(ioc, engine, fixture_dir, fac);
+    ASSERT_TRUE(rig.has_value()) << "acceptor rig setup failed";
+    auto [acc_id, port] = *rig;
+
+    fixpp::transport::test::LoopbackTlsFixture fixture{
+        std::string(fixture_dir), ioc.get_executor()};
+    asio::co_spawn(ioc,
+        run_test_initiator_fragmented(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
+        asio::detached);
+
+    ioc.run_for(3s);
+    ioc.restart();
+
+    fixpp::session::Session* s = engine.lookup(acc_id);
+    bool established = (s != nullptr) &&
+        (s->state() == fixpp::session::fsm_state::Active ||
+         s->state() == fixpp::session::fsm_state::LogonReceived);
+    std::string state_str = s ? std::to_string(static_cast<int>(s->state())) : "null";
+
+    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
+
+    EXPECT_TRUE(established)
+        << "F-015-001: a valid Logon split across two TLS reads must be reassembled "
+        << "and admitted, not rejected as malformed. state=" << state_str;
+}
+
+// ── F-015-002: a coalesced Logon‖Heartbeat admits + drains the surplus ────────
+// The acceptor must deliver ONLY the first frame (Logon) to the gate and carry
+// the trailing Heartbeat into the read-pump. The pre-fix code returned the whole
+// accumulated buffer as the "Logon" and the surplus Heartbeat was never delivered
+// (next_inbound would stop at 2). With the fix the Heartbeat (seq 2) is processed
+// → next_inbound advances to 3.
+
+TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
+    const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kDir = nullptr;
+#endif
+    const char* fixture_dir = dir ? dir : kDir;
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+    std::shared_ptr<fixpp::transport::TransportFactory> fac;
+    auto rig = start_mtls_acceptor(ioc, engine, fixture_dir, fac);
+    ASSERT_TRUE(rig.has_value()) << "acceptor rig setup failed";
+    auto [acc_id, port] = *rig;
+
+    fixpp::transport::test::LoopbackTlsFixture fixture{
+        std::string(fixture_dir), ioc.get_executor()};
+    asio::co_spawn(ioc,
+        run_test_initiator_coalesced(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
+        asio::detached);
+
+    ioc.run_for(3s);
+    ioc.restart();
+
+    fixpp::session::Session* s = engine.lookup(acc_id);
+    bool established = (s != nullptr) &&
+        (s->state() == fixpp::session::fsm_state::Active ||
+         s->state() == fixpp::session::fsm_state::LogonReceived);
+    int next_inbound = s
+        ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe())
+        : -1;
+
+    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
+
+    EXPECT_TRUE(established)
+        << "F-015-002: the coalesced Logon must be admitted (only the first frame "
+        << "delivered to the gate).";
+    EXPECT_EQ(next_inbound, 3)
+        << "F-015-002: the trailing Heartbeat (seq 2) coalesced into the same read "
+        << "as the Logon must be drained through the read-pump — next_inbound must "
+        << "advance past the post-Logon value of 2 to 3. next_inbound=" << next_inbound
+        << " (==2 means the surplus was dropped — the pre-fix bug).";
 }
 
 // ── FR-005 / C7: unmatched reversed-CompID Logon is rejected, NO session ─────

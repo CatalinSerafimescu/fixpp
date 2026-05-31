@@ -236,9 +236,13 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
             co_return std::unexpected(error::wire_frame_too_large);
         }
 
-        // Try to parse a complete frame from accumulated bytes.
+        // Feed ONLY the newly-read bytes into the stateful Framer — it accumulates
+        // unconsumed bytes in `carry` across calls, so re-feeding the whole `buf`
+        // would duplicate the already-carried prefix and corrupt a fragmented first
+        // frame (a valid Logon split across TLS reads → rejected). Mirrors the
+        // incremental feed in run_read_pump. [F-015-001]
         auto feed_r = framer.feed(
-            std::span<const std::byte>{buf.data(), buf.size()},
+            std::span<const std::byte>{read_buf.data(), n},
             carry,
             std::span<fixpp::wire::frame_view>{out_frames});
         if (!feed_r.has_value()) {
@@ -248,9 +252,13 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
             co_return std::unexpected(feed_r.error());
         }
         if (!feed_r->empty()) {
-            // At least one complete frame available.
+            // First complete frame available. Return its EXACT length so the caller
+            // delivers ONLY the first frame (buf[0..len)) to on_inbound_frame and
+            // carries any surplus (buf[len..], a coalesced next frame) into the
+            // read-pump (F-015-002). buf accumulates raw bytes in arrival order, so
+            // buf[0..len) is byte-for-byte the first frame the framer emitted.
             timer.cancel();
-            co_return buf.size();
+            co_return (*feed_r)[0].bytes().size();
         }
     }
     co_return std::unexpected(error::transport_handshake_timeout);
@@ -283,7 +291,8 @@ constexpr std::size_t kReadPumpCarryCapacity = 64u * 1024u;  // 64 KiB
 asio::awaitable<void>
 run_read_pump(fixpp::transport::Transport& transport,
               fixpp::session::Session&     session,
-              fixpp::session::SessionConfig const& cfg)
+              fixpp::session::SessionConfig const& cfg,
+              std::span<const std::byte>   initial_bytes = {})
 {
     // MANDATORY total-cancel reset — required if this coroutine is ever
     // co_spawned (co_spawn defaults to terminal-only). Harmless when co_awaited
@@ -316,6 +325,33 @@ run_read_pump(fixpp::transport::Transport& transport,
     auto stop_pump = [&]() -> asio::awaitable<void> {
         (void)co_await session.close(fixpp::session::close_mode::terminal);
     };
+
+    // Seed the framer with any surplus bytes carried over from the bounded
+    // first-frame read (a coalesced Logon‖next-frame, F-015-002). Drain them
+    // through the SAME framing path BEFORE the first socket read so no surplus
+    // frame is dropped. Mirrors the read-loop drain below (kept as a separate
+    // block to leave the proven read loop untouched).
+    if (!initial_bytes.empty()) {
+        std::span<const std::byte> incoming = initial_bytes;
+        for (;;) {
+            auto feed_r = framer.feed(
+                incoming, carry, std::span<fixpp::wire::frame_view>{out});
+            if (!feed_r.has_value()) {
+                co_await stop_pump();
+                co_return;
+            }
+            std::size_t const produced = feed_r->size();
+            for (auto const& frame : *feed_r) {
+                auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
+                if (!deliver_r.has_value()) {
+                    co_await stop_pump();
+                    co_return;
+                }
+            }
+            incoming = {};
+            if (produced < out.size()) break;
+        }
+    }
 
     while (true) {
         auto read_r = co_await transport.async_read_some(
@@ -491,6 +527,7 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
 
         std::vector<std::byte> frame_buf;
         frame_buf.reserve(512);
+        std::size_t first_frame_len = 0;
         {
             auto read_r = co_await read_first_frame_bounded(
                 *transport, frame_buf, kFirstFrameDeadline, kFirstFrameMaxBytes);
@@ -498,11 +535,18 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
                 transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim
             }
+            first_frame_len = *read_r;
         }
+        // The first complete frame is frame_buf[0..first_frame_len); any bytes
+        // beyond it are surplus (a coalesced next frame) that must reach the
+        // read-pump rather than being delivered as part of the Logon (F-015-002).
+        std::span<const std::byte> first_frame{frame_buf.data(), first_frame_len};
+        std::span<const std::byte> surplus{
+            frame_buf.data() + first_frame_len,
+            frame_buf.size() - first_frame_len};
 
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
-        auto ids = scan_first_frame_ids(
-            std::span<const std::byte>{frame_buf.data(), frame_buf.size()});
+        auto ids = scan_first_frame_ids(first_frame);
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() ||
             ids.target_comp_id.empty()) {
             transport->close();
@@ -538,11 +582,10 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // no peer EOF; total-cancel alone does not break the SSL read). [T018]
         entry.live_transport = raw;
 
-        // Step 7: direct-deliver the first Logon (DR-7 / E-2).
-        // The frame bytes are already in frame_buf; NOT re-fed into a framer carry.
+        // Step 7: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
+        // frame, never any coalesced surplus (F-015-002).
         {
-            auto deliver_r = co_await session->on_inbound_frame(
-                std::span<const std::byte>{frame_buf.data(), frame_buf.size()});
+            auto deliver_r = co_await session->on_inbound_frame(first_frame);
             (void)deliver_r;
         }
 
@@ -551,7 +594,7 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // stop()'s total-cancel propagates into async_read_some, the pump unwinds,
         // and the counter only decrements after the pump co_returns. No second
         // counter or detached spawn needed. [T015 locked design decision #3]
-        co_await run_read_pump(*raw, *session, entry.config);
+        co_await run_read_pump(*raw, *session, entry.config, surplus);
 
         // Re-spin the accept loop to serve the next peer (C5 — loop continuously).
         // For the current static-registry model (R2), the session stays live for

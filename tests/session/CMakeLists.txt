@@ -795,6 +795,9 @@ target_include_directories(engine_acceptor_test PRIVATE
 )
 target_compile_definitions(engine_acceptor_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  # exposes seqnum_mgr_test_access().next_inbound_unsafe() for the coalesced
+  # first-frame surplus witness (F-015-002).
+  FIXPP_TEST_HOOKS
 )
 add_test(NAME engine_acceptor COMMAND engine_acceptor_test)
 set_tests_properties(engine_acceptor PROPERTIES
