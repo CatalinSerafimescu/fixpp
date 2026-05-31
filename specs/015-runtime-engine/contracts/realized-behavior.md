@@ -76,7 +76,7 @@ Once C3 lands, `SessionConfig::logon_peer_identity_override` (`session_config.hp
 ## C6 — Registry & duplicate rejection (FR-002; SC-004)
 - `register_session(cfg)` keys on `SessionId::from_config(cfg)`; a second config resolving to the same `SessionId` → `session_invalid_argument` (= 119; R5 #2, no new slot).
 - `lookup(id)` returns the live `Session*`, or nullptr if `id` is not registered OR registered-but-not-yet-established (acceptor with no peer / loop not yet at open() — Gate A New-3).
-- Registry mutation on the engine strand (E-5), not a mutex. The engine strand protects the map; the join-before-clear rule (C5) protects the pointee lifetime across strands (Gate A New-4).
+- Registry mutation confined to the single injected executor (E-5 — single-executor confinement; not a strand, not a mutex — `[const §XV.9]`). The join-before-clear rule (C5) protects the pointee lifetime (Gate A New-4).
 
 ## C7 — Unmatched-Logon error delivery site (FR-006; SC-006)
 `session_unknown_acceptor_session` (= 121, the next free slot — verified no reusable code, `error.hpp:616-665`) surfaces at the **connection level only**: close the transport + log the diagnostic. It is **never delivered to a Session event** — at rejection time no Session exists for the unmatched identity (Gate A P2-6). Routing is static: an unmatched identity is ALWAYS rejected, no fail-open path (R2).

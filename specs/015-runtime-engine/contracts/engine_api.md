@@ -105,7 +105,7 @@ public:
 
 **Threading / cancellation contract**:
 - All loops/pumps `co_spawn` on `exec`; each MUST `reset_cancellation_state(enable_total_cancellation())` so `stop()`'s total cancel actually propagates (`[const §XI.2]`; `[[feedback_asio_cospawn_total_cancellation_default]]`). A loop that omits this hangs `stop()` silently — the first thing to check on a stop-hang.
-- Registry mutation/iteration is sequenced on an engine strand (E-5), NOT a `std::mutex` (`[const §XV.9]`). The engine strand protects the map; the join-before-clear rule (`stop()`) protects the pointee lifetime across strands (Gate A New-4).
+- Registry mutation/iteration is confined to the single injected executor (E-5 — single-executor confinement; NOT a strand, NOT a `std::mutex` — `[const §XV.9]`). The join-before-clear rule (`stop()`) protects the pointee lifetime (Gate A New-4).
 - Per-session work stays on that session's strand (`Session::open()` binds it); the read-pump dispatches `on_inbound_frame` on the session strand (FR-004).
 
 **Acceptor first-attach** (E-2 / research.md R7): on the acceptor path the accept loop runs the TLS handshake itself (`Listener::async_accept` returns a TCP-only transport — `listener.hpp:45-53`), harvests `handshake_result.peer_id`, and attaches via a **new acceptor-specific primitive** (design-named `attach_accepted_transport`) that sets `live_peer_id_` + rebinds outbound **without** an FSM transition. It does **NOT** use `install_reconnected_transport` (which re-enters `LogonSent`, initiator-only — Gate A Codex-2). The acceptor gate at `session.cpp:1048` then authorizes against `live_peer_id_` (live-identity-before-gate invariant, Gate A New-1).

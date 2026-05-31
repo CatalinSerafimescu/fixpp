@@ -30,7 +30,7 @@ The public runtime engine. Lives in `fixpp::session`. Owns the registry + per-ro
 |---|---|---|
 | executor | `asio::any_io_executor` | caller-supplied (Q3); all loops `co_spawn` on it |
 | engine_cfg | `fixpp::core::EngineConfig` (borrowed/held) | the shared engine-level resources (`clock`, `default_transport_factory`, dictionaries); the public `Session(const EngineConfig&, const SessionConfig&)` ctor takes it by const-ref (`session.hpp:95`). `EngineConfig` carries **no `Application`** (`engine_config.hpp:106-148`). |
-| registry | `std::unordered_map<SessionId, SessionEntry>` | FR-002 store; mutated only on the engine strand (E-5) |
+| registry | `std::unordered_map<SessionId, SessionEntry>` | FR-002 store; confined to the single injected executor (E-5 — single-executor confinement, not a strand) |
 | listeners | per acceptor-config `Listener` (012) | accept-loop substrate |
 | accept-scope domains | per-listener `cancellation_signal` (≠ per-session) | owns the accept→handshake→bounded-first-read→attach window (E-7 / research.md R9) |
 | stopped flag | `bool`/`atomic` | `stop()` idempotence (FR-011) |

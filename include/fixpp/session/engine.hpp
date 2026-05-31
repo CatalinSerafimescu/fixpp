@@ -11,8 +11,9 @@
 // Implementation lives in src/session/engine.cpp (T006 — NOT this slice).
 // DECLARATIONS ONLY here; the header must compile when included from any TU.
 //
-// Threading: all registry mutation/iteration is sequenced on the engine
-// strand (E-5). NO std::mutex — [const §XV.9].
+// Threading: all registry mutation/iteration is confined to the single
+// injected executor (E-5 — single-executor confinement, not a strand).
+// NO std::mutex — [const §XV.9].
 //
 // [arch §4.4 (session public types)]: see §4.4 entry added to architecture.md.
 #pragma once
