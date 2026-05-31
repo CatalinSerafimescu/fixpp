@@ -563,6 +563,17 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
 // NotConnected — the non-matching peer's transport is never attached and no Logon
 // is ever delivered to the gate. Contrast OnList, which reaches Active/LogonReceived.
 
+// ── FR-005 no-match: lookup() must be nullptr after an unmatched Logon ───────
+// (FQ-2 / gate-b/r1: rewritten to assert the engine.hpp:200-204 contract)
+//
+// Contract (engine.hpp:200-204; realized-behavior.md C1 step 6):
+//   "Returns nullptr if id is … registered but not yet established (e.g.
+//    acceptor with no peer yet)" AND "No match → … create NO session".
+// So after an unmatched Logon is rejected:
+//   - lookup(acc_id) MUST be nullptr (no session was constructed).
+// A positive control (matching CompIDs → non-null + admitted) is covered by
+// EngineAcceptorTest.OnListIdentityAdmitsToEstablished above.
+
 TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
@@ -630,6 +641,12 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
     ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind (port is 0)";
 
+    // Contract witness #1: after start() but BEFORE any peer connects,
+    // lookup() must be nullptr (lazy/match-gated construction). [Gate A New-3]
+    EXPECT_EQ(engine.lookup(acc_id), nullptr)
+        << "lookup() must be nullptr for a registered acceptor with no peer yet "
+        << "(lazy + match-gated construction; engine.hpp:200-204)";
+
     fixpp::transport::test::LoopbackTlsFixture fixture{
         std::string(fixture_dir), ioc.get_executor()};
 
@@ -642,21 +659,18 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     ioc.run_for(3s);
     ioc.restart();
 
-    // FR-005 / C7: the unmatched connection is rejected — the acceptor session
-    // exists (opened early) but is NEVER admitted; it stays NotConnected.
-    fixpp::session::Session* acc_session = engine.lookup(acc_id);
-    ASSERT_NE(acc_session, nullptr)
-        << "the acceptor session is opened early and stays lookup-addressable";
-    EXPECT_EQ(acc_session->state(), fixpp::session::fsm_state::NotConnected)
-        << "FR-005: an inbound Logon whose reversed CompID matches no registered "
-        << "acceptor session must be rejected at the connection level "
-        << "(session_unknown_acceptor_session = 121) — the session must NEVER be "
-        << "admitted (no attach, no Logon delivered). It must stay NotConnected. "
-        << "state=" << static_cast<int>(acc_session->state())
-        << ". (The OnList control proves the same handshake+Logon path admits "
-        << "with MATCHING CompIDs.)";
+    // Contract witness #2 (FQ-2 / gate-b/r1): after the unmatched Logon is
+    // rejected, lookup(acc_id) must STILL be nullptr — no session was
+    // constructed for a no-match connection per data-model C1 step 6 and
+    // realized-behavior.md C7. [engine.hpp:200-204]
+    EXPECT_EQ(engine.lookup(acc_id), nullptr)
+        << "FR-005 / C7: no-match → no Session constructed. lookup(acc_id) must "
+        << "be nullptr after an unmatched Logon is rejected. "
+        << "(The accept loop closed the transport + continued; no Session was "
+        << "created. Contrast OnListIdentityAdmitsToEstablished which shows the "
+        << "matching-CompID path produces a non-null Session.)";
 
-    // Clean teardown (the accept loop continued past the no-match close).
+    // Clean teardown.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
     stop_fut.get();
