@@ -577,13 +577,16 @@ private:
     // The type is forward-declared in this header; the destructor is
     // instantiated in session.cpp where the full Transport definition is visible.
     // [data-model §E-1 step 8; contracts C1; FR-001]
-    std::unique_ptr<fixpp::transport::Transport> reconnected_transport_;
+    // shared_ptr (015 /simplify Q-1): the rebound transport_send_ detached write
+    // captures a keepalive copy so an in-flight write outlives a Session freed by
+    // Engine::stop()'s registry clear (the writes are not in the join counter).
+    std::shared_ptr<fixpp::transport::Transport> reconnected_transport_;
 
     // 015 T011 — live accepted transport (owned by Session after a successful
     // attach_accepted_transport call). Null until the engine's accept loop
-    // attaches a peer. Destructor instantiated in session.cpp.
+    // attaches a peer. shared_ptr per 015 /simplify Q-1 (see reconnected_transport_).
     // [data-model §E-2; T011; contracts C1 step 5]
-    std::unique_ptr<fixpp::transport::Transport> accepted_transport_;
+    std::shared_ptr<fixpp::transport::Transport> accepted_transport_;
 
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed
@@ -651,6 +654,18 @@ private:
     // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     emit_initiator_logon_() noexcept;
+
+    // 015 /simplify (Q-1/R-1) — build the live outbound send-slot shared by the
+    // acceptor (attach_accepted_transport) and initiator (install_reconnected_
+    // transport) attach paths. Bridges the sync transport_send_ std::function to
+    // the async Transport::async_write via a fire-and-forget co_spawn on exec_,
+    // copying the frame bytes so the send is independent of the caller's buffer.
+    // Captures a SHARED keepalive to the transport so an in-flight detached write
+    // cannot be left dereferencing a freed Transport if the owning Session is
+    // destroyed first (e.g. Engine::stop()'s registry clear, which does not track
+    // these detached writes in its join counter).
+    [[nodiscard]] std::function<void(std::span<const std::byte>)>
+    make_live_send_(std::shared_ptr<fixpp::transport::Transport> transport);
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a

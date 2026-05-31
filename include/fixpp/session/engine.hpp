@@ -263,15 +263,11 @@ private:
                         asio::cancellation_signal&,
                         std::shared_ptr<std::atomic<int>>);
 
-    // Rebindable outbound send-slot machinery: for an acceptor session the live
-    // transport is unknown at open() time; the engine captures a forwarding
-    // function as cfg.transport_send at open() and repoints it at the live
-    // Transport::async_write during the acceptor attach (E-1 / E-2 / R7).
-    // Each entry stores the rebindable function that forwards to the live sink.
-    // (The actual slot is a std::function<void(std::span<const std::byte>)>
-    // inside SessionConfig::transport_send; the engine wraps it.)
-    std::unordered_map<SessionId, std::function<void(std::span<const std::byte>)>>
-        send_slots_;
+    // (015 /simplify R-3: the rebindable outbound send-slot lives entirely inside
+    // each Session — transport_send_ is rebound by attach_accepted_transport /
+    // install_reconnected_transport to the live Transport::async_write. The engine
+    // holds no per-session send map; an earlier `send_slots_` member was vestigial
+    // and removed.)
 
     // Joint-before-clear counter (E-7 / Gate A New-4): tracks how many
     // co_spawned loops are still running. start() initialises this and

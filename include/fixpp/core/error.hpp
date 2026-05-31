@@ -667,16 +667,17 @@ enum class error : std::uint8_t {
     //    Non-renumbering append at unused slot 121, next contiguous slot
     //    after 014's session_seqnum_too_high = 120 per [const §X.4].
     //    Slot 70 remains a PERMANENT NUMERIC HOLE; never renumber.
-    //    This code surfaces at connection level only (close + log) — it is
-    //    never set on a Session event (no Session is created for unmatched
-    //    inbound Logons).
+    //    This code is the connection-level disposition reason — it is never set on
+    //    a Session event (no Session is created for unmatched inbound Logons).
     session_unknown_acceptor_session = 121, // FR-005/006 / C7 — inbound Logon from a
                                             //   peer whose reversed CompID
                                             //   (SessionId::reversed_from_logon) does not
                                             //   match any registered acceptor session in
                                             //   the Engine registry. The accept loop
-                                            //   closes the transport + logs this code;
-                                            //   no Session is created for the connection.
+                                            //   closes the transport (no Session is
+                                            //   created). The code names the disposition;
+                                            //   surfacing it on a log/observability sink is
+                                            //   deferred — 015 has no log surface (FR-013).
                                             //   Static matching only in 015 (R2).
                                             //   → FIXPP_ERR_SESSION_REJECT
 };

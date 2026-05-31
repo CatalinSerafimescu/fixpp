@@ -219,23 +219,9 @@ void Session::install_reconnected_transport(
     //     (symmetric initiator-attach, E-1a). 014 left transport_send_ pointing at
     //     the config-time sink; the engine lazy-connect model has NO config-time
     //     sink, so the post-connect Logon (and all subsequent outbound) must reach
-    //     the live reconnected_transport_. Mirror of attach_accepted_transport's
-    //     rebind: bridge the sync std::function to async_write via fire-and-forget
-    //     co_spawn on exec_, copying frame bytes so the send outlives the caller's
-    //     buffer. The raw pointer is safe — reconnected_transport_ is a Session
-    //     member that outlives transport_send_. [data-model §E-1a; T016(c); FR-003]
-    {
-        fixpp::transport::Transport* raw = reconnected_transport_.get();
-        transport_send_ = [raw, exec = exec_](std::span<const std::byte> frame) {
-            std::vector<std::byte> owned{frame.begin(), frame.end()};
-            asio::co_spawn(exec,
-                [raw, f = std::move(owned)]() -> asio::awaitable<void> {
-                    (void)co_await raw->async_write(
-                        std::span<const std::byte>{f.data(), f.size()});
-                },
-                asio::detached);
-        };
-    }
+    //     the live reconnected_transport_. Shared with the acceptor attach path via
+    //     make_live_send_ (015 /simplify R-1). [data-model §E-1a; T016(c); FR-003]
+    transport_send_ = make_live_send_(reconnected_transport_);
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
@@ -290,29 +276,32 @@ void Session::attach_accepted_transport(
     //    so the raw pointer captured below is to the owned object).
     accepted_transport_ = std::move(transport);
 
-    // 3. Rebind transport_send_ to the live Transport::async_write.
-    //    transport_send_ is std::function<void(span)> — a sync callback.
-    //    We bridge to the async async_write via fire-and-forget co_spawn on
-    //    the session executor (exec_). The frame bytes are copied into a
-    //    std::vector<std::byte> so the send is independent of the caller's
-    //    frame lifetime. exec_ is bound at open() and is stable.
-    //
-    //    The raw pointer captured here is safe: accepted_transport_ is a
-    //    member of this Session; the session outlives transport_send_.
-    //    [data-model §E-1/E-2; R7(b); contracts C1 step 5]
-    fixpp::transport::Transport* raw = accepted_transport_.get();
-    transport_send_ = [raw, exec = exec_](std::span<const std::byte> frame) {
-        // Copy frame bytes — the caller's buffer may be reused after return.
+    // 3. Rebind transport_send_ to the live Transport::async_write via the shared
+    //    make_live_send_ helper (015 /simplify R-1) — same bridge as the initiator
+    //    install_reconnected_transport path. [data-model §E-1/E-2; R7(b); C1 step 5]
+    transport_send_ = make_live_send_(accepted_transport_);
+    // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
+    // the acceptor gate (:1048) when the first inbound Logon is processed.
+}
+
+// 015 /simplify (Q-1/R-1) — shared live outbound send-slot builder.
+// One source of truth for the sync-std::function → async_write bridge used by both
+// attach paths (install_reconnected_transport + attach_accepted_transport). The
+// detached write captures a SHARED keepalive (`t`) so it cannot dereference a freed
+// Transport if the owning Session is destroyed first (Engine::stop()'s registry
+// clear does not track these detached writes in its join counter). Frame bytes are
+// copied so the send is independent of the caller's buffer lifetime.
+std::function<void(std::span<const std::byte>)>
+Session::make_live_send_(std::shared_ptr<fixpp::transport::Transport> transport) {
+    return [t = std::move(transport), exec = exec_](std::span<const std::byte> frame) {
         std::vector<std::byte> owned{frame.begin(), frame.end()};
         asio::co_spawn(exec,
-            [raw, f = std::move(owned)]() -> asio::awaitable<void> {
-                (void)co_await raw->async_write(
+            [t, f = std::move(owned)]() -> asio::awaitable<void> {
+                (void)co_await t->async_write(
                     std::span<const std::byte>{f.data(), f.size()});
             },
             asio::detached);
     };
-    // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
-    // the acceptor gate (:1048) when the first inbound Logon is processed.
 }
 
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.

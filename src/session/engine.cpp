@@ -197,8 +197,13 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
     timer.expires_after(deadline);
 
     bool timed_out = false;
-    timer.async_wait([&timed_out](const std::error_code& ec) {
-        if (!ec) timed_out = true;
+    // 015 /simplify (Q-2) — the deadline must CANCEL the in-flight async_read_some,
+    // not merely set a flag the loop checks between reads: a peer that completes the
+    // TLS handshake then stalls would otherwise block the read forever (FR-014 /
+    // SC-011). transport.cancel() aborts the pending read → the read-error arm below
+    // returns transport_handshake_timeout.
+    timer.async_wait([&timed_out, &transport](const std::error_code& ec) {
+        if (!ec) { timed_out = true; transport.cancel(); }
     });
 
     // Build a framer to detect frame boundaries.
@@ -217,6 +222,10 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
             std::span<std::byte>{read_buf.data(), read_buf.size()});
         if (!read_r.has_value()) {
             timer.cancel();
+            // Deadline-cancelled read (Q-2) surfaces as the handshake/Logon timeout
+            // disposition, not the raw cancellation code (FR-014).
+            if (timed_out)
+                co_return std::unexpected(error::transport_handshake_timeout);
             co_return std::unexpected(read_r.error());
         }
         std::size_t n = *read_r;
