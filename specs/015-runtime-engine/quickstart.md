@@ -50,7 +50,7 @@ On each inbound connection the accept loop (C1):
 //     session_compid_unauthorized + session_event_compid_authorization_failed + Disconnected
 ```
 
-The live-identity arm is added at the **single acceptor gate** `session.cpp:1048` (C3, mirror of the 014 initiator arm at `:1864`). Note `session.cpp:1913` is the **initiator** seam arm in the `LogonSent` case, NOT a second acceptor gate — the live arm goes at `:1048` only, while the `logon_peer_identity_override` seam is **removed** from BOTH `:1048` and `:1913` (C4). The binding-logic tests drive a live handshake identity over the loopback-TLS fixture. **T-041 → `done`** for both roles.
+The live-identity arm `if (live_peer_id_.has_value() && is_mtls)` is present at the acceptor gate (as-built `session.cpp:1167`, the `NotConnected → LogonReceived` path; C3) and — symmetrically — at the initiator gate (as-built `session.cpp:1978`, the `LogonSent` case; 014's live arm). The `logon_peer_identity_override` seam arm that previously sat ahead of the `is_mtls` check at **both** sites is **removed** (T020 / C4) — each guard is now exactly the two-arm `live-identity / else-if-mTLS fail-CLOSED` plus the non-mTLS permissive skip. The binding-logic tests drive a live handshake identity over the loopback-TLS fixture (via `inject_live_identity` → the production `attach_accepted_transport` path). **T-041 → `done`** for both roles. *(Line numbers are as-built on `015-runtime-engine` and shift with edits; the structural anchors are the `live_peer_id_.has_value() && is_mtls` arm + the FSM-state case.)*
 
 ## What you can verify
 
