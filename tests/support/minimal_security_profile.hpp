@@ -12,13 +12,14 @@
 // This means the CompID authorization gate (FR-019/FR-024) is NOT triggered:
 // one_way_ca has no client certificate so there is no peer_identity to authorize.
 // Tests that test mTLS CompID binding must use kind::mtls_ca or kind::mtls_pinned
-// explicitly and configure logon_peer_identity_override + compid_authorization_policy.
+// explicitly, set a compid_authorization_policy, and inject the peer identity via
+// inject_live_identity (support/identity_injecting_transport.hpp) after open().
 // Tests that assert open() REJECTS the default sentinel (kind::unset) must NOT
 // use this helper; they should leave security_profile default-constructed.
 //
 // RC#A (gate-b/r1): changed from mtls_ca → one_way_ca. The old mtls_ca value
-// would trigger the new fail-closed CompID gate for any session that does not set
-// logon_peer_identity_override. All non-CompID-auth tests keep the valid-profile
+// would trigger the fail-closed CompID gate for any session with no live peer
+// identity attached. All non-CompID-auth tests keep the valid-profile
 // precondition satisfied without hitting the authorization path.
 //
 // Do NOT use for TLS-semantic tests — only for threading/executor/clock/

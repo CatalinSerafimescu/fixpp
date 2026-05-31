@@ -61,8 +61,8 @@
 #include <fixpp/transport/transport_factory.hpp>
 
 #include "loopback_tls_session_harness.hpp"
+#include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
-#include "support/minimal_security_profile.hpp"
 
 using namespace std::chrono_literals;
 
@@ -172,7 +172,8 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         cfg.target_comp_id    = "TW";
         cfg.begin_string      = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+        cfg.security_profile  = fixpp::session::SecurityProfile{
+            fixpp::session::SecurityProfile::kind::mtls_ca};
         cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.role              = fixpp::session::session_role::acceptor;
@@ -180,13 +181,13 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.compid_authorization_policy = base_policy;
 
-        // Inject peer_identity with matching CN.
+        // Live handshake identity with matching CN.
         fixpp::tls::peer_identity pid;
         pid.subject_dn = "CN=TW-PROD-01,O=Acme,C=US";
-        cfg.logon_peer_identity_override = std::move(pid);
 
         fixpp::session::Session sess(engine, cfg);
         ASSERT_TRUE(run_open(sess).has_value()) << "Session " << i << " open failed.";
+        fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
         feed(sess, logon);
@@ -228,7 +229,8 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
         cfg.target_comp_id    = "ISLD";
         cfg.begin_string      = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+        cfg.security_profile  = fixpp::session::SecurityProfile{
+            fixpp::session::SecurityProfile::kind::mtls_ca};
         cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.role              = fixpp::session::session_role::initiator;
@@ -238,11 +240,11 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
 
         fixpp::tls::peer_identity pid;
         pid.subject_dn = "CN=ISLD-PROD-01,O=Exchange,C=US";
-        cfg.logon_peer_identity_override = std::move(pid);
 
         fixpp::session::Session sess(engine, cfg);
         ASSERT_TRUE(run_open(sess).has_value()) << "Session " << i << " open failed.";
         EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+        fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
         auto logon_ack = make_logon_frame("FIX.4.2", 1, "ISLD", "TW");
         feed(sess, logon_ack);

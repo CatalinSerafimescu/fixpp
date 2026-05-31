@@ -55,8 +55,8 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
 
+#include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
-#include "support/minimal_security_profile.hpp"
 
 using namespace std::chrono_literals;
 
@@ -162,13 +162,14 @@ protected:
         cfg.target_comp_id    = "TW";
         cfg.begin_string      = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+        // mTLS so the authorize() gate fires (the live-identity arm requires it).
+        cfg.security_profile  = fixpp::session::SecurityProfile{
+            fixpp::session::SecurityProfile::kind::mtls_ca};
         cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.role              = fixpp::session::session_role::acceptor;
         // compid_authorization_policy is default-constructed = empty = default-deny.
-        // logon_peer_identity_override: set a peer_identity so authorize() is called.
-        cfg.logon_peer_identity_override = make_peer_identity("CN=TW-PROD-01,O=Acme,C=US");
+        // The peer identity is injected post-open() via inject_live_identity (T021).
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -205,6 +206,10 @@ TEST_F(CompidBindingDefaultDenyTest, Acceptor_EmptyPolicy_RejectsLogon) {
     // compid_authorization_policy is empty (default-deny per FR-023 / D-9).
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
+
+    // Inject the live handshake identity (off-list under the empty policy).
+    fixpp::test_support::inject_live_identity(
+        sess, make_peer_identity("CN=TW-PROD-01,O=Acme,C=US"));
 
     // Peer (initiator) sends Logon.
     auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
@@ -249,19 +254,24 @@ TEST_F(CompidBindingDefaultDenyTest, Initiator_EmptyPolicy_RejectsLogonAck) {
     cfg.target_comp_id    = "ISLD";
     cfg.begin_string      = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    // mTLS so the authorize() gate fires (the live-identity arm requires it).
+    cfg.security_profile  = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::initiator;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests default-deny, not reset semantics.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // Empty policy — default-deny.
-    cfg.logon_peer_identity_override = make_peer_identity("CN=ISLD-PROD-01,O=Exchange,C=US");
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
     // After open(), initiator should be in LogonSent.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Inject the live handshake identity (off-list under the empty policy).
+    fixpp::test_support::inject_live_identity(
+        sess, make_peer_identity("CN=ISLD-PROD-01,O=Exchange,C=US"));
 
     // Peer (acceptor) sends Logon-ack.
     auto logon_ack = make_logon("FIX.4.2", 1, "ISLD", "TW");

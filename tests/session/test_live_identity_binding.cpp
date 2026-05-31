@@ -13,7 +13,7 @@
 //   Cell A (MOCK) — identity-interception witness using a tracking factory.
 //     The mock handshake injects CN="PEER-PROD-01" in peer_id.
 //     The policy binds CN="PEER-PROD-01" → "ACCEPTOR".
-//     No logon_peer_identity_override; mTLS profile.
+//     No injected-identity seam (removed); mTLS profile.
 //
 //     RED: the live path currently ignores hr.peer_id; arm (2) mTLS fail-closed
 //          fires → session never reaches Active; EXPECT_EQ(Active) FAILS.
@@ -22,7 +22,7 @@
 //
 //   Cell B (LIVE TLS) — full loopback: the live cert CN of leaf_rsa2048.pem
 //     drives authorize(). Policy binds "fixpp-test-leaf" → "ACCEPTOR".
-//     No logon_peer_identity_override; mTLS profile.
+//     No injected-identity seam (removed); mTLS profile.
 //
 //     RED: arm (2) fail-closed (mTLS without override, live arm not yet wired).
 //     GREEN after T014/T015: real cert CN → policy lookup → admitted → Active.
@@ -273,7 +273,7 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
     cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    // NO logon_peer_identity_override — live handshake must supply identity.
+    // NO injected-identity seam — live handshake must supply identity.
     cfg.transport_factory_override = factory;
     // Dummy endpoint (mock never really connects).
     cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19876};
@@ -369,7 +369,7 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
 // Cell B (LIVE TLS) — real leaf cert CN from loopback handshake drives auth.
 //
 // Policy binds CN="fixpp-test-leaf" → "ACCEPTOR" (the test cert subject CN).
-// No logon_peer_identity_override; mTLS profile.
+// No injected-identity seam (removed); mTLS profile.
 //
 // RED: arm (2) mTLS fail-closed (live arm not yet wired) → Disconnected.
 // GREEN after T014/T015: real cert CN → policy lookup → admitted → Active.
@@ -443,7 +443,7 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
     cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    // NO logon_peer_identity_override — live handshake must supply the identity.
+    // NO injected-identity seam — live handshake must supply the identity.
     cfg.transport_factory_override = session_factory_shared;
     cfg.reconnect_endpoint = server_ep;
 

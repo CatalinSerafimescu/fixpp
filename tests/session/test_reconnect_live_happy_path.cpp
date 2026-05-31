@@ -348,8 +348,8 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     cfg.role            = fixpp::session::session_role::initiator;
     cfg.executor_override       = ioc.get_executor();
     // Use one_way_ca so the Logon-ack authorization gate is permissive (skip).
-    // The 013 mTLS fail-closed gate (RC#A) requires either logon_peer_identity_override
-    // or one_way_ca to avoid the fail-closed arm. US1 uses one_way_ca (permissive).
+    // The 013 mTLS fail-closed gate (RC#A) requires either a live attached peer
+    // identity or one_way_ca to avoid the fail-closed arm. US1 uses one_way_ca.
     cfg.security_profile = fixpp::session::SecurityProfile{
         fixpp::session::SecurityProfile::kind::one_way_ca};
     cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();

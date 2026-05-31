@@ -1139,16 +1139,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // LogonReceived/Active (FR-019/FR-020/FR-021/FR-024).
             // Acceptor: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
             //
-            // ACCEPTOR LIVE-BINDING DEFERRAL (014/015 boundary):
-            //   The ACCEPTOR path stays seam-only in 014 (Clarifications Q2;
-            //   T-041 stays `implementing`). The live acceptor accept→handshake→
-            //   authorize() production path and test-seam removal land with the
-            //   015 engine, where T-041 fully closes.
-            //   [[feedback_half_restructure_symmetric_api]]: the asymmetry is
-            //   intentional and documented — 014 wires the live identity on the
-            //   INITIATOR reconnect path only (see :1811 guard below).
+            // ACCEPTOR LIVE-BINDING (T-041 CLOSED, 015 US4):
+            //   The acceptor binds the REAL handshake identity from
+            //   attach_accepted_transport — the test seam is gone (T020/SC-006).
+            //   [[feedback_half_restructure_symmetric_api]]: both roles now bind a
+            //   live identity and fail CLOSED symmetrically (initiator guard below).
             //
-            // Four-way guard (015 T013 extends the RC#A three-way guard):
+            // Two-arm guard (015 T020 removed the seam arm from the T013 form):
             //   (1) live_peer_id_ set + is_mtls → arm (1-live): authorize with the
             //       real handshake peer_id from attach_accepted_transport (T011).
             //       Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is
@@ -1156,14 +1153,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //       on_inbound_frame reaches this gate — guaranteed by run_accept_loop
             //       calling attach_accepted_transport before co_awaiting on_inbound_frame.
             //       Admit on-list / fail-CLOSED off-list-or-absent (T-041 acceptor path).
-            //   (2) logon_peer_identity_override set → authorize as today (test seam,
-            //       retained until US4 T020 removes it).
-            //   (3) mTLS + no identity available → FAIL CLOSED (RC#A). Arm (3) fires
-            //       when is_mtls but live_peer_id_ is absent (happens-before violated
+            //   (2) mTLS + no identity available → FAIL CLOSED (RC#A). Fires when
+            //       is_mtls but live_peer_id_ is absent (happens-before violated
             //       would land here — the safe default per Gate A New-1).
-            //   (4) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
-            // [015 T013; data-model §E-4; FR-006/007/008; T-041; Gate A New-1/E-4]
-            // [FR-019; FR-024 symmetric; data-model.md §D-10]
+            //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
+            // [015 T013/T020; data-model §E-4; FR-006/007/008/009; T-041; Gate A New-1/E-4]
+            // [FR-019; FR-024 symmetric]
             {
                 const bool is_mtls =
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
@@ -1200,44 +1195,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .principal_source  = auth_r->from,
                     });
                     live_peer_id_.reset();  // consume (one-shot per Logon)
-                } else if (cfg_.logon_peer_identity_override.has_value()) {
-                    // (1) Test seam: authorize against the injected peer_identity.
-                    const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
-                    const std::string_view asserted_compid = cfg_.target_comp_id;
-                    auto auth_r = cfg_.compid_authorization_policy.authorize(
-                        auth_pid, asserted_compid);
-                    if (!auth_r) {
-                        // Authorization failed: emit session_event_compid_authorization_failed,
-                        // close transport, transition to Disconnected.
-                        // [FR-021; US2 AC6]
-                        const std::string_view cn_view =
-                            parse_cn_from_dn_local(auth_pid.subject_dn_view());
-                        emit_event(fixpp::session::session_event_compid_authorization_failed{
-                            .cn              = cn_view,
-                            .asserted_compid = asserted_compid,
-                            .expected_compids = {},
-                            .principal_source = fixpp::session::bound_principal::source::CN,
-                        });
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // Authorization succeeded: emit session_event_peer_identity_bound.
-                    // bound_compid = the authorized CompID (= asserted_compid, which is
-                    // cfg_.target_comp_id, a string with session lifetime).
-                    // auth_r->value = view into the principal key (e.g. "TW-PROD-01").
-                    // [FR-020; US2 AC2]
-                    emit_event(fixpp::session::session_event_peer_identity_bound{
-                        .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
-                        .sans              = {},
-                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                        .cipher            = {},
-                        .bound_compid      = asserted_compid,
-                        .principal_source  = auth_r->from,
-                    });
                 } else if (is_mtls) {
                     // (2) mTLS + no peer_identity available → fail CLOSED.
-                    // Peer_identity required for mTLS CompID binding but unavailable
-                    // (production wiring deferred to 014; test seam not set).
+                    // Peer_identity required for mTLS CompID binding but the live
+                    // handshake identity is absent (happens-before violated, or a
+                    // non-engine acceptor with no attach_accepted_transport call).
                     // Silent-admit here would bake a fail-open default. [triage RC#A]
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
@@ -1994,23 +1956,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // symmetric initiator path).
             // Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
             //
-            // Four-way guard (014 T015 — extends RC#A gate-b/r1 three-way guard):
+            // Two-arm guard (015 T020 removed the seam arm from the T015 form):
             //   (1) live_peer_id_ set (live reconnect path, T014/T015) →
             //       authorize with the real handshake peer_id, making the
             //       already-fail-CLOSED mTLS gate *operable* with a live identity
             //       (admit on-list; fail-close off-list/absent). FR-006/FR-008.
-            //   (2) logon_peer_identity_override set (test seam) → authorize as today
-            //       (retained for binding-logic tests; removed in 015). FR-008.
-            //   (3) mTLS + no identity available → fail CLOSED. RC#A.
-            //   (4) Non-mTLS → skip (backward compat, permissive). FR-019.
+            //   (2) mTLS + no identity available → fail CLOSED. RC#A.
+            //   (3) Non-mTLS → skip (backward compat, permissive). FR-019.
             //
             // live_peer_id_ is stored by install_reconnected_transport (T015) on a
             // successful reconnect handshake and reset() one-shot below once this
-            // guard authorizes it. The acceptor site (:953-1008) stays seam-only —
-            // the acceptor live binding deferral to 015 is documented there.
-            // [[feedback_half_restructure_symmetric_api]]: asymmetry is documented
-            // and intentional per spec Clarifications Q2 / T-041 stays `implementing`.
-            // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008]
+            // guard authorizes it. The acceptor site now binds a live identity too
+            // (T020/T-041 CLOSED) — both roles are symmetric, the seam is gone.
+            // [[feedback_half_restructure_symmetric_api]]: symmetric one-pass fix.
+            // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008; FR-009]
             {
                 const bool is_mtls =
                     cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
@@ -2065,37 +2024,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .principal_source  = auth_r->from,
                     });
                     live_peer_id_.reset();  // consume (one-shot per Logon-ack)
-                } else if (cfg_.logon_peer_identity_override.has_value()) {
-                    // (2) Test seam: authorize against the injected peer_identity.
-                    const fixpp::tls::peer_identity& auth_pid = *cfg_.logon_peer_identity_override;
-                    const std::string_view asserted_compid = cfg_.target_comp_id;
-                    auto auth_r = cfg_.compid_authorization_policy.authorize(
-                        auth_pid, asserted_compid);
-                    if (!auth_r) {
-                        // Authorization failed: emit event, close transport, Disconnected.
-                        const std::string_view cn_view =
-                            parse_cn_from_dn_local(auth_pid.subject_dn_view());
-                        emit_event(fixpp::session::session_event_compid_authorization_failed{
-                            .cn              = cn_view,
-                            .asserted_compid = asserted_compid,
-                            .expected_compids = {},
-                            .principal_source = fixpp::session::bound_principal::source::CN,
-                        });
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // Authorization succeeded: emit session_event_peer_identity_bound.
-                    // bound_compid = the authorized CompID (= asserted_compid = cfg_.target_comp_id).
-                    emit_event(fixpp::session::session_event_peer_identity_bound{
-                        .cn                = parse_cn_from_dn_local(auth_pid.subject_dn_view()),
-                        .sans              = {},
-                        .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                        .cipher            = {},
-                        .bound_compid      = asserted_compid,
-                        .principal_source  = auth_r->from,
-                    });
                 } else if (is_mtls) {
-                    // (3) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
+                    // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
                         .cn               = {},
@@ -2109,14 +2039,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // (4) Non-mTLS (one_way_ca): no client cert → gate skipped.
             }
 
-            // ACCEPTOR SITE DEFERRAL NOTE (T-041 / 014–015 boundary):
-            // The acceptor guard at session.cpp:953-1008 stays seam-only (arm 1
-            // logon_peer_identity_override + arm 2 mTLS fail-closed). The live
-            // acceptor accept→handshake→authorize() production path and test-seam
-            // removal land with the 015 engine, where T-041 fully closes.
-            // Per spec Clarifications Q2 / [[feedback_half_restructure_symmetric_api]]
-            // the asymmetry is intentional: 014 wires and proves the live identity
-            // on the INITIATOR reconnect path only. [FR-008; data-model §E-2; C2]
+            // T-041 CLOSED (015 US4): the acceptor guard above now binds the live
+            // handshake identity from attach_accepted_transport and fails CLOSED
+            // symmetrically; the per-config peer-identity test seam is removed in
+            // production AND tests (T020/T021, SC-006/FR-009). Both roles bind a
+            // real identity — no asymmetry remains. [FR-008/009; data-model §E-2; C2]
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);

@@ -53,8 +53,8 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
 
+#include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
-#include "support/minimal_security_profile.hpp"
 
 using namespace std::chrono_literals;
 
@@ -290,7 +290,9 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     cfg.target_comp_id    = "TW";
     cfg.begin_string      = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    // mTLS so the authorize() gate fires (the live-identity arm requires it).
+    cfg.security_profile  = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
@@ -300,11 +302,11 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     // Configure policy: CN "TW-PROD-01" → CompID "TW".
     cfg.compid_authorization_policy.add_binding("TW-PROD-01", "TW");
 
-    // Inject peer_identity with CN=TW-PROD-01.
-    cfg.logon_peer_identity_override = make_cn_only_identity("TW-PROD-01");
-
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
+
+    // Inject the live handshake identity with CN=TW-PROD-01.
+    fixpp::test_support::inject_live_identity(sess, make_cn_only_identity("TW-PROD-01"));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
     feed(sess, logon);

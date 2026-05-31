@@ -597,8 +597,9 @@ set_tests_properties(live_identity_binding PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us2;live_tls;identity_binding")
 
-# T012 — CompID binding seam: on-list/off-list/absent via logon_peer_identity_override.
-# FR-007 / US2 AC2/AC3 / SC-003.
+# T012/T021 — CompID binding no-identity gate arms (fail-closed mTLS / permissive
+# non-mTLS); the on-list/off-list seam cells were removed in 015 US4 (SC-006).
+# FR-007/FR-009 / US2 AC3 / SC-003/SC-006.
 add_executable(compid_binding_seam
   test_compid_binding_seam.cpp)
 target_link_libraries(compid_binding_seam PRIVATE
@@ -614,6 +615,27 @@ add_test(NAME compid_binding_seam COMMAND compid_binding_seam)
 set_tests_properties(compid_binding_seam PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us2;compid;seam")
+
+# ── 015-runtime-engine T019 (US4) — seam-removal grep gate + live-binding ────
+# SC-006/FR-009: zero per-config peer-identity test-seam references across
+# src/+include/+tests/, AND the binding gate authorizes from a live handshake
+# identity (the production live_peer_id_ path), not a config seam.
+add_executable(engine_seam_removal
+  engine_seam_removal_test.cpp)
+target_link_libraries(engine_seam_removal PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_seam_removal PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(engine_seam_removal PRIVATE
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME engine_seam_removal COMMAND engine_seam_removal)
+set_tests_properties(engine_seam_removal PROPERTIES
+  LABELS "015;us4;compid;seam_removal")
 
 # T013 auth-fail cell lives in reconnect_backoff_cap (already registered above
 # as reconnect_backoff_cap). The new AuthFailReconnectCapTest class is compiled
