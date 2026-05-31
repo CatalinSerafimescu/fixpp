@@ -270,6 +270,124 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
         << "attach→arm(1-live)→admit; session reaches established state.";
 }
 
+// ── FR-005 / C7: unmatched reversed-CompID Logon is rejected, NO session ─────
+//
+// Static-routing default (R2): the accept loop resolves the inbound Logon by its
+// reversed SenderCompID/TargetCompID; a Logon matching no registered acceptor
+// SessionId is rejected at the connection level (close + session_unknown_acceptor_
+// session = 121) with NO Session created — there is no fail-open path.
+//
+// This is the control's twin: identical harness, identical successful TLS
+// handshake + well-formed Logon as OnListIdentityAdmitsToEstablished — only the
+// CompIDs differ. The acceptor is registered {sender=ACCEPTOR, target=INITIATOR}
+// (SessionId {FIX.4.2, ACCEPTOR, INITIATOR}). The client sends a Logon with
+// SenderCompID="STRANGER", TargetCompID="NOBODY" → reversed = {FIX.4.2, sender=
+// NOBODY, target=STRANGER} → resolved_id != session_id → the no-match arm
+// (engine.cpp run_accept_loop: close transport + continue, slot 121) rejects the
+// connection. The acceptor Session is opened EARLY (lookup-addressable), so the
+// witness is NOT "no session" but "the session is never ADMITTED": it stays
+// NotConnected — the non-matching peer's transport is never attached and no Logon
+// is ever delivered to the gate. Contrast OnList, which reaches Active/LogonReceived.
+
+TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
+    const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kDir = nullptr;
+#endif
+    const char* fixture_dir = dir ? dir : kDir;
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+
+    fixpp::tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
+    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
+    ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
+
+    fixpp::tls::SslCtxConfig ssl;
+    ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
+    ssl.cs      = std::move(*cs_r);
+    ssl.clock   = nullptr;
+    ssl.caps    = fixpp::tls::CertSourceCaps{};
+
+    auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
+        fixpp::transport::Transport::Config{}, ssl);
+    ASSERT_TRUE(fac_r.has_value()) << "transport factory build failed";
+    std::shared_ptr<fixpp::transport::TransportFactory> fac{std::move(*fac_r)};
+
+    fixpp::session::CompIdAuthorizationPolicy authz;
+    authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+
+    fixpp::session::SessionConfig acc;
+    acc.sender_comp_id  = "ACCEPTOR";
+    acc.target_comp_id  = "INITIATOR";
+    acc.begin_string    = "FIX.4.2";
+    acc.role            = fixpp::session::session_role::acceptor;
+    acc.executor_override = ioc.get_executor();
+    acc.security_profile = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.compid_authorization_policy = authz;
+    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.transport_factory_override = fac;
+    acc.heartbeat_interval = std::chrono::seconds{30};
+    acc.logout_disconnect_timeout_ms = 2000;
+    acc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
+    acc.transport_send = [](std::span<const std::byte>) {};
+
+    auto acc_id = fixpp::session::SessionId::from_config(acc);
+    ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
+
+    engine.start();
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind (port is 0)";
+
+    fixpp::transport::test::LoopbackTlsFixture fixture{
+        std::string(fixture_dir), ioc.get_executor()};
+
+    // Client sends a Logon whose reversed CompID matches NO registered acceptor.
+    asio::co_spawn(ioc,
+        run_test_initiator(ioc, fixture, bound_port,
+                           /*sender=*/"STRANGER", /*target=*/"NOBODY"),
+        asio::detached);
+
+    ioc.run_for(3s);
+    ioc.restart();
+
+    // FR-005 / C7: the unmatched connection is rejected — the acceptor session
+    // exists (opened early) but is NEVER admitted; it stays NotConnected.
+    fixpp::session::Session* acc_session = engine.lookup(acc_id);
+    ASSERT_NE(acc_session, nullptr)
+        << "the acceptor session is opened early and stays lookup-addressable";
+    EXPECT_EQ(acc_session->state(), fixpp::session::fsm_state::NotConnected)
+        << "FR-005: an inbound Logon whose reversed CompID matches no registered "
+        << "acceptor session must be rejected at the connection level "
+        << "(session_unknown_acceptor_session = 121) — the session must NEVER be "
+        << "admitted (no attach, no Logon delivered). It must stay NotConnected. "
+        << "state=" << static_cast<int>(acc_session->state())
+        << ". (The OnList control proves the same handshake+Logon path admits "
+        << "with MATCHING CompIDs.)";
+
+    // Clean teardown (the accept loop continued past the no-match close).
+    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
+}
+
 // ── Gate A New-3: lookup() returns null before start ─────────────────────────
 
 TEST(EngineAcceptorTest, LookupNullBeforeStart) {
