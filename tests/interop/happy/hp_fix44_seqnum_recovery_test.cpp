@@ -95,17 +95,10 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterparty, Role>>& info) {
-    const auto [cp, role] = info.param;
-    std::string n = (cp == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    n += (role == Role::fixpp_initiator) ? "_init" : "_acc";
-    return n;
-}
-
 INSTANTIATE_TEST_SUITE_P(
     Fix44, HappySeqnumRecovery,
     ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
                        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
-    cell_name);
+    fixpp::interop::hp::cell_name);
 
 }  // namespace

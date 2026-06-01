@@ -125,7 +125,6 @@ inline bool frame_is_msg_type(std::span<const std::byte> frame, std::string_view
 struct OutboundCapture {
     std::vector<std::vector<std::byte>> frames;
     bool fail_writes = false;
-    int writes_before_capture_fail = 0;  // unused unless fail_writes
 
     void operator()(std::span<const std::byte> data) {
         if (fail_writes) {

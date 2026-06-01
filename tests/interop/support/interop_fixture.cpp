@@ -58,7 +58,6 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
     // resolves or `bound` elapses. We must keep pumping the io_context for stop()'s
     // teardown coroutines (cancellation, join-before-clear) to make progress.
     auto fut = asio::co_spawn(ioc_, engine_.stop(), asio::use_future);
-    stop_spawned_ = true;
 
     const auto t_end = t0 + bound;
     while (std::chrono::steady_clock::now() < t_end) {

@@ -64,7 +64,6 @@ public:
 private:
     asio::io_context ioc_;
     fixpp::session::Engine engine_;
-    bool stop_spawned_ = false;
 };
 
 }  // namespace fixpp::interop

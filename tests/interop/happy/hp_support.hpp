@@ -39,6 +39,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
@@ -197,6 +198,18 @@ inline fixpp::session::fsm_state drive_to_active(InteropEngineFixture& fx,
         deadline);
     const fixpp::session::Session* s = fx.engine().lookup(id);
     return s != nullptr ? s->state() : fixpp::session::fsm_state::NotConnected;
+}
+
+// GoogleTest parameter-name formatter for the (counterparty, role) happy cells,
+// shared by the drivers' INSTANTIATE_TEST_SUITE_P (each previously copy-pasted it).
+// NB: kept a single (non-overloaded) function — an overload set cannot be deduced
+// as INSTANTIATE_TEST_SUITE_P's name-generator argument. The reconnect cell's
+// counterparty-only variant stays local to that driver.
+inline std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterparty, Role>>& info) {
+    const auto [cp, role] = info.param;
+    std::string n = (cp == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+    n += (role == Role::fixpp_initiator) ? "_init" : "_acc";
+    return n;
 }
 
 }  // namespace fixpp::interop::hp
