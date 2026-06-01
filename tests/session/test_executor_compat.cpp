@@ -51,7 +51,12 @@ drive_script(Session& s, const ts::fsm_script& script) {
         const auto lbl = script[i].label;
         const bool is_last = (i + 1 == n);
         s.dispatch_app_callback([&log, lbl, is_last, &last] {
-            ts::observed_callback span{log, lbl};
+            // The span MUST be fully destroyed (on_leave runs) BEFORE signalling
+            // completion: drive_script tears down `log` the instant `fut` unblocks,
+            // so set_value() inside the span scope races the destructor's on_leave
+            // against `log`'s destruction on the main thread — a stack-use-after-
+            // return on the last callback's pool thread (CI ASan, .github#936).
+            { ts::observed_callback span{log, lbl}; }
             if (is_last) last.set_value();
         });
     }
