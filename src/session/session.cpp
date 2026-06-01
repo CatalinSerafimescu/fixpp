@@ -94,7 +94,7 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
 // ReconnectPolicy{} whose 0-backoff schedule busy-spun on repeated connect failure
 // (015 down-peer L2 carry-forward). The arena allocates the schedule vector. [FR-004]
 fixpp::transport::ReconnectPolicy resolve_reconnect_policy(const SessionConfig& cfg,
-                                                          std::pmr::memory_resource* arena) {
+                                                           std::pmr::memory_resource* arena) {
     if (cfg.reconnect_policy.has_value()) {
         return *cfg.reconnect_policy;
     }
