@@ -26,7 +26,7 @@ Defines how a reference-unit-test-parity row is dispositioned and how GAP closur
 | Inbound SequenceReset `NewSeqNo >/=/<` arms | confirm S-023/#90 arms cover the audit rows | `COVERED` (cite #90 tests) |
 | EncryptMethod=0 emit; integer-convertor overflow bounds | already closed (#91) | `COVERED` (cite #91 witnesses) |
 | Acceptor HeartBtInt-echo (Bucket-1) | include only if cheap | `COVERED` or note-deferred |
-| Bucket-3 (PossDup/OrigSendingTime inbound, AllowPossDup, app-message, FIXT routing, ResetOn*/RefreshOnLogon) | `#8`/option-a | `deferred:by-design` (rationale recorded) |
+| Bucket-3 (PossDup/OrigSendingTime inbound, AllowPossDup, app-message, FIXT routing + `DefaultApplVerID(1137)` / FIX 5.0 SP2 session, ResetOn*/RefreshOnLogon) | `#8`/option-a | `deferred:by-design` (rationale recorded) — consistent with the LIVE matrix's `deferred:fixt-routing` v1.0 deferral (FR-003): fixpp cannot establish a FIXT/5.0SP2 session today (S-020 FIXT half `implementing(4.4 only)`, S-025 `backlog`) |
 
 ## Where the disposition lives
 

@@ -51,7 +51,7 @@ The full matrix × {normal, ASan/UBSan, TSan} (FR-019) + the thorny corpus, run 
 
 | Check | SC |
 |-------|-----|
-| Smoke cell green against QFC + QFJ, both roles, 4.4 + 5.0SP2, incl. TLS-logon | SC-001 |
+| Full matrix green against QFC + QFJ, both roles, FIX 4.4, incl. TLS-logon (5.0SP2/FIXT cells `deferred:fixt-routing`) | SC-001 |
 | All P1 / watch:P1 corpus scenarios pass or are documented limitations | SC-002 |
 | All parity GAP rows COVERED-with-citation or deferred-with-tracking | SC-003 |
 | Full matrix green under normal + ASan/UBSan + TSan | SC-004 |
@@ -61,4 +61,4 @@ The full matrix × {normal, ASan/UBSan, TSan} (FR-019) + the thorny corpus, run 
 
 ## Known caveat
 
-A fixpp initiator aimed at a not-yet-listening counterparty can busy-spin / block `stop()` (015 down-peer L2 carry-forward). Fixtures **start the counterparty first** and bound the connect (R5). Do not author a live cell that relies on `ioc.run()` to terminate — use the scenario's internal `deadline_ms`.
+A fixpp initiator aimed at a not-yet-listening counterparty can busy-spin / block `stop()` (015 down-peer L2 carry-forward). Fixtures **start the counterparty first** and bound the connect (R5). Live reconnect cells use a **finite reconnect policy** (no busy-spin) + a **`stop()` watchdog** proving `Engine::stop()` returns within a bound (FR-004); the deliberate down-peer case is a **separate regression cell** (FR-028), not in the happy-path matrix. Do not author a live cell that relies on `ioc.run()` to terminate — use the scenario's internal `deadline_ms`.

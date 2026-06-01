@@ -16,8 +16,9 @@ A single named, reproducible interop test.
 | `kind` | `happy` \| `thorny` \| `parity` |
 | `preconditions` | counterparty config + port + fixpp `EngineConfig`/`SessionConfig` + role; for live cells: **counterparty started first** (R5) |
 | `driven_sequence` | the session-event / message sequence to drive (or the wire bytes to inject for a corpus replay) |
-| `pass_criteria` | fixpp FSM end-state on both sides + seqnum deltas (FR-007) + (live) golden diff (FR-006) |
+| `pass_criteria` | fixpp FSM end-state + seqnum deltas + the **wire-observed counterparty terminal behavior** (received Logout / orderly socket close), NOT an internal counterparty-FSM probe (FR-007) + (live) golden diff (FR-006) |
 | `deadline` | internal self-deadline so a hung live I/O probe fails instead of wedging `ioc.run()` (`[[feedback_fail_placeholder_red_test]]`) |
+| `reconnect_policy` | for live reconnect cells: a **finite max-attempts** policy (no busy-spin) + a **`stop()` watchdog** bound asserting `Engine::stop()` returns; the deliberate down-peer/never-listening case is a *separate* cell (FR-004/FR-028, R5) |
 | `skip_reason` | set when a required counterparty binary is unavailable (FR-023) — skip, never silent-pass |
 
 State (per run): `pending → running → {passed, failed, skipped:<reason>, known-limitation:<issue>}`.
@@ -30,13 +31,13 @@ A happy-path cell keyed by the matrix axes (R8).
 |-------|---------|
 | `counterparty` | `quickfix-cpp` \| `quickfix-j` \| `fix8`(placeholder) |
 | `role` | `fixpp-initiator` \| `fixpp-acceptor` |
-| `fix_version` | `FIX.4.4` \| `FIXT.1.1/FIX.5.0SP2` |
+| `fix_version` | `FIX.4.4` (LIVE at v1.0) \| `FIXT.1.1/FIX.5.0SP2` (placeholder, `deferred:fixt-routing` — not executed at v1.0, FR-003) |
 | `security` | `plain-tcp` \| `tls-logon` (FR-025); `mtls-mutual` reserved for v1.1 |
 | `event_chain` | e.g. `logon-hb-logout`, `testrequest-echo`, `reject-invalid-admin`, `seqnum-recovery`, `disconnect-reconnect-noreset` |
 | `business` | `none` for v1.0 cells; A-row cells exist tagged `deferred:app-messages` (FR-005) and are not executed |
 | `golden_ref` | path to `tests/interop/happy/golden/HP-<id>.fix` |
 
-Disposition tags: `live` \| `deferred:app-messages` \| `deferred:fix8-revisit` \| `deferred:v1.1-mtls`. Every axis covered ≥ once or carries a deferred-to-vN.x note (FR-008).
+Disposition tags: `live` \| `deferred:app-messages` \| `deferred:fixt-routing` (FIX 5.0 SP2/FIXT.1.1 cells, FR-003) \| `deferred:fix8-revisit` \| `deferred:v1.1-mtls`. Every axis covered ≥ once or carries a deferred-to-vN.x note (FR-008).
 
 ## E3 — CorpusScenario : Scenario (US2)
 
@@ -50,7 +51,7 @@ A thorny-corpus item derived from an upstream bug.
 | `differentiator` | true when fixpp is spec-correct while upstream is buggy → release-notes positive (FR-015) |
 | `disposition` | `pass` \| `known-limitation:<tracking-issue>` (FR-014) |
 
-Rules: **append-only** across releases (FR-013); a failing `P1`/`watch:P1` blocks the tag unless `known-limitation` with an open issue (FR-014). The executable scenario lives in-repo; the sweep analysis stays in the parent (R2).
+Rules: **append-only** across releases (FR-013); a failing `P1`/`watch:P1` blocks the tag unless `known-limitation` with an open issue (FR-014). The executable scenario lives in-repo; the sweep analysis stays in the parent (R2). The v1.0 sweep is the **initial population** of the corpus (a bounded, capped worklist — FR-010, not an unbounded all-open-issues triage); FR-013's append-only rule governs **subsequent** releases (they add, never remove) — the first bulk construction is not forbidden by it.
 
 ## E4 — ParityRow (US3)
 

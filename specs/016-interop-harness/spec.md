@@ -1,4 +1,4 @@
-# Feature Specification: Interop Harness (Per-Release Interop Gate)
+# Feature Specification: Interop Harness (Session-Layer Interop Gate)
 
 **Feature Branch**: `016-interop-harness`  
 **Created**: 2026-06-01  
@@ -7,7 +7,7 @@
 
 ## Context *(non-normative)*
 
-This feature realizes the Phase-9 per-release interop gate (`phases/phase-9.md`), re-baselined post-015 (`phases/phase-9/REFRESH-2026-06-01-post-015.md`). It bundles three disciplines whose investigation is already complete:
+This feature realizes the **session-layer** slice of the Phase-9 per-release interop gate (`phases/phase-9.md`), re-baselined post-015 (`phases/phase-9/REFRESH-2026-06-01-post-015.md`) — a v1.0-GA *precursor*, not the full release gate (the business-message interop clause of `[const §VII.6]` is an open v1.0-GA residual; see FR-027/SC-008 + the Gate A round-1 clarification). It bundles three disciplines whose investigation is already complete:
 
 - **9.B** — happy-path interop matrix (fixpp as live System-Under-Test against mature reference engines).
 - **9.C** — thorny-issues corpus (upstream-bug replay as an append-only regression suite).
@@ -23,20 +23,25 @@ The prerequisites are met: the session FSM (005), TLS policy (011), transport (0
 - Q: Is the thorny-issues corpus a pre-existing input, or built by this feature? → A: It does not exist yet; this feature performs the full v1.0 sweep (pre-seeded list + last-2-years closed-bug tail + ALL open issues) across QuickFIX-cpp, QuickFIX-J, and Fix8, and consolidates it.
 - Q: Is TLS interop in the v1.0 gate scope? → A: Yes — the 4 TLS-logon cells activated by the post-015 refresh are gated at v1.0 (plain TCP and TLS-logon both gated); mutual-certificate (client-cert) mTLS interop is a v1.1 reach.
 
+### Session 2026-06-01 (Gate A round 1)
+
+- Q: Does this feature's session-only badge discharge `[const §VII.6]`'s v1.0 interop obligation (`Logon → NewOrderSingle → ExecutionReport → Logout`)? → A: **No.** 016 is re-framed as the **session-layer** interop gate (a v1.0-GA precursor). Its Success Criteria explicitly do NOT discharge the business-message clause of `[const §VII.6]`, which remains an **open v1.0-GA residual** satisfied by a later feature when the app-message layer (A-001/A-006, catalogue `backlog`) lands. Made normative in FR-027 + SC-008 (option (c) — spec-framing change, no code, respects user decision #8). A permanent deferral past v1.0 would require an Article XX amendment.
+- Q: Can the v1.0 LIVE matrix include FIX 5.0 SP2 / FIXT.1.1 cells today? → A: **No.** fixpp cannot establish a FIXT.1.1 / FIX 5.0 SP2 session at v1.0 — S-020's FIXT half is `implementing(4.4 only)`, S-025 `DefaultApplVerID(1137)` is `backlog`, and 005 defers FIXT logon-time semantics (all per the post-015 refresh + user #8). The v1.0 LIVE matrix is therefore **FIX 4.4 only**; FIX 5.0 SP2 / FIXT.1.1 cells are placeholder rows tagged `deferred:fixt-routing`, activating when FIXT routing + `DefaultApplVerID(1137)` land. Reflected in FR-003, SC-001, and the matrix axes (data-model E2, scenario-descriptor).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Happy-path session interop against live reference engines (Priority: P1)
 
-A release engineer needs verifiable evidence that fixpp speaks the FIX session protocol correctly against the two most-deployed open-source FIX engines. They run fixpp's session loop against QuickFIX-cpp and QuickFIX-J, in both initiator and acceptor roles, on FIX 4.4 and FIX 5.0 SP2, exercising the full session-admin layer (Logon, Heartbeat active+idle, TestRequest, Reject, sequence-number management, ResendRequest/SequenceReset recovery, Logout, abnormal disconnect + reconnect). Each scenario's wire dialogue is captured and diffed against a per-scenario golden transcript.
+A release engineer needs verifiable evidence that fixpp speaks the FIX session protocol correctly against the two most-deployed open-source FIX engines. They run fixpp's session loop against QuickFIX-cpp and QuickFIX-J, in both initiator and acceptor roles, on FIX 4.4 (the v1.0 LIVE version; FIX 5.0 SP2 / FIXT.1.1 cells are deferred placeholders — FR-003), exercising the full session-admin layer (Logon, Heartbeat active+idle, TestRequest, Reject, sequence-number management, ResendRequest/SequenceReset recovery, Logout, abnormal disconnect + reconnect). Each scenario's wire dialogue is captured and diffed against a per-scenario golden transcript.
 
-**Why this priority**: This is the headline interop evidence — the "Interop verified against QuickFIX-cpp / QuickFIX-J" badge. Without it there is no release gate. It is the minimum viable product: a single role/engine/version cell already delivers standalone value (proof fixpp interoperates at all).
+**Why this priority**: This is the headline interop evidence — the "Interop verified against QuickFIX-cpp / QuickFIX-J" badge. Without it there is no *session-layer* release gate. It is the minimum viable product: a single role/engine/version cell already delivers standalone value (proof fixpp interoperates at all).
 
 **Independent Test**: Stand up one reference engine on a TCP port with a known config, drive a fixpp session on the opposite side, capture both wire streams, and confirm the session reaches the expected FSM end-state on both sides with the expected sequence-number deltas — with no business messages involved.
 
 **Acceptance Scenarios**:
 
 1. **Given** QuickFIX-cpp configured as an acceptor on FIX 4.4, **When** fixpp connects as initiator and completes Logon → idle Heartbeat → TestRequest/Heartbeat → Logout, **Then** both sides end in the disconnected state, the captured wire matches the golden transcript (modulo timestamps/seqnums), and no unexpected administrative messages were exchanged.
-2. **Given** fixpp configured as an acceptor on FIX 5.0 SP2, **When** QuickFIX-J connects as initiator and completes the same session-admin chain, **Then** the same end-state and golden-diff invariants hold from the acceptor perspective.
+2. **Given** fixpp configured as an acceptor on FIX 4.4, **When** QuickFIX-J connects as initiator and completes the same session-admin chain, **Then** the same end-state and golden-diff invariants hold from the acceptor perspective. (The FIXT.1.1 / FIX 5.0 SP2 analogue is a `deferred:fixt-routing` placeholder at v1.0 — FR-003.)
 3. **Given** a session where fixpp's expected inbound sequence number is lower than the counterparty's next outbound (a gap), **When** the counterparty's higher-numbered message arrives, **Then** fixpp drives the spec-conformant recovery exchange (ResendRequest / SequenceReset-GapFill) and the session resynchronizes without a fatal disconnect.
 4. **Given** an established session that is abruptly disconnected, **When** the side configured to reconnect re-establishes with `ResetSeqNumFlag=N`, **Then** sequence continuity is preserved per the spec and the golden transcript confirms no spurious reset.
 5. **Given** a business-message cell of the matrix (e.g., NewOrderSingle → ExecutionReport), **When** the matrix is enumerated, **Then** that cell is present but explicitly tagged deferred (`deferred:app-messages`) with a rationale, not executed.
@@ -127,18 +132,19 @@ An adopter evaluating fixpp wants reassurance it interoperates with the engines 
 
 - **FR-001**: The harness MUST pair fixpp as the System-Under-Test against QuickFIX-cpp and QuickFIX-J as live counterparties.
 - **FR-002**: The harness MUST exercise both roles for each live counterparty: fixpp-initiator ↔ counterparty-acceptor AND fixpp-acceptor ↔ counterparty-initiator.
-- **FR-003**: The harness MUST cover FIX 4.4 and FIX 5.0 SP2 at minimum.
-- **FR-004**: The happy-path matrix MUST exercise the session-admin layer: Logon, Heartbeat (active and idle), TestRequest, Reject, sequence-number management, ResendRequest, SequenceReset (GapFill and Reset modes), Logout, and abnormal disconnect + reconnect with `ResetSeqNumFlag=N`.
+- **FR-003**: The v1.0 LIVE matrix MUST cover **FIX 4.4**. FIX 5.0 SP2 / FIXT.1.1 cells MUST be present as placeholder rows tagged `deferred:fixt-routing` and MUST NOT be executed at v1.0 — fixpp cannot establish a FIXT.1.1 / FIX 5.0 SP2 session today (S-020 FIXT half `implementing(4.4 only)`, S-025 `DefaultApplVerID(1137)` `backlog`, 005 defers FIXT logon-time semantics; user #8). They activate when FIXT routing + `DefaultApplVerID(1137)` land, per the deferred-to-vN.x discipline (FR-008).
+- **FR-004**: The happy-path matrix MUST exercise the session-admin layer: Logon, Heartbeat (active and idle), TestRequest, Reject, sequence-number management, ResendRequest, SequenceReset (GapFill and Reset modes), Logout, and abnormal disconnect + reconnect with `ResetSeqNumFlag=N`. Every live reconnect cell MUST use a **finite reconnect policy (bounded max-attempts)** so a re-connect cannot busy-spin, and MUST assert a **`stop()` watchdog** proving `Engine::stop()` returns within a stated bound. A deliberate **down-peer / never-listening** regression scenario MUST be kept as a separate cell, out of the happy-path matrix, never on the happy path (see FR-028 + research R5).
 - **FR-005**: The happy-path matrix MUST be scoped session-only for v1.0: business-message cells (e.g., NewOrderSingle → ExecutionReport) MUST be present in the matrix but tagged `deferred:app-messages` with a rationale, and MUST NOT be executed.
 - **FR-006**: Each happy-path scenario MUST capture the byte-level wire dialogue of both sides and diff it against a per-scenario golden transcript, with a normalization layer that excludes timestamps, sequence numbers, and other non-deterministic fields from the diff.
-- **FR-007**: Each happy-path scenario MUST assert the session FSM end-state on both sides and the sequence-number deltas, in addition to the wire diff.
+- **FR-007**: Each happy-path scenario MUST assert **fixpp's** session FSM end-state and the sequence-number deltas, plus the **wire-observed terminal behavior of the counterparty** (e.g. a received `Logout(35=5)` or an orderly socket close in the capture) — NOT an internal probe of the counterparty's FSM state. A wire transcript is terminal-behavior evidence, not counterparty-FSM-state observation.
 - **FR-008**: Every matrix axis (counterparty × role × FIX-version × session-event-chain) MUST be covered at least once; any skipped cell MUST carry an explicit deferred-to-vN.x note with rationale.
 - **FR-009**: Fix8 MUST be treated as corpus-only at v1.0; its happy-path cells MUST be placeholder rows tagged for a later live-disposition revisit and MUST NOT be populated.
 - **FR-025**: The v1.0 matrix MUST gate both plain-TCP and TLS-logon session interop — the 4 TLS-logon cells activated by the post-015 refresh are in scope. Mutual-certificate (client-cert) mTLS interop cells MAY be deferred to v1.1 and, if deferred, MUST carry an explicit deferred-to-v1.1 note.
+- **FR-028**: A deliberate **down-peer / never-listening-counterparty** regression cell MUST exist as a *separate* scenario (not in the happy-path matrix) that proves `Engine::stop()` returns within a stated bound when an initiator is aimed at a peer that never accepts — guarding the 015 down-peer carry-forward (CLAUDE.md L2). It MUST NOT silently pass on a hang; the watchdog is the assertion.
 
 **Thorny corpus (US2)**
 
-- **FR-010**: This feature MUST perform the v1.0 thorny-issues sweep itself (the corpus does not pre-exist) and consolidate it: the pre-seeded list + the last-2-years closed-with-fix tail + ALL open issues across QuickFIX-cpp, QuickFIX-J, and Fix8 that touch wire / session / persistence behavior.
+- **FR-010**: This feature MUST perform the v1.0 thorny-issues sweep against a **bounded, enumerable worklist** (the corpus does not pre-exist): the pre-seeded list (`phase-9-harness/manifest/scenarios.yaml`) + a **capped per-engine closed-with-fix tail** (last-2-years, sized cap stated in the corpus manifest) across QuickFIX-cpp, QuickFIX-J, and Fix8 that touch wire / session / persistence behavior. The open-issue `watch:` bucket is **explicitly phased as a follow-on sweep** beyond the v1.0 capped worklist (not an unbounded in-feature triage of all open issues across three trackers), so `/speckit-tasks` can produce a bounded task list. This respects the Phase-9 plan's own 9.A–9.D decomposition (`phases/phase-9.md`) and avoids runaway scope; the append-only clause (FR-013) governs subsequent releases. **Scope-refinement flag:** phasing the open-issue `watch:` bucket as a follow-on sweep is a deliberate **refinement** (a bounding choice) of the phase-9.md (2026-05-22) "closed + ALL open at v1.0" scope decision — recorded here as such, not a silent contradiction; the open-issue tail moves to a follow-on sweep to keep v1.0 `/speckit-tasks` bounded.
 - **FR-011**: Each corpus scenario MUST record its upstream provenance (engine, issue/PR reference, state) so the motivating bug is traceable.
 - **FR-012**: Corpus scenarios MUST be bucketed by priority: closed-bug scenarios as P1 (release-blocking) / P2 / P3; open-issue scenarios as `watch:P1` / `watch:P2` / `watch:info`.
 - **FR-013**: The corpus MUST be append-only across releases — a new release sweep adds scenarios and never removes prior ones.
@@ -170,6 +176,10 @@ An adopter evaluating fixpp wants reassurance it interoperates with the engines 
 
 - **FR-026**: The committed library deliverable MUST be the SUT-side artifacts under `tests/interop/`: the fixpp scenario drivers, the per-scenario golden transcripts, and the parity unit tests. The cross-engine fork-exec orchestration and the counterparty-engine clones/builds MUST remain in the gitignored parent harness (`phase-9-harness/`) and MUST NOT be vendored into the submodule.
 
+**v1.0-GA residual (§VII.6 disposition)**
+
+- **FR-027**: The Success Criteria of this feature **do NOT discharge** the business-message interop clause of `[const §VII.6]` (`Logon → NewOrderSingle → ExecutionReport → Logout`). That clause remains an **open v1.0-GA residual**, satisfied by a later feature when the app-message layer (A-001/A-006, catalogue `backlog`) lands; it MUST be tracked in `spec/behaviors-and-limitations.md` + the catalogue, not marked closed by 016's session-only badge. The business cells stay present-but-deferred per FR-005. A permanent deferral past v1.0 requires an Article XX amendment.
+
 ### Key Entities
 
 - **Scenario**: a single named, reproducible interop test (happy-path cell or corpus item) with pre-conditions, a driven message/event sequence, and pass/fail criteria.
@@ -184,32 +194,34 @@ An adopter evaluating fixpp wants reassurance it interoperates with the engines 
 
 ### Measurable Outcomes
 
-- **SC-001**: The happy-path matrix passes for both live counterparties (QuickFIX-cpp and QuickFIX-J), in both initiator and acceptor roles, across FIX 4.4 and FIX 5.0 SP2, for the full session-admin event set including the 4 TLS-logon cells — 100% of non-deferred cells green.
+- **SC-001**: The happy-path matrix passes for both live counterparties (QuickFIX-cpp and QuickFIX-J), in both initiator and acceptor roles, on **FIX 4.4** (the v1.0 LIVE version axis; FIX 5.0 SP2 / FIXT.1.1 cells are `deferred:fixt-routing` placeholders, FR-003), for the full session-admin event set including the 4 TLS-logon cells — 100% of non-deferred cells green.
 - **SC-002**: 100% of P1 and `watch:P1` corpus scenarios either pass or are recorded as documented known-limitations with open tracking issues; zero P1 failures are silently unaddressed at the GA tag.
 - **SC-003**: 100% of parity rows dispositioned GAP are closed (COVERED with a citation) or explicitly deferred with a tracking entry; no GAP row is left undispositioned.
 - **SC-004**: The full matrix + corpus pass under all three build configurations (normal, TSan, ASan/UBSan) with zero sanitizer findings other than written-justification suppressions.
 - **SC-005**: The per-PR smoke scenario completes within the project's PR-latency budget on the normal build and reliably catches an introduced wire regression.
 - **SC-006**: Every executed scenario reconciles its assertions to a cited FIX specification section, with zero assertions justified by "because engine X does it that way".
 - **SC-007**: The published release notes carry the interop badge with exact counterparty versions and links to archived transcripts and the documented-limitations list.
+- **SC-008**: The `[const §VII.6]` business-message interop flow (`Logon → NewOrderSingle → ExecutionReport → Logout`) is **NOT** claimed as discharged by this feature; it is recorded as an open v1.0-GA residual in `spec/behaviors-and-limitations.md` + the catalogue with a forward pointer to the app-message-layer feature (A-001/A-006). Zero artifact of 016 asserts the business flow ran or that the session-only badge closes §VII.6 (FR-027).
 
 ## Normative References
 
 The harness reconciles every assertion against these (FR-018). Per `[const §VI.5]`, these are the coverage-index entries that inform this spec:
 
 - **`[FIX-TC]`** — FIX Session Layer Test Cases (TC-001..TC-017). The conformance oracle the harness reconciles to; the engine-drift rule (FR-018) resolves reference-engine disagreement against these + the session-layer spec, never against an engine.
-- **`[FIX-SL §4.4]`** — message recovery: `ResendRequest(35=2)`, `SequenceReset(35=4)` GapFill/Reset modes, `ResetSeqNumFlag(141)` (US1 acceptance 3/4, recovery cells; informed by 013).
-- **`[FIX-SL §6.2]`** — session-level sequence number management and gap detection (US1 acceptance 3, seqnum-delta assertions).
-- **`[FIX-SL §5.3.x]`** — administrative messages: Logon, Logout, Heartbeat, TestRequest, Reject (US1 session-admin event set, FR-004).
-- **`[FIXS §3.2]`, `[FIXS §3.4]`** — FIX-over-TLS session profile + certificate validation (FR-025 TLS-logon cells; inherited from 011/012).
-- **`[FIX50SP2 §3.1]`** — FIX 5.0 SP2 / FIXT.1.1 session routing (FR-003 FIX-version axis).
-- **`[const §VII.6]`** — the v1.0 interop requirement against an independent FIX implementation (QuickFIX); see the Constitution-tension note in `plan.md` re: its `NewOrderSingle → ExecutionReport` clause vs. the session-only scope.
+- **`[FIX-SL §4.8.2]`** Request retransmission of messages (ResendRequest), **`[FIX-SL §4.8.5]`** Gap fill process (SequenceReset-GapFill), **`[FIX-SL §4.8.6]`** Sequence reset (hard reset, GapFillFlag=N), **`[FIX-SL §4.4.2]`/`[FIX-SL §4.4.3]`** Using ResetSeqNumFlag(141) — message recovery (US1 acceptance 3/4, recovery cells; informed by 013).
+- **`[FIX-SL §4.5.3]`** Missing sequence number (gap detection → ResendRequest), **`[FIX-SL §4.8.1]`** Ordered message processing — session-level sequence-number management + gap detection (US1 acceptance 3, seqnum-delta assertions).
+- **`[FIX-SL §4.3]`** Establishing a FIX connection (Logon), **`[FIX-SL §4.5.1]`** FIX connection keep-alive (Heartbeat), **`[FIX-SL §4.5.5]`** Test Request processing, **`[FIX-SL §4.5.4]`** Rejecting invalid messages (Reject 35=3), **`[FIX-SL §4.6]`** FIX connection termination (Logout) — administrative messages (US1 session-admin event set, FR-004).
+- **`[FIXS §3.2]`** Protocol features (compression/renegotiation/session caching), **`[FIXS §3.4]`** Certificate parameters — FIX-over-TLS session profile + certificate validation (FR-025 TLS-logon cells; inherited from 011/012).
+- **`[FIX-SL §4.3.7]`** Specifying application version (DefaultApplVerID 1137 / FIXT) — FIXT.1.1 / FIX 5.0 SP2 session routing (FR-003 deferred FIX-version axis; `deferred:fixt-routing` at v1.0).
+- **`[const §VII.6]`** — the v1.0 interop requirement against an independent FIX implementation (QuickFIX). Its `NewOrderSingle → ExecutionReport` business-message clause is an **open v1.0-GA residual** that 016's session-only badge does NOT discharge — made normative in FR-027 + SC-008.
 - **`[const §IX.2]`** — Tier-1 sanitizer matrix (ASan/UBSan/TSan), the basis for FR-019/FR-020.
 
 ## Assumptions
 
-- **Scope is session-only for v1.0** (matrix option (a) per the post-015 refresh and user decision #8): business-message families are deferred until a real counterparty engagement requires them; the headline interop evidence is the FIX session layer.
+- **Scope is session-only for v1.0** (matrix option (a) per the post-015 refresh and user decision #8): business-message families are deferred until a real counterparty engagement requires them; the headline interop evidence is the FIX session layer. The `[const §VII.6]` business-message flow stays an open v1.0-GA residual (FR-027/SC-008).
+- **LIVE FIX-version axis is FIX 4.4 only for v1.0**: FIX 5.0 SP2 / FIXT.1.1 live cells are deferred (`deferred:fixt-routing`) because fixpp cannot establish a FIXT session today (S-020 FIXT half `implementing(4.4 only)`, S-025 `DefaultApplVerID(1137)` `backlog`, 005 defers FIXT logon-time semantics; user #8). They activate when FIXT routing + `DefaultApplVerID(1137)` land.
 - **Live counterparties at v1.0 are QuickFIX-cpp and QuickFIX-J**; Fix8 is corpus-only at v1.0 (its live disposition is revisited later based on corpus findings).
-- **The transport dependency is satisfied**: TCP/TLS transport (012) and per-session live wiring + public runtime engine (013/014/015) have shipped, so an end-to-end fixpp session is drivable against a live counterparty without bundling additional transport work into this feature.
+- **The transport dependency is satisfied for the happy path**: TCP/TLS transport (012) and per-session live wiring + public runtime engine (013/014/015) have shipped, so an end-to-end fixpp session is drivable against a live counterparty for the established-session cells without additional transport work. **One bounded production prerequisite is acknowledged for the reconnect cells** (FR-004/FR-028): per the 015 down-peer carry-forward (CLAUDE.md L2) there is no `SessionConfig` reconnect-policy field yet and the engine connect is not promptly cancellable, so reliable reconnect cells require either a small bounded production change (wire a `SessionConfig` reconnect-policy field + bound/cancel the connect) or scoping v1.0 reconnect cells to avoid it. This is NOT "zero production surface" — see plan Production-surface escape hatches.
 - **9.B and 9.G inputs exist; 9.C does not**: the re-baselined happy-path matrix (`cross-communication-test-plan.md`) and the parity matrix (`unit-test-parity-matrix.md`) already exist as research inputs, and the pre-9.F gap-closure slate (S-021 EncryptMethod, S-023 reset confirmation, integer-overflow bounds) has landed. The thorny-issues corpus does NOT yet exist — this feature performs its full v1.0 sweep + consolidation (see FR-010).
 - **A reference-vs-reference self-test harness already exists** (`phase-9-harness/`); this feature pairs fixpp into it as the SUT and re-anchors each converted assertion against the FIX spec.
 - **TLS posture at v1.0**: both plain TCP and TLS-logon session interop gate v1.0 (the 4 TLS-logon cells were activated by the post-015 refresh now that TLS policy (011) and TLS transport (012) shipped); mutual-certificate (client-cert) mTLS interop is the v1.1 reach (FR-025).

@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Interop Harness (Per-Release Interop Gate)
+# Specification Quality Checklist: Interop Harness (Session-Layer Interop Gate)
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-06-01

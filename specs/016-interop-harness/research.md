@@ -35,8 +35,8 @@ This phase resolves the plan's ⚠ items and pins the decisions that shape `data
 
 ## R5 — Engine teardown / down-peer landmine under live traffic
 
-- **Decision**: the happy-path fixture **starts the counterparty (or its listener) before** bringing up a fixpp initiator, and bounds the test with an internal deadline; the lifecycle cell asserts clean `Engine::stop()` join under the sanitizer matrix.
-- **Rationale**: the 015 down-peer carry-forward (CLAUDE.md L2) shows a fixpp initiator aimed at a not-yet-listening peer can busy-spin (empty `ReconnectPolicy`) and that `async_connect` isn't promptly total-cancelled — a real interop-fixture hazard. Ordering + a bounded connect avoids triggering it inside the gate; if a cell *needs* the down-peer path, it's a deliberate scenario, not an accident. Cross-ref `[[feedback_engine_stop_must_close_transports_total_cancel_insufficient]]` + `[[feedback_fail_placeholder_red_test]]` (live-I/O probes need an internal self-deadline or `ioc.run()` hangs).
+- **Decision**: the happy-path fixture **starts the counterparty (or its listener) before** bringing up a fixpp initiator, and bounds the test with an internal deadline. Every **live reconnect cell** additionally MUST (a) use a **finite reconnect policy / max-attempts** (no empty-`ReconnectPolicy` busy-spin) and (b) carry a **`stop()` watchdog** asserting `Engine::stop()` returns within a stated bound — an internal deadline alone only *detects* a hang, it does not make the gate reliable nor prove `stop()` returns. The deliberate down-peer / never-listening case is a **separate regression cell** (FR-028), kept out of the happy-path matrix.
+- **Rationale**: the 015 down-peer carry-forward (CLAUDE.md L2) shows a fixpp initiator aimed at a not-yet-listening peer can busy-spin (empty `ReconnectPolicy`) and that `async_connect` isn't promptly total-cancelled — a real interop-fixture hazard. A reconnect cell re-enters that path *after* the listener was initially valid, so the finite policy + watchdog are required, not optional. Cross-ref `[[feedback_engine_stop_must_close_transports_total_cancel_insufficient]]` + `[[feedback_fail_placeholder_red_test]]` (live-I/O probes need an internal self-deadline or `ioc.run()` hangs). **Production prerequisite:** a reliable finite reconnect policy requires the `SessionConfig` reconnect-policy field that does not yet exist (CLAUDE.md L2) — see R-prod.
 
 ## R6 — Benchmark scope
 
@@ -51,8 +51,8 @@ This phase resolves the plan's ⚠ items and pins the decisions that shape `data
 
 ## R8 — Matrix axes + TLS-logon cells for v1.0
 
-- **Decision**: v1.0 live matrix = **{QuickFIX-cpp, QuickFIX-J} × {fixpp-initiator, fixpp-acceptor} × {FIX 4.4, FIX 5.0 SP2} × session-admin chains**, plus the **4 TLS-logon cells** activated by the refresh (FR-025), plus **abnormal-disconnect + reconnect (`ResetSeqNumFlag=N`)** and the **recovery** chain (ResendRequest/SequenceReset, live now via 013). Business cells present but `deferred:app-messages`. Fix8 cells are placeholder/`deferred:fix8-revisit` (corpus-only, FR-009).
-- **Rationale**: matches `cross-communication-test-plan.md` (re-baselined by the refresh) + the clarify-Q3 TLS answer. The refresh's §A.1 moved the recovery + 4 TLS scenarios out of `fixpp gap` into the active matrix.
+- **Decision**: v1.0 live matrix = **{QuickFIX-cpp, QuickFIX-J} × {fixpp-initiator, fixpp-acceptor} × {FIX 4.4} × session-admin chains**, plus the **4 TLS-logon cells** activated by the refresh (FR-025), plus **abnormal-disconnect + reconnect (`ResetSeqNumFlag=N`)** and the **recovery** chain (ResendRequest/SequenceReset, live now via 013). **FIX 5.0 SP2 / FIXT.1.1 cells are placeholder rows tagged `deferred:fixt-routing`, NOT live at v1.0** — fixpp cannot establish a FIXT/5.0SP2 session today (S-020 FIXT half `implementing(4.4 only)`, S-025 `DefaultApplVerID(1137)` `backlog` per `REFRESH-2026-06-01-post-015.md`; `cross-communication-test-plan.md` states the FIXT/5.0SP2 Logon cells require S-020+S-025+S-021 and 005 defers FIXT logon-time semantics; user #8). Business cells present but `deferred:app-messages`. Fix8 cells are placeholder/`deferred:fix8-revisit` (corpus-only, FR-009).
+- **Rationale**: matches `cross-communication-test-plan.md` (re-baselined by the refresh) + the clarify-Q3 TLS answer. The refresh's §A.1 moved the recovery + 4 TLS scenarios out of `fixpp gap` into the active matrix. The FIXT/5.0SP2 deferral keeps FR-003/SC-001 realizable and consistent with the parity contract's Bucket-3 `deferred:by-design`; the cells activate when FIXT routing + `DefaultApplVerID(1137)` land.
 - **mTLS**: mutual-certificate (client-cert) interop is the v1.1 reach; v1.0 TLS-logon cells use a `SecurityProfile` that the counterparty config can satisfy (server-auth or pinned per fixture).
 
 ## R-parity — US3 GAP-closure scope (from `unit-test-parity-matrix.md`)
@@ -64,6 +64,19 @@ This phase resolves the plan's ⚠ items and pins the decisions that shape `data
 - **Rationale**: behaviors exist; this is witness-writing + a model assertion, not new production behavior. If the Bucket-4 witness *fails* (replay does NOT subsume some queue behavior), that becomes a scoped session-layer finding surfaced at implement/Gate-B — not pre-built.
 - **Open**: the acceptor HeartBtInt-echo assertion (Bucket-1) is low-value; include only if cheap.
 
+## R-scope — bounding the thorny-corpus sweep (avoid runaway scope)
+
+- **Decision**: the v1.0 sweep (FR-010) runs against a **bounded, enumerable worklist** — the pre-seeded list (`phase-9-harness/manifest/scenarios.yaml`) + a **capped per-engine closed-with-fix tail** (sized cap recorded in the corpus manifest). The open-issue `watch:` bucket is **phased as a follow-on sweep**, not folded into this feature as an unbounded all-open-issues triage across three trackers.
+- **Rationale**: `phases/phase-9.md` explicitly decomposes the sweep+consolidation into sub-phases 9.A–9.D precisely because it is too large for one effort; an unbounded corpus makes `/speckit-tasks` unable to emit a bounded task list and risks the runaway-scope failure mode (`[[feedback_phase_implementer_sonnet_runaway_scope]]`). The first invocation seeds the corpus; FR-013 append-only governs later releases.
+- **Scope-refinement flag**: phasing the open-issue `watch:` bucket as a follow-on sweep is a deliberate **refinement** (a bounding choice) of the phase-9.md (2026-05-22) "closed + ALL open at v1.0" scope decision — recorded here as such, not a silent contradiction; the open-issue tail moves to a follow-on sweep to keep v1.0 `/speckit-tasks` bounded.
+
+## R-prod — production-surface escape hatches + coverage disposition (Article IX §1)
+
+- **Decision**: the feature is **tests-only on the happy path** (R3), but two named paths can touch `src/`/`include/` production code, each pinned with an explicit boundary:
+  1. **Reconnect-policy field (FR-004/FR-028 prerequisite)** — the 015 down-peer carry-forward (CLAUDE.md L2) confirms there is **no `SessionConfig` reconnect-policy field** and the connect is not promptly cancellable. Either (a) scope-in a *small, bounded* production change (wire a `SessionConfig` reconnect-policy field + bound/cancel the engine connect) — then its touched lines fall under Article IX §1 95/85 with the standard `verify.md` assessment — or (b) restrict v1.0 reconnect cells to a shape that avoids it (e.g. acceptor-side only) and defer initiator-reconnect cells. The choice is made at `/speckit-tasks`; the "near-zero production surface" claim is bounded, not zero.
+  2. **Bucket-4 model confirmation (R-parity)** — default is confirm-via-witness, no impl. If the witness *fails*, the resulting session-layer fix **leaves 016 as a separate feature**, carrying its own Article IX §1 coverage; 016 does not silently absorb a behavior change.
+- **Coverage disposition**: if path (1a) is taken, the touched module gets a coverage-index entry + a `verify.md` 95/85 assessment; if 016 ships purely tests-only after scoping (1b + Bucket-4 confirmed), the Article IX §1 touched-module gate is **N/A by construction** and `verify.md` states that explicitly.
+
 ---
 
 ## Consolidated decisions feeding Phase 1
@@ -74,10 +87,12 @@ This phase resolves the plan's ⚠ items and pins the decisions that shape `data
 | R2 | Executable scenarios + index in-repo; analysis in parent | data-model `CorpusScenario`; contracts/parity-disposition |
 | R3 | No library tap; tests-only production surface | Project Structure (tests/interop only) |
 | R4 | Pattern-A CI; smoke cell `HP-QFcpp-init-fix44-logon-hb-logout` | quickstart; FR-022 |
-| R5 | Counterparty-first ordering + bounded/self-deadlined cells | data-model `Scenario.preconditions`; quickstart |
+| R5 | Counterparty-first ordering + finite reconnect policy + stop watchdog + separate down-peer cell | data-model `Scenario` (`reconnect_policy`); FR-004/FR-028; quickstart |
 | R6 | Bench out of scope | (exclusion) |
-| R7 | §VII.6 stays open v1.0-GA item; Gate A adjudicates | Complexity Tracking; /analyze |
-| R8 | Matrix axes incl. 4 TLS-logon cells; Fix8 placeholder | data-model `MatrixCell`; contracts/scenario-descriptor |
+| R7 | §VII.6 stays open v1.0-GA residual (NORMATIVE: FR-027/SC-008); session-layer reframing | spec FR-027/SC-008; Clarifications |
+| R8 | Matrix axes FIX 4.4 LIVE only (5.0SP2/FIXT `deferred:fixt-routing`) + 4 TLS-logon; Fix8 placeholder | data-model `MatrixCell`; FR-003; contracts/scenario-descriptor + parity-disposition |
 | R-parity | Witness-only GAP closure + Bucket-4 model confirmation | data-model `ParityRow`; contracts/parity-disposition |
+| R-scope | Bounded/capped corpus worklist; open-issue tail phased follow-on | spec FR-010; data-model `CorpusScenario` |
+| R-prod | Two production escape hatches pinned (reconnect field / Bucket-4); coverage disposition | plan Production surface; Constitution Check IX.1 |
 
 **All NEEDS CLARIFICATION resolved.** No unresolved unknowns block Phase 1.
