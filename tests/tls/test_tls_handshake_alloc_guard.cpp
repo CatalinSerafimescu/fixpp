@@ -23,39 +23,39 @@
 // alloc counting via counting_resource still catches PMR escapes.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <array>
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory_resource>
 
 // mallocnesia weak symbols — replaced by LD_PRELOAD.
 extern "C" {
 __attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end()   {}
+__attribute__((weak)) void alloc_guard_end() {}
 }
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn = "CN=alloc") {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
 
 // Minimal counting_resource: tracks bytes allocated via PMR channel.
 class counting_resource : public std::pmr::memory_resource {
- public:
+public:
     std::size_t bytes_allocated = 0;
 
- private:
+private:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override {
         bytes_allocated += bytes;
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
@@ -108,8 +108,7 @@ TEST(TlsHandshakeAllocGuard, FindAndSnapshotZeroPMRAllocAfterWarmup) {
     }
 
     std::size_t hot_allocs = counter.bytes_allocated - allocs_before;
-    EXPECT_EQ(hot_allocs, 0u)
-        << "find/snapshot must not allocate via PMR after warm-up (FR-007)";
+    EXPECT_EQ(hot_allocs, 0u) << "find/snapshot must not allocate via PMR after warm-up (FR-007)";
 }
 
 // ── GlobalMallocGate: mallocnesia ─────────────────────────────────────────────

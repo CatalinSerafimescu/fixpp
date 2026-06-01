@@ -37,10 +37,22 @@
 // Anchors: research D-10; spec FR-006 (HeartBtInt); data-model.md Active row;
 // [FIX-SL §4.5]; tasks.md T038/T042. [const §VII.5]: ships only in-scope
 // subset green; 4a deferred with traceability.
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -48,23 +60,9 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -72,20 +70,19 @@ namespace fixpp::session::test {
 
 namespace {
 
-static std::vector<std::byte> make_raw_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra_fields = {}) {
+static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_fields.empty()) { body += std::string(extra_fields); }
+    if (!extra_fields.empty()) {
+        body += std::string(extra_fields);
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
@@ -93,14 +90,18 @@ static std::vector<std::byte> make_raw_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> result;
-    for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
     return result;
 }
 
@@ -108,10 +109,14 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return wire.substr(pos); }
+    if (end == std::string::npos) {
+        return wire.substr(pos);
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -130,19 +135,19 @@ protected:
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(int heartbt = 30) {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         // RC#C (gate-b/r1): bilateral_lenient — liveness tests don't exercise reset.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -158,7 +163,8 @@ protected:
 
         // Peer sends Logon ack (seq=1).
         auto logon = make_raw_frame("FIX.4.2", "A", 1, "TW", "ISLD",
-            "98=0\001" "108=30\001");
+                                    "98=0\001"
+                                    "108=30\001");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
@@ -172,8 +178,7 @@ protected:
 
     // Clean-up close: advance clock past timeout and drain.
     void do_close(Session& sess) {
-        auto close_fut = asio::co_spawn(
-            ioc, sess.close(close_mode::graceful), asio::use_future);
+        auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
         clock->advance(std::chrono::seconds{3});
@@ -197,9 +202,7 @@ protected:
 TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
     auto cfg = make_cfg(30);
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active(sess, td);
@@ -209,16 +212,14 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
     const std::size_t before = td.sent_count();
 
     // Oracle step: send inbound TestRequest(35=1, 34=2, 112=HELLO).
-    auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD",
-        "112=HELLO\x01");
+    auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=HELLO\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     ASSERT_TRUE(fut.get().has_value()) << "on_inbound_frame(TestRequest) failed";
 
     // Session must remain Active.
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "Inbound TestRequest must not change FSM state";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "Inbound TestRequest must not change FSM state";
 
     // Engine must have emitted a Heartbeat (35=0) in response.
     ASSERT_GT(td.sent_count(), before)
@@ -239,10 +240,8 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
             break;
         }
     }
-    EXPECT_TRUE(found_hb)
-        << "Engine must emit Heartbeat(35=0) in reply to TestRequest";
-    EXPECT_EQ(hb_test_req_id, "HELLO")
-        << "Heartbeat must echo the inbound TestReqID(112=HELLO)";
+    EXPECT_TRUE(found_hb) << "Engine must emit Heartbeat(35=0) in reply to TestRequest";
+    EXPECT_EQ(hb_test_req_id, "HELLO") << "Heartbeat must echo the inbound TestReqID(112=HELLO)";
 
     do_close(sess);
 }
@@ -254,9 +253,7 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
 TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     auto cfg = make_cfg(30);
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active(sess, td);
@@ -265,8 +262,7 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     const std::size_t before = td.sent_count();
 
     // Send TestRequest with a non-trivial TestReqID.
-    auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD",
-        "112=LIVENESS_PROBE_42\x01");
+    auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=LIVENESS_PROBE_42\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();

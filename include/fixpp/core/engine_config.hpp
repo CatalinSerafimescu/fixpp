@@ -15,26 +15,37 @@
 // specs/007-threading-clock/contracts/engine_config.hpp.
 #pragma once
 
+#include <asio/any_io_executor.hpp>
 #include <atomic>
 #include <cstring>
+#include <fixpp/core/clock.hpp>
+#include <fixpp/core/error.hpp>  // expected_t / error (clock_not_set)
+#include <fixpp/core/trace_context.hpp>
+#include <fixpp/dict/version_registry.hpp>          // dict::version_registry (2d construction)
+#include <fixpp/service/control_plane_factory.hpp>  // unique_ptr member ⇒ complete type
 #include <memory>
 #include <memory_resource>
 #include <vector>
 
-#include <asio/any_io_executor.hpp>
-
-#include <fixpp/core/clock.hpp>
-#include <fixpp/core/error.hpp>                       // expected_t / error (clock_not_set)
-#include <fixpp/core/trace_context.hpp>
-#include <fixpp/dict/version_registry.hpp>            // dict::version_registry (2d construction)
-#include <fixpp/service/control_plane_factory.hpp>  // unique_ptr member ⇒ complete type
-
-namespace fixpp::dict      { class Dictionary; }
-namespace fixpp::core      { class Logger; }
-namespace fixpp::otel      { class TracerProvider; class MeterProvider; }
-namespace fixpp::session   { class MessageStoreFactory; }   // shared_ptr — incomplete OK
-namespace fixpp::tls       { class cert_source; }
-namespace fixpp::transport { class TransportFactory; }       // shared_ptr — incomplete OK
+namespace fixpp::dict {
+class Dictionary;
+}
+namespace fixpp::core {
+class Logger;
+}
+namespace fixpp::otel {
+class TracerProvider;
+class MeterProvider;
+}  // namespace fixpp::otel
+namespace fixpp::session {
+class MessageStoreFactory;
+}  // namespace fixpp::session
+namespace fixpp::tls {
+class cert_source;
+}
+namespace fixpp::transport {
+class TransportFactory;
+}  // namespace fixpp::transport
 
 namespace fixpp::core {
 
@@ -54,9 +65,7 @@ class trace_context_snapshot {
 public:
     trace_context_snapshot() noexcept { store(fixpp::otel::trace_context{}); }
 
-    explicit trace_context_snapshot(const fixpp::otel::trace_context& v) noexcept {
-        store(v);
-    }
+    explicit trace_context_snapshot(const fixpp::otel::trace_context& v) noexcept { store(v); }
 
     void store(const fixpp::otel::trace_context& v) noexcept {
         if constexpr (kLockFree) {
@@ -79,11 +88,15 @@ public:
             fixpp::otel::trace_context out{};
             for (;;) {
                 const auto s1 = seq_.load(std::memory_order_acquire);
-                if ((s1 & 1U) != 0U) { continue; }    // writer mid-update
+                if ((s1 & 1U) != 0U) {
+                    continue;
+                }  // writer mid-update
                 std::memcpy(&out, &bytes_, sizeof(out));
                 std::atomic_thread_fence(std::memory_order_acquire);
                 const auto s2 = seq_.load(std::memory_order_relaxed);
-                if (s1 == s2) { return out; }          // consistent snapshot
+                if (s1 == s2) {
+                    return out;
+                }  // consistent snapshot
             }
         }
     }
@@ -91,34 +104,33 @@ public:
     [[nodiscard]] static constexpr bool lock_free() noexcept { return kLockFree; }
 
 private:
-    static constexpr bool kLockFree =
-        std::atomic<fixpp::otel::trace_context>::is_always_lock_free;
+    static constexpr bool kLockFree = std::atomic<fixpp::otel::trace_context>::is_always_lock_free;
 
     // Only one of the two storage paths is ever used (selected at compile
     // time); both are declared so the type stays a single value member.
     std::atomic<fixpp::otel::trace_context> atom_;
-    std::atomic<std::uint32_t>              seq_{0};
-    fixpp::otel::trace_context              bytes_{};
+    std::atomic<std::uint32_t> seq_{0};
+    fixpp::otel::trace_context bytes_{};
 };
 
 }  // namespace detail
 
 struct EngineConfig {
-    asio::any_io_executor    executor;
-    std::shared_ptr<Clock>   clock;                 // rejected if null @ Engine::open
+    asio::any_io_executor executor;
+    std::shared_ptr<Clock> clock;  // rejected if null @ Engine::open
 
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
 
     std::pmr::memory_resource* default_message_resource = std::pmr::get_default_resource();
     std::pmr::memory_resource* default_session_resource = std::pmr::get_default_resource();
 
-    std::shared_ptr<fixpp::core::Logger>          logger;   // null → no-op
-    std::shared_ptr<fixpp::otel::TracerProvider>  tracer;   // null → no-op
-    std::shared_ptr<fixpp::otel::MeterProvider>   meter;    // null → no-op
+    std::shared_ptr<fixpp::core::Logger> logger;          // null → no-op
+    std::shared_ptr<fixpp::otel::TracerProvider> tracer;  // null → no-op
+    std::shared_ptr<fixpp::otel::MeterProvider> meter;    // null → no-op
 
     std::shared_ptr<fixpp::session::MessageStoreFactory> default_store_factory;
-    std::shared_ptr<fixpp::tls::cert_source>             default_cert_source;
-    std::shared_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
+    std::shared_ptr<fixpp::tls::cert_source> default_cert_source;
+    std::shared_ptr<fixpp::transport::TransportFactory> default_transport_factory;
 
     // ── 008-message-store: per-session storage-DoS cap (FR-014a) and the
     //    shared file-I/O executor for FileStore async pwrite/fdatasync
@@ -137,8 +149,8 @@ struct EngineConfig {
     //      MemoryStore impls silently discard it. FileStoreFactory rejects
     //      with store_factory_failed when both the Config-supplied executor
     //      AND this threaded-in value are empty (FR-024 / I-13).
-    std::size_t              max_store_memory_per_session = 1ULL << 30;
-    asio::any_io_executor    file_io_executor;
+    std::size_t max_store_memory_per_session = 1ULL << 30;
+    asio::any_io_executor file_io_executor;
 
     // Seed value; the engine publishes/reads it via the atomic snapshot below
     // (the engine-fallback trace-context path — FR-015 / I-12).
@@ -153,8 +165,7 @@ struct EngineConfig {
 // establishment is downstream); validate_engine_config() is the minimal
 // 2d-owned realization of that engine-open invariant — the broader Engine
 // calls it at open. Additional engine-open config invariants accrue here.
-[[nodiscard]] inline expected_t<void>
-validate_engine_config(const EngineConfig& cfg) noexcept {
+[[nodiscard]] inline expected_t<void> validate_engine_config(const EngineConfig& cfg) noexcept {
     if (cfg.clock == nullptr) {
         return std::unexpected(error::clock_not_set);
     }
@@ -177,8 +188,8 @@ validate_engine_config(const EngineConfig& cfg) noexcept {
 //
 // Returns expected_t<version_registry> (always succeeds for a well-formed
 // EngineConfig; errors during get() are the registry's responsibility).
-[[nodiscard]] inline expected_t<fixpp::dict::version_registry>
-build_version_registry(const EngineConfig& cfg) noexcept {
+[[nodiscard]] inline expected_t<fixpp::dict::version_registry> build_version_registry(
+    const EngineConfig& cfg) noexcept {
     return fixpp::dict::version_registry{cfg.dictionaries};
 }
 

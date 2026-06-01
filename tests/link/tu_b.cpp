@@ -6,7 +6,9 @@
 // library never defines that specialization, so the link must fail with an
 // "undefined reference to ... decimal_alias_sentinel<...mismatch_type>::tag"
 // message (AC-B3).
-namespace fixpp::core::test { struct mismatch_type {}; }
+namespace fixpp::core::test {
+struct mismatch_type {};
+}  // namespace fixpp::core::test
 #include "fixpp/core/decimal_alias.hpp"
 extern int tu_a_dummy();
 int tu_b_dummy() { return 0; }

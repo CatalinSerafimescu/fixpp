@@ -20,13 +20,12 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <fixpp/session/security_profile.hpp>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -38,12 +37,9 @@ using fixpp::core::error;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 
-static std::shared_ptr<fixpp::core::mock_clock> make_clock(
-        asio::any_io_executor ex) {
+static std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor ex) {
     return std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{},
-        fixpp::core::steady_time_point{},
-        std::move(ex));
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, std::move(ex));
 }
 
 // ── Part 1: Default-constructed sentinel rejected ──────────────────────────
@@ -53,10 +49,10 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, DefaultSentinelRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();  // T050
     // security_profile NOT set → default kind::unset sentinel
 
     Session s{engine, cfg};
@@ -77,11 +73,12 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
-    cfg.security_profile = fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::unset};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::unset};
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
@@ -125,13 +122,13 @@ TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-    cfg.mode             = fixpp::session::threading_mode::direct_executor;
-    cfg.locks            = fixpp::session::lock_policy::spin;
+    cfg.mode = fixpp::session::threading_mode::direct_executor;
+    cfg.locks = fixpp::session::lock_policy::spin;
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
@@ -148,13 +145,14 @@ TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
     // Reinterpret a known-out-of-range integer through the closed enum.
-    cfg.app_backpressure = static_cast<SessionConfig::backpressure_mode>(static_cast<std::uint8_t>(99));
+    cfg.app_backpressure =
+        static_cast<SessionConfig::backpressure_mode>(static_cast<std::uint8_t>(99));
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
@@ -170,7 +168,7 @@ TEST(SessionOpenValidationArms, NullDictionaryRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
     // cfg.dictionary deliberately left null.
@@ -191,10 +189,10 @@ TEST(SessionOpenValidationArms, SecondOpenRejected) {
     asio::io_context ioc;
     EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = make_clock(ioc.get_executor());
+    engine.clock = make_clock(ioc.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
 
     Session s{engine, cfg};
@@ -225,10 +223,10 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, NonSentinelAccepted) {
         asio::io_context ioc;
         EngineConfig engine;
         engine.executor = ioc.get_executor();
-        engine.clock    = make_clock(ioc.get_executor());
+        engine.clock = make_clock(ioc.get_executor());
 
         SessionConfig cfg;
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.security_profile = fixpp::session::SecurityProfile{k};
 
         Session s{engine, cfg};
@@ -236,9 +234,9 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, NonSentinelAccepted) {
         ioc.run();
         auto val = result.get();
 
-        EXPECT_TRUE(val.has_value())
-            << "Session::open() must NOT reject SecurityProfile with "
-               "non-sentinel kind value " << static_cast<int>(k);
+        EXPECT_TRUE(val.has_value()) << "Session::open() must NOT reject SecurityProfile with "
+                                        "non-sentinel kind value "
+                                     << static_cast<int>(k);
     }
 }
 

@@ -35,23 +35,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <future>
-#include <memory>
-#include <optional>
-#include <string>
-#include <thread>
-#include <variant>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
@@ -62,6 +54,12 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <optional>
+#include <string>
+#include <thread>
+#include <variant>
 
 #include "transport/asio_listener.hpp"
 
@@ -69,11 +67,11 @@ namespace {
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
-using fixpp::session::SessionEvent;
 using fixpp::session::session_event_tls_validation_failed;
+using fixpp::session::SessionEvent;
+using fixpp::transport::asio_listener;
 using fixpp::transport::Endpoint;
 using fixpp::transport::TlsTransport;
-using fixpp::transport::asio_listener;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -82,14 +80,14 @@ using fixpp::transport::asio_listener;
 static std::string g_fixture_dir;
 
 // Build a file_cert_source from the given leaf/key files and the standard ca.pem.
-std::shared_ptr<fixpp::tls::cert_source>
-make_client_cs(std::string const& leaf_pem, std::string const& key_pem) {
+std::shared_ptr<fixpp::tls::cert_source> make_client_cs(std::string const& leaf_pem,
+                                                        std::string const& key_pem) {
     fixpp::tls::file_cert_source::Config cs;
-    cs.leaf_path        = leaf_pem;
+    cs.leaf_path = leaf_pem;
     cs.private_key_path = key_pem;
-    cs.ca_bundle_path   = g_fixture_dir + "/ca.pem";
-    auto r = fixpp::tls::file_cert_source::make_file_cert_source(
-        cs, std::pmr::new_delete_resource());
+    cs.ca_bundle_path = g_fixture_dir + "/ca.pem";
+    auto r =
+        fixpp::tls::file_cert_source::make_file_cert_source(cs, std::pmr::new_delete_resource());
     if (!r.has_value()) {
         return nullptr;
     }
@@ -104,13 +102,13 @@ struct ListenerHandle {
 };
 
 ListenerHandle make_server_listener(asio::any_io_executor exec,
-                                     fixpp::tls::SslCtxConfig server_ssl_cfg) {
+                                    fixpp::tls::SslCtxConfig server_ssl_cfg) {
     asio_listener::Config cfg;
     cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, /*backlog=*/4};
-    cfg.ssl_cfg       = std::move(server_ssl_cfg);
+    cfg.ssl_cfg = std::move(server_ssl_cfg);
     auto* raw = new asio_listener{exec, std::move(cfg)};
     ListenerHandle h;
-    h.port     = raw->bound_endpoint().port;
+    h.port = raw->bound_endpoint().port;
     h.listener = std::unique_ptr<asio_listener>{raw};
     return h;
 }
@@ -131,19 +129,19 @@ ListenerHandle make_server_listener(asio::any_io_executor exec,
 // string content before the listener goes out of scope. ScenarioResult uses
 // owned std::string copies, not views. [data-model §E-5]
 struct TlsValidationEvent {
-    error       code;
+    error code;
     std::string sub_reason;
     std::string peer_endpoint;
     std::string reason_string;
 };
 
 struct ScenarioResult {
-    error                          server_hs_error{error::transport_accept_cancelled};
+    error server_hs_error{error::transport_accept_cancelled};
     std::vector<TlsValidationEvent> events;
 };
 
 ScenarioResult run_failure_scenario(fixpp::tls::SslCtxConfig server_ssl_cfg,
-                                     fixpp::tls::SslCtxConfig client_ssl_cfg) {
+                                    fixpp::tls::SslCtxConfig client_ssl_cfg) {
     asio::io_context ioc;
 
     auto server = make_server_listener(ioc.get_executor(), server_ssl_cfg);
@@ -172,11 +170,10 @@ ScenarioResult run_failure_scenario(fixpp::tls::SslCtxConfig server_ssl_cfg,
             // string_view fields become dangling after the listener is destroyed.
             auto span = server.listener->recent_events();
             for (const auto& ev : span) {
-                if (const auto* p =
-                        std::get_if<session_event_tls_validation_failed>(&ev)) {
+                if (const auto* p = std::get_if<session_event_tls_validation_failed>(&ev)) {
                     TlsValidationEvent e;
-                    e.code         = p->code;
-                    e.sub_reason   = std::string{p->sub_reason};
+                    e.code = p->code;
+                    e.sub_reason = std::string{p->sub_reason};
                     e.peer_endpoint = std::string{p->peer_endpoint};
                     e.reason_string = std::string{p->reason_string};
                     result.events.push_back(std::move(e));
@@ -191,8 +188,7 @@ ScenarioResult run_failure_scenario(fixpp::tls::SslCtxConfig server_ssl_cfg,
     if (!client_factory.has_value()) {
         return result;
     }
-    auto client_transport = (*client_factory)->make(
-        ioc.get_executor(), client_ssl_cfg, nullptr);
+    auto client_transport = (*client_factory)->make(ioc.get_executor(), client_ssl_cfg, nullptr);
     if (!client_transport.has_value()) {
         return result;
     }
@@ -227,15 +223,15 @@ ScenarioResult run_failure_scenario(fixpp::tls::SslCtxConfig server_ssl_cfg,
 // Standard server TLS config: mtls_ca, leaf_rsa2048, ca.pem trust.
 fixpp::tls::SslCtxConfig make_server_ssl_cfg() {
     fixpp::tls::file_cert_source::Config cs;
-    cs.leaf_path        = g_fixture_dir + "/leaf_rsa2048.pem";
+    cs.leaf_path = g_fixture_dir + "/leaf_rsa2048.pem";
     cs.private_key_path = g_fixture_dir + "/leaf_rsa2048.key";
-    cs.ca_bundle_path   = g_fixture_dir + "/ca.pem";
-    auto r = fixpp::tls::file_cert_source::make_file_cert_source(
-        cs, std::pmr::new_delete_resource());
+    cs.ca_bundle_path = g_fixture_dir + "/ca.pem";
+    auto r =
+        fixpp::tls::file_cert_source::make_file_cert_source(cs, std::pmr::new_delete_resource());
     fixpp::tls::SslCtxConfig cfg;
     cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    cfg.cs      = (r.has_value()) ? std::move(*r) : nullptr;
-    cfg.clock   = nullptr;  // skip expiry on server cert
+    cfg.cs = (r.has_value()) ? std::move(*r) : nullptr;
+    cfg.clock = nullptr;  // skip expiry on server cert
     return cfg;
 }
 
@@ -247,9 +243,9 @@ fixpp::tls::SslCtxConfig make_client_ssl_cfg(
     std::shared_ptr<fixpp::tls::Pinset> pinset = nullptr) {
     fixpp::tls::SslCtxConfig cfg;
     cfg.profile = profile;
-    cfg.cs      = std::move(cs);
-    cfg.clock   = std::move(clock);
-    cfg.pinset  = std::move(pinset);
+    cfg.cs = std::move(cs);
+    cfg.clock = std::move(clock);
+    cfg.pinset = std::move(pinset);
     return cfg;
 }
 
@@ -270,18 +266,15 @@ TEST(TlsValidationFailedTaxonomy, ExpiredCertEmitsEvent) {
         fixpp::core::steady_time_point steady_now() const noexcept override {
             return std::chrono::steady_clock::now();
         }
-        asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override {
-            co_return;
-        }
+        asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
         void cancel_sleeps() noexcept override {}
     };
 
     auto server_cfg = make_server_ssl_cfg();
     server_cfg.clock = std::make_shared<RealClock>();
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_expired.pem",
-        g_fixture_dir + "/leaf_expired.key");
+    auto client_cs =
+        make_client_cs(g_fixture_dir + "/leaf_expired.pem", g_fixture_dir + "/leaf_expired.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_expired.pem not available";
     }
@@ -301,10 +294,8 @@ TEST(TlsValidationFailedTaxonomy, ExpiredCertEmitsEvent) {
     const auto& ev = result.events.front();
     EXPECT_EQ(ev.code, error::tls_handshake_failed)
         << "event code must be tls_handshake_failed for expired cert";
-    EXPECT_EQ(ev.sub_reason, "expired")
-        << "sub_reason must be 'expired'";
-    EXPECT_FALSE(ev.peer_endpoint.empty())
-        << "peer_endpoint must be non-empty (host:port)";
+    EXPECT_EQ(ev.sub_reason, "expired") << "sub_reason must be 'expired'";
+    EXPECT_FALSE(ev.peer_endpoint.empty()) << "peer_endpoint must be non-empty (host:port)";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,9 +309,8 @@ TEST(TlsValidationFailedTaxonomy, RsaKeyTooLargeEmitsEvent) {
 
     auto server_cfg = make_server_ssl_cfg();
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_rsa16384_negative.pem",
-        g_fixture_dir + "/leaf_rsa16384_negative.key");
+    auto client_cs = make_client_cs(g_fixture_dir + "/leaf_rsa16384_negative.pem",
+                                    g_fixture_dir + "/leaf_rsa16384_negative.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_rsa16384_negative.pem not available";
     }
@@ -335,8 +325,7 @@ TEST(TlsValidationFailedTaxonomy, RsaKeyTooLargeEmitsEvent) {
         << "Listener ring must contain session_event_tls_validation_failed";
 
     const auto& ev = result.events.front();
-    EXPECT_EQ(ev.code, error::tls_rsa_key_too_large)
-        << "event code must be tls_rsa_key_too_large";
+    EXPECT_EQ(ev.code, error::tls_rsa_key_too_large) << "event code must be tls_rsa_key_too_large";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -350,9 +339,8 @@ TEST(TlsValidationFailedTaxonomy, CertDerTooLargeEmitsEvent) {
 
     auto server_cfg = make_server_ssl_cfg();
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_der_16KiB_negative.pem",
-        g_fixture_dir + "/leaf_der_16KiB_negative.key");
+    auto client_cs = make_client_cs(g_fixture_dir + "/leaf_der_16KiB_negative.pem",
+                                    g_fixture_dir + "/leaf_der_16KiB_negative.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_der_16KiB_negative.pem not available";
     }
@@ -382,9 +370,8 @@ TEST(TlsValidationFailedTaxonomy, SanEntriesExceededEmitsEvent) {
 
     auto server_cfg = make_server_ssl_cfg();
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_san_65_negative.pem",
-        g_fixture_dir + "/leaf_san_65_negative.key");
+    auto client_cs = make_client_cs(g_fixture_dir + "/leaf_san_65_negative.pem",
+                                    g_fixture_dir + "/leaf_san_65_negative.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_san_65_negative.pem not available";
     }
@@ -422,12 +409,11 @@ TEST(TlsValidationFailedTaxonomy, PinMismatchEmitsEvent) {
 
     auto server_cfg = make_server_ssl_cfg();
     server_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
-    server_cfg.pinset  = pinset;
+    server_cfg.pinset = pinset;
 
     // Client uses the valid standard cert.
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_rsa2048.pem",
-        g_fixture_dir + "/leaf_rsa2048.key");
+    auto client_cs =
+        make_client_cs(g_fixture_dir + "/leaf_rsa2048.pem", g_fixture_dir + "/leaf_rsa2048.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_rsa2048.pem not available";
     }
@@ -442,8 +428,7 @@ TEST(TlsValidationFailedTaxonomy, PinMismatchEmitsEvent) {
         << "Listener ring must contain session_event_tls_validation_failed";
 
     const auto& ev = result.events.front();
-    EXPECT_EQ(ev.code, error::tls_pin_mismatch)
-        << "event code must be tls_pin_mismatch";
+    EXPECT_EQ(ev.code, error::tls_pin_mismatch) << "event code must be tls_pin_mismatch";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -472,9 +457,8 @@ TEST(TlsValidationFailedTaxonomy, PinEmptyAtOpenEmitsEvent) {
     // Do NOT set server_cfg.pinset — it stays nullptr → pinset_snapshot=nullptr
     // → verify_peer returns tls_pin_empty_at_open.
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_rsa2048.pem",
-        g_fixture_dir + "/leaf_rsa2048.key");
+    auto client_cs =
+        make_client_cs(g_fixture_dir + "/leaf_rsa2048.pem", g_fixture_dir + "/leaf_rsa2048.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_rsa2048.pem not available";
     }
@@ -529,9 +513,8 @@ TEST(TlsValidationFailedTaxonomy, SuccessfulHandshakeProducesNoEvent) {
 
     auto server_cfg = make_server_ssl_cfg();
 
-    auto client_cs = make_client_cs(
-        g_fixture_dir + "/leaf_rsa2048.pem",
-        g_fixture_dir + "/leaf_rsa2048.key");
+    auto client_cs =
+        make_client_cs(g_fixture_dir + "/leaf_rsa2048.pem", g_fixture_dir + "/leaf_rsa2048.key");
     if (!client_cs) {
         GTEST_SKIP() << "leaf_rsa2048.pem not available";
     }

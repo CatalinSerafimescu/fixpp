@@ -15,13 +15,12 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
 
 // ── Helper: run a coroutine synchronously on a single-threaded io_context ──
 
@@ -70,13 +69,17 @@ TEST(SeamUncontendedLatency, AfterReleaseCanAcquireAgain) {
         {
             auto r1 = co_await mtx.async_lock();
             EXPECT_TRUE(r1.has_value());
-            if (r1.has_value()) { ++acquires; }
+            if (r1.has_value()) {
+                ++acquires;
+            }
             // guard released here
         }
         {
             auto r2 = co_await mtx.async_lock();
             EXPECT_TRUE(r2.has_value());
-            if (r2.has_value()) { ++acquires; }
+            if (r2.has_value()) {
+                ++acquires;
+            }
         }
     });
 
@@ -101,8 +104,7 @@ TEST(SeamUncontendedLatency, GuardOwnsLockAfterAcquire) {
 
 TEST(SeamUncontendedLatency, DefaultPolicyIsDispatch) {
     async_mutex mtx;
-    EXPECT_EQ(mtx.policy(),
-              fixpp::sync::completion_policy::dispatch);
+    EXPECT_EQ(mtx.policy(), fixpp::sync::completion_policy::dispatch);
 }
 
 }  // namespace

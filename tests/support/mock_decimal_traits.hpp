@@ -78,8 +78,7 @@ struct decimal_traits<test::mock_pod> {
     }
 
     static expected_t<pod_decimal> to_pod(test::mock_pod const& v) noexcept {
-        if (test::has(fail_mask, test::mock_fail::to_pod))
-            return std::unexpected{to_pod_error};
+        if (test::has(fail_mask, test::mock_fail::to_pod)) return std::unexpected{to_pod_error};
         return pod_decimal{v.mantissa, v.exponent};
     }
 

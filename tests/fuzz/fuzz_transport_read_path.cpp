@@ -28,11 +28,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/transport/transport_errors.hpp>
+#include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 #include <span>
-
-#include <fixpp/wire/framer.hpp>
-#include <fixpp/transport/transport_errors.hpp>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // This harness fuzzes Framer::feed directly — that is the production path bytes
@@ -57,8 +56,8 @@ namespace {
 }  // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    using fixpp::wire::Framer;
     using fixpp::wire::frame_view;
+    using fixpp::wire::Framer;
     using fixpp::wire::pmr_carry_buffer;
 
     // Small max to exercise the too-large reject path quickly.
@@ -66,9 +65,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // Arena-backed carry buffer (no heap in hot path — [const §VIII.5]).
     std::array<std::byte, kMaxFrame + 256> carry_arena_buf{};
-    std::pmr::monotonic_buffer_resource carry_arena{
-        carry_arena_buf.data(), carry_arena_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource carry_arena{carry_arena_buf.data(), carry_arena_buf.size(),
+                                                    std::pmr::null_memory_resource()};
 
     pmr_carry_buffer carry{kMaxFrame, &carry_arena};
 
@@ -77,8 +75,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::array<frame_view, kMaxFrames> frame_out{};
 
     // Feed the entire fuzzer input as a single span.
-    std::span<const std::byte> input{
-        reinterpret_cast<const std::byte*>(data), size};
+    std::span<const std::byte> input{reinterpret_cast<const std::byte*>(data), size};
 
     // Framer::feed returns one frame_view per complete frame. We do not inspect
     // the content — only assert that the call returns without crash/UB.

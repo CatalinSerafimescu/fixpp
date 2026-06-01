@@ -33,10 +33,21 @@
 //
 // Anchors: data-model.md E2 (FSM matrix); error slot 73; [FIX-SL §4.6];
 // spec FR-005; SC-005; tasks.md T043.
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -44,22 +55,9 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -69,20 +67,19 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra_fields = {}) {
+static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_fields.empty()) { body += std::string(extra_fields); }
+    if (!extra_fields.empty()) {
+        body += std::string(extra_fields);
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
@@ -90,7 +87,9 @@ static std::vector<std::byte> make_raw_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -98,22 +97,23 @@ static std::vector<std::byte> make_raw_frame(
 
     std::vector<std::byte> result;
     result.reserve(full.size());
-    for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
     return result;
 }
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string, std::uint32_t seq,
-        std::string_view sender, std::string_view target, int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_logout_frame(
-        std::string_view begin_string, std::uint32_t seq,
-        std::string_view sender, std::string_view target) {
+static std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
+                                                std::string_view sender, std::string_view target) {
     return make_raw_frame(begin_string, "5", seq, sender, target);
 }
 
@@ -122,10 +122,14 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return wire.substr(pos); }
+    if (end == std::string::npos) {
+        return wire.substr(pos);
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -144,19 +148,19 @@ protected:
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(int heartbt_sec = 30) {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -171,10 +175,8 @@ protected:
     }
 
     // Feed an inbound frame and wait for the FSM dispatch.
-    fixpp::core::expected_t<void> feed_inbound(Session& sess,
-                                                std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame),
-                                  asio::use_future);
+    fixpp::core::expected_t<void> feed_inbound(Session& sess, std::span<const std::byte> frame) {
+        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         return fut.get();
@@ -224,17 +226,14 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     auto cfg = make_cfg();
     // Install transport sink.
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close in background.
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     // Run briefly — should emit Logout and move to LogoutSent.
     ioc.run_for(100ms);
@@ -251,8 +250,7 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
 
     // Feed inbound Logout confirmation (peer seq=2, since we sent seq 1 for Logon).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
-    auto inbound_r = asio::co_spawn(
-        ioc, sess.on_inbound_frame(peer_logout), asio::use_future);
+    auto inbound_r = asio::co_spawn(ioc, sess.on_inbound_frame(peer_logout), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto ir = inbound_r.get();
@@ -274,17 +272,14 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
 TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     // Run until Logout is emitted and FSM is LogoutSent.
     ioc.run_for(100ms);
@@ -321,17 +316,14 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     auto cfg = make_cfg();
     cfg.logout_disconnect_timeout_ms = 200;
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     // Run briefly so run_logout_phase1 starts and registers sleep_until.
     ioc.run_for(100ms);
@@ -403,9 +395,7 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     // For this test: verify Active + inbound Logout → emit outbound Logout → Disconnected.
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess2(engine, cfg);
     drive_to_active_initiator(sess2);
@@ -417,12 +407,10 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     EXPECT_TRUE(ir.has_value());
 
     // Per matrix Active row: inbound Logout → emit Logout → Disconnected.
-    EXPECT_EQ(sess2.state(), fsm_state::Disconnected)
-        << "Active + inbound Logout → Disconnected";
+    EXPECT_EQ(sess2.state(), fsm_state::Disconnected) << "Active + inbound Logout → Disconnected";
 
     // The engine should have emitted a confirming Logout back.
-    EXPECT_GE(td.sent_count(), 1u)
-        << "Active + inbound Logout should emit outbound Logout";
+    EXPECT_GE(td.sent_count(), 1u) << "Active + inbound Logout should emit outbound Logout";
     if (td.sent_count() >= 1) {
         EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
             << "Outbound confirming frame should be Logout(35=5)";
@@ -433,17 +421,14 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
 TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Initiate graceful close → LogoutSent.
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -466,9 +451,7 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
 TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
@@ -486,9 +469,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
 TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
@@ -519,16 +500,13 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
 TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
 
     // Force disconnect via terminal close.
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::terminal), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     (void)close_fut.get();
@@ -550,16 +528,13 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
 TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active_initiator(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     ioc.run_for(100ms);
     ioc.restart();

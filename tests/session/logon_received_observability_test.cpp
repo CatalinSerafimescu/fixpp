@@ -14,21 +14,17 @@
 //     called returns an empty history span.
 //
 // Anchors: spec.md FR-004 / D-2; data-model.md §E1 ring-buffer invariant I-25.
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -36,12 +32,14 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -49,12 +47,11 @@ namespace fixpp::session::test {
 
 // ── Frame builder (mirrors logon_handshake_test.cpp helper) ──────────────────
 
-static std::vector<std::byte> make_logon_frame_obs(
-        std::string_view begin_string,
-        std::uint32_t msg_seq_num,
-        std::string_view sender_comp_id,
-        std::string_view target_comp_id,
-        int heartbt_int) {
+static std::vector<std::byte> make_logon_frame_obs(std::string_view begin_string,
+                                                   std::uint32_t msg_seq_num,
+                                                   std::string_view sender_comp_id,
+                                                   std::string_view target_comp_id,
+                                                   int heartbt_int) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -70,7 +67,9 @@ static std::vector<std::byte> make_logon_frame_obs(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -78,7 +77,9 @@ static std::vector<std::byte> make_logon_frame_obs(
 
     std::vector<std::byte> frame;
     frame.reserve(full.size());
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -86,16 +87,16 @@ static std::vector<std::byte> make_logon_frame_obs(
 
 class LogonObservabilityTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         using namespace std::chrono;
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -103,14 +104,14 @@ protected:
     // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 0s;  // disable liveness loop
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = fixpp::session::session_role::acceptor;  // FR-004 / D-2
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::acceptor;  // FR-004 / D-2
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
@@ -119,14 +120,14 @@ protected:
     // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_initiator_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "TW";
-        cfg.target_comp_id     = "ISLD";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 0s;  // disable liveness loop
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = fixpp::session::session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
@@ -152,8 +153,7 @@ protected:
 // FR-004 acceptance scenario 1: acceptor valid peer Logon → history contains
 // LogonReceived (the intermediate state between NotConnected and Active).
 // Anchors: spec.md FR-004; data-model.md §E1 I-25; D-2.
-TEST_F(LogonObservabilityTest,
-       AcceptorReplyLogonPath_VisitHistoryContainsLogonReceived) {
+TEST_F(LogonObservabilityTest, AcceptorReplyLogonPath_VisitHistoryContainsLogonReceived) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
 
@@ -165,8 +165,7 @@ TEST_F(LogonObservabilityTest,
     // Feed valid peer Logon (TW→ISLD, seq=1, HeartBtInt=30).
     auto logon_frame = make_logon_frame_obs("FIX.4.2", 1, "TW", "ISLD", 30);
     auto inbound_r = feed_sync(sess, std::span<const std::byte>{logon_frame});
-    EXPECT_TRUE(inbound_r.has_value())
-        << "on_inbound_frame() returned error for valid Logon";
+    EXPECT_TRUE(inbound_r.has_value()) << "on_inbound_frame() returned error for valid Logon";
 
     // After the awaitable completes, LogonReceived must appear in the ring.
     auto hist = sess.fsm_visit_history();
@@ -184,8 +183,7 @@ TEST_F(LogonObservabilityTest, InitiatorOpen_VisitHistoryContainsLogonSent) {
     auto open_r = open_sync(sess);
     ASSERT_TRUE(open_r.has_value()) << "open() failed";
 
-    EXPECT_EQ(sess.state(), fsm_state::LogonSent)
-        << "Initiator must be in LogonSent after open()";
+    EXPECT_EQ(sess.state(), fsm_state::LogonSent) << "Initiator must be in LogonSent after open()";
 
     auto hist = sess.fsm_visit_history();
     EXPECT_THAT(hist, ::testing::Contains(fsm_state::LogonSent))
@@ -202,9 +200,8 @@ TEST_F(LogonObservabilityTest, VisitHistoryEmptyOnFreshSession) {
     // Do NOT call open().
 
     auto hist = sess.fsm_visit_history();
-    EXPECT_TRUE(hist.empty())
-        << "fsm_visit_history() must be empty before any state transition "
-        << "(no open() called); got " << hist.size() << " entries (D-2)";
+    EXPECT_TRUE(hist.empty()) << "fsm_visit_history() must be empty before any state transition "
+                              << "(no open() called); got " << hist.size() << " entries (D-2)";
 }
 
 }  // namespace fixpp::session::test

@@ -36,11 +36,24 @@
 //   Tests 6/7: timer-driven tests (T039+T041). RED until both ship.
 //   No SUCCEED() placeholders — each test has real assertions.
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -48,25 +61,10 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/admin_messages.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -78,15 +76,18 @@ namespace {
 
 // Extract a field value from a SOH-delimited FIX frame.
 // Returns the raw string value for the tag, or "" if not found.
-static std::string extract_field(std::span<const std::byte> frame,
-                                 std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -95,20 +96,19 @@ static bool has_field(std::span<const std::byte> frame, std::uint32_t tag) {
 }
 
 // Build a minimal FIX frame with BeginString/BodyLength/checksum.
-static std::vector<std::byte> make_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra_fields = {}) {
+static std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
+                                         std::uint32_t seq, std::string_view sender,
+                                         std::string_view target,
+                                         std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_fields.empty()) { body += std::string(extra_fields); }
+    if (!extra_fields.empty()) {
+        body += std::string(extra_fields);
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
@@ -116,7 +116,9 @@ static std::vector<std::byte> make_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -124,16 +126,15 @@ static std::vector<std::byte> make_frame(
 
     std::vector<std::byte> result;
     result.reserve(full.size());
-    for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
     return result;
 }
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     // Build extra fields without "\x01108=" (hex escape extends through digits).
     std::string extra;
     extra += "98=0\x01";
@@ -147,8 +148,7 @@ static std::vector<std::byte> make_logon_frame(
 // then restarting it. The future is returned for the caller to `.get()`.
 // This is the established pattern for single-threaded coroutine tests.
 template <class R>
-static R run_coro(asio::io_context& ioc,
-                  asio::awaitable<fixpp::core::expected_t<R>> coro) {
+static R run_coro(asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<R>> coro) {
     auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
@@ -157,14 +157,16 @@ static R run_coro(asio::io_context& ioc,
         // Propagate by re-throwing to make test failures visible.
         return R{};  // caller checks separately
     }
-    if constexpr (std::is_same_v<R, void>) { return; }
-    else { return *res; }
+    if constexpr (std::is_same_v<R, void>) {
+        return;
+    } else {
+        return *res;
+    }
 }
 
 // Overload for awaitable<expected_t<void>>.
 static fixpp::core::expected_t<void> run_coro_result(
-        asio::io_context& ioc,
-        asio::awaitable<fixpp::core::expected_t<void>> coro) {
+    asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<void>> coro) {
     auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
@@ -188,22 +190,20 @@ protected:
         using sc = std::chrono::system_clock;
         auto utc_2024 = sc::time_point{} + std::chrono::seconds{1704067200};
         clock = std::make_shared<fixpp::core::mock_clock>(
-            utc_2024,
-            fixpp::core::steady_time_point{},
-            ioc.get_executor());
-        engine.clock    = clock;
+            utc_2024, fixpp::core::steady_time_point{}, ioc.get_executor());
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_cfg(int heartbt_sec = 30) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "SENDER";
-        cfg.target_comp_id     = "TARGET";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "SENDER";
+        cfg.target_comp_id = "TARGET";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -216,8 +216,7 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed_sync(Session& s,
-                                             std::span<const std::byte> frame) {
+    fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
@@ -227,7 +226,9 @@ protected:
     // Drive session to Active (initiator: open → LogonSent → feed peer Logon → Active).
     bool drive_to_active(Session& s, int heartbt_sec = 30) {
         auto r = open_sync(s);
-        if (!r.has_value()) { return false; }
+        if (!r.has_value()) {
+            return false;
+        }
         // Peer (TARGET→SENDER) sends Logon seq=1.
         auto logon = make_logon_frame("FIX.4.2", 1, "TARGET", "SENDER", heartbt_sec);
         feed_sync(s, logon);
@@ -243,9 +244,8 @@ protected:
 TEST(HbTrBuilders, BuildHeartbeatCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
-    auto result = fixpp::session::build_heartbeat(
-        std::span<std::byte>(buf), 1, "SENDER", "TARGET", "TR001",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto result = fixpp::session::build_heartbeat(std::span<std::byte>(buf), 1, "SENDER", "TARGET",
+                                                  "TR001", "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_heartbeat must succeed";
     auto frame = *result;
@@ -267,18 +267,16 @@ TEST(HbTrBuilders, BuildHeartbeatCarriesTestReqID) {
 TEST(HbTrBuilders, BuildHeartbeatNoTestReqID) {
     std::array<std::byte, 512> buf{};
 
-    auto result = fixpp::session::build_heartbeat(
-        std::span<std::byte>(buf), 2, "SENDER", "TARGET",
-        /*test_req_id=*/{},
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto result =
+        fixpp::session::build_heartbeat(std::span<std::byte>(buf), 2, "SENDER", "TARGET",
+                                        /*test_req_id=*/{}, "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_heartbeat (no TestReqID) must succeed";
     auto frame = *result;
 
     EXPECT_EQ(extract_field(frame, 35), "0");
     // Tag 112 must NOT appear when test_req_id is empty.
-    EXPECT_FALSE(has_field(frame, 112))
-        << "tag 112 must be absent when test_req_id is empty";
+    EXPECT_FALSE(has_field(frame, 112)) << "tag 112 must be absent when test_req_id is empty";
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -287,9 +285,9 @@ TEST(HbTrBuilders, BuildHeartbeatNoTestReqID) {
 TEST(HbTrBuilders, BuildTestRequestCarriesTestReqID) {
     std::array<std::byte, 512> buf{};
 
-    auto result = fixpp::session::build_test_request(
-        std::span<std::byte>(buf), 3, "SENDER", "TARGET", "REQ-42",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto result =
+        fixpp::session::build_test_request(std::span<std::byte>(buf), 3, "SENDER", "TARGET",
+                                           "REQ-42", "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(result.has_value()) << "build_test_request must succeed";
     auto frame = *result;
@@ -311,12 +309,10 @@ TEST(HbTrBuilders, TestReqIDDistinctness) {
     std::array<std::byte, 512> buf1{};
     std::array<std::byte, 512> buf2{};
 
-    auto r1 = fixpp::session::build_test_request(
-        std::span<std::byte>(buf1), 1, "S", "T", "ID-A",
-        "FIX.4.2", "20240101-00:00:00.000");
-    auto r2 = fixpp::session::build_test_request(
-        std::span<std::byte>(buf2), 2, "S", "T", "ID-B",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r1 = fixpp::session::build_test_request(std::span<std::byte>(buf1), 1, "S", "T", "ID-A",
+                                                 "FIX.4.2", "20240101-00:00:00.000");
+    auto r2 = fixpp::session::build_test_request(std::span<std::byte>(buf2), 2, "S", "T", "ID-B",
+                                                 "FIX.4.2", "20240101-00:00:00.000");
 
     ASSERT_TRUE(r1.has_value());
     ASSERT_TRUE(r2.has_value());
@@ -325,8 +321,7 @@ TEST(HbTrBuilders, TestReqIDDistinctness) {
     std::string id2 = extract_field(*r2, 112);
 
     // Distinct test_req_id inputs → distinct TestReqID values in the frames.
-    EXPECT_NE(id1, id2)
-        << "Distinct test_req_id inputs must yield distinct TestReqID field values";
+    EXPECT_NE(id1, id2) << "Distinct test_req_id inputs must yield distinct TestReqID field values";
     EXPECT_EQ(id1, "ID-A");
     EXPECT_EQ(id2, "ID-B");
 }
@@ -440,17 +435,14 @@ TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {
     seqnum_t inbound_seq = 2;
     for (int window = 0; window < 3; ++window) {
         // Feed inbound Heartbeat (35=0) — must reset last_inbound_steady_.
-        auto hb_frame =
-            make_frame("FIX.4.2", "0", inbound_seq++, "TARGET", "SENDER");
+        auto hb_frame = make_frame("FIX.4.2", "0", inbound_seq++, "TARGET", "SENDER");
         auto res = feed_sync(session, hb_frame);
         ASSERT_TRUE(res.has_value())
-            << "window " << window
-            << ": on_inbound_frame for Heartbeat must not error";
+            << "window " << window << ": on_inbound_frame for Heartbeat must not error";
 
         // Session must still be Active after the HB delivery.
         ASSERT_EQ(session.state(), fsm_state::Active)
-            << "window " << window
-            << ": session must be Active immediately after inbound HB";
+            << "window " << window << ": session must be Active immediately after inbound HB";
 
         // Advance the clock half a HeartBtInt — keeps us inside this
         // window so no timer fires yet.

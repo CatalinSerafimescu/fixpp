@@ -306,12 +306,12 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
         // 16-byte RecordHeader: kind=0(frame), dir=0(inbound), reserved[2]=0,
         // seq=0x01 (LE), len=0xFFFFFFFF (LE), crc32=0xDEADBEEF (invalid — doesn't matter).
         std::uint8_t corrupt_hdr[16] = {
-            0x00,                        // kind = frame
-            0x00,                        // dir  = inbound
-            0x00, 0x00,                  // reserved
-            0x01, 0x00, 0x00, 0x00,      // seq = 1 (LE)
-            0xFF, 0xFF, 0xFF, 0xFF,      // len = 0xFFFFFFFF (LE) — the attack value
-            0xEF, 0xBE, 0xAD, 0xDE,     // crc32 = invalid
+            0x00,                    // kind = frame
+            0x00,                    // dir  = inbound
+            0x00, 0x00,              // reserved
+            0x01, 0x00, 0x00, 0x00,  // seq = 1 (LE)
+            0xFF, 0xFF, 0xFF, 0xFF,  // len = 0xFFFFFFFF (LE) — the attack value
+            0xEF, 0xBE, 0xAD, 0xDE,  // crc32 = invalid
         };
         // Open for append
         FILE* f = ::fopen(lp.c_str(), "ab");
@@ -323,8 +323,8 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
     // Step 3: re-open — must NOT terminate; must succeed (scan stops at corrupt hdr).
     FileStore::Config cfg2 = make_config(dir, pool.get_executor());
     FileStoreFactory factory2{cfg2};
-    auto minted2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
-                                  pool.get_executor());
+    auto minted2 =
+        factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
     // The store MUST open successfully (the corrupt header is treated as a torn tail
     // and truncated at last_good_pos; the surviving good frame is kept).
     EXPECT_TRUE(minted2.has_value())
@@ -335,8 +335,8 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
         // The surviving frame seq=1 must be readable.
         struct simple_vis final : public fixpp::session::retrieve_visitor {
             std::vector<fixpp::session::seqnum_t> seqs;
-            asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-            on_frame(fixpp::session::seqnum_t s, std::span<const std::byte>) noexcept override {
+            asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+                fixpp::session::seqnum_t s, std::span<const std::byte>) noexcept override {
                 seqs.push_back(s);
                 co_return fixpp::core::expected_t<fixpp::session::visit_result>{
                     fixpp::session::visit_result::cont};
@@ -424,12 +424,12 @@ TEST(FileStoreTornWrite, N3_MidLogCorruptRecordSurfacesStoreFactoryFailed) {
         // Corrupt record header: kind=frame, dir=outbound, seq=2, len=0x1234 (oversized)
         // crc32=0xDEADBEEF (invalid — doesn't matter because cap-check fires first)
         std::uint8_t corrupt_hdr[16] = {
-            0x00,                        // kind = frame
-            0x01,                        // dir  = outbound
-            0x00, 0x00,                  // reserved
-            0x02, 0x00, 0x00, 0x00,      // seq = 2 (LE)
-            0x34, 0x12, 0x00, 0x00,      // len = 0x1234 = 4660 > max_frame_bytes (LE)
-            0xEF, 0xBE, 0xAD, 0xDE,     // crc32 = invalid
+            0x00,                    // kind = frame
+            0x01,                    // dir  = outbound
+            0x00, 0x00,              // reserved
+            0x02, 0x00, 0x00, 0x00,  // seq = 2 (LE)
+            0x34, 0x12, 0x00, 0x00,  // len = 0x1234 = 4660 > max_frame_bytes (LE)
+            0xEF, 0xBE, 0xAD, 0xDE,  // crc32 = invalid
         };
         ::fwrite(corrupt_hdr, 1, sizeof(corrupt_hdr), f);
 
@@ -444,16 +444,15 @@ TEST(FileStoreTornWrite, N3_MidLogCorruptRecordSurfacesStoreFactoryFailed) {
     // Step 3: re-open — must return store_factory_failed (mid-log corruption detected).
     FileStore::Config cfg2 = make_config(dir, pool.get_executor());
     FileStoreFactory factory2{cfg2};
-    auto minted2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
-                                  pool.get_executor());
+    auto minted2 =
+        factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
     EXPECT_FALSE(minted2.has_value())
         << "N3: factory.make() must return store_factory_failed for mid-log "
            "corrupt oversized header with valid suffix data";
 
     if (!minted2.has_value()) {
         EXPECT_EQ(minted2.error(), fixpp::core::error::store_factory_failed)
-            << "N3: expected store_factory_failed, got "
-            << static_cast<int>(minted2.error());
+            << "N3: expected store_factory_failed, got " << static_cast<int>(minted2.error());
     }
 
     fs::remove_all(dir);

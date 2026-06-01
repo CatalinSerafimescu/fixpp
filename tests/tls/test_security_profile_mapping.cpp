@@ -6,15 +6,14 @@
 // Spec anchors: FR-013 (enum + [[deprecated]] enumerator), FR-014 (TLS-version posture),
 //               FR-022 ([[nodiscard]]), FR-025 (named error variants).
 
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/tls/security_profile.hpp>
-#include <fixpp/tls/pinset.hpp>
-
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <fixpp/tls/file_cert_source.hpp>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
 #include <memory>
 #include <memory_resource>
-#include <chrono>
 #include <string>
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
@@ -28,15 +27,14 @@ using fixpp::core::error;
 namespace {
 
 class stub_cert_source final : public cert_source {
- public:
-    asio::awaitable<fixpp::core::expected_t<local_credentials>>
-    load_credentials() override {
-        co_return fixpp::core::expected_t<local_credentials>{
-            std::unexpect, error::tls_load_cancelled};
+public:
+    asio::awaitable<fixpp::core::expected_t<local_credentials>> load_credentials() override {
+        co_return fixpp::core::expected_t<local_credentials>{std::unexpect,
+                                                             error::tls_load_cancelled};
     }
 
-    fixpp::core::expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    fixpp::core::expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return fixpp::core::expected_t<std::span<const Certificate>>{
             std::span<const Certificate>{}};
     }
@@ -44,34 +42,27 @@ class stub_cert_source final : public cert_source {
 
 // Minimal Clock stub.
 class stub_clock final : public fixpp::core::Clock {
- public:
+public:
     fixpp::core::utc_time_point now() const noexcept override {
         return std::chrono::system_clock::now();
     }
     fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
-    asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override {
-        co_return;
-    }
+    asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
     void cancel_sleeps() noexcept override {}
 };
 
-std::shared_ptr<cert_source> make_cs() {
-    return std::make_shared<stub_cert_source>();
-}
-std::shared_ptr<fixpp::core::Clock> make_clock() {
-    return std::make_shared<stub_clock>();
-}
+std::shared_ptr<cert_source> make_cs() { return std::make_shared<stub_cert_source>(); }
+std::shared_ptr<fixpp::core::Clock> make_clock() { return std::make_shared<stub_clock>(); }
 
 }  // namespace
 
 // ── Row 1: mtls_ca — accepts cs + clock + null pinset ────────────────────────
 
 TEST(SecurityProfileMapping, MtlsCaAccepted) {
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_ca,
-                                      make_cs(), make_clock(),
-                                      nullptr, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::mtls_ca, make_cs(), make_clock(), nullptr, nullptr);
     ASSERT_TRUE(result.has_value()) << "mtls_ca with valid cs+clock should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::mtls_ca);
     EXPECT_NE(result->cs, nullptr);
@@ -86,9 +77,8 @@ TEST(SecurityProfileMapping, MtlsCaWithNonNullPinsetAccepted) {
     ASSERT_TRUE(pinset_result.has_value());
     auto pinset = *pinset_result;
     // Add at least one pin so we have a populated pinset (empty pinset allowed for mtls_ca).
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_ca,
-                                      make_cs(), make_clock(),
-                                      pinset, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::mtls_ca, make_cs(), make_clock(), pinset, nullptr);
     ASSERT_TRUE(result.has_value()) << "mtls_ca + non-null Pinset should succeed";
     EXPECT_EQ(result->pinset, pinset);
 }
@@ -107,9 +97,8 @@ TEST(SecurityProfileMapping, MtlsPinnedWithPopulatedPinsetAccepted) {
     auto add_res = pinset->add(cert);
     ASSERT_TRUE(add_res.has_value()) << "Pinset::add should succeed";
 
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned,
-                                      make_cs(), make_clock(),
-                                      pinset, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::mtls_pinned, make_cs(), make_clock(), pinset, nullptr);
     ASSERT_TRUE(result.has_value()) << "mtls_pinned with non-empty Pinset should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::mtls_pinned);
     // pinset_snapshot is INTENTIONALLY null at make_ssl_ctx_config time per
@@ -123,9 +112,8 @@ TEST(SecurityProfileMapping, OneWayCaAccepted) {
     // one_way_ca is deprecated but still functional.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    auto result = make_ssl_ctx_config(SecurityProfile::one_way_ca,
-                                      make_cs(), make_clock(),
-                                      nullptr, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), nullptr, nullptr);
 #pragma GCC diagnostic pop
     ASSERT_TRUE(result.has_value()) << "one_way_ca with null Pinset should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::one_way_ca);
@@ -134,9 +122,8 @@ TEST(SecurityProfileMapping, OneWayCaAccepted) {
 // ── Rejection: SecurityProfile::unset → tls_invalid_security_profile ─────────
 
 TEST(SecurityProfileMapping, RejectUnset) {
-    auto result = make_ssl_ctx_config(SecurityProfile::unset,
-                                      make_cs(), make_clock(),
-                                      nullptr, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::unset, make_cs(), make_clock(), nullptr, nullptr);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
 }
@@ -144,9 +131,8 @@ TEST(SecurityProfileMapping, RejectUnset) {
 // ── Rejection: null cs → tls_invalid_security_profile ────────────────────────
 
 TEST(SecurityProfileMapping, RejectNullCertSource) {
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_ca,
-                                      nullptr, make_clock(),
-                                      nullptr, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::mtls_ca, nullptr, make_clock(), nullptr, nullptr);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
 }
@@ -154,9 +140,8 @@ TEST(SecurityProfileMapping, RejectNullCertSource) {
 // ── Rejection: null clock → tls_invalid_security_profile ─────────────────────
 
 TEST(SecurityProfileMapping, RejectNullClock) {
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_ca,
-                                      make_cs(), nullptr,
-                                      nullptr, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::mtls_ca, make_cs(), nullptr, nullptr, nullptr);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
 }
@@ -164,8 +149,7 @@ TEST(SecurityProfileMapping, RejectNullClock) {
 // ── Rejection: mtls_pinned + null Pinset → tls_invalid_security_profile ──────
 
 TEST(SecurityProfileMapping, MtlsPinnedNullPinsetRejected) {
-    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned,
-                                      make_cs(), make_clock(),
+    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, make_cs(), make_clock(),
                                       nullptr, nullptr);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
@@ -180,9 +164,8 @@ TEST(SecurityProfileMapping, OneWayCaWithPinsetRejected) {
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    auto result = make_ssl_ctx_config(SecurityProfile::one_way_ca,
-                                      make_cs(), make_clock(),
-                                      pinset, nullptr);
+    auto result =
+        make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), pinset, nullptr);
 #pragma GCC diagnostic pop
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
@@ -198,38 +181,38 @@ TEST(SecurityProfileMapping, OneWayCaWithPinsetRejected) {
 // caps flow into cfg.caps (vs being silently dropped — the pre-F-04 drift).
 TEST(SecurityProfileMapping, ExtractCapsReadsFileCertSourceConfig) {
     file_cert_source::Config fcs_cfg;
-    fcs_cfg.leaf_path        = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.pem";
+    fcs_cfg.leaf_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.pem";
     fcs_cfg.private_key_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.key";
-    fcs_cfg.ca_bundle_path   = std::string(FIXPP_TLS_FIXTURE_DIR) + "/ca.pem";
+    fcs_cfg.ca_bundle_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/ca.pem";
     // Tightened DoS caps vs CertSourceCaps{} defaults of 8/8192/16384/64.
-    fcs_cfg.max_chain_depth    = 4;
-    fcs_cfg.max_rsa_key_bits   = 4096;
+    fcs_cfg.max_chain_depth = 4;
+    fcs_cfg.max_rsa_key_bits = 4096;
     fcs_cfg.max_cert_der_bytes = 8 * 1024;
-    fcs_cfg.max_san_entries    = 16;
+    fcs_cfg.max_san_entries = 16;
 
     auto fcs_r = file_cert_source::make_file_cert_source(fcs_cfg, nullptr);
     ASSERT_TRUE(fcs_r.has_value())
         << "file_cert_source factory must succeed against checked-in fixtures";
 
-    auto cfg_r = make_ssl_ctx_config(
-        SecurityProfile::mtls_ca, *fcs_r, make_clock(), nullptr, nullptr);
+    auto cfg_r =
+        make_ssl_ctx_config(SecurityProfile::mtls_ca, *fcs_r, make_clock(), nullptr, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
 
-    EXPECT_EQ(cfg.caps.max_chain_depth,    4u);
-    EXPECT_EQ(cfg.caps.max_rsa_key_bits,   4096u);
+    EXPECT_EQ(cfg.caps.max_chain_depth, 4u);
+    EXPECT_EQ(cfg.caps.max_rsa_key_bits, 4096u);
     EXPECT_EQ(cfg.caps.max_cert_der_bytes, 8u * 1024u);
-    EXPECT_EQ(cfg.caps.max_san_entries,    16u);
+    EXPECT_EQ(cfg.caps.max_san_entries, 16u);
 }
 
 TEST(SecurityProfileMapping, EnumHasFourValues) {
     // Contract assertion 1: four enumerators including unset sentinel.
-    static_assert(static_cast<uint8_t>(SecurityProfile::unset)       == 0);
-    static_assert(static_cast<uint8_t>(SecurityProfile::mtls_ca)     == 1);
+    static_assert(static_cast<uint8_t>(SecurityProfile::unset) == 0);
+    static_assert(static_cast<uint8_t>(SecurityProfile::mtls_ca) == 1);
     static_assert(static_cast<uint8_t>(SecurityProfile::mtls_pinned) == 2);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    static_assert(static_cast<uint8_t>(SecurityProfile::one_way_ca)  == 3);
+    static_assert(static_cast<uint8_t>(SecurityProfile::one_way_ca) == 3);
 #pragma GCC diagnostic pop
     SUCCEED();
 }

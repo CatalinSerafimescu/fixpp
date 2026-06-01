@@ -32,24 +32,16 @@
 //   make_call_count == 1 != max_attempts → EXPECT_EQ fails.
 //   GREEN after T014: auth-fail counts as one attempt per retry; exhausts cap.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -61,6 +53,12 @@
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <vector>
 
 // mock_transport is test-only; gate with the required define.
 #define FIXPP_ALLOW_MOCK_TRANSPORT
@@ -85,16 +83,13 @@ enum class FailMode { make_fail, handshake_fail };
 
 class FailingTransportFactory final : public fixpp::transport::TransportFactory {
 public:
-    explicit FailingTransportFactory(FailMode mode)
-        : mode_{mode} {}
+    explicit FailingTransportFactory(FailMode mode) : mode_{mode} {}
 
     std::atomic<int> make_call_count{0};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         ++make_call_count;
         if (mode_ == FailMode::make_fail) {
             return std::unexpected{fixpp::core::error::transport_factory_failed};
@@ -108,20 +103,17 @@ public:
         // witness below is unaffected.
         fixpp::transport::test::Script script;
         script.handshake_succeeds = false;
-        return std::make_unique<fixpp::transport::test::mock_transport>(
-            std::move(exec), std::move(script));
+        return std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
+                                                                        std::move(script));
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(
-        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override
-    {
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
         return nullptr;
     }
 
@@ -141,26 +133,20 @@ protected:
     static fixpp::transport::ReconnectPolicy make_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
-        policy.schedule = std::pmr::vector<std::chrono::milliseconds>{
-            std::pmr::get_default_resource()};
+        policy.schedule =
+            std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
         // Zero-delay so tests don't sleep
         policy.schedule.push_back(0ms);
         policy.jitter = 0.0;
         return policy;
     }
 
-    fixpp::core::expected_t<void> run_drive(
-        fixpp::transport::TransportFactory* factory,
-        std::uint32_t max_attempts)
-    {
-        fixpp::session::ReconnectFsm fsm(
-            factory,
-            make_policy(max_attempts),
-            std::chrono::seconds{30},
-            2000ms);
+    fixpp::core::expected_t<void> run_drive(fixpp::transport::TransportFactory* factory,
+                                            std::uint32_t max_attempts) {
+        fixpp::session::ReconnectFsm fsm(factory, make_policy(max_attempts),
+                                         std::chrono::seconds{30}, 2000ms);
 
-        auto fut = asio::co_spawn(ioc,
-            fsm.drive_reconnect_attempt(), asio::use_future);
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
         ioc.run_for(2s);
         ioc.restart();
         return fut.get();
@@ -227,9 +213,8 @@ TEST_F(ReconnectBackoffCapTest, ReturnsErrorOnCapExhaustion) {
 
     // After cap exhaustion, drive_reconnect_attempt must co_return an error.
     // RED: stub returns success (expected_t<void>{}).
-    EXPECT_FALSE(result.has_value())
-        << "Expected error on cap exhaustion; got success. "
-        << "RED: stub always returns success.";
+    EXPECT_FALSE(result.has_value()) << "Expected error on cap exhaustion; got success. "
+                                     << "RED: stub always returns success.";
     // The terminal error code must be transport_reconnect_limit_exceeded (C1).
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), fixpp::core::error::transport_reconnect_limit_exceeded)
@@ -265,16 +250,13 @@ TEST_F(ReconnectBackoffCapTest, ReturnsErrorOnCapExhaustion) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // SuccessfulHandshakeFactory: always connects+handshakes, injects off-list CN.
-class SuccessfulHandshakeOffListFactory final
-    : public fixpp::transport::TransportFactory {
+class SuccessfulHandshakeOffListFactory final : public fixpp::transport::TransportFactory {
 public:
     std::atomic<int> make_call_count{0};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         ++make_call_count;
         // Script: connect succeeds, handshake succeeds.
         fixpp::transport::test::Script script;
@@ -288,18 +270,19 @@ public:
             off_list_pid.leaf_fingerprint = {};
             script.peer_identity_to_return = std::move(off_list_pid);
         }
-        return std::make_unique<fixpp::transport::test::mock_transport>(
-            std::move(exec), std::move(script));
+        return std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
+                                                                        std::move(script));
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
         std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override { return nullptr; }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,18 +291,16 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 class AuthFailReconnectCapTest : public ::testing::Test {
 protected:
-    asio::io_context          ioc;
+    asio::io_context ioc;
     fixpp::core::EngineConfig engine{};
 
-    void SetUp() override {
-        engine.executor = ioc.get_executor();
-    }
+    void SetUp() override { engine.executor = ioc.get_executor(); }
 
     static fixpp::transport::ReconnectPolicy make_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
-        policy.schedule = std::pmr::vector<std::chrono::milliseconds>{
-            std::pmr::get_default_resource()};
+        policy.schedule =
+            std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
         policy.schedule.push_back(0ms);
         policy.jitter = 0.0;
         return policy;
@@ -337,23 +318,22 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     policy.add_binding("ON-LIST-PEER", "ACCEPTOR");
 
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
-    cfg.heartbeat_interval     = std::chrono::seconds{30};
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
-    cfg.executor_override       = ioc.get_executor();
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.executor_override = ioc.get_executor();
     // mTLS: live-identity arm (T015) fires after T014/T015 land.
     // Before T015, the arm 2 (mTLS no override) fires and fail-closes too —
     // but the RED condition is that step 7 is absent so the first attempt
     // succeeds without any auth check.
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.compid_authorization_policy = std::move(policy);
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // NO injected-identity seam — auth must come from step 7 (T014).
     cfg.transport_factory_override = factory;
     cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19877};
@@ -377,17 +357,13 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     // set_session_owner → install_reconnected_transport (T010) is callable.
     // After T014: the FSM calls authorize(hr.peer_id, ...) in step 7 before
     // calling install_reconnected_transport.
-    fixpp::session::ReconnectFsm reconnect_fsm(
-        factory.get(),
-        make_policy(kMaxAttempts),
-        std::chrono::seconds{30},
-        2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_policy(kMaxAttempts),
+                                               std::chrono::seconds{30}, 2000ms);
     reconnect_fsm.set_reconnect_endpoint(fixpp::transport::Endpoint{"127.0.0.1", 19877});
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
-    auto fut = asio::co_spawn(ioc,
-        reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+    auto fut = asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
     ioc.run_for(2s);
     ioc.restart();
 
@@ -412,7 +388,8 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), fixpp::core::error::transport_reconnect_limit_exceeded)
             << "Auth-fail cap-exhaustion must surface transport_reconnect_limit_exceeded. "
-            << "[C1; FR-003; Q1 reason-agnostic: same terminal code regardless of per-attempt cause]";
+            << "[C1; FR-003; Q1 reason-agnostic: same terminal code regardless of per-attempt "
+               "cause]";
     }
 
     // Session must NOT be in Active (auth always fails → never transitions).

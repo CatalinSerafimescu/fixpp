@@ -26,25 +26,16 @@
 //   Session::recent_events()) will FAIL RED because the Logon path does NOT yet
 //   emit the event (T036 impl not yet landed). Both acceptor + initiator cells.
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -54,6 +45,13 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -69,11 +67,9 @@ static std::string field(int tag, std::string_view val) {
 }
 
 static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                              std::string_view msg_type,
-                                              std::uint32_t seq,
-                                              std::string_view sender,
-                                              std::string_view target,
-                                              std::string_view extra = {}) {
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -100,8 +96,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
 }
 
 static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view sender, std::string_view target,
-                                          int hbt = 30) {
+                                         std::string_view sender, std::string_view target,
+                                         int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -121,8 +117,8 @@ static fixpp::tls::peer_identity make_peer_identity(std::string_view subject_dn)
 static bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
-        return std::holds_alternative<
-            fixpp::session::session_event_compid_authorization_failed>(ev);
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
     });
 }
 
@@ -144,30 +140,30 @@ find_compid_auth_failed_event(const fixpp::session::Session& sess) {
 
 class CompidBindingDefaultDenyTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
         // mTLS so the authorize() gate fires (the live-identity arm requires it).
-        cfg.security_profile  = fixpp::session::SecurityProfile{
-            fixpp::session::SecurityProfile::kind::mtls_ca};
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.role = fixpp::session::session_role::acceptor;
         // compid_authorization_policy is default-constructed = empty = default-deny.
         // The peer identity is injected post-open() via inject_live_identity (T021).
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
@@ -208,8 +204,8 @@ TEST_F(CompidBindingDefaultDenyTest, Acceptor_EmptyPolicy_RejectsLogon) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Inject the live handshake identity (off-list under the empty policy).
-    fixpp::test_support::inject_live_identity(
-        sess, make_peer_identity("CN=TW-PROD-01,O=Acme,C=US"));
+    fixpp::test_support::inject_live_identity(sess,
+                                              make_peer_identity("CN=TW-PROD-01,O=Acme,C=US"));
 
     // Peer (initiator) sends Logon.
     auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
@@ -250,16 +246,16 @@ TEST_F(CompidBindingDefaultDenyTest, Acceptor_EmptyPolicy_RejectsLogon) {
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(CompidBindingDefaultDenyTest, Initiator_EmptyPolicy_RejectsLogonAck) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "TW";
-    cfg.target_comp_id    = "ISLD";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "TW";
+    cfg.target_comp_id = "ISLD";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
     // mTLS so the authorize() gate fires (the live-identity arm requires it).
-    cfg.security_profile  = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
-    cfg.role              = fixpp::session::session_role::initiator;
+    cfg.role = fixpp::session::session_role::initiator;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests default-deny, not reset semantics.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // Empty policy — default-deny.

@@ -16,27 +16,25 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
 #include <memory_resource>
 #include <thread>
 #include <vector>
 
 namespace {
 
+using fixpp::core::error;
+using fixpp::core::expected_t;
 using fixpp::tls::async_signer_ref;
 using fixpp::tls::sign_request;
 using fixpp::tls::sign_response;
-using fixpp::core::error;
-using fixpp::core::expected_t;
 
 // ── HsmSignerRoutesOffSessionStrand ──────────────────────────────────────────
 // An async_signer_ref whose sign function posts the actual work to a
@@ -72,8 +70,7 @@ TEST(HsmAsyncSignerMock, SignCallbackRunsOnDifferentExecutor) {
 
         // Build a trivial signature response (PMR-default allocator for test).
         sign_response resp{};
-        resp.signature = std::pmr::vector<std::byte>(
-            req.tbs.begin(), req.tbs.end());
+        resp.signature = std::pmr::vector<std::byte>(req.tbs.begin(), req.tbs.end());
         co_return expected_t<sign_response>{std::move(resp)};
     };
 
@@ -110,8 +107,8 @@ TEST(HsmAsyncSignerMock, SignCallbackRunsOnDifferentExecutor) {
 // ── HsmSignerVariantIsWellFormed ──────────────────────────────────────────────
 // Sanity: async_signer_ref can be stored in the signer variant and extracted.
 TEST(HsmAsyncSignerMock, SignerVariantStorageRoundTrip) {
-    using fixpp::tls::local_credentials;
     using fixpp::tls::Certificate;
+    using fixpp::tls::local_credentials;
     using fixpp::tls::software_key_ref;
 
     async_signer_ref signer;

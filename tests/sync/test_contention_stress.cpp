@@ -12,11 +12,9 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -47,14 +45,13 @@ TEST(SeamContentionStress, TenThousandCoroutines) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     ioc.run();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap, 0)  << "Mutual exclusion violated (overlap detected)";
-    EXPECT_EQ(counter, N)  << "Lost waiter: not all coroutines completed";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated (overlap detected)";
+    EXPECT_EQ(counter, N) << "Lost waiter: not all coroutines completed";
 }
 
 TEST(SeamContentionStress, ZeroLostWaiterOnChainedAcquires) {
@@ -84,8 +81,7 @@ TEST(SeamContentionStress, ZeroLostWaiterOnChainedAcquires) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     ioc.run();
     for (auto& f : futs) f.get();

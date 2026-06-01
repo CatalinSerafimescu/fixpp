@@ -98,8 +98,8 @@ public:
         // Validation uses primitive string_view::find_first_of / find;
         // std::filesystem::path constructors are NOT invoked until
         // validation passes (preserves noexcept on make()).
-        std::string sender_comp_id{};
-        std::string target_comp_id{};
+        std::string sender_comp_id;
+        std::string target_comp_id;
 
         // Durability knob.
         FileStorePolicy policy = {};
@@ -111,7 +111,7 @@ public:
         // Executor for the file-I/O work (§4.3.2).
         // REQUIRED at construction per [2e §4.3.2]:665. FileStoreFactory::make()
         // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
-        asio::any_io_executor file_io_executor{};
+        asio::any_io_executor file_io_executor;
 
         // PMR resource for store-owned scratch.
         std::pmr::memory_resource* store_resource = nullptr;

@@ -66,8 +66,7 @@ struct decimal_traits<test::decimal_wide> {
         if (v.mantissa < INT64_MIN_128 || v.mantissa > INT64_MAX_128)
             return std::unexpected{error::decimal_overflow};
         // Also enforce exponent domain per the canonical pod_decimal contract.
-        if (v.exponent < -38 || v.exponent > 0)
-            return std::unexpected{error::decimal_overflow};
+        if (v.exponent < -38 || v.exponent > 0) return std::unexpected{error::decimal_overflow};
         return pod_decimal{static_cast<std::int64_t>(v.mantissa), v.exponent};
     }
 
@@ -218,18 +217,16 @@ TEST(DecimalCrossTraits, X7_FromNonOverflowErrorPassthrough) {
 
 TEST(DecimalCrossTraits, ParseInvalidInputPropagatesError) {
     std::array<std::byte, 1> src{std::byte{'+'}};
-    auto r = decimal<pod_decimal>::parse(
-        std::span<const std::byte>{src.data(), src.size()},
-        std::pmr::null_memory_resource());
+    auto r = decimal<pod_decimal>::parse(std::span<const std::byte>{src.data(), src.size()},
+                                         std::pmr::null_memory_resource());
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_invalid_input);
 }
 
 TEST(DecimalCrossTraits, ParseValidInputReturnsWrappedValue) {
     std::array<std::byte, 3> src{std::byte{'1'}, std::byte{'.'}, std::byte{'5'}};
-    auto r = decimal<pod_decimal>::parse(
-        std::span<const std::byte>{src.data(), src.size()},
-        std::pmr::null_memory_resource());
+    auto r = decimal<pod_decimal>::parse(std::span<const std::byte>{src.data(), src.size()},
+                                         std::pmr::null_memory_resource());
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->value().mantissa, 15);
     EXPECT_EQ(r->value().exponent, -1);

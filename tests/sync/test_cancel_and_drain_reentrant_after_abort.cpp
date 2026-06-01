@@ -36,21 +36,19 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <future>
 #include <vector>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -78,8 +76,8 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, ReentrantCallReturnsAbortNotSuccess)
     async_mutex mtx;
     asio::cancellation_signal reaper_sig;
 
-    std::atomic<int> reaper_result{-1};    // 0=success, 1=aborted, 2=other
-    std::atomic<int> reentrant_result{-1}; // 0=success (BAD), 1=aborted (GOOD), 2=other
+    std::atomic<int> reaper_result{-1};     // 0=success, 1=aborted, 2=other
+    std::atomic<int> reentrant_result{-1};  // 0=success (BAD), 1=aborted (GOOD), 2=other
     std::atomic<bool> holder_release{false};
 
     // Holder: stays locked until explicitly released so the reaper parks on
@@ -87,8 +85,7 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, ReentrantCallReturnsAbortNotSuccess)
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire))
-            co_await yield_n(1);
+        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
         // guard dtor → unlock() → active_holders_count_ decrements
     };
 
@@ -115,8 +112,7 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, ReentrantCallReturnsAbortNotSuccess)
     // aborted latch (drain_latch_ptr_ stays non-null with aborted_==true).
     auto reentrant_coro = [&]() -> asio::awaitable<void> {
         // Wait until reaper has returned (reaper_result != -1).
-        while (reaper_result.load(std::memory_order_acquire) == -1)
-            co_await yield_n(1);
+        while (reaper_result.load(std::memory_order_acquire) == -1) co_await yield_n(1);
 
         // Fresh cancel_and_drain() — no cancellation slot.
         // Must return unexpected{sync_lock_aborted}, not success.
@@ -139,14 +135,13 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, ReentrantCallReturnsAbortNotSuccess)
         reaper_sig.emit(asio::cancellation_type::total);
     };
 
-    auto fh  = asio::co_spawn(ioc, holder_coro(), asio::use_future);
+    auto fh = asio::co_spawn(ioc, holder_coro(), asio::use_future);
     std::vector<std::future<void>> wfuts;
     wfuts.reserve(N);
     for (int i = 0; i < N; ++i)
         wfuts.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
-    auto fr = asio::co_spawn(
-        ioc, reaper_coro(),
-        asio::bind_cancellation_slot(reaper_sig.slot(), asio::use_future));
+    auto fr = asio::co_spawn(ioc, reaper_coro(),
+                             asio::bind_cancellation_slot(reaper_sig.slot(), asio::use_future));
     auto frt = asio::co_spawn(ioc, reentrant_coro(), asio::use_future);
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
@@ -164,8 +159,8 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, ReentrantCallReturnsAbortNotSuccess)
     EXPECT_EQ(reentrant_result.load(), 1)
         << "Reentrant cancel_and_drain() after abort must return "
            "unexpected{sync_lock_aborted}, NOT success. "
-           "Got: " << reentrant_result.load()
-        << " (0=false-success/BUG, 1=aborted/OK, 2=other)";
+           "Got: "
+        << reentrant_result.load() << " (0=false-success/BUG, 1=aborted/OK, 2=other)";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,16 +179,15 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, NoUAFAfterReentrantAbortReturn) {
     auto mtx = std::make_unique<async_mutex>();
 
     asio::cancellation_signal reaper_sig;
-    std::atomic<int>  reaper_result{-1};
-    std::atomic<int>  reentrant_result{-1};
+    std::atomic<int> reaper_result{-1};
+    std::atomic<int> reentrant_result{-1};
     std::atomic<bool> holder_release{false};
     std::atomic<bool> reentrant_done{false};
 
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx->async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire))
-            co_await yield_n(1);
+        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
     };
 
     auto reaper_coro = [&]() -> asio::awaitable<void> {
@@ -208,8 +202,7 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, NoUAFAfterReentrantAbortReturn) {
     };
 
     auto reentrant_coro = [&]() -> asio::awaitable<void> {
-        while (reaper_result.load(std::memory_order_acquire) == -1)
-            co_await yield_n(1);
+        while (reaper_result.load(std::memory_order_acquire) == -1) co_await yield_n(1);
         // Reentrant call must NOT return success.
         auto d = co_await mtx->cancel_and_drain();
         if (d.has_value())
@@ -231,10 +224,9 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, NoUAFAfterReentrantAbortReturn) {
         reaper_sig.emit(asio::cancellation_type::total);
     };
 
-    auto fh  = asio::co_spawn(ioc, holder_coro(), asio::use_future);
-    auto fr  = asio::co_spawn(
-        ioc, reaper_coro(),
-        asio::bind_cancellation_slot(reaper_sig.slot(), asio::use_future));
+    auto fh = asio::co_spawn(ioc, holder_coro(), asio::use_future);
+    auto fr = asio::co_spawn(ioc, reaper_coro(),
+                             asio::bind_cancellation_slot(reaper_sig.slot(), asio::use_future));
     auto frt = asio::co_spawn(ioc, reentrant_coro(), asio::use_future);
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
@@ -244,12 +236,10 @@ TEST(SeamCancelAndDrainReentrantAfterAbort, NoUAFAfterReentrantAbortReturn) {
     frt.get();
     fcn.get();
 
-    EXPECT_EQ(reaper_result.load(), 1)
-        << "Reaper must return sync_lock_aborted";
+    EXPECT_EQ(reaper_result.load(), 1) << "Reaper must return sync_lock_aborted";
     EXPECT_EQ(reentrant_result.load(), 1)
         << "Reentrant call must return sync_lock_aborted (not false success)";
-    EXPECT_TRUE(reentrant_done.load())
-        << "Reentrant coroutine must complete without hanging";
+    EXPECT_TRUE(reentrant_done.load()) << "Reentrant coroutine must complete without hanging";
 
     // Destroy the mutex while ioc is still alive (heap-allocated, reset here).
     // state_==not_locked after the holder's unlock() ran under draining_==true

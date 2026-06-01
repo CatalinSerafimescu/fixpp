@@ -38,25 +38,18 @@ struct global_new_counter {
 
 class pmr_allocation_tracking_resource final : public std::pmr::memory_resource {
 public:
-    explicit pmr_allocation_tracking_resource(
-        std::pmr::memory_resource* upstream) noexcept
+    explicit pmr_allocation_tracking_resource(std::pmr::memory_resource* upstream) noexcept
         : upstream_(upstream) {}
 
-    [[nodiscard]] std::size_t allocate_calls() const noexcept {
-        return allocate_calls_;
-    }
+    [[nodiscard]] std::size_t allocate_calls() const noexcept { return allocate_calls_; }
 
-    [[nodiscard]] std::size_t deallocate_calls() const noexcept {
-        return deallocate_calls_;
-    }
+    [[nodiscard]] std::size_t deallocate_calls() const noexcept { return deallocate_calls_; }
 
     [[nodiscard]] std::size_t total_bytes_allocated() const noexcept {
         return total_bytes_allocated_;
     }
 
-    [[nodiscard]] std::pmr::memory_resource* upstream() const noexcept {
-        return upstream_;
-    }
+    [[nodiscard]] std::pmr::memory_resource* upstream() const noexcept { return upstream_; }
 
     void reset_counters() noexcept {
         allocate_calls_ = 0;
@@ -76,8 +69,7 @@ private:
         upstream_->deallocate(p, bytes, alignment);
     }
 
-    [[nodiscard]] bool do_is_equal(
-        std::pmr::memory_resource const& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
         return this == &other;
     }
 

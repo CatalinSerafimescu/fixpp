@@ -10,17 +10,17 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/dict/error.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include "support/failing_pmr_resource.hpp"
-
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <fixpp/dict/error.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
 #include <sstream>
 #include <string>
+
+#include "support/failing_pmr_resource.hpp"
 
 namespace {
 
@@ -32,8 +32,7 @@ constexpr std::size_t k4MiB = 4UZ * 1024UZ * 1024UZ;
 class OomInjection : public ::testing::Test {
 protected:
     void SetUp() override {
-        auto const path =
-            std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
         std::ifstream ifs{path};
         ASSERT_TRUE(ifs.is_open()) << "Cannot open FIX44.xml at: " << path;
         std::ostringstream oss;
@@ -86,8 +85,7 @@ TEST_F(OomInjection, MidAllocateFailsBecomesXmlOomError) {
         // AC-L9: correct typed exception.
         EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_oom);
         // what() — overridden message identifying the loader allocation site.
-        EXPECT_NE(std::string_view{e.what()}.find("xml_oom_error"),
-                  std::string_view::npos)
+        EXPECT_NE(std::string_view{e.what()}.find("xml_oom_error"), std::string_view::npos)
             << "what() must identify the typed exception, got: " << e.what();
     } catch (std::bad_alloc const&) {
         // AC-P2 violation — raw std::bad_alloc must not escape.

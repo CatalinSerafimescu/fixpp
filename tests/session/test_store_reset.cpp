@@ -40,9 +40,9 @@ using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
 using fixpp::session::MemoryStore;
-using fixpp::store_test::unique_store_dir;
 using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
+using fixpp::store_test::unique_store_dir;
 namespace fs = std::filesystem;
 
 // ── MemoryStore reset tests ──────────────────────────────────────────────────
@@ -272,9 +272,8 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
             {
                 FileStore::Config cfg = make_file_config(dir, pool.get_executor());
                 FileStoreFactory factory{cfg};
-                auto minted =
-                    factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
-                                 pool.get_executor());
+                auto minted = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
+                                           pool.get_executor());
                 EXPECT_TRUE(minted.has_value()) << "Phase 1 open failed";
                 if (!minted.has_value()) co_return;
                 auto& store = *minted.value();
@@ -308,8 +307,8 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
             // post-reset store() and restart_scan() returns false → factory_failed.
             FileStore::Config cfg2 = make_file_config(dir, pool.get_executor());
             FileStoreFactory factory2{cfg2};
-            auto minted2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
-                                          pool.get_executor());
+            auto minted2 =
+                factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
             EXPECT_TRUE(minted2.has_value()) << "Phase 2 reopen failed (sentinel corrupt?)";
             if (!minted2.has_value()) co_return;
             auto& store2 = *minted2.value();
@@ -317,8 +316,8 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
             // Phase 3: retrieve(1, 0, outbound) — must see exactly frame seq=1.
             struct collecting_vis final : public fixpp::session::retrieve_visitor {
                 std::vector<fixpp::session::seqnum_t> seqs;
-                asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-                on_frame(fixpp::session::seqnum_t s, std::span<const std::byte>) noexcept override {
+                asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+                    fixpp::session::seqnum_t s, std::span<const std::byte>) noexcept override {
                     seqs.push_back(s);
                     co_return fixpp::core::expected_t<fixpp::session::visit_result>{
                         fixpp::session::visit_result::cont};
@@ -375,8 +374,8 @@ TEST(StoreResetFile, N2_DirOpenFailureReturnsFatalError) {
 
             // Store a frame so the log has content.
             auto frame = fixpp::store_test::make_test_frame(1, direction_t::outbound);
-            auto sr = co_await store.store(1, std::span<const std::byte>(frame),
-                                           direction_t::outbound);
+            auto sr =
+                co_await store.store(1, std::span<const std::byte>(frame), direction_t::outbound);
             EXPECT_TRUE(sr.has_value());
             if (!sr.has_value()) co_return;
 
@@ -391,8 +390,8 @@ TEST(StoreResetFile, N2_DirOpenFailureReturnsFatalError) {
             // Restore permissions before any EXPECT (so cleanup doesn't fail).
             ::chmod(inner.c_str(), 0755);
 
-            reset_returned_failure = !r.has_value() &&
-                r.error() == fixpp::core::error::store_io_failure;
+            reset_returned_failure =
+                !r.has_value() && r.error() == fixpp::core::error::store_io_failure;
         },
         asio::use_future);
     fut.get();

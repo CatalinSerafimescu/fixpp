@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(ServiceSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(ServiceSmoke, Compiles) { SUCCEED(); }

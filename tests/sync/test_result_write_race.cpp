@@ -20,11 +20,9 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -57,12 +55,11 @@ TEST(SeamResultWriteRace, EveryAcquireReceivesWellFormedResult) {
     };
 
     std::vector<std::future<void>> futs;
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
     ioc.run();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap, 0)    << "Mutual exclusion violated";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated";
     EXPECT_EQ(bad_results, 0) << "Unexpected error result in US1 (no cancel)";
     EXPECT_EQ(good_results, N);
 }
@@ -75,14 +72,16 @@ TEST(SeamResultWriteRace, SequentialResultsAreConsistent) {
     asio::io_context ioc;
     async_mutex mtx;
 
-    auto f = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        for (int i = 0; i < N; ++i) {
-            auto r = co_await mtx.async_lock();
-            EXPECT_TRUE(r.has_value())
-                << "Sequential acquire must always succeed";
-            if (r.has_value()) ++good;
-        }
-    }, asio::use_future);
+    auto f = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            for (int i = 0; i < N; ++i) {
+                auto r = co_await mtx.async_lock();
+                EXPECT_TRUE(r.has_value()) << "Sequential acquire must always succeed";
+                if (r.has_value()) ++good;
+            }
+        },
+        asio::use_future);
     ioc.run();
     f.get();
 
@@ -94,12 +93,15 @@ TEST(SeamResultWriteRace, ResultSlotClearedAfterResume) {
     asio::io_context ioc;
     bool result_valid = false;
 
-    auto f = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        async_mutex mtx;
-        auto r = co_await mtx.async_lock();
-        result_valid = r.has_value() && r->owns_lock();
-        // guard released here
-    }, asio::use_future);
+    auto f = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            async_mutex mtx;
+            auto r = co_await mtx.async_lock();
+            result_valid = r.has_value() && r->owns_lock();
+            // guard released here
+        },
+        asio::use_future);
     ioc.run();
     f.get();
 

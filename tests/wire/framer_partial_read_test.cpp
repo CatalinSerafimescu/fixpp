@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
+#include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
-#include <string>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/wire/framer.hpp>
 
 namespace {
 
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
+using fixpp::wire::Framer;
 using fixpp::wire::pmr_carry_buffer;
 
 constexpr char soh = '\x01';
@@ -58,8 +56,8 @@ void append_checksum_field(std::string& frame, unsigned checksum) {
     return to_bytes(frame);
 }
 
-[[nodiscard]] std::vector<std::byte>
-concat(std::span<const std::byte> a, std::span<const std::byte> b) {
+[[nodiscard]] std::vector<std::byte> concat(std::span<const std::byte> a,
+                                            std::span<const std::byte> b) {
     std::vector<std::byte> out;
     out.reserve(a.size() + b.size());
     out.insert(out.end(), a.begin(), a.end());
@@ -74,11 +72,9 @@ concat(std::span<const std::byte> a, std::span<const std::byte> b) {
     return out;
 }
 
-[[nodiscard]] bool chunking_requires_partial(std::size_t total_size,
-                                             std::size_t first_frame_size,
+[[nodiscard]] bool chunking_requires_partial(std::size_t total_size, std::size_t first_frame_size,
                                              std::size_t chunk_size) {
-    for (std::size_t offset = chunk_size; offset < total_size;
-         offset += chunk_size) {
+    for (std::size_t offset = chunk_size; offset < total_size; offset += chunk_size) {
         if (offset != first_frame_size) {
             return true;
         }
@@ -90,34 +86,32 @@ concat(std::span<const std::byte> a, std::span<const std::byte> b) {
 
 TEST(WireFramerPartialRead, ReassemblesKnownPipelineAcrossEveryChunkSize) {
     std::vector<std::byte> const first =
-        make_frame(std::string{"35=0\x01" "49=SENDER\x01" "56=TARGET\x01"});
+        make_frame(std::string{"35=0\x01"
+                               "49=SENDER\x01"
+                               "56=TARGET\x01"});
     std::vector<std::byte> const second =
-        make_frame(std::string{"35=1\x01" "49=ALPHA\x01" "56=BETA\x01"});
+        make_frame(std::string{"35=1\x01"
+                               "49=ALPHA\x01"
+                               "56=BETA\x01"});
     std::vector<std::byte> const pipeline = concat(first, second);
     std::vector<std::vector<std::byte>> const expected{first, second};
 
     std::array<std::byte, 1024> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                              arena_storage.size()};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
 
-    for (std::size_t chunk_size = 1; chunk_size <= pipeline.size();
-         ++chunk_size) {
+    for (std::size_t chunk_size = 1; chunk_size <= pipeline.size(); ++chunk_size) {
         std::array<std::byte, 1024> arena_storage{};
-        std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                                  arena_storage.size()};
+        std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
         Framer framer{};
         pmr_carry_buffer carry{pipeline.size(), &arena};
         std::vector<std::vector<std::byte>> observed;
         bool saw_partial = false;
 
-        for (std::size_t offset = 0; offset < pipeline.size();
-             offset += chunk_size) {
-            std::size_t const count =
-                std::min(chunk_size, pipeline.size() - offset);
+        for (std::size_t offset = 0; offset < pipeline.size(); offset += chunk_size) {
+            std::size_t const count = std::min(chunk_size, pipeline.size() - offset);
             std::array<frame_view, 4> out{};
-            auto result = framer.feed(
-                std::span<const std::byte>{pipeline}.subspan(offset, count),
-                carry, out);
+            auto result = framer.feed(std::span<const std::byte>{pipeline}.subspan(offset, count),
+                                      carry, out);
 
             ASSERT_TRUE(result.has_value()) << static_cast<int>(result.error());
             for (frame_view const& frame : result.value()) {

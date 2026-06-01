@@ -27,7 +27,8 @@ namespace {
 // Write exactly `width` decimal digits of `value` into `buf[0..width-1]`.
 // Returns buf advanced by `width`.
 // Precondition: value < 10^width.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — internal helper; arg order matches the printf-like (value, width) convention every call site uses.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — internal helper; arg order matches the
+// printf-like (value, width) convention every call site uses.
 constexpr char* write_digits(char* buf, std::uint32_t value, int width) noexcept {
     // Write right-to-left for correctness, then done — avoids a reverse pass.
     for (int i = width - 1; i >= 0; --i) {
@@ -88,7 +89,7 @@ constexpr date_t days_to_date(std::int32_t days) noexcept {
     auto d = static_cast<std::uint8_t>(doy - (((153 * mp) + 2) / 5) + 1);
     auto m = static_cast<std::uint8_t>(mp < 10 ? mp + 3 : mp - 9);
     y += static_cast<int>(m <= 2);
-    return date_t{.year=y, .month=m, .day=d};
+    return date_t{.year = y, .month = m, .day = d};
 }
 
 // Date → days since epoch.
@@ -211,7 +212,7 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
     p += 2;
 
     // Validate day against actual month/year.
-    if (std::cmp_greater(day_i , days_in_month(year, month))) {
+    if (std::cmp_greater(day_i, days_in_month(year, month))) {
         return std::unexpected(error::wire_invalid_field_format);
     }
 

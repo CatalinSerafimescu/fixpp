@@ -14,16 +14,14 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <filesystem>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <memory>
 #include <memory_resource>
 #include <string>
@@ -31,16 +29,16 @@
 
 namespace {
 
-using fixpp::tls::file_cert_source;
-using fixpp::tls::cert_source;
 using fixpp::core::error;
+using fixpp::tls::cert_source;
+using fixpp::tls::file_cert_source;
 
 // Companion positive-compile witness: make_file_cert_source must be noexcept
 // so 2i's C-ABI bridge can call it without an exception handler.
 // Per FR-005 / [arch §5.3]: factory NEVER throws.
-static_assert(
-    noexcept(file_cert_source::make_file_cert_source(file_cert_source::Config{}, nullptr)),
-    "make_file_cert_source must be noexcept — 2i C-ABI bridge requirement (FR-005)");
+static_assert(noexcept(file_cert_source::make_file_cert_source(file_cert_source::Config{},
+                                                               nullptr)),
+              "make_file_cert_source must be noexcept — 2i C-ABI bridge requirement (FR-005)");
 
 // Path to the fixture directory (compiled-in at test-build time via CMake
 // definition FIXPP_TLS_FIXTURE_DIR).
@@ -55,10 +53,10 @@ static std::string fixture(const char* name) {
 // ── (a) No exception escapes the factory ─────────────────────────────────────
 TEST(FileCertSourceFactory, ReturnsExpectedNotThrows) {
     file_cert_source::Config cfg;
-    cfg.leaf_path    = fixture("leaf_rsa2048.pem");
-    cfg.chain_path   = fixture("chain_depth_8.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
+    cfg.chain_path = fixture("chain_depth_8.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     // The call itself must not throw (noexcept).
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
@@ -66,9 +64,8 @@ TEST(FileCertSourceFactory, ReturnsExpectedNotThrows) {
     // Result is either success or a typed error — never a thrown exception.
     // (If fixture files are missing this may be tls_cert_load_failed — that's
     //  tested separately below; here we just confirm no exception.)
-    static_assert(std::is_same_v<
-        decltype(result),
-        fixpp::core::expected_t<std::shared_ptr<cert_source>>>,
+    static_assert(
+        std::is_same_v<decltype(result), fixpp::core::expected_t<std::shared_ptr<cert_source>>>,
         "make_file_cert_source must return expected_t<shared_ptr<cert_source>>");
 
     // On success, shared_ptr is non-null.
@@ -94,7 +91,7 @@ TEST(FileCertSourceFactory, MalformedPemSurfacesCertParseFailed) {
     }
 
     file_cert_source::Config cfg;
-    cfg.leaf_path        = tmp.string();
+    cfg.leaf_path = tmp.string();
     cfg.private_key_path = fixture("leaf_rsa2048.key");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
@@ -109,7 +106,7 @@ TEST(FileCertSourceFactory, MalformedPemSurfacesCertParseFailed) {
 // ── (c) Load-failure — missing file → tls_cert_load_failed ───────────────────
 TEST(FileCertSourceFactory, MissingFileSurfacesCertLoadFailed) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = "/nonexistent/path/leaf.pem";
+    cfg.leaf_path = "/nonexistent/path/leaf.pem";
     cfg.private_key_path = "/nonexistent/path/leaf.key";
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
@@ -122,9 +119,9 @@ TEST(FileCertSourceFactory, MissingFileSurfacesCertLoadFailed) {
 // ── (c) Load-failure — wrong passphrase → tls_cert_load_failed ───────────────
 TEST(FileCertSourceFactory, WrongPasswordSurfacesCertLoadFailed) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_encrypted_pem.pem");
+    cfg.leaf_path = fixture("leaf_encrypted_pem.pem");
     cfg.private_key_path = fixture("leaf_encrypted_pem.key");
-    cfg.password_cb      = []() -> std::string { return "wrong_password"; };
+    cfg.password_cb = []() -> std::string { return "wrong_password"; };
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
 
@@ -136,9 +133,9 @@ TEST(FileCertSourceFactory, WrongPasswordSurfacesCertLoadFailed) {
 // ── (d) Success: load_trust_anchors mirrors the throwing constructor ──────────
 TEST(FileCertSourceFactory, SuccessReturnsUsableSharedPtr) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
 
@@ -157,8 +154,7 @@ TEST(FileCertSourceFactory, SuccessReturnsUsableSharedPtr) {
     ASSERT_TRUE(trust.has_value())
         << "load_trust_anchors must not error when ca_bundle loaded at construction";
     // At least the CA cert should be present.
-    EXPECT_GE(trust->size(), 1u)
-        << "Loaded ca_bundle_path must yield at least one trust anchor";
+    EXPECT_GE(trust->size(), 1u) << "Loaded ca_bundle_path must yield at least one trust anchor";
 }
 
 // ── (d) Success — ECDSA P-256 leaf (exercises certificate.cpp EC branch) ─────
@@ -167,9 +163,9 @@ TEST(FileCertSourceFactory, SuccessReturnsUsableSharedPtr) {
 // detection uncovered. This test fires those.
 TEST(FileCertSourceFactory, SuccessLoadsEcdsaP256Leaf) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_ecdsa_p256.pem");
+    cfg.leaf_path = fixture("leaf_ecdsa_p256.pem");
     cfg.private_key_path = fixture("leaf_ecdsa_p256.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
     ASSERT_TRUE(result.has_value())
@@ -183,13 +179,12 @@ TEST(FileCertSourceFactory, SuccessLoadsEcdsaP256Leaf) {
 // parse_certificate_der which the leaf_rsa2048 single-SAN happy-path skips.
 TEST(FileCertSourceFactory, SuccessLoadsLeafWithLargeSanList) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_san_64.pem");
+    cfg.leaf_path = fixture("leaf_san_64.pem");
     cfg.private_key_path = fixture("leaf_san_64.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-    ASSERT_TRUE(result.has_value())
-        << "make_file_cert_source must succeed for 64-SAN leaf";
+    ASSERT_TRUE(result.has_value()) << "make_file_cert_source must succeed for 64-SAN leaf";
     ASSERT_NE(*result, nullptr);
 }
 
@@ -201,10 +196,10 @@ TEST(FileCertSourceFactory, SuccessLoadsLeafWithLargeSanList) {
 // test only short-circuits past.
 TEST(FileCertSourceFactory, SuccessLoadsEncryptedPemWithCorrectPassword) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_encrypted_pem.pem");
+    cfg.leaf_path = fixture("leaf_encrypted_pem.pem");
     cfg.private_key_path = fixture("leaf_encrypted_pem.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
-    cfg.password_cb      = []() -> std::string { return "test"; };  // matches fixtures/Makefile
+    cfg.ca_bundle_path = fixture("ca.pem");
+    cfg.password_cb = []() -> std::string { return "test"; };  // matches fixtures/Makefile
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
     ASSERT_TRUE(result.has_value())
@@ -218,13 +213,12 @@ TEST(FileCertSourceFactory, SuccessLoadsEncryptedPemWithCorrectPassword) {
 // branch (read_file_bytes + d2i_AutoPrivateKey + d2i_X509 path in Impl::load).
 TEST(FileCertSourceFactory, SuccessLoadsDerInputFormat) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.der");
+    cfg.leaf_path = fixture("leaf_rsa2048.der");
     cfg.private_key_path = fixture("leaf_rsa2048_pkcs8.der");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-    ASSERT_TRUE(result.has_value())
-        << "make_file_cert_source must succeed for DER-encoded inputs";
+    ASSERT_TRUE(result.has_value()) << "make_file_cert_source must succeed for DER-encoded inputs";
     ASSERT_NE(*result, nullptr);
 }
 
@@ -234,9 +228,9 @@ TEST(FileCertSourceFactory, SuccessLoadsDerInputFormat) {
 // single-cert ca.pem trust-anchor happy-path bypasses.
 TEST(FileCertSourceFactory, SuccessLoadsChainDepth8) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("chain_depth_8.pem");
+    cfg.leaf_path = fixture("chain_depth_8.pem");
     cfg.private_key_path = fixture("chain_depth_8.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
     ASSERT_TRUE(result.has_value())
@@ -257,12 +251,11 @@ TEST(FileCertSourceFactory, SuccessLoadsChainDepth8) {
 // ── Empty leaf_path must fail closed ─────────────────────────────────────────
 TEST(FileCertSourceFactory, EmptyLeafPathSurfacesCertLoadFailed) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = "";  // intentionally empty
+    cfg.leaf_path = "";  // intentionally empty
     cfg.private_key_path = fixture("leaf_rsa2048.key");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-    ASSERT_FALSE(result.has_value())
-        << "Empty leaf_path must not succeed";
+    ASSERT_FALSE(result.has_value()) << "Empty leaf_path must not succeed";
     EXPECT_EQ(result.error(), error::tls_cert_load_failed)
         << "Empty leaf_path must surface as tls_cert_load_failed";
 }
@@ -270,12 +263,11 @@ TEST(FileCertSourceFactory, EmptyLeafPathSurfacesCertLoadFailed) {
 // ── Empty private_key_path must fail closed ───────────────────────────────────
 TEST(FileCertSourceFactory, EmptyPrivateKeyPathSurfacesCertLoadFailed) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = "";  // intentionally empty
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-    ASSERT_FALSE(result.has_value())
-        << "Empty private_key_path must not succeed";
+    ASSERT_FALSE(result.has_value()) << "Empty private_key_path must not succeed";
     EXPECT_EQ(result.error(), error::tls_cert_load_failed)
         << "Empty private_key_path must surface as tls_cert_load_failed";
 }
@@ -283,12 +275,11 @@ TEST(FileCertSourceFactory, EmptyPrivateKeyPathSurfacesCertLoadFailed) {
 // ── Both paths empty must fail closed ────────────────────────────────────────
 TEST(FileCertSourceFactory, BothPathsEmptySurfacesCertLoadFailed) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = "";  // intentionally empty
+    cfg.leaf_path = "";         // intentionally empty
     cfg.private_key_path = "";  // intentionally empty
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-    ASSERT_FALSE(result.has_value())
-        << "Both empty paths must not succeed";
+    ASSERT_FALSE(result.has_value()) << "Both empty paths must not succeed";
     EXPECT_EQ(result.error(), error::tls_cert_load_failed)
         << "Both empty paths must surface as tls_cert_load_failed";
 }
@@ -299,7 +290,7 @@ TEST(FileCertSourceFactory, BothPathsEmptySurfacesCertLoadFailed) {
 // would silently produce a null-handle signer (data-model E-2 violation).
 TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
@@ -313,7 +304,7 @@ TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
     asio::io_context ioc;
     fixpp::tls::local_credentials creds{};
     bool got_creds = false;
-    bool creds_ok  = false;
+    bool creds_ok = false;
 
     auto fut = asio::co_spawn(
         ioc,
@@ -322,7 +313,7 @@ TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
             if (r.has_value()) {
                 creds = *r;
                 got_creds = true;
-                creds_ok  = true;
+                creds_ok = true;
             }
         },
         asio::use_future);

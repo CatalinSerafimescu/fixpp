@@ -13,11 +13,10 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
-#include <asio/strand.hpp>
 #include <asio/post.hpp>
-#include <asio/use_future.hpp>
+#include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
-
+#include <asio/use_future.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
@@ -73,16 +72,14 @@ TEST(SeamExecutorCompat, ContendedResumesOnAwaiterStrand) {
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (v > 1) ++overlap;
         // Yield to allow second coroutine to post its acquire.
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         in_critical.fetch_sub(1, std::memory_order_acq_rel);
         // guard released on scope exit
     };
 
     // Second coroutine: post once (so holder acquires first), then acquire.
     auto waiter = [&]() -> asio::awaitable<void> {
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;

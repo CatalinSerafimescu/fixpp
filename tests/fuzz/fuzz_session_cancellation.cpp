@@ -14,24 +14,22 @@
 //     a bounded monotonic resource; cancellable_dispatch must surface
 //     strand_dispatch_failed_oom (slot 50), never silently hit the heap, and
 //     every awaitable must complete exactly once (no leaked handler).
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
 #include <array>
-#include <memory_resource>
-#include <optional>
-
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
-
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/cancellable_dispatch.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <memory_resource>
+#include <optional>
 
 namespace {
 
@@ -46,12 +44,11 @@ using fixpp::session::threading_mode;
 
 }  // namespace
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
-                                      std::size_t size) {
+extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     if (size == 0) return 0;
 
-    const bool   terminal      = (data[0] & 0x1u) != 0;
-    const int    n_dispatches  = 1 + (data[0] >> 1) % 8;            // 1..8
+    const bool terminal = (data[0] & 0x1u) != 0;
+    const int n_dispatches = 1 + (data[0] >> 1) % 8;  // 1..8
     const std::size_t checkpoint =
         (size > 1 ? data[1] : 0u) % static_cast<std::size_t>(n_dispatches + 1);
 
@@ -68,8 +65,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
     SessionConfig cfg;
     cfg.session_arena = &arena;
     Session sess{engine, cfg};
-    auto se = *make_session_executor(ctx.get_executor(),
-                                     threading_mode::per_session_strand,
+    auto se = *make_session_executor(ctx.get_executor(), threading_mode::per_session_strand,
                                      /*attested=*/false, &sess);
 
     asio::co_spawn(ctx, sess.open(), asio::detached);
@@ -89,8 +85,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
         asio::co_spawn(
             ctx,
             [&, i]() -> asio::awaitable<void> {
-                auto r = co_await cancellable_dispatch(
-                    se, sig.slot(), [] {});
+                auto r = co_await cancellable_dispatch(se, sig.slot(), [] {});
                 // Every awaitable completes exactly once with a DEFINED
                 // outcome (value, dispatch_aborted, or the bounded-arena
                 // OOM error) — never a leak, never UB.
@@ -99,8 +94,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
             },
             asio::detached);
         if (static_cast<std::size_t>(i) == checkpoint) {
-            asio::co_spawn(ctx, sess.close(terminal ? close_mode::terminal
-                                                    : close_mode::graceful),
+            asio::co_spawn(ctx, sess.close(terminal ? close_mode::terminal : close_mode::graceful),
                            asio::detached);
         }
     }
@@ -110,7 +104,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
     // cancellation cycle.
     std::size_t budget = 100000;
     while (ctx.poll() != 0) {
-        if (--budget == 0) std::abort();   // libFuzzer flags the deadlock
+        if (--budget == 0) std::abort();  // libFuzzer flags the deadlock
     }
 
     // Every spawned dispatch coroutine must have completed (no leaked

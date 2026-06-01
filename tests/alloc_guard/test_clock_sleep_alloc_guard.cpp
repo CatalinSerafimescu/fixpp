@@ -34,11 +34,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <atomic>
-#include <cstddef>
-#include <memory_resource>
-#include <system_error>
-
 #include <asio/bind_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -46,12 +41,15 @@
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
+#include <atomic>
+#include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <memory_resource>
+#include <system_error>
 
 #include "support/minimal_dictionary.hpp"
 
@@ -89,36 +87,32 @@ using fixpp::session::threading_mode;
 // wall-clock delay, no TSan flakiness from timing.
 // ─────────────────────────────────────────────────────────────────────────────
 void run_sleep_corpus(threading_mode mode) {
-    constexpr int WARMUP_CYCLES  = 5;   // prime asio recycler + slot alloc
-    constexpr int CORPUS_CYCLES  = 10'000;
+    constexpr int WARMUP_CYCLES = 5;  // prime asio recycler + slot alloc
+    constexpr int CORPUS_CYCLES = 10'000;
 
     constexpr std::size_t kSessionArenaSize = 65536;
     std::array<std::byte, kSessionArenaSize> session_buf{};
     // Monotonic, NULL upstream — exhaustion is a hard failure, not silent heap.
-    std::pmr::monotonic_buffer_resource session_mr{
-        session_buf.data(), session_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{session_buf.data(), session_buf.size(),
+                                                   std::pmr::null_memory_resource()};
 
     // Single-threaded io_context drives everything deterministically.
     asio::io_context ioc;
 
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = mode;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
-    if (mode == threading_mode::direct_executor)
-        cfg.already_serialized_executor = true;
+    cfg.mode = mode;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    if (mode == threading_mode::direct_executor) cfg.already_serialized_executor = true;
 
     Session sess{engine, cfg};
-    auto se_result = make_session_executor(
-        ioc.get_executor(),
-        mode,
-        /*attested=*/(mode == threading_mode::direct_executor),
-        &sess);
+    auto se_result =
+        make_session_executor(ioc.get_executor(), mode,
+                              /*attested=*/(mode == threading_mode::direct_executor), &sess);
     ASSERT_TRUE(se_result.has_value()) << "make_session_executor failed";
     auto se = *se_result;
 
@@ -128,26 +122,26 @@ void run_sleep_corpus(threading_mode mode) {
     // ── Warm-up: prime asio recycler + perform the one-time slot alloc ─────
     {
         std::atomic<int> warmup_done{0};
-        asio::co_spawn(
-            ioc,
-            asio::bind_executor(
-                se,
-                [&]() -> asio::awaitable<void> {
-                    for (int i = 0; i < WARMUP_CYCLES; ++i) {
-                        // Deadline in the past → async_wait completes
-                        // immediately on the next io_context poll pass.
-                        try {
-                            co_await clk->sleep_until(
-                                std::chrono::steady_clock::now() - 1s);
-                        } catch (const std::system_error&) {
-                            // operation_aborted on cancel — should not happen
-                            // in the warm-up with no cancellation.
-                        }
-                        warmup_done.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    co_return;
-                }),
-            asio::detached);
+        asio::co_spawn(ioc,
+                       asio::bind_executor(se,
+                                           [&]() -> asio::awaitable<void> {
+                                               for (int i = 0; i < WARMUP_CYCLES; ++i) {
+                                                   // Deadline in the past → async_wait completes
+                                                   // immediately on the next io_context poll pass.
+                                                   try {
+                                                       co_await clk->sleep_until(
+                                                           std::chrono::steady_clock::now() - 1s);
+                                                   } catch (const std::system_error&) {
+                                                       // operation_aborted on cancel — should not
+                                                       // happen in the warm-up with no
+                                                       // cancellation.
+                                                   }
+                                                   warmup_done.fetch_add(1,
+                                                                         std::memory_order_relaxed);
+                                               }
+                                               co_return;
+                                           }),
+                       asio::detached);
         ioc.run();
         ioc.restart();
         ASSERT_EQ(warmup_done.load(), WARMUP_CYCLES);
@@ -155,29 +149,26 @@ void run_sleep_corpus(threading_mode mode) {
 
     // ── Measured window ────────────────────────────────────────────────────
     std::atomic<int> corpus_done{0};
-    asio::co_spawn(
-        ioc,
-        asio::bind_executor(
-            se,
-            [&]() -> asio::awaitable<void> {
-                for (int i = 0; i < CORPUS_CYCLES; ++i) {
-                    try {
-                        co_await clk->sleep_until(
-                            std::chrono::steady_clock::now() - 1s);
-                    } catch (const std::system_error&) {
-                        // Should not happen without cancellation.
-                    }
-                    corpus_done.fetch_add(1, std::memory_order_relaxed);
-                    // Yield periodically to avoid excessive inline-resume
-                    // recursion depth.
-                    if ((i & 255) == 255)
-                        co_await asio::post(
-                            co_await asio::this_coro::executor,
-                            asio::use_awaitable);
-                }
-                co_return;
-            }),
-        asio::detached);
+    asio::co_spawn(ioc,
+                   asio::bind_executor(
+                       se,
+                       [&]() -> asio::awaitable<void> {
+                           for (int i = 0; i < CORPUS_CYCLES; ++i) {
+                               try {
+                                   co_await clk->sleep_until(std::chrono::steady_clock::now() - 1s);
+                               } catch (const std::system_error&) {
+                                   // Should not happen without cancellation.
+                               }
+                               corpus_done.fetch_add(1, std::memory_order_relaxed);
+                               // Yield periodically to avoid excessive inline-resume
+                               // recursion depth.
+                               if ((i & 255) == 255)
+                                   co_await asio::post(co_await asio::this_coro::executor,
+                                                       asio::use_awaitable);
+                           }
+                           co_return;
+                       }),
+                   asio::detached);
 
     alloc_guard_start();
     ioc.run();
@@ -220,20 +211,19 @@ TEST(ClockSleepAllocGuard, DirectExecutorNoHeapAllocAfterCycle1) {
 TEST(ClockSleepAllocGuard, IdleSessionNoSlotAllocated) {
     constexpr std::size_t kSessionArenaSize = 65536;
     std::array<std::byte, kSessionArenaSize> session_buf{};
-    std::pmr::monotonic_buffer_resource session_mr{
-        session_buf.data(), session_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{session_buf.data(), session_buf.size(),
+                                                   std::pmr::null_memory_resource()};
 
     asio::io_context ioc;
 
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     // Record the arena's used bytes before creating the session.
     // (We cannot easily introspect a monotonic_buffer_resource's watermark,

@@ -13,12 +13,10 @@
 // (cancel_sleeps() has no live waiters post-teardown — seam 14 variant).
 #pragma once
 
-#include <chrono>
-#include <memory>
-
 #include <asio/any_io_executor.hpp>
-
+#include <chrono>
 #include <fixpp/core/clock.hpp>
+#include <memory>
 
 namespace fixpp::core {
 
@@ -26,17 +24,16 @@ class mock_clock final : public Clock {
 public:
     // Seeded construction ([2d §4.3]): independent initial UTC + steady +
     // the engine executor. Both clocks step independently.
-    mock_clock(utc_time_point initial_utc,
-               steady_time_point initial_steady,
+    mock_clock(utc_time_point initial_utc, steady_time_point initial_steady,
                asio::any_io_executor exec);
 
-    mock_clock(const mock_clock&)            = delete;
+    mock_clock(const mock_clock&) = delete;
     mock_clock& operator=(const mock_clock&) = delete;
-    mock_clock(mock_clock&&)                 = delete;
-    mock_clock& operator=(mock_clock&&)      = delete;
+    mock_clock(mock_clock&&) = delete;
+    mock_clock& operator=(mock_clock&&) = delete;
     ~mock_clock() override;
 
-    [[nodiscard]] utc_time_point    now() const noexcept override;
+    [[nodiscard]] utc_time_point now() const noexcept override;
     [[nodiscard]] steady_time_point steady_now() const noexcept override;
     // NO expected_t — cancellation via asio::error::operation_aborted
     // ([2d §4.1]/§4.3): the awaiter is removed from the per-deadline list and
@@ -56,7 +53,7 @@ public:
     void set_utc_skew(std::chrono::nanoseconds skew) noexcept;
 
 private:
-    struct state;                     // opaque mutable-state object (in .cpp)
+    struct state;  // opaque mutable-state object (in .cpp)
     std::unique_ptr<state> impl_;
 };
 

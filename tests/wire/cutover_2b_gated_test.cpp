@@ -10,22 +10,21 @@
 // only (deferred with owning_message_handle runtime dispatch); the implemented
 // typed entry point is owning_<Msg>::from_view, exercised here.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/dict/reify.hpp>
+#include <fixpp/wire/field_view.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/dict/reify.hpp>
-#include <fixpp/wire/field_view.hpp>
-#include <fixpp/wire/parser.hpp>
 
 // Generated owning_<Msg> (build-tree only).
 #include <fixpp/v44/Reify.hpp>
@@ -57,8 +56,11 @@ TEST(WireCutover2bGated, WireFloatAccessorLegOnRealSurface) {
     // 44=Price (FLOAT). The wire layer decodes NOTHING: it hands the field's
     // raw bytes across the 2a trait boundary to decimal_t::parse. field_view
     // is the real `: public View` shape the cutover migrates merged-003 onto.
-    auto buf = make_frame("35=D\x01" "34=1\x01" "44=1234.56\x01"
-                          "38=100\x01");
+    auto buf = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "44=1234.56\x01"
+        "38=100\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -76,8 +78,7 @@ TEST(WireCutover2bGated, WireFloatAccessorLegOnRealSurface) {
     EXPECT_EQ(px->as_string(), "1234.56");
 
     auto dec = mv->get_decimal(44, &arena);
-    ASSERT_TRUE(dec.has_value())
-        << "field_view::bytes() -> decimal_t::parse must succeed";
+    ASSERT_TRUE(dec.has_value()) << "field_view::bytes() -> decimal_t::parse must succeed";
 
     auto missing = mv->get_decimal(9999, &arena);
     EXPECT_FALSE(missing.has_value());
@@ -94,8 +95,13 @@ TEST(WireCutover2bGated, ReifyRoundTripOnRealMessageView) {
     std::optional<ONOS> owned;
     {
         // Source frame + its arena live ONLY in this scope.
-        auto buf = make_frame("35=D\x01" "34=1\x01" "49=S\x01" "56=T\x01"
-                              "11=ORD1\x01" "55=AAPL\x01");
+        auto buf = make_frame(
+            "35=D\x01"
+            "34=1\x01"
+            "49=S\x01"
+            "56=T\x01"
+            "11=ORD1\x01"
+            "55=AAPL\x01");
         auto fv = fixpp::wire::test::make_frame_view(buf);
         ASSERT_TRUE(fv.has_value());
         std::pmr::monotonic_buffer_resource source_mr;
@@ -104,8 +110,7 @@ TEST(WireCutover2bGated, ReifyRoundTripOnRealMessageView) {
         ASSERT_TRUE(src.has_value());
 
         auto r = ONOS::from_view(*src, &owning_mr);
-        ASSERT_TRUE(r.has_value())
-            << "owning deep-copy from_view must succeed (T059)";
+        ASSERT_TRUE(r.has_value()) << "owning deep-copy from_view must succeed (T059)";
         // Sanity inside scope: ClOrdID readable.
         ASSERT_TRUE(r->cl_ord_id().has_value());
         EXPECT_EQ(r->cl_ord_id().value(), "ORD1");

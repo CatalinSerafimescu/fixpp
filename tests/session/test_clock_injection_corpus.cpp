@@ -15,18 +15,16 @@
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
 #include <future>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -45,22 +43,22 @@ std::vector<std::string> run_corpus() {
     std::thread runner{[&] { ioc.run(); }};
 
     auto clk = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{1'700'000'000s},
-        fixpp::core::steady_time_point{}, ioc.get_executor());
+        fixpp::core::utc_time_point{1'700'000'000s}, fixpp::core::steady_time_point{},
+        ioc.get_executor());
 
     fixpp::core::EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = std::make_shared<fixpp::core::mock_clock>(
+    engine.clock = std::make_shared<fixpp::core::mock_clock>(
         fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ioc.get_executor());                       // distinct engine clock
+        ioc.get_executor());  // distinct engine clock
     fixpp::session::SessionConfig cfg;
-    cfg.clock_override   = clk;                     // session uses THIS one
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.clock_override = clk;                                         // session uses THIS one
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();  // T050
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     fixpp::session::Session s{engine, cfg};
 
     EXPECT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());
-    EXPECT_EQ(s.effective_clock(), clk);           // I-03: override wins
+    EXPECT_EQ(s.effective_clock(), clk);  // I-03: override wins
 
     std::vector<std::string> transcript;
     const auto script = ts::make_default_script();
@@ -71,16 +69,13 @@ std::vector<std::string> run_corpus() {
         s.dispatch_app_callback([&, lbl = step.label] {
             // Session-scoped timing MUST come from effective_clock (the
             // injected mock), never std::chrono::system_clock::now().
-            const auto st = s.effective_clock()->steady_now()
-                                .time_since_epoch().count();
-            const auto ut = s.effective_clock()->now()
-                                .time_since_epoch().count();
-            transcript.push_back(std::to_string(static_cast<int>(lbl)) +
-                                 ":" + std::to_string(st) + ":" +
-                                 std::to_string(ut));
+            const auto st = s.effective_clock()->steady_now().time_since_epoch().count();
+            const auto ut = s.effective_clock()->now().time_since_epoch().count();
+            transcript.push_back(std::to_string(static_cast<int>(lbl)) + ":" + std::to_string(st) +
+                                 ":" + std::to_string(ut));
             ran.set_value();
         });
-        done.wait();                               // serialise step ordering
+        done.wait();  // serialise step ordering
     }
     wg.reset();
     runner.join();

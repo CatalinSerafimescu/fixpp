@@ -18,7 +18,6 @@
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
@@ -28,25 +27,24 @@
 
 namespace {
 
-using fixpp::session::MemoryStore;
 using fixpp::session::direction_t;
+using fixpp::session::MemoryStore;
 using fixpp::session::seqnum_t;
 using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_test_frame;
 
 MemoryStore make_store(std::size_t cap = 1000) {
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::bounded;
-    cfg.inbound_capacity  = cap;
+    cfg.policy = fixpp::session::capacity_policy::bounded;
+    cfg.inbound_capacity = cap;
     cfg.outbound_capacity = cap;
-    cfg.max_frame_bytes   = 4096;
+    cfg.max_frame_bytes = 4096;
     return MemoryStore{cfg};
 }
 
 // Store frames at seqnums [begin, end] (inclusive) for the given direction
-asio::awaitable<void>
-store_range(MemoryStore& store, seqnum_t begin, seqnum_t end, direction_t dir)
-{
+asio::awaitable<void> store_range(MemoryStore& store, seqnum_t begin, seqnum_t end,
+                                  direction_t dir) {
     for (seqnum_t s = begin; s <= end; ++s) {
         auto frame = make_test_frame(s, dir);
         auto r = co_await store.store(s, std::span<const std::byte>(frame), dir);
@@ -59,7 +57,8 @@ store_range(MemoryStore& store, seqnum_t begin, seqnum_t end, direction_t dir)
 // Replay over [42, 99] walks visitor in seqnum order
 TEST(RetrieveWithGaps, ReplaySubRange) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             // Store frames 1..99 (so [42,99] is a valid contiguous sub-range)
@@ -82,7 +81,8 @@ TEST(RetrieveWithGaps, ReplaySubRange) {
 // retrieve(begin=0) → store_seqnum_invalid, no visitor calls
 TEST(RetrieveWithGaps, BeginZeroIsInvalid) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             co_await store_range(store, 1, 5, direction_t::outbound);
@@ -102,7 +102,8 @@ TEST(RetrieveWithGaps, BeginZeroIsInvalid) {
 // retrieve(begin=10, end=5) → store_invalid_range
 TEST(RetrieveWithGaps, InvalidRange) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             co_await store_range(store, 1, 15, direction_t::inbound);
@@ -126,7 +127,8 @@ TEST(RetrieveWithGaps, InvalidRange) {
 // attempting to retrieve [1, 10] — seqnums 6..10 are never stored (gap).
 TEST(RetrieveWithGaps, NeverPersistedGap) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             // Store only frames 1..5 (seqnums 6..10 are never persisted)
@@ -148,7 +150,8 @@ TEST(RetrieveWithGaps, NeverPersistedGap) {
 // retrieve(1, 0) with end=0 (to-end sentinel) → normal termination
 TEST(RetrieveWithGaps, EndZeroSentinel) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             constexpr seqnum_t kFrames = 20;
@@ -156,8 +159,7 @@ TEST(RetrieveWithGaps, EndZeroSentinel) {
 
             byte_collecting_visitor visitor;
             auto r = co_await store.retrieve(1, 0, direction_t::inbound, visitor);
-            EXPECT_TRUE(r.has_value())
-                << "retrieve(1, 0) with end=0 sentinel must succeed";
+            EXPECT_TRUE(r.has_value()) << "retrieve(1, 0) with end=0 sentinel must succeed";
             EXPECT_EQ(visitor.entries().size(), static_cast<std::size_t>(kFrames));
         },
         asio::use_future);
@@ -167,7 +169,8 @@ TEST(RetrieveWithGaps, EndZeroSentinel) {
 // visitor returning visit_result::stop terminates early with success
 TEST(RetrieveWithGaps, VisitorStopTerminatesCleanly) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             co_await store_range(store, 1, 20, direction_t::inbound);
@@ -188,8 +191,7 @@ TEST(RetrieveWithGaps, VisitorStopTerminatesCleanly) {
             } v;
 
             auto r = co_await store.retrieve(1, 0, direction_t::inbound, v);
-            EXPECT_TRUE(r.has_value())
-                << "visit_result::stop must return success (not an error)";
+            EXPECT_TRUE(r.has_value()) << "visit_result::stop must return success (not an error)";
             EXPECT_EQ(v.count, static_cast<std::size_t>(5));
         },
         asio::use_future);
@@ -199,7 +201,8 @@ TEST(RetrieveWithGaps, VisitorStopTerminatesCleanly) {
 // visitor returning visit_result::abort returns store_visitor_aborted
 TEST(RetrieveWithGaps, VisitorAbortReturnsAbortError) {
     asio::thread_pool pool{1};
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         []() -> asio::awaitable<void> {
             auto store = make_store();
             co_await store_range(store, 1, 20, direction_t::inbound);

@@ -23,8 +23,8 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 
 namespace {
 

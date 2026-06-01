@@ -14,10 +14,8 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
@@ -46,8 +44,7 @@ TEST(SeamContendedLatency, SecondAcquirerSuspends) {
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (v > 1) overlap_detected++;
         // Yield to let coro2 start and block on the mutex.
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         in_critical.fetch_sub(1, std::memory_order_acq_rel);
         first_done = 1;
         // guard destructor calls unlock() here
@@ -55,8 +52,7 @@ TEST(SeamContendedLatency, SecondAcquirerSuspends) {
 
     auto coro2 = [&]() -> asio::awaitable<void> {
         // Post after coro1 has started so coro1 acquires first.
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         auto guard = co_await mtx.async_lock();
         EXPECT_TRUE(guard.has_value());
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -98,8 +94,7 @@ TEST(SeamContendedLatency, MutualExclusionMultipleWaiters) {
     };
 
     std::vector<std::future<void>> futs;
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
     ioc.run();
     for (auto& f : futs) f.get();
 

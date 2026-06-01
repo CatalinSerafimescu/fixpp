@@ -29,11 +29,9 @@
 // slot BEFORE its arena is reclaimed.
 #pragma once
 
-#include <memory>
-
 #include <asio/any_io_executor.hpp>
-
 #include <fixpp/core/clock.hpp>
+#include <memory>
 
 namespace fixpp::core {
 
@@ -44,13 +42,13 @@ public:
     // state.
     explicit system_clock_source(asio::any_io_executor exec);
 
-    system_clock_source(const system_clock_source&)            = delete;
+    system_clock_source(const system_clock_source&) = delete;
     system_clock_source& operator=(const system_clock_source&) = delete;
-    system_clock_source(system_clock_source&&)                 = delete;
-    system_clock_source& operator=(system_clock_source&&)      = delete;
+    system_clock_source(system_clock_source&&) = delete;
+    system_clock_source& operator=(system_clock_source&&) = delete;
     ~system_clock_source() override;
 
-    [[nodiscard]] utc_time_point    now() const noexcept override;
+    [[nodiscard]] utc_time_point now() const noexcept override;
     [[nodiscard]] steady_time_point steady_now() const noexcept override;
     // NO expected_t — cancellation via asio::error::operation_aborted
     // ([2d §4.1]/§4.2).
@@ -63,7 +61,7 @@ public:
     void forget_session(fixpp::session::Session* session) noexcept override;
 
 private:
-    struct state;                     // opaque (intrusive list + mutex; in .cpp)
+    struct state;  // opaque (intrusive list + mutex; in .cpp)
     std::unique_ptr<state> impl_;
 };
 

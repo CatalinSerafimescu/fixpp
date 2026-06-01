@@ -8,14 +8,13 @@
 #include <fixpp/dict/xml_loader.hpp>
 
 // T028: direct pugixml parse for exact exhaustiveness check.
-#include <pugixml.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory_resource>
+#include <pugixml.hpp>
 #include <ranges>
 #include <set>
 #include <string>
@@ -31,39 +30,33 @@ constexpr std::size_t k4MiB = 4UZ * 1024UZ * 1024UZ;
 // Representative tag corpus: a handful of well-known FIX 4.4 header/body tags
 // plus a deliberately absent tag so the NotDeclared branch is exercised.
 constexpr std::array<std::uint16_t, 11> kProbeTags{
-    1,    // Account
-    8,    // BeginString
-    9,    // BodyLength
-    11,   // ClOrdID
-    35,   // MsgType
-    49,   // SenderCompID
-    56,   // TargetCompID
-    78,   // NoAllocs
-    453,  // NoPartyIDs
-    555,  // NoLegs
-    9999, // known-absent sentinel
+    1,     // Account
+    8,     // BeginString
+    9,     // BodyLength
+    11,    // ClOrdID
+    35,    // MsgType
+    49,    // SenderCompID
+    56,    // TargetCompID
+    78,    // NoAllocs
+    453,   // NoPartyIDs
+    555,   // NoLegs
+    9999,  // known-absent sentinel
 };
 
 // Bytewise comparator over msg_type strings (unsigned-char domain per D-6).
 auto bytewise_less = [](std::string_view a, std::string_view b) noexcept {
-    return std::ranges::lexicographical_compare(
-        a, b,
-        [](char lhs, char rhs) noexcept {
-            return static_cast<unsigned char>(lhs) <
-                   static_cast<unsigned char>(rhs);
-        });
+    return std::ranges::lexicographical_compare(a, b, [](char lhs, char rhs) noexcept {
+        return static_cast<unsigned char>(lhs) < static_cast<unsigned char>(rhs);
+    });
 };
 
 // Load FIX44.xml once and pin in monotonic storage.  Each test fixture
 // re-uses a fresh buffer so tests remain independent.
-fixpp::dict::Dictionary load_fix44()
-{
+fixpp::dict::Dictionary load_fix44() {
     static std::array<std::byte, k4MiB> s_buf{};
-    static std::pmr::monotonic_buffer_resource s_mr{
-        s_buf.data(), s_buf.size()};
+    static std::pmr::monotonic_buffer_resource s_mr{s_buf.data(), s_buf.size()};
 
-    auto const path =
-        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     return fixpp::dict::XmlLoader{}.load(path, &s_mr);
 }
 
@@ -73,36 +66,27 @@ fixpp::dict::Dictionary load_fix44()
 // AC-D5 — messages() is non-empty and bytewise-sorted
 // ---------------------------------------------------------------------------
 
-TEST(RoundTrip, MessagesIsSortedBytewise)
-{
-    auto d    = load_fix44();
+TEST(RoundTrip, MessagesIsSortedBytewise) {
+    auto d = load_fix44();
     auto msgs = d.messages();
 
-    ASSERT_FALSE(msgs.empty())
-        << "messages() must return at least one entry for FIX44.xml";
+    ASSERT_FALSE(msgs.empty()) << "messages() must return at least one entry for FIX44.xml";
 
     bool const sorted = std::ranges::is_sorted(
-        msgs,
-        [](fixpp::dict::MessageEntry const& a,
-           fixpp::dict::MessageEntry const& b) noexcept {
+        msgs, [](fixpp::dict::MessageEntry const& a, fixpp::dict::MessageEntry const& b) noexcept {
             return std::ranges::lexicographical_compare(
-                a.msg_type, b.msg_type,
-                [](char lhs, char rhs) noexcept {
-                    return static_cast<unsigned char>(lhs) <
-                           static_cast<unsigned char>(rhs);
+                a.msg_type, b.msg_type, [](char lhs, char rhs) noexcept {
+                    return static_cast<unsigned char>(lhs) < static_cast<unsigned char>(rhs);
                 });
         });
 
-    EXPECT_TRUE(sorted)
-        << "messages() must be sorted bytewise by msg_type (research.md D-6)";
+    EXPECT_TRUE(sorted) << "messages() must be sorted bytewise by msg_type (research.md D-6)";
 
     // Verify no adjacent pair violates strict weak ordering.
     for (std::size_t i = 0; i + 1 < msgs.size(); ++i) {
-        bool const ok =
-            !bytewise_less(msgs[i + 1].msg_type, msgs[i].msg_type);
-        EXPECT_TRUE(ok)
-            << "Inversion at index " << i << ": \""
-            << msgs[i].msg_type << "\" vs \"" << msgs[i + 1].msg_type << "\"";
+        bool const ok = !bytewise_less(msgs[i + 1].msg_type, msgs[i].msg_type);
+        EXPECT_TRUE(ok) << "Inversion at index " << i << ": \"" << msgs[i].msg_type << "\" vs \""
+                        << msgs[i + 1].msg_type << "\"";
         if (!ok) break;
     }
 }
@@ -111,42 +95,36 @@ TEST(RoundTrip, MessagesIsSortedBytewise)
 // AC-D1 / AC-D2 — field_ref and field() are consistent for every message
 // ---------------------------------------------------------------------------
 
-TEST(RoundTrip, FieldRefMatchesFieldOptional)
-{
-    auto d    = load_fix44();
+TEST(RoundTrip, FieldRefMatchesFieldOptional) {
+    auto d = load_fix44();
     auto msgs = d.messages();
 
     ASSERT_FALSE(msgs.empty());
 
     for (auto const& m : msgs) {
         for (std::uint16_t tag : kProbeTags) {
-            auto fr  = d.field_ref(m.msg_type, tag);
+            auto fr = d.field_ref(m.msg_type, tag);
             auto opt = d.field(m.msg_type, tag);
 
             // AC-D2: nullopt iff rule == NotDeclared
-            bool const declared =
-                (fr.rule != fixpp::dict::field_presence::NotDeclared);
+            bool const declared = (fr.rule != fixpp::dict::field_presence::NotDeclared);
 
-            EXPECT_EQ(opt.has_value(), declared)
-                << "msg_type=\"" << m.msg_type << "\" tag=" << tag
-                << ": field_ref.rule=" << static_cast<int>(fr.rule)
-                << " but field().has_value()=" << opt.has_value();
+            EXPECT_EQ(opt.has_value(), declared) << "msg_type=\"" << m.msg_type << "\" tag=" << tag
+                                                 << ": field_ref.rule=" << static_cast<int>(fr.rule)
+                                                 << " but field().has_value()=" << opt.has_value();
 
             if (opt.has_value()) {
                 // AC-D1/D2 round-trip: the FieldRef inside the optional must
                 // equal the FieldRef returned by field_ref().
-                EXPECT_EQ(opt->tag,  fr.tag)
-                    << "tag mismatch for msg_type=\"" << m.msg_type << "\"";
+                EXPECT_EQ(opt->tag, fr.tag) << "tag mismatch for msg_type=\"" << m.msg_type << "\"";
                 EXPECT_EQ(opt->rule, fr.rule)
                     << "rule mismatch for msg_type=\"" << m.msg_type << "\"";
                 EXPECT_EQ(opt->type, fr.type)
                     << "type mismatch for msg_type=\"" << m.msg_type << "\"";
                 EXPECT_EQ(opt->group_no_tag, fr.group_no_tag)
-                    << "group_no_tag mismatch for msg_type=\""
-                    << m.msg_type << "\"";
+                    << "group_no_tag mismatch for msg_type=\"" << m.msg_type << "\"";
                 EXPECT_EQ(opt->component_index, fr.component_index)
-                    << "component_index mismatch for msg_type=\""
-                    << m.msg_type << "\"";
+                    << "component_index mismatch for msg_type=\"" << m.msg_type << "\"";
             }
         }
     }
@@ -156,9 +134,8 @@ TEST(RoundTrip, FieldRefMatchesFieldOptional)
 // AC-D5 driver — exhaustive walk finds the FIX44 headline message types
 // ---------------------------------------------------------------------------
 
-TEST(RoundTrip, ExhaustiveWalkVisitsEveryMessage)
-{
-    auto d    = load_fix44();
+TEST(RoundTrip, ExhaustiveWalkVisitsEveryMessage) {
+    auto d = load_fix44();
     auto msgs = d.messages();
 
     ASSERT_FALSE(msgs.empty());
@@ -177,20 +154,15 @@ TEST(RoundTrip, ExhaustiveWalkVisitsEveryMessage)
     };
 
     for (auto const headline : kHeadlines) {
-        bool const found =
-            std::ranges::find(seen, headline) != seen.end();
-        EXPECT_TRUE(found)
-            << "Headline msg_type \"" << headline
-            << "\" not found in messages()";
+        bool const found = std::ranges::find(seen, headline) != seen.end();
+        EXPECT_TRUE(found) << "Headline msg_type \"" << headline << "\" not found in messages()";
     }
 
     // Every entry should have a non-empty msg_type and a non-empty name.
     for (auto const& m : msgs) {
-        EXPECT_FALSE(m.msg_type.empty())
-            << "MessageEntry has empty msg_type";
+        EXPECT_FALSE(m.msg_type.empty()) << "MessageEntry has empty msg_type";
         EXPECT_FALSE(m.name.empty())
-            << "MessageEntry for msg_type=\"" << m.msg_type
-            << "\" has empty name";
+            << "MessageEntry for msg_type=\"" << m.msg_type << "\" has empty name";
     }
 }
 
@@ -216,12 +188,10 @@ namespace {
 // guard against pathological cyclic XML (R9 / P3-A). The shipped FIX fixtures
 // are well-formed acyclic DAGs so this guard is purely defensive.
 // NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design
-void collect_tags(pugi::xml_node const& container,
-                  std::set<std::uint16_t>& out,
+void collect_tags(pugi::xml_node const& container, std::set<std::uint16_t>& out,
                   std::unordered_map<std::string, pugi::xml_node> const& comp_map,
                   std::unordered_map<std::string, std::uint16_t> const& field_tag_map,
-                  std::unordered_set<std::string>& visited)
-{
+                  std::unordered_set<std::string>& visited) {
     for (auto const& child : container.children()) {
         std::string_view const cn{child.name()};
         if (cn == "field") {
@@ -257,10 +227,8 @@ void collect_tags(pugi::xml_node const& container,
 
 }  // namespace
 
-TEST(RoundTrip, ExhaustiveCoverageExactEquality)
-{
-    auto const xml_path =
-        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+TEST(RoundTrip, ExhaustiveCoverageExactEquality) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
 
     // ---- Step 1: direct pugixml parse to build ground-truth set ----
     pugi::xml_document doc;
@@ -292,7 +260,7 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality)
     // Also expose header/trailer as pseudo-components so per-message expansion
     // can incorporate them (header/trailer fields are inherited by every message
     // in the XmlLoader implementation).
-    auto const header_node  = fix_root.child("header");
+    auto const header_node = fix_root.child("header");
     auto const trailer_node = fix_root.child("trailer");
 
     // Build expected set: for each message, collect tags from header + body + trailer.
@@ -300,7 +268,9 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality)
     std::set<MsgTagPair> expected_pairs;
     for (auto const& m : fix_root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
-        if (msg_type.empty()) { continue; }
+        if (msg_type.empty()) {
+            continue;
+        }
 
         std::set<std::uint16_t> msg_tags;
         // Per-message visited set: reset for each message so component
@@ -320,27 +290,30 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality)
     }
 
     // ---- Step 2: walk the loaded Dictionary to build actual set ----
-    auto d    = load_fix44();
+    auto d = load_fix44();
     auto msgs = d.messages();
     ASSERT_FALSE(msgs.empty());
 
     std::set<MsgTagPair> actual_pairs;
-    std::size_t total_pairs   = 0;
+    std::size_t total_pairs = 0;
     std::size_t nos_tag_count = 0;
-    std::size_t er_tag_count  = 0;
+    std::size_t er_tag_count = 0;
     for (auto const& entry : msgs) {
         std::size_t per_msg = 0;
         for (std::uint32_t t = 0; t < 65536u; ++t) {
             auto const fr = d.field_ref(entry.msg_type, static_cast<std::uint16_t>(t));
             if (fr.rule != fixpp::dict::field_presence::NotDeclared) {
-                actual_pairs.emplace(std::string{entry.msg_type},
-                                     static_cast<std::uint16_t>(t));
+                actual_pairs.emplace(std::string{entry.msg_type}, static_cast<std::uint16_t>(t));
                 ++per_msg;
                 ++total_pairs;
             }
         }
-        if (entry.msg_type == "D") { nos_tag_count = per_msg; }
-        if (entry.msg_type == "8") { er_tag_count  = per_msg; }
+        if (entry.msg_type == "D") {
+            nos_tag_count = per_msg;
+        }
+        if (entry.msg_type == "8") {
+            er_tag_count = per_msg;
+        }
     }
 
     // ---- Step 3: exact equality assertion ----
@@ -365,8 +338,6 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality)
     // ---- Secondary: heuristic floors for loud failure on catastrophic regressions ----
     EXPECT_GT(total_pairs, 200u)
         << "Distinct (msg_type, tag) coverage too low — suspect under-iteration";
-    EXPECT_GT(nos_tag_count, 30u)
-        << "NewOrderSingle has too few declared tags — under-iteration?";
-    EXPECT_GT(er_tag_count, 50u)
-        << "ExecutionReport has too few declared tags — under-iteration?";
+    EXPECT_GT(nos_tag_count, 30u) << "NewOrderSingle has too few declared tags — under-iteration?";
+    EXPECT_GT(er_tag_count, 50u) << "ExecutionReport has too few declared tags — under-iteration?";
 }

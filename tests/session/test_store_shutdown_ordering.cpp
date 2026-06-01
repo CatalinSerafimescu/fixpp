@@ -26,19 +26,17 @@
 // gate-b/r1: RC#7 — comment corrected to match body (test body unchanged).
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <span>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <span>
+#include <vector>
 
 #include "_fixtures_/test_double_fsm.hpp"
 
@@ -58,23 +56,21 @@ TEST(StoreShutdownOrdering, HundredSequentialStoresAllSucceed) {
     asio::thread_pool pool{1};
 
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::bounded;
-    cfg.inbound_capacity  = 200;
+    cfg.policy = fixpp::session::capacity_policy::bounded;
+    cfg.inbound_capacity = 200;
     cfg.outbound_capacity = 200;
-    cfg.max_frame_bytes   = 4096;
+    cfg.max_frame_bytes = 4096;
     auto store = std::make_shared<MemoryStore>(cfg);
 
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= 100; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::outbound);
-                auto r = co_await store->store(
-                    static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame),
-                    direction_t::outbound);
-                EXPECT_TRUE(r.has_value())
-                    << "store seq=" << i << " failed";
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
+                auto r =
+                    co_await store->store(static_cast<seqnum_t>(i),
+                                          std::span<const std::byte>(frame), direction_t::outbound);
+                EXPECT_TRUE(r.has_value()) << "store seq=" << i << " failed";
             }
         },
         asio::use_future);
@@ -95,31 +91,31 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
     asio::thread_pool pool{4};
 
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::unbounded;
-    cfg.max_frame_bytes   = 4096;
+    cfg.policy = fixpp::session::capacity_policy::unbounded;
+    cfg.max_frame_bytes = 4096;
     auto store = std::make_shared<MemoryStore>(cfg);
 
     constexpr int kPerDir = 50;
 
     // Two concurrent writers: one inbound, one outbound
-    auto fut_in = asio::co_spawn(pool.get_executor(),
+    auto fut_in = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::inbound);
-                co_await store->store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::inbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
+                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                      direction_t::inbound);
             }
         },
         asio::use_future);
 
-    auto fut_out = asio::co_spawn(pool.get_executor(),
+    auto fut_out = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::outbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
+                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                      direction_t::outbound);
             }
         },
         asio::use_future);
@@ -146,20 +142,20 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
     asio::thread_pool pool{1};
 
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::bounded;
-    cfg.inbound_capacity  = 200;
+    cfg.policy = fixpp::session::capacity_policy::bounded;
+    cfg.inbound_capacity = 200;
     cfg.outbound_capacity = 200;
-    cfg.max_frame_bytes   = 4096;
+    cfg.max_frame_bytes = 4096;
     auto store = std::make_shared<MemoryStore>(cfg);
 
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             // Store 50 frames
             for (int i = 1; i <= 50; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::outbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
+                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                      direction_t::outbound);
             }
 
             // Trigger reset
@@ -190,20 +186,20 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
     asio::thread_pool pool{2};
 
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::unbounded;
-    cfg.max_frame_bytes   = 4096;
+    cfg.policy = fixpp::session::capacity_policy::unbounded;
+    cfg.max_frame_bytes = 4096;
     auto store = std::make_shared<MemoryStore>(cfg);
 
     // Pre-populate 10 frames so retrieve has something to read
     {
         asio::thread_pool setup{1};
-        auto sfut = asio::co_spawn(setup.get_executor(),
+        auto sfut = asio::co_spawn(
+            setup.get_executor(),
             [store]() -> asio::awaitable<void> {
                 for (int i = 1; i <= 10; ++i) {
-                    auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                                 direction_t::outbound);
+                    auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
                     co_await store->store(static_cast<seqnum_t>(i),
-                        std::span<const std::byte>(frame), direction_t::outbound);
+                                          std::span<const std::byte>(frame), direction_t::outbound);
                 }
             },
             asio::use_future);
@@ -217,13 +213,13 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
     //         writer is also active)
     std::atomic<bool> writer_done{false};
 
-    auto fut_writer = asio::co_spawn(pool.get_executor(),
+    auto fut_writer = asio::co_spawn(
+        pool.get_executor(),
         [store, &writer_done]() -> asio::awaitable<void> {
             for (int i = 11; i <= 30; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::outbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
+                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                      direction_t::outbound);
             }
             writer_done.store(true, std::memory_order_release);
         },
@@ -232,15 +228,16 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
     // Simple collecting visitor for reader
     struct simple_vis final : public fixpp::session::retrieve_visitor {
         std::vector<seqnum_t> seqs;
-        asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-        on_frame(seqnum_t s, std::span<const std::byte>) noexcept override {
+        asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+            seqnum_t s, std::span<const std::byte>) noexcept override {
             seqs.push_back(s);
             co_return fixpp::core::expected_t<fixpp::session::visit_result>{
                 fixpp::session::visit_result::cont};
         }
     };
 
-    auto fut_reader = asio::co_spawn(pool.get_executor(),
+    auto fut_reader = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             simple_vis vis;
             // Read a fixed range (1..10) — concurrent writer writes 11..30
@@ -278,33 +275,33 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
 
     // Tiny initial capacity to force immediate reallocation on first store().
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::unbounded;
-    cfg.max_frame_bytes   = 1024;
+    cfg.policy = fixpp::session::capacity_policy::unbounded;
+    cfg.max_frame_bytes = 1024;
     auto store = std::make_shared<MemoryStore>(cfg);
 
     // Pre-populate 1 frame so retrieve(1,1,...) has something to walk.
     {
         asio::thread_pool setup{1};
-        auto pre = asio::co_spawn(setup.get_executor(),
+        auto pre = asio::co_spawn(
+            setup.get_executor(),
             [store]() -> asio::awaitable<void> {
-                auto frame = make_test_frame(static_cast<seqnum_t>(1),
-                                             direction_t::outbound);
-                co_await store->store(1, std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(1), direction_t::outbound);
+                co_await store->store(1, std::span<const std::byte>(frame), direction_t::outbound);
             },
             asio::use_future);
         pre.get();
-        setup.stop(); setup.join();
+        setup.stop();
+        setup.join();
     }
 
     // Writer: store 200 frames (each ~50 bytes) to force multiple reallocations.
-    auto fut_writer = asio::co_spawn(pool.get_executor(),
+    auto fut_writer = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             for (int i = 2; i <= 200; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::outbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
+                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                      direction_t::outbound);
             }
         },
         asio::use_future);
@@ -313,12 +310,12 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
     // Without RC#1, this triggers the UAF.
     struct nop_vis final : public fixpp::session::retrieve_visitor {
         std::size_t count{0};
-        asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-        on_frame(seqnum_t, std::span<const std::byte> frame) noexcept override {
+        asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+            seqnum_t, std::span<const std::byte> frame) noexcept override {
             // Touch all bytes to ensure ASan catches use-after-free.
             volatile std::byte sum{};
-            for (auto b : frame) sum = static_cast<std::byte>(static_cast<uint8_t>(sum) ^
-                                                               static_cast<uint8_t>(b));
+            for (auto b : frame)
+                sum = static_cast<std::byte>(static_cast<uint8_t>(sum) ^ static_cast<uint8_t>(b));
             (void)sum;
             ++count;
             co_return fixpp::core::expected_t<fixpp::session::visit_result>{
@@ -326,7 +323,8 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
         }
     };
 
-    auto fut_reader = asio::co_spawn(pool.get_executor(),
+    auto fut_reader = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<void> {
             for (int round = 0; round < 50; ++round) {
                 nop_vis vis;

@@ -43,16 +43,15 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/ip/tcp.hpp>
+#include <fixpp/core/error.hpp>                 // core::expected_t<T>
+#include <fixpp/tls/security_profile.hpp>       // fixpp::tls::SslCtxConfig
+#include <fixpp/transport/endpoint.hpp>         // Endpoint
+#include <fixpp/transport/listener.hpp>         // abstract Listener
+#include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
+#include <fixpp/transport/transport.hpp>        // Transport + Transport::Config
 #include <memory>
 #include <memory_resource>
 #include <span>
-
-#include <fixpp/core/error.hpp>             // core::expected_t<T>
-#include <fixpp/tls/security_profile.hpp>   // fixpp::tls::SslCtxConfig
-#include <fixpp/transport/endpoint.hpp>     // Endpoint
-#include <fixpp/transport/listener.hpp>     // abstract Listener
-#include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
-#include <fixpp/transport/transport.hpp>    // Transport + Transport::Config
 
 namespace fixpp::transport {
 
@@ -79,46 +78,46 @@ public:
     struct Config {
         // Local bind address + port + backlog. backlog ≥ 64 recommended for
         // multi-session deployments (per [2h §6.3] / spec US3).
-        Endpoint                   bind_endpoint;
+        Endpoint bind_endpoint;
 
         // SO_REUSEADDR: typical acceptor default (true).
-        bool                       so_reuseaddr {true};
+        bool so_reuseaddr{true};
 
         // SO_REUSEPORT: Linux-only kernel-side load-balancing across multiple
         // listeners on the same port; off by default.
-        bool                       so_reuseport {false};
+        bool so_reuseport{false};
 
         // The accepted Transport's Config — passed through to each minted
         // Transport (Nagle OFF + no linger per Clarifications Q5=A defaults).
-        Transport::Config          accepted_transport_config {};
+        Transport::Config accepted_transport_config{};
 
         // Per-acceptor TLS profile. One SslCtxConfig per Listener — built by
         // the engine bootstrap. Per-counterparty profiles use one Listener
         // per counterparty per [2h §4.6] notes.
-        fixpp::tls::SslCtxConfig   ssl_cfg;
+        fixpp::tls::SslCtxConfig ssl_cfg;
 
         // 013 T039 — per-listener session-event ring for pre-Session TLS
         // validation events. Owned by Config (and therefore by asio_listener).
         // Lifetime: spans the Listener instance — any non-owning pointer into
         // this member (e.g., held by an accepted asio_tls_transport) is valid
         // for the listener's lifetime. [FR-028 / data-model §E-5 / §E-6]
-        ListenerEvents             events;
+        ListenerEvents events;
     };
 
     // Throwing constructor — engine-bootstrap carve-out per [arch §5.3].
     // MUST NOT be called outside of a `trap_throw` boundary at runtime.
     explicit asio_listener(asio::any_io_executor exec, Config cfg);
 
-    asio_listener(asio_listener const&)            = delete;
+    asio_listener(asio_listener const&) = delete;
     asio_listener& operator=(asio_listener const&) = delete;
-    asio_listener(asio_listener&&)                 = delete;
-    asio_listener& operator=(asio_listener&&)      = delete;
+    asio_listener(asio_listener&&) = delete;
+    asio_listener& operator=(asio_listener&&) = delete;
 
     ~asio_listener() override = default;
 
     // ── Listener override ──────────────────────────────────────────────────
-    [[nodiscard]] asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
-        async_accept() override;
+    [[nodiscard]] asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> async_accept()
+        override;
 
     // ── Concrete-impl-only API per spec FR-023 / FR-025 ────────────────────
     //
@@ -138,16 +137,15 @@ public:
     // events (FR-028 / FR-035). Returns a membership-witness view over the
     // last ≤16 emitted SessionEvents (physical ring order; NOT chronological).
     // Parallel shape to Session::recent_events(). [data-model §E-6]
-    [[nodiscard]] std::span<const fixpp::session::SessionEvent>
-    recent_events() const noexcept {
+    [[nodiscard]] std::span<const fixpp::session::SessionEvent> recent_events() const noexcept {
         return cfg_.events.recent_events();
     }
 
 private:
-    Config                                        cfg_;
-    asio::any_io_executor                         exec_;
-    asio::ip::tcp::acceptor                       acceptor_;
-    std::shared_ptr<asio_tls_transport_factory>  accept_factory_;
+    Config cfg_;
+    asio::any_io_executor exec_;
+    asio::ip::tcp::acceptor acceptor_;
+    std::shared_ptr<asio_tls_transport_factory> accept_factory_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,9 +159,7 @@ private:
 // per [arch §6] rule 4 — currently unused (the v1.0 acceptor allocates only
 // the OS-side acceptor handle).
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Listener>>
-make_asio_listener(asio::any_io_executor              exec,
-                   asio_listener::Config              cfg,
-                   std::pmr::memory_resource*         mr) noexcept;
+[[nodiscard]] core::expected_t<std::unique_ptr<Listener>> make_asio_listener(
+    asio::any_io_executor exec, asio_listener::Config cfg, std::pmr::memory_resource* mr) noexcept;
 
 }  // namespace fixpp::transport

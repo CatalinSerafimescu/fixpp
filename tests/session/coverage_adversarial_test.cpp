@@ -15,22 +15,16 @@
 //   C. Logon-ack with msg_seq_num=0 → Disconnected (session.cpp:896-899).
 //   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
 //      absorbing the operation_aborted exception (session.cpp:1187).
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -39,12 +33,16 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -95,29 +93,29 @@ TEST(AdversarialBuilderBufferTooSmall, BuildLogonZeroBuf) {
 
 TEST(AdversarialBuilderBufferTooSmall, BuildLogoutZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_logout(std::span<std::byte>{buf}, 1, "TW", "ISLD", "",
-                          "FIX.4.2", "20240101-00:00:00.000");
+    auto r = build_logout(std::span<std::byte>{buf}, 1, "TW", "ISLD", "", "FIX.4.2",
+                          "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildHeartbeatZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_heartbeat(std::span<std::byte>{buf}, 1, "TW", "ISLD", "",
-                             "FIX.4.2", "20240101-00:00:00.000");
+    auto r = build_heartbeat(std::span<std::byte>{buf}, 1, "TW", "ISLD", "", "FIX.4.2",
+                             "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildTestRequestZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_test_request(std::span<std::byte>{buf}, 1, "TW", "ISLD", "TR1",
-                                "FIX.4.2", "20240101-00:00:00.000");
+    auto r = build_test_request(std::span<std::byte>{buf}, 1, "TW", "ISLD", "TR1", "FIX.4.2",
+                                "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdversarialBuilderBufferTooSmall, BuildRejectZeroBuf) {
     std::array<std::byte, 0> buf{};
-    auto r = build_reject(std::span<std::byte>{buf}, 1, "TW", "ISLD", 2, 35, "0", 5,
-                          "FIX.4.2", "20240101-00:00:00.000");
+    auto r = build_reject(std::span<std::byte>{buf}, 1, "TW", "ISLD", 2, 35, "0", 5, "FIX.4.2",
+                          "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -136,28 +134,30 @@ TEST(AdversarialInterpretLogon, NonDigitTagCharIsSkipped) {
     // Embed a garbage field whose tag starts with a non-digit byte ('X')
     // between BeginString and the real Logon fields. The parser's SOH scanner
     // should walk past it via the skip-malformed-field branch.
-    std::string body = "X9=garbage\x01"
-                       "35=A\x01"
-                       "34=1\x01"
-                       "49=TW\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=ISLD\x01"
-                       "98=0\x01"
-                       "108=30\x01";
+    std::string body =
+        "X9=garbage\x01"
+        "35=A\x01"
+        "34=1\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01"
+        "98=0\x01"
+        "108=30\x01";
     auto frame = wrap_frame(body);
     // Outcome may be ok or error depending on validation; coverage is the goal.
     (void)interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.2");
 }
 
 TEST(AdversarialInterpretLogon, TagWithoutEqualsIsSkipped) {
-    std::string body = "999\x01"  // tag with no '='
-                       "35=A\x01"
-                       "34=1\x01"
-                       "49=TW\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=ISLD\x01"
-                       "98=0\x01"
-                       "108=30\x01";
+    std::string body =
+        "999\x01"  // tag with no '='
+        "35=A\x01"
+        "34=1\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01"
+        "98=0\x01"
+        "108=30\x01";
     auto frame = wrap_frame(body);
     (void)interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.2");
 }
@@ -216,12 +216,13 @@ TEST_F(AdversarialSessionTest, InboundFrameMalformedTagCharSkipped) {
     ASSERT_TRUE(open_session(s).has_value());
 
     // Inbound frame with a garbage field (non-digit tag) before the real fields.
-    std::string body = "X35=garbage\x01"
-                       "35=0\x01"  // Heartbeat
-                       "34=2\x01"
-                       "49=TW\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=ISLD\x01";
+    std::string body =
+        "X35=garbage\x01"
+        "35=0\x01"  // Heartbeat
+        "34=2\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01";
     (void)feed(s, wrap_frame(body));
 }
 
@@ -229,12 +230,13 @@ TEST_F(AdversarialSessionTest, InboundFrameTagWithoutEqualsSkipped) {
     Session s(engine, make_cfg());
     ASSERT_TRUE(open_session(s).has_value());
 
-    std::string body = "999\x01"  // tag without '='
-                       "35=0\x01"
-                       "34=2\x01"
-                       "49=TW\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=ISLD\x01";
+    std::string body =
+        "999\x01"  // tag without '='
+        "35=0\x01"
+        "34=2\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01";
     (void)feed(s, wrap_frame(body));
 }
 
@@ -251,13 +253,14 @@ TEST_F(AdversarialSessionTest, LogonAckOutOfSequenceForcesDisconnected) {
     ASSERT_EQ(s.state(), fsm_state::LogonSent);
 
     // Logon-ack with seq=5 (expected was 1) — seqnum check fails → Disconnected.
-    std::string body = "35=A\x01"
-                       "34=5\x01"
-                       "49=ISLD\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=TW\x01"
-                       "98=0\x01"
-                       "108=30\x01";
+    std::string body =
+        "35=A\x01"
+        "34=5\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01"
+        "98=0\x01"
+        "108=30\x01";
     (void)feed(s, wrap_frame(body));
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
@@ -272,8 +275,7 @@ TEST(AdversarialSessionArena, ResolveArenaThirdFallbackToDefaultResource) {
     // must fall through to std::pmr::get_default_resource() (never null).
     SessionConfig cfg;
     Session s(engine, cfg);
-    EXPECT_NE(s.session_arena(), nullptr)
-        << "I-18: session_arena() must never return null";
+    EXPECT_NE(s.session_arena(), nullptr) << "I-18: session_arena() must never return null";
 }
 
 TEST_F(AdversarialSessionTest, LogonAckSeqZeroForcesDisconnected) {
@@ -284,13 +286,14 @@ TEST_F(AdversarialSessionTest, LogonAckSeqZeroForcesDisconnected) {
     // Logon-ack with seq=0 — parse_seqnum returns 0 → Disconnected.
     // Peer's SenderCompID = our target_comp_id, peer's TargetCompID = our sender_comp_id
     // so interpret_logon's CompID check passes — only the seq=0 branch should fire.
-    std::string body = "35=A\x01"
-                       "34=0\x01"
-                       "49=ISLD\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=TW\x01"
-                       "98=0\x01"
-                       "108=30\x01";
+    std::string body =
+        "35=A\x01"
+        "34=0\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01"
+        "98=0\x01"
+        "108=30\x01";
     (void)feed(s, wrap_frame(body));
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
@@ -303,22 +306,21 @@ TEST_F(AdversarialSessionTest, LogonAckSeqZeroForcesDisconnected) {
 TEST_F(AdversarialSessionTest, LogoutGracefulCancelMidSleep) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
     Session s(engine, cfg);
     ASSERT_TRUE(open_session(s).has_value());
     ASSERT_EQ(s.state(), fsm_state::LogonSent);
 
     // Drive to Active via Logon-ack (seq=1). Peer's 49/56 must match the
     // session's target/sender (interpret_logon's CompID check).
-    std::string body = "35=A\x01"
-                       "34=1\x01"
-                       "49=ISLD\x01"
-                       "52=20240101-00:00:00.000\x01"
-                       "56=TW\x01"
-                       "98=0\x01"
-                       "108=30\x01";
+    std::string body =
+        "35=A\x01"
+        "34=1\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01"
+        "98=0\x01"
+        "108=30\x01";
     ASSERT_TRUE(feed(s, wrap_frame(body)).has_value());
     ASSERT_EQ(s.state(), fsm_state::Active);
 

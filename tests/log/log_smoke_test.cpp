@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(LogSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(LogSmoke, Compiles) { SUCCEED(); }

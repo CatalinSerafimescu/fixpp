@@ -41,11 +41,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 #include <memory_resource>
 #include <vector>
-
-#include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/transport/tls_transport.hpp>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal local stub of async_handshake for fuzz use until T041 ships.
@@ -114,9 +113,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // Verify that transport_handshake_failed has the expected slot (compile-time
     // guard embedded in the fuzzer binary for runtime-assertion purposes).
-    static_assert(
-        static_cast<int>(fixpp::core::error::transport_handshake_failed) == 107,
-        "transport_handshake_failed slot must be 107 per data-model E-13");
+    static_assert(static_cast<int>(fixpp::core::error::transport_handshake_failed) == 107,
+                  "transport_handshake_failed slot must be 107 per data-model E-13");
 
     return 0;
 }

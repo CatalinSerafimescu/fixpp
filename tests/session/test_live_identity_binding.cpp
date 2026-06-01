@@ -29,16 +29,7 @@
 //
 // Anchors: FR-006; US2 AC1; SC-003; I-4; data-model E-2; contracts C2.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
@@ -48,9 +39,10 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -66,6 +58,12 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -81,12 +79,8 @@ static std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));
@@ -116,32 +110,28 @@ static std::vector<std::byte> make_logon_frame(
 // IdentityInjectingTlsTransport — injects a peer_identity with known CN into
 // the handshake result. Simulates what the live TLS path would yield.
 // ─────────────────────────────────────────────────────────────────────────────
-class IdentityInjectingTlsTransport final
-    : public fixpp::transport::TlsTransport {
+class IdentityInjectingTlsTransport final : public fixpp::transport::TlsTransport {
 public:
-    explicit IdentityInjectingTlsTransport(asio::any_io_executor exec,
-                                            std::string injected_cn)
-        : exec_{std::move(exec)}
-        , injected_cn_{std::move(injected_cn)}
-    {}
+    explicit IdentityInjectingTlsTransport(asio::any_io_executor exec, std::string injected_cn)
+        : exec_{std::move(exec)}, injected_cn_{std::move(injected_cn)} {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
     async_connect(fixpp::transport::Endpoint const& ep) override {
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         co_return buf.size();
     }
 
@@ -161,8 +151,8 @@ public:
         pid.leaf_fingerprint = {};
 
         co_return fixpp::transport::handshake_result{
-            .peer_id           = std::move(pid),
-            .captured_pinset   = nullptr,
+            .peer_id = std::move(pid),
+            .captured_pinset = nullptr,
             .negotiated_cipher = std::pmr::string{"TLS_AES_128_GCM_SHA256", mr},
         };
     }
@@ -180,22 +170,21 @@ public:
     explicit IdentityInjectingFactory(std::string injected_cn)
         : injected_cn_{std::move(injected_cn)} {}
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
-        return std::make_unique<IdentityInjectingTlsTransport>(
-            std::move(exec), injected_cn_);
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
+        return std::make_unique<IdentityInjectingTlsTransport>(std::move(exec), injected_cn_);
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override { return nullptr; }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
 
 private:
     std::string injected_cn_;
@@ -206,18 +195,16 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 class LiveIdentityBindingTest : public ::testing::Test {
 protected:
-    asio::io_context          ioc;
+    asio::io_context ioc;
     fixpp::core::EngineConfig engine{};
 
-    void SetUp() override {
-        engine.executor = ioc.get_executor();
-    }
+    void SetUp() override { engine.executor = ioc.get_executor(); }
 
     static fixpp::transport::ReconnectPolicy make_fast_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
-        policy.schedule = std::pmr::vector<std::chrono::milliseconds>{
-            std::pmr::get_default_resource()};
+        policy.schedule =
+            std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
         policy.schedule.push_back(0ms);
         policy.jitter = 0.0;
         return policy;
@@ -225,18 +212,12 @@ protected:
 
     // Build a session reaching LogonSent via drive_reconnect_attempt.
     // Returns the ReconnectFsm (must stay alive through the Logon-ack feed).
-    template<typename FactoryT>
-    static std::unique_ptr<fixpp::session::ReconnectFsm>
-    drive_to_logon_sent(asio::io_context& ioc,
-                        fixpp::session::Session& session,
-                        FactoryT* factory,
-                        fixpp::transport::Endpoint ep)
-    {
-        auto fsm = std::make_unique<fixpp::session::ReconnectFsm>(
-            factory,
-            make_fast_policy(3),
-            30s,
-            2000ms);
+    template <typename FactoryT>
+    static std::unique_ptr<fixpp::session::ReconnectFsm> drive_to_logon_sent(
+        asio::io_context& ioc, fixpp::session::Session& session, FactoryT* factory,
+        fixpp::transport::Endpoint ep) {
+        auto fsm = std::make_unique<fixpp::session::ReconnectFsm>(factory, make_fast_policy(3), 30s,
+                                                                  2000ms);
         fsm->set_reconnect_endpoint(ep);
         fsm->set_session_owner(&session);
         fsm->set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
@@ -259,20 +240,19 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     auto factory = std::make_shared<IdentityInjectingFactory>("PEER-PROD-01");
 
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
-    cfg.heartbeat_interval     = std::chrono::seconds{30};
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
-    cfg.executor_override       = ioc.get_executor();
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.executor_override = ioc.get_executor();
     // mTLS: the live-identity arm (1-live) must fire (not arm 2 fail-closed).
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.compid_authorization_policy = std::move(policy);
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // NO injected-identity seam — live handshake must supply identity.
     cfg.transport_factory_override = factory;
     // Dummy endpoint (mock never really connects).
@@ -290,17 +270,12 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     }
 
     // Drive reconnect via a standalone FSM (bypasses the initial open() path).
-    fixpp::session::ReconnectFsm reconnect_fsm(
-        factory.get(),
-        make_fast_policy(3),
-        30s,
-        2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
     reconnect_fsm.set_reconnect_endpoint(fixpp::transport::Endpoint{"127.0.0.1", 19876});
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
-    auto drive_fut = asio::co_spawn(
-        ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+    auto drive_fut = asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
     ioc.run_for(2s);
     ioc.restart();
 
@@ -322,9 +297,7 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
     {
         auto feed_fut = asio::co_spawn(
-            ioc,
-            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
         ioc.run_for(500ms);
         ioc.restart();
         ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
@@ -349,10 +322,8 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     // dangling view fails fast.
     bool found_bound_event = false;
     for (const auto& ev : session.recent_events()) {
-        if (std::holds_alternative<
-                fixpp::session::session_event_peer_identity_bound>(ev)) {
-            const auto& bound =
-                std::get<fixpp::session::session_event_peer_identity_bound>(ev);
+        if (std::holds_alternative<fixpp::session::session_event_peer_identity_bound>(ev)) {
+            const auto& bound = std::get<fixpp::session::session_event_peer_identity_bound>(ev);
             EXPECT_TRUE(bound.cn.empty())
                 << "peer_identity_bound .cn must be empty on the live success arm "
                 << "(backing store freed by live_peer_id_.reset(); gate-b/r2 FQ-2).";
@@ -395,18 +366,18 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     }
 
     // Build the loopback TLS fixture (provides server-side accept+handshake).
-    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{std::string(fixture_dir),
+                                                                ioc.get_executor()};
 
-    auto  server_ep = loopback_fixture.server_endpoint();
-    auto& listener  = loopback_fixture.listener();
-    auto  ssl_cfg   = loopback_fixture.ssl_cfg();
+    auto server_ep = loopback_fixture.server_endpoint();
+    auto& listener = loopback_fixture.listener();
+    auto ssl_cfg = loopback_fixture.ssl_cfg();
 
     // Session-side factory using the same certs.
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
 
     auto cs_result = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
@@ -414,13 +385,13 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
 
     fixpp::tls::SslCtxConfig session_ssl_cfg;
     session_ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    session_ssl_cfg.cs      = std::move(*cs_result);
+    session_ssl_cfg.cs = std::move(*cs_result);
 
     auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, session_ssl_cfg);
     ASSERT_TRUE(factory_result.has_value()) << "Failed to build transport factory";
-    auto session_factory_shared = std::shared_ptr<fixpp::transport::TransportFactory>{
-        std::move(*factory_result)};
+    auto session_factory_shared =
+        std::shared_ptr<fixpp::transport::TransportFactory>{std::move(*factory_result)};
 
     // Policy: CN="fixpp-leaf-rsa2048" → allowed for "ACCEPTOR".
     // The test cert subject CN from tests/tls/fixtures/leaf_rsa2048.pem is
@@ -429,20 +400,19 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     live_policy.add_binding("fixpp-leaf-rsa2048", "ACCEPTOR");
 
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
-    cfg.heartbeat_interval     = std::chrono::seconds{30};
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
-    cfg.executor_override       = ioc.get_executor();
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.executor_override = ioc.get_executor();
     // mTLS: the live-identity arm (1-live) must fire, not arm (2) fail-closed.
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.compid_authorization_policy = std::move(live_policy);
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // NO injected-identity seam — live handshake must supply the identity.
     cfg.transport_factory_override = session_factory_shared;
     cfg.reconnect_endpoint = server_ep;
@@ -459,28 +429,23 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     }
 
     // Drive client + server sides concurrently.
-    fixpp::session::ReconnectFsm reconnect_fsm(
-        session_factory_shared.get(),
-        make_fast_policy(3),
-        30s,
-        2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3),
+                                               30s, 2000ms);
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
-    auto client_fut = asio::co_spawn(
-        ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+    auto client_fut =
+        asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
 
     asio::co_spawn(
         ioc,
         [&listener, &ssl_cfg]() -> asio::awaitable<void> {
-            co_await asio::this_coro::reset_cancellation_state(
-                asio::enable_total_cancellation());
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             auto accept_r = co_await listener.async_accept();
             if (!accept_r.has_value()) co_return;
             auto& transport_ptr = *accept_r;
-            auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(
-                transport_ptr.get());
+            auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(transport_ptr.get());
             if (tls) {
                 (void)co_await tls->async_handshake(ssl_cfg);
             }
@@ -503,9 +468,7 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
     {
         auto feed_fut = asio::co_spawn(
-            ioc,
-            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
         ioc.run_for(1s);
         ioc.restart();
         ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);

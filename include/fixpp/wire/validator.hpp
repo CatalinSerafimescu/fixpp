@@ -118,8 +118,7 @@ public:
             auto const ents = msg.offsets().entries();
             // Find the first entry that is not a framing tag.
             for (auto const& e : ents) {
-                if (e.tag == kBeginStringH || e.tag == kBodyLengthH ||
-                    e.tag == kCheckSumH) {
+                if (e.tag == kBeginStringH || e.tag == kBodyLengthH || e.tag == kCheckSumH) {
                     continue;  // skip framing — they are order-guaranteed by Framer
                 }
                 // First non-framing field must be MsgType (35).
@@ -192,9 +191,10 @@ public:
             std::uint32_t declared_count = 0;
             for (auto b : count_bytes) {
                 auto c = static_cast<unsigned char>(b);
-                if (c < '0' || c > '9') { break; }
-                declared_count = declared_count * 10U +
-                                 static_cast<std::uint32_t>(c - '0');
+                if (c < '0' || c > '9') {
+                    break;
+                }
+                declared_count = declared_count * 10U + static_cast<std::uint32_t>(c - '0');
             }
             // Walk entries after the count to count actual delimiter occurrences
             // and verify the first entry after the count is the delimiter.

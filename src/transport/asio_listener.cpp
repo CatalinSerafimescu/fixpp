@@ -29,16 +29,14 @@
 
 #include <asio/error.hpp>
 #include <asio/ip/address.hpp>
+#include <asio/redirect_error.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-#include <asio/redirect_error.hpp>
-
-#include <new>          // std::bad_alloc
+#include <fixpp/transport/transport_factory.hpp>
+#include <new>  // std::bad_alloc
 #include <string>
 #include <system_error>
 #include <utility>
-
-#include <fixpp/transport/transport_factory.hpp>
 
 #include "asio_tls_transport.hpp"
 
@@ -75,10 +73,7 @@ namespace {
 // `make_asio_listener`'s `trap_throw` envelope → transport_factory_failed.
 // ─────────────────────────────────────────────────────────────────────────────
 asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
-    : cfg_{std::move(cfg)},
-      exec_{exec},
-      acceptor_{exec_}
-{
+    : cfg_{std::move(cfg)}, exec_{exec}, acceptor_{exec_} {
     const auto bind_ep = make_bind_endpoint(cfg_.bind_endpoint);
 
     acceptor_.open(bind_ep.protocol());
@@ -92,8 +87,7 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
         // SO_REUSEPORT is Linux-only kernel-side load-balancing. ASIO does not
         // expose a typed option; use the raw setsockopt level via native handle.
         const int on = 1;
-        ::setsockopt(acceptor_.native_handle(), SOL_SOCKET, SO_REUSEPORT,
-                     &on, sizeof(on));
+        ::setsockopt(acceptor_.native_handle(), SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
     }
 #endif
 
@@ -121,8 +115,7 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
 // `operation_aborted` on the accepted socket result, mapped here to
 // `transport_accept_cancelled` per [2h §6.6]:1191.
 // ─────────────────────────────────────────────────────────────────────────────
-asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
-asio_listener::async_accept() {
+asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::async_accept() {
     using E = core::error;
 
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
@@ -149,9 +142,8 @@ asio_listener::async_accept() {
     // exec_ which is the [2h §6.4.1] service strand.
     asio::error_code accept_ec;
     asio::ip::tcp::socket accepted_socket{exec_};
-    co_await acceptor_.async_accept(
-        accepted_socket,
-        asio::redirect_error(asio::use_awaitable, accept_ec));
+    co_await acceptor_.async_accept(accepted_socket,
+                                    asio::redirect_error(asio::use_awaitable, accept_ec));
 
     if (accept_ec) {
         if (accept_ec == asio::error::operation_aborted) {
@@ -233,11 +225,9 @@ core::expected_t<void> asio_listener::cancel() noexcept {
 // parameter is reserved for future PMR-aware acceptor allocation; v1.0
 // allocates only the OS-side acceptor handle so it is currently unused.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Listener>>
-make_asio_listener(asio::any_io_executor              exec,
-                   asio_listener::Config              cfg,
-                   std::pmr::memory_resource*         /*mr*/) noexcept
-{
+[[nodiscard]] core::expected_t<std::unique_ptr<Listener>> make_asio_listener(
+    asio::any_io_executor exec, asio_listener::Config cfg,
+    std::pmr::memory_resource* /*mr*/) noexcept {
     try {
         auto ptr = std::make_unique<asio_listener>(std::move(exec), std::move(cfg));
         return std::unique_ptr<Listener>(std::move(ptr));

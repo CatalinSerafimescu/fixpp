@@ -16,12 +16,11 @@
 #include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
-#include <asio/bind_executor.hpp>
 #include <asio/associated_executor.hpp>
+#include <asio/bind_executor.hpp>
 #include <asio/execution.hpp>
 #include <asio/strand.hpp>
 #include <asio/thread_pool.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
@@ -47,8 +46,7 @@ TEST(SeamSessionExecutorAccessorSurvivesErasure, TypedSessionPtrSurvivesDecorati
     SessionConfig cfg;
     Session sess{engine, cfg};
 
-    auto made = make_session_executor(pool.get_executor(),
-                                      threading_mode::per_session_strand,
+    auto made = make_session_executor(pool.get_executor(), threading_mode::per_session_strand,
                                       /*attested=*/false, &sess);
     ASSERT_TRUE(made.has_value());
     const session_executor se = *made;
@@ -93,7 +91,7 @@ TEST(SeamSessionExecutorAccessorSurvivesErasure, TypedSessionPtrSurvivesDecorati
 TEST(SeamSessionExecutorAccessorSurvivesErasure, NonSessionExecutorExposesNoSessionPtr) {
     asio::thread_pool pool{1};
     asio::any_io_executor plain{pool.get_executor()};
-    EXPECT_EQ(plain.target<session_executor>(), nullptr);   // no Session* leak
+    EXPECT_EQ(plain.target<session_executor>(), nullptr);  // no Session* leak
     pool.join();
 }
 

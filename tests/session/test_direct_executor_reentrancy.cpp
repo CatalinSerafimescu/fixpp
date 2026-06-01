@@ -14,14 +14,12 @@
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
-#include <thread>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <thread>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -39,8 +37,8 @@ TEST(SeamDirectExecutorReentrancy, IsStrandWrappedDiscriminator) {
     EngineConfig engine;
     engine.executor = pool.get_executor();
 
-    SessionConfig strand_cfg;  // per_session_strand default
-    strand_cfg.dictionary       = dict;        // T050: non-null dict required at open
+    SessionConfig strand_cfg;      // per_session_strand default
+    strand_cfg.dictionary = dict;  // T050: non-null dict required at open
     strand_cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session a{engine, strand_cfg};
     ASSERT_TRUE(asio::co_spawn(pool, a.open(), asio::use_future).get().has_value());
@@ -50,7 +48,7 @@ TEST(SeamDirectExecutorReentrancy, IsStrandWrappedDiscriminator) {
     SessionConfig direct_cfg;
     direct_cfg.mode = threading_mode::direct_executor;
     direct_cfg.already_serialized_executor = true;
-    direct_cfg.dictionary       = dict;        // T050: non-null dict required at open
+    direct_cfg.dictionary = dict;  // T050: non-null dict required at open
     direct_cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session b{engine, direct_cfg};
     ASSERT_TRUE(asio::co_spawn(pool, b.open(), asio::use_future).get().has_value());
@@ -72,17 +70,16 @@ TEST(SeamDirectExecutorReentrancy, CorrectAttestationDoesNotTripGuard) {
     engine.executor = ioc.get_executor();
     SessionConfig cfg;
     cfg.mode = threading_mode::direct_executor;
-    cfg.already_serialized_executor = true;   // truthful attestation
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary(); // T050
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();  // RC#1
+    cfg.already_serialized_executor = true;                           // truthful attestation
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();  // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
     ASSERT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());
 
     std::atomic<int> done{0};
     constexpr int kN = 3000;
     for (int i = 0; i < kN; ++i) {
-        s.dispatch_app_callback(
-            [&done] { done.fetch_add(1, std::memory_order_relaxed); });
+        s.dispatch_app_callback([&done] { done.fetch_add(1, std::memory_order_relaxed); });
     }
     while (done.load(std::memory_order_relaxed) < kN)
         std::this_thread::sleep_for(std::chrono::milliseconds{2});

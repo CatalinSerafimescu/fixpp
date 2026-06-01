@@ -45,15 +45,14 @@ using fixpp::test_support::make_nos_frame;
 // Reify a NOS into owning_mr; the source frame buffer + its arena are built
 // and DESTROYED inside this function — so a returned ONOS that still reads
 // its fields proves the owning deep-copy is self-contained (AC-R5/AC-R4).
-[[nodiscard]] fixpp::core::expected_t<ONOS>
-reify_nos(std::pmr::memory_resource* owning_mr) {
+[[nodiscard]] fixpp::core::expected_t<ONOS> reify_nos(std::pmr::memory_resource* owning_mr) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource frame_mr;
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     if (!framed || framed->empty()) {
         return std::unexpected{fixpp::core::error::dict_reify_wire_body_not_ready};
     }
@@ -98,8 +97,7 @@ TEST(ReiifyCrossStrand, MoveAcrossThreadsNoRace) {
         }
         ONOS& o = *shared;
         auto cl = o.cl_ord_id();
-        ASSERT_TRUE(cl.has_value())
-            << "parsed values survive cross-strand move (AC-R5)";
+        ASSERT_TRUE(cl.has_value()) << "parsed values survive cross-strand move (AC-R5)";
         EXPECT_EQ(cl.value(), "ORD1");
         EXPECT_TRUE(o.field_value(11).has_value());
         EXPECT_EQ(o.which(), fixpp::dict::application_version::v44);

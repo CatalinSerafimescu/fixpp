@@ -12,21 +12,21 @@
 //   (a) <asio/awaitable.hpp> is directly included → awaitable line-marker present
 //   (b) the active banned spelling appears in a non-system, project-owned region
 #pragma once
-#include <asio/awaitable.hpp>   // brings asio::awaitable into scope
+#include <asio/awaitable.hpp>  // brings asio::awaitable into scope
 #include <mutex>
 #include <shared_mutex>
 namespace fixpp::sync::test::fixture {
-#if   defined(FX_MUTEX)
-inline std::mutex                 g_banned;
+#if defined(FX_MUTEX)
+inline std::mutex g_banned;
 #elif defined(FX_RECURSIVE_MUTEX)
-inline std::recursive_mutex       g_banned;
+inline std::recursive_mutex g_banned;
 #elif defined(FX_TIMED_MUTEX)
-inline std::timed_mutex           g_banned;
+inline std::timed_mutex g_banned;
 #elif defined(FX_RECURSIVE_TIMED_MUTEX)
 inline std::recursive_timed_mutex g_banned;
 #elif defined(FX_SHARED_MUTEX)
-inline std::shared_mutex          g_banned;
+inline std::shared_mutex g_banned;
 #elif defined(FX_SHARED_TIMED_MUTEX)
-inline std::shared_timed_mutex    g_banned;
+inline std::shared_timed_mutex g_banned;
 #endif
 }  // namespace fixpp::sync::test::fixture

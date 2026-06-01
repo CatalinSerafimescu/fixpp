@@ -27,25 +27,16 @@
 //   SC-006; data-model.md E-1 I-3 / E-5;
 //   [[feedback_half_restructure_symmetric_api]]; 012 FR-026.
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -59,6 +50,13 @@
 #include <fixpp/tls/peer_identity.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "loopback_tls_session_harness.hpp"
 #include "support/identity_injecting_transport.hpp"
@@ -75,8 +73,8 @@ static std::string field(int tag, std::string_view val) {
 }
 
 static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                                std::string_view sender, std::string_view target,
-                                                int hbt = 30) {
+                                               std::string_view sender, std::string_view target,
+                                               int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -118,15 +116,15 @@ static std::size_t count_bound_events(const fixpp::session::Session& sess) {
 
 class InvariantCounterWitnessTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -168,15 +166,15 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         ioc.restart();
 
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::session::SecurityProfile{
-            fixpp::session::SecurityProfile::kind::mtls_ca};
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.role = fixpp::session::session_role::acceptor;
         // RC#C (gate-b/r1): bilateral_lenient — tests compid invariant, not reset.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.compid_authorization_policy = base_policy;
@@ -225,15 +223,15 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
         ioc.restart();
 
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "TW";
-        cfg.target_comp_id    = "ISLD";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::session::SecurityProfile{
-            fixpp::session::SecurityProfile::kind::mtls_ca};
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.role              = fixpp::session::session_role::initiator;
+        cfg.role = fixpp::session::session_role::initiator;
         // RC#C (gate-b/r1): bilateral_lenient — tests compid invariant, not reset.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.compid_authorization_policy = base_policy;
@@ -287,8 +285,7 @@ TEST(CompidPolicyStructural, AuthorizeIsConstNoexcept) {
     {
         [[maybe_unused]] auto auth_result = const_policy.authorize(pid, "TESTCOMP");
     }
-    EXPECT_EQ(const_policy.binding_count(), 1u)
-        << "authorize() must not modify binding_count().";
+    EXPECT_EQ(const_policy.binding_count(), 1u) << "authorize() must not modify binding_count().";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,7 +330,7 @@ public:
 
 private:
     std::shared_ptr<fixpp::tls::cert_source> inner_;
-    std::atomic<std::size_t>                 count_{0};
+    std::atomic<std::size_t> count_{0};
 };
 
 // T021 — live loopback: load_credentials() called exactly ONCE per factory,
@@ -361,9 +358,9 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
 
     // ── Build a file_cert_source and wrap it with a counting layer ───────────
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = fdir + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = fdir + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = fdir + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = fdir + "/ca.pem";
+    cs_cfg.ca_bundle_path = fdir + "/ca.pem";
 
     auto inner_result = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
@@ -375,9 +372,9 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
     // prepare_ssl_ctx_ → load_credentials() is called EXACTLY ONCE here.
     fixpp::tls::SslCtxConfig ssl_cfg;
     ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl_cfg.cs      = counting;  // counting wrapper
-    ssl_cfg.clock   = nullptr;   // skip expiry
-    ssl_cfg.caps    = fixpp::tls::CertSourceCaps{};
+    ssl_cfg.cs = counting;    // counting wrapper
+    ssl_cfg.clock = nullptr;  // skip expiry
+    ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
 
     EXPECT_EQ(counting->load_count(), 0u) << "No load before factory construction";
 
@@ -396,7 +393,7 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
     // load_credentials() calls do not affect our counting source.
     fixpp::transport::test::LoopbackTlsFixture loopback_fixture{fdir, ioc.get_executor()};
     auto server_ep = loopback_fixture.server_endpoint();
-    auto& listener  = loopback_fixture.listener();
+    auto& listener = loopback_fixture.listener();
     auto& server_ssl_cfg = loopback_fixture.ssl_cfg();
 
     // ── Drive N=2 loopback handshakes and assert count stays at 1 ───────────
@@ -415,7 +412,9 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
             ioc.get_executor(),
             [&]() -> asio::awaitable<void> {
                 auto ar = co_await listener.async_accept();
-                if (!ar.has_value()) { co_return; }
+                if (!ar.has_value()) {
+                    co_return;
+                }
                 auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(ar->get());
                 if (tls) {
                     auto hs = co_await tls->async_handshake(server_ssl_cfg);
@@ -430,14 +429,20 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
             [&]() -> asio::awaitable<void> {
                 // make() uses the CACHED SSL_CTX — does NOT call load_credentials().
                 auto t = factory->make(ioc.get_executor(), ssl_cfg, nullptr);
-                if (!t.has_value()) { co_return; }
+                if (!t.has_value()) {
+                    co_return;
+                }
                 auto* transport = t->get();
 
                 auto conn = co_await (*t)->async_connect(server_ep);
-                if (!conn.has_value()) { co_return; }
+                if (!conn.has_value()) {
+                    co_return;
+                }
 
                 auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(transport);
-                if (!tls) { co_return; }
+                if (!tls) {
+                    co_return;
+                }
                 // async_handshake() uses the cached SSL_CTX — does NOT call load_credentials().
                 auto hs = co_await tls->async_handshake(ssl_cfg);
                 client_hs_ok = hs.has_value();
@@ -446,10 +451,8 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
 
         ioc.run_for(std::chrono::seconds{5});
 
-        EXPECT_TRUE(client_hs_ok)
-            << "Handshake " << (i + 1) << " client side must succeed";
-        EXPECT_TRUE(server_hs_ok)
-            << "Handshake " << (i + 1) << " server side must succeed";
+        EXPECT_TRUE(client_hs_ok) << "Handshake " << (i + 1) << " client side must succeed";
+        EXPECT_TRUE(server_hs_ok) << "Handshake " << (i + 1) << " server side must succeed";
 
         // KEY ASSERTION: count must STILL be 1 after each handshake.
         // make() + async_handshake() must NOT call load_credentials().

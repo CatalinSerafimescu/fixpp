@@ -36,14 +36,18 @@
 //
 // REACHABLE CELLS (57 total; "n/a" = design-forbidden, not tested):
 //
-// | From\Event | E01   | E02          | E03   | E04   | E05   | E06   | E07   | E08   | E09   | E10   | E11   | E12   | E13   | E14      | E15   |
+// | From\Event | E01   | E02          | E03   | E04   | E05   | E06   | E07   | E08   | E09   | E10
+// | E11   | E12   | E13   | E14      | E15   |
 // |------------|-------|--------------|-------|-------|-------|-------|-------|-------|-------|-------|-------|-------|-------|----------|-------|
-// | S0 NC      | →S1   | →S2→S3       | →S5   | →S5   | →S5   | →S5   | →S5   | →S5   | n/a   | n/a   | n/a   | →S5   | n/a   | →S5      | →S5   |
-// | S1 LS      | idem  | →S3          | →S5   | →S5   | →S5   | →S5   | →S5   | →S5   | (post)| →S5   | →S5   | →S5   | →S5   | →S4      | →S5   |
-// | S2 LR      | n/a   | (already ack)| →S5   | →S3   | →HB+S3| →S3   | →S5   | →S3   | →S3   | →S5   | →S5   | →S3   | →S3   | →S4      | →S5   |
-// | S3 Active  | n/a   | Reject+stay  | n/a   | stay  | →HB   | log   | →Lo→S5| Reject| stay  | →S5   | →S5   | Reject| →TR/S5| →Lo→S4   | →S5   |
-// | S4 LS_out  | n/a   | (drained)    | n/a   | drain | drain | drain | →S5   | drain | drain | drain | drain | drain | →S5   | idem     | →S5   |
-// | S5 Disc    | err   | ignored      | n/a   | ignore| ignore| ignore| ignore| ignore| ignore| ignore| ignore| ignore| none  | err      | idem  |
+// | S0 NC      | →S1   | →S2→S3       | →S5   | →S5   | →S5   | →S5   | →S5   | →S5   | n/a   | n/a
+// | n/a   | →S5   | n/a   | →S5      | →S5   | | S1 LS      | idem  | →S3          | →S5   | →S5 |
+// →S5   | →S5   | →S5   | →S5   | (post)| →S5   | →S5   | →S5   | →S5   | →S4      | →S5   | | S2
+// LR      | n/a   | (already ack)| →S5   | →S3   | →HB+S3| →S3   | →S5   | →S3   | →S3   | →S5   |
+// →S5   | →S3   | →S3   | →S4      | →S5   | | S3 Active  | n/a   | Reject+stay  | n/a   | stay  |
+// →HB   | log   | →Lo→S5| Reject| stay  | →S5   | →S5   | Reject| →TR/S5| →Lo→S4   | →S5   | | S4
+// LS_out  | n/a   | (drained)    | n/a   | drain | drain | drain | →S5   | drain | drain | drain |
+// drain | drain | →S5   | idem     | →S5   | | S5 Disc    | err   | ignored      | n/a   | ignore|
+// ignore| ignore| ignore| ignore| ignore| ignore| ignore| ignore| none  | err      | idem  |
 //
 // Cross-check vs 005/data-model.md table:
 //   - Implementation matches on all 57 cells enumerated above.
@@ -56,11 +60,22 @@
 //
 // Anchors: 005/data-model.md §E2 matrix; session_fsm.hpp:30-67; FR-006; SC-002.
 
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <optional>
@@ -69,21 +84,8 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -113,7 +115,7 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
+    unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
     cs &= 0xFFU;
     char csbuf[4];
@@ -128,8 +130,8 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
 
 // Build a valid Logon(35=A) frame (includes 98=0 / 108=HeartBtInt).
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
-                                   std::string_view begin_string = "FIX.4.2",
-                                   std::uint32_t seq = 1, int heartbt = 30) {
+                                   std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
+                                   int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -171,9 +173,9 @@ protected:
     std::vector<std::vector<std::byte>> captured_frames;
 
     // Default CompID pair: sender=SENDER, target=TARGET.
-    static constexpr std::string_view kSender     = "SENDER";
-    static constexpr std::string_view kTarget     = "TARGET";
-    static constexpr std::string_view kBeginStr   = "FIX.4.2";
+    static constexpr std::string_view kSender = "SENDER";
+    static constexpr std::string_view kTarget = "TARGET";
+    static constexpr std::string_view kBeginStr = "FIX.4.2";
 
     void SetUp() override {
         // Anchor clock at 2024-01-01 00:00:00 UTC so "52=20240101-00:00:00.000"
@@ -182,20 +184,20 @@ protected:
         auto utc_2024 = sc::time_point{} + std::chrono::seconds{1704067200};
         clock = std::make_shared<fixpp::core::mock_clock>(
             utc_2024, fixpp::core::steady_time_point{}, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_initiator_cfg(int heartbt_sec = 30) {
         SessionConfig cfg;
-        cfg.sender_comp_id     = std::string(kSender);
-        cfg.target_comp_id     = std::string(kTarget);
-        cfg.begin_string       = std::string(kBeginStr);
+        cfg.sender_comp_id = std::string(kSender);
+        cfg.target_comp_id = std::string(kTarget);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = session_role::initiator;
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         // W3.3 — capture every outbound frame for per-cell emission assertions.
@@ -230,8 +232,8 @@ protected:
     void clear_handshake_captures() { captured_frames.clear(); }
 
     SessionConfig make_acceptor_cfg(int heartbt_sec = 30) {
-        auto cfg             = make_initiator_cfg(heartbt_sec);
-        cfg.role             = session_role::acceptor;
+        auto cfg = make_initiator_cfg(heartbt_sec);
+        cfg.role = session_role::acceptor;
         return cfg;
     }
 
@@ -417,7 +419,9 @@ TEST_F(FsmMatrixWitness, NC_InboundOutOfScopeAdmin_TransitionsToDisconnected) {
     (void)open_sync(sess);
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
 
-    std::string extra = "7=1\x01" "16=0\x01";
+    std::string extra =
+        "7=1\x01"
+        "16=0\x01";
     auto rr = build_frame("2", 1, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, rr);
 
@@ -477,8 +481,7 @@ TEST_F(FsmMatrixWitness, LS_OpenInitiator_Idempotent) {
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto r2 = open_sync(sess);
-    EXPECT_FALSE(r2.has_value())
-        << "Second open() from LogonSent must return session_already_open";
+    EXPECT_FALSE(r2.has_value()) << "Second open() from LogonSent must return session_already_open";
     EXPECT_EQ(r2.error(), fixpp::core::error::session_already_open);
     EXPECT_EQ(sess.state(), fsm_state::LogonSent)
         << "State must remain LogonSent after idempotent open()";
@@ -579,7 +582,9 @@ TEST_F(FsmMatrixWitness, LS_InboundOutOfScopeAdmin_SessionFatal_TransitionsToDis
     (void)open_sync(sess);
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
-    std::string extra = "7=1\x01" "16=0\x01";
+    std::string extra =
+        "7=1\x01"
+        "16=0\x01";
     auto rr = build_frame("2", 1, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, rr);
 
@@ -671,8 +676,7 @@ TEST_F(FsmMatrixWitness, LR_AcceptorPath_RecordsLogonReceivedTransient) {
     auto hist = sess.fsm_visit_history();
     EXPECT_TRUE(history_contains(hist, fsm_state::LogonReceived))
         << "LogonReceived must appear in visit history";
-    EXPECT_TRUE(history_contains(hist, fsm_state::Active))
-        << "Active must appear in visit history";
+    EXPECT_TRUE(history_contains(hist, fsm_state::Active)) << "Active must appear in visit history";
 }
 
 // S2×E07: inbound Logout during LogonReceived → Disconnected.
@@ -834,7 +838,9 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
-    std::string extra = "7=1\x01" "16=0\x01";
+    std::string extra =
+        "7=1\x01"
+        "16=0\x01";
     auto rr = build_frame("2", 2, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, rr);
 
@@ -1050,7 +1056,9 @@ TEST_F(FsmMatrixWitness, LO_InboundOutOfScopeAdmin_Drained_StaysLogoutSent) {
         << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
 
-    std::string extra = "7=1\x01" "16=0\x01";
+    std::string extra =
+        "7=1\x01"
+        "16=0\x01";
     auto rr = build_frame("2", 3, kTarget, kSender, kBeginStr, extra);
     (void)feed_sync(sess, rr);
 

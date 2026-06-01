@@ -30,20 +30,18 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -55,7 +53,6 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
-
     bool drain_ok = false;
     std::atomic<int> acquirer_granted{0};
     std::atomic<int> acquirer_drained{0};
@@ -69,19 +66,22 @@ TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
         auto ex = co_await asio::this_coro::executor;
 
         // Spawn the in-flight acquirer (starts concurrently with drain below).
-        asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-            // Acquirer checks draining_ racing with cancel_and_drain().
-            auto r = co_await mtx.async_lock();
-            if (r.has_value()) {
-                acquirer_granted.fetch_add(1, std::memory_order_acq_rel);
-                // Unlock to let drain complete.
-                // guard destructor calls unlock().
-            } else if (r.error() == error::sync_lock_drained ||
-                       r.error() == error::sync_lock_aborted) {
-                acquirer_drained.fetch_add(1, std::memory_order_acq_rel);
-            }
-            acquirer_completed.fetch_add(1, std::memory_order_acq_rel);
-        }, asio::detached);
+        asio::co_spawn(
+            ex,
+            [&]() -> asio::awaitable<void> {
+                // Acquirer checks draining_ racing with cancel_and_drain().
+                auto r = co_await mtx.async_lock();
+                if (r.has_value()) {
+                    acquirer_granted.fetch_add(1, std::memory_order_acq_rel);
+                    // Unlock to let drain complete.
+                    // guard destructor calls unlock().
+                } else if (r.error() == error::sync_lock_drained ||
+                           r.error() == error::sync_lock_aborted) {
+                    acquirer_drained.fetch_add(1, std::memory_order_acq_rel);
+                }
+                acquirer_completed.fetch_add(1, std::memory_order_acq_rel);
+            },
+            asio::detached);
 
         // Drain is called immediately after spawning the acquirer (same thread,
         // before ioc yields to the acquirer).
@@ -100,8 +100,8 @@ TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
     EXPECT_EQ(acquirer_completed.load(), 1) << "Acquirer must complete exactly once";
     int g = acquirer_granted.load();
     int dr = acquirer_drained.load();
-    EXPECT_EQ(g + dr, 1)
-        << "Acquirer must be either granted (g=" << g << ") or drained (dr=" << dr << ")";
+    EXPECT_EQ(g + dr, 1) << "Acquirer must be either granted (g=" << g << ") or drained (dr=" << dr
+                         << ")";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
 
 TEST(SeamInFlightAcquirerCoverage, MultipleIterationsCoverRaceWindow) {
     constexpr int ROUNDS = 8;
-    constexpr int K      = 4;   // concurrent in-flight acquirers per round
+    constexpr int K = 4;  // concurrent in-flight acquirers per round
 
     for (int round = 0; round < ROUNDS; ++round) {
         async_mutex mtx;
@@ -129,17 +129,20 @@ TEST(SeamInFlightAcquirerCoverage, MultipleIterationsCoverRaceWindow) {
 
             // Spawn K in-flight acquirers with different yields to vary interleaving.
             for (int k = 0; k < K; ++k) {
-                asio::co_spawn(ex, [&, k]() -> asio::awaitable<void> {
-                    co_await yield_n(k);  // stagger
-                    auto r = co_await mtx.async_lock();
-                    if (r.has_value()) {
-                        total_granted.fetch_add(1, std::memory_order_acq_rel);
-                        // unlock via guard dtor
-                    } else {
-                        total_rejected.fetch_add(1, std::memory_order_acq_rel);
-                    }
-                    total_completed.fetch_add(1, std::memory_order_acq_rel);
-                }, asio::detached);
+                asio::co_spawn(
+                    ex,
+                    [&, k]() -> asio::awaitable<void> {
+                        co_await yield_n(k);  // stagger
+                        auto r = co_await mtx.async_lock();
+                        if (r.has_value()) {
+                            total_granted.fetch_add(1, std::memory_order_acq_rel);
+                            // unlock via guard dtor
+                        } else {
+                            total_rejected.fetch_add(1, std::memory_order_acq_rel);
+                        }
+                        total_completed.fetch_add(1, std::memory_order_acq_rel);
+                    },
+                    asio::detached);
             }
 
             // Drain starts at round-dependent yield offset.
@@ -187,13 +190,16 @@ TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
 
         // Spawn M acquirers strictly AFTER drain completes.
         for (int i = 0; i < M; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                auto r = co_await mtx.async_lock();
-                if (r.has_value())
-                    post_drain_granted.fetch_add(1, std::memory_order_acq_rel);
-                else if (r.error() == error::sync_lock_drained)
-                    post_drain_drained.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    auto r = co_await mtx.async_lock();
+                    if (r.has_value())
+                        post_drain_granted.fetch_add(1, std::memory_order_acq_rel);
+                    else if (r.error() == error::sync_lock_drained)
+                        post_drain_drained.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(M * 4);
@@ -204,8 +210,7 @@ TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
     f.get();
 
     EXPECT_TRUE(drain_ok);
-    EXPECT_EQ(post_drain_granted.load(), 0)
-        << "No acquirer must slip past the drain";
+    EXPECT_EQ(post_drain_granted.load(), 0) << "No acquirer must slip past the drain";
     EXPECT_EQ(post_drain_drained.load(), M)
         << "All post-drain acquirers must get sync_lock_drained";
 }
@@ -225,8 +230,7 @@ TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
-    constexpr int K = 6;   // concurrent in-flight acquirers
-
+    constexpr int K = 6;  // concurrent in-flight acquirers
 
     std::atomic<int> total_completed{0};
     std::atomic<int> granted_count{0};
@@ -239,47 +243,57 @@ TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
     // Spawn K in-flight acquirers with varying stagger, and 2 concurrent drains
     // as top-level futures (not nested, avoiding deadlock).
     for (int k = 0; k < K; ++k) {
-        asio::co_spawn(ioc, [&, k]() -> asio::awaitable<void> {
-            co_await yield_n(k);
-            auto r = co_await mtx.async_lock();
-            if (r.has_value()) {
-                granted_count.fetch_add(1, std::memory_order_acq_rel);
-                // unlock via guard dtor
-            } else {
-                rejected_count.fetch_add(1, std::memory_order_acq_rel);
-            }
-            total_completed.fetch_add(1, std::memory_order_acq_rel);
-        }, asio::detached);
+        asio::co_spawn(
+            ioc,
+            [&, k]() -> asio::awaitable<void> {
+                co_await yield_n(k);
+                auto r = co_await mtx.async_lock();
+                if (r.has_value()) {
+                    granted_count.fetch_add(1, std::memory_order_acq_rel);
+                    // unlock via guard dtor
+                } else {
+                    rejected_count.fetch_add(1, std::memory_order_acq_rel);
+                }
+                total_completed.fetch_add(1, std::memory_order_acq_rel);
+            },
+            asio::detached);
     }
 
-    auto fd1 = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        auto d = co_await mtx.cancel_and_drain();
-        if (d.has_value()) drain_success.fetch_add(1, std::memory_order_acq_rel);
-    }, asio::use_future);
+    auto fd1 = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            auto d = co_await mtx.cancel_and_drain();
+            if (d.has_value()) drain_success.fetch_add(1, std::memory_order_acq_rel);
+        },
+        asio::use_future);
 
-    auto fd2 = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        co_await yield_n(1);
-        auto d = co_await mtx.cancel_and_drain();
-        if (d.has_value()) drain_success.fetch_add(1, std::memory_order_acq_rel);
-    }, asio::use_future);
+    auto fd2 = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            co_await yield_n(1);
+            auto d = co_await mtx.cancel_and_drain();
+            if (d.has_value()) drain_success.fetch_add(1, std::memory_order_acq_rel);
+        },
+        asio::use_future);
 
     ioc.run();
     fd1.get();
     fd2.get();
 
     // After both drains complete, all K acquirers must have completed.
-    EXPECT_EQ(total_completed.load(), K)
-        << "All K in-flight acquirers must complete exactly once";
-    EXPECT_EQ(drain_success.load(), 2)
-        << "Both drains must succeed";
+    EXPECT_EQ(total_completed.load(), K) << "All K in-flight acquirers must complete exactly once";
+    EXPECT_EQ(drain_success.load(), 2) << "Both drains must succeed";
 
     // Post-drain: any new acquirer must be rejected with sync_lock_drained.
     ioc.restart();
     bool post_drain_rejected = false;
-    auto fc = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        auto r = co_await mtx.async_lock();
-        post_drain_rejected = !r.has_value() && r.error() == error::sync_lock_drained;
-    }, asio::use_future);
+    auto fc = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            auto r = co_await mtx.async_lock();
+            post_drain_rejected = !r.has_value() && r.error() == error::sync_lock_drained;
+        },
+        asio::use_future);
     ioc.run();
     fc.get();
     EXPECT_TRUE(post_drain_rejected) << "Post-drain acquires must be rejected";

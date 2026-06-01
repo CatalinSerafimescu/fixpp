@@ -17,11 +17,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>  // defines core::expected_t<T>
+#include <fixpp/transport/endpoint.hpp>
 #include <memory_resource>
 #include <span>
-
-#include <fixpp/core/error.hpp>        // defines core::expected_t<T>
-#include <fixpp/transport/endpoint.hpp>
 
 namespace fixpp::transport {
 
@@ -61,28 +60,31 @@ public:
     //   so_linger_enabled = false (matches Fix8 explicit + QFJ/QFC OS-default)
     struct Config {
         // ── Connect-time / handshake-time ───────────────────────────────────
-        std::chrono::milliseconds connect_timeout       {30'000};   // [2h §1.1] cap.
-        std::chrono::milliseconds tls_handshake_timeout {30'000};   // [2h §1.1] cap; surfaces transport_handshake_timeout.
-        std::chrono::milliseconds tls_close_timeout     {1'000};    // [2h §4.1] close() bidi shutdown cap.
+        std::chrono::milliseconds connect_timeout{30'000};  // [2h §1.1] cap.
+        std::chrono::milliseconds tls_handshake_timeout{
+            30'000};  // [2h §1.1] cap; surfaces transport_handshake_timeout.
+        std::chrono::milliseconds tls_close_timeout{1'000};  // [2h §4.1] close() bidi shutdown cap.
 
         // ── Read/Write windows ──────────────────────────────────────────────
-        std::size_t               max_read_window_bytes  {256 * 1024};   // matches [2b §1.2] default_max_frame_bytes.
-        std::size_t               max_write_size_bytes   {1024 * 1024};  // one v1.0-max frame + 4× headroom.
+        std::size_t max_read_window_bytes{256 *
+                                          1024};  // matches [2b §1.2] default_max_frame_bytes.
+        std::size_t max_write_size_bytes{1024 * 1024};  // one v1.0-max frame + 4× headroom.
 
         // ── TCP knobs ───────────────────────────────────────────────────────
-        std::int32_t              tcp_recv_buf_bytes     {0};   // 0 = OS auto-tune.
-        std::int32_t              tcp_send_buf_bytes     {0};   // 0 = OS auto-tune.
-        bool                      tcp_nodelay            {true};  // Clarifications Q5=A — Nagle OFF.
-        bool                      tcp_keepalive          {false}; // Heartbeat is primary keep-alive.
-        std::int32_t              tcp_keepalive_idle_seconds     {120};  // consulted only when tcp_keepalive true.
-        std::int32_t              tcp_keepalive_interval_seconds {30};
-        std::int32_t              tcp_keepalive_count            {3};
-        bool                      so_reuseaddr           {false}; // acceptor-side opt-in.
-        bool                      so_linger_enabled      {false}; // Clarifications Q5=A — no linger.
-        std::int32_t              so_linger_seconds      {0};
+        std::int32_t tcp_recv_buf_bytes{0};            // 0 = OS auto-tune.
+        std::int32_t tcp_send_buf_bytes{0};            // 0 = OS auto-tune.
+        bool tcp_nodelay{true};                        // Clarifications Q5=A — Nagle OFF.
+        bool tcp_keepalive{false};                     // Heartbeat is primary keep-alive.
+        std::int32_t tcp_keepalive_idle_seconds{120};  // consulted only when tcp_keepalive true.
+        std::int32_t tcp_keepalive_interval_seconds{30};
+        std::int32_t tcp_keepalive_count{3};
+        bool so_reuseaddr{false};       // acceptor-side opt-in.
+        bool so_linger_enabled{false};  // Clarifications Q5=A — no linger.
+        std::int32_t so_linger_seconds{0};
 
         // ── PMR (per [arch §6] rule 4) ──────────────────────────────────────
-        std::pmr::memory_resource* mr {nullptr};   // null → engine default; passed through factory make().
+        std::pmr::memory_resource* mr{
+            nullptr};  // null → engine default; passed through factory make().
     };
 
     virtual ~Transport() = default;
@@ -93,8 +95,8 @@ public:
     //
     //     Cancellation: cancellation_type::total → transport_connect_cancelled.
     //     Idempotency: second call before close()/cancel() → transport_already_connected.
-    [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
-        async_connect(Endpoint const& ep) = 0;
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
+        Endpoint const& ep) = 0;
 
     // (2) Read up to buf.size() bytes from the peer into the CALLER-OWNED buffer
     //     (typically aliases 2b's framer-carry arena; transport NEVER allocates
@@ -106,8 +108,8 @@ public:
     //
     //     [[clang::lifetimebound]] on the parameter — caller MUST keep buffer
     //     alive past awaitable completion.
-    [[nodiscard]] virtual asio::awaitable<core::expected_t<std::size_t>>
-        async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) = 0;
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) = 0;
 
     // (3) Composed write — ASIO equivalent of asio::async_write, NOT
     //     async_write_some. Awaitable completes with bytes.size() on success.
@@ -129,8 +131,8 @@ public:
     //     alive past awaitable completion (typically the caller pins the
     //     per-message arena that holds Writer::commit's post-commit span per
     //     [2e §6.1.4] / [2b §4.5]).
-    [[nodiscard]] virtual asio::awaitable<core::expected_t<std::size_t>>
-        async_write(std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
     //     async_handshake. Synchronous; thread-safe (ASIO cancellation_signal
@@ -163,9 +165,9 @@ public:
 // The session FSM captures by value across reconnect cycles.
 // ─────────────────────────────────────────────────────────────────────────────
 struct ConnectInfo {
-    Endpoint remote;       // negotiated peer endpoint (post-resolution).
-    Endpoint local;        // local-side bind endpoint.
-    int      family {0};   // AF_INET or AF_INET6.
+    Endpoint remote;  // negotiated peer endpoint (post-resolution).
+    Endpoint local;   // local-side bind endpoint.
+    int family{0};    // AF_INET or AF_INET6.
 };
 
 }  // namespace fixpp::transport

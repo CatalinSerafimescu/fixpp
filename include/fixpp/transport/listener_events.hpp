@@ -33,7 +33,7 @@
 #include <string>
 #include <string_view>
 
-#include "fixpp/core/error.hpp"            // fixpp::core::error (master enum)
+#include "fixpp/core/error.hpp"             // fixpp::core::error (master enum)
 #include "fixpp/session/session_event.hpp"  // SessionEvent + kSessionEventRingCapacity
 
 namespace fixpp::transport {
@@ -46,18 +46,18 @@ class ListenerEvents {
 public:
     ListenerEvents() noexcept = default;
 
-    ListenerEvents(ListenerEvents const&)            = default;
+    ListenerEvents(ListenerEvents const&) = default;
     ListenerEvents& operator=(ListenerEvents const&) = default;
-    ListenerEvents(ListenerEvents&&)                 = default;
-    ListenerEvents& operator=(ListenerEvents&&)      = default;
-    ~ListenerEvents()                                = default;
+    ListenerEvents(ListenerEvents&&) = default;
+    ListenerEvents& operator=(ListenerEvents&&) = default;
+    ~ListenerEvents() = default;
 
     // Emit a generic SessionEvent into the ring. Overwrites the oldest entry
     // when full (ring-wrap). Called from the listener strand only.
     // NOTE: prefer emit_with_strings() for events carrying string_view fields
     // to ensure proper string lifetime. [data-model §E-5]
     void emit(session::SessionEvent ev) noexcept {
-        events_[write_idx_++ % session::kSessionEventRingCapacity] = std::move(ev);
+        events_[write_idx_++ % session::kSessionEventRingCapacity] = ev;
         if (count_ < session::kSessionEventRingCapacity) {
             ++count_;
         }
@@ -73,13 +73,10 @@ public:
     // Lifetime: the views remain valid until the slot is overwritten on the next
     // ring wrap — exactly mirroring the event-ring overwrite semantics.
     // [013 T039 / data-model §E-5 sub_reason capture semantics]
-    void emit_with_strings(
-        session::session_event_tls_validation_failed /*unused tag*/,
-        fixpp::core::error                           code,
-        std::string const&                           sub_reason,
-        std::string const&                           peer_endpoint,
-        std::string const&                           reason_string) noexcept
-    {
+    void emit_with_strings(session::session_event_tls_validation_failed /*unused tag*/,
+                           fixpp::core::error code, std::string const& sub_reason,
+                           std::string const& peer_endpoint,
+                           std::string const& reason_string) noexcept {
         const std::size_t slot = write_idx_ % session::kSessionEventRingCapacity;
 
         // Write owning copies first so the views are stable before the event
@@ -88,9 +85,9 @@ public:
         // in a valid state after any exception — and the array pre-allocates
         // the default-initialised std::string objects).
         try {
-            sub_reason_store_[slot]  = sub_reason;
-            peer_ep_store_[slot]     = peer_endpoint;
-            reason_str_store_[slot]  = reason_string;
+            sub_reason_store_[slot] = sub_reason;
+            peer_ep_store_[slot] = peer_endpoint;
+            reason_str_store_[slot] = reason_string;
         } catch (...) {
             // Allocation failure: emit with empty strings rather than omitting
             // the event entirely (the code is still diagnostic). The views will
@@ -101,12 +98,12 @@ public:
         }
 
         session::session_event_tls_validation_failed ev{};
-        ev.code          = code;
-        ev.sub_reason    = std::string_view{sub_reason_store_[slot]};
+        ev.code = code;
+        ev.sub_reason = std::string_view{sub_reason_store_[slot]};
         ev.peer_endpoint = std::string_view{peer_ep_store_[slot]};
         ev.reason_string = std::string_view{reason_str_store_[slot]};
 
-        events_[slot] = std::move(ev);
+        events_[slot] = ev;
         ++write_idx_;
         if (count_ < session::kSessionEventRingCapacity) {
             ++count_;
@@ -115,11 +112,9 @@ public:
 
     // Membership-witness view over the most recent ≤16 emitted events
     // (physical-buffer order; NOT chronologically meaningful). [FR-035]
-    [[nodiscard]] std::span<const session::SessionEvent>
-    recent_events() const noexcept {
+    [[nodiscard]] std::span<const session::SessionEvent> recent_events() const noexcept {
         return std::span<const session::SessionEvent>{
-            events_.data(),
-            std::min(count_, session::kSessionEventRingCapacity)};
+            events_.data(), std::min(count_, session::kSessionEventRingCapacity)};
     }
 
 private:
@@ -132,7 +127,7 @@ private:
     std::array<std::string, session::kSessionEventRingCapacity> peer_ep_store_;
     std::array<std::string, session::kSessionEventRingCapacity> reason_str_store_;
 
-    std::size_t count_     = 0;
+    std::size_t count_ = 0;
     std::size_t write_idx_ = 0;
 };
 

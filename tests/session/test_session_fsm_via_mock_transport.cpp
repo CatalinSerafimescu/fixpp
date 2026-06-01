@@ -35,20 +35,18 @@
 // Phase-4 spec which authors that entry point.
 
 #define FIXPP_ALLOW_MOCK_TRANSPORT
-#include <fixpp/transport/test/mock_transport.hpp>
-
 #include <gtest/gtest.h>
 
 #include <asio/io_context.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <fixpp/transport/test/mock_transport.hpp>
 
 namespace {
 
-using fixpp::transport::test::Script;
 using fixpp::transport::test::mock_transport;
+using fixpp::transport::test::Script;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Cell — compile-time + link-time smoke. Constructs a mock_transport with a

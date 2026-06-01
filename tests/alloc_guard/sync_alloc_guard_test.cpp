@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -32,11 +33,8 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <array>
 #include <atomic>
 #include <cstddef>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
@@ -47,14 +45,13 @@ __attribute__((weak)) void alloc_guard_end() {}
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 
 static asio::awaitable<void> yield_n(int n) {
     auto ex = co_await asio::this_coro::executor;
-    for (int i = 0; i < n; ++i)
-        co_await asio::post(ex, asio::use_awaitable);
+    for (int i = 0; i < n; ++i) co_await asio::post(ex, asio::use_awaitable);
 }
 
 }  // namespace
@@ -94,26 +91,32 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
         std::atomic<bool> waiter_done{false};
 
         // Holder coroutine.
-        asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-            auto g = co_await mtx.async_lock(nullptr);
-            EXPECT_TRUE(g.has_value());
-            // Yield to allow the waiter to enqueue on the LIFO.
-            co_await yield_n(4);
-            holder_done.store(true, std::memory_order_release);
-            // guard released here → unlock() → grant the waiter
-        }, asio::detached);
+        asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                auto g = co_await mtx.async_lock(nullptr);
+                EXPECT_TRUE(g.has_value());
+                // Yield to allow the waiter to enqueue on the LIFO.
+                co_await yield_n(4);
+                holder_done.store(true, std::memory_order_release);
+                // guard released here → unlock() → grant the waiter
+            },
+            asio::detached);
 
         // Waiter coroutine — yields once to let the holder go first.
-        asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-            // One yield so the holder's async_lock fast-path wins.
-            co_await yield_n(1);
-            // This acquire must contend (holder holds lock) → suspend.
-            auto g = co_await mtx.async_lock(nullptr);
-            EXPECT_TRUE(g.has_value());
-            counter.fetch_add(1, std::memory_order_acq_rel);
-            waiter_done.store(true, std::memory_order_release);
-            // guard released
-        }, asio::detached);
+        asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                // One yield so the holder's async_lock fast-path wins.
+                co_await yield_n(1);
+                // This acquire must contend (holder holds lock) → suspend.
+                auto g = co_await mtx.async_lock(nullptr);
+                EXPECT_TRUE(g.has_value());
+                counter.fetch_add(1, std::memory_order_acq_rel);
+                waiter_done.store(true, std::memory_order_release);
+                // guard released
+            },
+            asio::detached);
 
         // Run until both coroutines complete.
         ioc.restart();

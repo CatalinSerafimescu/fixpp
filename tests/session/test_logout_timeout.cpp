@@ -40,24 +40,15 @@
 //   any SessionEvent via emit_event(). recent_events() returns empty span for
 //   logout-type events. EXPECT_GT(logout_events, 0) FAILS RED.
 
-#include <algorithm>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -67,6 +58,13 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -79,13 +77,10 @@ static std::string field_str(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra = {}) {
+static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field_str(35, msg_type);
     body += field_str(34, std::to_string(seq));
@@ -111,9 +106,8 @@ static std::vector<std::byte> make_fix_frame(
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          int hbt = 30) {
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field_str(98, "0");
     extra += field_str(108, std::to_string(hbt));
@@ -121,8 +115,8 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 static std::vector<std::byte> make_logout(std::string_view bs, std::uint32_t seq,
-                                           std::string_view s, std::string_view t,
-                                           std::string_view text = {}) {
+                                          std::string_view s, std::string_view t,
+                                          std::string_view text = {}) {
     std::string extra;
     if (!text.empty()) extra += field_str(58, text);
     return make_fix_frame(bs, "5", seq, s, t, extra);
@@ -141,31 +135,31 @@ struct OutboundCapture {
 
 class LogoutTimeoutTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
-    OutboundCapture                          capture;
+    fixpp::core::EngineConfig engine{};
+    OutboundCapture capture;
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_cfg(fixpp::session::session_role role,
                                            std::uint32_t timeout_ms = 2000) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = (role == fixpp::session::session_role::acceptor) ? "ISLD" : "TW";
-        cfg.target_comp_id    = (role == fixpp::session::session_role::acceptor) ? "TW" : "ISLD";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = (role == fixpp::session::session_role::acceptor) ? "ISLD" : "TW";
+        cfg.target_comp_id = (role == fixpp::session::session_role::acceptor) ? "TW" : "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
-        cfg.role              = role;
+        cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
+        cfg.role = role;
         cfg.logout_disconnect_timeout_ms = timeout_ms;
         // RC#C (gate-b/r1): bilateral_lenient — tests here drive to Active without 141=Y.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
@@ -187,8 +181,8 @@ protected:
         return fut.get();
     }
 
-    bool drive_to_active(fixpp::session::Session& s,
-                          std::string_view our_sender, std::string_view our_target) {
+    bool drive_to_active(fixpp::session::Session& s, std::string_view our_sender,
+                         std::string_view our_target) {
         if (!run_open(s).has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, our_target, our_sender);
         feed(s, logon);
@@ -307,8 +301,8 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     //
     // The RED assertion: we assert at least one event was emitted (by the 013
     // drive_logout impl) — which currently fails because the stub emits none.
-    std::size_t total_events = static_cast<std::size_t>(
-        std::distance(events.begin(), events.end()));
+    std::size_t total_events =
+        static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
     // 005 behavior: no events in ring (events are 013-introduced).
     // 013 impl: will emit peer_identity_bound or sequence_numbers_reset or
@@ -349,8 +343,8 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     // 013 impl: drive_logout times out → emits an event to recent_events().
     // Stub: no event emitted.
     auto events = sess.recent_events();
-    std::size_t total_events = static_cast<std::size_t>(
-        std::distance(events.begin(), events.end()));
+    std::size_t total_events =
+        static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
     EXPECT_GT(total_events, 0u)
         << "013-new: after logout timeout (300ms), drive_logout must surface a "
@@ -377,11 +371,12 @@ TEST_F(LogoutTimeoutTest, Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry
     feed(sess, peer_logout);
 
     auto events = sess.recent_events();
-    std::size_t total_events = static_cast<std::size_t>(
-        std::distance(events.begin(), events.end()));
+    std::size_t total_events =
+        static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
     // Symmetry check: both initiator and acceptor paths must emit events.
-    // RED: stub emits 0 events for both → FAILS RED per T019 / [[feedback_half_restructure_symmetric_api]].
+    // RED: stub emits 0 events for both → FAILS RED per T019 /
+    // [[feedback_half_restructure_symmetric_api]].
     EXPECT_GT(total_events, 0u)
         << "Symmetric cell: initiator drive_logout path must also emit SessionEvent. "
         << "RED: stub emits 0 events (symmetrically no-op) → FAILS RED per T019.";

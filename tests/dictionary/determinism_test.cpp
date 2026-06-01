@@ -3,14 +3,13 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/field_ref.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/field_ref.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <string>
 #include <vector>
@@ -35,10 +34,8 @@ std::string msg_type_bytes(fixpp::dict::Dictionary const& d) {
 // the representative tag span [1, 600].  Tags where rule == NotDeclared still
 // contribute three bytes so the string lengths are equal across dictionaries
 // regardless of which tags happen to be declared.
-std::string field_ref_bytes(fixpp::dict::Dictionary const& d,
-                             std::string_view msg_type,
-                             std::uint16_t first_tag,
-                             std::uint16_t last_tag) {
+std::string field_ref_bytes(fixpp::dict::Dictionary const& d, std::string_view msg_type,
+                            std::uint16_t first_tag, std::uint16_t last_tag) {
     std::string out;
     for (std::uint16_t tag = first_tag; tag <= last_tag; ++tag) {
         auto const fr = d.field_ref(msg_type, tag);
@@ -93,10 +90,16 @@ TEST(Determinism, FieldRefSequenceByteIdentical) {
     bool d_present_d1 = false;
     bool d_present_d2 = false;
     for (auto const& e : d1.messages()) {
-        if (e.msg_type == "D") { d_present_d1 = true; break; }
+        if (e.msg_type == "D") {
+            d_present_d1 = true;
+            break;
+        }
     }
     for (auto const& e : d2.messages()) {
-        if (e.msg_type == "D") { d_present_d2 = true; break; }
+        if (e.msg_type == "D") {
+            d_present_d2 = true;
+            break;
+        }
     }
     ASSERT_TRUE(d_present_d1) << "FIX44.xml must contain MsgType D (NewOrderSingle)";
     ASSERT_TRUE(d_present_d2) << "second load of FIX44.xml must contain MsgType D";
@@ -125,7 +128,6 @@ TEST(Determinism, SurvivesMove) {
 
     std::string const h_after = msg_type_bytes(d2);
 
-    EXPECT_EQ(h_before, h_after)
-        << "messages() iteration order changed after Dictionary move "
-           "(NFR-002-4 determinism / move semantics regression)";
+    EXPECT_EQ(h_before, h_after) << "messages() iteration order changed after Dictionary move "
+                                    "(NFR-002-4 determinism / move semantics regression)";
 }

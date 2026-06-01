@@ -12,13 +12,6 @@
 // Single io_context so the interleave is deterministic and TSan-clean.
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <cstring>
-#include <exception>
-#include <memory>
-#include <system_error>
-
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/co_spawn.hpp>
@@ -27,12 +20,17 @@
 #include <asio/io_context.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <exception>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <memory>
+#include <system_error>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -45,8 +43,7 @@ using fixpp::session::close_mode;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 
-bool eq(const fixpp::otel::trace_context& a,
-        const fixpp::otel::trace_context& b) {
+bool eq(const fixpp::otel::trace_context& a, const fixpp::otel::trace_context& b) {
     return std::memcmp(&a, &b, sizeof(a)) == 0;
 }
 
@@ -54,17 +51,16 @@ TEST(SeamSessionLocalLifetime, SlotValidUntilCloseCompletesThenCleared) {
     asio::io_context ctx;
     EngineConfig engine;
     engine.executor = ctx.get_executor();
-    engine.clock    = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ctx.get_executor());
+    engine.clock = std::make_shared<fixpp::core::mock_clock>(
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ctx.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();              // T050
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     fixpp::otel::trace_context seed{};
     seed.trace_id[0] = std::byte{0xC7};
-    seed.span_id[0]  = std::byte{0x5E};
-    seed.flags       = 0x01;
+    seed.span_id[0] = std::byte{0x5E};
+    seed.flags = 0x01;
     cfg.initial_trace_context = seed;
 
     Session sess{engine, cfg};
@@ -77,37 +73,34 @@ TEST(SeamSessionLocalLifetime, SlotValidUntilCloseCompletesThenCleared) {
     std::atomic<bool> finished{false};
 
     asio::co_spawn(
-        sess.executor(),     // run UNDER the bound session_executor so
-                             // current_trace_context() recovers Session*
+        sess.executor(),  // run UNDER the bound session_executor so
+                          // current_trace_context() recovers Session*
         [&]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(
-                asio::enable_total_cancellation());          // phase-2 = total
+                asio::enable_total_cancellation());  // phase-2 = total
             const auto seen = co_await fixpp::current_trace_context();
-            read_ok.store(eq(seen, seed));                    // slot live: seed
+            read_ok.store(eq(seen, seed));  // slot live: seed
             try {
                 // Frozen mock clock → only the phase-2 root total ends this;
                 // the slot must remain valid for the whole wait.
-                co_await sess.effective_clock()->sleep_until(
-                    std::chrono::steady_clock::now() + 1h);
+                co_await sess.effective_clock()->sleep_until(std::chrono::steady_clock::now() + 1h);
             } catch (const std::system_error& e) {
                 EXPECT_EQ(e.code(), asio::error::operation_aborted);
                 aborted.store(true);
             }
             finished.store(true);
         },
-        asio::bind_cancellation_slot(sess.root_cancellation_slot(),
-                                     asio::detached));
+        asio::bind_cancellation_slot(sess.root_cancellation_slot(), asio::detached));
 
-    ctx.poll();                                  // park the fromApp reader
-    EXPECT_TRUE(read_ok.load());                 // slot valid mid-fromApp
+    ctx.poll();                   // park the fromApp reader
+    EXPECT_TRUE(read_ok.load());  // slot valid mid-fromApp
 
-    auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful),
-                                 asio::use_future);
+    auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful), asio::use_future);
     ctx.run();
 
     EXPECT_TRUE(closed.get().has_value());
-    EXPECT_TRUE(aborted.load());                 // cancelled, never UB
-    EXPECT_TRUE(finished.load());                // no hang
+    EXPECT_TRUE(aborted.load());   // cancelled, never UB
+    EXPECT_TRUE(finished.load());  // no hang
     // Slot was DRAINED at close completion (T045), not destroyed: a fresh
     // read of the Session-owned slot is the default, not a dangling access.
     EXPECT_TRUE(eq(sess.trace_context_value(), fixpp::otel::trace_context{}));

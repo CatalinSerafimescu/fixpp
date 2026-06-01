@@ -23,9 +23,21 @@
 //
 // Anchors: research D-3/D-8/D-10; spec FR-013; SC-007; [FIX-SL §4.2.3];
 // tasks.md T053; error slot 71.
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -33,24 +45,10 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 
@@ -61,47 +59,52 @@ namespace {
 
 // Build a frame with an explicit SendingTime value.
 static std::vector<std::byte> make_frame_with_sending_time(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view sending_time,
-        std::string_view extra_body = {}) {
+    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
+    std::string_view sender, std::string_view target, std::string_view sending_time,
+    std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_body.empty()) { body += extra_body; }
+    if (!extra_body.empty()) {
+        body += extra_body;
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::string extract_field(std::span<const std::byte> frame,
-                                  std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -121,21 +124,21 @@ struct SendingTimeConformanceFixture {
         auto utc = system_clock::time_point{} + seconds{kNowSec};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_cfg(std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = 30s;
         // Use default MaxLatency (120 s).
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
         // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset.
@@ -144,19 +147,18 @@ struct SendingTimeConformanceFixture {
     }
 
     // Drive session to Active with a valid (fresh) SendingTime.
-    void open_to_active(fixpp::session::Session& sess,
-                        std::string_view begin_string = "FIX.4.2") {
+    void open_to_active(fixpp::session::Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Valid Logon with fresh SendingTime matching mock clock now.
-        auto logon = make_frame_with_sending_time(
-            begin_string, "A", 1, "TW", "ISLD",
-            "20240101-00:00:00.000",
-            "98=0\x01""108=30\x01");
-        auto fut2  = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto logon = make_frame_with_sending_time(begin_string, "A", 1, "TW", "ISLD",
+                                                  "20240101-00:00:00.000",
+                                                  "98=0\x01"
+                                                  "108=30\x01");
+        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
@@ -200,10 +202,10 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
     const std::size_t before = f.transport.sent_count();
 
     // Stale Logon: SendingTime = now − 300 s = "20231231-23:55:00.000"
-    auto stale_logon = make_frame_with_sending_time(
-        "FIX.4.2", "A", 1, "TW", "ISLD",
-        "20231231-23:55:00.000",
-        "98=0\x01""108=30\x01");
+    auto stale_logon =
+        make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", "20231231-23:55:00.000",
+                                     "98=0\x01"
+                                     "108=30\x01");
     f.feed(sess, stale_logon);
 
     // Must emit a Logout(35=5) — NOT a Reject(35=3).
@@ -211,7 +213,9 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
     bool found_logout = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") { found_reject = true; }
+        if (mt == "3") {
+            found_reject = true;
+        }
         if (mt == "5") {
             found_logout = true;
             // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
@@ -223,8 +227,7 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
     }
     EXPECT_FALSE(found_reject)
         << "1d fix42: stale Logon SendingTime must NOT trigger Reject(35=3) (D-3)";
-    EXPECT_TRUE(found_logout)
-        << "1d fix42: stale Logon SendingTime must trigger Logout(35=5)";
+    EXPECT_TRUE(found_logout) << "1d fix42: stale Logon SendingTime must trigger Logout(35=5)";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "1d fix42: session must be Disconnected after logout-with-error";
 }
@@ -243,17 +246,19 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
 
     const std::size_t before = f.transport.sent_count();
 
-    auto stale_logon = make_frame_with_sending_time(
-        "FIX.4.4", "A", 1, "TW", "ISLD",
-        "20231231-23:55:00.000",
-        "98=0\x01""108=30\x01");
+    auto stale_logon =
+        make_frame_with_sending_time("FIX.4.4", "A", 1, "TW", "ISLD", "20231231-23:55:00.000",
+                                     "98=0\x01"
+                                     "108=30\x01");
     f.feed(sess, stale_logon);
 
     bool found_reject = false;
     bool found_logout = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") { found_reject = true; }
+        if (mt == "3") {
+            found_reject = true;
+        }
         if (mt == "5") {
             found_logout = true;
             // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
@@ -264,7 +269,7 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
         }
     }
     EXPECT_FALSE(found_reject) << "1d fix44: stale Logon must NOT trigger Reject";
-    EXPECT_TRUE(found_logout)  << "1d fix44: stale Logon must trigger Logout";
+    EXPECT_TRUE(found_logout) << "1d fix44: stale Logon must trigger Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 }
 
@@ -285,10 +290,10 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesE
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
     mgr.set_counters_for_test(next_inbound, seqnum_max);
 
-    auto stale_logon = make_frame_with_sending_time(
-        "FIX.4.4", "A", next_inbound, "TW", "ISLD",
-        "20231231-23:55:00.000",
-        "98=0\x01""108=30\x01");
+    auto stale_logon = make_frame_with_sending_time("FIX.4.4", "A", next_inbound, "TW", "ISLD",
+                                                    "20231231-23:55:00.000",
+                                                    "98=0\x01"
+                                                    "108=30\x01");
     auto fut2 = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_logon), asio::use_future);
     f.ioc.run_for(200ms);
     f.ioc.restart();
@@ -325,9 +330,8 @@ TEST(TCSendingTime, Fix42_2o_SendingTimeValueOutOfRange) {
     const std::size_t before = f.transport.sent_count();
 
     // Send a Heartbeat with stale SendingTime (300 s ago).
-    auto stale_hb = make_frame_with_sending_time(
-        "FIX.4.2", "0", 2, "TW", "ISLD",
-        "20231231-23:55:00.000");
+    auto stale_hb =
+        make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", "20231231-23:55:00.000");
     f.feed(sess, stale_hb);
 
     // Must emit Reject(35=3, 373=10, 371=52).
@@ -356,8 +360,8 @@ TEST(TCSendingTime, Fix42_2o_SendingTimeValueOutOfRange) {
                 << "2o fix42: Logout must carry 52=<mock_clock_now>";
         }
     }
-    EXPECT_TRUE(found_reject)  << "2o fix42: stale established SendingTime must emit Reject";
-    EXPECT_TRUE(found_logout)  << "2o fix42: stale established SendingTime must emit Logout";
+    EXPECT_TRUE(found_reject) << "2o fix42: stale established SendingTime must emit Reject";
+    EXPECT_TRUE(found_logout) << "2o fix42: stale established SendingTime must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "2o fix42: session must be Disconnected after Reject+Logout";
 }
@@ -372,9 +376,8 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
 
     const std::size_t before = f.transport.sent_count();
 
-    auto stale_hb = make_frame_with_sending_time(
-        "FIX.4.4", "0", 2, "TW", "ISLD",
-        "20231231-23:55:00.000");
+    auto stale_hb =
+        make_frame_with_sending_time("FIX.4.4", "0", 2, "TW", "ISLD", "20231231-23:55:00.000");
     f.feed(sess, stale_hb);
 
     bool found_reject = false;
@@ -400,8 +403,8 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
                 << "2o fix44: Logout must carry 52=<mock_clock_now>";
         }
     }
-    EXPECT_TRUE(found_reject)  << "2o fix44: stale established SendingTime must emit Reject";
-    EXPECT_TRUE(found_logout)  << "2o fix44: stale established SendingTime must emit Logout";
+    EXPECT_TRUE(found_reject) << "2o fix44: stale established SendingTime must emit Reject";
+    EXPECT_TRUE(found_logout) << "2o fix44: stale established SendingTime must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 }
 
@@ -418,9 +421,8 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesE
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
     mgr.set_counters_for_test(next_inbound, seqnum_max);
 
-    auto stale_hb = make_frame_with_sending_time(
-        "FIX.4.4", "0", next_inbound, "TW", "ISLD",
-        "20231231-23:55:00.000");
+    auto stale_hb = make_frame_with_sending_time("FIX.4.4", "0", next_inbound, "TW", "ISLD",
+                                                 "20231231-23:55:00.000");
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_hb), asio::use_future);
     f.ioc.run_for(200ms);
     f.ioc.restart();
@@ -431,7 +433,8 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesE
         << "got ok (bug: session.cpp sites 1/2 disconnect and return success).";
     ASSERT_FALSE(inbound_r.has_value());
     EXPECT_EQ(inbound_r.error(), fixpp::core::error::store_seqnum_overflow)
-        << "Established bad-SendingTime path must return store_seqnum_overflow on outbound seqnum overflow.";
+        << "Established bad-SendingTime path must return store_seqnum_overflow on outbound seqnum "
+           "overflow.";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "Established bad-SendingTime overflow must transition to Disconnected.";
     EXPECT_EQ(f.transport.sent_count(), before)

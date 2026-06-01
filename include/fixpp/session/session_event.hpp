@@ -52,12 +52,12 @@ static_assert(kSessionEventRingCapacity == 16,
 // peer_identity owning-by-value contract); consumer copies if it needs to
 // outlive the event-emit synchronous context.
 struct session_event_peer_identity_bound {
-    std::string_view cn;           // lifetimebound: view into peer_identity (session lifetime)
-    std::span<std::string_view const> sans;  // lifetimebound: view into peer_identity
+    std::string_view cn;  // lifetimebound: view into peer_identity (session lifetime)
+    std::span<std::string_view const> sans;        // lifetimebound: view into peer_identity
     std::array<std::byte, 32> sha256_fingerprint;  // by-value
-    std::string_view cipher;       // lifetimebound: view into peer_identity
-    std::string_view bound_compid; // lifetimebound: view into peer_identity
-    bound_principal::source principal_source;  // FR-022 — which field bound
+    std::string_view cipher;                       // lifetimebound: view into peer_identity
+    std::string_view bound_compid;                 // lifetimebound: view into peer_identity
+    bound_principal::source principal_source;      // FR-022 — which field bound
 };
 
 // FR-021 — emitted when CompIdAuthorizationPolicy::authorize returns
@@ -71,7 +71,8 @@ struct session_event_peer_identity_bound {
 struct session_event_compid_authorization_failed {
     std::string_view cn;               // lifetimebound: view into peer_identity
     std::string_view asserted_compid;  // lifetimebound: view into caller's compid string
-    std::span<std::string_view const> expected_compids;  // lifetimebound: empty if unrecognized principal
+    std::span<std::string_view const>
+        expected_compids;  // lifetimebound: empty if unrecognized principal
     bound_principal::source principal_source;
 };
 
@@ -90,10 +91,10 @@ struct session_event_compid_authorization_failed {
 // the consumer may further copy if it needs to outlive the event-emit
 // synchronous context.
 struct session_event_tls_validation_failed {
-    fixpp::core::error code;           // precise master-enum variant (6 tls_* cells)
-    std::string_view sub_reason;       // lifetimebound: 011 sub-reason diagnostic
-    std::string_view peer_endpoint;    // lifetimebound: "host:port"
-    std::string_view reason_string;    // lifetimebound: operator-readable
+    fixpp::core::error code;         // precise master-enum variant (6 tls_* cells)
+    std::string_view sub_reason;     // lifetimebound: 011 sub-reason diagnostic
+    std::string_view peer_endpoint;  // lifetimebound: "host:port"
+    std::string_view reason_string;  // lifetimebound: operator-readable
 };
 
 // FR-032 / D-12 — emitted BEFORE the first handshake on the rotated cert_source
@@ -115,12 +116,9 @@ struct session_event_sequence_numbers_reset {
 // alternatives; future features APPEND alternatives append-only (consumer-side
 // std::visit fall-throughs are responsible for tolerating future variants).
 // [data-model §E-5]
-using SessionEvent = std::variant<
-    session_event_peer_identity_bound,
-    session_event_compid_authorization_failed,
-    session_event_tls_validation_failed,
-    session_event_credentials_rotated,
-    session_event_sequence_numbers_reset
->;
+using SessionEvent =
+    std::variant<session_event_peer_identity_bound, session_event_compid_authorization_failed,
+                 session_event_tls_validation_failed, session_event_credentials_rotated,
+                 session_event_sequence_numbers_reset>;
 
 }  // namespace fixpp::session

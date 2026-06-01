@@ -3,15 +3,14 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/version_profile.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
 #include <set>
@@ -66,46 +65,41 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
 
     // 2. messages().size() and msg_type/name sequence equality.
     auto const msgs_file = d_file.messages();
-    auto const msgs_str  = d_str.messages();
+    auto const msgs_str = d_str.messages();
     EXPECT_FALSE(msgs_str.empty());
     ASSERT_EQ(msgs_file.size(), msgs_str.size())
         << "messages().size() differs between load() and load_from_string()";
     for (std::size_t i = 0; i < msgs_file.size(); ++i) {
         EXPECT_EQ(msgs_file[i].msg_type, msgs_str[i].msg_type)
             << "msg_type mismatch at index " << i;
-        EXPECT_EQ(msgs_file[i].name, msgs_str[i].name)
-            << "message name mismatch at index " << i;
+        EXPECT_EQ(msgs_file[i].name, msgs_str[i].name) << "message name mismatch at index " << i;
     }
 
     // 3. Spot-check field_ref() for known (msg_type, tag) pairs.
     //    ClOrdID(11) on NewOrderSingle(D): required in FIX44.
     {
         auto const fr_file = d_file.field_ref("D", std::uint16_t{11});
-        auto const fr_str  = d_str.field_ref("D",  std::uint16_t{11});
-        EXPECT_EQ(fr_file.rule, fr_str.rule)
-            << "field_ref(D, 11).rule differs between load paths";
-        EXPECT_EQ(fr_file.type, fr_str.type)
-            << "field_ref(D, 11).type differs between load paths";
+        auto const fr_str = d_str.field_ref("D", std::uint16_t{11});
+        EXPECT_EQ(fr_file.rule, fr_str.rule) << "field_ref(D, 11).rule differs between load paths";
+        EXPECT_EQ(fr_file.type, fr_str.type) << "field_ref(D, 11).type differs between load paths";
     }
     //    OrdStatus(39) on ExecutionReport(8).
     {
         auto const fr_file = d_file.field_ref("8", std::uint16_t{39});
-        auto const fr_str  = d_str.field_ref("8",  std::uint16_t{39});
-        EXPECT_EQ(fr_file.rule, fr_str.rule)
-            << "field_ref(8, 39).rule differs between load paths";
+        auto const fr_str = d_str.field_ref("8", std::uint16_t{39});
+        EXPECT_EQ(fr_file.rule, fr_str.rule) << "field_ref(8, 39).rule differs between load paths";
     }
     //    SenderCompID(49) on Logon(A): header field on all versions.
     {
         auto const fr_file = d_file.field_ref("A", std::uint16_t{49});
-        auto const fr_str  = d_str.field_ref("A",  std::uint16_t{49});
-        EXPECT_EQ(fr_file.rule, fr_str.rule)
-            << "field_ref(A, 49).rule differs between load paths";
+        auto const fr_str = d_str.field_ref("A", std::uint16_t{49});
+        EXPECT_EQ(fr_file.rule, fr_str.rule) << "field_ref(A, 49).rule differs between load paths";
     }
 
     // 4. required_fields("A") returns the same sorted set on both paths.
     {
         auto const req_file = d_file.required_fields("A");
-        auto const req_str  = d_str.required_fields("A");
+        auto const req_str = d_str.required_fields("A");
         EXPECT_EQ(req_file.size(), req_str.size())
             << "required_fields(A).size() differs between load paths";
         for (std::size_t i = 0; i < std::min(req_file.size(), req_str.size()); ++i) {
@@ -117,9 +111,9 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     // 5. component("Instrument") payload equivalence (depends on R1).
     {
         auto const comp_file = d_file.component("Instrument");
-        auto const comp_str  = d_str.component("Instrument");
+        auto const comp_str = d_str.component("Instrument");
         ASSERT_TRUE(comp_file.has_value()) << "Instrument missing in load()";
-        ASSERT_TRUE(comp_str.has_value())  << "Instrument missing in load_from_string()";
+        ASSERT_TRUE(comp_str.has_value()) << "Instrument missing in load_from_string()";
         EXPECT_EQ(comp_file->field_count, comp_str->field_count)
             << "Instrument field_count differs between load paths";
         EXPECT_EQ(comp_file->component_id, comp_str->component_id)
@@ -129,9 +123,9 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     // 6. group(453) first_field_tag equality (NoPartyIDs delimiter).
     {
         auto const grp_file = d_file.group(std::uint16_t{453});
-        auto const grp_str  = d_str.group(std::uint16_t{453});
+        auto const grp_str = d_str.group(std::uint16_t{453});
         ASSERT_TRUE(grp_file.has_value()) << "NoPartyIDs(453) missing in load()";
-        ASSERT_TRUE(grp_str.has_value())  << "NoPartyIDs(453) missing in load_from_string()";
+        ASSERT_TRUE(grp_str.has_value()) << "NoPartyIDs(453) missing in load_from_string()";
         EXPECT_EQ(grp_file->first_field_tag, grp_str->first_field_tag)
             << "group(453).first_field_tag differs between load paths";
         EXPECT_EQ(grp_file->field_count, grp_str->field_count)
@@ -151,16 +145,14 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     //    round_trip_test.cpp:316-329.
     for (auto const& m_file : msgs_file) {
         for (std::uint32_t t = 0; t < 65536u; ++t) {
-            auto const tag     = static_cast<std::uint16_t>(t);
+            auto const tag = static_cast<std::uint16_t>(t);
             auto const fr_file = d_file.field_ref(m_file.msg_type, tag);
-            auto const fr_str  = d_str.field_ref(m_file.msg_type, tag);
-            EXPECT_EQ(fr_file.rule, fr_str.rule)
-                << "field_ref(" << m_file.msg_type << ", " << tag
-                << ").rule mismatch between load paths";
+            auto const fr_str = d_str.field_ref(m_file.msg_type, tag);
+            EXPECT_EQ(fr_file.rule, fr_str.rule) << "field_ref(" << m_file.msg_type << ", " << tag
+                                                 << ").rule mismatch between load paths";
             if (fr_file.rule != fixpp::dict::field_presence::NotDeclared) {
-                EXPECT_EQ(fr_file.type, fr_str.type)
-                    << "field_ref(" << m_file.msg_type << ", " << tag
-                    << ").type mismatch between load paths";
+                EXPECT_EQ(fr_file.type, fr_str.type) << "field_ref(" << m_file.msg_type << ", "
+                                                     << tag << ").type mismatch between load paths";
                 EXPECT_EQ(fr_file.group_no_tag, fr_str.group_no_tag)
                     << "field_ref(" << m_file.msg_type << ", " << tag
                     << ").group_no_tag mismatch between load paths";
@@ -179,12 +171,10 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
         auto const req_f = d_file.required_fields(m.msg_type);
         auto const req_s = d_str.required_fields(m.msg_type);
         ASSERT_EQ(req_f.size(), req_s.size())
-            << "required_fields(" << m.msg_type
-            << ").size() mismatch between load paths";
+            << "required_fields(" << m.msg_type << ").size() mismatch between load paths";
         for (std::size_t i = 0; i < req_f.size(); ++i) {
             EXPECT_EQ(req_f[i], req_s[i])
-                << "required_fields(" << m.msg_type << ")[" << i
-                << "] mismatch between load paths";
+                << "required_fields(" << m.msg_type << ")[" << i << "] mismatch between load paths";
         }
     }
 
@@ -198,14 +188,11 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
             << "component_fields(\"Instrument\").size() mismatch between load paths";
         for (std::size_t i = 0; i < span_f.size(); ++i) {
             EXPECT_EQ(span_f[i].tag, span_s[i].tag)
-                << "component_fields(\"Instrument\")[" << i
-                << "].tag mismatch between load paths";
+                << "component_fields(\"Instrument\")[" << i << "].tag mismatch between load paths";
             EXPECT_EQ(span_f[i].rule, span_s[i].rule)
-                << "component_fields(\"Instrument\")[" << i
-                << "].rule mismatch between load paths";
+                << "component_fields(\"Instrument\")[" << i << "].rule mismatch between load paths";
             EXPECT_EQ(span_f[i].type, span_s[i].type)
-                << "component_fields(\"Instrument\")[" << i
-                << "].type mismatch between load paths";
+                << "component_fields(\"Instrument\")[" << i << "].type mismatch between load paths";
         }
     }
 }

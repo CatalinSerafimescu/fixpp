@@ -16,13 +16,12 @@
 //   session_version::Unknown     → skip
 #include <cstddef>
 #include <expected>
-#include <memory>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
+#include <memory>
+#include <vector>
 
 namespace fixpp::dict {
 
@@ -32,17 +31,27 @@ namespace {
 // only; skip in registry) and Unknown (not a valid mapping).
 application_version session_to_application(session_version sv) noexcept {
     switch (sv) {
-        case session_version::v40:     return application_version::v40;
-        case session_version::v41:     return application_version::v41;
-        case session_version::v42:     return application_version::v42;
-        case session_version::v43:     return application_version::v43;
-        case session_version::v44:     return application_version::v44;
-        case session_version::v50:     return application_version::v50;
-        case session_version::v50sp1:  return application_version::v50sp1;
-        case session_version::v50sp2:  return application_version::v50sp2;
+        case session_version::v40:
+            return application_version::v40;
+        case session_version::v41:
+            return application_version::v41;
+        case session_version::v42:
+            return application_version::v42;
+        case session_version::v43:
+            return application_version::v43;
+        case session_version::v44:
+            return application_version::v44;
+        case session_version::v50:
+            return application_version::v50;
+        case session_version::v50sp1:
+            return application_version::v50sp1;
+        case session_version::v50sp2:
+            return application_version::v50sp2;
         // NOLINTNEXTLINE(bugprone-branch-clone) - vt11 and Unknown are distinct semantic cases
-        case session_version::vt11:    return application_version::Unknown;  // skip
-        case session_version::Unknown: return application_version::Unknown;  // skip
+        case session_version::vt11:
+            return application_version::Unknown;  // skip
+        case session_version::Unknown:
+            return application_version::Unknown;  // skip
     }
     return application_version::Unknown;
 }
@@ -51,27 +60,28 @@ application_version session_to_application(session_version sv) noexcept {
 version_registry::version_registry(
     const std::vector<std::shared_ptr<const Dictionary>>& dicts) noexcept {
     for (const auto& d : dicts) {
-        if (!d) { continue; }
+        if (!d) {
+            continue;
+        }
         const auto av = session_to_application(d->which_session_version());
         const auto idx = static_cast<std::size_t>(av);
-        if (idx == 0 || idx >= kTableSize) { continue; }  // Unknown or out-of-range
+        if (idx == 0 || idx >= kTableSize) {
+            continue;
+        }  // Unknown or out-of-range
         // Last writer wins if two dicts map to the same version.
         entries_[idx] = d;
     }
 }
 
-core::expected_t<Dictionary const*> version_registry::get(
-    application_version v) const noexcept {
+core::expected_t<Dictionary const*> version_registry::get(application_version v) const noexcept {
     const auto idx = static_cast<std::size_t>(v);
     if (idx == 0 || idx >= kTableSize) {
         // Unknown is not a valid lookup key.
-        return std::unexpected{
-            core::error::dict_no_dictionary_for_application_version};
+        return std::unexpected{core::error::dict_no_dictionary_for_application_version};
     }
     const auto& entry = entries_[idx];
     if (!entry) {
-        return std::unexpected{
-            core::error::dict_no_dictionary_for_application_version};
+        return std::unexpected{core::error::dict_no_dictionary_for_application_version};
     }
     return entry.get();
 }

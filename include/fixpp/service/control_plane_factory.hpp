@@ -14,12 +14,12 @@ namespace fixpp::service {
 
 class ControlPlaneFactory {
 public:
-    ControlPlaneFactory()                                      = default;
-    ControlPlaneFactory(const ControlPlaneFactory&)            = delete;
+    ControlPlaneFactory() = default;
+    ControlPlaneFactory(const ControlPlaneFactory&) = delete;
     ControlPlaneFactory& operator=(const ControlPlaneFactory&) = delete;
-    ControlPlaneFactory(ControlPlaneFactory&&)                 = delete;
-    ControlPlaneFactory& operator=(ControlPlaneFactory&&)      = delete;
-    virtual ~ControlPlaneFactory()                             = default;
+    ControlPlaneFactory(ControlPlaneFactory&&) = delete;
+    ControlPlaneFactory& operator=(ControlPlaneFactory&&) = delete;
+    virtual ~ControlPlaneFactory() = default;
     // Full control-plane surface owned by 2j (extends this base).
 };
 

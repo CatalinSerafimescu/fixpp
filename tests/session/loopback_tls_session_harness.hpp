@@ -37,24 +37,16 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
 #include <cstdlib>
-#include <future>
-#include <memory>
-#include <optional>
-#include <span>
-#include <stdexcept>
-#include <string>
-
-#include <gtest/gtest.h>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/security_profile.hpp>  // fixpp::session::SecurityProfile kind enum
@@ -62,8 +54,14 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/tls/security_profile.hpp>      // fixpp::tls::SecurityProfile + SslCtxConfig
+#include <fixpp/tls/security_profile.hpp>         // fixpp::tls::SecurityProfile + SslCtxConfig
 #include <fixpp/transport/transport_factory.hpp>  // also pulls endpoint.hpp transitively
+#include <future>
+#include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
 
 // The transport-layer loopback fixture (acceptor + factory). Pulls concrete
 // asio_listener + asio_tls_transport_factory; fine here (tests/ only).
@@ -99,9 +97,8 @@ public:
     // Factory method. Returns nullptr (and calls GTEST_SKIP) when fixture dir
     // is absent. Throws std::runtime_error on factory/session construction
     // failures (test should fail, not skip — the dir was set but certs are bad).
-    [[nodiscard]] static std::unique_ptr<LoopbackTlsSessionHarness>
-    build(asio::any_io_executor exec, fixpp::core::EngineConfig const& engine)
-    {
+    [[nodiscard]] static std::unique_ptr<LoopbackTlsSessionHarness> build(
+        asio::any_io_executor exec, fixpp::core::EngineConfig const& engine) {
         const char* dir_env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
         static const char* kCompileTimeDir = FIXPP_TLS_FIXTURE_DIR;
@@ -119,28 +116,27 @@ public:
         auto h = std::unique_ptr<LoopbackTlsSessionHarness>(new LoopbackTlsSessionHarness{});
         h->fixture_dir_ = fixture_dir;
 
-        h->transport_fixture_ = std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(
-            h->fixture_dir_, exec);
+        h->transport_fixture_ =
+            std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(h->fixture_dir_, exec);
 
         // Build a SEPARATE TransportFactory for the Session (FR-026: SSL_CTX
         // cached ONCE; use_count()==1 at open per SessionConfig contract).
         fixpp::tls::file_cert_source::Config cs_cfg;
-        cs_cfg.leaf_path        = h->fixture_dir_ + "/leaf_rsa2048.pem";
+        cs_cfg.leaf_path = h->fixture_dir_ + "/leaf_rsa2048.pem";
         cs_cfg.private_key_path = h->fixture_dir_ + "/leaf_rsa2048.key";
-        cs_cfg.ca_bundle_path   = h->fixture_dir_ + "/ca.pem";
+        cs_cfg.ca_bundle_path = h->fixture_dir_ + "/ca.pem";
 
         auto cs_result = fixpp::tls::file_cert_source::make_file_cert_source(
             cs_cfg, std::pmr::new_delete_resource());
         if (!cs_result.has_value()) {
-            throw std::runtime_error(
-                "LoopbackTlsSessionHarness: failed to build file_cert_source");
+            throw std::runtime_error("LoopbackTlsSessionHarness: failed to build file_cert_source");
         }
 
         fixpp::tls::SslCtxConfig ssl_cfg;
         ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-        ssl_cfg.cs      = std::move(*cs_result);
-        ssl_cfg.clock   = nullptr;  // skip expiry — fixture certs may be stale
-        ssl_cfg.caps    = fixpp::tls::CertSourceCaps{};
+        ssl_cfg.cs = std::move(*cs_result);
+        ssl_cfg.clock = nullptr;  // skip expiry — fixture certs may be stale
+        ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
 
         auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
             fixpp::transport::Transport::Config{}, ssl_cfg);
@@ -152,18 +148,17 @@ public:
 
         // Build the initiator Session config.
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id  = "INITIATOR";
-        cfg.target_comp_id  = "ACCEPTOR";
-        cfg.begin_string    = "FIX.4.2";
-        cfg.heartbeat_interval     = std::chrono::seconds{30};
+        cfg.sender_comp_id = "INITIATOR";
+        cfg.target_comp_id = "ACCEPTOR";
+        cfg.begin_string = "FIX.4.2";
+        cfg.heartbeat_interval = std::chrono::seconds{30};
         cfg.logout_disconnect_timeout_ms = 2000;
-        cfg.role            = fixpp::session::session_role::initiator;
-        cfg.executor_override       = exec;
+        cfg.role = fixpp::session::session_role::initiator;
+        cfg.executor_override = exec;
         cfg.security_profile = fixpp::session::SecurityProfile{
             fixpp::session::SecurityProfile::kind::mtls_ca};  // session-layer kind discriminant
-        cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-        cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.transport_factory_override = h->session_factory_;
         // Server endpoint resolved from bound_port at construction.
         h->server_endpoint_ = h->transport_fixture_->server_endpoint();
@@ -181,9 +176,7 @@ public:
     fixpp::session::Session& session() noexcept { return *session_; }
 
     // The server endpoint (127.0.0.1:bound_port).
-    fixpp::transport::Endpoint server_endpoint() const noexcept {
-        return server_endpoint_;
-    }
+    fixpp::transport::Endpoint server_endpoint() const noexcept { return server_endpoint_; }
 
     // The shared TransportFactory (asio_tls_transport_factory, FR-026 cached).
     std::shared_ptr<fixpp::transport::TransportFactory> factory() const noexcept {
@@ -192,27 +185,24 @@ public:
 
     // Convenience: open the Session (drives the initiator to LogonSent).
     // Returns the expected_t from open(); caller drives io_context.
-    std::future<fixpp::core::expected_t<void>>
-    spawn_open(asio::io_context& ioc)
-    {
+    std::future<fixpp::core::expected_t<void>> spawn_open(asio::io_context& ioc) {
         return asio::co_spawn(ioc, session_->open(), asio::use_future);
     }
 
     // Convenience: feed inbound bytes through on_inbound_frame.
-    std::future<fixpp::core::expected_t<void>>
-    spawn_feed(asio::io_context& ioc, std::span<const std::byte> frame)
-    {
+    std::future<fixpp::core::expected_t<void>> spawn_feed(asio::io_context& ioc,
+                                                          std::span<const std::byte> frame) {
         return asio::co_spawn(ioc, session_->on_inbound_frame(frame), asio::use_future);
     }
 
 private:
     LoopbackTlsSessionHarness() = default;
 
-    std::string                                                  fixture_dir_;
-    std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture>  transport_fixture_;
-    std::shared_ptr<fixpp::transport::TransportFactory>          session_factory_;
-    std::unique_ptr<fixpp::session::Session>                     session_;
-    fixpp::transport::Endpoint                                   server_endpoint_{};
+    std::string fixture_dir_;
+    std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture> transport_fixture_;
+    std::shared_ptr<fixpp::transport::TransportFactory> session_factory_;
+    std::unique_ptr<fixpp::session::Session> session_;
+    fixpp::transport::Endpoint server_endpoint_{};
 };
 
 }  // namespace fixpp::test_support

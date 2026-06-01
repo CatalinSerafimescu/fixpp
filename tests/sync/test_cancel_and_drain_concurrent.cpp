@@ -26,21 +26,19 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <future>
 #include <vector>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -50,9 +48,8 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
-    constexpr int N = 8;   // number of waiting acquirers
-    constexpr int D = 4;   // number of concurrent drain callers
-
+    constexpr int N = 8;  // number of waiting acquirers
+    constexpr int D = 4;  // number of concurrent drain callers
 
     std::atomic<int> aborted_count{0};
     std::atomic<int> granted_count{0};
@@ -82,8 +79,7 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
         auto r = co_await mtx.async_lock();
         if (r.has_value()) {
             granted_count.fetch_add(1, std::memory_order_acq_rel);
-        } else if (r.error() == error::sync_lock_aborted ||
-                   r.error() == error::sync_lock_drained) {
+        } else if (r.error() == error::sync_lock_aborted || r.error() == error::sync_lock_drained) {
             aborted_count.fetch_add(1, std::memory_order_acq_rel);
         }
         completed_count.fetch_add(1, std::memory_order_acq_rel);
@@ -105,24 +101,19 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     std::vector<std::future<void>> drain_futs;
     drain_futs.reserve(D);
     for (int i = 0; i < D; ++i)
-        drain_futs.push_back(
-            asio::co_spawn(ioc, make_drainer(i), asio::use_future));
+        drain_futs.push_back(asio::co_spawn(ioc, make_drainer(i), asio::use_future));
 
     ioc.run();
     fh.get();
     for (auto& f : futs) f.get();
     for (auto& df : drain_futs) df.get();
 
-    EXPECT_EQ(completed_count.load(), N)
-        << "All N waiters must complete exactly once";
-    EXPECT_EQ(granted_count.load(), 0)
-        << "No waiter must be granted (drain aborts all)";
+    EXPECT_EQ(completed_count.load(), N) << "All N waiters must complete exactly once";
+    EXPECT_EQ(granted_count.load(), 0) << "No waiter must be granted (drain aborts all)";
     EXPECT_EQ(aborted_count.load(), N)
         << "Every waiter must be aborted exactly once (total aborted == N)";
-    EXPECT_EQ(drain_success_count.load(), D)
-        << "All D concurrent drainers must return success";
-    EXPECT_EQ(drain_fail_count.load(), 0)
-        << "No drainer must fail";
+    EXPECT_EQ(drain_success_count.load(), D) << "All D concurrent drainers must return success";
+    EXPECT_EQ(drain_fail_count.load(), 0) << "No drainer must fail";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,7 +122,7 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamCancelAndDrainConcurrent, IdempotentDrainAfterEpochCompletes) {
-    bool first_drain_ok  = false;
+    bool first_drain_ok = false;
     bool second_drain_ok = false;
 
     asio::io_context ioc;
@@ -151,7 +142,7 @@ TEST(SeamCancelAndDrainConcurrent, IdempotentDrainAfterEpochCompletes) {
     ioc.run();
     f.get();
 
-    EXPECT_TRUE(first_drain_ok)  << "First cancel_and_drain() must succeed";
+    EXPECT_TRUE(first_drain_ok) << "First cancel_and_drain() must succeed";
     EXPECT_TRUE(second_drain_ok) << "Second (idempotent) cancel_and_drain() must also succeed";
 }
 
@@ -178,12 +169,15 @@ TEST(SeamCancelAndDrainConcurrent, NoDoubleResumeUnderConcurrentDrain) {
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < N; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                co_await yield_n(1);
-                auto r = co_await mtx.async_lock();
-                (void)r;
-                total_completions.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    co_await yield_n(1);
+                    auto r = co_await mtx.async_lock();
+                    (void)r;
+                    total_completions.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(N * 4);
@@ -199,22 +193,21 @@ TEST(SeamCancelAndDrainConcurrent, NoDoubleResumeUnderConcurrentDrain) {
     std::vector<std::future<void>> dfuts;
     dfuts.reserve(D);
     for (int i = 0; i < D; ++i) {
-        dfuts.push_back(
-            asio::co_spawn(ioc, [&, i]() -> asio::awaitable<void> {
+        dfuts.push_back(asio::co_spawn(
+            ioc,
+            [&, i]() -> asio::awaitable<void> {
                 co_await yield_n(i);
                 auto d = co_await mtx.cancel_and_drain();
-                if (d.has_value())
-                    drain_success_count.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::use_future));
+                if (d.has_value()) drain_success_count.fetch_add(1, std::memory_order_acq_rel);
+            },
+            asio::use_future));
     }
 
     ioc.run();
     for (auto& df : dfuts) df.get();
 
-    EXPECT_EQ(total_completions.load(), N)
-        << "Each of the N waiters must complete exactly once";
-    EXPECT_EQ(drain_success_count.load(), D)
-        << "All D concurrent drainers must succeed";
+    EXPECT_EQ(total_completions.load(), N) << "Each of the N waiters must complete exactly once";
+    EXPECT_EQ(drain_success_count.load(), D) << "All D concurrent drainers must succeed";
 }
 
 }  // namespace

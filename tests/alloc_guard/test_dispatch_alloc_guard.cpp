@@ -29,23 +29,21 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <atomic>
-#include <cstddef>
-#include <memory_resource>
-
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
+#include <atomic>
+#include <cstddef>
 #include <fixpp/core/cancellable_dispatch.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <memory_resource>
 
 #include "support/minimal_dictionary.hpp"
 
@@ -57,8 +55,8 @@ __attribute__((weak)) void alloc_guard_end() {}
 
 namespace {
 
-using fixpp::core::EngineConfig;
 using fixpp::core::cancellable_dispatch;
+using fixpp::core::EngineConfig;
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::core::make_session_executor;
@@ -126,13 +124,11 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
     // overflow outside the guard window doesn't abort; inside the guard we
     // assert the hot path never overflows (the 1 MB buffer accommodates all
     // 10003 calls; any overflow would be a global-heap hit caught by mallocnesia).
-    std::pmr::monotonic_buffer_resource session_mr{
-        session_buf.data(), session_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{session_buf.data(), session_buf.size(),
+                                                   std::pmr::get_default_resource()};
     // Message arena: per-awaiter promise frames (PMR fallback).
-    std::pmr::monotonic_buffer_resource message_mr{
-        message_buf.data(), message_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource message_mr{message_buf.data(), message_buf.size(),
+                                                   std::pmr::get_default_resource()};
 
     asio::io_context ioc;
 
@@ -144,15 +140,12 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
     cfg.message_arena = &message_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     Session sess{engine, cfg};
-    auto se_result = make_session_executor(
-        ioc.get_executor(),
-        threading_mode::per_session_strand,
-        /*attested=*/false,
-        &sess);
+    auto se_result = make_session_executor(ioc.get_executor(), threading_mode::per_session_strand,
+                                           /*attested=*/false, &sess);
     ASSERT_TRUE(se_result.has_value()) << "make_session_executor failed";
     auto se = *se_result;
 
@@ -166,14 +159,11 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
         [&]() -> asio::awaitable<void> {
             for (int i = 0; i < WARMUP; ++i) {
                 asio::cancellation_signal sig;
-                auto rc = co_await cancellable_dispatch(
-                    se, sig.slot(), [&warmup_count] {
-                        warmup_count.fetch_add(1, std::memory_order_relaxed);
-                    });
+                auto rc = co_await cancellable_dispatch(se, sig.slot(), [&warmup_count] {
+                    warmup_count.fetch_add(1, std::memory_order_relaxed);
+                });
                 (void)rc;
-                co_await asio::post(
-                    co_await asio::this_coro::executor,
-                    asio::use_awaitable);
+                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
             }
             co_return;
         },
@@ -184,9 +174,8 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
 
     // Reset the message arena (warm-up may have used it for PMR fallback).
     message_mr.release();
-    new (&message_mr) std::pmr::monotonic_buffer_resource{
-        message_buf.data(), message_buf.size(),
-        std::pmr::null_memory_resource()};
+    new (&message_mr) std::pmr::monotonic_buffer_resource{message_buf.data(), message_buf.size(),
+                                                          std::pmr::null_memory_resource()};
 
     // ── Measured window ───────────────────────────────────────────────────
     constexpr int CORPUS_SIZE = 10'000;
@@ -200,17 +189,14 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
         [&]() -> asio::awaitable<void> {
             for (int i = 0; i < CORPUS_SIZE; ++i) {
                 asio::cancellation_signal sig;
-                auto rc = co_await cancellable_dispatch(
-                    se, sig.slot(), [&handler_count] {
-                        handler_count.fetch_add(1, std::memory_order_relaxed);
-                    });
+                auto rc = co_await cancellable_dispatch(se, sig.slot(), [&handler_count] {
+                    handler_count.fetch_add(1, std::memory_order_relaxed);
+                });
                 EXPECT_TRUE(rc.has_value());
                 // Yield periodically to unwind the strand's inline-resume
                 // recursion depth (mirrors bench warm-up trampoline pattern).
                 if ((i & 255) == 255)
-                    co_await asio::post(
-                        co_await asio::this_coro::executor,
-                        asio::use_awaitable);
+                    co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
             }
             corpus_done = true;
             co_return;
@@ -224,4 +210,3 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
     EXPECT_TRUE(corpus_done);
     EXPECT_EQ(handler_count.load(), CORPUS_SIZE);
 }
-

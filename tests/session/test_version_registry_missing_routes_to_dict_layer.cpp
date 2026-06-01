@@ -27,18 +27,17 @@
 // failure to a different C-ABI group) is caught by CI.
 #include <gtest/gtest.h>
 
-#include <memory>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
+#include <memory>
+#include <vector>
 
 namespace {
 
-using fixpp::core::EngineConfig;
 using fixpp::core::build_version_registry;
+using fixpp::core::EngineConfig;
 using fixpp::core::error;
 using fixpp::dict::application_version;
 using fixpp::dict::version_registry;
@@ -49,21 +48,18 @@ using fixpp::dict::version_registry;
 // return dict_no_dictionary_for_application_version for every lookup.
 // This is the unchanged 003-owned AC-X2 contract; the test confirms no 2d
 // synonym is introduced.
-TEST(SeamVersionRegistryMissingRoutesToDictLayer,
-     EmptyRegistryGetReturnsDictLayerError) {
+TEST(SeamVersionRegistryMissingRoutesToDictLayer, EmptyRegistryGetReturnsDictLayerError) {
     version_registry reg;
     auto result = reg.get(application_version::v50sp2);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(),
-              error::dict_no_dictionary_for_application_version)
+    EXPECT_EQ(result.error(), error::dict_no_dictionary_for_application_version)
         << "An empty registry must return the 2c-owned slot-28 error, "
            "NOT a 2d synonym";
 }
 
 // Verify the error is specifically slot 28 (dict_no_dictionary_for_application_version)
 // and NOT any other dict_* variant.
-TEST(SeamVersionRegistryMissingRoutesToDictLayer,
-     MissingVersionIsSlot28NotOtherDictVariant) {
+TEST(SeamVersionRegistryMissingRoutesToDictLayer, MissingVersionIsSlot28NotOtherDictVariant) {
     version_registry reg;
     auto result = reg.get(application_version::v44);
     ASSERT_FALSE(result.has_value());
@@ -72,16 +68,14 @@ TEST(SeamVersionRegistryMissingRoutesToDictLayer,
     EXPECT_NE(result.error(), error::invalid_session_config);
     EXPECT_NE(result.error(), error::clock_not_set);
     // Confirm it IS the 2c-owned dict-layer error (slot 28):
-    EXPECT_EQ(result.error(),
-              error::dict_no_dictionary_for_application_version);
+    EXPECT_EQ(result.error(), error::dict_no_dictionary_for_application_version);
 }
 
 // ── Path A: Registry-build via build_version_registry() ────────────────────
 // When EngineConfig::dictionaries is EMPTY, build_version_registry returns an
 // error (dict_no_dictionary_for_application_version). This is the proxy for
 // Engine::open's registry-build step — the 007-scoped free function (D-20).
-TEST(SeamVersionRegistryMissingRoutesToDictLayer,
-     BuildRegistryFromEmptyEngineConfigDictionaries) {
+TEST(SeamVersionRegistryMissingRoutesToDictLayer, BuildRegistryFromEmptyEngineConfigDictionaries) {
     EngineConfig cfg;
     // No dictionaries → registry build should succeed (empty registry is
     // valid — no dictionaries registered). The *missing-version* error only
@@ -97,8 +91,7 @@ TEST(SeamVersionRegistryMissingRoutesToDictLayer,
     // Lookup on the resulting registry must return the 2c-owned error.
     auto get_result = reg_result->get(application_version::v50sp2);
     ASSERT_FALSE(get_result.has_value());
-    EXPECT_EQ(get_result.error(),
-              error::dict_no_dictionary_for_application_version)
+    EXPECT_EQ(get_result.error(), error::dict_no_dictionary_for_application_version)
         << "Registry built from empty EngineConfig::dictionaries must return "
            "the 2c-owned slot-28 error on get(), NOT a 2d synonym";
 }

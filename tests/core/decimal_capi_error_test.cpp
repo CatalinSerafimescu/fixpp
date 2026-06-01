@@ -53,7 +53,7 @@ TEST(DecimalCAPIErrorPaths, FormatNullWritten) {
 
 TEST(DecimalCAPIErrorPaths, FormatBufferTooSmallCallsMapError) {
     fixpp_decimal_t d{123456789, -5, {}};  // "1234.56789" — 10 chars + NUL
-    char buf[4]{};                          // way too small
+    char buf[4]{};                         // way too small
     size_t written = 0;
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_BUFFER_TOO_SMALL);
 }

@@ -18,13 +18,11 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/clock.hpp>
 #include <thread>
 #include <variant>
-
-#include <fixpp/core/clock.hpp>
 
 #include "support/scripted_fsm.hpp"
 
@@ -44,14 +42,14 @@ public:
     fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
-    asio::awaitable<void> sleep_until(
-        fixpp::core::steady_time_point dl) override {
+    asio::awaitable<void> sleep_until(fixpp::core::steady_time_point dl) override {
         asio::steady_timer t{ex_};
         t.expires_at(dl);
         co_await t.async_wait(asio::use_awaitable);  // throws op_aborted on cancel
         co_return;
     }
     void cancel_sleeps() noexcept override {}
+
 private:
     asio::any_io_executor ex_;
 };
@@ -81,9 +79,9 @@ TEST(SeamThirdPartyClockConformance, CompletesOnBoundExecutorAndHonoursCancel) {
                     // resolves cleanly (no hang, no double-complete).
                     asio::steady_timer kick{co_await asio::this_coro::executor};
                     kick.expires_after(30ms);
-                    auto which = co_await (
-                        clk.sleep_until(std::chrono::steady_clock::now() + 10s)
-                        || kick.async_wait(asio::use_awaitable));
+                    auto which =
+                        co_await (clk.sleep_until(std::chrono::steady_clock::now() + 10s) ||
+                                  kick.async_wait(asio::use_awaitable));
                     // index 1 ⇒ the timer won and the long sleep was
                     // cancelled+drained (cancellation honoured).
                     cancel_honoured.store(which.index() == 1);

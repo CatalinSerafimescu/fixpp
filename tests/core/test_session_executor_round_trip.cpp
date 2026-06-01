@@ -17,9 +17,8 @@
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
-#include <fixpp/core/error.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -29,17 +28,16 @@
 
 namespace {
 
+using fixpp::core::EngineConfig;
 using fixpp::core::error;
 using fixpp::core::make_session_executor;
-using fixpp::core::EngineConfig;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 using fixpp::session::threading_mode;
 
 TEST(SeamSessionExecutorRoundTrip, PerSessionStrandWrapsAndRoundTrips) {
     asio::thread_pool pool{2};
-    auto se = make_session_executor(pool.get_executor(),
-                                    threading_mode::per_session_strand,
+    auto se = make_session_executor(pool.get_executor(), threading_mode::per_session_strand,
                                     /*attested=*/false, nullptr);
     ASSERT_TRUE(se.has_value());
     EXPECT_TRUE(se->is_strand_wrapped());
@@ -53,8 +51,7 @@ TEST(SeamSessionExecutorRoundTrip, PerSessionStrandWrapsAndRoundTrips) {
 
 TEST(SeamSessionExecutorRoundTrip, DirectExecutorAttestedIsBare) {
     asio::thread_pool pool{1};
-    auto se = make_session_executor(pool.get_executor(),
-                                    threading_mode::direct_executor,
+    auto se = make_session_executor(pool.get_executor(), threading_mode::direct_executor,
                                     /*attested=*/true, nullptr);
     ASSERT_TRUE(se.has_value());
     EXPECT_FALSE(se->is_strand_wrapped());
@@ -65,8 +62,7 @@ TEST(SeamSessionExecutorRoundTrip, DirectExecutorAttestedIsBare) {
 // error::executor_not_serialised (slot 48).
 TEST(SeamSessionExecutorRoundTrip, DirectExecutorWithoutAttestationRejected) {
     asio::thread_pool pool{1};
-    auto se = make_session_executor(pool.get_executor(),
-                                    threading_mode::direct_executor,
+    auto se = make_session_executor(pool.get_executor(), threading_mode::direct_executor,
                                     /*attested=*/false, nullptr);
     ASSERT_FALSE(se.has_value());
     EXPECT_EQ(se.error(), error::executor_not_serialised);
@@ -79,7 +75,7 @@ TEST(SeamSessionExecutorRoundTrip, SecondOpenRejectedSessionAlreadyOpen) {
     EngineConfig engine;
     engine.executor = pool.get_executor();
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();              // T050
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
 
@@ -96,7 +92,7 @@ TEST(SeamSessionExecutorRoundTrip, SecondOpenRejectedSessionAlreadyOpen) {
 // invalid_session_config (slot 53 / FR-018).
 TEST(SeamSessionExecutorRoundTrip, NullEngineExecutorRejected) {
     asio::thread_pool pool{1};
-    EngineConfig engine;                 // engine.executor default = empty
+    EngineConfig engine;  // engine.executor default = empty
     SessionConfig cfg;
     Session s{engine, cfg};
     auto r = asio::co_spawn(pool, s.open(), asio::use_future).get();
@@ -112,7 +108,7 @@ TEST(SeamSessionExecutorRoundTrip, DirectExecutorSpinRejectedEvenAttested) {
     EngineConfig engine;
     engine.executor = pool.get_executor();
     SessionConfig cfg;
-    cfg.mode  = threading_mode::direct_executor;
+    cfg.mode = threading_mode::direct_executor;
     cfg.locks = fixpp::session::lock_policy::spin;
     cfg.already_serialized_executor = true;
     Session s{engine, cfg};

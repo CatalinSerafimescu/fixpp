@@ -298,8 +298,8 @@ public:
                     // record the byte offset into unbounded_payload_copy.
                     const std::byte* src = unbounded_slab_.data() + entries[idx].slab_offset;
                     const std::size_t copy_start = unbounded_payload_copy.size();
-                    unbounded_payload_copy.insert(unbounded_payload_copy.end(),
-                                                  src, src + e.bytes_len);
+                    unbounded_payload_copy.insert(unbounded_payload_copy.end(), src,
+                                                  src + e.bytes_len);
                     e.slab_offset = copy_start;
                 }
                 snapshots.push_back(e);
@@ -314,9 +314,8 @@ public:
             // Resolve payload span from stable storage (no per-frame alloc after this).
             // For bounded: slab_ is a fixed PMR allocation that is never reallocated.
             // For unbounded: unbounded_payload_copy holds the bytes snapshotted under mutex.
-            const std::byte* payload_base = (cfg_.policy == capacity_policy::bounded)
-                                                ? slab_
-                                                : unbounded_payload_copy.data();
+            const std::byte* payload_base =
+                (cfg_.policy == capacity_policy::bounded) ? slab_ : unbounded_payload_copy.data();
             std::span<const std::byte> frame_view{payload_base + e.slab_offset, e.bytes_len};
 
             fixpp::core::expected_t<visit_result> vr{visit_result::cont};

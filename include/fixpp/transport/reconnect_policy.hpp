@@ -60,20 +60,20 @@ struct ReconnectPolicy {
     // 0.0 (industry-canonical no-jitter). Deterministic-per-attempt (seeded
     // from session_id_seed + attempt number) for test repeatability per
     // [const §VII.7] fuzz determinism.
-    double jitter {0.0};
+    double jitter{0.0};
 
     // Cap on total reconnect attempts before the FSM surfaces
     // transport_reconnect_limit_exceeded. 0 = UNBOUNDED (opt-in only).
     // defaults() = 10 (numeric ceiling per [const §XV] thundering-herd-pattern
     // intent); defaults_quickfix_compat() = 0 (industry-canonical no-cap).
-    std::uint32_t max_attempts {0};
+    std::uint32_t max_attempts{0};
 
     // Seed source for deterministic-per-attempt jitter. Set by the session
     // FSM at session open (derived from the session id) per data-model E-6
     // (mechanism settled at /implement-time as a field on the policy). Stays
     // zero for ad-hoc construction; the helper then folds attempt_n alone
     // into the seed_seq.
-    std::uint64_t session_id_seed {0};
+    std::uint64_t session_id_seed{0};
 
     // ── Schedule helper ────────────────────────────────────────────────────
     //
@@ -83,8 +83,8 @@ struct ReconnectPolicy {
     // The plateau-at-last semantics match QuickFIX/J IoSessionInitiator::
     // computeNextRetryConnectDelay():318-319. Jitter is deterministic-per-
     // attempt (seeded from session_id_seed + attempt_n) — see the .cpp body.
-    [[nodiscard]] std::chrono::milliseconds
-        delay_for_attempt(std::uint32_t attempt_n) const noexcept;
+    [[nodiscard]] std::chrono::milliseconds delay_for_attempt(
+        std::uint32_t attempt_n) const noexcept;
 
     // ── Defaults factories ──────────────────────────────────────────────────
     //
@@ -100,8 +100,7 @@ struct ReconnectPolicy {
     //
     // The mr parameter is the engine PMR root used to allocate the schedule
     // vector; if null, the engine's default upstream resource is used.
-    [[nodiscard]] static ReconnectPolicy
-        defaults(std::pmr::memory_resource* mr = nullptr);
+    [[nodiscard]] static ReconnectPolicy defaults(std::pmr::memory_resource* mr = nullptr);
 
     // defaults_quickfix_compat() — industry-canonical QuickFIX-cpp / Fix8
     // shape: single fixed 30 s interval, no jitter, no cap:
@@ -114,8 +113,8 @@ struct ReconnectPolicy {
     //
     // The mr parameter is the engine PMR root used to allocate the
     // single-entry schedule vector.
-    [[nodiscard]] static ReconnectPolicy
-        defaults_quickfix_compat(std::pmr::memory_resource* mr = nullptr);
+    [[nodiscard]] static ReconnectPolicy defaults_quickfix_compat(
+        std::pmr::memory_resource* mr = nullptr);
 };
 
 }  // namespace fixpp::transport

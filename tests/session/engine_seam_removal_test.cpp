@@ -18,20 +18,14 @@
 //
 // Anchors: FR-009; SC-006; C4/E-6; data-model §E-2/E-4.
 
-#include <chrono>
-#include <cstddef>
-#include <cstdio>
-#include <future>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdio>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -42,6 +36,10 @@
 #include <fixpp/tls/peer_identity.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -58,10 +56,8 @@ static std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string, std::uint32_t seq,
-    std::string_view sender, std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));
@@ -89,25 +85,30 @@ static std::vector<std::byte> make_logon_frame(
 
 class MinimalTransportFactory final : public fixpp::transport::TransportFactory {
 public:
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor, fixpp::tls::SslCtxConfig,
-         std::pmr::memory_resource*) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor, fixpp::tls::SslCtxConfig,
+        std::pmr::memory_resource*) noexcept override {
         return std::unexpected{fixpp::core::error::transport_factory_failed};
     }
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source>) noexcept override { return {}; }
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override { return nullptr; }
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source>) noexcept override {
+        return {};
+    }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
 };
 
 // ── (1) Grep gate ───────────────────────────────────────────────────────────
 TEST(EngineSeamRemoval, NoSeamReferenceInAnyTree) {
     // Assemble the needle from fragments so this file holds no contiguous match.
     const std::string needle = std::string{"logon_peer"} + "_identity_override";
-    const std::string root   = FIXPP_TEST_SOURCE_DIR;
-    const std::string cmd =
-        "grep -rn -- '" + needle + "' "
-        "'" + root + "/src' '" + root + "/include' '" + root + "/tests' 2>/dev/null";
+    const std::string root = FIXPP_TEST_SOURCE_DIR;
+    const std::string cmd = "grep -rn -- '" + needle +
+                            "' "
+                            "'" +
+                            root + "/src' '" + root + "/include' '" + root + "/tests' 2>/dev/null";
 
     FILE* pipe = ::popen(cmd.c_str(), "r");
     ASSERT_NE(pipe, nullptr) << "popen(grep) failed";
@@ -121,7 +122,8 @@ TEST(EngineSeamRemoval, NoSeamReferenceInAnyTree) {
 
     EXPECT_TRUE(out.empty())
         << "SC-006 / FR-009: the per-config peer-identity test seam must have ZERO "
-        << "references across src/ + include/ + tests/. Offending lines:\n" << out;
+        << "references across src/ + include/ + tests/. Offending lines:\n"
+        << out;
 }
 
 // ── (2) Live-binding witness ─────────────────────────────────────────────────
@@ -134,19 +136,18 @@ TEST(EngineSeamRemoval, LiveIdentityDrivesAuthorization) {
     policy.add_binding("PEER-PROD-01", "ACCEPTOR");
 
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
+    cfg.role = fixpp::session::session_role::initiator;
     cfg.executor_override = ioc.get_executor();
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.compid_authorization_policy = std::move(policy);
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.transport_factory_override = std::make_shared<MinimalTransportFactory>();
     cfg.transport_send = [](std::span<const std::byte>) noexcept {};
 
@@ -169,8 +170,7 @@ TEST(EngineSeamRemoval, LiveIdentityDrivesAuthorization) {
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
     {
         auto feed_fut = asio::co_spawn(
-            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
         ioc.run_for(500ms);
         ioc.restart();
         ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
@@ -183,14 +183,12 @@ TEST(EngineSeamRemoval, LiveIdentityDrivesAuthorization) {
 
     bool bound = false;
     for (const auto& ev : session.recent_events()) {
-        if (std::holds_alternative<
-                fixpp::session::session_event_peer_identity_bound>(ev)) {
+        if (std::holds_alternative<fixpp::session::session_event_peer_identity_bound>(ev)) {
             bound = true;
             break;
         }
     }
-    EXPECT_TRUE(bound)
-        << "peer_identity_bound must be emitted from the live-identity arm.";
+    EXPECT_TRUE(bound) << "peer_identity_bound must be emitted from the live-identity arm.";
 }
 
 }  // namespace

@@ -45,18 +45,9 @@
 //
 // [const §XV.9]: this header is tests-only — heavy includes are safe here.
 
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -64,9 +55,10 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/reconnect_fsm.hpp>
@@ -83,6 +75,12 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "loopback_tls_session_harness.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -99,12 +97,8 @@ static std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));
@@ -141,9 +135,7 @@ public:
     // The SHA-256 fingerprint this source reports in its leaf.
     std::array<std::byte, 32> expected_sha{};
 
-    explicit known_sha_cert_source(std::array<std::byte, 32> sha)
-        : expected_sha(sha)
-    {}
+    explicit known_sha_cert_source(std::array<std::byte, 32> sha) : expected_sha(sha) {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>>
     load_credentials() override {
@@ -173,9 +165,7 @@ public:
 struct event_capture {
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    void operator()(fixpp::session::session_event_credentials_rotated ev) {
-        events.push_back(ev);
-    }
+    void operator()(fixpp::session::session_event_credentials_rotated ev) { events.push_back(ev); }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,9 +184,9 @@ public:
     //   - event_order_: set by the injected emit callback when it fires.
     //   - make_order_: set when make() is called.
     // We use a simple monotonic counter shared between callback and factory.
-    std::atomic<int>  sequence_counter{0};
-    int               event_sequence = -1;  // sequence at credentials_rotated
-    int               make_sequence  = -1;  // sequence at make()
+    std::atomic<int> sequence_counter{0};
+    int event_sequence = -1;  // sequence at credentials_rotated
+    int make_sequence = -1;   // sequence at make()
 
     // The event capture — filled by the emit callback.
     std::vector<fixpp::session::session_event_credentials_rotated> emitted_events;
@@ -214,19 +204,19 @@ public:
         async_connect(fixpp::transport::Endpoint const& ep) override {
             fixpp::transport::ConnectInfo info;
             info.remote = ep;
-            info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+            info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
             info.family = 2;
             co_return info;
         }
 
-        [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-        async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+        [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+            std::span<std::byte> buf [[clang::lifetimebound]]) override {
             (void)buf;
             co_return std::unexpected{fixpp::core::error::transport_read_eof};
         }
 
-        [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-        async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+        [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+            std::span<const std::byte> buf [[clang::lifetimebound]]) override {
             co_return buf.size();
         }
 
@@ -237,8 +227,8 @@ public:
         async_handshake(fixpp::tls::SslCtxConfig const& cfg [[clang::lifetimebound]]) override {
             std::pmr::memory_resource* mr = cfg.mr ? cfg.mr : std::pmr::get_default_resource();
             co_return fixpp::transport::handshake_result{
-                .peer_id           = fixpp::tls::peer_identity{},
-                .captured_pinset   = nullptr,
+                .peer_id = fixpp::tls::peer_identity{},
+                .captured_pinset = nullptr,
                 .negotiated_cipher = std::pmr::string{"TLS_AES_128_GCM_SHA256", mr},
             };
         }
@@ -247,24 +237,22 @@ public:
         asio::any_io_executor exec_;
     };
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         make_sequence = sequence_counter.fetch_add(1, std::memory_order_relaxed);
         ++factory_make_count;
         return std::make_unique<SuccessTransport>(std::move(exec));
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override {
         current_source = std::move(new_source);
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override {
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
         return current_source;
     }
 };
@@ -298,9 +286,7 @@ protected:
     asio::io_context ioc;
     fixpp::core::EngineConfig engine{};
 
-    void SetUp() override {
-        engine.executor = ioc.get_executor();
-    }
+    void SetUp() override { engine.executor = ioc.get_executor(); }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -327,15 +313,12 @@ TEST_F(CredentialsRotatedEmitTest, FirstLoadEmitsNoEvent) {
     // Capture emitted events.
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    fixpp::session::ReconnectFsm fsm(
-        factory.get(), make_fast_policy(), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(), 30s, 2000ms);
 
     // Inject the emit callback — will be populated by T018 wiring.
     // For the standalone FSM test (no Session), we inject directly.
     fsm.set_emit_credentials_rotated(
-        [&events](fixpp::session::session_event_credentials_rotated ev) {
-            events.push_back(ev);
-        });
+        [&events](fixpp::session::session_event_credentials_rotated ev) { events.push_back(ev); });
 
     // No session_ back-pointer set (standalone test) — authorization gate
     // will be skipped (session_ == nullptr check in step 7).
@@ -384,8 +367,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
         factory->current_source = source_a;
         std::vector<fixpp::session::session_event_credentials_rotated> init_events;
 
-        fixpp::session::ReconnectFsm fsm_init(
-            factory.get(), make_fast_policy(), 30s, 2000ms);
+        fixpp::session::ReconnectFsm fsm_init(factory.get(), make_fast_policy(), 30s, 2000ms);
         fsm_init.set_emit_credentials_rotated(
             [&init_events](fixpp::session::session_event_credentials_rotated ev) {
                 init_events.push_back(ev);
@@ -412,18 +394,16 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     factory->current_source = source_a;
     factory->factory_make_count = 0;
     factory->event_sequence = -1;
-    factory->make_sequence  = -1;
+    factory->make_sequence = -1;
 
     std::vector<fixpp::session::session_event_credentials_rotated> events;
     int event_order = -1;
 
-    fixpp::session::ReconnectFsm fsm(
-        factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
 
     // Wire the emit callback; also record the sequence counter at emit time.
     fsm.set_emit_credentials_rotated(
-        [&factory, &events, &event_order](
-            fixpp::session::session_event_credentials_rotated ev) {
+        [&factory, &events, &event_order](fixpp::session::session_event_credentials_rotated ev) {
             event_order = factory->sequence_counter.fetch_add(1, std::memory_order_relaxed);
             events.push_back(ev);
         });
@@ -456,9 +436,8 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     // ── Assertions ────────────────────────────────────────────────────────────
 
     // (a) Exactly one credentials_rotated emitted.
-    ASSERT_EQ(events.size(), 1u)
-        << "Expected exactly one credentials_rotated event. "
-        << "RED: stub does not emit.";
+    ASSERT_EQ(events.size(), 1u) << "Expected exactly one credentials_rotated event. "
+                                 << "RED: stub does not emit.";
 
     // (b) new_sha256 == sha_b (the REAL fingerprint of source_b's leaf).
     EXPECT_EQ(events[0].new_sha256, sha_b)
@@ -476,8 +455,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     EXPECT_NE(factory->make_sequence, -1) << "make() was never called.";
     EXPECT_LT(event_order, factory->make_sequence)
         << "credentials_rotated must be emitted BEFORE make() (FR-009). "
-        << "event_order=" << event_order
-        << " make_sequence=" << factory->make_sequence;
+        << "event_order=" << event_order << " make_sequence=" << factory->make_sequence;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -504,13 +482,10 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
 
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    fixpp::session::ReconnectFsm fsm(
-        factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
 
     fsm.set_emit_credentials_rotated(
-        [&events](fixpp::session::session_event_credentials_rotated ev) {
-            events.push_back(ev);
-        });
+        [&events](fixpp::session::session_event_credentials_rotated ev) { events.push_back(ev); });
 
     // Attempt 0 (first load — source_c1): sets baseline, no event.
     {
@@ -539,10 +514,8 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
         << "No-op rotation (old_sha == new_sha) must still emit credentials_rotated "
         << "(FR-011). RED: no emit site exists.";
 
-    EXPECT_EQ(events[0].old_sha256, sha_c)
-        << "old_sha256 must equal sha_c.";
-    EXPECT_EQ(events[0].new_sha256, sha_c)
-        << "new_sha256 must equal sha_c (same fingerprint).";
+    EXPECT_EQ(events[0].old_sha256, sha_c) << "old_sha256 must equal sha_c.";
+    EXPECT_EQ(events[0].new_sha256, sha_c) << "new_sha256 must equal sha_c (same fingerprint).";
 
     // old == new for the no-op case.
     EXPECT_EQ(events[0].old_sha256, events[0].new_sha256)
@@ -586,18 +559,18 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     }
 
     // ── Build the transport-layer loopback (acceptor + factory) ──────────
-    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{std::string(fixture_dir),
+                                                                ioc.get_executor()};
 
     auto server_ep = loopback_fixture.server_endpoint();
     auto& listener = loopback_fixture.listener();
-    auto ssl_cfg   = loopback_fixture.ssl_cfg();
+    auto ssl_cfg = loopback_fixture.ssl_cfg();
 
     // ── Build a cert_source from the fixture leaf ─────────────────────────
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
 
     auto cs_result_a = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
@@ -634,36 +607,39 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
 
     // Verify the expected SHA is non-zero (sanity: the cert loaded properly).
     bool all_zero = true;
-    for (auto b : expected_sha) if (b != std::byte{0}) { all_zero = false; break; }
+    for (auto b : expected_sha)
+        if (b != std::byte{0}) {
+            all_zero = false;
+            break;
+        }
     ASSERT_FALSE(all_zero) << "Expected SHA-256 is all-zero — cert may not have loaded.";
 
     // ── Build the session TransportFactory (source_a initially) ──────────
     fixpp::tls::SslCtxConfig session_ssl_cfg;
     session_ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    session_ssl_cfg.cs      = source_a;
-    session_ssl_cfg.clock   = nullptr;
-    session_ssl_cfg.caps    = fixpp::tls::CertSourceCaps{};
+    session_ssl_cfg.cs = source_a;
+    session_ssl_cfg.clock = nullptr;
+    session_ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
 
     auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, session_ssl_cfg);
     ASSERT_TRUE(factory_result.has_value()) << "Failed to build transport factory";
-    auto session_factory = std::shared_ptr<fixpp::transport::TransportFactory>{
-        std::move(*factory_result)};
+    auto session_factory =
+        std::shared_ptr<fixpp::transport::TransportFactory>{std::move(*factory_result)};
 
     // ── Build the Session (one_way_ca so the authorization gate is permissive)
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
-    cfg.heartbeat_interval     = std::chrono::seconds{30};
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
-    cfg.executor_override       = ioc.get_executor();
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::one_way_ca};
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.executor_override = ioc.get_executor();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::one_way_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.transport_factory_override = session_factory;
     cfg.reconnect_endpoint = server_ep;
 
@@ -693,11 +669,8 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     // state).  We must prime it by running one attempt with source_a (returns
     // no event, as per FR-009 SPEC-FIXED), then stage source_b and run a second
     // attempt to observe the rotation event.
-    fixpp::session::ReconnectFsm reconnect_fsm(
-        session_factory.get(),
-        make_fast_policy(5),
-        30s,
-        2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory.get(), make_fast_policy(5), 30s,
+                                               2000ms);
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
@@ -719,14 +692,13 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
                     asio::enable_total_cancellation());
                 auto accept_r = co_await listener.async_accept();
                 if (!accept_r.has_value()) co_return;
-                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(
-                    accept_r->get());
+                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(accept_r->get());
                 if (tls) (void)co_await tls->async_handshake(ssl_cfg);
             },
             asio::detached);
 
-        auto prime_fut = asio::co_spawn(
-            ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+        auto prime_fut =
+            asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
         ioc.run_for(5s);
         ioc.restart();
         ASSERT_EQ(prime_fut.wait_for(0s), std::future_status::ready)
@@ -743,9 +715,9 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     // a new shared_ptr instance — different identity pointer), which triggers
     // snap != last_active_source_ and fires the rotation event.
     fixpp::tls::file_cert_source::Config cs_cfg_c;
-    cs_cfg_c.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg_c.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg_c.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg_c.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg_c.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
 
     auto cs_result_c = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg_c, std::pmr::new_delete_resource());
@@ -769,14 +741,13 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
                     asio::enable_total_cancellation());
                 auto accept_r = co_await listener.async_accept();
                 if (!accept_r.has_value()) co_return;
-                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(
-                    accept_r->get());
+                auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(accept_r->get());
                 if (tls) (void)co_await tls->async_handshake(ssl_cfg);
             },
             asio::detached);
 
-        auto client_fut = asio::co_spawn(
-            ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+        auto client_fut =
+            asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
         ioc.run_for(5s);
         ioc.restart();
         ASSERT_EQ(client_fut.wait_for(0s), std::future_status::ready)
@@ -785,9 +756,8 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     }
 
     // ── Assert: exactly one credentials_rotated emitted with real fingerprint
-    ASSERT_EQ(captured_events.size(), 1u)
-        << "Expected exactly one credentials_rotated event. "
-        << "RED: no emit site exists in 013 stub.";
+    ASSERT_EQ(captured_events.size(), 1u) << "Expected exactly one credentials_rotated event. "
+                                          << "RED: no emit site exists in 013 stub.";
 
     EXPECT_EQ(captured_events[0].new_sha256, expected_sha)
         << "new_sha256 must equal the real SHA-256 of source_b's leaf. "
@@ -797,7 +767,10 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     // Verify the SHA is non-zero (sanity).
     bool emitted_all_zero = true;
     for (auto b : captured_events[0].new_sha256)
-        if (b != std::byte{0}) { emitted_all_zero = false; break; }
+        if (b != std::byte{0}) {
+            emitted_all_zero = false;
+            break;
+        }
     EXPECT_FALSE(emitted_all_zero)
         << "Emitted new_sha256 is all-zero — not a real fingerprint (FR-010).";
 }

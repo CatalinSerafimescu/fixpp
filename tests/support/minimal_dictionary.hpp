@@ -14,13 +14,12 @@
 
 #include <array>
 #include <cstddef>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
 #include <string_view>
-
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/xml_loader.hpp>
 
 namespace fixpp::test_support {
 
@@ -65,23 +64,20 @@ constexpr std::string_view kMinimalFix42Xml = R"xml(
 // the PMR buffer is co-owned via the shared_ptr's deleter. This is
 // intentionally oversized (64 KiB) to accommodate the XML loader's
 // internal allocations.
-[[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary>
-make_minimal_dictionary() {
+[[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary> make_minimal_dictionary() {
     // Allocate a PMR buffer on the heap; co-own it via the shared_ptr deleter.
     constexpr std::size_t kBufSize = 64u * 1024u;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 
-    fixpp::dict::Dictionary d =
-        fixpp::dict::XmlLoader{}.load_from_string(kMinimalFix42Xml, mr);
+    fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(kMinimalFix42Xml, mr);
 
     // Move Dictionary into a shared_ptr; the deleter owns both the
     // monotonic_buffer_resource and the backing buffer.
     auto* raw_dict = new fixpp::dict::Dictionary{std::move(d)};
-    auto* raw_buf  = buf.release();
+    auto* raw_buf = buf.release();
     return std::shared_ptr<const fixpp::dict::Dictionary>{
-        raw_dict,
-        [mr, raw_buf](const fixpp::dict::Dictionary* p) {
+        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* p) {
             delete p;
             delete mr;
             delete raw_buf;

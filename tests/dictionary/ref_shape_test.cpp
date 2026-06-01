@@ -3,12 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/group_ref.hpp>
 #include <fixpp/dict/version_profile.hpp>
-
-#include <cstdint>
 #include <type_traits>
 
 // ---------------------------------------------------------------------------
@@ -37,19 +36,16 @@ static_assert(std::is_trivially_copyable_v<fixpp::dict::GroupRef>);
 static_assert(std::is_same_v<std::underlying_type_t<fixpp::dict::field_presence>, std::uint8_t>);
 static_assert(std::is_same_v<std::underlying_type_t<fixpp::dict::field_data_type>, std::uint8_t>);
 static_assert(std::is_same_v<std::underlying_type_t<fixpp::dict::session_version>, std::uint8_t>);
-static_assert(std::is_same_v<std::underlying_type_t<fixpp::dict::application_version>, std::uint8_t>);
+static_assert(
+    std::is_same_v<std::underlying_type_t<fixpp::dict::application_version>, std::uint8_t>);
 
 // ---------------------------------------------------------------------------
 // RefShape — runtime re-assertion of sizes, alignment, and type traits
 // ---------------------------------------------------------------------------
 
-TEST(RefShape, FieldRefSize) {
-    EXPECT_EQ(sizeof(fixpp::dict::FieldRef), 16u);
-}
+TEST(RefShape, FieldRefSize) { EXPECT_EQ(sizeof(fixpp::dict::FieldRef), 16u); }
 
-TEST(RefShape, FieldRefAlignment) {
-    EXPECT_EQ(alignof(fixpp::dict::FieldRef), 2u);
-}
+TEST(RefShape, FieldRefAlignment) { EXPECT_EQ(alignof(fixpp::dict::FieldRef), 2u); }
 
 TEST(RefShape, FieldRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::FieldRef>);
@@ -59,9 +55,7 @@ TEST(RefShape, FieldRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::FieldRef>);
 }
 
-TEST(RefShape, ComponentRefSize) {
-    EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 12u);
-}
+TEST(RefShape, ComponentRefSize) { EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 12u); }
 
 TEST(RefShape, ComponentRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::ComponentRef>);
@@ -71,9 +65,7 @@ TEST(RefShape, ComponentRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::ComponentRef>);
 }
 
-TEST(RefShape, GroupRefSize) {
-    EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 12u);
-}
+TEST(RefShape, GroupRefSize) { EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 12u); }
 
 TEST(RefShape, GroupRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::GroupRef>);
@@ -107,7 +99,8 @@ TEST(ReservedDiscipline, GroupRefReservedIsZeroOnValueInit) {
 // ---------------------------------------------------------------------------
 
 TEST(EnumDiscipline, FieldPresenceUnderlyingTypeIsUint8) {
-    EXPECT_TRUE((std::is_same_v<std::underlying_type_t<fixpp::dict::field_presence>, std::uint8_t>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::underlying_type_t<fixpp::dict::field_presence>, std::uint8_t>));
 }
 
 TEST(EnumDiscipline, FieldPresenceNotDeclaredIsZero) {
@@ -127,13 +120,16 @@ TEST(EnumDiscipline, FieldPresenceConditionalIsThree) {
 }
 
 TEST(EnumDiscipline, FieldDataTypeUnderlyingTypeIsUint8) {
-    EXPECT_TRUE((std::is_same_v<std::underlying_type_t<fixpp::dict::field_data_type>, std::uint8_t>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::underlying_type_t<fixpp::dict::field_data_type>, std::uint8_t>));
 }
 
 TEST(EnumDiscipline, SessionVersionUnderlyingTypeIsUint8) {
-    EXPECT_TRUE((std::is_same_v<std::underlying_type_t<fixpp::dict::session_version>, std::uint8_t>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::underlying_type_t<fixpp::dict::session_version>, std::uint8_t>));
 }
 
 TEST(EnumDiscipline, ApplicationVersionUnderlyingTypeIsUint8) {
-    EXPECT_TRUE((std::is_same_v<std::underlying_type_t<fixpp::dict::application_version>, std::uint8_t>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::underlying_type_t<fixpp::dict::application_version>, std::uint8_t>));
 }

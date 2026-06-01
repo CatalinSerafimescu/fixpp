@@ -34,10 +34,17 @@
 // (use-after-free). The cleanup is forget_session(Session*), called from
 // Session::~Session() (the canonical lifetime hook) per Clock's
 // default-virtual forget_session API.
-#include <fixpp/core/system_clock_source.hpp>
-
+#include <asio/any_io_executor.hpp>
+#include <asio/post.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/strand.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstdint>
+#include <fixpp/core/clock.hpp>             // utc_time_point, steady_time_point
+#include <fixpp/core/session_executor.hpp>  // session_arena_of; target<session_executor>
+#include <fixpp/core/system_clock_source.hpp>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -45,16 +52,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <asio/any_io_executor.hpp>
-#include <asio/post.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/strand.hpp>
-#include <asio/this_coro.hpp>
-#include <asio/use_awaitable.hpp>
-
-#include <fixpp/core/clock.hpp>              // utc_time_point, steady_time_point
-#include <fixpp/core/session_executor.hpp>  // session_arena_of; target<session_executor>
 
 // fixpp::session::Session is forward-declared via session_executor.hpp —
 // used as a map key (opaque pointer) only; no complete type needed here.
@@ -87,9 +84,9 @@ struct SessionTimerSlot {
 }  // namespace
 
 struct system_clock_source::state {
-    asio::any_io_executor                                 engine_exec;
-    std::mutex                                            m;
-    std::uint64_t                                         next_id{1};
+    asio::any_io_executor engine_exec;
+    std::mutex m;
+    std::uint64_t next_id{1};
     std::map<std::uint64_t, std::weak_ptr<asio::steady_timer>> inflight;
 
     // Per-session reusable timer slot pool (T055 / D-8).
@@ -99,8 +96,7 @@ struct system_clock_source::state {
     // slot control block via allocate_shared; the timer itself lives in the
     // shared_ptr payoad).
     // Protected by `m` (same lock as inflight — avoids a second mutex).
-    std::unordered_map<fixpp::session::Session*,
-                       std::shared_ptr<SessionTimerSlot>> session_slots;
+    std::unordered_map<fixpp::session::Session*, std::shared_ptr<SessionTimerSlot>> session_slots;
 };
 
 system_clock_source::system_clock_source(asio::any_io_executor exec)
@@ -122,14 +118,12 @@ steady_time_point system_clock_source::steady_now() const noexcept {
     return std::chrono::steady_clock::now();
 }
 
-asio::awaitable<void>
-system_clock_source::sleep_until(steady_time_point deadline) {
+asio::awaitable<void> system_clock_source::sleep_until(steady_time_point deadline) {
     // ── Step 1: recover the awaiter's executor ─────────────────────────────
     // co_await asio::this_coro::executor returns the bound executor (erased
     // to asio::any_io_executor when the coroutine is spawned without an
     // explicit bind_executor).
-    asio::any_io_executor awaiter_exec =
-        co_await asio::this_coro::executor;
+    asio::any_io_executor awaiter_exec = co_await asio::this_coro::executor;
 
     // ── Step 2: attempt per-session slot pool lookup (T055 / D-8) ─────────
     // Try to recover a session_executor from the awaiter's bound executor.
@@ -140,8 +134,7 @@ system_clock_source::sleep_until(steady_time_point deadline) {
     // stores the typed wrapper, so target<session_executor>() succeeds when
     // the session was opened via make_session_executor + the coroutine runs
     // on the session's executor).
-    const session_executor* const se_ptr =
-        awaiter_exec.target<session_executor>();
+    const session_executor* const se_ptr = awaiter_exec.target<session_executor>();
 
     std::shared_ptr<asio::steady_timer> timer;
 
@@ -176,17 +169,15 @@ system_clock_source::sleep_until(steady_time_point deadline) {
                     // cancel_sleeps posts cancel() onto the timer's own
                     // executor which must be a serialiser).
                     auto new_slot = std::allocate_shared<SessionTimerSlot>(
-                        alloc,
-                        SessionTimerSlot{std::make_shared<asio::steady_timer>(
-                            asio::make_strand(impl_->engine_exec))});
+                        alloc, SessionTimerSlot{std::make_shared<asio::steady_timer>(
+                                   asio::make_strand(impl_->engine_exec))});
 
                     std::scoped_lock g(impl_->m);
                     // Double-check under lock (another coroutine on the same
                     // session could have raced here — under per_session_strand
                     // this cannot happen, but under direct_executor it can if
                     // the user runs two sleeps concurrently; be safe).
-                    auto [it, inserted] =
-                        impl_->session_slots.emplace(sess, std::move(new_slot));
+                    auto [it, inserted] = impl_->session_slots.emplace(sess, std::move(new_slot));
                     slot = it->second;
                 }
             }
@@ -207,8 +198,7 @@ system_clock_source::sleep_until(steady_time_point deadline) {
         // non-hot-path engine-scope sleeps ([2d §4.1.1] pattern (b) note;
         // D-8: "non-session callers fall back to per-call path").
         // The per-timer strand is preserved (D-19).
-        timer = std::make_shared<asio::steady_timer>(
-            asio::make_strand(impl_->engine_exec));
+        timer = std::make_shared<asio::steady_timer>(asio::make_strand(impl_->engine_exec));
         timer->expires_at(deadline);
     }
 
@@ -222,13 +212,12 @@ system_clock_source::sleep_until(steady_time_point deadline) {
     // RAII de-register (covers deadline-reached, cancel, and exception paths).
     struct dereg {
         system_clock_source::state* s;
-        std::uint64_t               id;
-        dereg(system_clock_source::state* ps, std::uint64_t pid) noexcept
-            : s{ps}, id{pid} {}
-        dereg(const dereg&)            = delete;
+        std::uint64_t id;
+        dereg(system_clock_source::state* ps, std::uint64_t pid) noexcept : s{ps}, id{pid} {}
+        dereg(const dereg&) = delete;
         dereg& operator=(const dereg&) = delete;
-        dereg(dereg&&)                 = delete;
-        dereg& operator=(dereg&&)      = delete;
+        dereg(dereg&&) = delete;
+        dereg& operator=(dereg&&) = delete;
         ~dereg() {
             std::scoped_lock g(s->m);
             s->inflight.erase(id);
@@ -250,7 +239,9 @@ void system_clock_source::cancel_sleeps() noexcept {
         std::scoped_lock g(impl_->m);
         live.reserve(impl_->inflight.size());
         for (auto& [id, w] : impl_->inflight) {
-            if (auto sp = w.lock()) { live.push_back(std::move(sp)); }
+            if (auto sp = w.lock()) {
+                live.push_back(std::move(sp));
+            }
         }
     }
     // Cancel each on its OWN executor (asio timers are not thread-safe); the
@@ -268,9 +259,10 @@ void system_clock_source::cancel_sleeps() noexcept {
 // shared_ptr destruction calls the deallocator on the (still-live) session
 // arena's polymorphic_allocator; for a monotonic_buffer_resource that's a
 // no-op, which is correct (the arena owns the memory).
-void system_clock_source::forget_session(
-    fixpp::session::Session* session) noexcept {
-    if (session == nullptr) { return; }
+void system_clock_source::forget_session(fixpp::session::Session* session) noexcept {
+    if (session == nullptr) {
+        return;
+    }
     std::shared_ptr<SessionTimerSlot> released;  // destroyed AFTER lock release
     {
         std::scoped_lock g(impl_->m);

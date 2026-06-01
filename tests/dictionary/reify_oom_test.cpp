@@ -77,8 +77,8 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};
@@ -88,8 +88,7 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
     counting_pmr_resource counter{&upstream};
 
     auto result = ONOS::from_view(src, &counter);
-    ASSERT_TRUE(result.has_value())
-        << "from_view must succeed (real owning deep-copy, T059)";
+    ASSERT_TRUE(result.has_value()) << "from_view must succeed (real owning deep-copy, T059)";
     EXPECT_LE(counter.count(), std::size_t{4})
         << "AC-R7: from_view must use ≤4 PMR allocations per Entity 4 budget "
            "(the bytes_ deep-copy; view() is lazy)";
@@ -121,8 +120,8 @@ TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};
@@ -158,8 +157,8 @@ TEST(ReifyOomTest, FirstViewRebuildOomDegradesNotTerminate) {
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};
@@ -193,8 +192,8 @@ TEST(ReifyOomTest, NoOomYieldsSuccess) {
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};

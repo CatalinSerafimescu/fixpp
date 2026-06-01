@@ -10,27 +10,27 @@
 //  • pin_view::found() true / false correctness.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/core/error.hpp>
 
 #include <array>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 
 namespace {
 
-using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
-using fixpp::tls::pin_fingerprint;
 using fixpp::core::error;
+using fixpp::tls::Certificate;
+using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 // Build a minimal Certificate with a given SHA-256 fingerprint and subject_dn.
 // san_dns_names_ / san_uris_ left empty (zero-entry spans are fine).
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn = "CN=test") {
     Certificate c{};
-    c.sha256_      = fp;
-    c.subject_dn_  = dn;
-    c.x509_version_= 3;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
+    c.x509_version_ = 3;
     return c;
 }
 

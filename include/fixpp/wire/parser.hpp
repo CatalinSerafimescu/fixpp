@@ -101,9 +101,8 @@ public:
     using classify_fn_t = bool (*)(void const*, std::string_view, std::uint16_t) noexcept;
     using group_member_fn_t = OffsetTable::group_member_fn_t;
 
-    MessageView(frame_view const& frame, std::pmr::memory_resource* mr,
-                void const* opaque_dict, classify_fn_t classify_fn,
-                group_member_fn_t group_member_fn) noexcept
+    MessageView(frame_view const& frame, std::pmr::memory_resource* mr, void const* opaque_dict,
+                classify_fn_t classify_fn, group_member_fn_t group_member_fn) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
@@ -114,9 +113,8 @@ public:
           unk_items_{mr} {}
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
-    MessageView(frame_view const& frame, std::pmr::memory_resource* mr,
-                OffsetTable::Config cfg, void const* opaque_dict,
-                classify_fn_t classify_fn,
+    MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
+                void const* opaque_dict, classify_fn_t classify_fn,
                 group_member_fn_t group_member_fn) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
@@ -137,8 +135,8 @@ public:
 
     explicit MessageView(frame_view const& frame) noexcept
         requires(Mode == access_mode::Iter)
-        : View{frame.bytes().data(), frame.bytes().size(),
-               frame.token()} {}  // [2b §6.4] thread real pool token
+        : View{frame.bytes().data(), frame.bytes().size(), frame.token()} {
+    }  // [2b §6.4] thread real pool token
 
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
@@ -254,8 +252,7 @@ template <std::uint16_t NoTag, class GroupT>
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         if (unk_items_built_) {
             return unknown_fields_view{
-                std::span<unknown_fields_view::kv const>{
-                    unk_items_.data(), unk_items_.size()},
+                std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
                 token()};
         }
         unk_items_built_ = true;
@@ -266,24 +263,20 @@ template <std::uint16_t NoTag, class GroupT>
         constexpr std::uint16_t kBodyLength = 9;
         constexpr std::uint16_t kCheckSum = 10;
         for (auto const& e : table_.entries()) {
-            if (e.tag == kBeginString || e.tag == kBodyLength ||
-                e.tag == kCheckSum) {
+            if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
                 continue;  // framing — never unknown
             }
             // classify_fn_ is nullptr for dict-free views (all non-framing =
             // unknown); otherwise classify via the bound fn + opaque dict.
-            bool const known = (classify_fn_ != nullptr) &&
-                               classify_fn_(opaque_dict_, mtype, e.tag);
+            bool const known =
+                (classify_fn_ != nullptr) && classify_fn_(opaque_dict_, mtype, e.tag);
             if (!known) {
                 unk_items_.push_back(unknown_fields_view::kv{
-                    .tag = e.tag,
-                    .data = raw.data() + e.offset,
-                    .len = e.length});
+                    .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
             }
         }
         return unknown_fields_view{
-            std::span<unknown_fields_view::kv const>{
-                unk_items_.data(), unk_items_.size()},
+            std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
             token()};
     }
 
@@ -321,8 +314,7 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_fn_ = nullptr;
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
-    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{
-        std::pmr::null_memory_resource()};
+    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{std::pmr::null_memory_resource()};
     mutable bool unk_items_built_ = false;
 };
 
@@ -385,27 +377,32 @@ public:
     Parser() noexcept = default;
 
     template <class TV>
+    // dict_metadata is lvalue-constrained and only address-taken (opaque_dict_);
+    // forwarding would be wrong, so missing-std-forward is a false positive here.
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     explicit Parser(TV&& dict_metadata) noexcept
-        requires(std::is_lvalue_reference_v<TV&&>)
+        requires(std::is_lvalue_reference_v<TV &&>)
         : opaque_dict_{std::addressof(dict_metadata)},
           classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
               using dict_t = std::remove_reference_t<TV>;
               return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
           }},
-          group_member_fn_{[](void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept -> bool {
-              using dict_t = std::remove_reference_t<TV>;
-              auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
-              for (auto const member_tag : members) {
-                  if (member_tag == tag) {
-                      return true;
+          group_member_fn_{
+              [](void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept -> bool {
+                  using dict_t = std::remove_reference_t<TV>;
+                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
+                  for (auto const member_tag : members) {
+                      if (member_tag == tag) {
+                          return true;
+                      }
                   }
-              }
-              return false;
-          }} {}
+                  return false;
+              }} {}
 
     template <class TV>
     explicit Parser(TV&&) noexcept
-        requires(!std::is_lvalue_reference_v<TV&&>) = delete;
+        requires(!std::is_lvalue_reference_v<TV &&>)
+    = delete;
 
     Parser(Parser const&) = delete;
     Parser& operator=(Parser const&) = delete;
@@ -429,27 +426,25 @@ public:
     // FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
     // but threads an OffsetTable::Config so the per-instance group cap is
     // tunable through the public Parser API (not collapsed to constants).
-    [[nodiscard]] core::expected_t<MessageView<Mode>> parse(
-        frame_view const& frame [[clang::lifetimebound]],
-        std::pmr::memory_resource* mr,
-        OffsetTable::Config cfg) noexcept [[clang::lifetimebound]]
-        requires(Mode == access_mode::Index) {
-        MessageView<Mode> mv{frame, mr, cfg, opaque_dict_, classify_fn_,
-                             group_member_fn_};
+[[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
+                                                        [[clang::lifetimebound]],
+                                                        std::pmr::memory_resource* mr,
+                                                        OffsetTable::Config cfg) noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+        MessageView<Mode> mv{frame, mr, cfg, opaque_dict_, classify_fn_, group_member_fn_};
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }
         return mv;
     }
 
-    [[nodiscard]] core::expected_t<MessageView<access_mode::Iter>> parse_iter(
-        frame_view const& frame [[clang::lifetimebound]]) noexcept
-        [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
-            return MessageView<access_mode::Iter>{frame};
-        }
+[[nodiscard]] core::expected_t<MessageView<access_mode::Iter>> parse_iter(
+    frame_view const& frame [[clang::lifetimebound]]) noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
+        return MessageView<access_mode::Iter>{frame};
+    }
 
-private:
-    void const* opaque_dict_ = nullptr;
+private : void const* opaque_dict_ = nullptr;
     bool (*classify_fn_)(void const*, std::string_view, std::uint16_t) noexcept = nullptr;
     OffsetTable::group_member_fn_t group_member_fn_ = nullptr;
 };

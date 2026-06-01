@@ -32,30 +32,28 @@
 //
 // Anchors: data-model.md I-9/I-10; [2d §6.5]; spec FR-005; SC-005;
 // tasks.md T044.
-#include <chrono>
-#include <cstddef>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -63,9 +61,9 @@ namespace fixpp::session::test {
 
 namespace {
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string, std::uint32_t seq,
-        std::string_view sender, std::string_view target, int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -81,14 +79,18 @@ static std::vector<std::byte> make_logon_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> result;
-    for (char c : full) { result.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
     return result;
 }
 
@@ -96,10 +98,14 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return wire.substr(pos); }
+    if (end == std::string::npos) {
+        return wire.substr(pos);
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -118,19 +124,19 @@ protected:
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg() {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -159,9 +165,7 @@ protected:
 TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active(sess);
@@ -170,8 +174,7 @@ TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
     // Record sent count before terminal close.
     const std::size_t sent_before = td.sent_count();
 
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(close_mode::terminal), asio::use_future);
+    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto close_r = close_fut.get();
@@ -194,25 +197,21 @@ TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
 TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // First close: starts the graceful-close sequence.
-    auto fut1 = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     // Run briefly so phase 1 starts (Logout emitted, state → LogoutSent).
     ioc.run_for(50ms);
     ioc.restart();
 
     // Second close during phase 1 (idempotent — should attach to the in-flight result).
-    auto fut2 = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     // Advance clock past timeout to complete.
     clock->advance(std::chrono::seconds{3});
@@ -227,7 +226,9 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     // Count Logout frames (35=5) in sent_frames.
     std::size_t logout_count = 0;
     for (std::size_t i = 0; i < td.sent_count(); ++i) {
-        if (extract_field(td.sent(i), 35) == "5") { ++logout_count; }
+        if (extract_field(td.sent(i), 35) == "5") {
+            ++logout_count;
+        }
     }
     EXPECT_LE(logout_count, 1u)
         << "Idempotent close: at most one Logout frame emitted (no duplicate)";
@@ -235,7 +236,8 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     // Session must be Disconnected at the end.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 
-    (void)r1; (void)r2;
+    (void)r1;
+    (void)r2;
 }
 
 // ── Test 3: ChildCancellationStateIsolatesLogout ──────────────────────────────
@@ -255,9 +257,7 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
 TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
     auto cfg = make_cfg();
     TransportDouble td;
-    cfg.transport_send = [&td](std::span<const std::byte> frame) {
-        td.capture_outbound(frame);
-    };
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
     drive_to_active(sess);
@@ -265,8 +265,7 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
 
     // Start graceful close. Run briefly to let phase-1 start (Logout emitted,
     // state → LogoutSent) and the sleep_until registered in mock_clock.
-    auto fut = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
     ioc.run_for(100ms);
     ioc.restart();
@@ -313,9 +312,8 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     // THEN advance past the 2s timeout. The advance MUST come AFTER the
     // sleep_until is registered (same pattern as NeverConfirmedForceDisconnect
     // in logout_exchange_test.cpp: run_for(100ms) → advance → run_for again).
-    auto fut1 = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
-    ioc.run_for(100ms);   // let close() start; run_logout_phase1 registers sleep
+    auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    ioc.run_for(100ms);  // let close() start; run_logout_phase1 registers sleep
     ioc.restart();
     clock->advance(std::chrono::seconds{3});  // fire the 2s sleep
     ioc.run_for(200ms);
@@ -323,8 +321,7 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     (void)fut1.get();
 
     // Second close on already-closed session.
-    auto fut2 = asio::co_spawn(
-        ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto r2 = fut2.get();

@@ -20,10 +20,6 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <asio/as_tuple.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
@@ -36,9 +32,11 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <variant>
 #include <vector>
 
@@ -57,25 +55,22 @@ using fixpp::tls::software_key_ref;
 // step 4 on a timer the test cancels after emitting the cancellation signal —
 // removing the otherwise-racey "post emit + post yield" interleave.
 class CancellableMockCertSource final : public cert_source {
- public:
+public:
     std::atomic<bool> step3_reap_fired{false};
     std::atomic<bool> step4_reached{false};
     std::atomic<bool> step4_cancel_fired{false};
 
     asio::steady_timer* gate_ = nullptr;  // optional; if set, step 4 waits on it.
 
-    [[nodiscard]] asio::awaitable<expected_t<local_credentials>>
-    load_credentials() override {
-        co_await asio::this_coro::reset_cancellation_state(
-            asio::enable_total_cancellation());
+    [[nodiscard]] asio::awaitable<expected_t<local_credentials>> load_credentials() override {
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
         auto cs = co_await asio::this_coro::cancellation_state;
 
         // Step 3: pre-I/O reap (load-bearing).
         if (cs.cancelled() != asio::cancellation_type::none) {
             step3_reap_fired.store(true, std::memory_order_release);
-            co_return expected_t<local_credentials>{
-                std::unexpect, error::tls_load_cancelled};
+            co_return expected_t<local_credentials>{std::unexpect, error::tls_load_cancelled};
         }
 
         // Step 4: dispatch / build credentials.
@@ -89,22 +84,21 @@ class CancellableMockCertSource final : public cert_source {
             cs = co_await asio::this_coro::cancellation_state;
             if (cs.cancelled() != asio::cancellation_type::none) {
                 step4_cancel_fired.store(true, std::memory_order_release);
-                co_return expected_t<local_credentials>{
-                    std::unexpect, error::tls_load_cancelled};
+                co_return expected_t<local_credentials>{std::unexpect, error::tls_load_cancelled};
             }
         }
 
         // Success.
         Certificate c{};
         local_credentials creds;
-        creds.leaf   = c;
-        creds.chain  = {};
+        creds.leaf = c;
+        creds.chain = {};
         creds.signer = software_key_ref{};
         co_return expected_t<local_credentials>{std::move(creds)};
     }
 
-    [[nodiscard]] expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    [[nodiscard]] expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return std::span<const Certificate>{};
     }
 };
@@ -112,15 +106,11 @@ class CancellableMockCertSource final : public cert_source {
 // Drive cs.load_credentials() directly via co_spawn so the bound cancellation
 // slot becomes the child coroutine's OWN cancellation_state — NOT the outer
 // future's. This is what lets a pre-emitted signal land on step 3.
-static expected_t<local_credentials> spawn_and_run(
-    asio::io_context& ioc,
-    CancellableMockCertSource& cs,
-    asio::cancellation_signal& signal) {
-
-    auto fut = asio::co_spawn(
-        ioc,
-        cs.load_credentials(),
-        asio::bind_cancellation_slot(signal.slot(), asio::use_future));
+static expected_t<local_credentials> spawn_and_run(asio::io_context& ioc,
+                                                   CancellableMockCertSource& cs,
+                                                   asio::cancellation_signal& signal) {
+    auto fut = asio::co_spawn(ioc, cs.load_credentials(),
+                              asio::bind_cancellation_slot(signal.slot(), asio::use_future));
     ioc.run();
     ioc.restart();
     return fut.get();
@@ -149,8 +139,7 @@ TEST(LoadCredentialsCancellation, Step3IsCodeStructuralOnly) {
 
     auto result = spawn_and_run(ioc, cs, signal);
     ASSERT_TRUE(result.has_value());
-    EXPECT_FALSE(cs.step3_reap_fired.load())
-        << "step 3 must not fire when no cancellation present";
+    EXPECT_FALSE(cs.step3_reap_fired.load()) << "step 3 must not fire when no cancellation present";
     EXPECT_TRUE(cs.step4_reached.load());
 }
 
@@ -162,12 +151,9 @@ TEST(LoadCredentialsCancellation, NoCancelReachesStep4ReturnsCredentials) {
 
     auto result = spawn_and_run(ioc, cs, signal);
 
-    ASSERT_TRUE(result.has_value())
-        << "no-cancel path must return credentials";
-    EXPECT_TRUE(cs.step4_reached.load())
-        << "step 4 must be reached when no cancellation";
-    EXPECT_FALSE(cs.step3_reap_fired.load())
-        << "step 3 must NOT fire when no cancellation";
+    ASSERT_TRUE(result.has_value()) << "no-cancel path must return credentials";
+    EXPECT_TRUE(cs.step4_reached.load()) << "step 4 must be reached when no cancellation";
+    EXPECT_FALSE(cs.step3_reap_fired.load()) << "step 3 must NOT fire when no cancellation";
 }
 
 // ── Step 4: in-flight cancellation fires via gate-cancel after signal.emit ───
@@ -183,10 +169,8 @@ TEST(LoadCredentialsCancellation, Step4InFlightCancelFiresDeterministic) {
     gate.expires_after(std::chrono::hours{1});
     cs.gate_ = &gate;
 
-    auto fut = asio::co_spawn(
-        ioc,
-        cs.load_credentials(),
-        asio::bind_cancellation_slot(signal.slot(), asio::use_future));
+    auto fut = asio::co_spawn(ioc, cs.load_credentials(),
+                              asio::bind_cancellation_slot(signal.slot(), asio::use_future));
 
     // Post a driver onto ioc that emits the signal and cancels the gate AFTER
     // the coroutine has reached step 4's gate-wait. We sequence by posting the
@@ -200,13 +184,10 @@ TEST(LoadCredentialsCancellation, Step4InFlightCancelFiresDeterministic) {
     ioc.run();
     auto result = fut.get();
 
-    ASSERT_FALSE(result.has_value())
-        << "in-flight cancellation must produce tls_load_cancelled";
+    ASSERT_FALSE(result.has_value()) << "in-flight cancellation must produce tls_load_cancelled";
     EXPECT_EQ(result.error(), error::tls_load_cancelled);
-    EXPECT_TRUE(cs.step4_reached.load())
-        << "step 4 must have been reached before in-flight cancel";
-    EXPECT_TRUE(cs.step4_cancel_fired.load())
-        << "step 4 cancel probe must fire deterministically";
+    EXPECT_TRUE(cs.step4_reached.load()) << "step 4 must have been reached before in-flight cancel";
+    EXPECT_TRUE(cs.step4_cancel_fired.load()) << "step 4 cancel probe must fire deterministically";
     EXPECT_FALSE(cs.step3_reap_fired.load())
         << "step 3 must NOT fire when cancellation arrives at step 4";
 }
@@ -223,10 +204,8 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
     gate.expires_after(std::chrono::hours{1});
     cs.gate_ = &gate;
 
-    auto fut = asio::co_spawn(
-        ioc,
-        cs.load_credentials(),
-        asio::bind_cancellation_slot(signal.slot(), asio::use_future));
+    auto fut = asio::co_spawn(ioc, cs.load_credentials(),
+                              asio::bind_cancellation_slot(signal.slot(), asio::use_future));
 
     asio::post(ioc, [&]() {
         signal.emit(asio::cancellation_type::total);
@@ -244,8 +223,7 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
         threw_non_system = true;
     }
 
-    EXPECT_FALSE(threw_non_system)
-        << "cancellation must not throw arbitrary exceptions";
+    EXPECT_FALSE(threw_non_system) << "cancellation must not throw arbitrary exceptions";
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_load_cancelled);
 }

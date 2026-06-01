@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(OtelSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(OtelSmoke, Compiles) { SUCCEED(); }

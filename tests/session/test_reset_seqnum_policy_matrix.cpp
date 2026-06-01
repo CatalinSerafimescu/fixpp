@@ -21,24 +21,15 @@
 //   processing stub treats it as a normal Logon. All per-mode assertions FAIL
 //   RED until T024 impl lands.
 
-#include <algorithm>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -46,6 +37,13 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -58,13 +56,10 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra = {}) {
+static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -91,9 +86,9 @@ static std::vector<std::byte> make_fix_frame(
 }
 
 // make_logon with optional ResetSeqNumFlag(141)=Y
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          int hbt = 30, bool reset_seqnum = false) {
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30,
+                                         bool reset_seqnum = false) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -132,32 +127,31 @@ static bool frame_has_141Y(const std::vector<std::byte>& frame) {
 
 class ResetSeqnumPolicyMatrixTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
-    OutboundCapture                          capture;
+    fixpp::core::EngineConfig engine{};
+    OutboundCapture capture;
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
-    fixpp::session::SessionConfig make_cfg(
-            fixpp::session::session_role role,
-            fixpp::session::reset_seqnum_policy policy) {
+    fixpp::session::SessionConfig make_cfg(fixpp::session::session_role role,
+                                           fixpp::session::reset_seqnum_policy policy) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = (role == fixpp::session::session_role::acceptor) ? "ISLD" : "TW";
-        cfg.target_comp_id    = (role == fixpp::session::session_role::acceptor) ? "TW" : "ISLD";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = (role == fixpp::session::session_role::acceptor) ? "ISLD" : "TW";
+        cfg.target_comp_id = (role == fixpp::session::session_role::acceptor) ? "TW" : "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
-        cfg.role              = role;
+        cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
+        cfg.role = role;
         cfg.reset_seqnum_policy_field = policy;
         return cfg;
     }
@@ -445,11 +439,13 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_ReplyContains141Y) 
     // The reply Logon MUST contain 141=Y (bilateral_strict mirrors peer 141=Y).
     bool found = false;
     for (const auto& f : capture.frames) {
-        if (frame_has_141Y(f)) { found = true; break; }
+        if (frame_has_141Y(f)) {
+            found = true;
+            break;
+        }
     }
-    EXPECT_TRUE(found)
-        << "bilateral_strict acceptor: reply Logon must carry 141=Y. "
-        << "FR-017: bilateral_strict mirrors peer ResetSeqNumFlag(141)=Y.";
+    EXPECT_TRUE(found) << "bilateral_strict acceptor: reply Logon must carry 141=Y. "
+                       << "FR-017: bilateral_strict mirrors peer ResetSeqNumFlag(141)=Y.";
 }
 
 TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y) {
@@ -470,7 +466,10 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y)
     // (FR-017:148). Before this fix the predicate gated only on bilateral_strict.
     bool found = false;
     for (const auto& f : capture.frames) {
-        if (frame_has_141Y(f)) { found = true; break; }
+        if (frame_has_141Y(f)) {
+            found = true;
+            break;
+        }
     }
     EXPECT_TRUE(found)
         << "bilateral_lenient acceptor: reply Logon must carry 141=Y when peer sends it. "
@@ -651,7 +650,6 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
             found = true;
         }
     }
-    EXPECT_TRUE(found)
-        << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
-        << "RED: stub does not emit → FAILS RED per T017 design.";
+    EXPECT_TRUE(found) << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
+                       << "RED: stub does not emit → FAILS RED per T017 design.";
 }

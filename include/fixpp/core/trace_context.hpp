@@ -19,28 +19,25 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
-#include <type_traits>
-
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/this_coro.hpp>
-
-#include <fixpp/core/session_executor.hpp>   // typed session_ptr recovery (RC#1)
+#include <cstddef>
+#include <cstdint>
+#include <fixpp/core/session_executor.hpp>  // typed session_ptr recovery (RC#1)
+#include <type_traits>
 
 namespace fixpp::otel {
 
 struct trace_context {
     std::array<std::byte, 16> trace_id{};
-    std::array<std::byte, 8>  span_id{};
-    std::uint8_t              flags{};
-    std::array<std::byte, 7>  _pad{};   // explicit pad to a fixed 32 B
+    std::array<std::byte, 8> span_id{};
+    std::uint8_t flags{};
+    std::array<std::byte, 7> _pad{};  // explicit pad to a fixed 32 B
 };
 
-static_assert(sizeof(trace_context) == 32
-                  && std::is_trivially_copyable_v<trace_context>
-                  && std::is_standard_layout_v<trace_context>,
+static_assert(sizeof(trace_context) == 32 && std::is_trivially_copyable_v<trace_context> &&
+                  std::is_standard_layout_v<trace_context>,
               "fixpp::otel::trace_context must be a 32-byte, "
               "trivially-copyable, standard-layout POD (D-1 / E11)");
 
@@ -159,8 +156,7 @@ namespace fixpp {
 // Engine-fallback note: 007 ships no Engine type; a session-less executor
 // yields a default trace_context (D-17 — concrete engine snapshot fallback
 // is the downstream Engine's).
-[[nodiscard]] inline asio::awaitable<fixpp::otel::trace_context>
-current_trace_context() {
+[[nodiscard]] inline asio::awaitable<fixpp::otel::trace_context> current_trace_context() {
     asio::any_io_executor ex = co_await asio::this_coro::executor;
     if (const auto* se = ex.template target<fixpp::core::session_executor>()) {
         co_return fixpp::core::session_trace_context_of(*se);

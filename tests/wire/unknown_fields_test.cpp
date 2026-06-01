@@ -10,6 +10,8 @@
 // MessageView; unknown_fields() performs the real classification against
 // the seam-#1 mock table_view (unknown = not in dict for this msg_type).
 
+#include <gtest/gtest.h>
+
 #include <cstddef>
 #include <cstring>
 #include <memory_resource>
@@ -18,14 +20,12 @@
 #include <string_view>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 // seam #1 — mock_dict_table.hpp BEFORE parser.hpp
-#include "support/mock_dict_table.hpp"
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/unknown_fields.hpp>
 
 #include "support/frame_view_factory.hpp"
+#include "support/mock_dict_table.hpp"
 
 namespace {
 
@@ -45,26 +45,27 @@ TEST(WireUnknownFields, DocumentOrderRoundTripNoMaterialization) {
     // Three "unknown" fields recorded in document order. The view borrows the
     // kv span (no owning vector) — iteration yields them in wire order and
     // each value aliases the originating buffer byte-for-byte.
-    std::string raw = "5000=alpha\x01" "5001=beta\x01" "5000=gamma\x01";
+    std::string raw =
+        "5000=alpha\x01"
+        "5001=beta\x01"
+        "5000=gamma\x01";
     std::vector<std::byte> buf(raw.size());
     std::memcpy(buf.data(), raw.data(), raw.size());
 
     // Value slices, in document order (tag, ptr-into-buf, len).
     std::vector<unknown_fields_view::kv> items{
-        {5000, buf.data() + 5, 5},    // "alpha"
-        {5001, buf.data() + 16, 4},   // "beta"
-        {5000, buf.data() + 26, 5},   // "gamma" (repeat tag, kept in order)
+        {5000, buf.data() + 5, 5},   // "alpha"
+        {5001, buf.data() + 16, 4},  // "beta"
+        {5000, buf.data() + 26, 5},  // "gamma" (repeat tag, kept in order)
     };
-    unknown_fields_view uf{
-        std::span<unknown_fields_view::kv const>{items.data(), items.size()},
-        {}};
+    unknown_fields_view uf{std::span<unknown_fields_view::kv const>{items.data(), items.size()},
+                           {}};
 
     std::vector<std::uint16_t> tags;
     std::vector<std::string> vals;
     for (auto it = uf.begin(); !(it == uf.end()); ++it) {
         tags.push_back((*it).tag);
-        vals.emplace_back(reinterpret_cast<char const*>((*it).data),
-                          (*it).len);
+        vals.emplace_back(reinterpret_cast<char const*>((*it).data), (*it).len);
     }
     ASSERT_EQ(tags.size(), 3U);
     EXPECT_EQ(tags[0], 5000U);
@@ -86,7 +87,10 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
     dict.add_valid("D", 35)   // MsgType
         .add_valid("D", 34);  // MsgSeqNum
 
-    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "5000=x\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "5000=x\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -107,17 +111,18 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
         unknown_tags.push_back((*it).tag);
     }
     EXPECT_EQ(unknown_tags.size(), 1U);
-    EXPECT_EQ(unknown_tags[0], 5000U)
-        << "only tag 5000 should be unknown; framing tags 8/9/10 and "
-           "known dict tags 35/34 must not appear";
+    EXPECT_EQ(unknown_tags[0], 5000U) << "only tag 5000 should be unknown; framing tags 8/9/10 and "
+                                         "known dict tags 35/34 must not appear";
 }
 
 TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
     fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
-        .add_valid("D", 34);
+    dict.add_valid("D", 35).add_valid("D", 34);
 
-    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "5000=x\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "5000=x\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -141,7 +146,9 @@ TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
 // With an empty dict (no known tags for this msg_type), all non-framing
 // tags are classified as unknown by unknown_fields() (no-arg contract API).
 TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
-    auto buf = make_raw_frame("35=D\x01" "34=1\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -158,9 +165,15 @@ TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
     bool has_35 = false, has_34 = false, has_framing = false;
     for (auto it = uf.begin(); !(it == uf.end()); ++it) {
         auto tag = (*it).tag;
-        if (tag == 35) { has_35 = true; }
-        if (tag == 34) { has_34 = true; }
-        if (tag == 8 || tag == 9 || tag == 10) { has_framing = true; }
+        if (tag == 35) {
+            has_35 = true;
+        }
+        if (tag == 34) {
+            has_34 = true;
+        }
+        if (tag == 8 || tag == 9 || tag == 10) {
+            has_framing = true;
+        }
     }
     EXPECT_TRUE(has_35) << "tag 35 must appear as unknown with empty dict";
     EXPECT_TRUE(has_34) << "tag 34 must appear as unknown with empty dict";

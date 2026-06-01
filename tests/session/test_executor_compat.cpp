@@ -18,14 +18,12 @@
 #include <asio/system_executor.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
-#include <future>
-#include <thread>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <future>
+#include <thread>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -41,8 +39,7 @@ namespace ts = fixpp::testsupport;
 
 // Replay the default script by posting each label callback in order onto the
 // session's serialisation domain; returns the observed label order.
-std::vector<ts::fsm_label>
-drive_script(Session& s, const ts::fsm_script& script) {
+std::vector<ts::fsm_label> drive_script(Session& s, const ts::fsm_script& script) {
     ts::observation_log log;
     std::promise<void> last;
     auto fut = last.get_future();
@@ -56,7 +53,9 @@ drive_script(Session& s, const ts::fsm_script& script) {
             // so set_value() inside the span scope races the destructor's on_leave
             // against `log`'s destruction on the main thread — a stack-use-after-
             // return on the last callback's pool thread (CI ASan, .github#936).
-            { ts::observed_callback span{log, lbl}; }
+            {
+                ts::observed_callback span{log, lbl};
+            }
             if (is_last) last.set_value();
         });
     }
@@ -71,7 +70,7 @@ void run_combo(asio::any_io_executor ex, threading_mode mode, bool attested,
     SessionConfig cfg;
     cfg.mode = mode;
     cfg.already_serialized_executor = attested;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();              // T050
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
 
@@ -100,8 +99,8 @@ TEST(SeamExecutorCompat, ThreadPoolDirectExecutorAttested) {
               threading_mode::direct_executor, true, &pool);
 }
 TEST(SeamExecutorCompat, SystemExecutorPerSessionStrand) {
-    run_combo(asio::any_io_executor{asio::system_executor{}},
-              threading_mode::per_session_strand, false, nullptr);
+    run_combo(asio::any_io_executor{asio::system_executor{}}, threading_mode::per_session_strand,
+              false, nullptr);
 }
 TEST(SeamExecutorCompat, SystemExecutorDirectExecutorAttested) {
     // system_executor is a global CONCURRENT pool; a faithful direct_executor

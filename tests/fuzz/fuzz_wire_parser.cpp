@@ -28,11 +28,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
-#include <span>
-
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory_resource>
+#include <span>
 
 // Concrete dict::table_view definition (seam #1 — test double).
 // The production table_view is forward-declared only in parser.hpp; the
@@ -51,8 +50,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // through the test factory.  The factory locates "9=" and "10=" boundaries;
     // if absent, it returns a wire_* error and we skip the parse (still
     // exercising the factory's error paths).
-    auto buf = std::span<const std::byte>{
-        reinterpret_cast<const std::byte*>(data), size};
+    auto buf = std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), size};
     auto fv_or_err = fixpp::wire::test::make_frame_view(buf);
 
     if (!fv_or_err) {
@@ -66,9 +64,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Parse with Index mode (builds OffsetTable + hash overlay).
     // The per-message arena is stack-backed to keep heap usage bounded.
     std::array<std::byte, 256 * 1024> arena_buf{};
-    std::pmr::monotonic_buffer_resource arena{
-        arena_buf.data(), arena_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                              std::pmr::null_memory_resource()};
 
     fixpp::dict::table_view tv{};
     Parser<access_mode::Index> p{tv};
@@ -86,11 +83,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         (void)tbl.entries();
 
         // Look up a few tags to exercise the hash overlay lookup.
-        (void)tbl.find(35);   // MsgType
-        (void)tbl.find(34);   // MsgSeqNum
-        (void)tbl.find(55);   // Symbol
-        (void)tbl.find(0);    // invalid / out-of-range
-        (void)tbl.find(9999); // user-defined range
+        (void)tbl.find(35);    // MsgType
+        (void)tbl.find(34);    // MsgSeqNum
+        (void)tbl.find(55);    // Symbol
+        (void)tbl.find(0);     // invalid / out-of-range
+        (void)tbl.find(9999);  // user-defined range
 
         // Touch the build_status() path.
         (void)tbl.build_status();

@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(SessionSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(SessionSmoke, Compiles) { SUCCEED(); }

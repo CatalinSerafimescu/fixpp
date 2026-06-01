@@ -25,10 +25,9 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
-#include <memory>
-
-#include <fixpp/core/error.hpp>          // core::expected_t<T>
+#include <fixpp/core/error.hpp>           // core::expected_t<T>
 #include <fixpp/transport/transport.hpp>  // Transport
+#include <memory>
 
 namespace fixpp::transport {
 
@@ -50,7 +49,7 @@ public:
     //     Cancellation: cancellation_type::total → transport_accept_cancelled
     //     per [2h §6.6]:1191.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
-        async_accept() = 0;
+    async_accept() = 0;
 };
 
 }  // namespace fixpp::transport

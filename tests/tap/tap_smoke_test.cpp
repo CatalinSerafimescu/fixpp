@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(TapSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(TapSmoke, Compiles) { SUCCEED(); }

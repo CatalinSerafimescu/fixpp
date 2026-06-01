@@ -24,23 +24,17 @@
 // Anchors: tasks.md T009; spec.md SC-002/US1 AC2; contracts C1/C3/E-4;
 //          data-model E-4; [[feedback_simplify_pass_catches_9th_burn]].
 
-#include <algorithm>
-#include <chrono>
-#include <cstdlib>
-#include <future>
-#include <string>
-#include <variant>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
@@ -54,6 +48,10 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <string>
+#include <variant>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -64,19 +62,15 @@ namespace {
 
 static bool has_authz_failed_event(const fixpp::session::Session& s) {
     auto evs = s.recent_events();
-    return std::any_of(evs.begin(), evs.end(),
-        [](const fixpp::session::SessionEvent& ev) {
-            return std::holds_alternative<
-                fixpp::session::session_event_compid_authorization_failed>(ev);
-        });
+    return std::any_of(evs.begin(), evs.end(), [](const fixpp::session::SessionEvent& ev) {
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
+    });
 }
 
 // Build a valid FIX Logon frame.
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_str,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                               std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -104,15 +98,11 @@ static std::vector<std::byte> make_logon_frame(
 }
 
 // Standalone TLS test-initiator that sends a Logon and then waits.
-static asio::awaitable<void>
-run_test_initiator(asio::io_context& ioc,
-                   fixpp::transport::test::LoopbackTlsFixture& fixture,
-                   uint16_t acceptor_port,
-                   std::string sender,
-                   std::string target)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
+                                                fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                                uint16_t acceptor_port, std::string sender,
+                                                std::string target) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto client = fixture.make_client(ioc.get_executor());
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
@@ -126,15 +116,15 @@ run_test_initiator(asio::io_context& ioc,
         if (!hs_r.has_value()) co_return;
 
         auto logon_bytes = make_logon_frame("FIX.4.2", sender, target);
-        co_await client->async_write(
-            std::span<const std::byte>{logon_bytes});
+        co_await client->async_write(std::span<const std::byte>{logon_bytes});
 
         // Wait briefly then close.
         asio::steady_timer t{ioc};
         t.expires_after(2s);
         co_await t.async_wait(asio::use_awaitable);
         (void)client->close();
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 // Build the acceptor engine+session with a given CompIdAuthorizationPolicy.
@@ -155,26 +145,25 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
 
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value());
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -189,17 +178,16 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id  = "ACCEPTOR";
-    acc.target_comp_id  = "INITIATOR";
-    acc.begin_string    = "FIX.4.2";
-    acc.role            = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     acc.compid_authorization_policy = authz;  // off-list policy
-    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac;
     acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
@@ -216,23 +204,21 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
     ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
 
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
 
     // Connect with off-list cert CN.
-    asio::co_spawn(ioc,
-        run_test_initiator(ioc, fixture, bound_port, "INITIATOR", "ACCEPTOR"),
-        asio::detached);
+    asio::co_spawn(ioc, run_test_initiator(ioc, fixture, bound_port, "INITIATOR", "ACCEPTOR"),
+                   asio::detached);
 
     ioc.run_for(3s);
     ioc.restart();
 
     // Capture state BEFORE stop().
     fixpp::session::Session* acc_session = engine.lookup(acc_id);
-    bool auth_failed_emitted = (acc_session != nullptr) &&
-        has_authz_failed_event(*acc_session);
+    bool auth_failed_emitted = (acc_session != nullptr) && has_authz_failed_event(*acc_session);
     bool session_disconnected = (acc_session != nullptr) &&
-        (acc_session->state() == fixpp::session::fsm_state::Disconnected);
+                                (acc_session->state() == fixpp::session::fsm_state::Disconnected);
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
@@ -274,26 +260,25 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
 
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value());
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -310,17 +295,16 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id  = "ACCEPTOR";
-    acc.target_comp_id  = "INITIATOR";
-    acc.begin_string    = "FIX.4.2";
-    acc.role            = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     acc.compid_authorization_policy = empty_policy;  // default-deny
-    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac;
     acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
@@ -337,12 +321,11 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
     ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
 
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
 
-    asio::co_spawn(ioc,
-        run_test_initiator(ioc, fixture, bound_port, "INITIATOR", "ACCEPTOR"),
-        asio::detached);
+    asio::co_spawn(ioc, run_test_initiator(ioc, fixture, bound_port, "INITIATOR", "ACCEPTOR"),
+                   asio::detached);
 
     ioc.run_for(3s);
     ioc.restart();
@@ -353,12 +336,11 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     // Happens-before invariant (Gate A New-1 / E-4): session MUST NOT reach Active.
     // Under mTLS with any connecting peer whose CN is not in the allow-list,
     // the gate fires and fails CLOSED regardless of which arm executes.
-    bool never_admitted = (acc_session == nullptr) ||
-        (acc_session->state() != fixpp::session::fsm_state::Active);
+    bool never_admitted =
+        (acc_session == nullptr) || (acc_session->state() != fixpp::session::fsm_state::Active);
 
     // The authorization_failed event MUST be emitted (arm (1-live) or arm (3)).
-    bool auth_failed = (acc_session != nullptr) &&
-        has_authz_failed_event(*acc_session);
+    bool auth_failed = (acc_session != nullptr) && has_authz_failed_event(*acc_session);
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();

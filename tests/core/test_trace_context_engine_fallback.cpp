@@ -15,12 +15,10 @@
 // Engine wiring.
 #include <gtest/gtest.h>
 
-#include <cstring>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <cstring>
 #include <fixpp/core/trace_context.hpp>
 
 namespace {
@@ -66,8 +64,7 @@ TEST(SeamTraceContextEngineFallback, PlainExecutorDoesNotThrow) {
         ioc.get_executor(),
         [&threw]() -> asio::awaitable<void> {
             try {
-                [[maybe_unused]] auto ctx =
-                    co_await fixpp::current_trace_context();
+                [[maybe_unused]] auto ctx = co_await fixpp::current_trace_context();
             } catch (...) {
                 threw = true;
             }
@@ -78,8 +75,7 @@ TEST(SeamTraceContextEngineFallback, PlainExecutorDoesNotThrow) {
     ioc.run();
     fut.get();  // propagate any exception from the coroutine infrastructure
 
-    EXPECT_FALSE(threw)
-        << "current_trace_context() must NOT throw on a plain executor";
+    EXPECT_FALSE(threw) << "current_trace_context() must NOT throw on a plain executor";
 }
 
 }  // namespace

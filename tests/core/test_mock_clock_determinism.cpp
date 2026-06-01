@@ -10,11 +10,9 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
-
 #include <chrono>
-#include <vector>
-
 #include <fixpp/core/test/mock_clock.hpp>
+#include <vector>
 
 namespace {
 
@@ -24,16 +22,16 @@ using fixpp::core::utc_time_point;
 using namespace std::chrono_literals;
 
 struct run_result {
-    std::vector<int>                       wake_order;
-    fixpp::core::utc_time_point            utc_after;
-    fixpp::core::steady_time_point         steady_after;
+    std::vector<int> wake_order;
+    fixpp::core::utc_time_point utc_after;
+    fixpp::core::steady_time_point steady_after;
 };
 
 // Drive 4 sleepers with staggered deadlines, then advance in 3 steps; record
 // the order awaiters wake. Identical seeds + advance ⇒ identical result.
 run_result drive(std::chrono::nanoseconds skew_at_step2) {
     asio::io_context ioc;
-    const utc_time_point    u0{1'700'000'000s};
+    const utc_time_point u0{1'700'000'000s};
     const steady_time_point s0{};
     mock_clock clk{u0, s0, ioc.get_executor()};
 
@@ -47,14 +45,17 @@ run_result drive(std::chrono::nanoseconds skew_at_step2) {
     asio::co_spawn(ioc, sleeper(2, 30ms), asio::detached);
     asio::co_spawn(ioc, sleeper(3, 20ms), asio::detached);
     asio::co_spawn(ioc, sleeper(4, 30ms), asio::detached);
-    ioc.poll();                          // register all waiters
+    ioc.poll();  // register all waiters
 
-    clk.advance(15ms); ioc.poll();       // wakes #1
-    clk.set_utc_skew(skew_at_step2);     // wall-only; steady unaffected
-    clk.advance(10ms); ioc.poll();       // steady=25ms wakes #3
-    clk.step_to(s0 + 40ms); ioc.poll();  // wakes #2,#4 (insertion order)
+    clk.advance(15ms);
+    ioc.poll();                       // wakes #1
+    clk.set_utc_skew(skew_at_step2);  // wall-only; steady unaffected
+    clk.advance(10ms);
+    ioc.poll();  // steady=25ms wakes #3
+    clk.step_to(s0 + 40ms);
+    ioc.poll();  // wakes #2,#4 (insertion order)
 
-    r.utc_after    = clk.now();
+    r.utc_after = clk.now();
     r.steady_after = clk.steady_now();
     return r;
 }
@@ -72,13 +73,12 @@ TEST(SeamMockClockDeterminism, IdenticalSeedAndAdvanceYieldIdenticalOrder) {
 }
 
 TEST(SeamMockClockDeterminism, UtcSkewDoesNotMoveSteady) {
-    auto no_skew   = drive(0ms);
+    auto no_skew = drive(0ms);
     auto with_skew = drive(500ms);
     // steady_now unaffected by wall-clock skew (US2 AC-3 / I-02) ...
     EXPECT_EQ(no_skew.steady_after, with_skew.steady_after);
     // ... but now() carries the skew.
-    EXPECT_EQ(with_skew.utc_after - no_skew.utc_after,
-              std::chrono::nanoseconds{500ms});
+    EXPECT_EQ(with_skew.utc_after - no_skew.utc_after, std::chrono::nanoseconds{500ms});
 }
 
 }  // namespace

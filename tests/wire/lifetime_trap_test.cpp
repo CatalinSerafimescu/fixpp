@@ -10,22 +10,21 @@
 // invariant + the end-to-end "parser-minted view over a recycled per-
 // message arena traps" test ([2b §6.4] / FR-016, gate-b/r1 wiring).
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/wire/field_view.hpp>
+#include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/view.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/wire/field_view.hpp>
-#include <fixpp/wire/framer.hpp>
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/view.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -39,16 +38,14 @@ static_assert(std::is_trivially_copyable_v<fixpp::wire::View>);
 static_assert(std::is_trivially_copyable_v<fixpp::wire::field_view>);
 #ifdef NDEBUG
 // Release: exactly {data ptr, length}, no generation member.
-static_assert(sizeof(fixpp::wire::View) == sizeof(std::byte const*)
-                                           + sizeof(std::size_t));
+static_assert(sizeof(fixpp::wire::View) == sizeof(std::byte const*) + sizeof(std::size_t));
 #endif
 
 #ifndef NDEBUG
 // Test probe: exposes View's protected ctor + check_alive so the trap
 // mechanism can be exercised directly (isolated mechanism test).
 struct probe : fixpp::wire::View {
-    probe(std::byte const* d, std::size_t n,
-          fixpp::wire::detail::generation_token g) noexcept
+    probe(std::byte const* d, std::size_t n, fixpp::wire::detail::generation_token g) noexcept
         : fixpp::wire::View{d, n, g} {}
     using fixpp::wire::View::check_alive;
 };
@@ -86,11 +83,15 @@ TEST(WireLifetimeTrap, UntrackedPoolNeverTraps) {
 // msg_type() / get() access ([2b §6.4] / FR-016).
 TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
     // Build a checksum-valid FIX frame.
-    std::string body{"35=D\x01" "34=1\x01"};
+    std::string body{
+        "35=D\x01"
+        "34=1\x01"};
     std::string nine = "9=" + std::to_string(body.size()) + "\x01";
     std::string pre = "8=FIX.4.4\x01" + nine + body;
     unsigned chksum = 0;
-    for (unsigned char c : pre) { chksum += c; }
+    for (unsigned char c : pre) {
+        chksum += c;
+    }
     char chk[16];
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", chksum % 256U);
     std::string full = pre + chk;
@@ -101,8 +102,7 @@ TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
     fixpp::wire::Framer framer;
     fixpp::wire::pmr_carry_buffer carry{1024, std::pmr::get_default_resource()};
     std::array<fixpp::wire::frame_view, 4> out_buf{};
-    auto frames = framer.feed(raw, carry,
-                              std::span<fixpp::wire::frame_view>{out_buf});
+    auto frames = framer.feed(raw, carry, std::span<fixpp::wire::frame_view>{out_buf});
     ASSERT_TRUE(frames.has_value()) << "feed must succeed";
     ASSERT_GE(frames->size(), 1U) << "must have produced at least one frame";
 

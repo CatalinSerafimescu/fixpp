@@ -21,12 +21,10 @@
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <thread>
 #include <vector>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
 
@@ -58,13 +56,11 @@ TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     std::vector<std::thread> pool;
     pool.reserve(T);
-    for (unsigned t = 0; t < T; ++t)
-        pool.emplace_back([&] { ioc.run(); });
+    for (unsigned t = 0; t < T; ++t) pool.emplace_back([&] { ioc.run(); });
     for (auto& th : pool) th.join();
     for (auto& f : futs) f.get();
 
@@ -97,8 +93,7 @@ TEST(SeamArm64WeakMemory, DrainUnderMultiThreadContention) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         for (int i = 0; i < 64; ++i)
-            co_await asio::post(co_await asio::this_coro::executor,
-                                asio::use_awaitable);
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         in_critical.fetch_add(1, std::memory_order_acq_rel);
         in_critical.fetch_sub(1, std::memory_order_acq_rel);
         // guard released here -> reaper observes the holder gone, finalises
@@ -122,14 +117,12 @@ TEST(SeamArm64WeakMemory, DrainUnderMultiThreadContention) {
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, acquirer(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, acquirer(), asio::use_future));
     auto fd = asio::co_spawn(ioc, drainer(), asio::use_future);
 
     std::vector<std::thread> pool;
     pool.reserve(T);
-    for (unsigned t = 0; t < T; ++t)
-        pool.emplace_back([&] { ioc.run(); });
+    for (unsigned t = 0; t < T; ++t) pool.emplace_back([&] { ioc.run(); });
     for (auto& th : pool) th.join();
     fh.get();
     fd.get();

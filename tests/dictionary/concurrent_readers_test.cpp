@@ -3,14 +3,13 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <optional>
 #include <string>
@@ -20,8 +19,8 @@
 namespace {
 
 constexpr std::size_t k4MiB = 4UZ * 1024UZ * 1024UZ;
-constexpr int         kNumThreads  = 8;
-constexpr int         kIterations  = 10'000;
+constexpr int kNumThreads = 8;
+constexpr int kIterations = 10'000;
 
 }  // namespace
 
@@ -38,7 +37,7 @@ TEST(ConcurrentReaders, NReadersStayConsistent) {
 
     // Capture a stable reference value from the main thread before spawning.
     auto const expected_clordid_tag = d.field_by_name("ClOrdID");
-    auto const expected_msg_count   = d.messages().size();
+    auto const expected_msg_count = d.messages().size();
 
     std::atomic<int> failure_count{0};
 
@@ -46,10 +45,7 @@ TEST(ConcurrentReaders, NReadersStayConsistent) {
     threads.reserve(kNumThreads);
 
     for (int t = 0; t < kNumThreads; ++t) {
-        threads.emplace_back([&d,
-                              &failure_count,
-                              expected_clordid_tag,
-                              expected_msg_count]() {
+        threads.emplace_back([&d, &failure_count, expected_clordid_tag, expected_msg_count]() {
             for (int i = 0; i < kIterations; ++i) {
                 // Cycle tags 1..600 across iterations.
                 auto const tag = static_cast<std::uint16_t>((i % 600) + 1);

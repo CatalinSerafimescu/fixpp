@@ -26,20 +26,18 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -49,12 +47,12 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SyncTsanClean, ContentionMixMutualExclusion) {
-    constexpr int N            = 64;
+    constexpr int N = 64;
     constexpr int ACQUIRES_PER = 8;
 
     std::atomic<int> in_critical{0};
-    int overlap  = 0;
-    int counter  = 0;
+    int overlap = 0;
+    int counter = 0;
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -76,14 +74,13 @@ TEST(SyncTsanClean, ContentionMixMutualExclusion) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     ioc.run();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap,  0)                << "Mutual exclusion violated (overlap detected)";
-    EXPECT_EQ(counter,  N * ACQUIRES_PER) << "Lost waiter: not all increments completed";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated (overlap detected)";
+    EXPECT_EQ(counter, N * ACQUIRES_PER) << "Lost waiter: not all increments completed";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,8 +141,7 @@ TEST(SyncTsanClean, FractionCancelMidWait) {
             // Cancel-waiter: bind slot so on_cancel fires.
             futs.push_back(asio::co_spawn(
                 ioc, waiter_body(),
-                asio::bind_cancellation_slot(
-                    signals[sig_idx++].slot(), asio::use_future)));
+                asio::bind_cancellation_slot(signals[sig_idx++].slot(), asio::use_future)));
         } else {
             futs.push_back(asio::co_spawn(ioc, waiter_body(), asio::use_future));
         }
@@ -153,19 +149,20 @@ TEST(SyncTsanClean, FractionCancelMidWait) {
 
     // Fire cancellations after a delay using a detached helper coroutine.
     // This runs on the same ioc thread — no thread safety issues.
-    asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        // Let all waiters park on the LIFO.
-        co_await yield_n(N * 3 + 4);
-        for (int j = 0; j < sig_idx; ++j)
-            signals[j].emit(asio::cancellation_type::total);
-    }, asio::detached);
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            // Let all waiters park on the LIFO.
+            co_await yield_n(N * 3 + 4);
+            for (int j = 0; j < sig_idx; ++j) signals[j].emit(asio::cancellation_type::total);
+        },
+        asio::detached);
 
     ioc.run();
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(completed_count.load(), N)
-        << "Not all waiters completed (lost waiter)";
+    EXPECT_EQ(completed_count.load(), N) << "Not all waiters completed (lost waiter)";
     EXPECT_EQ(granted_count.load() + cancelled_count.load(), N)
         << "granted + cancelled must equal N";
     // Some should have been cancelled (we fired N/4+1 signals).
@@ -194,11 +191,14 @@ TEST(SyncTsanClean, OccasionalCancelAndDrain) {
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < N; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                auto r = co_await drain_mtx.async_lock();
-                (void)r;
-                total_completed.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    auto r = co_await drain_mtx.async_lock();
+                    (void)r;
+                    total_completed.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(N * 4);
@@ -216,8 +216,7 @@ TEST(SyncTsanClean, OccasionalCancelAndDrain) {
     ioc.run();
     f.get();
 
-    EXPECT_EQ(total_completed.load(), N)
-        << "Each waiter must complete exactly once";
+    EXPECT_EQ(total_completed.load(), N) << "Each waiter must complete exactly once";
 }
 
 }  // namespace

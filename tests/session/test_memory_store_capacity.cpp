@@ -295,9 +295,8 @@ TEST(MemoryStoreCapacity, EngineMrAppliedWhenConfigResourceIsNull) {
 
     // Pass a non-null engine mr — the factory must accept it and use it.
     auto result = factory.make("SND", "TGT", &mr, kCap1GiB, asio::any_io_executor{});
-    EXPECT_TRUE(result.has_value())
-        << "engine-mr applied: expected success but got error: "
-        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    EXPECT_TRUE(result.has_value()) << "engine-mr applied: expected success but got error: "
+                                    << (!result.has_value() ? static_cast<int>(result.error()) : 0);
 }
 
 }  // namespace

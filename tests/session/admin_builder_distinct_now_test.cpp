@@ -34,12 +34,23 @@
 //
 // Anchors: spec.md FR-007; SC-006; data-model.md §E1 (admin-builder stamp).
 
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -47,21 +58,8 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -95,8 +93,7 @@ std::string extract_msg_type(std::span<const std::byte> frame) {
 
 std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
                                    std::string_view sender, std::string_view target,
-                                   std::string_view begin_string,
-                                   std::string_view sending_time_val,
+                                   std::string_view begin_string, std::string_view sending_time_val,
                                    std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
@@ -111,7 +108,7 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
+    unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
     cs &= 0xFFU;
     char csbuf[4];
@@ -126,8 +123,7 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
 
 // Build Logon with correct timestamp for the given mock_clock UTC epoch.
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
-                                   std::string_view st, std::uint32_t seq = 1,
-                                   int heartbt = 30) {
+                                   std::string_view st, std::uint32_t seq = 1, int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -145,33 +141,33 @@ protected:
     fixpp::core::EngineConfig engine;
     std::vector<std::vector<std::byte>> captured_frames;
 
-    static constexpr std::string_view kSender   = "SENDER";
-    static constexpr std::string_view kTarget   = "TARGET";
+    static constexpr std::string_view kSender = "SENDER";
+    static constexpr std::string_view kTarget = "TARGET";
     static constexpr std::string_view kBeginStr = "FIX.4.2";
 
     void SetUp() override {
         // Anchor at 2024-01-01 00:00:00 UTC so inbound frames with that timestamp pass Q3.
-        using sc     = std::chrono::system_clock;
-        auto utc     = sc::time_point{} + std::chrono::seconds{1704067200};
-        auto stp     = fixpp::core::steady_time_point{};
-        clock        = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        using sc = std::chrono::system_clock;
+        auto utc = sc::time_point{} + std::chrono::seconds{1704067200};
+        auto stp = fixpp::core::steady_time_point{};
+        clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(int heartbt_sec = 30) {
         SessionConfig cfg;
-        cfg.sender_comp_id     = std::string(kSender);
-        cfg.target_comp_id     = std::string(kTarget);
-        cfg.begin_string       = std::string(kBeginStr);
+        cfg.sender_comp_id = std::string(kSender);
+        cfg.target_comp_id = std::string(kTarget);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = session_role::initiator;
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             captured_frames.emplace_back(frame.begin(), frame.end());
         };
         return cfg;
@@ -223,7 +219,7 @@ protected:
 
     // Find nth frame (0-based) with matching MsgType, or nullptr.
     const std::vector<std::byte>* find_frame_with_type(std::string_view msg_type,
-                                                        std::size_t skip = 0) const {
+                                                       std::size_t skip = 0) const {
         std::size_t count = 0;
         for (const auto& f : captured_frames) {
             auto mt = extract_msg_type(f);
@@ -326,8 +322,8 @@ TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctS
     std::string test_req_id = tr1_wire.substr(tid_pos, tid_end - tid_pos);
 
     std::string hb_extra = "112=" + test_req_id + "\x01";
-    auto hb_reply = build_frame("0", 2, kTarget, kSender, kBeginStr,
-                                "20240101-00:00:02.000", hb_extra);
+    auto hb_reply =
+        build_frame("0", 2, kTarget, kSender, kBeginStr, "20240101-00:00:02.000", hb_extra);
     (void)feed_sync(sess, hb_reply);
 
     // Window 2: advance past another heartbt_int (deadline = new last_inbound +
@@ -342,10 +338,9 @@ TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctS
     std::string st2 = extract_sending_time(*tr2);
     ASSERT_FALSE(st2.empty()) << "Second TestRequest must contain SendingTime(52)";
 
-    EXPECT_NE(st1, st2)
-        << "Two TestRequests emitted by liveness loop 2 s apart must have distinct "
-        << "SendingTime(52) values (FR-007 per-message-distinct branch). First=" << st1
-        << " Second=" << st2;
+    EXPECT_NE(st1, st2) << "Two TestRequests emitted by liveness loop 2 s apart must have distinct "
+                        << "SendingTime(52) values (FR-007 per-message-distinct branch). First="
+                        << st1 << " Second=" << st2;
 
     (void)close_sync(sess, close_mode::terminal);
 }
@@ -391,9 +386,8 @@ TEST_F(AdminDistinctNowTest, Reject_DistinctNow_TwoRejectsHaveDistinctSendingTim
     std::string st2 = extract_sending_time(*rj2);
     ASSERT_FALSE(st2.empty());
 
-    EXPECT_NE(st1, st2)
-        << "Two Rejects emitted 1 s apart must have distinct SendingTime(52) values"
-        << " (FR-007). First=" << st1 << " Second=" << st2;
+    EXPECT_NE(st1, st2) << "Two Rejects emitted 1 s apart must have distinct SendingTime(52) values"
+                        << " (FR-007). First=" << st1 << " Second=" << st2;
 
     (void)close_sync(sess, close_mode::terminal);
 }
@@ -409,7 +403,7 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
     std::vector<std::vector<std::byte>> captured1, captured2;
 
     {
-        SessionConfig cfg1  = make_cfg(30);
+        SessionConfig cfg1 = make_cfg(30);
         cfg1.transport_send = [&captured1](std::span<const std::byte> f) {
             captured1.emplace_back(f.begin(), f.end());
         };
@@ -426,7 +420,7 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
     clock->advance(1s);
 
     {
-        SessionConfig cfg2  = make_cfg(30);
+        SessionConfig cfg2 = make_cfg(30);
         cfg2.transport_send = [&captured2](std::span<const std::byte> f) {
             captured2.emplace_back(f.begin(), f.end());
         };
@@ -440,17 +434,23 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
     // Find Logout frames from each session.
     std::string st1, st2;
     for (const auto& f : captured1) {
-        if (extract_msg_type(f) == "5") { st1 = extract_sending_time(f); break; }
+        if (extract_msg_type(f) == "5") {
+            st1 = extract_sending_time(f);
+            break;
+        }
     }
     for (const auto& f : captured2) {
-        if (extract_msg_type(f) == "5") { st2 = extract_sending_time(f); break; }
+        if (extract_msg_type(f) == "5") {
+            st2 = extract_sending_time(f);
+            break;
+        }
     }
 
     ASSERT_FALSE(st1.empty()) << "Session 1 must have emitted a Logout(35=5)";
     ASSERT_FALSE(st2.empty()) << "Session 2 must have emitted a Logout(35=5)";
-    EXPECT_NE(st1, st2)
-        << "Two Logout frames emitted 1 s apart must have distinct SendingTime(52)"
-        << " (FR-007 per-message-distinct branch). First=" << st1 << " Second=" << st2;
+    EXPECT_NE(st1, st2) << "Two Logout frames emitted 1 s apart must have distinct SendingTime(52)"
+                        << " (FR-007 per-message-distinct branch). First=" << st1
+                        << " Second=" << st2;
 }
 
 // ── T018 Test 4: Logon (35=A) — per-message-distinct SendingTime ─────────────
@@ -463,7 +463,7 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
 
     {
         std::vector<std::vector<std::byte>> cap1;
-        SessionConfig cfg1  = make_cfg(30);
+        SessionConfig cfg1 = make_cfg(30);
         cfg1.transport_send = [&cap1](std::span<const std::byte> f) {
             cap1.emplace_back(f.begin(), f.end());
         };
@@ -472,7 +472,10 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
         // First frame emitted by initiator open() is the outbound Logon.
         if (!cap1.empty()) {
             for (const auto& f : cap1) {
-                if (extract_msg_type(f) == "A") { st1 = extract_sending_time(f); break; }
+                if (extract_msg_type(f) == "A") {
+                    st1 = extract_sending_time(f);
+                    break;
+                }
             }
         }
         (void)close_sync(sess1, close_mode::terminal);
@@ -483,7 +486,7 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
 
     {
         std::vector<std::vector<std::byte>> cap2;
-        SessionConfig cfg2  = make_cfg(30);
+        SessionConfig cfg2 = make_cfg(30);
         cfg2.transport_send = [&cap2](std::span<const std::byte> f) {
             cap2.emplace_back(f.begin(), f.end());
         };
@@ -491,7 +494,10 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
         (void)open_sync(sess2);
         if (!cap2.empty()) {
             for (const auto& f : cap2) {
-                if (extract_msg_type(f) == "A") { st2 = extract_sending_time(f); break; }
+                if (extract_msg_type(f) == "A") {
+                    st2 = extract_sending_time(f);
+                    break;
+                }
             }
         }
         (void)close_sync(sess2, close_mode::terminal);
@@ -499,9 +505,8 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
 
     ASSERT_FALSE(st1.empty()) << "Session 1 initiator open() must emit Logon(35=A)";
     ASSERT_FALSE(st2.empty()) << "Session 2 initiator open() must emit Logon(35=A)";
-    EXPECT_NE(st1, st2)
-        << "Two Logons emitted 1 s apart must have distinct SendingTime(52)"
-        << " (FR-007). First=" << st1 << " Second=" << st2;
+    EXPECT_NE(st1, st2) << "Two Logons emitted 1 s apart must have distinct SendingTime(52)"
+                        << " (FR-007). First=" << st1 << " Second=" << st2;
 }
 
 }  // namespace fixpp::session::test

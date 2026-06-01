@@ -29,10 +29,9 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/transport/transport.hpp>
-
 #include <cstddef>
+#include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 #include <memory_resource>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,10 +40,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 extern "C" {
-    // Weak symbols replaced by libmallocnesia.so at runtime.
-    [[gnu::weak]] void alloc_guard_start();
-    [[gnu::weak]] void alloc_guard_end();
-    [[gnu::weak]] long alloc_guard_global_count();
+// Weak symbols replaced by libmallocnesia.so at runtime.
+[[gnu::weak]] void alloc_guard_start();
+[[gnu::weak]] void alloc_guard_end();
+[[gnu::weak]] long alloc_guard_global_count();
 }
 
 namespace {
@@ -81,7 +80,7 @@ public:
 TEST(TransportReadAllocGuard, WeakSymbolsPresent) {
     // Verify that the weak symbols are at least callable (no-op without preload).
     if (alloc_guard_start) alloc_guard_start();
-    if (alloc_guard_end)   alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
     long n = alloc_guard_global_count ? alloc_guard_global_count() : 0L;
     // Without LD_PRELOAD: n == 0 (no interception, any value is acceptable).
     // With LD_PRELOAD: n must be 0 after a preloaded zero-alloc window.

@@ -211,8 +211,7 @@ struct MinimalSession {
 // -fsanitize=*, which covers every compiler this project supports;
 // the Clang-only __has_feature() check was removed because GCC's
 // preprocessor errors on it ("missing binary operator before token (").
-#if !defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && \
-    !defined(__SANITIZE_UNDEFINED__)
+#if !defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_UNDEFINED__)
 TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
     // ── RED sub-test: EXPECT_DEATH shows the exact terminate drain() prevents ──
     //

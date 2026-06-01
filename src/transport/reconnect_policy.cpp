@@ -14,11 +14,10 @@
 // stays a private detail; downstream code depends only on the noexcept
 // signature.
 
-#include <fixpp/transport/reconnect_policy.hpp>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <fixpp/transport/reconnect_policy.hpp>
 #include <random>
 
 namespace fixpp::transport {
@@ -28,8 +27,8 @@ namespace {
 // Round `base * mult` to the nearest millisecond. Defensively saturates at
 // zero on the impossible case mult < 0 (jitter > 1.0 is rejected at the
 // factory site, but the helper is noexcept and must not return negative).
-[[nodiscard]] std::chrono::milliseconds
-scale_ms(std::chrono::milliseconds base, double mult) noexcept {
+[[nodiscard]] std::chrono::milliseconds scale_ms(std::chrono::milliseconds base,
+                                                 double mult) noexcept {
     if (mult < 0.0) {
         return std::chrono::milliseconds{0};
     }
@@ -50,9 +49,8 @@ scale_ms(std::chrono::milliseconds base, double mult) noexcept {
 // so the same pair always returns the same delay — fuzz-determinism per
 // [const §VII.7].
 // ─────────────────────────────────────────────────────────────────────────────
-std::chrono::milliseconds
-ReconnectPolicy::delay_for_attempt(std::uint32_t attempt_n) const noexcept
-{
+std::chrono::milliseconds ReconnectPolicy::delay_for_attempt(
+    std::uint32_t attempt_n) const noexcept {
     if (schedule.empty()) {
         // Defensive: factories guarantee schedule.size() >= 1. A user-constructed
         // policy with an empty schedule lands here; surface zero rather than
@@ -71,7 +69,7 @@ ReconnectPolicy::delay_for_attempt(std::uint32_t attempt_n) const noexcept
     // every (seed, attempt) pair gets its own minstd_rand state. minstd_rand is
     // small + deterministic; replay across architectures matches the
     // [const §VII.7] requirement.
-    const auto lo = static_cast<std::uint32_t>(session_id_seed & 0xFFFFFFFFu);
+    const auto lo = static_cast<std::uint32_t>(session_id_seed & 0xFFFFFFFFU);
     const auto hi = static_cast<std::uint32_t>(session_id_seed >> 32);
     std::seed_seq sseq{lo, hi, attempt_n};
     std::minstd_rand rng(sseq);
@@ -91,11 +89,12 @@ ReconnectPolicy ReconnectPolicy::defaults(std::pmr::memory_resource* mr) {
     using ms = std::chrono::milliseconds;
     auto* res = mr ? mr : std::pmr::get_default_resource();
     return ReconnectPolicy{
-        .schedule = std::pmr::vector<ms>{
-            {ms{100}, ms{200}, ms{400}, ms{800}, ms{1600}, ms{3200},
-             ms{6400}, ms{12800}, ms{25600}, ms{30000}},
-            std::pmr::polymorphic_allocator<ms>{res},
-        },
+        .schedule =
+            std::pmr::vector<ms>{
+                {ms{100}, ms{200}, ms{400}, ms{800}, ms{1600}, ms{3200}, ms{6400}, ms{12800},
+                 ms{25600}, ms{30000}},
+                std::pmr::polymorphic_allocator<ms>{res},
+            },
         .jitter = 0.10,
         .max_attempts = 10,
         .session_id_seed = 0,
@@ -112,10 +111,11 @@ ReconnectPolicy ReconnectPolicy::defaults_quickfix_compat(std::pmr::memory_resou
     using ms = std::chrono::milliseconds;
     auto* res = mr ? mr : std::pmr::get_default_resource();
     return ReconnectPolicy{
-        .schedule = std::pmr::vector<ms>{
-            {ms{30000}},
-            std::pmr::polymorphic_allocator<ms>{res},
-        },
+        .schedule =
+            std::pmr::vector<ms>{
+                {ms{30000}},
+                std::pmr::polymorphic_allocator<ms>{res},
+            },
         .jitter = 0.0,
         .max_attempts = 0,
         .session_id_seed = 0,

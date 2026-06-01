@@ -40,8 +40,9 @@
 #include <sys/wait.h>
 #endif
 
-#include "../../tools/codegen/fixpp-codegen/gen_util.hpp"
 #include <fixpp/dict/field_ref.hpp>
+
+#include "../../tools/codegen/fixpp-codegen/gen_util.hpp"
 
 namespace fs = std::filesystem;
 
@@ -232,9 +233,7 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
                                   "generated file differs between the two codegen runs.";
 }
 
-TEST_F(DeterminismTest, NoArgsExitsTwo) {
-    EXPECT_EQ(exit_code(run_codegen_args("")), 2);
-}
+TEST_F(DeterminismTest, NoArgsExitsTwo) { EXPECT_EQ(exit_code(run_codegen_args("")), 2); }
 
 TEST_F(DeterminismTest, MissingXmlValueExitsTwo) {
     EXPECT_EQ(exit_code(run_codegen_args("--xml")), 2);
@@ -376,8 +375,8 @@ TEST(CodegenGenUtil, GroupPrefixVersionAndCollisionHelpersCoverReachableBranches
 }
 
 TEST(CodegenGenUtil, KindOfMapsRepresentativeFieldKinds) {
-    using fixpp::codegen::TypeKind;
     using fixpp::codegen::kind_of;
+    using fixpp::codegen::TypeKind;
     using fixpp::dict::field_data_type;
 
     EXPECT_EQ(kind_of(field_data_type::Price), TypeKind::Decimal);

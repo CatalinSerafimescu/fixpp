@@ -33,21 +33,19 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <future>
 #include <vector>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -61,8 +59,8 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) {
-    constexpr int S = 3;   // reaper + 2 subscribers (only reaper's slot fires)
-    constexpr int N = 4;   // waiters queued on the mutex
+    constexpr int S = 3;  // reaper + 2 subscribers (only reaper's slot fires)
+    constexpr int N = 4;  // waiters queued on the mutex
 
     // Only sigs[0] is fired; sigs[1] and sigs[2] are never fired.
     // Per v1.4 contract, sigs[1] and sigs[2] must still receive sync_lock_aborted.
@@ -90,8 +88,7 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire))
-            co_await yield_n(1);
+        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -128,8 +125,7 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
     dfuts.reserve(S);
     for (int s = 0; s < S; ++s)
         dfuts.push_back(asio::co_spawn(
-            ioc, make_drainer(s),
-            asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
+            ioc, make_drainer(s), asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
     ioc.run();
@@ -147,8 +143,8 @@ TEST(SeamDrainReaperAbortSubscribers, AllSubscribersGetAbortedWhenReaperAborts) 
     // => drain_aborted_count < S. This assertion catches the gap.
     EXPECT_EQ(drain_aborted_count.load(), S)
         << "When reaper is aborted, ALL S subscribers must get sync_lock_aborted. "
-           "drain_aborted=" << drain_aborted_count.load()
-        << ", drain_success=" << drain_success_count.load();
+           "drain_aborted="
+        << drain_aborted_count.load() << ", drain_success=" << drain_success_count.load();
     EXPECT_EQ(drain_success_count.load(), 0)
         << "No subscriber must succeed when the reaper is aborted";
 }
@@ -171,26 +167,23 @@ TEST(SeamDrainReaperAbortSubscribers, NoHangWithImmediateReaperAbort) {
     std::vector<std::future<void>> dfuts;
     dfuts.reserve(S);
     for (int s = 0; s < S; ++s) {
-        dfuts.push_back(
-            asio::co_spawn(
-                ioc,
-                [&]() -> asio::awaitable<void> {
-                    auto d = co_await mtx.cancel_and_drain();
-                    (void)d;
-                    completed.fetch_add(1, std::memory_order_acq_rel);
-                },
-                asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
+        dfuts.push_back(asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                auto d = co_await mtx.cancel_and_drain();
+                (void)d;
+                completed.fetch_add(1, std::memory_order_acq_rel);
+            },
+            asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
     }
 
     // Abort ALL subscribers immediately (including the reaper, sigs[0]).
-    for (auto& sig : sigs)
-        sig.emit(asio::cancellation_type::total);
+    for (auto& sig : sigs) sig.emit(asio::cancellation_type::total);
 
     ioc.run();
     for (auto& df : dfuts) df.get();  // must not block
 
-    EXPECT_EQ(completed.load(), S)
-        << "All S subscribers must complete when all slots are aborted";
+    EXPECT_EQ(completed.load(), S) << "All S subscribers must complete when all slots are aborted";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,12 +210,15 @@ TEST(SeamDrainReaperAbortSubscribers, LateAbortDoesNotLeaveSubscriberHanging) {
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < N; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                co_await yield_n(1);
-                auto r = co_await mtx.async_lock();
-                (void)r;
-                waiter_done.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    co_await yield_n(1);
+                    auto r = co_await mtx.async_lock();
+                    (void)r;
+                    waiter_done.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(N * 3);
@@ -239,16 +235,15 @@ TEST(SeamDrainReaperAbortSubscribers, LateAbortDoesNotLeaveSubscriberHanging) {
     std::vector<std::future<void>> dfuts;
     dfuts.reserve(S);
     for (int s = 0; s < S; ++s) {
-        dfuts.push_back(
-            asio::co_spawn(
-                ioc,
-                [&, s]() -> asio::awaitable<void> {
-                    co_await yield_n(s);
-                    auto d = co_await mtx.cancel_and_drain();
-                    (void)d;
-                    completed.fetch_add(1, std::memory_order_acq_rel);
-                },
-                asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
+        dfuts.push_back(asio::co_spawn(
+            ioc,
+            [&, s]() -> asio::awaitable<void> {
+                co_await yield_n(s);
+                auto d = co_await mtx.cancel_and_drain();
+                (void)d;
+                completed.fetch_add(1, std::memory_order_acq_rel);
+            },
+            asio::bind_cancellation_slot(sigs[s].slot(), asio::use_future)));
     }
 
     // Let drain progress a bit before aborting sigs[0].
@@ -258,8 +253,7 @@ TEST(SeamDrainReaperAbortSubscribers, LateAbortDoesNotLeaveSubscriberHanging) {
     ioc.run();
     for (auto& df : dfuts) df.get();
 
-    EXPECT_EQ(completed.load(), S)
-        << "All S subscribers must complete even on late reaper abort";
+    EXPECT_EQ(completed.load(), S) << "All S subscribers must complete even on late reaper abort";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,7 +265,7 @@ TEST(SeamDrainReaperAbortSubscribers, SubscriberGetsAbortedWhenReaperAborted) {
     asio::cancellation_signal reaper_sig;
     // subscriber_sig is never fired.
 
-    std::atomic<int> reaper_result{-1};    // 0=success, 1=aborted, 2=other
+    std::atomic<int> reaper_result{-1};  // 0=success, 1=aborted, 2=other
     std::atomic<int> subscriber_result{-1};
 
     std::atomic<bool> holder_release{false};
@@ -285,8 +279,7 @@ TEST(SeamDrainReaperAbortSubscribers, SubscriberGetsAbortedWhenReaperAborted) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire))
-            co_await yield_n(1);
+        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -327,7 +320,7 @@ TEST(SeamDrainReaperAbortSubscribers, SubscriberGetsAbortedWhenReaperAborted) {
         holder_release.store(true, std::memory_order_release);
     };
 
-    auto fh  = asio::co_spawn(ioc, holder_coro(), asio::use_future);
+    auto fh = asio::co_spawn(ioc, holder_coro(), asio::use_future);
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
     ioc.run();

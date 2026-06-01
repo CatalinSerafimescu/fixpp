@@ -20,14 +20,13 @@
 //   9. Pinning       → tls_pin_mismatch
 //  10. Cipher        → tls_cipher_not_allowed (stub; 2h pending)
 
-#include <fixpp/tls/security_profile.hpp>
-#include <fixpp/tls/pinset.hpp>
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -48,20 +47,19 @@ using fixpp::core::error;
 namespace {
 
 class stub_cs2 final : public cert_source {
- public:
-    asio::awaitable<fixpp::core::expected_t<local_credentials>>
-    load_credentials() override {
-        co_return fixpp::core::expected_t<local_credentials>{
-            std::unexpect, error::tls_load_cancelled};
+public:
+    asio::awaitable<fixpp::core::expected_t<local_credentials>> load_credentials() override {
+        co_return fixpp::core::expected_t<local_credentials>{std::unexpect,
+                                                             error::tls_load_cancelled};
     }
-    fixpp::core::expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    fixpp::core::expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return std::span<const Certificate>{};
     }
 };
 
 class fixed_clock final : public fixpp::core::Clock {
- public:
+public:
     explicit fixed_clock(std::chrono::system_clock::time_point t) : t_{t} {}
     fixpp::core::utc_time_point now() const noexcept override { return t_; }
     fixpp::core::steady_time_point steady_now() const noexcept override {
@@ -69,7 +67,8 @@ class fixed_clock final : public fixpp::core::Clock {
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
     void cancel_sleeps() noexcept override {}
- private:
+
+private:
     std::chrono::system_clock::time_point t_;
 };
 
@@ -79,19 +78,19 @@ static std::array<std::byte, 512> g_der{};
 SslCtxConfig make_mtls_ca(std::chrono::system_clock::time_point now) {
     SslCtxConfig cfg;
     cfg.profile = SecurityProfile::mtls_ca;
-    cfg.cs      = std::make_shared<stub_cs2>();
-    cfg.clock   = std::make_shared<fixed_clock>(now);
+    cfg.cs = std::make_shared<stub_cs2>();
+    cfg.clock = std::make_shared<fixed_clock>(now);
     return cfg;
 }
 
 Certificate make_valid(std::chrono::system_clock::time_point now) {
     Certificate c{};
-    c.raw_der_      = std::span<const std::byte>{g_der};
-    c.alg_          = signature_algorithm::ecdsa;
-    c.curve_        = ecdsa_curve::p256;
+    c.raw_der_ = std::span<const std::byte>{g_der};
+    c.alg_ = signature_algorithm::ecdsa;
+    c.curve_ = ecdsa_curve::p256;
     c.x509_version_ = 3;
-    c.not_before_   = now - std::chrono::hours{24};
-    c.not_after_    = now + std::chrono::hours{24};
+    c.not_before_ = now - std::chrono::hours{24};
+    c.not_after_ = now + std::chrono::hours{24};
     return c;
 }
 
@@ -115,8 +114,8 @@ TEST(VerifyPeerT039, Step2RsaUnderMin) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
     Certificate c = make_valid(now);
-    c.alg_          = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_  = 1024;
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 1024;
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_FALSE(r.has_value());
@@ -128,8 +127,8 @@ TEST(VerifyPeerT039, Step3RsaTooLarge) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
     Certificate c = make_valid(now);
-    c.alg_          = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_  = 16384;  // > 8192 default cap
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 16384;  // > 8192 default cap
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_FALSE(r.has_value());
@@ -165,7 +164,7 @@ TEST(VerifyPeerT039, Step6SanExceeded) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
     Certificate c = make_valid(now);
-    static const std::array<std::string_view, 65> sans = [](){
+    static const std::array<std::string_view, 65> sans = []() {
         std::array<std::string_view, 65> a{};
         for (auto& s : a) s = "x.example.com";
         return a;
@@ -206,7 +205,7 @@ TEST(VerifyPeerT039, Step8NotYetValid) {
     auto cfg = make_mtls_ca(now);
     Certificate c = make_valid(now);
     c.not_before_ = now + std::chrono::hours{1};
-    c.not_after_  = now + std::chrono::hours{48};
+    c.not_after_ = now + std::chrono::hours{48};
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_FALSE(r.has_value());
@@ -223,11 +222,8 @@ TEST(VerifyPeerT039, Step9PinMismatch) {
     pinned.sha256_[0] = std::byte{0xCC};
     ASSERT_TRUE(pinset->add(pinned).has_value());
 
-    auto cfg_r = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs2>(),
-        std::make_shared<fixed_clock>(now),
-        pinset, nullptr);
+    auto cfg_r = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs2>(),
+                                     std::make_shared<fixed_clock>(now), pinset, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
     // Act as 2h's wiring: capture the snapshot at "handshake start" per
@@ -264,12 +260,12 @@ TEST(VerifyPeerT039, MultiViolationFirstInOrderFires) {
         // Leaf cert (chain[0]) has RSA-low (step 2 violation).
     }
     // Leaf violates step 2: RSA < 2048.
-    chain[0].alg_          = signature_algorithm::rsa_pss;
-    chain[0].rsa_key_bits_  = 512;
+    chain[0].alg_ = signature_algorithm::rsa_pss;
+    chain[0].rsa_key_bits_ = 512;
     // All certs expired (step 8 violation).
     for (auto& c : chain) {
         c.not_before_ = now - std::chrono::hours{48};
-        c.not_after_  = now - std::chrono::hours{1};
+        c.not_after_ = now - std::chrono::hours{1};
     }
 
     auto r = verify_peer(cfg, std::span<const Certificate>{chain});
@@ -289,9 +285,9 @@ TEST(VerifyPeerT039, DerBeforeRsaLow) {
 
     std::vector<std::byte> big(16 * 1024 + 1);
     Certificate c = make_valid(now);
-    c.raw_der_       = std::span<const std::byte>{big};
-    c.alg_           = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_   = 512;  // also violates step 2
+    c.raw_der_ = std::span<const std::byte>{big};
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 512;  // also violates step 2
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_FALSE(r.has_value());
@@ -305,8 +301,8 @@ TEST(VerifyPeerT039, ValidRsa2048Accepted) {
     auto cfg = make_mtls_ca(now);
 
     Certificate c = make_valid(now);
-    c.alg_          = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_  = 2048;
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 2048;
 
     auto r = verify_peer(cfg, {&c, 1});
     ASSERT_TRUE(r.has_value()) << "RSA-2048 valid cert should be accepted";
@@ -364,14 +360,11 @@ TEST(VerifyPeerT039, MtlsPinnedLeafMatchesAccepted) {
     auto pinset = *pinset_r;
 
     Certificate pinned_leaf = make_valid(now);
-    pinned_leaf.sha256_[0]  = std::byte{0xCC};
+    pinned_leaf.sha256_[0] = std::byte{0xCC};
     ASSERT_TRUE(pinset->add(pinned_leaf).has_value());
 
-    auto cfg_r = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs2>(),
-        std::make_shared<fixed_clock>(now),
-        pinset, nullptr);
+    auto cfg_r = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs2>(),
+                                     std::make_shared<fixed_clock>(now), pinset, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
     cfg.pinset_snapshot = pinset->snapshot();  // 2h's wiring
@@ -391,11 +384,8 @@ TEST(VerifyPeerT039, MtlsPinnedNullSnapshotFailsClosed) {
     dummy.sha256_[0] = std::byte{0x55};
     ASSERT_TRUE(pinset->add(dummy).has_value());
 
-    auto cfg_r = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs2>(),
-        std::make_shared<fixed_clock>(now),
-        pinset, nullptr);
+    auto cfg_r = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs2>(),
+                                     std::make_shared<fixed_clock>(now), pinset, nullptr);
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
     // INTENTIONALLY leave cfg.pinset_snapshot null (simulate 2h forgetting).
@@ -459,14 +449,14 @@ TEST(VerifyPeerT039, Ed25519FixtureRejectedAsSigalgDisallowed) {
 
     const std::string ed25519_pem = std::string(fixture_dir) + "/leaf_ed25519.pem";
     const std::string ed25519_key = std::string(fixture_dir) + "/leaf_ed25519.key";
-    const std::string ca_pem      = std::string(fixture_dir) + "/ca.pem";
+    const std::string ca_pem = std::string(fixture_dir) + "/ca.pem";
 
     // Load the real Ed25519 cert via file_cert_source (same path as
     // make_asio_tls_transport_factory → prepare_ssl_ctx_ → load_credentials).
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = ed25519_pem;
+    cs_cfg.leaf_path = ed25519_pem;
     cs_cfg.private_key_path = ed25519_key;
-    cs_cfg.ca_bundle_path   = ca_pem;
+    cs_cfg.ca_bundle_path = ca_pem;
 
     auto cs_result = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
@@ -482,14 +472,12 @@ TEST(VerifyPeerT039, Ed25519FixtureRejectedAsSigalgDisallowed) {
         std::optional<fixpp::core::expected_t<fixpp::tls::local_credentials>> creds_result;
         asio::co_spawn(
             tmp_io.get_executor(),
-            [&]() -> asio::awaitable<void> {
-                creds_result = co_await cs->load_credentials();
-            },
+            [&]() -> asio::awaitable<void> { creds_result = co_await cs->load_credentials(); },
             asio::detached);
         tmp_io.run();
         ASSERT_TRUE(creds_result.has_value()) << "load_credentials did not complete";
-        ASSERT_TRUE(creds_result->has_value()) << "load_credentials failed: "
-            << static_cast<int>(creds_result->error());
+        ASSERT_TRUE(creds_result->has_value())
+            << "load_credentials failed: " << static_cast<int>(creds_result->error());
         creds_opt = std::move(**creds_result);
     }
 
@@ -503,9 +491,9 @@ TEST(VerifyPeerT039, Ed25519FixtureRejectedAsSigalgDisallowed) {
     // date range (2025-01-01 .. 2027-12-31) but we skip for simplicity.
     SslCtxConfig cfg;
     cfg.profile = SecurityProfile::mtls_ca;
-    cfg.clock   = nullptr;
-    cfg.caps    = CertSourceCaps{};
-    cfg.cs      = cs;  // cert_source must remain alive (leaf views its storage)
+    cfg.clock = nullptr;
+    cfg.caps = CertSourceCaps{};
+    cfg.cs = cs;  // cert_source must remain alive (leaf views its storage)
 
     // Call verify_peer with the real Ed25519 leaf.
     // Step 1.5 (sigalg check): alg_ != rsa_pss && alg_ != ecdsa → fires.

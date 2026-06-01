@@ -13,22 +13,22 @@
 //   // Rotation: both sessions observe the new snapshot atomically.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory>
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -66,10 +66,12 @@ TEST(PinsetPerCounterparty, TwoAliasesObserveRotationAtomically) {
     ASSERT_TRUE(pinset->remove(kOld).has_value());
 
     // Both readers immediately observe the new snapshot (same instance).
-    EXPECT_FALSE(session_a_pins->find(kOld).found()) << "session_a must not find OLD after rotation";
-    EXPECT_FALSE(session_b_pins->find(kOld).found()) << "session_b must not find OLD after rotation";
-    EXPECT_TRUE(session_a_pins->find(kNew).found())  << "session_a must find NEW after rotation";
-    EXPECT_TRUE(session_b_pins->find(kNew).found())  << "session_b must find NEW after rotation";
+    EXPECT_FALSE(session_a_pins->find(kOld).found())
+        << "session_a must not find OLD after rotation";
+    EXPECT_FALSE(session_b_pins->find(kOld).found())
+        << "session_b must not find OLD after rotation";
+    EXPECT_TRUE(session_a_pins->find(kNew).found()) << "session_a must find NEW after rotation";
+    EXPECT_TRUE(session_b_pins->find(kNew).found()) << "session_b must find NEW after rotation";
 
     // Snapshot view is the same object for both aliases.
     auto snap_a = session_a_pins->snapshot();

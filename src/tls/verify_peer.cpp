@@ -64,120 +64,121 @@ core::expected_t<peer_identity> verify_peer(SslCtxConfig const& cfg,
     // Design anchor: spec.md FR-035; .specify/2h-transport.md §1 item 5.
     // Constitutional binding: [arch §5.3] — no exceptions across the public surface.
     try {
-
-    // Empty chain is a degenerate case; treat as handshake failure.
-    if (peer_chain.empty()) {
-        return handshake_failed("empty_chain");
-    }
-
-    const Certificate& leaf = peer_chain[0];
-    const auto& caps = cfg.caps;
-
-    // ── Step 1: Per-cert DER size ──────────────────────────────────────────────
-    if (leaf.raw_der().size() > caps.max_cert_der_bytes) {
-        return std::unexpected{core::error::tls_cert_der_too_large};
-    }
-
-    // Reject keys whose algorithm we do not recognise as RSA or ECDSA before
-    // running the algorithm-specific bounds (steps 2-4). Without this, an
-    // Ed25519 / Ed448 / unknown EVP_PKEY leaf would bypass FR-020's RSA and
-    // ECDSA envelope (step 10 cipher gate is TODO 2h, so this is the only
-    // hardening barrier today). Sub-reason "sigalg_disallowed" per [2g §6.6].
-    if (leaf.alg() != signature_algorithm::rsa_pss && leaf.alg() != signature_algorithm::ecdsa) {
-        return handshake_failed("sigalg_disallowed");
-    }
-
-    // ── Step 2: RSA key lower bound (≥ 2048 bits) ─────────────────────────────
-    if (leaf.alg() == signature_algorithm::rsa_pss && leaf.rsa_key_bits() < 2048) {
-        return handshake_failed("rsa_under_min");
-    }
-
-    // ── Step 3: RSA key upper bound (≤ max_rsa_key_bits) ──────────────────────
-    if (leaf.alg() == signature_algorithm::rsa_pss && leaf.rsa_key_bits() > caps.max_rsa_key_bits) {
-        return std::unexpected{core::error::tls_rsa_key_too_large};
-    }
-
-    // ── Step 4: ECDSA curve ∈ {P-256, P-384} ──────────────────────────────────
-    if (leaf.alg() == signature_algorithm::ecdsa) {
-        if (leaf.curve() != ecdsa_curve::p256 && leaf.curve() != ecdsa_curve::p384) {
-            return handshake_failed("ecdsa_curve");
+        // Empty chain is a degenerate case; treat as handshake failure.
+        if (peer_chain.empty()) {
+            return handshake_failed("empty_chain");
         }
-    }
 
-    // ── Step 5: Chain depth ≤ max_chain_depth ─────────────────────────────────
-    if (peer_chain.size() > caps.max_chain_depth) {
-        return handshake_failed("chain_too_deep");
-    }
+        const Certificate& leaf = peer_chain[0];
+        const auto& caps = cfg.caps;
 
-    // ── Step 6: SAN cardinality ≤ max_san_entries ─────────────────────────────
-    const std::size_t san_total = leaf.san_dns_names().size() + leaf.san_uris().size();
-    if (san_total > caps.max_san_entries) {
-        return std::unexpected{core::error::tls_san_entries_exceeded};
-    }
-
-    // ── Step 7: X.509 version ∈ {v2, v3} (v1 rejected) ───────────────────────
-    if (leaf.x509_version() == 1) {
-        return handshake_failed("x509_v1");
-    }
-
-    // ── Step 8: Expiration ────────────────────────────────────────────────────
-    if (cfg.clock) {
-        const auto now = cfg.clock->now();
-        if (now > leaf.not_after()) {
-            return handshake_failed("expired");
+        // ── Step 1: Per-cert DER size ──────────────────────────────────────────────
+        if (leaf.raw_der().size() > caps.max_cert_der_bytes) {
+            return std::unexpected{core::error::tls_cert_der_too_large};
         }
-        if (now < leaf.not_before()) {
-            return handshake_failed("not_yet_valid");
-        }
-    }
 
-    // ── Step 9: Pinning (mtls_pinned only) ────────────────────────────────────
-    // Consumes cfg.pinset_snapshot — NEVER calls cfg.pinset->find/contains/snapshot.
-    // Fail-closed if 2h's wiring failed to capture a snapshot before calling
-    // verify_peer: a null snapshot under mtls_pinned would otherwise silently
-    // accept any peer cert (worst-case trust bypass, US3).
-    if (cfg.profile == SecurityProfile::mtls_pinned) {
-        if (!cfg.pinset_snapshot) {
-            return std::unexpected{core::error::tls_pin_empty_at_open};
+        // Reject keys whose algorithm we do not recognise as RSA or ECDSA before
+        // running the algorithm-specific bounds (steps 2-4). Without this, an
+        // Ed25519 / Ed448 / unknown EVP_PKEY leaf would bypass FR-020's RSA and
+        // ECDSA envelope (step 10 cipher gate is TODO 2h, so this is the only
+        // hardening barrier today). Sub-reason "sigalg_disallowed" per [2g §6.6].
+        if (leaf.alg() != signature_algorithm::rsa_pss &&
+            leaf.alg() != signature_algorithm::ecdsa) {
+            return handshake_failed("sigalg_disallowed");
         }
-        const auto& fp = leaf.sha256();
-        bool found = false;
-        for (const auto& pin_entry : *cfg.pinset_snapshot) {
-            if (pin_entry.sha256 == fp) {
-                found = true;
-                break;
+
+        // ── Step 2: RSA key lower bound (≥ 2048 bits) ─────────────────────────────
+        if (leaf.alg() == signature_algorithm::rsa_pss && leaf.rsa_key_bits() < 2048) {
+            return handshake_failed("rsa_under_min");
+        }
+
+        // ── Step 3: RSA key upper bound (≤ max_rsa_key_bits) ──────────────────────
+        if (leaf.alg() == signature_algorithm::rsa_pss &&
+            leaf.rsa_key_bits() > caps.max_rsa_key_bits) {
+            return std::unexpected{core::error::tls_rsa_key_too_large};
+        }
+
+        // ── Step 4: ECDSA curve ∈ {P-256, P-384} ──────────────────────────────────
+        if (leaf.alg() == signature_algorithm::ecdsa) {
+            if (leaf.curve() != ecdsa_curve::p256 && leaf.curve() != ecdsa_curve::p384) {
+                return handshake_failed("ecdsa_curve");
             }
         }
-        if (!found) {
-            return std::unexpected{core::error::tls_pin_mismatch};
+
+        // ── Step 5: Chain depth ≤ max_chain_depth ─────────────────────────────────
+        if (peer_chain.size() > caps.max_chain_depth) {
+            return handshake_failed("chain_too_deep");
         }
-    }
 
-    // ── Step 10: Cipher (TODO: 2h delegates negotiated cipher string) ──────────
-    // The negotiated cipher is not available in Phase-5 scope (2h hasn't shipped).
-    // Structure the check site so 2h can inject the cipher string later.
-    // TODO(2h): if (!CipherPolicy::is_allowed(negotiated_cipher))
-    //     return std::unexpected{core::error::tls_cipher_not_allowed};
+        // ── Step 6: SAN cardinality ≤ max_san_entries ─────────────────────────────
+        const std::size_t san_total = leaf.san_dns_names().size() + leaf.san_uris().size();
+        if (san_total > caps.max_san_entries) {
+            return std::unexpected{core::error::tls_san_entries_exceeded};
+        }
 
-    // ── Accept: build peer_identity ───────────────────────────────────────────
-    // PMR resource: cfg.mr or std::pmr::new_delete_resource().
-    auto* mr = (cfg.mr != nullptr) ? cfg.mr : std::pmr::new_delete_resource();
+        // ── Step 7: X.509 version ∈ {v2, v3} (v1 rejected) ───────────────────────
+        if (leaf.x509_version() == 1) {
+            return handshake_failed("x509_v1");
+        }
 
-    peer_identity id{mr};
-    id.subject_dn.assign(leaf.subject_dn());
+        // ── Step 8: Expiration ────────────────────────────────────────────────────
+        if (cfg.clock) {
+            const auto now = cfg.clock->now();
+            if (now > leaf.not_after()) {
+                return handshake_failed("expired");
+            }
+            if (now < leaf.not_before()) {
+                return handshake_failed("not_yet_valid");
+            }
+        }
 
-    for (const std::string_view dns : leaf.san_dns_names()) {
-        id.san_dns_names_owned.emplace_back(dns);
-    }
+        // ── Step 9: Pinning (mtls_pinned only) ────────────────────────────────────
+        // Consumes cfg.pinset_snapshot — NEVER calls cfg.pinset->find/contains/snapshot.
+        // Fail-closed if 2h's wiring failed to capture a snapshot before calling
+        // verify_peer: a null snapshot under mtls_pinned would otherwise silently
+        // accept any peer cert (worst-case trust bypass, US3).
+        if (cfg.profile == SecurityProfile::mtls_pinned) {
+            if (!cfg.pinset_snapshot) {
+                return std::unexpected{core::error::tls_pin_empty_at_open};
+            }
+            const auto& fp = leaf.sha256();
+            bool found = false;
+            for (const auto& pin_entry : *cfg.pinset_snapshot) {
+                if (pin_entry.sha256 == fp) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return std::unexpected{core::error::tls_pin_mismatch};
+            }
+        }
 
-    for (const std::string_view uri : leaf.san_uris()) {
-        id.san_uris_owned.emplace_back(uri);
-    }
+        // ── Step 10: Cipher (TODO: 2h delegates negotiated cipher string) ──────────
+        // The negotiated cipher is not available in Phase-5 scope (2h hasn't shipped).
+        // Structure the check site so 2h can inject the cipher string later.
+        // TODO(2h): if (!CipherPolicy::is_allowed(negotiated_cipher))
+        //     return std::unexpected{core::error::tls_cipher_not_allowed};
 
-    id.leaf_fingerprint = leaf.sha256();
-    id.not_after = leaf.not_after();
+        // ── Accept: build peer_identity ───────────────────────────────────────────
+        // PMR resource: cfg.mr or std::pmr::new_delete_resource().
+        auto* mr = (cfg.mr != nullptr) ? cfg.mr : std::pmr::new_delete_resource();
 
-    return id;
+        peer_identity id{mr};
+        id.subject_dn.assign(leaf.subject_dn());
+
+        for (const std::string_view dns : leaf.san_dns_names()) {
+            id.san_dns_names_owned.emplace_back(dns);
+        }
+
+        for (const std::string_view uri : leaf.san_uris()) {
+            id.san_uris_owned.emplace_back(uri);
+        }
+
+        id.leaf_fingerprint = leaf.sha256();
+        id.not_after = leaf.not_after();
+
+        return id;
 
     } catch (const std::bad_alloc&) {
         // PMR or heap exhaustion building peer_identity: surface as a distinct

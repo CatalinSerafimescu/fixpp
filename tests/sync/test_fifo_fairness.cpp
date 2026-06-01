@@ -17,11 +17,9 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
-#include <vector>
 #include <atomic>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -40,8 +38,8 @@ TEST(SeamFifoFairness, DrainCycleReversesLIFO) {
     std::atomic<int> in_critical{0};
     int overlap = 0;
 
-    std::vector<int> enqueue_order; // coroutine index in the order they block
-    std::vector<int> acquire_order; // coroutine index in the order they acquire
+    std::vector<int> enqueue_order;  // coroutine index in the order they block
+    std::vector<int> acquire_order;  // coroutine index in the order they acquire
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -52,16 +50,14 @@ TEST(SeamFifoFairness, DrainCycleReversesLIFO) {
         EXPECT_TRUE(g.has_value());
         // Give all other coroutines a chance to start and block on async_lock.
         for (int i = 0; i < N * 2; ++i)
-            co_await asio::post(co_await asio::this_coro::executor,
-                                asio::use_awaitable);
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         // Now release — all N waiters should be in the LIFO list.
         // unlock() reverses → FIFO relative to enqueue order.
     };
 
     // Waiters: enqueue after yielding once so the holder grabs the lock first.
     auto make_waiter = [&](int idx) -> asio::awaitable<void> {
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         {
             // Record enqueue attempt order (approximate — single-threaded ioc).
             enqueue_order.push_back(idx);
@@ -115,7 +111,7 @@ TEST(SeamFifoFairness, MutualExclusionPreservedAcrossMultipleDrains) {
             auto g = co_await mtx.async_lock();
             EXPECT_TRUE(g.has_value());
             if (g.has_value()) {
-                int v = in_critical.fetch_add(1, std::memory_order_acq_rel)+1;
+                int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
                 if (v > 1) overlap++;
                 ++total_acquires;
                 in_critical.fetch_sub(1, std::memory_order_acq_rel);

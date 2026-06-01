@@ -19,32 +19,30 @@
 //
 // Anchors: spec.md FR-005 / US2 AC1/AC2/AC3; data-model.md §E1 Session::send;
 //          data-model.md §E3 error::session_invalid_state_for_send = 77; D-3.
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -52,11 +50,9 @@ namespace fixpp::session::test {
 
 // ── Frame builder ─────────────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_peer_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target) {
+static std::vector<std::byte> make_peer_logon_frame(std::string_view begin_string,
+                                                    std::uint32_t seq, std::string_view sender,
+                                                    std::string_view target) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -72,14 +68,18 @@ static std::vector<std::byte> make_peer_logon_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFu;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -87,16 +87,16 @@ static std::vector<std::byte> make_peer_logon_frame(
 
 class SendInvalidStateTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         using namespace std::chrono;
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -104,14 +104,14 @@ protected:
     // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_initiator_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "TW";
-        cfg.target_comp_id     = "ISLD";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 0s;  // disable liveness loop
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = fixpp::session::session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
@@ -136,8 +136,8 @@ protected:
     // Call send() with a dummy payload, return the result.
     fixpp::core::expected_t<void> send_sync(fixpp::session::Session& s) {
         std::array<std::byte, 4> payload{};
-        auto fut = asio::co_spawn(ioc, s.send(std::span<const std::byte>(payload)),
-                                  asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, s.send(std::span<const std::byte>(payload)), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         return fut.get();
@@ -174,8 +174,7 @@ TEST_F(SendInvalidStateTest, SendPreLogon_ReturnsInvalidStateForSend) {
         << "send() in NotConnected must return an error (FR-005 §US2 AC1)";
     EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_state_for_send)
         << "Expected session_invalid_state_for_send (=77) but got "
-        << static_cast<int>(result.error())
-        << " (FR-005 / D-3)";
+        << static_cast<int>(result.error()) << " (FR-005 / D-3)";
 }
 
 // AC2 (FR-005): send() while in LogonSent returns session_invalid_state_for_send.
@@ -196,8 +195,7 @@ TEST_F(SendInvalidStateTest, SendInLogonSent_ReturnsInvalidStateForSend) {
         << "send() in LogonSent must return an error (FR-005 §US2 AC2)";
     EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_state_for_send)
         << "Expected session_invalid_state_for_send (=77) but got "
-        << static_cast<int>(result.error())
-        << " (FR-005 / D-3)";
+        << static_cast<int>(result.error()) << " (FR-005 / D-3)";
 }
 
 // AC3 (FR-005): send() in Disconnected returns session_invalid_state_for_send.
@@ -225,8 +223,7 @@ TEST_F(SendInvalidStateTest, SendInDisconnected_ReturnsInvalidStateForSend) {
         << "send() in Disconnected must return an error (FR-005 §US2 AC3)";
     EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_state_for_send)
         << "Expected session_invalid_state_for_send (=77) but got "
-        << static_cast<int>(result.error())
-        << " (FR-005 / D-3)";
+        << static_cast<int>(result.error()) << " (FR-005 / D-3)";
 }
 
 // Positive control: send() in Active does NOT return session_invalid_state_for_send.

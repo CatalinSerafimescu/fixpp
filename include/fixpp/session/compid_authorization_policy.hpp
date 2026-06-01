@@ -18,7 +18,7 @@
 #include <memory_resource>
 #include <string_view>
 
-#include "fixpp/core/error.hpp"   // error enum + expected_t<T>
+#include "fixpp/core/error.hpp"  // error enum + expected_t<T>
 #include "fixpp/tls/peer_identity.hpp"
 
 namespace fixpp::session {
@@ -75,9 +75,8 @@ public:
     // look up in bindings_; return bound_principal on success OR
     // error::session_compid_unauthorized (slot 117) on miss / empty-policy /
     // unmatched principal→compid pair. noexcept for runtime use.
-    [[nodiscard]] core::expected_t<bound_principal>
-    authorize(fixpp::tls::peer_identity const& pid,
-              std::string_view asserted_compid) const noexcept;
+    [[nodiscard]] core::expected_t<bound_principal> authorize(
+        fixpp::tls::peer_identity const& pid, std::string_view asserted_compid) const noexcept;
 
     // Accessor — number of bindings (operator audit + completeness audit).
     [[nodiscard]] std::size_t binding_count() const noexcept;

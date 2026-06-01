@@ -53,22 +53,20 @@
 // global-heap fallback (seam 7's alloc guard fails the build otherwise).
 #pragma once
 
+#include <asio/awaitable.hpp>
+#include <asio/bind_allocator.hpp>
+#include <asio/bind_executor.hpp>
+#include <asio/cancellation_signal.hpp>  // asio::cancellation_slot/type
+#include <asio/dispatch.hpp>
+#include <asio/use_awaitable.hpp>
 #include <atomic>
 #include <exception>
+#include <fixpp/core/error.hpp>  // expected_t, error
+#include <fixpp/core/session_executor.hpp>
 #include <memory>
 #include <memory_resource>
 #include <type_traits>
 #include <utility>
-
-#include <asio/awaitable.hpp>
-#include <asio/bind_allocator.hpp>
-#include <asio/bind_executor.hpp>
-#include <asio/cancellation_signal.hpp>   // asio::cancellation_slot/type
-#include <asio/dispatch.hpp>
-#include <asio/use_awaitable.hpp>
-
-#include <fixpp/core/error.hpp>            // expected_t, error
-#include <fixpp/core/session_executor.hpp>
 
 namespace fixpp::core {
 
@@ -77,16 +75,17 @@ namespace detail {
 // True iff T is asio::awaitable<...> (so a coroutine handler is co_await-ed
 // rather than treated as a completed void call — supports BOTH the plain
 // callback shape and a coroutine application callback).
-template <class T>          struct is_awaitable                       : std::false_type {};
-template <class U, class E> struct is_awaitable<asio::awaitable<U, E>> : std::true_type  {};
+template <class T>
+struct is_awaitable : std::false_type {};
+template <class U, class E>
+struct is_awaitable<asio::awaitable<U, E>> : std::true_type {};
 
 }  // namespace detail
 
 template <typename Handler>
-[[nodiscard]] asio::awaitable<expected_t<void>>
-cancellable_dispatch(session_executor exec,
-                      asio::cancellation_slot slot,
-                      Handler&& handler) {
+[[nodiscard]] asio::awaitable<expected_t<void>> cancellable_dispatch(session_executor exec,
+                                                                     asio::cancellation_slot slot,
+                                                                     Handler&& handler) {
     // [2d §4.5] never-null chain THROUGH the wrapper, via the session-TU
     // bridge (core stays a leaf — [arch §2.3]; the raw
     // exec.session_ptr()->session_arena() is non-dependent and would force
@@ -119,8 +118,8 @@ cancellable_dispatch(session_executor exec,
     // error rather than letting it escape this noexcept-equivalent seam.
     std::pmr::polymorphic_allocator<std::byte> alloc{arena};
     try {
-        co_await asio::dispatch(asio::bind_allocator(
-            alloc, asio::bind_executor(exec, asio::use_awaitable)));
+        co_await asio::dispatch(
+            asio::bind_allocator(alloc, asio::bind_executor(exec, asio::use_awaitable)));
     } catch (const std::bad_alloc&) {
         co_return std::unexpected(error::strand_dispatch_failed_oom);
     }
@@ -133,8 +132,7 @@ cancellable_dispatch(session_executor exec,
 
     // Case 2 (signalled DURING → the handler's own co_await checkpoints
     // honour the slot, ASIO standard) / Case 3 (not signalled): invoke.
-    if constexpr (detail::is_awaitable<
-                      std::invoke_result_t<Handler>>::value) {
+    if constexpr (detail::is_awaitable<std::invoke_result_t<Handler>>::value) {
         co_await std::forward<Handler>(handler)();
     } else {
         std::forward<Handler>(handler)();

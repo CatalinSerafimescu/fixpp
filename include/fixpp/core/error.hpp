@@ -258,22 +258,22 @@ enum class error : std::uint8_t {
     //      FIXPP_ERR_SESSION_LIFECYCLE   ← { session_logout_timeout,
     //                                        session_test_request_unanswered,
     //                                        session_invalid_config }
-    session_invalid_logon = 66,               // FR-003/004, US1#3/#4, [FIX-SL §4.2]/§4.3 —
-                                              //   Logon refused; session never reaches Active.
-                                              //   → FIXPP_ERR_SESSION_REFUSAL
-    session_compid_mismatch = 67,             // FR-004, [FIX-SL §4.2.2] — SenderCompID/
-                                              //   TargetCompID do not match the configured
-                                              //   counterparty identity (point-to-point 49/56).
-                                              //   → FIXPP_ERR_SESSION_REFUSAL
-    session_begin_string_unsupported = 68,    // FR-003, [FIX-SL §4.2.1] — BeginString(8) is
-                                              //   not in the supported version set (FIX.4.2/4.4
-                                              //   for 005; FIXT.1.1/5.0SP2 deferred).
-                                              //   → FIXPP_ERR_SESSION_REFUSAL
-    session_seqnum_too_low = 69,              // FR-008, [FIX-SL §4.1] — inbound MsgSeqNum <
-                                              //   next-expected, no PossDupFlag=Y: session-fatal
-                                              //   (ordered-sequence integrity). PossDup handling
-                                              //   is deferred (S-010); treated as the no-PossDup
-                                              //   case in 005. → FIXPP_ERR_SESSION_FATAL
+    session_invalid_logon = 66,             // FR-003/004, US1#3/#4, [FIX-SL §4.2]/§4.3 —
+                                            //   Logon refused; session never reaches Active.
+                                            //   → FIXPP_ERR_SESSION_REFUSAL
+    session_compid_mismatch = 67,           // FR-004, [FIX-SL §4.2.2] — SenderCompID/
+                                            //   TargetCompID do not match the configured
+                                            //   counterparty identity (point-to-point 49/56).
+                                            //   → FIXPP_ERR_SESSION_REFUSAL
+    session_begin_string_unsupported = 68,  // FR-003, [FIX-SL §4.2.1] — BeginString(8) is
+                                            //   not in the supported version set (FIX.4.2/4.4
+                                            //   for 005; FIXT.1.1/5.0SP2 deferred).
+                                            //   → FIXPP_ERR_SESSION_REFUSAL
+    session_seqnum_too_low = 69,            // FR-008, [FIX-SL §4.1] — inbound MsgSeqNum <
+                                            //   next-expected, no PossDupFlag=Y: session-fatal
+                                            //   (ordered-sequence integrity). PossDup handling
+                                            //   is deferred (S-010); treated as the no-PossDup
+                                            //   case in 005. → FIXPP_ERR_SESSION_FATAL
     // slot 70: session_seqnum_gap_unrecoverable — DELETED pre-v1.0 per 013
     //   T006a Option D (2026-05-28). Too-high inbound seqnum transitions are
     //   handled by the 013 recovery sub-protocol (FR-009 ResendRequest path);
@@ -478,96 +478,96 @@ enum class error : std::uint8_t {
     //    rejection. FR-034: 15 tls_* variants from 011 surface UNCHANGED.
 
     // ── LIFECYCLE (8 variants, slots 94–101) ─────────────────────────────────
-    transport_resolve_failed = 94,        // [2h §6.6]:1170 — DNS / getaddrinfo
-                                          //   resolution of Endpoint::host failed;
-                                          //   no TCP connection attempted.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_connect_refused = 95,       // [2h §6.6]:1171 — TCP connect() returned
-                                          //   ECONNREFUSED / WSAECONNREFUSED; peer
-                                          //   port not listening.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_connect_timeout = 96,       // [2h §6.6]:1172 — connect_timeout
-                                          //   (Config::connect_timeout, default 30 s)
-                                          //   elapsed before TCP SYN-ACK received.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_connected = 97,     // [2h §6.6]:1173 — async_connect or
-                                          //   async_handshake called a second time on
-                                          //   the same Transport instance (one-shot
-                                          //   per lifetime per [2h §4.1]).
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_closed = 98,        // [2h §6.6]:1174 — cancel() or any async_*
-                                          //   called after close(); idempotent
-                                          //   second close() does NOT return this —
-                                          //   returns expected_t<void>{} per [2h §4.1].
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_read_in_progress = 99,      // [2h §6.6]:1175 — concurrent second
-                                          //   async_read_some while a first is
-                                          //   in-flight; returns IMMEDIATELY per
-                                          //   [2h §4.1] RC#3 close / spec FR-007.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_write_in_progress = 100,    // [2h §6.6]:1176 — concurrent second
-                                          //   async_write while a first is in-flight;
-                                          //   returns IMMEDIATELY per [2h §4.1] RC#3
-                                          //   close / spec FR-007.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_reconnect_limit_exceeded = 101, // [2h §6.6]:1177 — ReconnectPolicy
-                                          //   max_attempts exhausted (US2); FSM
-                                          //   transitions to Disconnected-terminal.
-                                          //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_resolve_failed = 94,             // [2h §6.6]:1170 — DNS / getaddrinfo
+                                               //   resolution of Endpoint::host failed;
+                                               //   no TCP connection attempted.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_connect_refused = 95,            // [2h §6.6]:1171 — TCP connect() returned
+                                               //   ECONNREFUSED / WSAECONNREFUSED; peer
+                                               //   port not listening.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_connect_timeout = 96,            // [2h §6.6]:1172 — connect_timeout
+                                               //   (Config::connect_timeout, default 30 s)
+                                               //   elapsed before TCP SYN-ACK received.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_already_connected = 97,          // [2h §6.6]:1173 — async_connect or
+                                               //   async_handshake called a second time on
+                                               //   the same Transport instance (one-shot
+                                               //   per lifetime per [2h §4.1]).
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_already_closed = 98,             // [2h §6.6]:1174 — cancel() or any async_*
+                                               //   called after close(); idempotent
+                                               //   second close() does NOT return this —
+                                               //   returns expected_t<void>{} per [2h §4.1].
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_read_in_progress = 99,           // [2h §6.6]:1175 — concurrent second
+                                               //   async_read_some while a first is
+                                               //   in-flight; returns IMMEDIATELY per
+                                               //   [2h §4.1] RC#3 close / spec FR-007.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_write_in_progress = 100,         // [2h §6.6]:1176 — concurrent second
+                                               //   async_write while a first is in-flight;
+                                               //   returns IMMEDIATELY per [2h §4.1] RC#3
+                                               //   close / spec FR-007.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_reconnect_limit_exceeded = 101,  // [2h §6.6]:1177 — ReconnectPolicy
+                                               //   max_attempts exhausted (US2); FSM
+                                               //   transitions to Disconnected-terminal.
+                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
 
     // ── IO (5 variants, slots 102–106) ───────────────────────────────────────
-    transport_read_eof = 102,             // [2h §6.6]:1180 — async_read_some got
-                                          //   EOF (peer closed write side / TCP FIN).
-                                          //   → FIXPP_ERR_TRANSPORT_IO
-    transport_read_truncated = 103,       // [2h §6.6]:1181 — partial TLS
-                                          //   close-notify received (peer dropped
-                                          //   without clean bidi shutdown); logged
-                                          //   at warn per [2g §7.8], non-fatal.
-                                          //   → FIXPP_ERR_TRANSPORT_IO
-    transport_read_error = 104,           // [2h §6.6]:1182 — OS-level read error
-                                          //   other than EOF (ECONNRESET, ETIMEDOUT,
-                                          //   TLS decrypt failure etc.).
-                                          //   → FIXPP_ERR_TRANSPORT_IO
-    transport_write_short = 105,          // [2h §6.6]:1183 — composed write completed
-                                          //   fewer bytes than requested (torn write);
-                                          //   FSM disconnects + recovers via
-                                          //   ResendRequest per [FIX-SL §4.5.2].
-                                          //   Persisted frame NOT rolled back per
-                                          //   [2e §6.1.4].
-                                          //   → FIXPP_ERR_TRANSPORT_IO
-    transport_write_error = 106,          // [2h §6.6]:1184 — OS-level write error
-                                          //   (EPIPE, ECONNRESET, TLS encrypt failure).
-                                          //   → FIXPP_ERR_TRANSPORT_IO
+    transport_read_eof = 102,        // [2h §6.6]:1180 — async_read_some got
+                                     //   EOF (peer closed write side / TCP FIN).
+                                     //   → FIXPP_ERR_TRANSPORT_IO
+    transport_read_truncated = 103,  // [2h §6.6]:1181 — partial TLS
+                                     //   close-notify received (peer dropped
+                                     //   without clean bidi shutdown); logged
+                                     //   at warn per [2g §7.8], non-fatal.
+                                     //   → FIXPP_ERR_TRANSPORT_IO
+    transport_read_error = 104,      // [2h §6.6]:1182 — OS-level read error
+                                     //   other than EOF (ECONNRESET, ETIMEDOUT,
+                                     //   TLS decrypt failure etc.).
+                                     //   → FIXPP_ERR_TRANSPORT_IO
+    transport_write_short = 105,     // [2h §6.6]:1183 — composed write completed
+                                     //   fewer bytes than requested (torn write);
+                                     //   FSM disconnects + recovers via
+                                     //   ResendRequest per [FIX-SL §4.5.2].
+                                     //   Persisted frame NOT rolled back per
+                                     //   [2e §6.1.4].
+                                     //   → FIXPP_ERR_TRANSPORT_IO
+    transport_write_error = 106,     // [2h §6.6]:1184 — OS-level write error
+                                     //   (EPIPE, ECONNRESET, TLS encrypt failure).
+                                     //   → FIXPP_ERR_TRANSPORT_IO
 
     // ── HANDSHAKE (2 variants, slots 107–108) ─────────────────────────────────
-    transport_handshake_failed = 107,     // [2h §6.6]:1187 — GROUPING variant;
-                                          //   TLS handshake rejected by peer cert
-                                          //   validation, cipher mismatch, etc.
-                                          //   Diagnostic field carries OpenSSL error
-                                          //   string + [2g §6.6] tls_* sub-reason
-                                          //   on verify_peer rejection. Joins
-                                          //   FIXPP_ERR_TLS_HANDSHAKE at C ABI.
-                                          //   FR-034a + FR-034.
-                                          //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
-    transport_handshake_timeout = 108,    // [2h §6.6]:1188 — Config::tls_handshake_
-                                          //   timeout (default 30 s) elapsed before
-                                          //   OpenSSL handshake completed; SSL* state
-                                          //   broken → caller MUST close() per
-                                          //   [2h §6.4].
-                                          //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
+    transport_handshake_failed = 107,   // [2h §6.6]:1187 — GROUPING variant;
+                                        //   TLS handshake rejected by peer cert
+                                        //   validation, cipher mismatch, etc.
+                                        //   Diagnostic field carries OpenSSL error
+                                        //   string + [2g §6.6] tls_* sub-reason
+                                        //   on verify_peer rejection. Joins
+                                        //   FIXPP_ERR_TLS_HANDSHAKE at C ABI.
+                                        //   FR-034a + FR-034.
+                                        //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
+    transport_handshake_timeout = 108,  // [2h §6.6]:1188 — Config::tls_handshake_
+                                        //   timeout (default 30 s) elapsed before
+                                        //   OpenSSL handshake completed; SSL* state
+                                        //   broken → caller MUST close() per
+                                        //   [2h §6.4].
+                                        //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
 
     // ── CONFIG (2 variants, slots 109–110) ────────────────────────────────────
-    transport_factory_failed = 109,       // [2h §6.6]:1191 — TransportFactory::make()
-                                          //   could not construct (OS socket resource
-                                          //   exhaustion, SSL_CTX_new failure, PMR
-                                          //   throw routed via [2a §4.2] trap_throw).
-                                          //   → FIXPP_ERR_TRANSPORT_CONFIG
-    transport_psk_unsupported = 110,      // [2h §6.6]:1192 — caller requested a
-                                          //   PSK-mode TLS session; v1.0 does NOT
-                                          //   implement PSK (deferred per [const §XII.6]
-                                          //   / T-012 P2). Returns this variant at
-                                          //   handshake time.
-                                          //   → FIXPP_ERR_TRANSPORT_CONFIG
+    transport_factory_failed = 109,   // [2h §6.6]:1191 — TransportFactory::make()
+                                      //   could not construct (OS socket resource
+                                      //   exhaustion, SSL_CTX_new failure, PMR
+                                      //   throw routed via [2a §4.2] trap_throw).
+                                      //   → FIXPP_ERR_TRANSPORT_CONFIG
+    transport_psk_unsupported = 110,  // [2h §6.6]:1192 — caller requested a
+                                      //   PSK-mode TLS session; v1.0 does NOT
+                                      //   implement PSK (deferred per [const §XII.6]
+                                      //   / T-012 P2). Returns this variant at
+                                      //   handshake time.
+                                      //   → FIXPP_ERR_TRANSPORT_CONFIG
 
     // ── CANCELLED-reuse (5 variants, slots 111–115) ───────────────────────────
     transport_connect_cancelled = 111,    // [2h §6.6]:1195 — async_connect awaitable
@@ -650,18 +650,18 @@ enum class error : std::uint8_t {
     //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
     //    surface added by this feature — contracts/error_slots.hpp):
     //      FIXPP_ERR_SESSION_FATAL ← { session_seqnum_too_high } (new member)
-    session_seqnum_too_high = 120,        // FR-016 / E-4 — inbound seqnum > next_expected
-                                          //   in LogonSent / LogonReceived states where
-                                          //   too-high is session-fatal (Active-state
-                                          //   too-high is intercepted earlier →
-                                          //   AwaitingResend per 013 FR-009). Replaces
-                                          //   the slot-74 stand-in
-                                          //   (session_test_request_unanswered) that was
-                                          //   returned by SeqnumManager::check_inbound's
-                                          //   too-high branch as a semantic misnomer.
-                                          //   Zero behavioural change — all 3 production
-                                          //   callers discard the code (session.cpp).
-                                          //   → FIXPP_ERR_SESSION_FATAL
+    session_seqnum_too_high = 120,  // FR-016 / E-4 — inbound seqnum > next_expected
+                                    //   in LogonSent / LogonReceived states where
+                                    //   too-high is session-fatal (Active-state
+                                    //   too-high is intercepted earlier →
+                                    //   AwaitingResend per 013 FR-009). Replaces
+                                    //   the slot-74 stand-in
+                                    //   (session_test_request_unanswered) that was
+                                    //   returned by SeqnumManager::check_inbound's
+                                    //   too-high branch as a semantic misnomer.
+                                    //   Zero behavioural change — all 3 production
+                                    //   callers discard the code (session.cpp).
+                                    //   → FIXPP_ERR_SESSION_FATAL
 
     // ── 015-runtime-engine: 1 session_* variant per data-model.md §E-7.
     //    Non-renumbering append at unused slot 121, next contiguous slot
@@ -669,17 +669,17 @@ enum class error : std::uint8_t {
     //    Slot 70 remains a PERMANENT NUMERIC HOLE; never renumber.
     //    This code is the connection-level disposition reason — it is never set on
     //    a Session event (no Session is created for unmatched inbound Logons).
-    session_unknown_acceptor_session = 121, // FR-005/006 / C7 — inbound Logon from a
-                                            //   peer whose reversed CompID
-                                            //   (SessionId::reversed_from_logon) does not
-                                            //   match any registered acceptor session in
-                                            //   the Engine registry. The accept loop
-                                            //   closes the transport (no Session is
-                                            //   created). The code names the disposition;
-                                            //   surfacing it on a log/observability sink is
-                                            //   deferred — 015 has no log surface (FR-013).
-                                            //   Static matching only in 015 (R2).
-                                            //   → FIXPP_ERR_SESSION_REJECT
+    session_unknown_acceptor_session = 121,  // FR-005/006 / C7 — inbound Logon from a
+                                             //   peer whose reversed CompID
+                                             //   (SessionId::reversed_from_logon) does not
+                                             //   match any registered acceptor session in
+                                             //   the Engine registry. The accept loop
+                                             //   closes the transport (no Session is
+                                             //   created). The code names the disposition;
+                                             //   surfacing it on a log/observability sink is
+                                             //   deferred — 015 has no log surface (FR-013).
+                                             //   Static matching only in 015 (R2).
+                                             //   → FIXPP_ERR_SESSION_REJECT
 };
 
 template <class T>

@@ -185,8 +185,8 @@ TEST(MemoryStoreZeroAllocatorCalls, RetrieveDescriptorSnapshotUsesPmr) {
             // should route any snapshot allocation through mr, NOT global new.
             struct counting_visitor final : public fixpp::session::retrieve_visitor {
                 std::size_t count = 0;
-                asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-                on_frame(fixpp::session::seqnum_t, std::span<const std::byte>) noexcept override {
+                asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+                    fixpp::session::seqnum_t, std::span<const std::byte>) noexcept override {
                     ++count;
                     co_return fixpp::core::expected_t<fixpp::session::visit_result>{
                         fixpp::session::visit_result::cont};

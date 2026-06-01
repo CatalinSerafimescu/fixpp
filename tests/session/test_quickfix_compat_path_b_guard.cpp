@@ -20,11 +20,10 @@
 
 #include <gtest/gtest.h>
 
+#include <fixpp/session/message_store.hpp>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <fixpp/session/message_store.hpp>
 
 namespace {
 
@@ -53,18 +52,16 @@ struct FakeQuickFixStore {
 //   (a) direct construction from a raw pointer (the main Path-B hazard)
 //   (b) direct default construction (MessageStore is abstract — excluded for
 //       completeness, though this is already guaranteed by the pure virtuals)
-static_assert(
-    !std::is_constructible_v<fixpp::session::MessageStore, FakeQuickFixStore*>,
-    "Path-B guard: implicit construction from sync QuickFIX shape is forbidden. "
-    "fixpp::session::MessageStore must not be constructible from a "
-    "FakeQuickFixStore* — this regression means an implicit conversion path "
-    "was accidentally introduced.");
+static_assert(!std::is_constructible_v<fixpp::session::MessageStore, FakeQuickFixStore*>,
+              "Path-B guard: implicit construction from sync QuickFIX shape is forbidden. "
+              "fixpp::session::MessageStore must not be constructible from a "
+              "FakeQuickFixStore* — this regression means an implicit conversion path "
+              "was accidentally introduced.");
 
-static_assert(
-    !std::is_default_constructible_v<fixpp::session::MessageStore>,
-    "Path-B guard: MessageStore must remain abstract (non-default-constructible). "
-    "A default-constructible MessageStore would bypass the async interface "
-    "contract and allow invalid store objects.");
+static_assert(!std::is_default_constructible_v<fixpp::session::MessageStore>,
+              "Path-B guard: MessageStore must remain abstract (non-default-constructible). "
+              "A default-constructible MessageStore would bypass the async interface "
+              "contract and allow invalid store objects.");
 
 // ── GoogleTest placeholder ────────────────────────────────────────────────────
 //

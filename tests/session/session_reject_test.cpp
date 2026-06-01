@@ -29,10 +29,23 @@
 //
 // Anchors: data-model.md §I-5, error slot 72; [FIX-SL §4.5.4];
 // spec FR-007; SC-006; tasks.md T050/T054/T056.
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -40,24 +53,9 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/admin_messages.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -68,44 +66,45 @@ namespace {
 
 // Build a minimal SOH-delimited FIX frame for the given body fields.
 // Computes BodyLength(9) and CheckSum(10) correctly.
-static std::vector<std::byte> make_raw_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string extra_body = {}) {
+static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_body.empty()) { body += extra_body; }
+    if (!extra_body.empty()) {
+        body += extra_body;
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string = "FIX.4.2",
-        std::uint32_t seq = 1,
-        std::string_view sender = "TW",
-        std::string_view target = "ISLD",
-        int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                               std::uint32_t seq = 1,
+                                               std::string_view sender = "TW",
+                                               std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -113,15 +112,18 @@ static std::vector<std::byte> make_logon_frame(
 }
 
 // Extract a field value from a SOH-delimited FIX frame.
-static std::string extract_field(std::span<const std::byte> frame,
-                                  std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -138,20 +140,20 @@ struct RejectFixture {
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(std::string_view begin_string = "FIX.4.2") {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
@@ -160,15 +162,14 @@ struct RejectFixture {
     }
 
     // Open and drive to Active (initiator path).
-    void open_to_active(Session& sess,
-                        std::string_view begin_string = "FIX.4.2") {
+    void open_to_active(Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
-        auto fut2  = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
@@ -176,8 +177,7 @@ struct RejectFixture {
     }
 
     // Open and drive to LogonReceived (acceptor path: NotConnected → LogonReceived).
-    void open_to_logon_received(Session& sess,
-                                std::string_view begin_string = "FIX.4.2") {
+    void open_to_logon_received(Session& sess, std::string_view begin_string = "FIX.4.2") {
         // In NotConnected (acceptor), feeding a valid Logon → LogonReceived.
         // We DON'T call open() first (that would send LogonSent). We construct
         // the session, feed a Logon, and verify LogonReceived.
@@ -211,34 +211,26 @@ struct RejectFixture {
 // SessionRejectReason(373).
 TEST(SessionReject, BuildRejectShape) {
     std::array<std::byte, 512> buf{};
-    auto result = fixpp::session::build_reject(
-        std::span<std::byte>{buf.data(), buf.size()},
-        /*seq=*/          2,
-        /*sender=*/       "ISLD",
-        /*target=*/       "TW",
-        /*ref_seq_num=*/  seqnum_t{1},
-        /*ref_tag_id=*/   371,
-        /*ref_msg_type=*/ "D",
-        /*reason=*/       3,
-        /*begin_string=*/ "FIX.4.2",
-        /*sending_time=*/ "20240101-00:00:00.000");
+    auto result = fixpp::session::build_reject(std::span<std::byte>{buf.data(), buf.size()},
+                                               /*seq=*/2,
+                                               /*sender=*/"ISLD",
+                                               /*target=*/"TW",
+                                               /*ref_seq_num=*/seqnum_t{1},
+                                               /*ref_tag_id=*/371,
+                                               /*ref_msg_type=*/"D",
+                                               /*reason=*/3,
+                                               /*begin_string=*/"FIX.4.2",
+                                               /*sending_time=*/"20240101-00:00:00.000");
 
-    ASSERT_TRUE(result.has_value())
-        << "build_reject must succeed";
+    ASSERT_TRUE(result.has_value()) << "build_reject must succeed";
 
     auto frame = *result;
-    EXPECT_EQ(extract_field(frame, 35), "3")
-        << "MsgType must be 3 (Reject)";
-    EXPECT_EQ(extract_field(frame, 34), "2")
-        << "MsgSeqNum must be 2";
-    EXPECT_EQ(extract_field(frame, 45), "1")
-        << "RefSeqNum(45) must carry ref_seq_num=1";
-    EXPECT_EQ(extract_field(frame, 371), "371")
-        << "RefTagID(371) must carry ref_tag_id=371";
-    EXPECT_EQ(extract_field(frame, 372), "D")
-        << "RefMsgType(372) must carry ref_msg_type=D";
-    EXPECT_EQ(extract_field(frame, 373), "3")
-        << "SessionRejectReason(373) must carry reason=3";
+    EXPECT_EQ(extract_field(frame, 35), "3") << "MsgType must be 3 (Reject)";
+    EXPECT_EQ(extract_field(frame, 34), "2") << "MsgSeqNum must be 2";
+    EXPECT_EQ(extract_field(frame, 45), "1") << "RefSeqNum(45) must carry ref_seq_num=1";
+    EXPECT_EQ(extract_field(frame, 371), "371") << "RefTagID(371) must carry ref_tag_id=371";
+    EXPECT_EQ(extract_field(frame, 372), "D") << "RefMsgType(372) must carry ref_msg_type=D";
+    EXPECT_EQ(extract_field(frame, 373), "3") << "SessionRejectReason(373) must carry reason=3";
 }
 
 // ── Test 2: No-reject-loop on inbound Reject (I-5) ───────────────────────────
@@ -256,7 +248,8 @@ TEST(SessionReject, NoRejectLoopOnInboundReject) {
 
     // Feed a Reject(35=3) with seq=2 (in-sequence).
     auto reject_frame = make_raw_frame("FIX.4.2", "3", 2, "TW", "ISLD",
-        "45=1\x01""373=2\x01");
+                                       "45=1\x01"
+                                       "373=2\x01");
     f.feed(sess, reject_frame);
 
     // I-5: the session must NOT emit a Reject in response to an inbound Reject.
@@ -365,17 +358,15 @@ TEST(AdminMessagesBufferGuard, BuildLogonBufferTooSmallReturnsError) {
     // Minimum Logon frame is ~80 bytes (8/9/35/34/49/52/56/98/108/10).
     // 16 bytes is unconditionally insufficient — Writer fails on the first append.
     std::array<std::byte, 16> tiny{};
-    auto r = fixpp::session::build_logon(
-        std::span<std::byte>{tiny}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30,
-        "20240101-00:00:00.000");
+    auto r = fixpp::session::build_logon(std::span<std::byte>{tiny}, /*seq=*/1, "SENDER", "TARGET",
+                                         "FIX.4.4", 30, "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildLogoutBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
-    auto r = fixpp::session::build_logout(
-        std::span<std::byte>{tiny}, /*seq=*/2, "SENDER", "TARGET", {},
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_logout(std::span<std::byte>{tiny}, /*seq=*/2, "SENDER", "TARGET",
+                                          {}, "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -383,18 +374,17 @@ TEST(AdminMessagesBufferGuard, BuildLogoutWithTextBufferTooSmallReturnsError) {
     // Even a buffer that fits a Logout-without-text might be too small with
     // a long text field — covers the optional-text branch + its error arm.
     std::array<std::byte, 32> small{};
-    auto r = fixpp::session::build_logout(
-        std::span<std::byte>{small}, /*seq=*/3, "SENDER", "TARGET",
-        "explanatory text that pushes past the 32-byte ceiling",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r =
+        fixpp::session::build_logout(std::span<std::byte>{small}, /*seq=*/3, "SENDER", "TARGET",
+                                     "explanatory text that pushes past the 32-byte ceiling",
+                                     "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildHeartbeatBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
-    auto r = fixpp::session::build_heartbeat(
-        std::span<std::byte>{tiny}, /*seq=*/4, "SENDER", "TARGET", {},
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_heartbeat(std::span<std::byte>{tiny}, /*seq=*/4, "SENDER",
+                                             "TARGET", {}, "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -403,26 +393,24 @@ TEST(AdminMessagesBufferGuard, BuildHeartbeatWithTestReqIDBufferTooSmallReturnsE
     std::array<std::byte, 32> small{};
     auto r = fixpp::session::build_heartbeat(
         std::span<std::byte>{small}, /*seq=*/5, "SENDER", "TARGET",
-        std::string_view{"TR-LONG-TEST-REQ-ID-PUSHES-PAST-32"},
-        "FIX.4.2", "20240101-00:00:00.000");
+        std::string_view{"TR-LONG-TEST-REQ-ID-PUSHES-PAST-32"}, "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildTestRequestBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
-    auto r = fixpp::session::build_test_request(
-        std::span<std::byte>{tiny}, /*seq=*/6, "SENDER", "TARGET", "TR-1",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r =
+        fixpp::session::build_test_request(std::span<std::byte>{tiny}, /*seq=*/6, "SENDER",
+                                           "TARGET", "TR-1", "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
 TEST(AdminMessagesBufferGuard, BuildRejectBufferTooSmallReturnsError) {
     std::array<std::byte, 16> tiny{};
-    auto r = fixpp::session::build_reject(
-        std::span<std::byte>{tiny}, /*seq=*/7, "SENDER", "TARGET",
-        /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
-        /*ref_msg_type=*/"D", /*reason=*/3,
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_reject(std::span<std::byte>{tiny}, /*seq=*/7, "SENDER", "TARGET",
+                                          /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
+                                          /*ref_msg_type=*/"D", /*reason=*/3, "FIX.4.2",
+                                          "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -438,11 +426,10 @@ class BuildRejectAllReasons : public ::testing::TestWithParam<int> {};
 TEST_P(BuildRejectAllReasons, ProducesValidRejectForReason) {
     const int reason = GetParam();
     std::array<std::byte, 512> buf{};
-    auto r = fixpp::session::build_reject(
-        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW",
-        /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
-        /*ref_msg_type=*/"D", reason,
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_reject(std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW",
+                                          /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/371,
+                                          /*ref_msg_type=*/"D", reason, "FIX.4.2",
+                                          "20240101-00:00:00.000");
     ASSERT_TRUE(r.has_value()) << "build_reject must succeed for reason=" << reason;
 
     // SessionRejectReason(373) carries the requested reason in ASCII.
@@ -450,8 +437,7 @@ TEST_P(BuildRejectAllReasons, ProducesValidRejectForReason) {
     EXPECT_EQ(extract_field(frame, 373), std::to_string(reason));
 }
 
-INSTANTIATE_TEST_SUITE_P(SessionRejectReasonFanOut,
-                         BuildRejectAllReasons,
+INSTANTIATE_TEST_SUITE_P(SessionRejectReasonFanOut, BuildRejectAllReasons,
                          ::testing::Values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
 
 // ── interpret_logon: malformed input arms ───────────────────────────────────
@@ -476,8 +462,8 @@ TEST(AdminMessagesInterpret, MalformedTagDigitReturnsError) {
     push("49=SENDER");
     bad.push_back(SOH);
 
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{bad}, "TARGET", "SENDER", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{bad}, "TARGET", "SENDER",
+                                             "FIX.4.4");
     EXPECT_FALSE(r.has_value());
 }
 
@@ -488,36 +474,49 @@ TEST(AdminMessagesInterpret, NonLogonMsgTypeRejectsAsInvalidLogon) {
     auto push = [&](std::string_view s) {
         for (char c : s) frame.push_back(static_cast<std::byte>(c));
     };
-    push("8=FIX.4.4");                frame.push_back(SOH);
-    push("35=0");                     frame.push_back(SOH);  // Heartbeat, not Logon
-    push("49=SENDER");                frame.push_back(SOH);
-    push("56=TARGET");                frame.push_back(SOH);
-    push("108=30");                   frame.push_back(SOH);
+    push("8=FIX.4.4");
+    frame.push_back(SOH);
+    push("35=0");
+    frame.push_back(SOH);  // Heartbeat, not Logon
+    push("49=SENDER");
+    frame.push_back(SOH);
+    push("56=TARGET");
+    frame.push_back(SOH);
+    push("108=30");
+    frame.push_back(SOH);
 
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     EXPECT_FALSE(r.has_value());
 }
 
 // Helper used by the per-validation-arm tests below.
 namespace {
-std::vector<std::byte> build_raw_logon(std::string_view begin,
-                                       std::string_view sender,
-                                       std::string_view target,
-                                       int heartbt_int,
+std::vector<std::byte> build_raw_logon(std::string_view begin, std::string_view sender,
+                                       std::string_view target, int heartbt_int,
                                        bool include_108 = true) {
     const std::byte SOH{0x01};
     std::vector<std::byte> frame;
     auto push = [&](std::string_view s) {
         for (char c : s) frame.push_back(static_cast<std::byte>(c));
     };
-    push("8="); push(begin); frame.push_back(SOH);
-    push("35=A"); frame.push_back(SOH);
-    push("34=1"); frame.push_back(SOH);
-    push("49="); push(sender); frame.push_back(SOH);
-    push("52=20200101-00:00:00.000"); frame.push_back(SOH);
-    push("56="); push(target); frame.push_back(SOH);
-    push("98=0"); frame.push_back(SOH);
+    push("8=");
+    push(begin);
+    frame.push_back(SOH);
+    push("35=A");
+    frame.push_back(SOH);
+    push("34=1");
+    frame.push_back(SOH);
+    push("49=");
+    push(sender);
+    frame.push_back(SOH);
+    push("52=20200101-00:00:00.000");
+    frame.push_back(SOH);
+    push("56=");
+    push(target);
+    frame.push_back(SOH);
+    push("98=0");
+    frame.push_back(SOH);
     if (include_108) {
         push("108=");
         char nbuf[12];
@@ -531,24 +530,24 @@ std::vector<std::byte> build_raw_logon(std::string_view begin,
 
 TEST(AdminMessagesInterpret, BeginStringMismatchReturnsError) {
     auto frame = build_raw_logon("FIX.4.2", "SENDER", "TARGET", 30);
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_begin_string_unsupported);
 }
 
 TEST(AdminMessagesInterpret, SenderCompIdMismatchReturnsError) {
     auto frame = build_raw_logon("FIX.4.4", "WRONG_SENDER", "TARGET", 30);
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_compid_mismatch);
 }
 
 TEST(AdminMessagesInterpret, TargetCompIdMismatchReturnsError) {
     auto frame = build_raw_logon("FIX.4.4", "SENDER", "WRONG_TARGET", 30);
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_compid_mismatch);
 }
@@ -556,8 +555,8 @@ TEST(AdminMessagesInterpret, TargetCompIdMismatchReturnsError) {
 TEST(AdminMessagesInterpret, MissingHeartBtIntReturnsInvalidLogon) {
     // include_108=false omits the 108= field entirely.
     auto frame = build_raw_logon("FIX.4.4", "SENDER", "TARGET", 0, /*include_108=*/false);
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
 }
@@ -569,17 +568,25 @@ TEST(AdminMessagesInterpret, NonNumericHeartBtIntReturnsInvalidLogon) {
     auto push = [&](std::string_view s) {
         for (char c : s) frame.push_back(static_cast<std::byte>(c));
     };
-    push("8=FIX.4.4");      frame.push_back(SOH);
-    push("35=A");           frame.push_back(SOH);
-    push("34=1");           frame.push_back(SOH);
-    push("49=SENDER");      frame.push_back(SOH);
-    push("52=20200101-00:00:00.000"); frame.push_back(SOH);
-    push("56=TARGET");      frame.push_back(SOH);
-    push("98=0");           frame.push_back(SOH);
-    push("108=XYZ");        frame.push_back(SOH);
+    push("8=FIX.4.4");
+    frame.push_back(SOH);
+    push("35=A");
+    frame.push_back(SOH);
+    push("34=1");
+    frame.push_back(SOH);
+    push("49=SENDER");
+    frame.push_back(SOH);
+    push("52=20200101-00:00:00.000");
+    frame.push_back(SOH);
+    push("56=TARGET");
+    frame.push_back(SOH);
+    push("98=0");
+    frame.push_back(SOH);
+    push("108=XYZ");
+    frame.push_back(SOH);
 
-    auto r = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame}, "SENDER", "TARGET", "FIX.4.4");
+    auto r = fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "SENDER", "TARGET",
+                                             "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
 }
@@ -597,59 +604,50 @@ class BuildLogonCalibratedBufferSizes : public ::testing::TestWithParam<std::siz
 TEST_P(BuildLogonCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
-    auto r = fixpp::session::build_logon(
-        std::span<std::byte>{buf}, /*seq=*/1, "SENDER", "TARGET", "FIX.4.4", 30,
-        "20240101-00:00:00.000");
-    EXPECT_FALSE(r.has_value())
-        << "build_logon with " << sz << "-byte buffer must fail";
+    auto r = fixpp::session::build_logon(std::span<std::byte>{buf}, /*seq=*/1, "SENDER", "TARGET",
+                                         "FIX.4.4", 30, "20240101-00:00:00.000");
+    EXPECT_FALSE(r.has_value()) << "build_logon with " << sz << "-byte buffer must fail";
 }
 
 // Sweep buffer sizes from too-small (1 byte) up through partial-success ranges
 // to just-below the minimum (~70 bytes). Each tier hits a different writer-
 // internal append failure arm.
-INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
-                         BuildLogonCalibratedBufferSizes,
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep, BuildLogonCalibratedBufferSizes,
                          ::testing::Values(1, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72));
 
 class BuildLogoutCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
 TEST_P(BuildLogoutCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
-    auto r = fixpp::session::build_logout(
-        std::span<std::byte>{buf}, /*seq=*/2, "SENDER", "TARGET", "explanatory",
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_logout(std::span<std::byte>{buf}, /*seq=*/2, "SENDER", "TARGET",
+                                          "explanatory", "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
-INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
-                         BuildLogoutCalibratedBufferSizes,
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep, BuildLogoutCalibratedBufferSizes,
                          ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
 
 class BuildHeartbeatCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
 TEST_P(BuildHeartbeatCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
-    auto r = fixpp::session::build_heartbeat(
-        std::span<std::byte>{buf}, /*seq=*/3, "SENDER", "TARGET",
-        std::string_view{"TR-LONG-TEST-REQ-ID"},
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r = fixpp::session::build_heartbeat(std::span<std::byte>{buf}, /*seq=*/3, "SENDER",
+                                             "TARGET", std::string_view{"TR-LONG-TEST-REQ-ID"},
+                                             "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
-INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
-                         BuildHeartbeatCalibratedBufferSizes,
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep, BuildHeartbeatCalibratedBufferSizes,
                          ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
 
 class BuildRejectCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};
 TEST_P(BuildRejectCalibratedBufferSizes, AllSizesFailGracefully) {
     const std::size_t sz = GetParam();
     std::vector<std::byte> buf(sz);
-    auto r = fixpp::session::build_reject(
-        std::span<std::byte>{buf}, /*seq=*/4, "SENDER", "TARGET",
-        seqnum_t{1}, 371, "D", 3,
-        "FIX.4.2", "20240101-00:00:00.000");
+    auto r =
+        fixpp::session::build_reject(std::span<std::byte>{buf}, /*seq=*/4, "SENDER", "TARGET",
+                                     seqnum_t{1}, 371, "D", 3, "FIX.4.2", "20240101-00:00:00.000");
     EXPECT_FALSE(r.has_value());
 }
-INSTANTIATE_TEST_SUITE_P(BufferSizeSweep,
-                         BuildRejectCalibratedBufferSizes,
+INSTANTIATE_TEST_SUITE_P(BufferSizeSweep, BuildRejectCalibratedBufferSizes,
                          ::testing::Values(1, 8, 16, 24, 32, 40, 48, 56, 64));
 
 }  // namespace fixpp::session::test

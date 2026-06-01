@@ -21,14 +21,7 @@
 //   but more importantly the stub returns SUCCESS when it should return a cancel
 //   error. EXPECT_FALSE(result.has_value()) → FAILS RED (stub returns success).
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <span>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
@@ -37,13 +30,13 @@
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
-#include <asio/redirect_error.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/reconnect_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
@@ -53,6 +46,11 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <span>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -66,27 +64,19 @@ namespace {
 // ─────────────────────────────────────────────────────────────────────────────
 class SlowTlsTransport final : public fixpp::transport::TlsTransport {
 public:
-    SlowTlsTransport(asio::any_io_executor exec,
-                     std::chrono::milliseconds handshake_latency,
+    SlowTlsTransport(asio::any_io_executor exec, std::chrono::milliseconds handshake_latency,
                      std::atomic<int>& live_count)
-        : exec_{std::move(exec)}
-        , latency_{handshake_latency}
-        , live_count_{live_count}
-    {
+        : exec_{std::move(exec)}, latency_{handshake_latency}, live_count_{live_count} {
         ++live_count_;
     }
 
-    ~SlowTlsTransport() override {
-        --live_count_;
-    }
+    ~SlowTlsTransport() override { --live_count_; }
 
     // ── Transport overrides ─────────────────────────────────────────────────
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
-    async_connect(fixpp::transport::Endpoint const& /*ep*/) override
-    {
-        co_await asio::this_coro::reset_cancellation_state(
-            asio::enable_total_cancellation());
+    async_connect(fixpp::transport::Endpoint const& /*ep*/) override {
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
         co_await asio::post(exec_, asio::use_awaitable);
         if (auto cs = co_await asio::this_coro::cancellation_state;
             cs.cancelled() != asio::cancellation_type::none) {
@@ -94,39 +84,31 @@ public:
         }
         fixpp::transport::ConnectInfo info;
         info.remote = fixpp::transport::Endpoint{"127.0.0.1", 0};
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override
-    {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override
-    {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         co_return buf.size();
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override {
-        return {};
-    }
+    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
 
-    [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
-        return {};
-    }
+    [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override { return {}; }
 
     // ── TlsTransport override ───────────────────────────────────────────────
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::handshake_result>>
-    async_handshake(fixpp::tls::SslCtxConfig const& cfg [[clang::lifetimebound]]) override
-    {
+    async_handshake(fixpp::tls::SslCtxConfig const& cfg [[clang::lifetimebound]]) override {
         using E = fixpp::core::error;
-        co_await asio::this_coro::reset_cancellation_state(
-            asio::enable_total_cancellation());
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
         if (auto cs = co_await asio::this_coro::cancellation_state;
             cs.cancelled() != asio::cancellation_type::none) {
@@ -137,8 +119,7 @@ public:
         asio::steady_timer timer{exec_};
         timer.expires_after(latency_);
         asio::error_code wait_ec;
-        co_await timer.async_wait(
-            asio::redirect_error(asio::use_awaitable, wait_ec));
+        co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
 
         if (wait_ec == asio::error::operation_aborted) {
             co_return std::unexpected{E::transport_handshake_cancelled};
@@ -153,16 +134,16 @@ public:
         // Successful handshake (only reached if not cancelled).
         std::pmr::memory_resource* mr = cfg.mr ? cfg.mr : std::pmr::get_default_resource();
         co_return fixpp::transport::handshake_result{
-            .peer_id           = fixpp::tls::peer_identity{},
-            .captured_pinset   = nullptr,
+            .peer_id = fixpp::tls::peer_identity{},
+            .captured_pinset = nullptr,
             .negotiated_cipher = std::pmr::string{"TLS_AES_128_GCM_SHA256", mr},
         };
     }
 
 private:
-    asio::any_io_executor     exec_;
+    asio::any_io_executor exec_;
     std::chrono::milliseconds latency_;
-    std::atomic<int>&         live_count_;
+    std::atomic<int>& live_count_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,26 +157,21 @@ public:
     std::atomic<int> make_call_count{0};
     std::atomic<int> live_transport_count{0};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         ++make_call_count;
-        return std::make_unique<SlowTlsTransport>(
-            std::move(exec), handshake_latency_, live_transport_count);
+        return std::make_unique<SlowTlsTransport>(std::move(exec), handshake_latency_,
+                                                  live_transport_count);
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(
-        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override
-    {
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
         return nullptr;
     }
 
@@ -213,8 +189,8 @@ protected:
     static fixpp::transport::ReconnectPolicy make_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
-        policy.schedule = std::pmr::vector<std::chrono::milliseconds>{
-            std::pmr::get_default_resource()};
+        policy.schedule =
+            std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
         policy.schedule.push_back(0ms);
         policy.jitter = 0.0;
         return policy;
@@ -232,18 +208,13 @@ protected:
 TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport) {
     auto factory = std::make_shared<SlowHandshakeFactory>(50ms);
 
-    fixpp::session::ReconnectFsm fsm(
-        factory.get(),
-        make_policy(100),
-        std::chrono::seconds{30},
-        2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100), std::chrono::seconds{30},
+                                     2000ms);
 
     asio::cancellation_signal cancel_sig;
 
-    auto fut = asio::co_spawn(
-        ioc,
-        fsm.drive_reconnect_attempt(),
-        asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
+    auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(),
+                              asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
 
     // Fire total-cancel after 20ms (handshake latency is 50ms — should be in flight).
     asio::steady_timer timer{ioc};
@@ -284,18 +255,14 @@ TEST_F(ReconnectCancelMidHandshakeTest, RepeatedCancelsLeaveNoLeaksAcrossNAttemp
     auto factory = std::make_shared<SlowHandshakeFactory>(30ms);
 
     for (int i = 0; i < kAttempts; ++i) {
-        fixpp::session::ReconnectFsm fsm(
-            factory.get(),
-            make_policy(100),
-            std::chrono::seconds{30},
-            2000ms);
+        fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100), std::chrono::seconds{30},
+                                         2000ms);
 
         asio::cancellation_signal cancel_sig;
 
-        auto fut = asio::co_spawn(
-            ioc,
-            fsm.drive_reconnect_attempt(),
-            asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
+        auto fut =
+            asio::co_spawn(ioc, fsm.drive_reconnect_attempt(),
+                           asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
 
         asio::steady_timer timer{ioc};
         timer.expires_after(10ms);

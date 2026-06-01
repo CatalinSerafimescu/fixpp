@@ -27,13 +27,7 @@
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/use_awaitable.hpp>
-
 #include <chrono>
-#include <memory>
-#include <optional>
-#include <stdexcept>
-#include <string>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
@@ -41,6 +35,10 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
 
 #include "transport/asio_listener.hpp"
 
@@ -54,40 +52,35 @@ namespace fixpp::transport::test {
 // ─────────────────────────────────────────────────────────────────────────────
 class LoopbackTlsFixture {
 public:
-    explicit LoopbackTlsFixture(std::string fixture_dir,
-                                 asio::any_io_executor exec)
-        : fixture_dir_{std::move(fixture_dir)}
-    {
+    explicit LoopbackTlsFixture(std::string fixture_dir, asio::any_io_executor exec)
+        : fixture_dir_{std::move(fixture_dir)} {
         tls::file_cert_source::Config cs_cfg;
-        cs_cfg.leaf_path        = fixture_dir_ + "/leaf_rsa2048.pem";
+        cs_cfg.leaf_path = fixture_dir_ + "/leaf_rsa2048.pem";
         cs_cfg.private_key_path = fixture_dir_ + "/leaf_rsa2048.key";
-        cs_cfg.ca_bundle_path   = fixture_dir_ + "/ca.pem";
+        cs_cfg.ca_bundle_path = fixture_dir_ + "/ca.pem";
 
-        auto cs_result = tls::file_cert_source::make_file_cert_source(
-            cs_cfg, std::pmr::new_delete_resource());
+        auto cs_result =
+            tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
         if (!cs_result.has_value()) {
-            throw std::runtime_error(
-                "LoopbackTlsFixture: failed to build file_cert_source");
+            throw std::runtime_error("LoopbackTlsFixture: failed to build file_cert_source");
         }
 
         ssl_cfg_.profile = tls::SecurityProfile::mtls_ca;
-        ssl_cfg_.cs      = std::move(*cs_result);
-        ssl_cfg_.clock   = nullptr;  // skip expiry — fixture certs may be stale
-        ssl_cfg_.caps    = tls::CertSourceCaps{};
+        ssl_cfg_.cs = std::move(*cs_result);
+        ssl_cfg_.clock = nullptr;  // skip expiry — fixture certs may be stale
+        ssl_cfg_.caps = tls::CertSourceCaps{};
 
         // Client factory (FR-026: SSL_CTX built ONCE here; cheap per-attempt mint).
-        auto factory_result = make_asio_tls_transport_factory(
-            Transport::Config{}, ssl_cfg_);
+        auto factory_result = make_asio_tls_transport_factory(Transport::Config{}, ssl_cfg_);
         if (!factory_result.has_value()) {
-            throw std::runtime_error(
-                "LoopbackTlsFixture: make_asio_tls_transport_factory failed");
+            throw std::runtime_error("LoopbackTlsFixture: make_asio_tls_transport_factory failed");
         }
         client_factory_ = std::move(*factory_result);
 
         // Listener — binds to 127.0.0.1:0 (OS-assigned port).
         asio_listener::Config listener_cfg;
         listener_cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, /*backlog=*/16};
-        listener_cfg.ssl_cfg       = ssl_cfg_;
+        listener_cfg.ssl_cfg = ssl_cfg_;
         listener_ = std::make_unique<asio_listener>(exec, listener_cfg);
         bound_port_ = listener_->bound_endpoint().port;
     }
@@ -102,9 +95,7 @@ public:
     std::uint16_t bound_port() const noexcept { return bound_port_; }
 
     // Endpoint clients should connect to.
-    Endpoint server_endpoint() const noexcept {
-        return Endpoint{"127.0.0.1", bound_port_, 0};
-    }
+    Endpoint server_endpoint() const noexcept { return Endpoint{"127.0.0.1", bound_port_, 0}; }
 
     // Mint a fresh client Transport using the cached SSL_CTX (FR-026).
     // The returned Transport is in state fresh; caller drives async_connect.
@@ -130,11 +121,11 @@ public:
     }
 
 private:
-    std::string                       fixture_dir_;
-    std::uint16_t                     bound_port_{0};
-    tls::SslCtxConfig                 ssl_cfg_;
+    std::string fixture_dir_;
+    std::uint16_t bound_port_{0};
+    tls::SslCtxConfig ssl_cfg_;
     std::unique_ptr<TransportFactory> client_factory_;
-    std::unique_ptr<asio_listener>    listener_;
+    std::unique_ptr<asio_listener> listener_;
 };
 
 }  // namespace fixpp::transport::test

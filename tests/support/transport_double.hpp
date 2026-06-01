@@ -43,10 +43,10 @@ class TransportDouble {
 public:
     TransportDouble() = default;
 
-    TransportDouble(const TransportDouble&)            = delete;
+    TransportDouble(const TransportDouble&) = delete;
     TransportDouble& operator=(const TransportDouble&) = delete;
-    TransportDouble(TransportDouble&&)                 = default;
-    TransportDouble& operator=(TransportDouble&&)      = default;
+    TransportDouble(TransportDouble&&) = default;
+    TransportDouble& operator=(TransportDouble&&) = default;
 
     // ── Inbound (test → session) ──────────────────────────────────────────────
 
@@ -65,7 +65,9 @@ public:
     /// The transport double retains ownership; the span is valid until the
     /// next call to pop_inbound().
     [[nodiscard]] std::span<const std::byte> pop_inbound() {
-        if (inbound_.empty()) { return {}; }
+        if (inbound_.empty()) {
+            return {};
+        }
         current_in_ = std::move(inbound_.front());
         inbound_.pop_front();
         return {current_in_.data(), current_in_.size()};
@@ -82,13 +84,9 @@ public:
     }
 
     /// All captured outbound frames in emit order.
-    [[nodiscard]] const std::vector<Frame>& sent_frames() const noexcept {
-        return sent_frames_;
-    }
+    [[nodiscard]] const std::vector<Frame>& sent_frames() const noexcept { return sent_frames_; }
 
-    [[nodiscard]] std::size_t sent_count() const noexcept {
-        return sent_frames_.size();
-    }
+    [[nodiscard]] std::size_t sent_count() const noexcept { return sent_frames_.size(); }
 
     /// Access the Nth sent frame (0-based).
     [[nodiscard]] std::span<const std::byte> sent(std::size_t n) const {
@@ -105,9 +103,9 @@ public:
     }
 
 private:
-    std::deque<Frame>  inbound_;     // pending inbound frames
-    Frame              current_in_;  // backing store for pop_inbound() span
-    std::vector<Frame> sent_frames_; // all captured outbound frames
+    std::deque<Frame> inbound_;       // pending inbound frames
+    Frame current_in_;                // backing store for pop_inbound() span
+    std::vector<Frame> sent_frames_;  // all captured outbound frames
 };
 
 }  // namespace fixpp::session::test

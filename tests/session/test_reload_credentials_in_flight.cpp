@@ -43,23 +43,16 @@
 //   in session.hpp → compile error before any assertion is reached.
 //   Cell 3 PASSES immediately (pure TransportFactory unit test, no Session call).
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
+#include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -68,6 +61,11 @@
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -110,18 +108,14 @@ public:
     std::atomic<int> reload_call_count{0};
     std::shared_ptr<fixpp::tls::cert_source> last_reloaded_source{};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor /*exec*/,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor /*exec*/, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         return std::unexpected{fixpp::core::error::transport_factory_failed};
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(
-        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override {
         if (!new_source) {
             return std::unexpected{fixpp::core::error::session_invalid_argument};
         }
@@ -135,8 +129,8 @@ public:
     // abstract TransportFactory base; this override was already present.
     // Added override keyword. Returns current source BY VALUE (strong-ref).
     // [[feedback_weak_ptr_cache_needs_owning_context]]
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override {
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
         return cert_source_slot_.load(std::memory_order_acquire);
     }
 };
@@ -146,15 +140,15 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 class ReloadCredentialsTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -166,17 +160,16 @@ protected:
     }
 
     fixpp::session::SessionConfig make_cfg(
-        std::shared_ptr<fixpp::transport::TransportFactory> factory)
-    {
+        std::shared_ptr<fixpp::transport::TransportFactory> factory) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id      = "SELL";
-        cfg.target_comp_id      = "BUY";
-        cfg.begin_string        = "FIX.4.4";
-        cfg.heartbeat_interval  = 30s;
-        cfg.security_profile    = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary          = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override   = ioc.get_executor();
-        cfg.role                = fixpp::session::session_role::initiator;
+        cfg.sender_comp_id = "SELL";
+        cfg.target_comp_id = "BUY";
+        cfg.begin_string = "FIX.4.4";
+        cfg.heartbeat_interval = 30s;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;
         cfg.transport_factory_override = std::move(factory);
         return cfg;
     }
@@ -242,8 +235,7 @@ TEST_F(ReloadCredentialsTest, ForwarderDelegates_DelegatesToFactory) {
     auto result = sess.reload_credentials(new_source);
 
     // Forwarder returns success. [FR-030]
-    EXPECT_TRUE(result.has_value())
-        << "reload_credentials(valid_source) must succeed per FR-030.";
+    EXPECT_TRUE(result.has_value()) << "reload_credentials(valid_source) must succeed per FR-030.";
 
     // Factory was called exactly once. [FR-030 1:1 forwarding contract]
     EXPECT_EQ(factory->reload_call_count.load(), 1)

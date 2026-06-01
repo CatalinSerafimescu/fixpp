@@ -64,14 +64,6 @@
 
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-#include <string>
-#include <variant>
-
 #include <asio/as_tuple.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_type.hpp>
@@ -83,7 +75,8 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
 #include <fixpp/core/cancellable_dispatch.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -92,6 +85,11 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <string>
+#include <variant>
 
 // Path to the 011-shipped fixture directory (compiled-in via CMake).
 #ifndef FIXPP_TLS_FIXTURE_DIR
@@ -100,8 +98,8 @@
 
 namespace {
 
-using fixpp::core::EngineConfig;
 using fixpp::core::cancellable_dispatch;
+using fixpp::core::EngineConfig;
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::core::make_session_executor;
@@ -128,24 +126,23 @@ static std::string fixture(const char* name) {
 struct SessionFixture {
     static constexpr std::size_t kArenaSize = 128 * 1024;  // 128 KB
 
-    std::array<std::byte, kArenaSize>         arena_buf{};
-    std::pmr::monotonic_buffer_resource       arena_mr{
-        arena_buf.data(), arena_buf.size(), std::pmr::get_default_resource()};
-    asio::io_context                          ioc;
-    EngineConfig                              engine;
-    SessionConfig                             cfg;
-    std::optional<Session>                    sess;
-    std::optional<session_executor>           se;
+    std::array<std::byte, kArenaSize> arena_buf{};
+    std::pmr::monotonic_buffer_resource arena_mr{arena_buf.data(), arena_buf.size(),
+                                                 std::pmr::get_default_resource()};
+    asio::io_context ioc;
+    EngineConfig engine;
+    SessionConfig cfg;
+    std::optional<Session> sess;
+    std::optional<session_executor> se;
 
     void init(threading_mode mode, bool attested = false) {
-        engine.executor               = ioc.get_executor();
+        engine.executor = ioc.get_executor();
         engine.default_session_resource = &arena_mr;
-        cfg.session_arena             = &arena_mr;
-        cfg.mode                      = mode;
+        cfg.session_arena = &arena_mr;
+        cfg.mode = mode;
         cfg.already_serialized_executor = attested;
         sess.emplace(engine, cfg);
-        auto result = make_session_executor(
-            ioc.get_executor(), mode, attested, &(*sess));
+        auto result = make_session_executor(ioc.get_executor(), mode, attested, &(*sess));
         ASSERT_TRUE(result.has_value()) << "make_session_executor failed";
         se = *result;
     }
@@ -166,14 +163,13 @@ struct SessionFixture {
 // — used to deterministically inject cancellation during handler execution (Case 3).
 class DispatchCertSource final : public fixpp::tls::cert_source {
 public:
-    session_executor          exec;
-    asio::cancellation_slot   dispatch_slot;  // fresh slot, not the co_spawn slot
-    std::atomic<bool>         dispatch_reached{false};
-    std::atomic<bool>         dispatch_cancel_fired{false};
-    asio::steady_timer*       gate_ = nullptr;
+    session_executor exec;
+    asio::cancellation_slot dispatch_slot;  // fresh slot, not the co_spawn slot
+    std::atomic<bool> dispatch_reached{false};
+    std::atomic<bool> dispatch_cancel_fired{false};
+    asio::steady_timer* gate_ = nullptr;
 
-    [[nodiscard]] asio::awaitable<expected_t<local_credentials>>
-    load_credentials() override {
+    [[nodiscard]] asio::awaitable<expected_t<local_credentials>> load_credentials() override {
         // RC#F (P2-3): D-17 reset per .specify/2d-threading.md §6.5 recipe step 0.
         // Production file_cert_source::load_credentials begins with this reset;
         // the stub must replicate it so the seam #13 witness exercises the same
@@ -181,42 +177,38 @@ public:
         // Without this reset, co_spawn defaults to terminal-only cancellation
         // per [[feedback_asio_cospawn_total_cancellation_default]], silently
         // filtering cancellation_type::total and making Cases 2-4 non-representative.
-        co_await asio::this_coro::reset_cancellation_state(
-            asio::enable_total_cancellation());
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
         // Step 4: post work via cancellable_dispatch per [2g §6.4].
         // Uses dispatch_slot (a fresh slot independent of co_spawn machinery).
-        auto dispatched = co_await cancellable_dispatch(
-            exec, dispatch_slot,
-            [this]() { dispatch_reached.store(true, std::memory_order_release); });
+        auto dispatched = co_await cancellable_dispatch(exec, dispatch_slot, [this]() {
+            dispatch_reached.store(true, std::memory_order_release);
+        });
 
         if (!dispatched) {
             // Case 2: dispatch_aborted → tls_load_cancelled.
-            co_return expected_t<local_credentials>{
-                std::unexpect, error::tls_load_cancelled};
+            co_return expected_t<local_credentials>{std::unexpect, error::tls_load_cancelled};
         }
 
         // Case 3: cancellation during step 4 (gate timer path).
         if (gate_) {
-            auto [ec] = co_await gate_->async_wait(
-                asio::as_tuple(asio::use_awaitable));
+            auto [ec] = co_await gate_->async_wait(asio::as_tuple(asio::use_awaitable));
             (void)ec;
             dispatch_cancel_fired.store(true, std::memory_order_release);
-            co_return expected_t<local_credentials>{
-                std::unexpect, error::tls_load_cancelled};
+            co_return expected_t<local_credentials>{std::unexpect, error::tls_load_cancelled};
         }
 
         // Case 4: success.
         Certificate leaf{};
         local_credentials creds;
-        creds.leaf   = leaf;
-        creds.chain  = {};
+        creds.leaf = leaf;
+        creds.chain = {};
         creds.signer = software_key_ref{};
         co_return expected_t<local_credentials>{std::move(creds)};
     }
 
-    [[nodiscard]] expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    [[nodiscard]] expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return std::span<const Certificate>{};
     }
 };
@@ -246,9 +238,9 @@ TEST(Seam13Witness, Case1_Strand) {
         << "per_session_strand must produce a strand-wrapped executor";
 
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     std::shared_ptr<fixpp::tls::cert_source> fcs;
     try {
@@ -259,17 +251,14 @@ TEST(Seam13Witness, Case1_Strand) {
 
     // load_credentials() on file_cert_source uses the cached-state fast path —
     // no cancellable_dispatch hop (the §6.4 footnote authorises this).
-    auto fut = asio::co_spawn(
-        f.ioc,
-        fcs->load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(f.ioc, fcs->load_credentials(), asio::use_future);
     f.ioc.run();
     f.ioc.restart();
 
     auto result = fut.get();
-    ASSERT_TRUE(result.has_value())
-        << "cached-state fast path must return valid credentials; "
-           "error: " << static_cast<int>(result.error());
+    ASSERT_TRUE(result.has_value()) << "cached-state fast path must return valid credentials; "
+                                       "error: "
+                                    << static_cast<int>(result.error());
 }
 
 TEST(Seam13Witness, Case1_Direct) {
@@ -283,9 +272,9 @@ TEST(Seam13Witness, Case1_Direct) {
         << "direct_executor must produce an unwrapped (non-strand) executor";
 
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     std::shared_ptr<fixpp::tls::cert_source> fcs;
     try {
@@ -294,17 +283,15 @@ TEST(Seam13Witness, Case1_Direct) {
         GTEST_SKIP() << "TLS fixture not available: " << e.what();
     }
 
-    auto fut = asio::co_spawn(
-        f.ioc,
-        fcs->load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(f.ioc, fcs->load_credentials(), asio::use_future);
     f.ioc.run();
     f.ioc.restart();
 
     auto result = fut.get();
     ASSERT_TRUE(result.has_value())
         << "cached-state fast path must return valid credentials (direct_executor); "
-           "error: " << static_cast<int>(result.error());
+           "error: "
+        << static_cast<int>(result.error());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -328,27 +315,22 @@ TEST(Seam13Witness, Case2_Strand) {
     asio::cancellation_signal dispatch_signal;
 
     DispatchCertSource cs;
-    cs.exec         = *f.se;
+    cs.exec = *f.se;
     cs.dispatch_slot = dispatch_signal.slot();
 
-    auto fut = asio::co_spawn(
-        drive,
-        cs.load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(drive, cs.load_credentials(), asio::use_future);
 
-    drive.poll();                                       // park at cancellable_dispatch hand-off
+    drive.poll();                                          // park at cancellable_dispatch hand-off
     dispatch_signal.emit(asio::cancellation_type::total);  // signal BEFORE pickup
-    f.ioc.poll();                                       // continuation reaps handler
-    drive.poll();                                       // co_spawn completion
+    f.ioc.poll();                                          // continuation reaps handler
+    drive.poll();                                          // co_spawn completion
 
     auto result = fut.get();
 
-    ASSERT_FALSE(result.has_value())
-        << "cancel-before-pickup must produce tls_load_cancelled";
+    ASSERT_FALSE(result.has_value()) << "cancel-before-pickup must produce tls_load_cancelled";
     EXPECT_EQ(result.error(), error::tls_load_cancelled);
     // The handler was REAPED — dispatch_reached must be false.
-    EXPECT_FALSE(cs.dispatch_reached.load())
-        << "handler must NOT run when reaped before pickup";
+    EXPECT_FALSE(cs.dispatch_reached.load()) << "handler must NOT run when reaped before pickup";
 }
 
 TEST(Seam13Witness, Case2_Direct) {
@@ -367,21 +349,18 @@ TEST(Seam13Witness, Case2_Direct) {
     asio::cancellation_signal dispatch_signal;
 
     DispatchCertSource cs;
-    cs.exec         = *f.se;
+    cs.exec = *f.se;
     cs.dispatch_slot = dispatch_signal.slot();
 
     // Co_spawn load_credentials() on drive (external caller thread); the
     // cancellable_dispatch inside posts to cs.exec (= f.ioc), creating the
     // reap window between drive.poll() suspension and f.ioc.poll() execution.
-    auto fut = asio::co_spawn(
-        drive,
-        cs.load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(drive, cs.load_credentials(), asio::use_future);
 
-    drive.poll();                                       // park at cancellable_dispatch hand-off
+    drive.poll();                                          // park at cancellable_dispatch hand-off
     dispatch_signal.emit(asio::cancellation_type::total);  // signal BEFORE pickup
-    f.ioc.poll();                                       // continuation reaps handler
-    drive.poll();                                       // co_spawn completion
+    f.ioc.poll();                                          // continuation reaps handler
+    drive.poll();                                          // co_spawn completion
 
     auto result = fut.get();
 
@@ -419,23 +398,17 @@ TEST(Seam13Witness, Case3_Strand) {
     gate.expires_after(std::chrono::hours{1});
     cs.gate_ = &gate;
 
-    auto fut = asio::co_spawn(
-        f.ioc,
-        cs.load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(f.ioc, cs.load_credentials(), asio::use_future);
 
     // Post a driver: after the coroutine reaches the gate wait, cancel the gate.
-    asio::post(f.ioc, [&]() {
-        gate.cancel();
-    });
+    asio::post(f.ioc, [&]() { gate.cancel(); });
 
     f.ioc.run();
     f.ioc.restart();
 
     auto result = fut.get();
 
-    ASSERT_FALSE(result.has_value())
-        << "in-flight cancel must produce tls_load_cancelled";
+    ASSERT_FALSE(result.has_value()) << "in-flight cancel must produce tls_load_cancelled";
     EXPECT_EQ(result.error(), error::tls_load_cancelled);
     EXPECT_TRUE(cs.dispatch_reached.load())
         << "dispatch handler must have run before in-flight cancel";
@@ -460,16 +433,11 @@ TEST(Seam13Witness, Case3_Direct) {
     auto fut = asio::co_spawn(
         f.ioc,
         [&cs]() -> asio::awaitable<expected_t<local_credentials>> {
-            co_return co_await asio::co_spawn(
-                cs.exec,
-                cs.load_credentials(),
-                asio::use_awaitable);
+            co_return co_await asio::co_spawn(cs.exec, cs.load_credentials(), asio::use_awaitable);
         },
         asio::use_future);
 
-    asio::post(f.ioc, [&]() {
-        gate.cancel();
-    });
+    asio::post(f.ioc, [&]() { gate.cancel(); });
 
     f.ioc.run();
     f.ioc.restart();
@@ -500,27 +468,21 @@ TEST(Seam13Witness, Case4_Strand) {
     asio::cancellation_signal dispatch_signal;  // never emitted
 
     DispatchCertSource cs;
-    cs.exec         = *f.se;
+    cs.exec = *f.se;
     cs.dispatch_slot = dispatch_signal.slot();
 
-    auto fut = asio::co_spawn(
-        drive,
-        cs.load_credentials(),
-        asio::use_future);
+    auto fut = asio::co_spawn(drive, cs.load_credentials(), asio::use_future);
 
     // Run both iocs: drive runs the coroutine, f.ioc runs the dispatch.
-    drive.poll();   // park at cancellable_dispatch hand-off
-    f.ioc.poll();   // dispatch handler runs
-    drive.poll();   // coroutine resumes and completes
+    drive.poll();  // park at cancellable_dispatch hand-off
+    f.ioc.poll();  // dispatch handler runs
+    drive.poll();  // coroutine resumes and completes
 
     auto result = fut.get();
 
-    ASSERT_TRUE(result.has_value())
-        << "happy path (strand) must return valid credentials";
-    EXPECT_TRUE(cs.dispatch_reached.load())
-        << "dispatch handler must have run on happy path";
-    EXPECT_FALSE(cs.dispatch_cancel_fired.load())
-        << "no cancel probe must fire on happy path";
+    ASSERT_TRUE(result.has_value()) << "happy path (strand) must return valid credentials";
+    EXPECT_TRUE(cs.dispatch_reached.load()) << "dispatch handler must have run on happy path";
+    EXPECT_FALSE(cs.dispatch_cancel_fired.load()) << "no cancel probe must fire on happy path";
 }
 
 TEST(Seam13Witness, Case4_Direct) {
@@ -530,17 +492,14 @@ TEST(Seam13Witness, Case4_Direct) {
     asio::cancellation_signal dispatch_signal;  // never emitted
 
     DispatchCertSource cs;
-    cs.exec         = *f.se;
+    cs.exec = *f.se;
     cs.dispatch_slot = dispatch_signal.slot();
 
     // nested co_spawn for direct_executor per D-18.
     auto fut = asio::co_spawn(
         f.ioc,
         [&cs]() -> asio::awaitable<expected_t<local_credentials>> {
-            co_return co_await asio::co_spawn(
-                cs.exec,
-                cs.load_credentials(),
-                asio::use_awaitable);
+            co_return co_await asio::co_spawn(cs.exec, cs.load_credentials(), asio::use_awaitable);
         },
         asio::use_future);
 
@@ -549,8 +508,7 @@ TEST(Seam13Witness, Case4_Direct) {
 
     auto result = fut.get();
 
-    ASSERT_TRUE(result.has_value())
-        << "happy path (direct_executor) must return valid credentials";
+    ASSERT_TRUE(result.has_value()) << "happy path (direct_executor) must return valid credentials";
     EXPECT_TRUE(cs.dispatch_reached.load())
         << "dispatch handler must have run on happy path (direct_executor)";
     EXPECT_FALSE(cs.dispatch_cancel_fired.load())

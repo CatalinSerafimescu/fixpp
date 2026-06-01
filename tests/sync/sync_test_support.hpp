@@ -16,8 +16,7 @@ namespace fixpp::sync::test {
 // inline-resume recursion depth.
 inline asio::awaitable<void> yield_n(int n) {
     auto ex = co_await asio::this_coro::executor;
-    for (int i = 0; i < n; ++i)
-        co_await asio::post(ex, asio::use_awaitable);
+    for (int i = 0; i < n; ++i) co_await asio::post(ex, asio::use_awaitable);
 }
 
 }  // namespace fixpp::sync::test

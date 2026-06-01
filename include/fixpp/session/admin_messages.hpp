@@ -61,8 +61,8 @@ namespace fixpp::session {
 // sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view text,
-    std::string_view begin_string, std::string_view sending_time) noexcept;
+    std::string_view target_comp_id, std::string_view text, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
 
 // ── Heartbeat (35=0) ─────────────────────────────────────────────────────────
 // FR-006, [FIX-SL §4.5.1]. S-003.
@@ -72,8 +72,8 @@ namespace fixpp::session {
 // sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id,
-    std::string_view begin_string, std::string_view sending_time) noexcept;
+    std::string_view target_comp_id, std::string_view test_req_id, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
 
 // ── TestRequest (35=1) ───────────────────────────────────────────────────────
 // FR-006, [FIX-SL §4.5.5]. S-004.
@@ -83,8 +83,8 @@ namespace fixpp::session {
 // sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id,
-    std::string_view begin_string, std::string_view sending_time) noexcept;
+    std::string_view target_comp_id, std::string_view test_req_id, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
 
 // ── Reject (35=3) ────────────────────────────────────────────────────────────
 // FR-007, [FIX-SL §4.5.4]. S-007.
@@ -97,8 +97,8 @@ namespace fixpp::session {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
-    std::string_view ref_msg_type, int session_reject_reason,
-    std::string_view begin_string, std::string_view sending_time) noexcept;
+    std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
 
 // ── ResendRequest (35=2) ─────────────────────────────────────────────────────
 // FR-009, [FIX-SL §4.3.2]. 013 recovery sub-protocol.

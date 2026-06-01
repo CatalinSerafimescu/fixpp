@@ -17,23 +17,14 @@
 //   [7..12]), emits the pre-horizon SequenceReset-GapFill{NewSeqNo=7}, then
 //   replays [7..12] with PossDupFlag(43)=Y + OrigSendingTime(122).
 
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <map>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -45,6 +36,13 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <map>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -57,13 +55,10 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra = {}) {
+static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -89,21 +84,18 @@ static std::vector<std::byte> make_fix_frame(
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          int hbt = 30) {
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_resend_request(std::string_view bs,
-                                                   std::uint32_t seq,
-                                                   std::string_view s,
-                                                   std::string_view t,
-                                                   std::uint32_t begin_seqno,
-                                                   std::uint32_t end_seqno) {
+static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                                  std::string_view s, std::string_view t,
+                                                  std::uint32_t begin_seqno,
+                                                  std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -138,15 +130,15 @@ public:
         }
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    store(seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
-          direction_t /*dir*/) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
+        direction_t /*dir*/) noexcept override {
         co_return fixpp::core::expected_t<void>{};  // accept (incl. Logon-ack)
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
-             retrieve_visitor& visitor) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        retrieve_visitor& visitor) noexcept override {
         if (dir != direction_t::outbound) {
             co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
         }
@@ -168,29 +160,28 @@ public:
         co_return fixpp::core::expected_t<void>{};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>>
-    next_seqnum(direction_t dir, bool /*increment*/) noexcept override {
-        co_return fixpp::core::expected_t<seqnum_t>{
-            dir == direction_t::outbound ? (kLast + 1U) : seqnum_t{1}};
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool /*increment*/) noexcept override {
+        co_return fixpp::core::expected_t<seqnum_t>{dir == direction_t::outbound ? (kLast + 1U)
+                                                                                 : seqnum_t{1}};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    reset() noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
 private:
     static constexpr std::uint32_t kHorizon = 7;
-    static constexpr std::uint32_t kLast    = 12;
+    static constexpr std::uint32_t kLast = 12;
     std::map<seqnum_t, std::vector<std::byte>> frames_;
 };
 
 class HorizonStoreFactory final : public MessageStoreFactory {
 public:
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
-    make(std::string_view /*sender*/, std::string_view /*target*/,
-         std::pmr::memory_resource* /*mr*/, std::size_t /*max_store_memory_bytes*/,
-         asio::any_io_executor /*file_io_executor*/) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
         return std::unique_ptr<MessageStore>(new HorizonStore());
     }
 };
@@ -222,31 +213,31 @@ static bool is_replay_with_poss_dup(std::span<const std::byte> frame, std::uint3
 
 class RecoveryStoreHorizonTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
-    OutboundCapture                          capture;
+    fixpp::core::EngineConfig engine{};
+    OutboundCapture capture;
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
-        cfg.role              = fixpp::session::session_role::acceptor;
-        cfg.store_factory     = std::make_shared<HorizonStoreFactory>();
+        cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
+        cfg.role = fixpp::session::session_role::acceptor;
+        cfg.store_factory = std::make_shared<HorizonStoreFactory>();
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -329,9 +320,8 @@ TEST_F(RecoveryStoreHorizonTest, AvailableRangeReplaysCarryPossDupFlag) {
             break;
         }
     }
-    EXPECT_TRUE(found_replay)
-        << "Expected at least one replay frame with PossDupFlag(43)=Y for "
-        << "available seq 7 or 8. RED: stub emits nothing — FAILS RED.";
+    EXPECT_TRUE(found_replay) << "Expected at least one replay frame with PossDupFlag(43)=Y for "
+                              << "available seq 7 or 8. RED: stub emits nothing — FAILS RED.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -351,8 +341,7 @@ TEST_F(RecoveryStoreHorizonTest, ReplayFramesCarryOrigSendingTime) {
     bool found_orig_sending_time = false;
     for (const auto& frame : capture.frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("43=Y\x01") != std::string::npos &&
-            wire.find("122=") != std::string::npos) {
+        if (wire.find("43=Y\x01") != std::string::npos && wire.find("122=") != std::string::npos) {
             found_orig_sending_time = true;
             break;
         }
@@ -372,17 +361,18 @@ class LargeFrameStore final : public MessageStore {
 public:
     explicit LargeFrameStore(std::vector<std::byte> big_frame, seqnum_t seq)
         : MessageStore(flush_thunk_for<LargeFrameStore>()),
-          big_frame_(std::move(big_frame)), seq_(seq) {}
+          big_frame_(std::move(big_frame)),
+          seq_(seq) {}
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    store(seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
-          direction_t /*dir*/) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
+        direction_t /*dir*/) noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
-             retrieve_visitor& visitor) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        retrieve_visitor& visitor) noexcept override {
         if (dir != direction_t::outbound) {
             co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
         }
@@ -401,14 +391,13 @@ public:
         co_return fixpp::core::expected_t<void>{};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>>
-    next_seqnum(direction_t dir, bool /*increment*/) noexcept override {
-        co_return fixpp::core::expected_t<seqnum_t>{
-            dir == direction_t::outbound ? (seq_ + 1U) : seqnum_t{1}};
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool /*increment*/) noexcept override {
+        co_return fixpp::core::expected_t<seqnum_t>{dir == direction_t::outbound ? (seq_ + 1U)
+                                                                                 : seqnum_t{1}};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    reset() noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -422,10 +411,10 @@ public:
     explicit LargeFrameStoreFactory(std::vector<std::byte> big_frame, seqnum_t seq)
         : big_frame_(std::move(big_frame)), seq_(seq) {}
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>>
-    make(std::string_view /*sender*/, std::string_view /*target*/,
-         std::pmr::memory_resource* /*mr*/, std::size_t /*max_store_memory_bytes*/,
-         asio::any_io_executor /*file_io_executor*/) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
         return std::unique_ptr<MessageStore>(new LargeFrameStore(big_frame_, seq_));
     }
 

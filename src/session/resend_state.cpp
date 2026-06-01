@@ -17,9 +17,9 @@ namespace fixpp::session {
 // Clears inbound_held (returns PMR storage to the arena per its policy).
 // Called when awaiting_resend_ transitions from true → false.
 void ResendState::reset() noexcept {
-    outstanding_begin      = 0;
-    outstanding_end        = 0;
-    started_at             = {};
+    outstanding_begin = 0;
+    outstanding_end = 0;
+    started_at = {};
     inbound_filled_through = 0;
     outbound_replay_cursor = 0;
     inbound_held.clear();

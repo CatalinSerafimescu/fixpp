@@ -49,16 +49,18 @@
 #include <memory>
 #include <memory_resource>
 #include <span>
+#include <utility>
 #include <vector>
 
 // Linux / POSIX headers (Tier-1)
 #ifndef _WIN32
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <cerrno>
 #endif
 
 // Windows headers (Tier-2 — compilation only on Linux Tier-1; runtime is T057)
@@ -149,10 +151,10 @@ static std::uint32_t compute_record_crc32(const RecordHeader& hdr, const std::ui
 // ── FNV-1a session hash ───────────────────────────────────────────────────────
 
 static std::uint32_t fnv1a_32(std::string_view s) noexcept {
-    std::uint32_t h = 2166136261u;
+    std::uint32_t h = 2166136261U;
     for (unsigned char c : s) {
         h ^= c;
-        h *= 16777619u;
+        h *= 16777619U;
     }
     return h;
 }
@@ -219,15 +221,15 @@ struct OsFile {
     }
 
     // Take advisory exclusive lock (non-blocking — fail immediately if held)
-    [[nodiscard]] bool try_lock() noexcept { return ::flock(fd, LOCK_EX | LOCK_NB) == 0; }
+    [[nodiscard]] bool try_lock() const noexcept { return ::flock(fd, LOCK_EX | LOCK_NB) == 0; }
 
     // Release advisory lock
-    void unlock() noexcept {
+    void unlock() const noexcept {
         if (fd >= 0) ::flock(fd, LOCK_UN);
     }
 
     // pwrite: write at explicit offset (no file-position side-effect)
-    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, off_t offset) noexcept {
+    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, off_t offset) const noexcept {
         const auto* p = static_cast<const char*>(buf);
         std::size_t remaining = n;
         while (remaining > 0) {
@@ -244,7 +246,7 @@ struct OsFile {
     }
 
     // pread: read at explicit offset
-    [[nodiscard]] ssize_t pread_all(void* buf, std::size_t n, off_t offset) noexcept {
+    [[nodiscard]] ssize_t pread_all(void* buf, std::size_t n, off_t offset) const noexcept {
         auto* p = static_cast<char*>(buf);
         std::size_t total = 0;
         while (total < n) {
@@ -260,13 +262,15 @@ struct OsFile {
     }
 
     // fdatasync: flush data to disk
-    [[nodiscard]] bool datasync() noexcept { return ::fdatasync(fd) == 0; }
+    [[nodiscard]] bool datasync() const noexcept { return ::fdatasync(fd) == 0; }
 
     // Truncate to given size
-    [[nodiscard]] bool truncate(off_t new_size) noexcept { return ::ftruncate(fd, new_size) == 0; }
+    [[nodiscard]] bool truncate(off_t new_size) const noexcept {
+        return ::ftruncate(fd, new_size) == 0;
+    }
 
     // Get current file size
-    [[nodiscard]] off_t file_size() noexcept {
+    [[nodiscard]] off_t file_size() const noexcept {
         struct stat st{};
         if (::fstat(fd, &st) != 0) return -1;
         return st.st_size;
@@ -439,7 +443,7 @@ struct FileStoreImpl {
 
     // ── Sentinel write ─────────────────────────────────────────────────────
 
-    bool write_sentinel(std::int64_t offset) noexcept {
+    bool write_sentinel(std::int64_t offset) const noexcept {
         RecordHeader hdr{};
         SentinelPayload pl{};
         pl.magic = kSentinelMagic;
@@ -473,7 +477,7 @@ struct FileStoreImpl {
 
     // ── Counter record write ───────────────────────────────────────────────
 
-    bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) noexcept {
+    bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) const noexcept {
         RecordHeader hdr{};
         CounterPayload pl{};
         pl.next_inbound = ni;
@@ -545,11 +549,11 @@ struct FileStoreImpl {
     // resize() does NOT allocate from the global heap when the buffer already
     // has enough capacity (reserved at open_log() to max_frame_bytes).
     // Returns false on I/O error.
-    bool read_frame_payload(const IndexEntry& ie, std::pmr::vector<std::byte>& dst) noexcept {
+    bool read_frame_payload(const IndexEntry& ie, std::pmr::vector<std::byte>& dst) const noexcept {
         dst.resize(ie.len);
         const std::int64_t payload_offset = ie.file_offset + static_cast<std::int64_t>(kHeaderSize);
         auto n = file.pread_all(dst.data(), ie.len, payload_offset);
-        return n == static_cast<decltype(n)>(ie.len);
+        return std::cmp_equal(n, ie.len);
     }
 
     // ── Restart scan (FR-012 / I-14) ──────────────────────────────────────
@@ -574,7 +578,7 @@ struct FileStoreImpl {
         {
             RecordHeader hdr{};
             auto n = file.pread_all(&hdr, kHeaderSize, 0);
-            if (n != static_cast<decltype(n)>(kHeaderSize)) return false;
+            if (std::cmp_not_equal(n, kHeaderSize)) return false;
 
             if (hdr.kind != static_cast<std::uint8_t>(RecordKind::sentinel)) {
                 return false;  // First record must be sentinel
@@ -583,7 +587,7 @@ struct FileStoreImpl {
 
             SentinelPayload pl{};
             n = file.pread_all(&pl, kSentinelPayloadSize, static_cast<std::int64_t>(kHeaderSize));
-            if (n != static_cast<decltype(n)>(kSentinelPayloadSize)) return false;
+            if (std::cmp_not_equal(n, kSentinelPayloadSize)) return false;
 
             // Verify CRC32 of sentinel
             const std::uint32_t expected_crc =
@@ -613,12 +617,12 @@ struct FileStoreImpl {
             // Read header
             RecordHeader hdr{};
             const std::int64_t remaining = fsize - scan_pos;
-            if (remaining < static_cast<std::int64_t>(kHeaderSize)) {
+            if (std::cmp_less(remaining, kHeaderSize)) {
                 // Partial header at tail → truncate here
                 break;
             }
             auto n = file.pread_all(&hdr, kHeaderSize, scan_pos);
-            if (n != static_cast<decltype(n)>(kHeaderSize)) break;
+            if (std::cmp_not_equal(n, kHeaderSize)) break;
 
             const std::size_t payload_len = hdr.len;
             const std::int64_t payload_offset = scan_pos + static_cast<std::int64_t>(kHeaderSize);
@@ -661,7 +665,7 @@ struct FileStoreImpl {
             std::vector<std::uint8_t> payload_buf(payload_len);
             if (payload_len > 0) {
                 n = file.pread_all(payload_buf.data(), payload_len, payload_offset);
-                if (n != static_cast<decltype(n)>(payload_len)) break;
+                if (std::cmp_not_equal(n, payload_len)) break;
             }
 
             // Verify CRC32
@@ -759,9 +763,8 @@ FileStore::FileStore(Config c) noexcept
         session_triple_hash(impl_->cfg.sender_comp_id, impl_->cfg.target_comp_id);
 }
 
-FileStore::~FileStore() noexcept {
-    // Advisory lock is released when OsFile destructs (close() releases flock)
-}
+// Advisory lock is released when OsFile destructs (close() releases flock).
+FileStore::~FileStore() noexcept = default;
 
 // ── FileStore::store() ────────────────────────────────────────────────────────
 
@@ -897,8 +900,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
     // the index snapshot does NOT allocate from the global heap. retrieve()
     // releases the writer mutex before disk reads, so concurrent store() calls
     // use store_scratch_ while retrieve() uses retrieve_scratch_ — no aliasing.
-    auto* snap_mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
-                                              : std::pmr::get_default_resource();
+    auto* snap_mr =
+        impl_->cfg.store_resource ? impl_->cfg.store_resource : std::pmr::get_default_resource();
     std::pmr::vector<IndexEntry> snap{std::pmr::polymorphic_allocator<IndexEntry>{snap_mr}};
     bool gap_hit = false;
     {
@@ -951,7 +954,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
         fixpp::core::expected_t<visit_result> vr{visit_result::cont};
         try {
-            vr = co_await visitor.on_frame(ie.seq, std::span<const std::byte>(impl_->retrieve_scratch_));
+            vr = co_await visitor.on_frame(ie.seq,
+                                           std::span<const std::byte>(impl_->retrieve_scratch_));
         } catch (...) {
             co_return std::unexpected(fixpp::core::error::store_visitor_aborted);
         }
@@ -1201,7 +1205,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     impl_->inbound_index.clear();
     impl_->outbound_index.clear();
     impl_->write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                                  record_disk_size(kCounterPayloadSize));
+                                                 record_disk_size(kCounterPayloadSize));
     impl_->next_inbound = seqnum_min;
     impl_->next_outbound = seqnum_min;
 
@@ -1269,12 +1273,12 @@ bool FileStore::open_log(const std::string& log_path) noexcept {
     {
         auto* mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
                                              : std::pmr::get_default_resource();
-        impl_->store_scratch_ = std::pmr::vector<std::byte>{
-            std::pmr::polymorphic_allocator<std::byte>{mr}};
+        impl_->store_scratch_ =
+            std::pmr::vector<std::byte>{std::pmr::polymorphic_allocator<std::byte>{mr}};
         impl_->store_scratch_.reserve(impl_->cfg.max_frame_bytes);
 
-        impl_->retrieve_scratch_ = std::pmr::vector<std::byte>{
-            std::pmr::polymorphic_allocator<std::byte>{mr}};
+        impl_->retrieve_scratch_ =
+            std::pmr::vector<std::byte>{std::pmr::polymorphic_allocator<std::byte>{mr}};
         impl_->retrieve_scratch_.reserve(impl_->cfg.max_frame_bytes);
     }
 

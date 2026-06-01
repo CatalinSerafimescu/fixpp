@@ -25,18 +25,16 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::core::error;
+using fixpp::sync::async_mutex;
 
 using fixpp::sync::test::yield_n;
 
@@ -64,8 +62,7 @@ TEST(SeamRaceMultiCancel, EightWaitersAllFiredSimultaneously) {
         co_await yield_n(N * 4);
 
         // Fire ALL cancellations.
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
 
         // Yield to process cancel handlers before unlock.
         co_await yield_n(N * 2);
@@ -93,22 +90,18 @@ TEST(SeamRaceMultiCancel, EightWaitersAllFiredSimultaneously) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(total_completed.load(), N)
-        << "All N waiters must complete exactly once";
+    EXPECT_EQ(total_completed.load(), N) << "All N waiters must complete exactly once";
 
     int g = granted_count.load();
     int a = aborted_count.load();
-    EXPECT_EQ(g + a, N)
-        << "granted (" << g << ") + aborted (" << a << ") must equal N=" << N;
+    EXPECT_EQ(g + a, N) << "granted (" << g << ") + aborted (" << a << ") must equal N=" << N;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,8 +123,7 @@ TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 4);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N * 2);
     };
 
@@ -153,9 +145,7 @@ TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
@@ -183,8 +173,7 @@ TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 3);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N * 2);
     };
 
@@ -200,9 +189,7 @@ TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
@@ -213,10 +200,13 @@ TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
 
     // After all cancelled waiters complete, a fresh acquire must succeed.
     bool ok = false;
-    auto freshen = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        auto r = co_await mtx.async_lock();
-        ok = r.has_value();
-    }, asio::use_future);
+    auto freshen = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            auto r = co_await mtx.async_lock();
+            ok = r.has_value();
+        },
+        asio::use_future);
     ioc.restart();  // io_context drained by the first run(); restart before re-running.
     ioc.run();
     freshen.get();

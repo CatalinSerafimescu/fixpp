@@ -22,9 +22,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
-#include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
@@ -75,9 +75,9 @@ enum class RejectPolicy : std::uint8_t;  // owned by 005; declared for the field
 // Per-session granularity (not engine-wide) so multi-tenant acceptors can pair
 // counterparties running different engines. [data-model §E-4]
 enum class reset_seqnum_policy : std::uint8_t {
-    bilateral_strict  = 0,
+    bilateral_strict = 0,
     bilateral_lenient = 1,
-    unilateral        = 2,
+    unilateral = 2,
 };
 
 enum class threading_mode : std::uint8_t {
@@ -201,8 +201,7 @@ struct SessionConfig {
     // RC#C (gate-b/r1): restored from bilateral_lenient → bilateral_strict per FR-017.
     // Pre-013 tests updated to send 141=Y in their test Logon frames to comply.
     // [FR-017; Clarifications Q1=A; triage RC#C(a)]
-    reset_seqnum_policy reset_seqnum_policy_field{
-        reset_seqnum_policy::bilateral_strict};
+    reset_seqnum_policy reset_seqnum_policy_field{reset_seqnum_policy::bilateral_strict};
 
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
@@ -215,7 +214,7 @@ struct SessionConfig {
     // allow-list = default-deny (rejects ALL Logons). Operator MUST enumerate
     // bindings before opening any session. COPY-CONSTRUCTIBLE per [data-model §E-3]
     // + 010 W-5 (CompIdAuthorizationPolicy pimpl supports copy). [data-model §E-4]
-    CompIdAuthorizationPolicy compid_authorization_policy{};
+    CompIdAuthorizationPolicy compid_authorization_policy;
 
     // FR-030 / 2h Appendix D §D.2 reservation — operator-supplied per-session
     // transport factory override. Default nullptr => engine substitutes
@@ -229,14 +228,14 @@ struct SessionConfig {
     // via a Session::open-time hygiene assertion (Phase 3 T030) checking
     // use_count()==1. The shared_ptr type is for SessionConfig COPY SEMANTICS
     // ONLY; cross-Session sharing is FORBIDDEN. [2h Appendix D §D.1+§D.2]
-    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override{};
+    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override;
 
     // 014 T009 — peer endpoint for initiator reconnect attempts.
     // Set by the operator at SessionConfig-build time; consumed by
     // Session::open() which calls reconnect_fsm_.set_reconnect_endpoint().
     // Default-constructed Endpoint (empty host, port=0) means "not configured".
     // [data-model §E-1 step 5 — async_connect(ep)]
-    fixpp::transport::Endpoint reconnect_endpoint{};
+    fixpp::transport::Endpoint reconnect_endpoint;
 
     // 015 T016(d) — engine-managed lazy-connect discriminator (connect-then-Logon).
     // Set ONLY by the Engine's run_connect_loop for initiator sessions it drives.

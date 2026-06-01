@@ -68,35 +68,36 @@
 namespace fixpp::transport::errors {
 
 // ── LIFECYCLE ─────────────────────────────────────────────────────────────────
-inline constexpr auto transport_resolve_failed        = core::error::transport_resolve_failed;
-inline constexpr auto transport_connect_refused       = core::error::transport_connect_refused;
-inline constexpr auto transport_connect_timeout       = core::error::transport_connect_timeout;
-inline constexpr auto transport_already_connected     = core::error::transport_already_connected;
-inline constexpr auto transport_already_closed        = core::error::transport_already_closed;
-inline constexpr auto transport_read_in_progress      = core::error::transport_read_in_progress;
-inline constexpr auto transport_write_in_progress     = core::error::transport_write_in_progress;
-inline constexpr auto transport_reconnect_limit_exceeded = core::error::transport_reconnect_limit_exceeded;
+inline constexpr auto transport_resolve_failed = core::error::transport_resolve_failed;
+inline constexpr auto transport_connect_refused = core::error::transport_connect_refused;
+inline constexpr auto transport_connect_timeout = core::error::transport_connect_timeout;
+inline constexpr auto transport_already_connected = core::error::transport_already_connected;
+inline constexpr auto transport_already_closed = core::error::transport_already_closed;
+inline constexpr auto transport_read_in_progress = core::error::transport_read_in_progress;
+inline constexpr auto transport_write_in_progress = core::error::transport_write_in_progress;
+inline constexpr auto transport_reconnect_limit_exceeded =
+    core::error::transport_reconnect_limit_exceeded;
 
 // ── IO ────────────────────────────────────────────────────────────────────────
-inline constexpr auto transport_read_eof              = core::error::transport_read_eof;
-inline constexpr auto transport_read_truncated        = core::error::transport_read_truncated;
-inline constexpr auto transport_read_error            = core::error::transport_read_error;
-inline constexpr auto transport_write_short           = core::error::transport_write_short;
-inline constexpr auto transport_write_error           = core::error::transport_write_error;
+inline constexpr auto transport_read_eof = core::error::transport_read_eof;
+inline constexpr auto transport_read_truncated = core::error::transport_read_truncated;
+inline constexpr auto transport_read_error = core::error::transport_read_error;
+inline constexpr auto transport_write_short = core::error::transport_write_short;
+inline constexpr auto transport_write_error = core::error::transport_write_error;
 
 // ── HANDSHAKE ─────────────────────────────────────────────────────────────────
-inline constexpr auto transport_handshake_failed      = core::error::transport_handshake_failed;
-inline constexpr auto transport_handshake_timeout     = core::error::transport_handshake_timeout;
+inline constexpr auto transport_handshake_failed = core::error::transport_handshake_failed;
+inline constexpr auto transport_handshake_timeout = core::error::transport_handshake_timeout;
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-inline constexpr auto transport_factory_failed        = core::error::transport_factory_failed;
-inline constexpr auto transport_psk_unsupported       = core::error::transport_psk_unsupported;
+inline constexpr auto transport_factory_failed = core::error::transport_factory_failed;
+inline constexpr auto transport_psk_unsupported = core::error::transport_psk_unsupported;
 
 // ── CANCELLED (reused FIXPP_ERR_CANCELLED pool) ───────────────────────────────
-inline constexpr auto transport_connect_cancelled     = core::error::transport_connect_cancelled;
-inline constexpr auto transport_read_cancelled        = core::error::transport_read_cancelled;
-inline constexpr auto transport_write_cancelled       = core::error::transport_write_cancelled;
-inline constexpr auto transport_handshake_cancelled   = core::error::transport_handshake_cancelled;
-inline constexpr auto transport_accept_cancelled      = core::error::transport_accept_cancelled;
+inline constexpr auto transport_connect_cancelled = core::error::transport_connect_cancelled;
+inline constexpr auto transport_read_cancelled = core::error::transport_read_cancelled;
+inline constexpr auto transport_write_cancelled = core::error::transport_write_cancelled;
+inline constexpr auto transport_handshake_cancelled = core::error::transport_handshake_cancelled;
+inline constexpr auto transport_accept_cancelled = core::error::transport_accept_cancelled;
 
 }  // namespace fixpp::transport::errors

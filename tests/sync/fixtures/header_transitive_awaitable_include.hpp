@@ -13,7 +13,7 @@
 //   (b) std::mutex appears in this fixture file itself — a non-system, project-
 //       owned region — so the token IS attributed to project code by the awk filter
 #pragma once
-#include <fixpp/core/sync/async_mutex.hpp>   // transitively pulls asio::awaitable
+#include <fixpp/core/sync/async_mutex.hpp>  // transitively pulls asio::awaitable
 #include <mutex>
 namespace fixpp::sync::test::fixture {
 inline std::mutex g_transitive_banned;

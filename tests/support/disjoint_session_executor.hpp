@@ -24,15 +24,13 @@
 // Motivating issue: https://github.com/CatalinSerafimescu/fixpp/issues/79
 #pragma once
 
-#include <thread>
-#include <utility>
-
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
+#include <thread>
+#include <utility>
 
 namespace fixpp::test_support {
 
@@ -54,13 +52,11 @@ public:
         // discriminator for the [2d §4.8] enforcement point. Multi-thread
         // foreign pools must use per_session_strand instead; see
         // book/concurrency_model.md §4.
-        auto r = fixpp::core::make_session_executor(
-            ioc_.get_executor(),
-            fixpp::session::threading_mode::direct_executor,
-            /*already_serialized_executor=*/true,
-            &sess);
+        auto r = fixpp::core::make_session_executor(ioc_.get_executor(),
+                                                    fixpp::session::threading_mode::direct_executor,
+                                                    /*already_serialized_executor=*/true, &sess);
         if (r.has_value()) {
-            se_    = *r;
+            se_ = *r;
             valid_ = true;
         }
     }
@@ -76,22 +72,18 @@ public:
         if (thread_.joinable()) thread_.join();
     }
 
-    [[nodiscard]] const fixpp::core::session_executor& executor() const noexcept {
-        return se_;
-    }
+    [[nodiscard]] const fixpp::core::session_executor& executor() const noexcept { return se_; }
 
-    [[nodiscard]] std::thread::id thread_id() const noexcept {
-        return thread_.get_id();
-    }
+    [[nodiscard]] std::thread::id thread_id() const noexcept { return thread_.get_id(); }
 
     [[nodiscard]] bool valid() const noexcept { return valid_; }
 
 private:
-    asio::io_context                                  ioc_;
+    asio::io_context ioc_;
     asio::executor_work_guard<asio::io_context::executor_type> work_;
-    std::thread                                       thread_;
-    fixpp::core::session_executor                     se_{};
-    bool                                              valid_{false};
+    std::thread thread_;
+    fixpp::core::session_executor se_{};
+    bool valid_{false};
 };
 
 }  // namespace fixpp::test_support
