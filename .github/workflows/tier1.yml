@@ -205,7 +205,9 @@ jobs:
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
           # in every preset, not just the python-bindings build.
-          pip install pytest
+          # pyyaml is required by the interop_cell_results_schema_check CTest
+          # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
+          pip install pytest pyyaml
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -294,7 +296,9 @@ jobs:
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
           # in every preset, not just the python-bindings build.
-          pip install pytest
+          # pyyaml is required by the interop_cell_results_schema_check CTest
+          # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
+          pip install pytest pyyaml
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -432,7 +436,7 @@ jobs:
       - name: Install Conan + pytest via pipx
         run: |
           pipx install conan
-          pip install pytest
+          pip install pytest pyyaml
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -544,7 +548,9 @@ jobs:
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
           # in every preset, not just the python-bindings build.
-          pip install pytest
+          # pyyaml is required by the interop_cell_results_schema_check CTest
+          # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
+          pip install pytest pyyaml
 
       - name: Initialize Conan default profile
         run: conan profile detect --force

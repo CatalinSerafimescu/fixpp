@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# tests/interop/cell_results.yaml — 016-interop-harness US4 (T028).
+#
+# The per-cell `cell_result` manifest the parent `interop-gate-evaluator` consumes
+# (contract: contracts/parent-harness-gate-contract.md "Result schema"). Every
+# matrix/corpus/parity cell is present — including each deferred:* row as
+# `status: n/a` — so a dropped cell is detectable, never silently absent
+# (per-cell completeness rule). Validated by cell_results_schema_check_test.py.
+#
+# `config: normal` is the in-repo/local declaration; the parent re-emits each row
+# per build config (normal | asan-ubsan | tsan) at release-prep. Live cells carry
+# `status: skip:counterparty-unavailable` here (FR-023): in this environment no
+# QuickFIX counterparty is configured, so the live cells skip-with-reason — never
+# silently passed. The parent overrides status with real results when the
+# counterparty is present. Deferred + corpus + parity rows are environment-
+# independent and carry their final status.
+schema_version: 1
+
+cells:
+  # ── US1 happy-path live matrix cells (18) — all over TLS (one_way_ca) ────────
+  # status skip:counterparty-unavailable locally (FR-023); matrix_disposition live.
+  - { id: HP-QFcpp-init-fix44-logon-hb-logout, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.3/§4.5.1/§4.6" }
+  - { id: HP-QFcpp-acc-fix44-logon-hb-logout,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.3/§4.5.1/§4.6" }
+  - { id: HP-QFj-init-fix44-logon-hb-logout,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.3/§4.5.1/§4.6" }
+  - { id: HP-QFj-acc-fix44-logon-hb-logout,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.3/§4.5.1/§4.6" }
+  - { id: HP-QFcpp-init-fix44-testrequest-echo, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1/§4.5.5" }
+  - { id: HP-QFcpp-acc-fix44-testrequest-echo,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1/§4.5.5" }
+  - { id: HP-QFj-init-fix44-testrequest-echo,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1/§4.5.5" }
+  - { id: HP-QFj-acc-fix44-testrequest-echo,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1/§4.5.5" }
+  - { id: HP-QFcpp-init-fix44-reject-invalid-admin, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.4" }
+  - { id: HP-QFcpp-acc-fix44-reject-invalid-admin,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.4" }
+  - { id: HP-QFj-init-fix44-reject-invalid-admin,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.4" }
+  - { id: HP-QFj-acc-fix44-reject-invalid-admin,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.4" }
+  - { id: HP-QFcpp-init-fix44-seqnum-recovery, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.2/§4.8.5" }
+  - { id: HP-QFcpp-acc-fix44-seqnum-recovery,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.2/§4.8.5" }
+  - { id: HP-QFj-init-fix44-seqnum-recovery,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.2/§4.8.5" }
+  - { id: HP-QFj-acc-fix44-seqnum-recovery,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.2/§4.8.5" }
+  - { id: HP-QFcpp-init-fix44-disconnect-reconnect-noreset, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.4.2/§4.4.3/§4.8.6" }
+  - { id: HP-QFj-init-fix44-disconnect-reconnect-noreset,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.4.2/§4.4.3/§4.8.6" }
+
+  # ── Separate (non-matrix) regression cell — runs green locally, no counterparty
+  - { id: HP-down-peer-stop-watchdog, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.4" }
+
+  # ── US1 deferred rows (present, NOT executed → status n/a) ───────────────────
+  - { id: HP-business-newordersingle-execreport, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:app-messages", deferred_reason: "v1.0 is session-only; the §VII.6 business flow is an open v1.0-GA residual (FR-027/SC-008), not discharged by the session badge.", spec_ref: "FIX-SL §VII.6" }
+  - { id: HP-fixt11-fix50sp2-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fixt-routing", deferred_reason: "fixpp cannot establish a FIXT.1.1/5.0SP2 session yet (S-020 FIXT half, S-025 DefaultApplVerID(1137) backlog).", spec_ref: "FIXT.1.1 §5" }
+  - { id: HP-fix8-happy-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fix8-revisit", deferred_reason: "Fix8 is corpus-only at v1.0; live disposition revisited from corpus findings (FR-009).", spec_ref: "FIX-SL §4" }
+  - { id: HP-mutual-mtls-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:v1.1-mtls", deferred_reason: "Client-cert mutual-mTLS identity binding is the v1.1 reach; v1.0 baseline is server-auth one_way_ca (FR-025).", spec_ref: "FIXS §3.2/§3.4" }
+
+  # ── US2 thorny corpus P1 (release-blocking) ─────────────────────────────────
+  # C-001..C-003 covered-by-parity (US3) — pass via the cited parity witness.
+  - { id: C-001-qfj646-resend-abort, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.3.5" }
+  - { id: C-002-qfj658-750-788-reorder-queue, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.5" }
+  - { id: C-003-qfcpp-inbound-sequencereset-arms, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.8.6/§4.5.4" }
+  # C-004..C-007 fresh encodings (this feature).
+  - { id: C-004-qfj750-logout-seqnum-mismatch, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.5.3/§4.7" }
+  - { id: C-005-qfj271-sequencereset-large-gapfill, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.8.6" }
+  - { id: C-006-qfj603-unsupported-beginstring, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.5.4" }
+  - { id: C-007-qfj721-non-logon-first-message, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P1, spec_ref: "FIX-SL §4.5.1" }
+
+  # ── US2 thorny corpus P2/P3 (tracked, non-blocking) ─────────────────────────
+  - { id: C-101-qfj626-resend-recomputes-checksum, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "FIX-SL §4.3.5" }
+  - { id: C-102-qfj557-generatereject-advances-seqnum, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "FIX-SL §4.5.4" }
+  - { id: C-103-qfj751-resendrequest-chunk-size, config: normal, kind: thorny, status: "known-limitation:S-backlog-chunked-resend", matrix_disposition: live, priority: P3, tracking_issue_state: "open:S-backlog-chunked-resend", spec_ref: "FIX-SL §4.8.5" }
+
+  # ── US3 parity GAP-closure witnesses (3) ────────────────────────────────────
+  - { id: PARITY-qfj646-resend-abort-on-failing-write, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.3.5" }
+  - { id: PARITY-replay-subsumes-reorder-queue, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.5" }
+  - { id: PARITY-inbound-sequencereset-arms, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.8.6/§4.5.4" }

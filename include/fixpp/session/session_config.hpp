@@ -51,6 +51,10 @@ class Sink;
 // [const §XV.9] check: endpoint.hpp only includes <cstdint>/<string>/<utility>
 // — no shared_mutex or awaitable chains. Safe to include here.
 #include <fixpp/transport/endpoint.hpp>
+// ReconnectPolicy is an optional value-typed member (016 T008) ⇒ needs the
+// complete type. [const §XV.9] check: reconnect_policy.hpp includes only
+// <chrono>/<cstdint>/<memory_resource>/<vector> — no shared_mutex / awaitable.
+#include <fixpp/transport/reconnect_policy.hpp>
 
 namespace fixpp::transport {
 class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-off; the actual
@@ -236,6 +240,17 @@ struct SessionConfig {
     // Default-constructed Endpoint (empty host, port=0) means "not configured".
     // [data-model §E-1 step 5 — async_connect(ep)]
     fixpp::transport::Endpoint reconnect_endpoint;
+
+    // 016 T008 — per-session initiator reconnect backoff policy. nullopt ⇒ the
+    // Session resolves ReconnectPolicy::defaults_quickfix_compat() at construction
+    // (single 30 s interval, unbounded), discharging the 015 down-peer L2
+    // carry-forward: the prior hard-coded empty ReconnectPolicy{} had a 0-backoff
+    // schedule (delay_for_attempt == 0) ⇒ ~100% CPU busy-spin on repeated connect
+    // failure. Operators set a finite max_attempts policy to bound reconnect (the
+    // FSM then surfaces transport_reconnect_limit_exceeded at the cap). Optional
+    // (no-implicit-default, [const §XII.5]); value-typed ⇒ keeps SessionConfig
+    // copy-constructible. [FR-004; data-model §E-1 reconnect_policy]
+    std::optional<fixpp::transport::ReconnectPolicy> reconnect_policy;
 
     // 015 T016(d) — engine-managed lazy-connect discriminator (connect-then-Logon).
     // Set ONLY by the Engine's run_connect_loop for initiator sessions it drives.

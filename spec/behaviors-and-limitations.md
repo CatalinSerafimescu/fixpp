@@ -96,3 +96,37 @@ Scope and conventions:
   teardown** (a shared keepalive, cf. the 014 detached-write fix), and should consider a
   debug `~Session` guard once the precise "no in-flight executor work" invariant is
   trackable. *(`include/fixpp/session/session.hpp dispatch_app_callback`; CI-TSan, 2026-06-01.)*
+
+## Interop harness (016-interop-harness)
+
+### Behaviors
+
+- **B-016-1 — The thorny corpus reconciles to the FIX spec, not to a reference
+  engine; a fixpp-vs-engine divergence is encoded against the spec mandate (FR-018).**
+  Where a reference engine special-cases behavior fixpp does not, the corpus encodes
+  fixpp's actual spec-defensible behavior and documents the divergence (disposition
+  `pass`, not a known-limitation). Worked example: an inbound **Logout carrying a
+  too-high MsgSeqNum** does **not** disconnect on fixpp (as QuickFIX-J#750 chose) —
+  fixpp's uniform FIX-SL §4.5.3 gap-recovery takes precedence (ResendRequest, stays
+  Active), recovering the gap before the Logout is dispatched; only a too-low Logout
+  disconnects. *(`tests/interop/thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp`;
+  `tests/interop/thorny/CORPUS-INDEX.md` C-004; FR-018.)*
+
+### Limitations
+
+- **L-016-1 — The session-only interop badge does NOT discharge the `[const §VII.6]`
+  business-message interop clause.** `Logon → NewOrderSingle → ExecutionReport →
+  Logout` is **not** exercised by `016`; v1.0 interop is session-layer only. This is an
+  **open v1.0-GA residual** (the one Gate-A adjudication carried in `plan.md`, R7) — the
+  business-message matrix cells are present as `deferred:app-messages` (`status: n/a`)
+  and **zero** `016` artifact claims the business flow ran. **Status: open** —
+  forward-pointer to catalogue **A-001/A-006**; revisit with the application-message
+  layer. *(FR-005/FR-027/SC-008; `tests/interop/KNOWN-LIMITATIONS.md`;
+  `tests/interop/happy/MATRIX.md` deferred rows.)*
+
+- **L-016-2 — Live interop is all-TLS with a server-auth `one_way_ca` baseline;
+  mutual-certificate mTLS is deferred to v1.1.** fixpp ships TLS-only (no plaintext
+  transport), so every live cell runs over TLS; the v1.0 baseline trusts a
+  counterparty server cert (`one_way_ca`). App-layer client-cert ↔ CompID mutual mTLS
+  (`mtls_ca`) is `deferred:v1.1-mtls`. **Status: wontfix for v1.0** (intentional scope
+  bound). *(FR-025; `tests/interop/happy/MATRIX.md`.)*
