@@ -739,6 +739,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         effective_clock_->cancel_sleeps();
     }
     root_cancel_.emit(asio::cancellation_type::total);
+    if (auto live = live_transport_shared_()) {
+        (void)live->close();
+    }
 
     // T045: clear the session_local<trace_context> slot at close completion
     // (FR-014). Reached in BOTH graceful and terminal once the two phases
@@ -749,11 +752,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // FQ-A (gate-b/r2): wait for the liveness loop to exit before the seqnum drain.
     // root_cancel_.emit() above has already fired total cancellation (which cancels
     // the liveness sleep_until via cancel_sleeps() + root cancel propagation), and
-    // any in-progress liveness write will fail when the socket is closed (engine
-    // stop() calls transport->close() before joining). We yield the executor until
-    // liveness_counter_ reaches 0, meaning the liveness coroutine has fully exited
-    // run_liveness_loop. This ensures registry_.clear() cannot destroy the Session
-    // while the liveness coroutine is still touching Session members.
+    // the live transport is synchronously closed above so any in-progress liveness
+    // write completes with error before the drain waits on write_gate_. We yield the
+    // executor until liveness_counter_ reaches 0, meaning the liveness coroutine has
+    // fully exited run_liveness_loop. This ensures registry_.clear() cannot destroy
+    // the Session while the liveness coroutine is still touching Session members.
     // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F4]
     {
         auto lc = liveness_counter_;
@@ -766,8 +769,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
     // FQ-A (gate-b/r2): drain the write gate after the liveness loop exits.
     // Any in-flight live write (started before total cancel propagated) has
-    // its socket closed (engine::stop() called transport->close() before
-    // the join) so the async_write completes with error → write_gate_ released.
+    // its socket closed above so async_write completes with error → write_gate_
+    // released before cancel_and_drain() waits for the current holder.
     // cancel_and_drain() cancels any pending waiters (they get dispatch_aborted
     // from live_write_serialized_) and waits for the current holder (if any)
     // to unlock — satisfying the async_mutex destructor precondition.
@@ -1369,6 +1372,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
+                liveness_counter_->fetch_add(1, std::memory_order_relaxed);
                 // NOLINTNEXTLINE(misc-include-cleaner)
                 asio::co_spawn(ex, run_liveness_loop(),
                                asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
@@ -1512,7 +1516,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                         } else {
                             auto emit_r = co_await store_then_emit(rr_seq, *rr_result);
-                            (void)emit_r;
+                            if (!emit_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(emit_r.error());
+                            }
                         }
                     }
                     // Remain in Active (not Disconnected) per FR-009.
@@ -1645,7 +1652,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 co_return std::unexpected(assign_r.error());
                             }
                             auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
-                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            if (!emit_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(emit_r.error());
+                            }
                         }
                     }
                     // Remain in Active — liveness tick.
@@ -1672,7 +1682,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             co_return std::unexpected(assign_r.error());
                         }
                         auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
-                        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        if (!emit_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(emit_r.error());
+                        }
                     }
                     // Remain in Active.
                     co_return fixpp::core::expected_t<void>{};
@@ -1865,7 +1878,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 co_return std::unexpected(assign_r.error());
                             }
                             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            if (!emit_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(emit_r.error());
+                            }
                         }
                         // Remain in Active — session stays after sending Reject.
                         co_return fixpp::core::expected_t<void>{};
@@ -2135,6 +2151,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // ([feedback_asio_cospawn_total_cancellation_default]).
             {
                 auto ex = co_await asio::this_coro::executor;
+                liveness_counter_->fetch_add(1, std::memory_order_relaxed);
                 // asio::co_spawn provided by <asio/co_spawn.hpp> at the top of this file;
                 // clang-tidy doesn't see the include through template machinery.
                 // NOLINTNEXTLINE(misc-include-cleaner)
@@ -2404,15 +2421,12 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // filter — it does not reassign the slot's backing storage.
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
 
-    // FQ-A (gate-b/r2): increment liveness_counter_ for the entire loop lifetime
-    // so that Session::close() can poll until it reaches 0, ensuring the liveness
-    // coroutine has fully exited before close() returns (and before
-    // registry_.clear() can destroy the Session).
-    // Using a captured shared_ptr so the counter is valid even if the Session
-    // starts destruction while the coroutine is still executing.
-    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F4]
+    // FQ-C (gate-b/r3): spawn sites increment liveness_counter_ BEFORE co_spawn
+    // publishes the detached frame, closing the pre-start close()/destroy race.
+    // The coroutine body owns only the matching decrement, using a captured
+    // shared_ptr so the counter storage survives until the detached work exits.
+    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-C]
     auto live_ctr = liveness_counter_;  // shared ownership
-    live_ctr->fetch_add(1, std::memory_order_relaxed);
     struct liveness_dec {
         std::shared_ptr<std::atomic<int>> ctr;
         ~liveness_dec() { ctr->fetch_sub(1, std::memory_order_release); }
@@ -2482,7 +2496,10 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
-                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                    if (!emit_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                 }
                 if (fsm_state_ != fsm_state::Active) {
                     co_return;
@@ -2530,7 +2547,10 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
-                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                    if (!emit_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                 }
             }
 

@@ -36,6 +36,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <memory>
 #include <span>
 #include <vector>
@@ -126,6 +127,58 @@ private:
     bool                  closed_{false};
 };
 
+class FailNthWriteTransport final : public fixpp::transport::Transport {
+public:
+    FailNthWriteTransport(asio::any_io_executor exec, int fail_on_write)
+        : exec_{std::move(exec)}, read_timer_{exec_}, fail_on_write_{fail_on_write} {}
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
+    async_connect(fixpp::transport::Endpoint const& ep) override {
+        fixpp::transport::ConnectInfo info;
+        info.remote = ep;
+        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.family = 2;
+        co_return info;
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
+    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+        (void)buf;
+        if (closed_) {
+            co_return std::unexpected{fixpp::core::error::transport_already_closed};
+        }
+        read_timer_.expires_after(60s);
+        asio::error_code ec;
+        co_await read_timer_.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        co_return std::unexpected{fixpp::core::error::transport_read_eof};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
+    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+        const int current = ++write_count_;
+        if (current == fail_on_write_) {
+            co_return std::unexpected{fixpp::core::error::transport_write_short};
+        }
+        co_return buf.size();
+    }
+
+    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
+    [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
+        closed_ = true;
+        read_timer_.cancel();
+        return {};
+    }
+
+    int write_count() const noexcept { return write_count_.load(); }
+
+private:
+    asio::any_io_executor exec_;
+    asio::steady_timer    read_timer_;
+    int                   fail_on_write_;
+    std::atomic<int>      write_count_{0};
+    bool                  closed_{false};
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ControlledWriteTransport — every async_write is synchronous (immediate) by
 // default; if arm_block() is called, the NEXT write blocks until release() is
@@ -170,6 +223,10 @@ public:
             write_timer_.expires_after(30s);
             asio::error_code ec;
             co_await write_timer_.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+            if (closed_) {
+                --in_flight_;
+                co_return std::unexpected{fixpp::core::error::transport_already_closed};
+            }
         }
 
         --in_flight_;
@@ -290,6 +347,18 @@ static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exe
     return cfg;
 }
 
+template <class Future>
+void run_until_ready(asio::io_context& ioc, Future& fut,
+                     std::chrono::milliseconds step = 50ms,
+                     std::chrono::milliseconds budget = 2s) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (fut.wait_for(0ms) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline) {
+        ioc.run_for(step);
+        ioc.restart();
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell A — write-error propagates through store_then_emit → FSM → Disconnected
 // ─────────────────────────────────────────────────────────────────────────────
@@ -331,6 +400,47 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 
     EXPECT_GE(raw_ptr->write_count(), 1)
         << "The transport's async_write must have been called at least once.";
+
+    raw_ptr->close();
+}
+
+TEST(LiveOutboundSerializedTest, HeartbeatEchoWriteErrorDisconnectsSession) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
+    auto* raw_ptr = raw_transport.get();
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto logon_fut = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+    auto heartbeat = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
+    auto hb_fut = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>{heartbeat}), asio::use_future);
+    run_until_ready(ioc, hb_fut);
+    ASSERT_EQ(hb_fut.wait_for(0ms), std::future_status::ready) << "heartbeat handling timed out";
+    auto hb_r = hb_fut.get();
+
+    EXPECT_FALSE(hb_r.has_value())
+        << "live Heartbeat echo write failure must surface back to on_inbound_frame";
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "live Heartbeat echo write failure must force Disconnected";
+    EXPECT_EQ(raw_ptr->write_count(), 2)
+        << "exactly the reply-Logon and failing Heartbeat echo should have written";
 
     raw_ptr->close();
 }
@@ -523,6 +633,110 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         << "state=" << static_cast<int>(sess.state());
 }
 
+TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    eng.clock = clock;
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+    cfg.heartbeat_interval = std::chrono::seconds{1};
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
+    auto* raw_ptr = raw_transport.get();
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto logon_fut = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+    ioc.run_for(1500ms);
+    ioc.restart();
+
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "liveness Heartbeat write failure must disconnect the session";
+    const int writes_after_failure = raw_ptr->write_count();
+    EXPECT_EQ(writes_after_failure, 2)
+        << "liveness loop should stop after the failing Heartbeat write";
+
+    ioc.run_for(1500ms);
+    ioc.restart();
+
+    EXPECT_EQ(raw_ptr->write_count(), writes_after_failure)
+        << "liveness loop must stop retrying writes after a live write failure";
+
+    raw_ptr->close();
+}
+
+TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    auto* raw_ptr = raw_transport.get();
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto logon_fut = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+    raw_ptr->arm_block();
+
+    std::array<std::byte, 4> payload{};
+    auto send_fut = asio::co_spawn(
+        ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    auto close_fut = asio::co_spawn(
+        ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+    ioc.run_for(500ms);
+    ioc.restart();
+
+    EXPECT_EQ(close_fut.wait_for(0ms), std::future_status::ready)
+        << "close() must close the live transport before draining write_gate_; "
+        << "a blocked public send must not deadlock terminal close";
+    EXPECT_EQ(send_fut.wait_for(0ms), std::future_status::ready)
+        << "blocked send() must resolve once close() tears down the live transport";
+
+    raw_ptr->close();
+    ioc.run_for(100ms);
+    ioc.restart();
+
+    ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready);
+    auto close_r = close_fut.get();
+    ASSERT_TRUE(close_r.has_value()) << "close() failed unexpectedly";
+
+    ASSERT_EQ(send_fut.wait_for(0ms), std::future_status::ready);
+    auto send_r = send_fut.get();
+    ASSERT_FALSE(send_r.has_value()) << "blocked send() must fail when close() aborts it";
+    EXPECT_EQ(send_r.error(), fixpp::core::error::dispatch_aborted)
+        << "blocked send() must surface dispatch_aborted after terminal close";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell D — liveness drain: Session::close() drains liveness_done_ + write_gate_
 //
@@ -546,6 +760,54 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 //
 // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4; gate-b/r2]
 // ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    eng.clock = clock;
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+    cfg.heartbeat_interval = std::chrono::seconds{1};
+
+    auto sess = std::make_unique<fixpp::session::Session>(eng, cfg);
+    auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_EQ(open_fut.wait_for(0ms), std::future_status::ready) << "open() timed out";
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    fixpp::transport::handshake_result hr{};
+    sess->attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto close_then_destroy = [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
+            if (!inbound_r) {
+                co_return std::unexpected(inbound_r.error());
+            }
+            EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
+                << "Session must reach Active before the close race witness";
+            co_return co_await sess->close(fixpp::session::close_mode::terminal);
+        };
+    auto close_fut = asio::co_spawn(ioc, close_then_destroy(), asio::use_future);
+
+    run_until_ready(ioc, close_fut, 20ms, 1s);
+    ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready)
+        << "close() must complete in the same executor turn even when liveness "
+        << "has not started yet";
+    auto close_r = close_fut.get();
+    ASSERT_TRUE(close_r.has_value()) << "close() failed unexpectedly";
+
+    sess.reset();
+
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    SUCCEED() << "Queued liveness coroutine did not touch freed Session after close().";
+}
+
 TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
