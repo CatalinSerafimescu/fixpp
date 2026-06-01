@@ -129,16 +129,67 @@ def test_corpus_p1_block_rule(cells):
                 )
 
 
+EXPECTED_IDS = frozenset({
+    # US1 happy-path live matrix cells (18)
+    "HP-QFcpp-init-fix44-logon-hb-logout",
+    "HP-QFcpp-acc-fix44-logon-hb-logout",
+    "HP-QFj-init-fix44-logon-hb-logout",
+    "HP-QFj-acc-fix44-logon-hb-logout",
+    "HP-QFcpp-init-fix44-testrequest-echo",
+    "HP-QFcpp-acc-fix44-testrequest-echo",
+    "HP-QFj-init-fix44-testrequest-echo",
+    "HP-QFj-acc-fix44-testrequest-echo",
+    "HP-QFcpp-init-fix44-reject-invalid-admin",
+    "HP-QFcpp-acc-fix44-reject-invalid-admin",
+    "HP-QFj-init-fix44-reject-invalid-admin",
+    "HP-QFj-acc-fix44-reject-invalid-admin",
+    "HP-QFcpp-init-fix44-seqnum-recovery",
+    "HP-QFcpp-acc-fix44-seqnum-recovery",
+    "HP-QFj-init-fix44-seqnum-recovery",
+    "HP-QFj-acc-fix44-seqnum-recovery",
+    "HP-QFcpp-init-fix44-disconnect-reconnect-noreset",
+    "HP-QFj-init-fix44-disconnect-reconnect-noreset",
+    # Regression cell (runs green locally)
+    "HP-down-peer-stop-watchdog",
+    # Deferred rows (4)
+    "HP-business-newordersingle-execreport",
+    "HP-fixt11-fix50sp2-cells",
+    "HP-fix8-happy-cells",
+    "HP-mutual-mtls-cells",
+    # US2 thorny corpus P1 (7)
+    "C-001-qfj646-resend-abort",
+    "C-002-qfj658-750-788-reorder-queue",
+    "C-003-qfcpp-inbound-sequencereset-arms",
+    "C-004-qfj750-logout-seqnum-mismatch",
+    "C-005-qfj271-sequencereset-large-gapfill",
+    "C-006-qfj603-unsupported-beginstring",
+    "C-007-qfj721-non-logon-first-message",
+    # US2 thorny corpus P2/P3 (3)
+    "C-101-qfj626-resend-recomputes-checksum",
+    "C-102-qfj557-generatereject-advances-seqnum",
+    "C-103-qfj751-resendrequest-chunk-size",
+    # US3 parity GAP-closure witnesses (3)
+    "PARITY-qfj646-resend-abort-on-failing-write",
+    "PARITY-replay-subsumes-reorder-queue",
+    "PARITY-inbound-sequencereset-arms",
+})
+
+
 def test_per_cell_completeness_no_silent_absence(cells):
-    # Guard the four by-design deferred axes are each present exactly once (a
-    # dropped deferred row is indistinguishable from a real deferral otherwise).
+    # Assert the exact expected id set — a dropped OR surprise-added cell fails
+    # with a clear diff (parent-harness-gate-contract.md:56 missing-row rule /
+    # T028 claim in tasks.md:125).
+    present_ids = {c["id"] for c in cells}
+    missing = EXPECTED_IDS - present_ids
+    unexpected = present_ids - EXPECTED_IDS
+    assert not missing and not unexpected, (
+        f"cell_results.yaml id set does not match the expected manifest; "
+        f"missing={missing!r}, unexpected={unexpected!r}"
+    )
+    # Keep the deferred-axis sub-check: each deferred:* disposition must appear.
     present_tags = {c["matrix_disposition"] for c in cells
                     if str(c["matrix_disposition"]).startswith("deferred:")}
     assert present_tags == DEFERRED_TAGS, (
         f"every deferred axis must have a present row; missing "
         f"{DEFERRED_TAGS - present_tags}, unexpected {present_tags - DEFERRED_TAGS}"
     )
-    # The smoke cell (FR-022) must exist.
-    ids = {c["id"] for c in cells}
-    assert "HP-QFcpp-init-fix44-logon-hb-logout" in ids, \
-        "the FR-022 smoke cell must be present in the manifest"
