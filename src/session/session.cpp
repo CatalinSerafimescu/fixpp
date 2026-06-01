@@ -87,6 +87,19 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
     }
     return std::pmr::get_default_resource();
 }
+
+// 016 T008 — resolve the per-session reconnect policy. An operator-supplied policy
+// wins; otherwise default to the QuickFIX-compat shape (single 30 s interval,
+// unbounded) which has a NON-ZERO backoff — replacing the prior hard-coded empty
+// ReconnectPolicy{} whose 0-backoff schedule busy-spun on repeated connect failure
+// (015 down-peer L2 carry-forward). The arena allocates the schedule vector. [FR-004]
+fixpp::transport::ReconnectPolicy resolve_reconnect_policy(const SessionConfig& cfg,
+                                                          std::pmr::memory_resource* arena) {
+    if (cfg.reconnect_policy.has_value()) {
+        return *cfg.reconnect_policy;
+    }
+    return fixpp::transport::ReconnectPolicy::defaults_quickfix_compat(arena);
+}
 }  // namespace
 
 Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
@@ -95,8 +108,8 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
       session_arena_(resolve_session_arena(engine, cfg)),
       reconnect_fsm_(
           cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
-          fixpp::transport::ReconnectPolicy{},   // default policy; Phase 4 wires
-                                                 // cfg_.reconnect_policy
+          resolve_reconnect_policy(cfg, session_arena_),  // 016 T008: was empty
+                                                          // ReconnectPolicy{} (busy-spin)
           cfg.heartbeat_interval.value_or(std::chrono::seconds{30}),
           std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms}) {
     // Resolution chain always terminates at std::pmr::get_default_resource()

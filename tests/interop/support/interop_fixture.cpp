@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// tests/interop/support/interop_fixture.cpp — 016 T004 impl.
+
+#include "support/interop_fixture.hpp"
+
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+#include <future>
+#include <utility>
+
+namespace fixpp::interop {
+
+namespace {
+// io_context pump granularity. Small enough that wall-clock deadlines are honored
+// promptly, large enough to avoid busy-spinning the test thread.
+constexpr std::chrono::milliseconds kPumpSlice{5};
+}  // namespace
+
+InteropEngineFixture::InteropEngineFixture(fixpp::core::EngineConfig cfg)
+    : engine_(ioc_.get_executor(), std::move(cfg)) {}
+
+InteropEngineFixture::~InteropEngineFixture() {
+    // The Engine dtor asserts stopped(); guarantee a completed stop() first.
+    // Generous bound — teardown correctness, not the watchdog assertion.
+    if (!engine_.stopped()) {
+        stop_within(std::chrono::seconds{30});
+    }
+}
+
+void InteropEngineFixture::start() { engine_.start(); }
+
+bool InteropEngineFixture::run_until(const std::function<bool()>& ready,
+                                     std::chrono::milliseconds deadline) {
+    const auto t_end = std::chrono::steady_clock::now() + deadline;
+    while (std::chrono::steady_clock::now() < t_end) {
+        if (ready()) {
+            return true;
+        }
+        if (ioc_.stopped()) {
+            ioc_.restart();
+        }
+        ioc_.run_for(kPumpSlice);
+    }
+    return ready();
+}
+
+std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::milliseconds bound) {
+    if (engine_.stopped()) {
+        return std::chrono::milliseconds{0};
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    if (ioc_.stopped()) {
+        ioc_.restart();
+    }
+    // co_spawn Engine::stop() as a detached-with-future operation and pump until it
+    // resolves or `bound` elapses. We must keep pumping the io_context for stop()'s
+    // teardown coroutines (cancellation, join-before-clear) to make progress.
+    auto fut = asio::co_spawn(ioc_, engine_.stop(), asio::use_future);
+    stop_spawned_ = true;
+
+    const auto t_end = t0 + bound;
+    while (std::chrono::steady_clock::now() < t_end) {
+        if (fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+            break;
+        }
+        if (ioc_.stopped()) {
+            ioc_.restart();
+        }
+        ioc_.run_for(kPumpSlice);
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    // If stop() completed, surface any exception it threw (propagate to the test).
+    if (fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+        fut.get();
+    }
+    return elapsed;
+}
+
+}  // namespace fixpp::interop

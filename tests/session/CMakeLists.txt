@@ -977,6 +977,38 @@ target_include_directories(live_outbound_serialized PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 
+# ── 016-interop-harness T007/T008 — reconnect-policy / down-peer stop() witness ──
+# RED witness for the 015 down-peer carry-forward: Engine::stop() must return within
+# a bound when an initiator targets an unreachable peer (the in-flight async_connect
+# must be promptly cancellable). T008 (SessionConfig reconnect-policy field + bounded
+# cancellable connect) makes it GREEN.
+add_executable(reconnect_policy_witness_test
+  reconnect_policy_witness_test.cpp
+)
+target_link_libraries(reconnect_policy_witness_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(reconnect_policy_witness_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(reconnect_policy_witness_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME reconnect_policy_witness COMMAND reconnect_policy_witness_test)
+set_tests_properties(reconnect_policy_witness PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "016;us-foundational;reconnect;down-peer;watchdog"
+  TIMEOUT 60)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

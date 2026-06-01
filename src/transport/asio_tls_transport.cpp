@@ -909,6 +909,23 @@ void asio_tls_transport::setup_ssl_ctx_() {
         }
     });
 
+    // 016 T008 — make the in-flight connect promptly abortable by Engine::stop()'s
+    // cancellation_type::total (the 015 down-peer L2 carry-forward). The range
+    // async_connect honors only `terminal` cancellation; stop() emits `total`,
+    // which the op would otherwise ignore — so stop() blocked until connect_timeout
+    // ran to completion (a mid-connect transport is not yet live_transport, so
+    // stop()'s socket-close step can't reach it either). Install an OUT filter on
+    // this coroutine's cancellation state that maps any accepted cancellation to
+    // `terminal` for the forwarded child op, so stop()'s total promptly aborts the
+    // connect. (Slot-level assignment is unsafe here — async_connect is also driven
+    // from contexts whose coroutine has no connected cancellation slot.)
+    // [[feedback_asio_cospawn_total_cancellation_default]];
+    // [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
+
     asio::error_code connect_ec;
     // Use the free function asio::async_connect via an explicit namespace
     // to avoid the ambiguity with our member method name.
