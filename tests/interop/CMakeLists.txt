@@ -66,8 +66,11 @@ add_custom_target(interop_parity)
 # TLS ⇒ link OpenSSL/ZLIB + define the fixture dir for tls-logon cells.
 function(fixpp_add_interop_test)
     set(options TLS)
-    set(oneValue NAME GROUP LABEL)
-    set(multiValue SOURCES)
+    set(oneValue NAME GROUP)
+    # LABEL is multiValue: a quoted "a;b;c" passed to a oneValue keyword collapses
+    # to just "a" (CMake flattens the list), so the ctest -L interop-happy / -parity
+    # workflow (quickstart) would match nothing. multiValue preserves the full list.
+    set(multiValue SOURCES LABEL)
     cmake_parse_arguments(IT "${options}" "${oneValue}" "${multiValue}" ${ARGN})
 
     add_executable(${IT_NAME} ${IT_SOURCES})
@@ -80,8 +83,21 @@ function(fixpp_add_interop_test)
         "${CMAKE_SOURCE_DIR}/src"      # concrete transport/listener headers (tests-only)
         "${CMAKE_SOURCE_DIR}/tests"    # support/minimal_dictionary.hpp, loopback fixtures
     )
+    # FIXPP_TEST_HOOKS exposes Session::seqnum_mgr_test_access() so cells can
+    # assert sequence-number deltas (FR-007) — the same per-target test macro
+    # tests/session/ uses. Test-only ([const §XV.9]).
+    target_compile_definitions(${IT_NAME} PRIVATE FIXPP_TEST_HOOKS)
     if(IT_TLS)
+        # Static-link ORDER matters: libfixpp_tls.a references OpenSSL symbols
+        # (certificate.cpp: EVP_*/X509_*/ASN1_*/BIO_*) and must precede libcrypto
+        # on the link line. interop_support re-exports the fixpp libs transitively,
+        # which CMake places AFTER the directly-linked OpenSSL libs → undefined
+        # refs. Listing the fixpp libs as DIRECT deps here, immediately before
+        # OpenSSL, fixes the order (mirrors tests/transport/CMakeLists.txt).
         target_link_libraries(${IT_NAME} PRIVATE
+            fixpp_session
+            fixpp_transport
+            fixpp_tls
             "${FIXPP_INTEROP_OPENSSL_SSL_LIB}"
             "${FIXPP_INTEROP_OPENSSL_CRYPTO_LIB}"
             "${FIXPP_INTEROP_ZLIB_LIB}"
@@ -102,4 +118,53 @@ fixpp_add_interop_test(
     GROUP happy
     LABEL "interop;016;interop-support"
     SOURCES support_smoke_test.cpp
+)
+
+# ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────
+# All-TLS baseline (FR-025): every cell links OpenSSL/ZLIB (TLS option). Live
+# matrix cells skip-with-reason when the counterparty is absent (FR-023); the
+# down-peer watchdog (T016) runs green locally (no counterparty — a deliberate
+# never-accepting peer). Drivers include happy/hp_support.hpp (resolved relative
+# to the source dir) + support/* (via the tests/interop include dir).
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_logon_hb_logout_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1;smoke"
+    SOURCES happy/hp_fix44_logon_hb_logout_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_down_peer_stop_watchdog_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1;down-peer;watchdog"
+    SOURCES happy/hp_down_peer_stop_watchdog_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_testrequest_echo_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1"
+    SOURCES happy/hp_fix44_testrequest_echo_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_reject_invalid_admin_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1"
+    SOURCES happy/hp_fix44_reject_invalid_admin_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_seqnum_recovery_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1"
+    SOURCES happy/hp_fix44_seqnum_recovery_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_disconnect_reconnect_noreset_test
+    GROUP happy
+    LABEL "interop;016;interop-happy;us1;reconnect"
+    SOURCES happy/hp_fix44_disconnect_reconnect_noreset_test.cpp
+    TLS
 )
