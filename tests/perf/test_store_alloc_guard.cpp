@@ -40,6 +40,7 @@
 //       --gtest_filter='*Mallocnesia*'
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
@@ -60,7 +61,6 @@
 #include <memory_resource>
 #include <span>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
@@ -143,8 +143,7 @@ inline std::filesystem::path perf_temp_dir(std::string_view tag) {
     const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
     auto p = std::filesystem::temp_directory_path() /
              (std::string("fixpp_perf_") + std::string(tag) + "_" +
-              std::to_string(static_cast<unsigned>(::getpid())) + "_" +
-              std::to_string(seq));
+              std::to_string(static_cast<unsigned>(::getpid())) + "_" + std::to_string(seq));
     std::filesystem::create_directories(p);
     return p;
 }
@@ -154,8 +153,8 @@ class counting_visitor final : public fixpp::session::retrieve_visitor {
 public:
     std::size_t count = 0;
 
-    asio::awaitable<fixpp::core::expected_t<visit_result>>
-    on_frame(seqnum_t, std::span<const std::byte>) noexcept override {
+    asio::awaitable<fixpp::core::expected_t<visit_result>> on_frame(
+        seqnum_t, std::span<const std::byte>) noexcept override {
         ++count;
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
@@ -186,8 +185,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
     // Capacity: warm-up (20) + measured (10,000) + margin (200) iterations,
     // all outbound. max_frame_bytes = 1024 → slab = 10220 × 1 KiB ≈ 10 MiB,
     // well within the 1 GiB engine cap ([2e §1.2]).
-    const std::size_t kTotalCapacity =
-        static_cast<std::size_t>(kWarmupIter + kMeasuredIter + 200);
+    const std::size_t kTotalCapacity = static_cast<std::size_t>(kWarmupIter + kMeasuredIter + 200);
     MemoryStore::Config cfg;
     cfg.policy = capacity_policy::bounded;
     cfg.inbound_capacity = 0;
@@ -287,8 +285,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     cfg.file_io_executor = pool.get_executor();
 
     FileStoreFactory factory{cfg};
-    auto minted =
-        factory.make("SENDER", "TARGET", &mr, 1024 * 1024 * 1024, pool.get_executor());
+    auto minted = factory.make("SENDER", "TARGET", &mr, 1024 * 1024 * 1024, pool.get_executor());
     ASSERT_TRUE(minted.has_value()) << "FileStore open failed";
     auto& store = *minted.value();
 
@@ -356,8 +353,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     // Layer 1 gate: any allocations retrieve() makes must be routed through mr
     // (counting_resource). The count must be >= baseline (not go backwards).
     const long long after = mr.allocate_count();
-    EXPECT_GE(after, baseline)
-        << "allocator count went backwards — PMR accounting is broken";
+    EXPECT_GE(after, baseline) << "allocator count went backwards — PMR accounting is broken";
 
     std::filesystem::remove_all(dir);
 }

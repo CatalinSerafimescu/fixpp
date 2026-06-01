@@ -30,18 +30,16 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::core::error;
+using fixpp::sync::async_mutex;
 
 using fixpp::sync::test::yield_n;
 
@@ -112,8 +110,7 @@ TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
             // This is the PRIMARY RC-A assertion: cancellation on
             // next_drain_head_ must NOT be silently swallowed.
             EXPECT_EQ(r.error(), error::sync_lock_aborted)
-                << "Residual waiter " << idx
-                << " must see sync_lock_aborted (RC-A / Codex C-P1-3)";
+                << "Residual waiter " << idx << " must see sync_lock_aborted (RC-A / Codex C-P1-3)";
             aborted_count.fetch_add(1, std::memory_order_acq_rel);
         }
         total_completed.fetch_add(1, std::memory_order_acq_rel);
@@ -124,17 +121,14 @@ TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(granted_count.load(), 1)
-        << "Exactly one waiter must be granted";
+    EXPECT_EQ(granted_count.load(), 1) << "Exactly one waiter must be granted";
     EXPECT_EQ(aborted_count.load(), N - 1)
         << "All residual waiters must see sync_lock_aborted "
            "(RC-A: cancellation on next_drain_head_ must not be swallowed)";
@@ -164,8 +158,7 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
         co_await yield_n(N * 3);
         // Fire ALL cancellations while still holding — races with the
         // upcoming drain walk.
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(2);
         // unlock here.
     };
@@ -188,9 +181,7 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
@@ -219,8 +210,7 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 3);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N * 2);
         // unlock.
     };
@@ -236,9 +226,7 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
@@ -247,16 +235,18 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
 
     // After all waiters complete (however resolved), a fresh acquire must work.
     bool ok = false;
-    auto freshen = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        auto r = co_await mtx.async_lock();
-        ok = r.has_value();
-    }, asio::use_future);
+    auto freshen = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            auto r = co_await mtx.async_lock();
+            ok = r.has_value();
+        },
+        asio::use_future);
     ioc.restart();  // io_context drained by the first run(); restart before re-running.
     ioc.run();
     freshen.get();
 
-    EXPECT_TRUE(ok)
-        << "After all residual waiters cancelled, mutex must be acquirable";
+    EXPECT_TRUE(ok) << "After all residual waiters cancelled, mutex must be acquirable";
 }
 
 }  // namespace

@@ -113,7 +113,8 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID9_ResolvesToV50sp2) {
         fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
     EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 2 R6 oracle: v50sp2 NOS dispatch must return dict_reify_wire_body_not_ready";
+        << "AC-D4 Frame 2 R6 oracle: v50sp2 NOS dispatch must return "
+           "dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 2: v50sp2 NewOrderSingle must NOT hit fail-loud default";
     // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);
@@ -157,7 +158,8 @@ TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
         fixpp::dict::dispatch::dispatch_application(mv, "F", *resolved, kSessionProfile, &arena);
     ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
     EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 4 R6 oracle: v50sp2 OCR dispatch must return dict_reify_wire_body_not_ready";
+        << "AC-D4 Frame 4 R6 oracle: v50sp2 OCR dispatch must return "
+           "dict_reify_wire_body_not_ready";
     EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
         << "AC-D4 Frame 4: v50sp2 OrderCancelRequest must NOT hit fail-loud default";
     // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);

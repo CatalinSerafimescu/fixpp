@@ -26,15 +26,13 @@
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
-#include <memory>
-#include <thread>
-
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
+#include <memory>
+#include <thread>
 
 #include "transport/asio_listener.hpp"
 #include "transport/asio_tls_transport.hpp"
@@ -80,8 +78,7 @@ TEST(SocketOptionDefaults, ConfigDefaultsSoLingerDisabled) {
 TEST(SocketOptionDefaults, ConfigDefaultsTcpKeepaliveOff) {
     Transport::Config cfg{};
     // FIX-level Heartbeat is the primary keep-alive; TCP keepalive is opt-in.
-    EXPECT_FALSE(cfg.tcp_keepalive)
-        << "tcp_keepalive must default to false (opt-in)";
+    EXPECT_FALSE(cfg.tcp_keepalive) << "tcp_keepalive must default to false (opt-in)";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,8 +129,8 @@ TEST(SocketOptionDefaults, AcceptorLegConfigPassThrough) {
     // listener's cfg_.accepted_transport_config field unchanged.
     asio_listener::Config lcfg;
     lcfg.bind_endpoint = Endpoint{"127.0.0.1", 0, 16};
-    lcfg.accepted_transport_config.tcp_nodelay        = true;
-    lcfg.accepted_transport_config.so_linger_enabled  = false;
+    lcfg.accepted_transport_config.tcp_nodelay = true;
+    lcfg.accepted_transport_config.so_linger_enabled = false;
     lcfg.ssl_cfg = fixpp::tls::SslCtxConfig{};
 
     asio_listener listener{ioc.get_executor(), std::move(lcfg)};

@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/wire/framer.hpp>
-
 namespace {
 
 using fixpp::core::error;
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
+using fixpp::wire::Framer;
 using fixpp::wire::pmr_carry_buffer;
 
 constexpr char soh = '\x01';
@@ -64,8 +63,7 @@ void xor_checksum_digit_for_test(std::vector<std::byte>& frame) {
     frame[frame.size() - 2U] ^= std::byte{0x01};
 }
 
-void replace_body_length_for_test(std::vector<std::byte>& frame,
-                                  std::string_view replacement) {
+void replace_body_length_for_test(std::vector<std::byte>& frame, std::string_view replacement) {
     std::size_t start = 0;
     while (start + 1U < frame.size()) {
         if (frame[start] == std::byte{'9'} && frame[start + 1U] == std::byte{'='}) {
@@ -92,12 +90,13 @@ void replace_body_length_for_test(std::vector<std::byte>& frame,
 
 TEST(WireChecksumBodyLengthCorruption, RejectsChecksumMismatchBeforeEmit) {
     std::vector<std::byte> frame =
-        make_frame(std::string{"35=0\x01" "49=SENDER\x01" "56=TARGET\x01"});
+        make_frame(std::string{"35=0\x01"
+                               "49=SENDER\x01"
+                               "56=TARGET\x01"});
     xor_checksum_digit_for_test(frame);
 
     std::array<std::byte, 256> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                              arena_storage.size()};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
     Framer framer{};
     pmr_carry_buffer carry{frame.size(), &arena};
     std::array<frame_view, 2> out{};
@@ -110,12 +109,13 @@ TEST(WireChecksumBodyLengthCorruption, RejectsChecksumMismatchBeforeEmit) {
 
 TEST(WireChecksumBodyLengthCorruption, RejectsSpacePaddedBodyLengthBeforeEmit) {
     std::vector<std::byte> frame =
-        make_frame(std::string{"35=0\x01" "49=SENDER\x01" "56=TARGET\x01"});
+        make_frame(std::string{"35=0\x01"
+                               "49=SENDER\x01"
+                               "56=TARGET\x01"});
     replace_body_length_for_test(frame, " 2");
 
     std::array<std::byte, 256> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                              arena_storage.size()};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
     Framer framer{};
     pmr_carry_buffer carry{frame.size(), &arena};
     std::array<frame_view, 2> out{};
@@ -126,15 +126,15 @@ TEST(WireChecksumBodyLengthCorruption, RejectsSpacePaddedBodyLengthBeforeEmit) {
     EXPECT_EQ(framer.pending_bytes(), 0U);
 }
 
-TEST(WireChecksumBodyLengthCorruption,
-     RejectsInconsistentBodyLengthBeforeChecksumValidation) {
+TEST(WireChecksumBodyLengthCorruption, RejectsInconsistentBodyLengthBeforeChecksumValidation) {
     std::vector<std::byte> frame =
-        make_frame(std::string{"35=0\x01" "49=SENDER\x01" "56=TARGET\x01"});
+        make_frame(std::string{"35=0\x01"
+                               "49=SENDER\x01"
+                               "56=TARGET\x01"});
     replace_body_length_for_test(frame, "12");
 
     std::array<std::byte, 256> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                              arena_storage.size()};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
     Framer framer{};
     pmr_carry_buffer carry{frame.size(), &arena};
     std::array<frame_view, 2> out{};
@@ -145,14 +145,15 @@ TEST(WireChecksumBodyLengthCorruption,
     EXPECT_EQ(framer.pending_bytes(), 0U);
 }
 
-TEST(WireChecksumBodyLengthCorruption,
-     RejectsOversizedFrameWithoutUnboundedCarryGrowth) {
-    std::vector<std::byte> frame = make_frame(
-        std::string{"35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "58=PAYLOAD1234567890\x01"});
+TEST(WireChecksumBodyLengthCorruption, RejectsOversizedFrameWithoutUnboundedCarryGrowth) {
+    std::vector<std::byte> frame =
+        make_frame(std::string{"35=D\x01"
+                               "49=SENDER\x01"
+                               "56=TARGET\x01"
+                               "58=PAYLOAD1234567890\x01"});
 
     std::array<std::byte, 256> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(),
-                                              arena_storage.size()};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
     Framer framer{Framer::Config{.max_frame_bytes = 24U}};
     pmr_carry_buffer carry{frame.size(), &arena};
     std::array<frame_view, 2> out{};

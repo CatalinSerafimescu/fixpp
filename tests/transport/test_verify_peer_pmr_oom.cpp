@@ -19,15 +19,14 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <memory_resource>
-#include <new>
-#include <span>
-#include <string_view>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/certificate.hpp>
 #include <fixpp/tls/peer_identity.hpp>
 #include <fixpp/tls/security_profile.hpp>
+#include <memory_resource>
+#include <new>
+#include <span>
+#include <string_view>
 
 namespace {
 
@@ -35,8 +34,8 @@ using fixpp::core::error;
 using fixpp::tls::Certificate;
 using fixpp::tls::CertSourceCaps;
 using fixpp::tls::SecurityProfile;
-using fixpp::tls::SslCtxConfig;
 using fixpp::tls::signature_algorithm;
+using fixpp::tls::SslCtxConfig;
 using fixpp::tls::verify_peer;
 
 // ── Counting PMR that throws std::bad_alloc on the N-th allocation ───────────
@@ -84,13 +83,13 @@ Certificate make_valid_cert_with_san() {
     static const std::span<const std::string_view> kNoSanUri{};
 
     Certificate c{};
-    c.subject_dn_    = kSubjectDn;
-    c.issuer_dn_     = kSubjectDn;
+    c.subject_dn_ = kSubjectDn;
+    c.issuer_dn_ = kSubjectDn;
     c.san_dns_names_ = kSanDnsSpan;
-    c.san_uris_      = kNoSanUri;
-    c.x509_version_  = 3;          // v3 required (v1 rejected at step 7)
-    c.alg_           = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_  = 2048;       // exactly the lower bound (step 2)
+    c.san_uris_ = kNoSanUri;
+    c.x509_version_ = 3;  // v3 required (v1 rejected at step 7)
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 2048;  // exactly the lower bound (step 2)
     // not_before / not_after default-initialized to epoch — clock is null so
     // step 8 (expiry) is skipped per verify_peer impl.
     return c;
@@ -117,13 +116,13 @@ Certificate make_valid_cert_with_multi_san() {
     static const std::span<const std::string_view> kNoSanUri{};
 
     Certificate c{};
-    c.subject_dn_    = kSubjectDn;
-    c.issuer_dn_     = kSubjectDn;
+    c.subject_dn_ = kSubjectDn;
+    c.issuer_dn_ = kSubjectDn;
     c.san_dns_names_ = kSanDnsSpan;
-    c.san_uris_      = kNoSanUri;
-    c.x509_version_  = 3;
-    c.alg_           = signature_algorithm::rsa_pss;
-    c.rsa_key_bits_  = 2048;
+    c.san_uris_ = kNoSanUri;
+    c.x509_version_ = 3;
+    c.alg_ = signature_algorithm::rsa_pss;
+    c.rsa_key_bits_ = 2048;
     return c;
 }
 
@@ -135,10 +134,10 @@ Certificate make_valid_cert_with_multi_san() {
 SslCtxConfig make_cfg(std::pmr::memory_resource* mr) {
     SslCtxConfig cfg;
     cfg.profile = SecurityProfile::mtls_ca;
-    cfg.mr      = mr;
+    cfg.mr = mr;
     // Caps: defaults from CertSourceCaps (max_chain_depth=8, etc.).
     // Single-cert chain fits within all bounds.
-    cfg.caps    = CertSourceCaps{};
+    cfg.caps = CertSourceCaps{};
     return cfg;
 }
 
@@ -219,9 +218,9 @@ TEST(VerifyPeerPmrOom, NoThrowSucceedsNormally) {
     SslCtxConfig cfg = make_cfg(&mr);
 
     auto result = verify_peer(cfg, chain);
-    EXPECT_TRUE(result.has_value())
-        << "verify_peer must succeed when PMR does not exhaust; "
-           "got error: " << (result.has_value() ? 0 : static_cast<int>(result.error()));
+    EXPECT_TRUE(result.has_value()) << "verify_peer must succeed when PMR does not exhaust; "
+                                       "got error: "
+                                    << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -247,7 +246,8 @@ TEST(VerifyPeerPmrOomMultiSan, BoundaryFirstAllocation) {
     throw_on_nth_resource mr{/*throw_on=*/1};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
-        << "multi-SAN boundary OOM (first alloc, subject_dn) must surface as tls_pinset_alloc_failed";
+        << "multi-SAN boundary OOM (first alloc, subject_dn) must surface as "
+           "tls_pinset_alloc_failed";
 }
 
 // Multi-SAN mid: N=2 — second allocation (first san_dns_names_owned.emplace_back).
@@ -256,7 +256,8 @@ TEST(VerifyPeerPmrOomMultiSan, MidFirstSanDnsAllocation) {
     throw_on_nth_resource mr{/*throw_on=*/2};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
-        << "multi-SAN mid OOM (second alloc, first SAN-DNS) must surface as tls_pinset_alloc_failed";
+        << "multi-SAN mid OOM (second alloc, first SAN-DNS) must surface as "
+           "tls_pinset_alloc_failed";
 }
 
 // Multi-SAN tail-1: N=3 — third allocation (second san_dns_names_owned.emplace_back).
@@ -264,7 +265,8 @@ TEST(VerifyPeerPmrOomMultiSan, TailSecondSanDnsAllocation) {
     throw_on_nth_resource mr{/*throw_on=*/3};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
-        << "multi-SAN tail-1 OOM (third alloc, second SAN-DNS) must surface as tls_pinset_alloc_failed";
+        << "multi-SAN tail-1 OOM (third alloc, second SAN-DNS) must surface as "
+           "tls_pinset_alloc_failed";
 }
 
 // Multi-SAN tail-2: N=4 — fourth allocation (third san_dns_names_owned.emplace_back).
@@ -272,7 +274,8 @@ TEST(VerifyPeerPmrOomMultiSan, TailThirdSanDnsAllocation) {
     throw_on_nth_resource mr{/*throw_on=*/4};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
-        << "multi-SAN tail-2 OOM (fourth alloc, third SAN-DNS) must surface as tls_pinset_alloc_failed";
+        << "multi-SAN tail-2 OOM (fourth alloc, third SAN-DNS) must surface as "
+           "tls_pinset_alloc_failed";
 }
 
 // Multi-SAN no-throw: all allocations succeed, verify_peer returns a peer_identity.

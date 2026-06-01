@@ -34,6 +34,9 @@
 #pragma once
 
 #include <array>
+#include <asio/any_io_executor.hpp>
+#include <asio/awaitable.hpp>
+#include <asio/steady_timer.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -42,11 +45,7 @@
 #include <optional>
 #include <string>
 
-#include <asio/awaitable.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/any_io_executor.hpp>
-
-#include "fixpp/core/error.hpp"   // error enum + expected_t<T>
+#include "fixpp/core/error.hpp"  // error enum + expected_t<T>
 #include "fixpp/session/resend_state.hpp"
 #include "fixpp/session/session_fsm.hpp"
 #include "fixpp/transport/reconnect_policy.hpp"
@@ -67,7 +66,7 @@
 namespace fixpp::tls {
 enum class SecurityProfile : std::uint8_t;
 class cert_source;
-}
+}  // namespace fixpp::tls
 
 // TransportFactory is used only as a non-owning raw pointer in this header (ctor
 // arg + factory_ member); the full definition is needed only in reconnect_fsm.cpp
@@ -77,7 +76,9 @@ class cert_source;
 // include would drag a std::mutex type into the asio::awaitable closure of every
 // consumer (session.hpp), violating [const §XV.9] / [2f §6.6] (caught by the
 // check_no_std_mutex_corpus Tier-1 gate).
-namespace fixpp::transport { class TransportFactory; }
+namespace fixpp::transport {
+class TransportFactory;
+}
 // Endpoint is a lightweight value type (std::string + uint16_t + uint32_t);
 // include the header directly (it has no heavy transitive includes).
 #include "fixpp/transport/endpoint.hpp"
@@ -85,7 +86,9 @@ namespace fixpp::transport { class TransportFactory; }
 // (session.hpp includes reconnect_fsm.hpp). The actual call to
 // Session::install_reconnected_transport() is in reconnect_fsm.cpp which
 // includes the full session.hpp definition. [data-model §E-1 step 8]
-namespace fixpp::session { class Session; }
+namespace fixpp::session {
+class Session;
+}
 
 // session_event.hpp defines session_event_credentials_rotated (the payload of
 // the emit callback).  It does NOT transitively include any mutex type, so
@@ -112,9 +115,8 @@ public:
     // sign-off. The engine guarantees the factory outlives the FSM per
     // [arch §5.6] frozen-at-open rule. [data-model §E-1]
     ReconnectFsm(fixpp::transport::TransportFactory* factory,
-                 fixpp::transport::ReconnectPolicy   policy,
-                 std::chrono::seconds                heartbeat_interval,
-                 std::chrono::milliseconds           logout_disconnect_timeout) noexcept;
+                 fixpp::transport::ReconnectPolicy policy, std::chrono::seconds heartbeat_interval,
+                 std::chrono::milliseconds logout_disconnect_timeout) noexcept;
 
     // 014 T009 — Set the peer endpoint for reconnect attempts.
     // Called by Session::open() before the first drive_reconnect_attempt.
@@ -128,9 +130,7 @@ public:
     // Session::install_reconnected_transport() on success.
     // Session is forward-declared; the call happens in reconnect_fsm.cpp
     // which includes the full session.hpp. [data-model §E-1 step 8]
-    void set_session_owner(Session* session) noexcept {
-        session_ = session;
-    }
+    void set_session_owner(Session* session) noexcept { session_ = session; }
 
     // 014 T009 — Set the TLS security profile for per-attempt SslCtxConfig
     // construction. Called by Session::open() from cfg_.security_profile's TLS
@@ -140,9 +140,7 @@ public:
     // The type is forward-declared (uint8_t-backed enum) to avoid pulling
     // tls/security_profile.hpp → tls/pinset.hpp → shared_mutex into this
     // awaitable-corpus header. [data-model §E-1 step 3; §XV.9]
-    void set_tls_profile(fixpp::tls::SecurityProfile profile) noexcept {
-        tls_profile_ = profile;
-    }
+    void set_tls_profile(fixpp::tls::SecurityProfile profile) noexcept { tls_profile_ = profile; }
 
     // 014 T017/T018 — Inject the strand-bound credential-rotation emit callback.
     // Called by Session::open() (T018) to wire the on-strand emit of
@@ -176,60 +174,54 @@ public:
     // Cancellation: enable_total_cancellation() resets the co_await state;
     //   total-cancel → abort in-flight attempt + RAII-release t.
     //   [[feedback_asio_cospawn_total_cancellation_default]]
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    drive_reconnect_attempt() noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> drive_reconnect_attempt() noexcept;
 
     // FR-003 / FR-005 — emit Heartbeat(0) outbound when no outbound traffic has
     // been sent for HeartBtInt seconds. Armed on Active entry; rearmed on every
     // outbound; cancelled on Disconnected entry.
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    run_heartbeat_cadence() noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> run_heartbeat_cadence() noexcept;
 
     // FR-004 / FR-007 — emit TestRequest(1) when no inbound traffic for
     // 1.2×HeartBtInt; if no inbound within 2×HeartBtInt total, Logout(5) and
     // disconnect with session_test_request_unanswered (slot 74, 005-era reused
     // per F1/D1 2026-05-28).
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    run_inbound_liveness_watch() noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> run_inbound_liveness_watch() noexcept;
 
     // FR-006 — validate inbound Heartbeat's TestReqID(112) matches the most
     // recent outbound TestRequest's TestReqID. Mismatch → session_testreqid_mismatch
     // (slot 118). [data-model §E-1]
-    [[nodiscard]] expected_t<void>
-    validate_inbound_heartbeat_testreqid(std::string_view inbound_testreqid) const noexcept;
+    [[nodiscard]] expected_t<void> validate_inbound_heartbeat_testreqid(
+        std::string_view inbound_testreqid) const noexcept;
 
     // FR-009 — enter AwaitingResend transient: set awaiting_resend_=true and
     // populate resend_state_ with [begin_seqno, end_seqno].
     // The caller (Session::on_inbound_frame) emits ResendRequest(2) inline
     // (it has access to seqnum_mgr_ + store_then_emit); this method owns the
     // STATE transition only. [data-model §E-1; spec.md FR-009; plan.md T023]
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    enter_awaiting_resend(std::uint32_t begin_seqno,
-                          std::uint32_t end_seqno) noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> enter_awaiting_resend(
+        std::uint32_t begin_seqno, std::uint32_t end_seqno) noexcept;
 
     // FR-013 / FR-014 — process inbound SequenceReset(4). GapFillFlag=Y → advance
     // next_expected_inbound to NewSeqNo without storing; GapFillFlag=N (forced reset)
     // → advance + emit warning event.
-    [[nodiscard]] expected_t<void>
-    process_inbound_sequence_reset(std::uint32_t new_seqno,
-                                   bool gap_fill_flag) noexcept;
+    [[nodiscard]] expected_t<void> process_inbound_sequence_reset(std::uint32_t new_seqno,
+                                                                  bool gap_fill_flag) noexcept;
 
     // FR-010 / FR-011 / FR-012 — reply to inbound ResendRequest(2): walk
     // MessageStore [BeginSeqNo, EndSeqNo] (EndSeqNo=0 → our_last_outbound per D-2);
     // for each application message, emit with PossDupFlag(43)=Y + OrigSendingTime(122);
     // collapse admin spans to SequenceReset-GapFill(4) per D-3; emit GapFill on
     // store-horizon per D-4.
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    reply_to_inbound_resend_request(std::uint32_t begin_seqno,
-                                    std::uint32_t end_seqno) noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> reply_to_inbound_resend_request(
+        std::uint32_t begin_seqno, std::uint32_t end_seqno) noexcept;
 
     // FR-008 / US1 AC5 — initiator-graceful Logout. Emits Logout(5), awaits peer
     // reply for logout_disconnect_timeout_, closes Transport, transitions to
     // Disconnected. Surfaces session_logout_timeout (slot 73, 005-era reused per
     // F1/D1 2026-05-28) if elapsed before peer reply. Symmetric on acceptor side
     // per [[feedback_half_restructure_symmetric_api]].
-    [[nodiscard]] asio::awaitable<expected_t<void>>
-    drive_logout(std::chrono::milliseconds timeout) noexcept;
+    [[nodiscard]] asio::awaitable<expected_t<void>> drive_logout(
+        std::chrono::milliseconds timeout) noexcept;
 
     // Accessor — TRANSIENT FLAG, NOT a new fsm_state value per D-1 / [arch §5.6].
     [[nodiscard]] bool is_awaiting_resend() const noexcept;
@@ -246,33 +238,33 @@ private:
     // NON-OWNING; owned by SessionConfig::transport_factory_override (shared_ptr).
     // The engine guarantees the factory outlives this FSM per [arch §5.6].
     fixpp::transport::TransportFactory* factory_;
-    fixpp::transport::ReconnectPolicy   policy_;
-    std::uint32_t                       attempt_index_ = 0;
-    std::chrono::seconds                heartbeat_interval_;
-    std::chrono::milliseconds           logout_disconnect_timeout_;
+    fixpp::transport::ReconnectPolicy policy_;
+    std::uint32_t attempt_index_ = 0;
+    std::chrono::seconds heartbeat_interval_;
+    std::chrono::milliseconds logout_disconnect_timeout_;
 
     // 014 T009 — peer endpoint for async_connect (set by Session::open via
     // set_reconnect_endpoint before drive_reconnect_attempt is first called).
-    fixpp::transport::Endpoint          endpoint_{};
+    fixpp::transport::Endpoint endpoint_{};
 
     // 014 T009/T010 — NON-OWNING back-pointer to the owning Session (set by
     // Session::open via set_session_owner). Used to call the private
     // Session::install_reconnected_transport() on success. Forward-declared
     // above; full definition in reconnect_fsm.cpp (which includes session.hpp).
-    Session*                            session_ = nullptr;
+    Session* session_ = nullptr;
 
     // 014 T009 — TLS security profile for per-attempt SslCtxConfig construction.
     // Set by Session::open() via set_tls_profile(). Default = unset (enum value 0);
     // must be set before drive_reconnect_attempt is called on a live TLS path.
     // Forward-declared as uint8_t-backed enum above; full definition via
     // transport_factory.hpp in reconnect_fsm.cpp. [data-model §E-1 step 3; §XV.9]
-    fixpp::tls::SecurityProfile         tls_profile_{};
+    fixpp::tls::SecurityProfile tls_profile_{};
     // Timers are optional so ReconnectFsm is constructible without an executor;
     // populated at first use in Phase 3 (drive_reconnect_attempt binds the
     // session executor at call time). [data-model §E-1 Phase 2 shape]
-    std::optional<asio::steady_timer>   heartbeat_timer_;
-    std::optional<asio::steady_timer>   test_request_timer_;
-    std::optional<asio::steady_timer>   logout_timer_;
+    std::optional<asio::steady_timer> heartbeat_timer_;
+    std::optional<asio::steady_timer> test_request_timer_;
+    std::optional<asio::steady_timer> logout_timer_;
 
     // Transient bool on Active state — NOT a new fsm_state value per D-1.
     bool awaiting_resend_ = false;

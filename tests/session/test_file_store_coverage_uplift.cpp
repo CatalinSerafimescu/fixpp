@@ -58,9 +58,9 @@ using fixpp::store_test::unique_store_dir;
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Open a FileStore via the factory using the standard test credentials.
-std::unique_ptr<fixpp::session::MessageStore> open_store(
-    const fs::path& dir, asio::any_io_executor exec,
-    FileStorePolicy policy = {}) {
+std::unique_ptr<fixpp::session::MessageStore> open_store(const fs::path& dir,
+                                                         asio::any_io_executor exec,
+                                                         FileStorePolicy policy = {}) {
     fixpp::session::FileStore::Config cfg;
     cfg.directory = dir;
     cfg.sender_comp_id = "SENDER";
@@ -349,9 +349,8 @@ TEST(FileStoreCoverageUplift, FlushForSessionCloseSucceedsOnOpenStore) {
         if (!file_store) co_return;
 
         auto r = co_await file_store->flush_for_session_close();
-        EXPECT_TRUE(r.has_value())
-            << "flush_for_session_close() must succeed: error="
-            << (!r.has_value() ? static_cast<int>(r.error()) : 0);
+        EXPECT_TRUE(r.has_value()) << "flush_for_session_close() must succeed: error="
+                                   << (!r.has_value() ? static_cast<int>(r.error()) : 0);
     });
 
     pool.join();
@@ -402,8 +401,7 @@ TEST(FileStoreCoverageUplift, CounterRecordSurvivesReopen) {
         auto ns2 = co_await store2->next_seqnum(d, false);
         EXPECT_TRUE(ns2.has_value());
         if (!ns2) co_return;
-        EXPECT_EQ(*ns2, seqnum_t{5})
-            << "counter record must be recovered from disk on re-open";
+        EXPECT_EQ(*ns2, seqnum_t{5}) << "counter record must be recovered from disk on re-open";
     });
 
     pool.join();

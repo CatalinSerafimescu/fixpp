@@ -83,8 +83,7 @@ class View {
 public:
     constexpr View() noexcept = default;
 
-    [[nodiscard]] std::span<const std::byte> bytes() const noexcept
-        [[clang::lifetimebound]] {
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept [[clang::lifetimebound]] {
         check_alive();  // [2b §6.4] trap on use-after-buffer-reuse in debug
         return {data_, len_};
     }

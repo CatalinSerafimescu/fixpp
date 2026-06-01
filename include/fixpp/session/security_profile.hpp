@@ -39,8 +39,8 @@ namespace fixpp::session {
 // `unset` is the default-constructed sentinel that Session::open() REJECTS.
 struct SecurityProfile {
     enum class kind : std::uint8_t {
-        unset      = 0,   // sentinel — rejected at Session::open() (FR-018)
-        mtls_ca    = 1,   // mutual TLS with CA-verified peer certificate
+        unset = 0,        // sentinel — rejected at Session::open() (FR-018)
+        mtls_ca = 1,      // mutual TLS with CA-verified peer certificate
         mtls_pinned = 2,  // mutual TLS with certificate pinning
         one_way_ca = 3,   // one-way TLS (server authenticates to client)
     };

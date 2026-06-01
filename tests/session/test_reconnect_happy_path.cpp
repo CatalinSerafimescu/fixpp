@@ -29,26 +29,17 @@
 //
 // T014-C is a link-time smoke (always GREEN — no behavioral assertion).
 
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -58,6 +49,13 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // mock_transport is a test-only header; gate it with the required define.
 #define FIXPP_ALLOW_MOCK_TRANSPORT
@@ -76,13 +74,10 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra = {}) {
+static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -108,9 +103,8 @@ static std::vector<std::byte> make_fix_frame(
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          int hbt = 30) {
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -118,7 +112,7 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                              std::string_view s, std::string_view t) {
+                                             std::string_view s, std::string_view t) {
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
@@ -137,9 +131,7 @@ static bool is_msg_type(std::span<const std::byte> frame, std::string_view type)
     return wire.find(needle) != std::string::npos;
 }
 
-static bool is_resend_request(std::span<const std::byte> frame) {
-    return is_msg_type(frame, "2");
-}
+static bool is_resend_request(std::span<const std::byte> frame) { return is_msg_type(frame, "2"); }
 
 }  // namespace
 
@@ -147,30 +139,30 @@ static bool is_resend_request(std::span<const std::byte> frame) {
 
 class ReconnectHappyPathTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
-    OutboundCapture                          capture;
+    fixpp::core::EngineConfig engine{};
+    OutboundCapture capture;
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
-        cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
+        cfg.role = fixpp::session::session_role::acceptor;
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -210,8 +202,7 @@ protected:
 TEST_F(ReconnectHappyPathTest, TooHighInboundSeqEntersAwaitingResend) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(drive_to_active(sess))
-        << "Precondition: session must reach Active state";
+    ASSERT_TRUE(drive_to_active(sess)) << "Precondition: session must reach Active state";
 
     // After Logon(seq=1) consumed, next expected = 2.
     // Inject Heartbeat with seq=5 (gap [2..4]).
@@ -289,7 +280,8 @@ TEST_F(ReconnectHappyPathTest, ReconnectFsmAccessorsCompile) {
     // by is_awaiting_resend() or current_resend_state() (stub impl).
     ReconnectPolicy policy;
     policy.max_attempts = 3;
-    policy.schedule = {std::chrono::milliseconds{1000}, std::chrono::milliseconds{2000}, std::chrono::milliseconds{4000}};
+    policy.schedule = {std::chrono::milliseconds{1000}, std::chrono::milliseconds{2000},
+                       std::chrono::milliseconds{4000}};
 
     ReconnectFsm fsm(nullptr, std::move(policy), std::chrono::seconds{30}, 2000ms);
 
@@ -300,7 +292,7 @@ TEST_F(ReconnectHappyPathTest, ReconnectFsmAccessorsCompile) {
     // but we verify it doesn't crash on the default-constructed state.
     [[maybe_unused]] const auto& rs = fsm.current_resend_state();
     EXPECT_EQ(rs.outstanding_begin, 0u);
-    EXPECT_EQ(rs.outstanding_end,   0u);
+    EXPECT_EQ(rs.outstanding_end, 0u);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,36 +318,31 @@ class TestTransportFactory final : public fixpp::transport::TransportFactory {
 public:
     std::atomic<int> make_call_count{0};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor                   exec,
-         fixpp::tls::SslCtxConfig                /*ssl_cfg*/,
-         std::pmr::memory_resource*              /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         ++make_call_count;
         fixpp::transport::test::Script script;
         // Empty inbound → mock delivers EOF immediately on first read.
-        return std::make_unique<fixpp::transport::test::mock_transport>(
-            std::move(exec), std::move(script));
+        return std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
+                                                                        std::move(script));
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(
-        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override {
         return {};
     }
 
     // 014 T004 — C4: cert_source_snapshot() promoted to pure-virtual on the
     // abstract TransportFactory base; trivial override returns nullptr (this
     // factory holds no cert_source; only make() call-count is tested here).
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override
-    {
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
         return nullptr;
     }
 };
 
-}  // namespace (inner)
+}  // namespace
 
 TEST_F(ReconnectHappyPathTest, ReconnectLoopMintsFreshTransport) {
     // Wire the TestTransportFactory into a ReconnectFsm directly.
@@ -371,14 +358,12 @@ TEST_F(ReconnectHappyPathTest, ReconnectLoopMintsFreshTransport) {
     policy.schedule = {10ms, 20ms, 40ms};
 
     // Pass raw pointer — non-owning, factory_owner is the strong ref anchor.
-    ReconnectFsm fsm(factory_owner.get(), std::move(policy),
-                     std::chrono::seconds{30}, 2000ms);
+    ReconnectFsm fsm(factory_owner.get(), std::move(policy), std::chrono::seconds{30}, 2000ms);
 
     // drive_reconnect_attempt() MUST call factory_->make(...) once per attempt
     // (FR-001 / FR-002). The Phase 2 stub returns {} without calling make() →
     // make_call_count stays 0 after the call → EXPECT_GE(1) FAILS RED.
-    auto fut = asio::co_spawn(ioc,
-        fsm.drive_reconnect_attempt(), asio::use_future);
+    auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
 
@@ -389,6 +374,5 @@ TEST_F(ReconnectHappyPathTest, ReconnectLoopMintsFreshTransport) {
         << "drive_reconnect_attempt() must call TransportFactory::make() at "
         << "least once per FR-001 / FR-002 (mint fresh Transport per attempt). "
         << "RED: Phase 2 stub returns {} without invoking make(). "
-        << "make_call_count=" << factory_owner->make_call_count.load()
-        << " expected >= 1.";
+        << "make_call_count=" << factory_owner->make_call_count.load() << " expected >= 1.";
 }

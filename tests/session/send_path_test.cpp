@@ -831,11 +831,9 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     EXPECT_EQ(get_34(0), "1") << "Logon must have 34=1";
     // After open(), manager is at 1 (no advance). send1 → assign_outbound() = 1 (BUG),
     // then fixes that → should be 2. send2 should be 3.
-    EXPECT_EQ(get_34(1), "2")
-        << "First Session::send must have 34=2 (not 1); "
-        << "RC#A bug: split counter means send1 gets 34=1 duplicating Logon";
-    EXPECT_EQ(get_34(2), "3")
-        << "Second Session::send must have 34=3 (not 2)";
+    EXPECT_EQ(get_34(1), "2") << "First Session::send must have 34=2 (not 1); "
+                              << "RC#A bug: split counter means send1 gets 34=1 duplicating Logon";
+    EXPECT_EQ(get_34(2), "3") << "Second Session::send must have 34=3 (not 2)";
 }
 
 // ── RC#B RED: Transport throw on Session::send (after store) must:
@@ -952,20 +950,22 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
 
         std::string full = hdr + body;
         unsigned int cs = 0;
-        for (unsigned char c : full) { cs += c; }
+        for (unsigned char c : full) {
+            cs += c;
+        }
         cs &= 0xFFU;
         char csbuf[4];
         snprintf(csbuf, sizeof(csbuf), "%03u", cs);
         full += "10=" + std::string(csbuf) + "\x01";
 
         tr_frame.clear();
-        for (char c : full) { tr_frame.push_back(static_cast<std::byte>(c)); }
+        for (char c : full) {
+            tr_frame.push_back(static_cast<std::byte>(c));
+        }
     }
 
-    auto fut = asio::co_spawn(
-        ioc,
-        sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
+                              asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
     auto inbound_result = fut.get();

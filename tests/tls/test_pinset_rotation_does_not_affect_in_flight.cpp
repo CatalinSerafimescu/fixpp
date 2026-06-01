@@ -16,23 +16,23 @@
 //   5. Fresh find() / snapshot() sees NEW, not OLD.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <atomic>
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <thread>
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -73,22 +73,18 @@ TEST(PinsetRotation, InFlightSnapshotUnaffectedByRotation) {
     ASSERT_TRUE(rotation_done.load());
 
     // Step 4: in-flight snapshot still sees OLD.
-    ASSERT_EQ(in_flight_snap->size(), 1u)
-        << "in-flight snapshot must not be mutated by rotation";
-    EXPECT_EQ((*in_flight_snap)[0].sha256, kOld)
-        << "in-flight snapshot must still contain OLD pin";
+    ASSERT_EQ(in_flight_snap->size(), 1u) << "in-flight snapshot must not be mutated by rotation";
+    EXPECT_EQ((*in_flight_snap)[0].sha256, kOld) << "in-flight snapshot must still contain OLD pin";
 
     // Step 5: fresh snapshot sees NEW, not OLD.
     auto fresh_snap = ps.snapshot();
     ASSERT_NE(fresh_snap, nullptr);
-    ASSERT_EQ(fresh_snap->size(), 1u)
-        << "post-rotation snapshot must contain exactly 1 pin";
-    EXPECT_EQ((*fresh_snap)[0].sha256, kNew)
-        << "post-rotation snapshot must contain NEW pin";
+    ASSERT_EQ(fresh_snap->size(), 1u) << "post-rotation snapshot must contain exactly 1 pin";
+    EXPECT_EQ((*fresh_snap)[0].sha256, kNew) << "post-rotation snapshot must contain NEW pin";
 
     // find() also reflects the rotation.
     EXPECT_FALSE(ps.find(kOld).found()) << "OLD pin must be absent after rotation";
-    EXPECT_TRUE(ps.find(kNew).found())  << "NEW pin must be present after rotation";
+    EXPECT_TRUE(ps.find(kNew).found()) << "NEW pin must be present after rotation";
 }
 
 }  // namespace

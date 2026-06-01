@@ -14,14 +14,12 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/thread_pool.hpp>
-
 #include <chrono>
-#include <memory>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <memory>
 
 namespace {
 
@@ -35,31 +33,28 @@ TEST(SeamEngineShutdownOrder, ClockNotSetRejectedRegardlessOfOverride) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::clock_not_set);
 
-    cfg.clock = std::make_shared<fixpp::core::system_clock_source>(
-        asio::system_executor{});
+    cfg.clock = std::make_shared<fixpp::core::system_clock_source>(asio::system_executor{});
     EXPECT_TRUE(fixpp::core::validate_engine_config(cfg).has_value());
 }
 
 TEST(SeamEngineShutdownOrder, FixtureHeldMockClockOutlivesEngineTeardown) {
     // mock_clock held OUTSIDE the engine (fixture shared_ptr).
     auto fixture_clock = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        asio::system_executor{});
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, asio::system_executor{});
 
     {
         asio::thread_pool pool{2};
         // "engine" holds its own clock shared_ptr (the EngineConfig::clock).
         std::shared_ptr<fixpp::core::Clock> engine_clock =
-            std::make_shared<fixpp::core::system_clock_source>(
-                pool.get_executor());
+            std::make_shared<fixpp::core::system_clock_source>(pool.get_executor());
 
         asio::co_spawn(
             pool,
             [engine_clock]() -> asio::awaitable<void> {
                 try {
-                    co_await engine_clock->sleep_until(
-                        std::chrono::steady_clock::now() + 10s);
-                } catch (...) { /* operation_aborted on teardown */ }
+                    co_await engine_clock->sleep_until(std::chrono::steady_clock::now() + 10s);
+                } catch (...) { /* operation_aborted on teardown */
+                }
                 co_return;
             },
             asio::detached);
@@ -69,7 +64,7 @@ TEST(SeamEngineShutdownOrder, FixtureHeldMockClockOutlivesEngineTeardown) {
         // clear the engine clock shared_ptr LAST.
         engine_clock->cancel_sleeps();
         pool.join();
-        engine_clock.reset();                 // cleared last — no live waiters
+        engine_clock.reset();  // cleared last — no live waiters
     }
 
     // The fixture-held clock outlived the engine safely; cancel_sleeps() has

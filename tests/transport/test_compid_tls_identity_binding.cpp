@@ -20,10 +20,9 @@
 
 #include <gtest/gtest.h>
 
+#include <fixpp/tls/peer_identity.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/tls/peer_identity.hpp>
-
 #include <string>
 #include <string_view>
 

@@ -8,13 +8,12 @@
 // `dict::xml_parse_error` with the correct `.code()` and message prefix.
 // No on-disk fixtures; each case drives the error via a malformed string_view.
 
-#include <fixpp/dict/error.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
+#include <fixpp/dict/error.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -61,8 +60,7 @@ void assert_parse_error_contains(std::string_view xml, std::string_view needle) 
         FAIL() << "expected dict::xml_parse_error";
     } catch (fixpp::dict::xml_parse_error const& e) {
         EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_parse_failed);
-        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos)
-            << "what()=" << e.what();
+        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos) << "what()=" << e.what();
     }
 }
 
@@ -84,8 +82,7 @@ TEST(ParserError, UnclosedTag) {
 // TC-PE-02: Mismatched closing tag — </notfix> does not match <fix ...>.
 // ---------------------------------------------------------------------------
 TEST(ParserError, MismatchedClosingTag) {
-    constexpr std::string_view kXml =
-        "<fix major='4' minor='4'></notfix>";
+    constexpr std::string_view kXml = "<fix major='4' minor='4'></notfix>";
     assert_parse_error(kXml);
 }
 
@@ -94,8 +91,7 @@ TEST(ParserError, MismatchedClosingTag) {
 // entity; pugixml yields status_bad_entity.
 // ---------------------------------------------------------------------------
 TEST(ParserError, InvalidEntity) {
-    constexpr std::string_view kXml =
-        "<fix major='4' minor='4'>&badentity;</fix>";
+    constexpr std::string_view kXml = "<fix major='4' minor='4'>&badentity;</fix>";
     assert_parse_error(kXml);
 }
 
@@ -103,9 +99,7 @@ TEST(ParserError, InvalidEntity) {
 // TC-PE-04: Empty input — zero-length string_view. Pugixml treats this as
 // a document with no root element and returns status != status_ok.
 // ---------------------------------------------------------------------------
-TEST(ParserError, EmptyInput) {
-    assert_parse_error("");
-}
+TEST(ParserError, EmptyInput) { assert_parse_error(""); }
 
 // ---------------------------------------------------------------------------
 // TC-PE-05: Non-XML garbage — no angle brackets; pugixml cannot find a root
@@ -140,8 +134,7 @@ TEST(ParserError, NonNumericMajor) {
     std::array<std::byte, kBufSize> buf{};
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size(),
                                            std::pmr::null_memory_resource()};
-    constexpr std::string_view kXml =
-        "<fix major='abc' minor='0'><fields/><messages/></fix>";
+    constexpr std::string_view kXml = "<fix major='abc' minor='0'><fields/><messages/></fix>";
     fixpp::dict::XmlLoader loader{};
     try {
         (void)loader.load_from_string(kXml, &mr);
@@ -156,8 +149,7 @@ TEST(ParserError, NonNumericMinor) {
     std::array<std::byte, kBufSize> buf{};
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size(),
                                            std::pmr::null_memory_resource()};
-    constexpr std::string_view kXml =
-        "<fix major='4' minor='xyz'><fields/><messages/></fix>";
+    constexpr std::string_view kXml = "<fix major='4' minor='xyz'><fields/><messages/></fix>";
     fixpp::dict::XmlLoader loader{};
     try {
         (void)loader.load_from_string(kXml, &mr);

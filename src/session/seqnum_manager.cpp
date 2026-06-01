@@ -131,7 +131,7 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noe
     }
     auto lk = std::move(*lk_result);
 
-    next_inbound_  = seqnum_min;
+    next_inbound_ = seqnum_min;
     next_outbound_ = seqnum_min;
     co_return fixpp::core::expected_t<void>{};
 }

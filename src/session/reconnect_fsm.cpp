@@ -21,12 +21,12 @@
 // ABI NOTE: awaiting_resend_ is a TRANSIENT BOOL on Active — NOT a new
 // fsm_state value per D-1 / [arch §5.6]. Do NOT extend fsm_state.
 
+#include "fixpp/session/reconnect_fsm.hpp"
+
+#include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-#include <asio/redirect_error.hpp>
-
-#include "fixpp/session/reconnect_fsm.hpp"
 // Full TransportFactory definition (forward-declared in the header to keep
 // tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
 // [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
@@ -55,17 +55,16 @@ namespace fixpp::session {
 // Initializes all scalar fields. Timer optionals start empty; populated on
 // first async use in Phase 3. [data-model §E-1]
 ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
-                            fixpp::transport::ReconnectPolicy   policy,
-                            std::chrono::seconds                heartbeat_interval,
-                            std::chrono::milliseconds           logout_disconnect_timeout) noexcept
+                           fixpp::transport::ReconnectPolicy policy,
+                           std::chrono::seconds heartbeat_interval,
+                           std::chrono::milliseconds logout_disconnect_timeout) noexcept
     // Remaining members (attempt_index_, the three timer optionals,
     // awaiting_resend_, resend_state_, last_outbound_testreqid_) take their
     // header NSDMI / default-constructed empty state. [data-model §E-1]
     : factory_{factory},
       policy_{std::move(policy)},
       heartbeat_interval_{heartbeat_interval},
-      logout_disconnect_timeout_{logout_disconnect_timeout}
-{}
+      logout_disconnect_timeout_{logout_disconnect_timeout} {}
 
 // ── drive_reconnect_attempt ───────────────────────────────────────────────────
 //
@@ -102,16 +101,14 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 // factory_ null guard: if no factory is configured the coroutine co_returns
 // an error immediately (non-retried; test fixtures may construct a ReconnectFsm
 // without a factory when testing FSM state transitions only).
-[[nodiscard]] asio::awaitable<expected_t<void>>
-ReconnectFsm::drive_reconnect_attempt() noexcept {
+[[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::drive_reconnect_attempt() noexcept {
     using fixpp::core::error;
 
     // Enable total-cancellation so cancellation_type::total from the root
     // cancellation signal propagates through nested co_awaits.
     // [[feedback_asio_cospawn_total_cancellation_default]]: co_spawn defaults
     // to terminal-only; we must explicitly reset here. [const §XI.2]
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     if (factory_ == nullptr) {
         co_return std::unexpected{error::transport_factory_failed};
@@ -123,7 +120,6 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
     // max_attempts == 0 means unbounded (QuickFIX-cpp / Fix8 compat mode).
     // [reconnect_policy.hpp: "0 = UNBOUNDED (opt-in only)"]
     for (std::uint32_t n = 0; max_attempts == 0 || n < max_attempts; ++n) {
-
         // ── Step 1: inter-attempt backoff delay (skip for n==0) ──────────────
         if (n > 0) {
             auto delay = policy_.delay_for_attempt(n);
@@ -131,8 +127,7 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
                 asio::steady_timer timer{exec};
                 timer.expires_after(delay);
                 asio::error_code wait_ec;
-                co_await timer.async_wait(
-                    asio::redirect_error(asio::use_awaitable, wait_ec));
+                co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
 
                 // Re-check cancellation state after the sleep.
                 co_await asio::this_coro::reset_cancellation_state(
@@ -183,7 +178,7 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
         // rotation-detect + the handshake itself at transport_factory.cpp:378),
         // breaking the FR-013a "load_credentials() == 1 per handshake" witness.
         const bool first_load = (last_active_source_ == nullptr);
-        const bool rotated    = !first_load && (snap != last_active_source_);
+        const bool rotated = !first_load && (snap != last_active_source_);
 
         if (first_load || rotated) {
             // Compute the SHA-256 fingerprint of snap's leaf via load_credentials()
@@ -210,7 +205,7 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
             // First load sets the baseline (NO event, FR-009 SPEC-FIXED);
             // rotation updates AFTER the emit above.
             last_active_source_ = snap;
-            last_active_fp_     = new_fp;
+            last_active_fp_ = new_fp;
         }
         // else: snap == last_active_source_ → no rotation, no load, no emit.
 
@@ -276,15 +271,13 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
         if (session_ != nullptr) {
             const auto& cfg = session_->cfg_;
             const bool is_mtls =
-                cfg.security_profile.k ==
-                    fixpp::session::SecurityProfile::kind::mtls_ca ||
-                cfg.security_profile.k ==
-                    fixpp::session::SecurityProfile::kind::mtls_pinned;
+                cfg.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
+                cfg.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
 
             if (is_mtls) {
                 const std::string_view asserted_compid = cfg.target_comp_id;
-                auto auth_r = cfg.compid_authorization_policy.authorize(
-                    hr.peer_id, asserted_compid);
+                auto auth_r =
+                    cfg.compid_authorization_policy.authorize(hr.peer_id, asserted_compid);
                 if (!auth_r) {
                     // Authorization failed: emit event, release t, count attempt.
                     // cn is left EMPTY: emit_event PERSISTS the event into the
@@ -292,14 +285,12 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
                     // view into hr.peer_id (a coroutine-stack temporary destroyed at
                     // the `continue` below) would dangle for later recent_events()
                     // readers. Mirrors the mTLS-no-identity arm (session.cpp:1939).
-                    session_->emit_event(
-                        fixpp::session::session_event_compid_authorization_failed{
-                            .cn               = {},
-                            .asserted_compid  = asserted_compid,
-                            .expected_compids = {},
-                            .principal_source =
-                                fixpp::session::bound_principal::source::CN,
-                        });
+                    session_->emit_event(fixpp::session::session_event_compid_authorization_failed{
+                        .cn = {},
+                        .asserted_compid = asserted_compid,
+                        .expected_compids = {},
+                        .principal_source = fixpp::session::bound_principal::source::CN,
+                    });
                     // t is released here (RAII unique_ptr); count attempt,
                     // continue to next iteration (retry-to-cap, NOT terminal).
                     continue;
@@ -332,8 +323,7 @@ ReconnectFsm::drive_reconnect_attempt() noexcept {
 //
 // FR-003 / FR-005: deferred to Phase 4 (heartbeat timer arm + outbound idle).
 // Liveness logic lives in session.cpp run_liveness_loop() for Phase 3.
-[[nodiscard]] asio::awaitable<expected_t<void>>
-ReconnectFsm::run_heartbeat_cadence() noexcept {
+[[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::run_heartbeat_cadence() noexcept {
     co_return expected_t<void>{};
 }
 
@@ -350,10 +340,8 @@ ReconnectFsm::run_inbound_liveness_watch() noexcept {
 //
 // FR-006: mismatch → session_testreqid_mismatch (slot 118). Phase 3 check
 // is inline in session.cpp on_inbound_frame; this method stub is Phase 4.
-[[nodiscard]] expected_t<void>
-ReconnectFsm::validate_inbound_heartbeat_testreqid(
-    std::string_view /*inbound_testreqid*/) const noexcept
-{
+[[nodiscard]] expected_t<void> ReconnectFsm::validate_inbound_heartbeat_testreqid(
+    std::string_view /*inbound_testreqid*/) const noexcept {
     return expected_t<void>{};
 }
 
@@ -365,12 +353,11 @@ ReconnectFsm::validate_inbound_heartbeat_testreqid(
 // (which has access to seqnum_mgr_ and store_then_emit); this method owns
 // the STATE transition only per data-model.md §E-1.
 // [spec.md FR-009; data-model.md §E-1; plan.md T023/T026]
-[[nodiscard]] asio::awaitable<expected_t<void>>
-ReconnectFsm::enter_awaiting_resend(std::uint32_t begin_seqno,
-                                    std::uint32_t end_seqno) noexcept {
+[[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::enter_awaiting_resend(
+    std::uint32_t begin_seqno, std::uint32_t end_seqno) noexcept {
     awaiting_resend_ = true;
     resend_state_.outstanding_begin = begin_seqno;
-    resend_state_.outstanding_end   = end_seqno;
+    resend_state_.outstanding_end = end_seqno;
     co_return expected_t<void>{};
 }
 
@@ -388,9 +375,8 @@ void ReconnectFsm::exit_awaiting_resend() noexcept {
 // FR-013 / FR-014: advance next_expected_inbound to NewSeqNo (GapFillFlag=Y)
 // or forced reset (GapFillFlag=N). Phase 3 stub — seqnum advance is handled
 // inline in session.cpp; this method is the Phase 4 hook.
-[[nodiscard]] expected_t<void>
-ReconnectFsm::process_inbound_sequence_reset(std::uint32_t /*new_seqno*/,
-                                              bool /*gap_fill_flag*/) noexcept {
+[[nodiscard]] expected_t<void> ReconnectFsm::process_inbound_sequence_reset(
+    std::uint32_t /*new_seqno*/, bool /*gap_fill_flag*/) noexcept {
     return expected_t<void>{};
 }
 
@@ -404,9 +390,8 @@ ReconnectFsm::process_inbound_sequence_reset(std::uint32_t /*new_seqno*/,
 // GapFill. This method remains a thin no-op hook for symmetry with the other
 // ReconnectFsm driver entry points (state ownership only, no emit). The T016
 // store-horizon witness drives the inline path via a seeded MessageStore.
-[[nodiscard]] asio::awaitable<expected_t<void>>
-ReconnectFsm::reply_to_inbound_resend_request(std::uint32_t /*begin_seqno*/,
-                                               std::uint32_t /*end_seqno*/) noexcept {
+[[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::reply_to_inbound_resend_request(
+    std::uint32_t /*begin_seqno*/, std::uint32_t /*end_seqno*/) noexcept {
     co_return expected_t<void>{};
 }
 
@@ -414,16 +399,14 @@ ReconnectFsm::reply_to_inbound_resend_request(std::uint32_t /*begin_seqno*/,
 //
 // FR-008: emit Logout(5), arm timer, await peer reply. Phase 3 stub — Logout
 // logic is inline in session.cpp run_logout_phase1 / on_inbound_frame.
-[[nodiscard]] asio::awaitable<expected_t<void>>
-ReconnectFsm::drive_logout(std::chrono::milliseconds /*timeout*/) noexcept {
+[[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::drive_logout(
+    std::chrono::milliseconds /*timeout*/) noexcept {
     co_return expected_t<void>{};
 }
 
 // ── Accessors ─────────────────────────────────────────────────────────────────
 
-[[nodiscard]] bool ReconnectFsm::is_awaiting_resend() const noexcept {
-    return awaiting_resend_;
-}
+[[nodiscard]] bool ReconnectFsm::is_awaiting_resend() const noexcept { return awaiting_resend_; }
 
 [[nodiscard]] ResendState const& ReconnectFsm::current_resend_state() const noexcept {
     return resend_state_;

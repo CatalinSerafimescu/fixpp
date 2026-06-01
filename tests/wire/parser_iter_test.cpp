@@ -5,18 +5,17 @@
 // Length+Data pair table so a Data field carrying embedded SOH is delimited
 // by its preceding Length field. Authored red; GREEN against T024's surface.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fixpp/wire/parser.hpp>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -51,13 +50,15 @@ static_assert(fixpp::wire::detail::data_tag_for_length(7) == 0);
 
 // parse_iter takes NO memory_resource — the streaming path is zero-alloc by
 // construction (compile-time contract, FR-003).
-static_assert(
-    std::is_invocable_v<decltype(&Parser<access_mode::Iter>::parse_iter),
-                        Parser<access_mode::Iter>&,
-                        fixpp::wire::frame_view const&>);
+static_assert(std::is_invocable_v<decltype(&Parser<access_mode::Iter>::parse_iter),
+                                  Parser<access_mode::Iter>&, fixpp::wire::frame_view const&>);
 
 TEST(WireParserIter, StreamingDictFreeInDocumentOrder) {
-    auto buf = make_frame("35=0\x01" "34=7\x01" "112=TESTREQ\x01" "58=hi\x01");
+    auto buf = make_frame(
+        "35=0\x01"
+        "34=7\x01"
+        "112=TESTREQ\x01"
+        "58=hi\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -79,16 +80,20 @@ TEST(WireParserIter, StreamingDictFreeInDocumentOrder) {
             ++w;
         }
     }
-    EXPECT_EQ(w, want.size())
-        << "body tags must stream in document order within the frame";
+    EXPECT_EQ(w, want.size()) << "body tags must stream in document order within the frame";
 }
 
 TEST(WireParserIter, LengthDataFieldCarriesEmbeddedSOH) {
     // 95=SecureDataLen, 96=SecureData. The 96 value "ab<SOH>cd" is 5 bytes;
     // the iterator must read it by the preceding 95 length, NOT stop at the
     // embedded SOH. Dict-free: resolved via the static Length+Data table.
-    auto buf = make_frame("35=D\x01" "34=1\x01" "95=5\x01"
-                          "96=ab\x01" "cd\x01" "58=END\x01");
+    auto buf = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "95=5\x01"
+        "96=ab\x01"
+        "cd\x01"
+        "58=END\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -101,11 +106,12 @@ TEST(WireParserIter, LengthDataFieldCarriesEmbeddedSOH) {
     for (auto it = mv->begin(); !(it == mv->end()); ++it) {
         if ((*it).tag == 96) {
             saw_96 = true;
-            std::string_view v{
-                reinterpret_cast<char const*>((*it).value.data()),
-                (*it).value.size()};
+            std::string_view v{reinterpret_cast<char const*>((*it).value.data()),
+                               (*it).value.size()};
             EXPECT_EQ(v.size(), 5U);
-            EXPECT_EQ(v, std::string_view("ab\x01" "cd", 5));
+            EXPECT_EQ(v, std::string_view("ab\x01"
+                                          "cd",
+                                          5));
         }
         if ((*it).tag == 58) {
             saw_58 = true;

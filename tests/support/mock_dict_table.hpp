@@ -20,16 +20,14 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace fixpp::dict {
 
-enum class field_type : std::uint8_t {
-    String, Int, Float, Char, Boolean, Data, Length
-};
+enum class field_type : std::uint8_t { String, Int, Float, Char, Boolean, Data, Length };
 
 class table_view {
 public:
@@ -77,8 +75,8 @@ public:
     }
 
     // ---- value-contract surface bound by wire::Validator/Parser
-    [[nodiscard]] std::span<std::uint16_t const>
-    required_fields(std::string_view msg_type) const noexcept {
+    [[nodiscard]] std::span<std::uint16_t const> required_fields(
+        std::string_view msg_type) const noexcept {
         auto it = required_.find(std::string{msg_type});
         if (it == required_.end()) {
             return {};
@@ -87,19 +85,18 @@ public:
     }
 
     [[nodiscard]] bool field_valid_for(std::string_view msg_type,
-                                        std::uint16_t tag) const noexcept {
+                                       std::uint16_t tag) const noexcept {
         auto it = valid_.find(std::string{msg_type});
         return it != valid_.end() && it->second.contains(tag);
     }
 
-    [[nodiscard]] std::uint16_t
-    group_first_field(std::uint16_t no_tag) const noexcept {
+    [[nodiscard]] std::uint16_t group_first_field(std::uint16_t no_tag) const noexcept {
         auto it = group_first_.find(no_tag);
         return it == group_first_.end() ? std::uint16_t{0} : it->second;
     }
 
-    [[nodiscard]] std::span<std::uint16_t const>
-    group_member_tags(std::uint16_t no_tag) const noexcept {
+    [[nodiscard]] std::span<std::uint16_t const> group_member_tags(
+        std::uint16_t no_tag) const noexcept {
         auto it = group_members_.find(no_tag);
         if (it == group_members_.end()) {
             return {};
@@ -107,8 +104,7 @@ public:
         return {it->second.data(), it->second.size()};
     }
 
-    [[nodiscard]] field_type
-    field_type_of(std::uint16_t tag) const noexcept {
+    [[nodiscard]] field_type field_type_of(std::uint16_t tag) const noexcept {
         auto it = types_.find(tag);
         return it == types_.end() ? field_type::String : it->second;
     }
@@ -118,9 +114,8 @@ public:
     // value set) OR `value` matches one of its registered values byte-for-
     // byte. A registered-but-unmatched value is the only rejection
     // (→ wire_field_value_out_of_range, slot 40).
-    [[nodiscard]] bool
-    enum_valid(std::uint16_t tag,
-               std::span<const std::byte> value) const noexcept {
+    [[nodiscard]] bool enum_valid(std::uint16_t tag,
+                                  std::span<const std::byte> value) const noexcept {
         auto it = enums_.find(tag);
         if (it == enums_.end()) {
             return true;  // not an enumerated field — unconstrained

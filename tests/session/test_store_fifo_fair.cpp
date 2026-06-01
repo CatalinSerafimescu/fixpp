@@ -12,20 +12,18 @@
 // TDD: RED until T040 (async_mutex wiring) ships.
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <future>
-#include <span>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <future>
+#include <span>
+#include <vector>
 
 #include "_fixtures_/test_double_fsm.hpp"
 
@@ -38,11 +36,11 @@ using fixpp::store_test::make_test_frame;
 
 MemoryStore make_fifo_store() {
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::bounded;
-    cfg.inbound_capacity  = 200;
+    cfg.policy = fixpp::session::capacity_policy::bounded;
+    cfg.inbound_capacity = 200;
     cfg.outbound_capacity = 200;
-    cfg.max_frame_bytes   = 4096;
-    cfg.store_resource    = nullptr;
+    cfg.max_frame_bytes = 4096;
+    cfg.store_resource = nullptr;
     return MemoryStore{cfg};
 }
 
@@ -67,15 +65,15 @@ TEST(StoreFifoFair, TwoCoroutinesInboundOutboundBothSucceed) {
     constexpr int kFrames = 50;
 
     // Coroutine A: store kFrames inbound frames (seq 1..kFrames)
-    auto fut_a = asio::co_spawn(pool.get_executor(),
+    auto fut_a = asio::co_spawn(
+        pool.get_executor(),
         [&store]() -> asio::awaitable<bool> {
             for (int i = 1; i <= kFrames; ++i) {
-                auto frame = make_test_frame(static_cast<fixpp::session::seqnum_t>(i),
-                                             direction_t::inbound);
-                auto r = co_await store.store(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    std::span<const std::byte>(frame),
-                    direction_t::inbound);
+                auto frame =
+                    make_test_frame(static_cast<fixpp::session::seqnum_t>(i), direction_t::inbound);
+                auto r =
+                    co_await store.store(static_cast<fixpp::session::seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::inbound);
                 if (!r.has_value()) co_return false;
             }
             co_return true;
@@ -83,15 +81,15 @@ TEST(StoreFifoFair, TwoCoroutinesInboundOutboundBothSucceed) {
         asio::use_future);
 
     // Coroutine B: store kFrames outbound frames (seq 1..kFrames)
-    auto fut_b = asio::co_spawn(pool.get_executor(),
+    auto fut_b = asio::co_spawn(
+        pool.get_executor(),
         [&store]() -> asio::awaitable<bool> {
             for (int i = 1; i <= kFrames; ++i) {
                 auto frame = make_test_frame(static_cast<fixpp::session::seqnum_t>(i),
                                              direction_t::outbound);
-                auto r = co_await store.store(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    std::span<const std::byte>(frame),
-                    direction_t::outbound);
+                auto r =
+                    co_await store.store(static_cast<fixpp::session::seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::outbound);
                 if (!r.has_value()) co_return false;
             }
             co_return true;
@@ -103,7 +101,8 @@ TEST(StoreFifoFair, TwoCoroutinesInboundOutboundBothSucceed) {
 
     // Verify all frames are present via retrieve
     asio::thread_pool verify_pool{1};
-    auto verify_fut = asio::co_spawn(verify_pool.get_executor(),
+    auto verify_fut = asio::co_spawn(
+        verify_pool.get_executor(),
         [&store]() -> asio::awaitable<void> {
             byte_collecting_visitor iv, ov;
             auto ri = co_await store.retrieve(1, 0, direction_t::inbound, iv);
@@ -137,12 +136,11 @@ TEST(StoreFifoFair, ConcurrentWritersSameDirectionOneWins) {
     std::atomic<int> out_of_order_count{0};
 
     // Both try to store seq=1 concurrently — exactly one should succeed.
-    auto fut_a = asio::co_spawn(pool.get_executor(),
-        [&store, &frame1, &success_count, &out_of_order_count]()
-            -> asio::awaitable<void>
-        {
-            auto r = co_await store.store(1,
-                std::span<const std::byte>(frame1), direction_t::outbound);
+    auto fut_a = asio::co_spawn(
+        pool.get_executor(),
+        [&store, &frame1, &success_count, &out_of_order_count]() -> asio::awaitable<void> {
+            auto r =
+                co_await store.store(1, std::span<const std::byte>(frame1), direction_t::outbound);
             if (r.has_value()) {
                 success_count.fetch_add(1, std::memory_order_relaxed);
             } else if (r.error() == fixpp::core::error::store_seqnum_out_of_order) {
@@ -151,12 +149,11 @@ TEST(StoreFifoFair, ConcurrentWritersSameDirectionOneWins) {
         },
         asio::use_future);
 
-    auto fut_b = asio::co_spawn(pool.get_executor(),
-        [&store, &frame2, &success_count, &out_of_order_count]()
-            -> asio::awaitable<void>
-        {
-            auto r = co_await store.store(1,
-                std::span<const std::byte>(frame2), direction_t::outbound);
+    auto fut_b = asio::co_spawn(
+        pool.get_executor(),
+        [&store, &frame2, &success_count, &out_of_order_count]() -> asio::awaitable<void> {
+            auto r =
+                co_await store.store(1, std::span<const std::byte>(frame2), direction_t::outbound);
             if (r.has_value()) {
                 success_count.fetch_add(1, std::memory_order_relaxed);
             } else if (r.error() == fixpp::core::error::store_seqnum_out_of_order) {
@@ -169,8 +166,7 @@ TEST(StoreFifoFair, ConcurrentWritersSameDirectionOneWins) {
     fut_b.get();
 
     // Exactly one succeeds, exactly one gets out_of_order
-    EXPECT_EQ(success_count.load(), 1)
-        << "Exactly 1 concurrent store(seq=1) must succeed";
+    EXPECT_EQ(success_count.load(), 1) << "Exactly 1 concurrent store(seq=1) must succeed";
     EXPECT_EQ(out_of_order_count.load(), 1)
         << "Exactly 1 concurrent store(seq=1) must fail with store_seqnum_out_of_order";
 }
@@ -187,24 +183,23 @@ TEST(StoreFifoFair, HighConcurrencyMutexGuardsStore) {
 
     // Use unbounded policy so we don't fight capacity
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::unbounded;
-    cfg.max_frame_bytes   = 4096;
-    cfg.store_resource    = nullptr;
+    cfg.policy = fixpp::session::capacity_policy::unbounded;
+    cfg.max_frame_bytes = 4096;
+    cfg.store_resource = nullptr;
     auto store = std::make_shared<MemoryStore>(cfg);
 
     constexpr int kFrames = 100;
 
     // Single writer for inbound — stores seq 1..kFrames
-    auto fut_in = asio::co_spawn(pool.get_executor(),
+    auto fut_in = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<bool> {
             for (int i = 1; i <= kFrames; ++i) {
-                auto frame = make_test_frame(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    direction_t::inbound);
-                auto r = co_await store->store(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    std::span<const std::byte>(frame),
-                    direction_t::inbound);
+                auto frame =
+                    make_test_frame(static_cast<fixpp::session::seqnum_t>(i), direction_t::inbound);
+                auto r =
+                    co_await store->store(static_cast<fixpp::session::seqnum_t>(i),
+                                          std::span<const std::byte>(frame), direction_t::inbound);
                 if (!r.has_value()) co_return false;
             }
             co_return true;
@@ -212,28 +207,28 @@ TEST(StoreFifoFair, HighConcurrencyMutexGuardsStore) {
         asio::use_future);
 
     // Single writer for outbound — stores seq 1..kFrames
-    auto fut_out = asio::co_spawn(pool.get_executor(),
+    auto fut_out = asio::co_spawn(
+        pool.get_executor(),
         [store]() -> asio::awaitable<bool> {
             for (int i = 1; i <= kFrames; ++i) {
-                auto frame = make_test_frame(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    direction_t::outbound);
-                auto r = co_await store->store(
-                    static_cast<fixpp::session::seqnum_t>(i),
-                    std::span<const std::byte>(frame),
-                    direction_t::outbound);
+                auto frame = make_test_frame(static_cast<fixpp::session::seqnum_t>(i),
+                                             direction_t::outbound);
+                auto r =
+                    co_await store->store(static_cast<fixpp::session::seqnum_t>(i),
+                                          std::span<const std::byte>(frame), direction_t::outbound);
                 if (!r.has_value()) co_return false;
             }
             co_return true;
         },
         asio::use_future);
 
-    EXPECT_TRUE(fut_in.get())  << "Inbound writer failed under concurrency";
+    EXPECT_TRUE(fut_in.get()) << "Inbound writer failed under concurrency";
     EXPECT_TRUE(fut_out.get()) << "Outbound writer failed under concurrency";
 
     // Verify counts
     asio::thread_pool vpool{1};
-    auto vfut = asio::co_spawn(vpool.get_executor(),
+    auto vfut = asio::co_spawn(
+        vpool.get_executor(),
         [store]() -> asio::awaitable<void> {
             byte_collecting_visitor iv, ov;
             auto ri = co_await store->retrieve(1, 0, direction_t::inbound, iv);

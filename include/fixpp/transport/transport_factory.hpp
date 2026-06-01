@@ -28,13 +28,12 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/ip/tcp.hpp>
 #include <atomic>
+#include <fixpp/core/error.hpp>            // defines core::expected_t<T>
+#include <fixpp/tls/cert_source.hpp>       // for reload_credentials (013 T012)
+#include <fixpp/tls/security_profile.hpp>  // [2g §4.5] SslCtxConfig (LOCKED)
+#include <fixpp/transport/transport.hpp>
 #include <memory>
 #include <memory_resource>
-
-#include <fixpp/core/error.hpp>             // defines core::expected_t<T>
-#include <fixpp/tls/cert_source.hpp>        // for reload_credentials (013 T012)
-#include <fixpp/tls/security_profile.hpp>   // [2g §4.5] SslCtxConfig (LOCKED)
-#include <fixpp/transport/transport.hpp>
 
 namespace fixpp::transport {
 
@@ -71,10 +70,9 @@ public:
     // instance is engine-anchored at Session::open and destructed at
     // Session::close (after async_close completes or close timeout fires per
     // [2h §6.4]).
-    [[nodiscard]] virtual core::expected_t<std::unique_ptr<Transport>>
-        make(asio::any_io_executor             exec,
-             fixpp::tls::SslCtxConfig          ssl_cfg,
-             std::pmr::memory_resource*        mr) noexcept = 0;
+    [[nodiscard]] virtual core::expected_t<std::unique_ptr<Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg,
+        std::pmr::memory_resource* mr) noexcept = 0;
 
     // 013 T012 — FR-030 / FR-033 / D-11 — atomic credential rotation.
     // Performs an atomic STORE on the factory-internal cert_source_slot_
@@ -92,9 +90,8 @@ public:
     // std::shared_ptr<cert_source> BY VALUE COPY before make(...) was called.
     //
     // Pure-virtual count moves 1→2 (under [const §XIV.2] 5/5 cap).
-    [[nodiscard]] virtual core::expected_t<void>
-        reload_credentials(
-            std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept = 0;
+    [[nodiscard]] virtual core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept = 0;
 
     // 014 T003 — C4 promotion: cert_source_snapshot() moves from the concrete
     // asio_tls_transport_factory to a pure-virtual on the abstract base.
@@ -107,8 +104,8 @@ public:
     // the abstract TransportFactory* (reconnect_fsm.hpp:152); this method must
     // be on the abstract base for the call to compile through that pointer.
     // noexcept — no state change; atomic load acquire.
-    [[nodiscard]] virtual std::shared_ptr<fixpp::tls::cert_source>
-        cert_source_snapshot() const noexcept = 0;
+    [[nodiscard]] virtual std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,41 +148,37 @@ public:
     // test executable to link OpenSSL even if it never constructs a factory).
     // The actual type is asio::ssl::context*; the factory's make() casts it back.
     struct shared_ctx_tag {};
-    asio_tls_transport_factory(shared_ctx_tag,
-                               Transport::Config cfg,
+    asio_tls_transport_factory(shared_ctx_tag, Transport::Config cfg,
                                fixpp::tls::SslCtxConfig ssl_cfg,
                                std::shared_ptr<void> ctx) noexcept;
 
-    [[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-        make(asio::any_io_executor             exec,
-             fixpp::tls::SslCtxConfig          ssl_cfg,
-             std::pmr::memory_resource*        mr) noexcept override;
+    [[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg,
+        std::pmr::memory_resource* mr) noexcept override;
 
-    [[nodiscard]] core::expected_t<std::unique_ptr<asio_tls_transport>>
-        make_accepted(asio::ip::tcp::socket accepted_socket,
-                      std::pmr::memory_resource* mr) noexcept;
+    [[nodiscard]] core::expected_t<std::unique_ptr<asio_tls_transport>> make_accepted(
+        asio::ip::tcp::socket accepted_socket, std::pmr::memory_resource* mr) noexcept;
 
     // 013 T012 — FR-033 / D-11 — atomic credential rotation override.
     // Stores new_source into cert_source_slot_ via atomic store. Returns
     // error::session_invalid_argument on nullptr. Both initiator and acceptor
     // paths share this single slot per [[feedback_half_restructure_symmetric_api]].
     // Body lives in src/transport/transport_factory.cpp.
-    [[nodiscard]] core::expected_t<void>
-        reload_credentials(
-            std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override;
+    [[nodiscard]] core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override;
 
     // 014 T003 — override of the abstract pure-virtual promoted in this pass (C4).
     // Returns the current cert_source strong-ref BY VALUE.
     // NEVER returns raw pointer or weak_ptr per
     // [[feedback_weak_ptr_cache_needs_owning_context]]. Called by ReconnectFsm
     // at drive_reconnect_attempt entry to capture the snapshot. noexcept.
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-        cert_source_snapshot() const noexcept override;
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override;
 
 private:
-    Transport::Config        cfg_;
+    Transport::Config cfg_;
     fixpp::tls::SslCtxConfig ssl_cfg_;
-    std::shared_ptr<void>    ssl_ctx_;  // actually asio::ssl::context*; type-erased
+    std::shared_ptr<void> ssl_ctx_;  // actually asio::ssl::context*; type-erased
 
     // 013 T012 — FR-033 atomic cert_source slot. Initiator and acceptor both
     // read this slot via cert_source_snapshot(); operator rotates via
@@ -207,9 +200,8 @@ private:
 //
 // Body lives in src/transport/transport_factory.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
-make_asio_tls_transport_factory(Transport::Config         cfg,
-                                 fixpp::tls::SslCtxConfig  ssl_cfg) noexcept;
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>> make_asio_tls_transport_factory(
+    Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg) noexcept;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SessionConfig::transport_factory_override field shape (Appendix D §D.2,

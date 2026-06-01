@@ -17,29 +17,27 @@
 //   EXPECT for a SequenceReset-GapFill outbound frame FAILS RED until T026 impl
 //   lands.
 
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -52,13 +50,10 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra = {}) {
+static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -84,9 +79,8 @@ static std::vector<std::byte> make_fix_frame(
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          int hbt = 30) {
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -94,12 +88,10 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 // ResendRequest(2) with BeginSeqNo(7) and EndSeqNo(16).
-static std::vector<std::byte> make_resend_request(std::string_view bs,
-                                                   std::uint32_t seq,
-                                                   std::string_view s,
-                                                   std::string_view t,
-                                                   std::uint32_t begin_seqno,
-                                                   std::uint32_t end_seqno) {
+static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                                  std::string_view s, std::string_view t,
+                                                  std::uint32_t begin_seqno,
+                                                  std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -137,30 +129,30 @@ static bool is_sequence_reset_gapfill(std::span<const std::byte> frame,
 
 class RecoveryAdminSpanGapfillTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
-    OutboundCapture                          capture;
+    fixpp::core::EngineConfig engine{};
+    OutboundCapture capture;
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte> d) { capture(d); };
-        cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
+        cfg.role = fixpp::session::session_role::acceptor;
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
@@ -202,8 +194,7 @@ protected:
 TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(drive_to_active(sess))
-        << "Precondition: session must reach Active state";
+    ASSERT_TRUE(drive_to_active(sess)) << "Precondition: session must reach Active state";
 
     // Inject ResendRequest from peer (they want us to replay [2..12]).
     // Since our outbound store only has admin msgs in [2..12],

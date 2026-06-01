@@ -21,11 +21,9 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -49,8 +47,7 @@ static void run_contention_test(async_mutex& mtx, int N) {
     };
 
     std::vector<std::future<void>> futs;
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
     ioc.run();
     for (auto& f : futs) f.get();
 

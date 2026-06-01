@@ -24,25 +24,16 @@
 //   binding, but will FAIL RED if the extraction order is wrong. The session-
 //   integration cell will FAIL RED because the event is not yet emitted (T036).
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -52,6 +43,13 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -67,8 +65,8 @@ static std::string field(int tag, std::string_view val) {
 }
 
 static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                                std::string_view sender, std::string_view target,
-                                                int hbt = 30) {
+                                               std::string_view sender, std::string_view target,
+                                               int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -122,8 +120,7 @@ static fixpp::tls::peer_identity make_san_uri_identity(std::string_view san_uri)
     return pid;
 }
 
-static fixpp::tls::peer_identity make_fingerprint_only_identity(
-    std::array<std::byte, 32> fp) {
+static fixpp::tls::peer_identity make_fingerprint_only_identity(std::array<std::byte, 32> fp) {
     // No CN, no SANs — only the raw SHA-256 fingerprint.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "";
@@ -137,7 +134,7 @@ static std::string fingerprint_to_hex(const std::array<std::byte, 32>& fp) {
     std::string out(64, '\0');
     for (std::size_t i = 0; i < 32; ++i) {
         const auto b = static_cast<unsigned char>(fp[i]);
-        out[2 * i]     = kHex[b >> 4u];
+        out[2 * i] = kHex[b >> 4u];
         out[2 * i + 1] = kHex[b & 0xFu];
     }
     return out;
@@ -145,12 +142,11 @@ static std::string fingerprint_to_hex(const std::array<std::byte, 32>& fp) {
 
 // ── Event helpers ─────────────────────────────────────────────────────────────
 
-static const fixpp::session::session_event_peer_identity_bound*
-find_peer_identity_bound_event(const fixpp::session::Session& sess) {
+static const fixpp::session::session_event_peer_identity_bound* find_peer_identity_bound_event(
+    const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     for (const auto& ev : events) {
-        if (const auto* p =
-                std::get_if<fixpp::session::session_event_peer_identity_bound>(&ev)) {
+        if (const auto* p = std::get_if<fixpp::session::session_event_peer_identity_bound>(&ev)) {
             return p;
         }
     }
@@ -172,14 +168,12 @@ TEST(CompidPrincipalExtractionUnit, CellA_CnFirst) {
     auto result = policy.authorize(pid, "ACME01");
 
     // RED: authorize() Phase 2 stub ignores pid → always returns unauthorized.
-    EXPECT_TRUE(result.has_value())
-        << "Cell A: CN-based principal must authorize successfully. "
-        << "RED (T034 not landed): stub always returns unauthorized.";
+    EXPECT_TRUE(result.has_value()) << "Cell A: CN-based principal must authorize successfully. "
+                                    << "RED (T034 not landed): stub always returns unauthorized.";
     if (result.has_value()) {
         EXPECT_EQ(result->from, fixpp::session::bound_principal::source::CN)
             << "Cell A: principal_source must be CN when subject_dn has CN= attribute.";
-        EXPECT_EQ(result->value, "ACME-PROD-01")
-            << "Cell A: value must be the extracted CN.";
+        EXPECT_EQ(result->value, "ACME-PROD-01") << "Cell A: value must be the extracted CN.";
     }
 }
 
@@ -252,15 +246,15 @@ TEST(CompidPrincipalExtractionUnit, CellD_Sha256FingerprintFallback) {
 
 class CompidPrincipalExtractionSessionTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -286,16 +280,16 @@ protected:
 // RED: T036 event emission not yet wired → event not emitted.
 TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCnSource) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "ISLD";
-    cfg.target_comp_id    = "TW";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
     // mTLS so the authorize() gate fires (the live-identity arm requires it).
-    cfg.security_profile  = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
-    cfg.role              = fixpp::session::session_role::acceptor;
+    cfg.role = fixpp::session::session_role::acceptor;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests principal extraction, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
@@ -323,7 +317,6 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     if (ev != nullptr) {
         EXPECT_EQ(ev->principal_source, fixpp::session::bound_principal::source::CN)
             << "principal_source must be CN.";
-        EXPECT_EQ(ev->bound_compid, "TW")
-            << "bound_compid must be the matched CompID.";
+        EXPECT_EQ(ev->bound_compid, "TW") << "bound_compid must be the matched CompID.";
     }
 }

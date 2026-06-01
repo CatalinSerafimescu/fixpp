@@ -23,22 +23,15 @@
 //
 // Anchors: spec US1; data-model E2 (FSM transitions); error slots 66..68;
 // [FIX-SL §4.2]/§4.3.
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstring>
-#include <future>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -47,17 +40,22 @@
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/sending_time.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
+#include <future>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 
@@ -66,12 +64,9 @@ namespace fixpp::session::test {
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
 static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t msg_seq_num,
-        std::string_view sender_comp_id,
-        std::string_view target_comp_id,
-        int heartbt_int,
-        std::string_view sending_time = "20240101-00:00:00.000") {
+    std::string_view begin_string, std::uint32_t msg_seq_num, std::string_view sender_comp_id,
+    std::string_view target_comp_id, int heartbt_int,
+    std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -86,8 +81,10 @@ static std::vector<std::byte> make_logon_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -95,15 +92,16 @@ static std::vector<std::byte> make_logon_frame(
 
     std::vector<std::byte> frame;
     frame.reserve(full.size());
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_heartbeat_frame(
-        std::string_view begin_string,
-        std::uint32_t msg_seq_num,
-        std::string_view sender_comp_id,
-        std::string_view target_comp_id) {
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string,
+                                                   std::uint32_t msg_seq_num,
+                                                   std::string_view sender_comp_id,
+                                                   std::string_view target_comp_id) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -116,8 +114,10 @@ static std::vector<std::byte> make_heartbeat_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -125,7 +125,9 @@ static std::vector<std::byte> make_heartbeat_frame(
 
     std::vector<std::byte> frame;
     frame.reserve(full.size());
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -133,10 +135,14 @@ static std::string extract_field(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -144,9 +150,9 @@ static std::string extract_field(std::span<const std::byte> frame, int tag) {
 
 class LogonHandshakeTest : public ::testing::Test {
 protected:
-    asio::io_context                          ioc;
-    std::shared_ptr<fixpp::core::mock_clock>  clock;
-    fixpp::core::EngineConfig                 engine{};
+    asio::io_context ioc;
+    std::shared_ptr<fixpp::core::mock_clock> clock;
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         using namespace std::chrono;
@@ -154,7 +160,7 @@ protected:
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -162,16 +168,16 @@ protected:
     // FR-004: role=acceptor set explicitly per T010.
     // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_acceptor_cfg(int heartbt_int = 30,
-                                                     std::string_view begin_string = "FIX.4.2") {
+                                                    std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_int};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = fixpp::session::session_role::acceptor;  // FR-004 / T010
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::acceptor;  // FR-004 / T010
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
@@ -181,14 +187,14 @@ protected:
     // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
     fixpp::session::SessionConfig make_initiator_cfg(int heartbt_int = 30) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "TW";
-        cfg.target_comp_id     = "ISLD";
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_int};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = fixpp::session::session_role::initiator;  // FR-004 / T010 (explicit)
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;  // FR-004 / T010 (explicit)
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
@@ -203,7 +209,7 @@ protected:
 
     // Synchronously feed an inbound frame.
     fixpp::core::expected_t<void> feed_sync(fixpp::session::Session& s,
-                                             std::span<const std::byte> frame) {
+                                            std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(std::chrono::milliseconds{200});
         ioc.restart();
@@ -227,8 +233,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpenEntersLogonSent) {
     // is `LogonSent`; assert it directly.
     EXPECT_EQ(sess.state(), fsm_state::LogonSent)
         << "Initiator should transition NotConnected → LogonSent after open() "
-        << "per data-model.md matrix; got state="
-        << static_cast<int>(sess.state());
+        << "per data-model.md matrix; got state=" << static_cast<int>(sess.state());
 }
 
 // T2: Acceptor: valid inbound Logon → FSM reaches Active or LogonReceived.
@@ -241,8 +246,7 @@ TEST_F(LogonHandshakeTest, AcceptorValidLogonTransitionsToActive) {
     // Peer (TW→ISLD) sends valid Logon with seq=1, HeartBtInt=30.
     auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
-    EXPECT_TRUE(inbound_result.has_value())
-        << "on_inbound_frame() returned error for valid Logon";
+    EXPECT_TRUE(inbound_result.has_value()) << "on_inbound_frame() returned error for valid Logon";
 
     const auto s = sess.state();
     EXPECT_EQ(s, fsm_state::Active)
@@ -259,8 +263,7 @@ TEST_F(LogonHandshakeTest, HeartBtIntNegotiationUsesLower) {
 
     auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 60 /* peer */);
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
-    EXPECT_TRUE(inbound_result.has_value())
-        << "on_inbound_frame() error with peer HeartBtInt=60";
+    EXPECT_TRUE(inbound_result.has_value()) << "on_inbound_frame() error with peer HeartBtInt=60";
     // Detailed HeartBtInt-in-reply assertion deferred to T026 green pass.
 }
 
@@ -276,8 +279,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongBeginString) {
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)
-        << "Session must NOT enter Active on BeginString mismatch";
+    EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on BeginString mismatch";
     EXPECT_NE(s, fsm_state::LogonReceived)
         << "Session must NOT enter LogonReceived on BeginString mismatch";
 }
@@ -294,8 +296,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongSenderCompID) {
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)
-        << "Session must NOT enter Active on SenderCompID mismatch";
+    EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on SenderCompID mismatch";
     EXPECT_NE(s, fsm_state::LogonReceived)
         << "Session must NOT enter LogonReceived on SenderCompID mismatch";
 }
@@ -312,8 +313,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongTargetCompID) {
     auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)
-        << "Session must NOT enter Active on TargetCompID mismatch";
+    EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on TargetCompID mismatch";
     EXPECT_NE(s, fsm_state::LogonReceived)
         << "Session must NOT enter LogonReceived on TargetCompID mismatch";
 }
@@ -339,17 +339,15 @@ TEST_F(LogonHandshakeTest, RefusedFirstMessageNotLogon) {
 // T8: build_logon() — unit test of T021 (admin_messages.cpp).
 TEST_F(LogonHandshakeTest, BuildLogonProducesValidFrame) {
     std::array<std::byte, 256> buf{};
-    auto result = fixpp::session::build_logon(
-        std::span<std::byte>{buf},
-        1,                            // seq
-        "TW",                         // sender
-        "ISLD",                       // target
-        "FIX.4.2",                    // begin_string
-        30,                           // heartbt_int
-        "20240101-00:00:00.000"       // sending_time
+    auto result = fixpp::session::build_logon(std::span<std::byte>{buf},
+                                              1,                       // seq
+                                              "TW",                    // sender
+                                              "ISLD",                  // target
+                                              "FIX.4.2",               // begin_string
+                                              30,                      // heartbt_int
+                                              "20240101-00:00:00.000"  // sending_time
     );
-    ASSERT_TRUE(result.has_value())
-        << "build_logon() returned error; T021 not yet wired";
+    ASSERT_TRUE(result.has_value()) << "build_logon() returned error; T021 not yet wired";
 
     EXPECT_GT(result->size(), 0u) << "build_logon() returned empty span";
 
@@ -383,9 +381,9 @@ TEST_F(LogonHandshakeTest, InterpretLogonValidFrameReturnsHeartBtInt) {
     auto frame = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
     auto result = fixpp::session::interpret_logon(
         std::span<const std::byte>{frame},
-        "TW",     // expected_sender (peer's SenderCompID = our TargetCompID)
-        "ISLD",   // expected_target (peer's TargetCompID = our SenderCompID)
-        "FIX.4.2" // expected_begin
+        "TW",      // expected_sender (peer's SenderCompID = our TargetCompID)
+        "ISLD",    // expected_target (peer's TargetCompID = our SenderCompID)
+        "FIX.4.2"  // expected_begin
     );
     ASSERT_TRUE(result.has_value())
         << "interpret_logon() returned error for valid frame; T021 not wired";
@@ -395,15 +393,11 @@ TEST_F(LogonHandshakeTest, InterpretLogonValidFrameReturnsHeartBtInt) {
 // T9b: interpret_logon() — BeginString mismatch returns error.
 TEST_F(LogonHandshakeTest, InterpretLogonWrongBeginStringReturnsError) {
     auto frame = make_logon_frame("FIX.3.9", 1, "TW", "ISLD", 30);
-    auto result = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame},
-        "TW", "ISLD", "FIX.4.2"
-    );
-    EXPECT_FALSE(result.has_value())
-        << "interpret_logon() should fail on BeginString mismatch";
+    auto result =
+        fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.2");
+    EXPECT_FALSE(result.has_value()) << "interpret_logon() should fail on BeginString mismatch";
     if (!result.has_value()) {
-        EXPECT_EQ(result.error(),
-                  fixpp::core::error::session_begin_string_unsupported)
+        EXPECT_EQ(result.error(), fixpp::core::error::session_begin_string_unsupported)
             << "Wrong error code for BeginString mismatch";
     }
 }
@@ -411,15 +405,11 @@ TEST_F(LogonHandshakeTest, InterpretLogonWrongBeginStringReturnsError) {
 // T9c: interpret_logon() — SenderCompID mismatch returns error.
 TEST_F(LogonHandshakeTest, InterpretLogonWrongSenderReturnsError) {
     auto frame = make_logon_frame("FIX.4.2", 1, "WT" /* wrong */, "ISLD", 30);
-    auto result = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame},
-        "TW", "ISLD", "FIX.4.2"
-    );
-    EXPECT_FALSE(result.has_value())
-        << "interpret_logon() should fail on SenderCompID mismatch";
+    auto result =
+        fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.2");
+    EXPECT_FALSE(result.has_value()) << "interpret_logon() should fail on SenderCompID mismatch";
     if (!result.has_value()) {
-        EXPECT_EQ(result.error(),
-                  fixpp::core::error::session_compid_mismatch)
+        EXPECT_EQ(result.error(), fixpp::core::error::session_compid_mismatch)
             << "Wrong error code for SenderCompID mismatch";
     }
 }
@@ -427,15 +417,11 @@ TEST_F(LogonHandshakeTest, InterpretLogonWrongSenderReturnsError) {
 // T9d: interpret_logon() — TargetCompID mismatch returns error.
 TEST_F(LogonHandshakeTest, InterpretLogonWrongTargetReturnsError) {
     auto frame = make_logon_frame("FIX.4.2", 1, "TW", "DLSI" /* wrong */, 30);
-    auto result = fixpp::session::interpret_logon(
-        std::span<const std::byte>{frame},
-        "TW", "ISLD", "FIX.4.2"
-    );
-    EXPECT_FALSE(result.has_value())
-        << "interpret_logon() should fail on TargetCompID mismatch";
+    auto result =
+        fixpp::session::interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.2");
+    EXPECT_FALSE(result.has_value()) << "interpret_logon() should fail on TargetCompID mismatch";
     if (!result.has_value()) {
-        EXPECT_EQ(result.error(),
-                  fixpp::core::error::session_compid_mismatch)
+        EXPECT_EQ(result.error(), fixpp::core::error::session_compid_mismatch)
             << "Wrong error code for TargetCompID mismatch";
     }
 }
@@ -455,8 +441,7 @@ TEST_F(LogonHandshakeTest, AcceptorOpenStaysInNotConnected) {
 
     EXPECT_EQ(sess.state(), fsm_state::NotConnected)
         << "Acceptor must stay NotConnected after open() — no outbound Logon; "
-        << "got state=" << static_cast<int>(sess.state())
-        << " (FR-004 §US2 AC1)";
+        << "got state=" << static_cast<int>(sess.state()) << " (FR-004 §US2 AC1)";
 }
 
 // US2-AC2 (FR-005): Acceptor valid peer Logon drives NotConnected→LogonReceived→Active.
@@ -497,8 +482,7 @@ TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) 
     const auto final_state = sess.state();
     EXPECT_EQ(final_state, fsm_state::Active)
         << "Acceptor must reach Active after emitting reply Logon; "
-        << "got state=" << static_cast<int>(final_state)
-        << " (FR-005 §US2 AC2; spec.md line 112)";
+        << "got state=" << static_cast<int>(final_state) << " (FR-005 §US2 AC2; spec.md line 112)";
 
     // FR-005: at least one outbound frame must have been emitted AND it must
     // carry MsgType 35=A (Logon reply). Transport was wired above.
@@ -542,8 +526,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
         << "got state=" << static_cast<int>(sess.state());
 
     // FR-004: outbound Logon (35=A) MUST be emitted by open() on the initiator path.
-    ASSERT_GE(captured.size(), 1u)
-        << "Initiator open() must emit at least one outbound frame";
+    ASSERT_GE(captured.size(), 1u) << "Initiator open() must emit at least one outbound frame";
     bool found_logon = false;
     for (const auto& frame : captured) {
         // Use the file-local extract_field at line 133 (returns std::string; "" on miss).
@@ -553,9 +536,8 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
             break;
         }
     }
-    EXPECT_TRUE(found_logon)
-        << "Initiator open() must emit an outbound Logon (35=A); captured "
-        << captured.size() << " frame(s) but none had 35=A.";
+    EXPECT_TRUE(found_logon) << "Initiator open() must emit an outbound Logon (35=A); captured "
+                             << captured.size() << " frame(s) but none had 35=A.";
 }
 
 // ── F6 (RED): Seqnum hole on open()'s initiator emit — open() must return error
@@ -603,7 +585,7 @@ TEST_F(LogonHandshakeTest, Acceptor_BuildLogonOverflow_DoesNotReachActive) {
     const std::string long_sender(200, 'X');
 
     auto cfg = make_acceptor_cfg(30);
-    cfg.sender_comp_id = long_sender;   // overflows 256-byte reply_buf in build_logon
+    cfg.sender_comp_id = long_sender;  // overflows 256-byte reply_buf in build_logon
     cfg.target_comp_id = "TW";
 
     // Build a peer Logon that matches (peer.49=TW, peer.56=<long_sender>, 8=FIX.4.2).
@@ -677,20 +659,17 @@ TEST_F(LogonHandshakeTest, StampSendingTimeFormatsCorrectly) {
     auto now = clock->now();
     std::array<char, 32> buf{};
     auto result = fixpp::session::stamp_sending_time(now, std::span<char>{buf});
-    ASSERT_TRUE(result.has_value())
-        << "stamp_sending_time() returned error; T022 not yet wired";
+    ASSERT_TRUE(result.has_value()) << "stamp_sending_time() returned error; T022 not yet wired";
     EXPECT_GE(result->size(), 17u) << "SendingTime too short (need ≥17 chars for seconds)";
     EXPECT_LE(result->size(), 25u) << "SendingTime too long";
 
     // Round-trip: parse back and compare.
-    auto parse_result = fixpp::core::fix_string_to_utc_time(
-        std::span<const char>{result->data(), result->size()});
-    ASSERT_TRUE(parse_result.has_value())
-        << "parse failed on stamp_sending_time() output";
+    auto parse_result =
+        fixpp::core::fix_string_to_utc_time(std::span<const char>{result->data(), result->size()});
+    ASSERT_TRUE(parse_result.has_value()) << "parse failed on stamp_sending_time() output";
     // Parsed tp should equal now truncated to millis (millis precision default).
     auto expected = time_point_cast<milliseconds>(now);
-    EXPECT_EQ(*parse_result, expected)
-        << "stamp_sending_time round-trip mismatch";
+    EXPECT_EQ(*parse_result, expected) << "stamp_sending_time round-trip mismatch";
 }
 
 }  // namespace fixpp::session::test

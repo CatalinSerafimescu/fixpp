@@ -47,8 +47,8 @@ static_assert(!has_fft<fixpp::decimal_t>::value,
               "AC-FT2: field_traits<decimal_t> must NOT be a defined specialisation");
 
 fixpp::wire::field_view make_field_view(std::string_view s) {
-    return fixpp::wire::field_view_access::make(
-        reinterpret_cast<std::byte const*>(s.data()), s.size(), {});
+    return fixpp::wire::field_view_access::make(reinterpret_cast<std::byte const*>(s.data()),
+                                                s.size(), {});
 }
 
 TEST(FieldTraitsAcFt3, ForwardsGetErrorWhenAbsent) {

@@ -14,8 +14,9 @@
 // Anchor: tasks.md T007 ("MUST compile — add a trivial compile-smoke TU or
 // include it from a placeholder test target if needed to prove it compiles").
 
-#include <asio/io_context.hpp>
 #include <gtest/gtest.h>
+
+#include <asio/io_context.hpp>
 
 #include "engine_loopback_harness.hpp"
 
@@ -47,15 +48,13 @@ TEST(EngineHarnessCompileSmoke, BuildSkipsWhenFixtureDirAbsent) {
 
     // If we get here, the fixture dir IS set and the harness was built.
     // Verify the engine's initial stopped() state.
-    EXPECT_TRUE(harness->engine().stopped() == false ||
-                harness->engine().stopped() == true)
+    EXPECT_TRUE(harness->engine().stopped() == false || harness->engine().stopped() == true)
         << "Engine::stopped() must be callable after build()";
 
     // The engine must be stopped before we destroy the harness (strict
     // assert(stopped()) in ~Engine()). Since we never called start(), we
     // need to manually stop it via co_await stop(). Use use_future + ioc.run().
-    auto stop_future = asio::co_spawn(
-        ioc, harness->engine().stop(), asio::use_future);
+    auto stop_future = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
     ioc.run();
     EXPECT_NO_THROW(stop_future.get());
     EXPECT_TRUE(harness->engine().stopped());
@@ -65,7 +64,7 @@ TEST(EngineHarnessCompileSmoke, SessionIdTypesCompile) {
     // Verify that SessionId construction and comparison compile correctly.
     fixpp::session::SessionId id1{"FIX.4.2", "SENDER", "TARGET"};
     fixpp::session::SessionId id2{"FIX.4.2", "SENDER", "TARGET"};
-    fixpp::session::SessionId id3{"FIX.4.2", "OTHER",  "TARGET"};
+    fixpp::session::SessionId id3{"FIX.4.2", "OTHER", "TARGET"};
 
     EXPECT_EQ(id1, id2);
     EXPECT_NE(id1, id3);

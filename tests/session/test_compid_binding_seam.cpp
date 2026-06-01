@@ -21,20 +21,13 @@
 //
 // Anchors: FR-007/FR-009; US2 AC3; SC-003/SC-006; data-model E-2; contracts C2.
 
-#include <chrono>
-#include <cstddef>
-#include <future>
-#include <optional>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -44,6 +37,11 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 
@@ -58,12 +56,8 @@ static std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));
@@ -95,21 +89,21 @@ static std::vector<std::byte> make_logon_frame(
 // ─────────────────────────────────────────────────────────────────────────────
 class MinimalTransportFactory final : public fixpp::transport::TransportFactory {
 public:
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor /*exec*/,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor /*exec*/, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         return std::unexpected{fixpp::core::error::transport_factory_failed};
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override { return nullptr; }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,36 +111,30 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 class CompIdBindingNoIdentityTest : public ::testing::Test {
 protected:
-    asio::io_context          ioc;
+    asio::io_context ioc;
     fixpp::core::EngineConfig engine{};
 
-    void SetUp() override {
-        engine.executor = ioc.get_executor();
-    }
+    void SetUp() override { engine.executor = ioc.get_executor(); }
 
     // Build a base SessionConfig with the given policy + TLS profile and a
     // null write-only sink (open() drives the initiator into LogonSent without
     // a real transport). No identity is injected — these cells exercise the
     // no-identity gate arms (fail-CLOSED under mTLS / permissive under non-mTLS).
-    fixpp::session::SessionConfig make_cfg(
-        fixpp::session::CompIdAuthorizationPolicy policy,
-        fixpp::session::SecurityProfile::kind sk)
-    {
+    fixpp::session::SessionConfig make_cfg(fixpp::session::CompIdAuthorizationPolicy policy,
+                                           fixpp::session::SecurityProfile::kind sk) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id  = "INITIATOR";
-        cfg.target_comp_id  = "ACCEPTOR";
-        cfg.begin_string    = "FIX.4.2";
-        cfg.heartbeat_interval     = std::chrono::seconds{30};
+        cfg.sender_comp_id = "INITIATOR";
+        cfg.target_comp_id = "ACCEPTOR";
+        cfg.begin_string = "FIX.4.2";
+        cfg.heartbeat_interval = std::chrono::seconds{30};
         cfg.logout_disconnect_timeout_ms = 2000;
-        cfg.role            = fixpp::session::session_role::initiator;
-        cfg.executor_override       = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;
+        cfg.executor_override = ioc.get_executor();
         cfg.security_profile = fixpp::session::SecurityProfile{sk};
         cfg.compid_authorization_policy = std::move(policy);
-        cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-        cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
-        cfg.transport_factory_override =
-            std::make_shared<MinimalTransportFactory>();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.transport_factory_override = std::make_shared<MinimalTransportFactory>();
         cfg.transport_send = [](std::span<const std::byte>) noexcept {};
         return cfg;
     }
@@ -162,14 +150,14 @@ protected:
 //   - session_event_compid_authorization_failed emitted.
 //
 // This is the RC#A baseline: the safe default when no live handshake identity
-// has been attached (the happens-before attach is absent). [[feedback_simplify_pass_catches_9th_burn]]
+// has been attached (the happens-before attach is absent).
+// [[feedback_simplify_pass_catches_9th_burn]]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(CompIdBindingNoIdentityTest, AbsentIdentityMtlsFailsClosed) {
     fixpp::session::CompIdAuthorizationPolicy policy;
     policy.add_binding("PEER-PROD-01", "ACCEPTOR");
 
-    auto cfg = make_cfg(std::move(policy),
-                        fixpp::session::SecurityProfile::kind::mtls_ca);
+    auto cfg = make_cfg(std::move(policy), fixpp::session::SecurityProfile::kind::mtls_ca);
 
     fixpp::session::Session session{engine, cfg};
 
@@ -189,9 +177,7 @@ TEST_F(CompIdBindingNoIdentityTest, AbsentIdentityMtlsFailsClosed) {
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
     {
         auto feed_fut = asio::co_spawn(
-            ioc,
-            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
         ioc.run_for(500ms);
         ioc.restart();
         ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
@@ -207,8 +193,7 @@ TEST_F(CompIdBindingNoIdentityTest, AbsentIdentityMtlsFailsClosed) {
 
     bool auth_failed_emitted = false;
     for (const auto& ev : session.recent_events()) {
-        if (std::holds_alternative<
-                fixpp::session::session_event_compid_authorization_failed>(ev)) {
+        if (std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(ev)) {
             auth_failed_emitted = true;
             break;
         }
@@ -226,8 +211,7 @@ TEST_F(CompIdBindingNoIdentityTest, NonMtlsAbsentIdentityPermissiveSkip) {
     fixpp::session::CompIdAuthorizationPolicy policy;
     // Empty policy (default-deny), but one_way_ca so the gate is skipped.
 
-    auto cfg = make_cfg(std::move(policy),
-                        fixpp::session::SecurityProfile::kind::one_way_ca);
+    auto cfg = make_cfg(std::move(policy), fixpp::session::SecurityProfile::kind::one_way_ca);
 
     fixpp::session::Session session{engine, cfg};
 
@@ -247,9 +231,7 @@ TEST_F(CompIdBindingNoIdentityTest, NonMtlsAbsentIdentityPermissiveSkip) {
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ACCEPTOR", "INITIATOR");
     {
         auto feed_fut = asio::co_spawn(
-            ioc,
-            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
         ioc.run_for(500ms);
         ioc.restart();
         ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);

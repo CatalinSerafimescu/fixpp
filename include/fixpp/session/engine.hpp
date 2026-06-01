@@ -25,18 +25,17 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>      // EngineConfig — held by value in Engine
+#include <fixpp/core/error.hpp>              // expected_t<T>, error enum (incl. slot 121)
+#include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
+#include <fixpp/transport/endpoint.hpp>      // Endpoint (for acceptor_bound_endpoint return type)
+#include <fixpp/transport/listener.hpp>      // abstract Listener (for listeners_ map)
 #include <functional>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-
-#include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
-#include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
-#include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
-#include <fixpp/transport/endpoint.hpp>  // Endpoint (for acceptor_bound_endpoint return type)
-#include <fixpp/transport/listener.hpp>  // abstract Listener (for listeners_ map)
 
 namespace fixpp::session {
 class Session;
@@ -83,8 +82,8 @@ struct SessionId {
                                          std::string_view logon_sender_comp_id,
                                          std::string_view logon_target_comp_id) {
         return {std::move(begin_string),
-                std::string{logon_target_comp_id},  // sender = logon_target
-                std::string{logon_sender_comp_id}}; // target = logon_sender
+                std::string{logon_target_comp_id},   // sender = logon_target
+                std::string{logon_sender_comp_id}};  // target = logon_sender
     }
 };
 
@@ -172,10 +171,10 @@ public:
     /// All loops co_spawn on exec; start() does NOT block or run the executor.
     Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg);
 
-    Engine(Engine const&)            = delete;
+    Engine(Engine const&) = delete;
     Engine& operator=(Engine const&) = delete;
-    Engine(Engine&&)                 = delete;
-    Engine& operator=(Engine&&)      = delete;
+    Engine(Engine&&) = delete;
+    Engine& operator=(Engine&&) = delete;
 
     /// STRICT precondition: assert(stopped()).
     /// No synchronous best-effort teardown — callers must co_await stop() first.
@@ -216,8 +215,7 @@ public:
     /// The accept loop builds the listener synchronously at entry; the endpoint
     /// is readable once the engine's executor runs at least one step after start().
     /// [data-model "Listener acquisition"; tasks.md SC-010 delta #6]
-    [[nodiscard]] fixpp::transport::Endpoint
-        acceptor_bound_endpoint(SessionId const& id) const;
+    [[nodiscard]] fixpp::transport::Endpoint acceptor_bound_endpoint(SessionId const& id) const;
 
 private:
     // Injected executor; all loops co_spawn on this.
@@ -254,13 +252,10 @@ private:
     // and Session's public attach_accepted_transport (now public in session.hpp).
     // The coroutine is declared in the fixpp::session namespace (not anonymous)
     // so the friend declaration is valid per [dcl.friend].
-    friend asio::awaitable<void>
-        run_accept_loop(fixpp::core::EngineConfig const&,
-                        Engine&,
-                        SessionId const&,
-                        SessionEntry&,
-                        asio::cancellation_signal&,
-                        std::shared_ptr<std::atomic<int>>);
+    friend asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const&, Engine&,
+                                                 SessionId const&, SessionEntry&,
+                                                 asio::cancellation_signal&,
+                                                 std::shared_ptr<std::atomic<int>>);
 
     // (015 /simplify R-3: the rebindable outbound send-slot lives entirely inside
     // each Session — transport_send_ is rebound by attach_accepted_transport /

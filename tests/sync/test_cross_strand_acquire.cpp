@@ -20,12 +20,10 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
-#include <asio/strand.hpp>
 #include <asio/post.hpp>
+#include <asio/strand.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
@@ -53,8 +51,7 @@ TEST(SeamCrossStrandAcquire, TwoStrandsNoOverlap) {
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (v > 1) ++overlap;
         // Yield so coro2 can post its acquire.
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         in_critical.fetch_sub(1, std::memory_order_acq_rel);
         first_done = true;
         // guard released
@@ -63,8 +60,7 @@ TEST(SeamCrossStrandAcquire, TwoStrandsNoOverlap) {
     // Coroutine on strand2: post once (so strand1's coro acquires first),
     // then acquire.
     auto coro2 = [&]() -> asio::awaitable<void> {
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -94,8 +90,7 @@ TEST(SeamCrossStrandAcquire, MultipleWaitersOnDifferentStrands) {
     int done_count = 0;
 
     std::vector<decltype(asio::make_strand(ioc))> strands;
-    for (int i = 0; i < NS; ++i)
-        strands.push_back(asio::make_strand(ioc));
+    for (int i = 0; i < NS; ++i) strands.push_back(asio::make_strand(ioc));
 
     auto make_coro = [&](int idx) -> asio::awaitable<void> {
         (void)idx;
@@ -109,8 +104,7 @@ TEST(SeamCrossStrandAcquire, MultipleWaitersOnDifferentStrands) {
 
     std::vector<std::future<void>> futs;
     for (int i = 0; i < NS; ++i)
-        futs.push_back(
-            asio::co_spawn(strands[i], make_coro(i), asio::use_future));
+        futs.push_back(asio::co_spawn(strands[i], make_coro(i), asio::use_future));
     ioc.run();
     for (auto& f : futs) f.get();
 

@@ -12,25 +12,25 @@
 // and the allocation throw is caught.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/core/error.hpp>
 
 #include <array>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory_resource>
 
 namespace {
 
-using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
-using fixpp::tls::pin_fingerprint;
 using fixpp::core::error;
+using fixpp::tls::Certificate;
+using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn = "CN=pmrfail") {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -92,7 +92,7 @@ TEST(PinsetAddPmrFail, TrapThrowBoundaryReturnsExpectedError) {
     Pinset ps{cfg};
 
     bool saw_alloc_failed = false;
-    bool saw_exception    = false;  // must stay false
+    bool saw_exception = false;  // must stay false
 
     // Drive adds until exhaustion; catch any thrown exception (must not happen).
     try {

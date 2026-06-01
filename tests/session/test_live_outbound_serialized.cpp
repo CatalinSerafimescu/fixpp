@@ -33,13 +33,7 @@
 // Anti-hang: every ioc.run_for() is bounded; internal self-deadlines via timers
 //   ensure ioc.run_for() never hangs waiting on blocked transport ops.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <future>
-#include <memory>
-#include <span>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
 #include <asio/co_spawn.hpp>
@@ -50,9 +44,9 @@
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/system_clock_source.hpp>
@@ -62,6 +56,10 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -83,13 +81,13 @@ public:
     async_connect(fixpp::transport::Endpoint const& ep) override {
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         if (closed_) {
             co_return std::unexpected{fixpp::core::error::transport_already_closed};
@@ -100,8 +98,8 @@ public:
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         ++write_count_;
         if (write_count_ == 1) {
             co_return std::unexpected{fixpp::core::error::transport_write_short};
@@ -109,9 +107,7 @@ public:
         co_return buf.size();
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override {
-        return {};
-    }
+    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
         closed_ = true;
         read_timer_.cancel();
@@ -122,9 +118,9 @@ public:
 
 private:
     asio::any_io_executor exec_;
-    asio::steady_timer    read_timer_;
-    std::atomic<int>      write_count_{0};
-    bool                  closed_{false};
+    asio::steady_timer read_timer_;
+    std::atomic<int> write_count_{0};
+    bool closed_{false};
 };
 
 class FailNthWriteTransport final : public fixpp::transport::Transport {
@@ -136,13 +132,13 @@ public:
     async_connect(fixpp::transport::Endpoint const& ep) override {
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         if (closed_) {
             co_return std::unexpected{fixpp::core::error::transport_already_closed};
@@ -153,8 +149,8 @@ public:
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         const int current = ++write_count_;
         if (current == fail_on_write_) {
             co_return std::unexpected{fixpp::core::error::transport_write_short};
@@ -173,10 +169,10 @@ public:
 
 private:
     asio::any_io_executor exec_;
-    asio::steady_timer    read_timer_;
-    int                   fail_on_write_;
-    std::atomic<int>      write_count_{0};
-    bool                  closed_{false};
+    asio::steady_timer read_timer_;
+    int fail_on_write_;
+    std::atomic<int> write_count_{0};
+    bool closed_{false};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,22 +183,19 @@ private:
 class ControlledWriteTransport final : public fixpp::transport::Transport {
 public:
     explicit ControlledWriteTransport(asio::any_io_executor exec)
-        : exec_{std::move(exec)}
-        , write_timer_{exec_}
-        , read_timer_{exec_}
-    {}
+        : exec_{std::move(exec)}, write_timer_{exec_}, read_timer_{exec_} {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
     async_connect(fixpp::transport::Endpoint const& ep) override {
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         if (closed_) {
             co_return std::unexpected{fixpp::core::error::transport_already_closed};
@@ -213,8 +206,8 @@ public:
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         const int n = ++in_flight_;
         if (n > 1) ++concurrent_excess_;
         ++total_starts_;
@@ -240,9 +233,7 @@ public:
         write_timer_.cancel();
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override {
-        return {};
-    }
+    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
         closed_ = true;
         read_timer_.cancel();
@@ -251,17 +242,17 @@ public:
     }
 
     int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
-    int total_starts()      const noexcept { return total_starts_.load(); }
+    int total_starts() const noexcept { return total_starts_.load(); }
 
 private:
     asio::any_io_executor exec_;
-    asio::steady_timer    write_timer_;
-    asio::steady_timer    read_timer_;
-    std::atomic<bool>     blocked_{false};
-    bool                  closed_{false};
-    std::atomic<int>      in_flight_{0};
-    std::atomic<int>      concurrent_excess_{0};
-    std::atomic<int>      total_starts_{0};
+    asio::steady_timer write_timer_;
+    asio::steady_timer read_timer_;
+    std::atomic<bool> blocked_{false};
+    bool closed_{false};
+    std::atomic<int> in_flight_{0};
+    std::atomic<int> concurrent_excess_{0};
+    std::atomic<int> total_starts_{0};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,12 +260,8 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Build a valid FIX Logon frame for an inbound peer.
-static std::vector<std::byte> make_peer_logon(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
+                                              std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -302,12 +289,9 @@ static std::vector<std::byte> make_peer_logon(
 }
 
 // Build a valid inbound Heartbeat (35=0) frame.
-static std::vector<std::byte> make_peer_heartbeat(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string, std::uint32_t seq,
+                                                  std::string_view sender,
+                                                  std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -334,22 +318,20 @@ static std::vector<std::byte> make_peer_heartbeat(
 
 static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exec) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id     = "ACCEPTOR";
-    cfg.target_comp_id     = "INITIATOR";
-    cfg.begin_string       = "FIX.4.4";
-    cfg.role               = fixpp::session::session_role::acceptor;
-    cfg.executor_override  = exec;
+    cfg.sender_comp_id = "ACCEPTOR";
+    cfg.target_comp_id = "INITIATOR";
+    cfg.begin_string = "FIX.4.4";
+    cfg.role = fixpp::session::session_role::acceptor;
+    cfg.executor_override = exec;
     cfg.heartbeat_interval = 0s;  // disable liveness loop by default
-    cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-    cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     return cfg;
 }
 
 template <class Future>
-void run_until_ready(asio::io_context& ioc, Future& fut,
-                     std::chrono::milliseconds step = 50ms,
+void run_until_ready(asio::io_context& ioc, Future& fut, std::chrono::milliseconds step = 50ms,
                      std::chrono::milliseconds budget = 2s) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     while (fut.wait_for(0ms) != std::future_status::ready &&
@@ -383,9 +365,8 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 
     // Feed a peer Logon — triggers reply-Logon emit → first async_write fails.
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto inbound_fut = asio::co_spawn(ioc,
-        sess.on_inbound_frame(std::span<const std::byte>{logon}),
-        asio::use_future);
+    auto inbound_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                      asio::use_future);
 
     ioc.run_for(2s);
     ioc.restart();
@@ -422,15 +403,15 @@ TEST(LiveOutboundSerializedTest, HeartbeatEchoWriteErrorDisconnectsSession) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto logon_fut = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                    asio::use_future);
     run_until_ready(ioc, logon_fut);
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
     auto heartbeat = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
-    auto hb_fut = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>{heartbeat}), asio::use_future);
+    auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{heartbeat}),
+                                 asio::use_future);
     run_until_ready(ioc, hb_fut);
     ASSERT_EQ(hb_fut.wait_for(0ms), std::future_status::ready) << "heartbeat handling timed out";
     auto hb_r = hb_fut.get();
@@ -482,8 +463,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
 
     // Feed peer Logon → reply-Logon write #1 (unblocked, completes immediately).
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                   asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);  // let reply-Logon complete → session Active
     ioc.restart();
 
@@ -497,8 +477,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
 
     // Feed a peer Heartbeat → triggers outbound Heartbeat echo → write N+1 BLOCKS.
     auto hb1 = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb1}),
-                   asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb1}), asio::detached);
 
     // Run a few steps to get write N+1 in-flight but blocked.
     ioc.run_for(50ms);
@@ -507,8 +486,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     // Now feed a second Heartbeat → triggers another Heartbeat echo → write N+2.
     // This write must NOT enter async_write while N+1 is still in-flight.
     auto hb2 = make_peer_heartbeat("FIX.4.4", 3, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb2}),
-                   asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb2}), asio::detached);
 
     // Run to ensure the second Heartbeat handler reaches its write_gate_ acquire.
     ioc.run_for(50ms);
@@ -525,9 +503,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     // Self-deadline: release after 300ms so ioc.run_for() completes normally.
     asio::steady_timer release_timer{ioc.get_executor()};
     release_timer.expires_after(300ms);
-    release_timer.async_wait([&](asio::error_code /*ec*/) {
-        raw_ptr->release();
-    });
+    release_timer.async_wait([&](asio::error_code /*ec*/) { raw_ptr->release(); });
 
     ioc.run_for(2s);
     ioc.restart();
@@ -585,8 +561,7 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 
     // Drive session to Active via peer Logon (using sync transport_send_ path).
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                   asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -619,9 +594,8 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         for (std::size_t i = 0; i < msg.size(); ++i)
             rr_bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(msg[i]));
 
-        asio::co_spawn(ioc,
-            sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}),
-            asio::detached);
+        asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}),
+                       asio::detached);
 
         // rr_bytes MUST outlive run_for(): on_inbound_frame() takes a non-owning
         // span and the detached coroutine reads it when the executor resumes it
@@ -659,8 +633,8 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto logon_fut = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                    asio::use_future);
     run_until_ready(ioc, logon_fut);
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
@@ -701,8 +675,8 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto logon_fut = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                    asio::use_future);
     run_until_ready(ioc, logon_fut);
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
@@ -710,13 +684,13 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     raw_ptr->arm_block();
 
     std::array<std::byte, 4> payload{};
-    auto send_fut = asio::co_spawn(
-        ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+    auto send_fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
     ioc.restart();
 
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+    auto close_fut =
+        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     ioc.run_for(500ms);
     ioc.restart();
 
@@ -760,8 +734,8 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto logon_fut = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                    asio::use_future);
     run_until_ready(ioc, logon_fut);
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
@@ -769,13 +743,13 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     raw_ptr->arm_block();
 
     std::array<std::byte, 4> payload{};
-    auto send_fut = asio::co_spawn(
-        ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+    auto send_fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
     ioc.restart();
 
-    auto close_fut = asio::co_spawn(
-        ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+    auto close_fut =
+        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
     ioc.run_for(500ms);
     ioc.restart();
 
@@ -850,14 +824,14 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
 
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
     auto close_then_destroy = [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-            auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
-            if (!inbound_r) {
-                co_return std::unexpected(inbound_r.error());
-            }
-            EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
-                << "Session must reach Active before the close race witness";
-            co_return co_await sess->close(fixpp::session::close_mode::terminal);
-        };
+        auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
+        if (!inbound_r) {
+            co_return std::unexpected(inbound_r.error());
+        }
+        EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
+            << "Session must reach Active before the close race witness";
+        co_return co_await sess->close(fixpp::session::close_mode::terminal);
+    };
     auto close_fut = asio::co_spawn(ioc, close_then_destroy(), asio::use_future);
 
     run_until_ready(ioc, close_fut, 20ms, 1s);
@@ -904,8 +878,7 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // Drive session to Active — reply-Logon write completes immediately,
     // liveness loop is spawned and starts sleeping.
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                   asio::detached);
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -923,8 +896,8 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // If the Session is destroyed with a held mutex, the destructor crashes.
     raw_ptr->close();
 
-    auto close_fut = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
-                                    asio::use_future);
+    auto close_fut =
+        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
 
     // Bounded: close() must complete within 5s.
     // root_cancel_.emit(total) + cancel_sleeps() should cancel the liveness sleep

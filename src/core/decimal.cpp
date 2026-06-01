@@ -19,7 +19,8 @@
 
 namespace fixpp::core {
 
-// Canonical pod_decimal exponent domain per 2a §4.2: exponent ∈ [kCanonicalExpMin, kCanonicalExpMax].
+// Canonical pod_decimal exponent domain per 2a §4.2: exponent ∈ [kCanonicalExpMin,
+// kCanonicalExpMax].
 inline constexpr int kCanonicalExpMin = -38;
 inline constexpr int kCanonicalExpMax = 0;
 

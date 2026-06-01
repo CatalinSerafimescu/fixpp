@@ -8,21 +8,19 @@
 // correct typed exception with the matching fixpp::core::error code.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/error.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
 #include <string>
 #include <string_view>
-
-#include <unistd.h>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/dict/error.hpp>
-#include <fixpp/dict/xml_loader.hpp>
 
 // ---------------------------------------------------------------------------
 // Helper: 256 KiB arena + monotonic_buffer_resource.
@@ -45,8 +43,7 @@ void expect_xml_parse_error_contains(std::string_view xml, std::string_view need
         FAIL() << "expected dict::xml_parse_error";
     } catch (fixpp::dict::xml_parse_error const& e) {
         EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_parse_failed);
-        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos)
-            << "what()=" << e.what();
+        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos) << "what()=" << e.what();
     }
 }
 
@@ -57,8 +54,7 @@ void expect_unknown_version_error_contains(std::string_view xml, std::string_vie
         FAIL() << "expected dict::unknown_version_error";
     } catch (fixpp::dict::unknown_version_error const& e) {
         EXPECT_EQ(e.code(), fixpp::core::error::dict_unknown_version);
-        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos)
-            << "what()=" << e.what();
+        EXPECT_NE(std::string{e.what()}.find(needle), std::string::npos) << "what()=" << e.what();
     }
 }
 
@@ -108,9 +104,8 @@ TEST(NegativePaths, AC_L3_MalformedXmlThrowsXmlParseError) {
 TEST(NegativePaths, AC_L4_UnknownFixVersionThrowsUnknownVersionError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='6' minor='0' servicepack='0'>)"
-        R"(<fields/><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='6' minor='0' servicepack='0'>)"
+                                      R"(<fields/><messages/></fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::unknown_version_error";
@@ -128,11 +123,10 @@ TEST(NegativePaths, AC_L5_MissingFieldNumberThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
     // number attribute intentionally absent.
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field name='Foo' type='STRING'/>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field name='Foo' type='STRING'/>)"
+                                      R"(</fields><messages/></fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::xml_parse_error";
@@ -149,11 +143,10 @@ TEST(NegativePaths, AC_L5_MissingFieldNumberThrowsXmlParseError) {
 TEST(NegativePaths, AC_L5b_NonNumericFieldNumberThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='abc' name='Foo' type='STRING'/>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='abc' name='Foo' type='STRING'/>)"
+                                      R"(</fields><messages/></fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::xml_parse_error";
@@ -170,12 +163,11 @@ TEST(NegativePaths, AC_L5b_NonNumericFieldNumberThrowsXmlParseError) {
 TEST(NegativePaths, AC_L6_DuplicateFieldNumberThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'/>)"
-        R"(<field number='1' name='AccountDup' type='STRING'/>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'/>)"
+                                      R"(<field number='1' name='AccountDup' type='STRING'/>)"
+                                      R"(</fields><messages/></fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::xml_parse_error";
@@ -195,18 +187,17 @@ TEST(NegativePaths, AC_L7_DanglingComponentReferenceThrowsXmlParseError) {
     fixpp::dict::XmlLoader loader;
     // The component "Instrument" is referenced inside the message body but
     // has no corresponding <component name='Instrument'> declaration.
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='35' name='MsgType' type='STRING'/>)"
-        R"(</fields>)"
-        R"(<components/>)"
-        R"(<messages>)"
-        R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
-        R"(<component name='NotDeclared' required='Y'/>)"
-        R"(</message>)"
-        R"(</messages>)"
-        R"(</fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='35' name='MsgType' type='STRING'/>)"
+                                      R"(</fields>)"
+                                      R"(<components/>)"
+                                      R"(<messages>)"
+                                      R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
+                                      R"(<component name='NotDeclared' required='Y'/>)"
+                                      R"(</message>)"
+                                      R"(</messages>)"
+                                      R"(</fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::xml_parse_error";
@@ -224,11 +215,10 @@ TEST(NegativePaths, AC_L7_DanglingComponentReferenceThrowsXmlParseError) {
 TEST(NegativePaths, AC_L8_UnknownFieldTypeThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Foo' type='UNKNOWN_TYPE'/>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Foo' type='UNKNOWN_TYPE'/>)"
+                                      R"(</fields><messages/></fix>)";
     try {
         (void)loader.load_from_string(kXml, &a.mr);
         FAIL() << "expected dict::xml_parse_error";
@@ -277,10 +267,9 @@ TEST(NegativePaths, AC_L10_LoadFromStringEquivalentForMalformed) {
 }
 
 TEST(NegativePaths, RejectsMissingFieldNameAttribute) {
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields><field number='11' type='STRING'/></fields>)"
-        R"(<messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields><field number='11' type='STRING'/></fields>)"
+                                      R"(<messages/></fix>)";
     expect_xml_parse_error_contains(kXml, "missing name attribute");
 }
 
@@ -407,9 +396,8 @@ TEST(NegativePaths, RejectsGroupWithoutMatchingNoFieldDeclaration) {
 TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
     auto* mr = std::pmr::new_delete_resource();
     // Per-process-unique filename avoids clobber under sharded/parallel reruns.
-    auto const path =
-        std::filesystem::temp_directory_path() /
-        ("fixpp_dictionary_malformed_input_" + std::to_string(::getpid()) + ".xml");
+    auto const path = std::filesystem::temp_directory_path() /
+                      ("fixpp_dictionary_malformed_input_" + std::to_string(::getpid()) + ".xml");
     // RAII guard: remove the temp file on every exit path (throw or return).
     struct FileGuard {
         std::filesystem::path const& p;

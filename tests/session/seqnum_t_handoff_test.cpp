@@ -12,13 +12,12 @@
 //
 // Anchor: data-model.md E4, research D-1, contracts/seqnum.hpp.
 // FR: SC-010 (consumer-side build check).
+#include <gtest/gtest.h>
+
 #include <cstdint>
+#include <fixpp/session/seqnum.hpp>
 #include <limits>
 #include <type_traits>
-
-#include <fixpp/session/seqnum.hpp>
-
-#include <gtest/gtest.h>
 
 namespace fixpp::session::test {
 namespace {
@@ -30,8 +29,7 @@ namespace {
 static_assert(std::is_same_v<seqnum_t, std::uint32_t>,
               "seqnum_t must be std::uint32_t (D-1, [2e §4.7])");
 
-static_assert(seqnum_min == 1u,
-              "seqnum_min must be 1 per [FIX-SL §4.1]");
+static_assert(seqnum_min == 1u, "seqnum_min must be 1 per [FIX-SL §4.1]");
 
 static_assert(seqnum_max == std::numeric_limits<std::uint32_t>::max(),
               "seqnum_max must be UINT32_MAX per data-model.md E4");
@@ -60,9 +58,7 @@ TEST(SeqnumTHandoff, MaxIsUint32Max) {
     EXPECT_EQ(seqnum_max, std::numeric_limits<std::uint32_t>::max());
 }
 
-TEST(SeqnumTHandoff, MinLessThanMax) {
-    EXPECT_LT(seqnum_min, seqnum_max);
-}
+TEST(SeqnumTHandoff, MinLessThanMax) { EXPECT_LT(seqnum_min, seqnum_max); }
 
 TEST(SeqnumTHandoff, HeaderResolvesWithoutPlaceholderAnnotation) {
     // If the PLACEHOLDER comment block is still present but the type+consts

@@ -31,17 +31,7 @@
 // SC-001 ("re-establishes a live, TLS-authenticated session … resume to Active")
 // is satisfied when this cell executes and passes.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-#include <stdexcept>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
@@ -51,9 +41,10 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/reconnect_fsm.hpp>
@@ -67,6 +58,13 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // The shared live-loopback-TLS session harness (T005 Phase 2).
 // Pulls heavy concrete headers — safe here (tests/ only).
@@ -87,11 +85,9 @@ static std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_string,
-    std::uint32_t seq,
-    std::string_view sender,  // 49=
-    std::string_view target)  // 56=
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender,  // 49=
+                                               std::string_view target)  // 56=
 {
     std::string body;
     body += fix_field(35, "A");
@@ -99,8 +95,8 @@ static std::vector<std::byte> make_logon_frame(
     body += fix_field(49, sender);
     // No SendingTime(52) — harness has no clock → latency check skipped.
     body += fix_field(56, target);
-    body += fix_field(98, "0");   // EncryptMethod=None
-    body += fix_field(108, "30"); // HeartBtInt=30s
+    body += fix_field(98, "0");    // EncryptMethod=None
+    body += fix_field(108, "30");  // HeartBtInt=30s
 
     std::string msg;
     msg += "8=" + std::string(begin_string) + "\x01";
@@ -124,32 +120,30 @@ static std::vector<std::byte> make_logon_frame(
 // ─────────────────────────────────────────────────────────────────────────────
 class TrackingTlsTransport final : public fixpp::transport::TlsTransport {
 public:
-    explicit TrackingTlsTransport(asio::any_io_executor exec,
-                                   std::atomic<int>& connect_count,
-                                   std::atomic<int>& handshake_count)
-        : exec_{std::move(exec)}
-        , connect_count_{connect_count}
-        , handshake_count_{handshake_count}
-    {}
+    explicit TrackingTlsTransport(asio::any_io_executor exec, std::atomic<int>& connect_count,
+                                  std::atomic<int>& handshake_count)
+        : exec_{std::move(exec)},
+          connect_count_{connect_count},
+          handshake_count_{handshake_count} {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
     async_connect(fixpp::transport::Endpoint const& ep) override {
         ++connect_count_;
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         co_return buf.size();
     }
 
@@ -161,8 +155,8 @@ public:
         ++handshake_count_;
         std::pmr::memory_resource* mr = cfg.mr ? cfg.mr : std::pmr::get_default_resource();
         co_return fixpp::transport::handshake_result{
-            .peer_id           = fixpp::tls::peer_identity{},
-            .captured_pinset   = nullptr,
+            .peer_id = fixpp::tls::peer_identity{},
+            .captured_pinset = nullptr,
             .negotiated_cipher = std::pmr::string{"TLS_AES_128_GCM_SHA256", mr},
         };
     }
@@ -182,23 +176,23 @@ public:
     std::atomic<int> connect_count{0};
     std::atomic<int> handshake_count{0};
 
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>>
-    make(asio::any_io_executor exec,
-         fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-         std::pmr::memory_resource* /*mr*/) noexcept override
-    {
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
         ++make_count;
-        return std::make_unique<TrackingTlsTransport>(
-            std::move(exec), connect_count, handshake_count);
+        return std::make_unique<TrackingTlsTransport>(std::move(exec), connect_count,
+                                                      handshake_count);
     }
 
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-    cert_source_snapshot() const noexcept override { return nullptr; }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,7 +200,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 class ReconnectLiveHappyPathTest : public ::testing::Test {
 protected:
-    asio::io_context          ioc;
+    asio::io_context ioc;
     fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
@@ -219,8 +213,8 @@ protected:
     static fixpp::transport::ReconnectPolicy make_fast_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
-        policy.schedule = std::pmr::vector<std::chrono::milliseconds>{
-            std::pmr::get_default_resource()};
+        policy.schedule =
+            std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
         policy.schedule.push_back(0ms);
         policy.jitter = 0.0;
         return policy;
@@ -236,14 +230,9 @@ protected:
 TEST_F(ReconnectLiveHappyPathTest, ConnectAndHandshakeCalledOnSuccessfulAttempt) {
     auto factory = std::make_shared<TrackingFactory>();
 
-    fixpp::session::ReconnectFsm fsm(
-        factory.get(),
-        make_fast_policy(3),
-        30s,
-        2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
 
-    auto fut = asio::co_spawn(ioc,
-        fsm.drive_reconnect_attempt(), asio::use_future);
+    auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
     ioc.run_for(500ms);
     ioc.restart();
 
@@ -307,19 +296,19 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     // We use LoopbackTlsFixture directly (not the session harness) so we can
     // build the Session with a permissive config for US1 testing.
     // US1 proves the TRANSPORT LAYER reconnect path; US2 adds the authorization.
-    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture loopback_fixture{std::string(fixture_dir),
+                                                                ioc.get_executor()};
 
-    auto  server_ep = loopback_fixture.server_endpoint();
-    auto& listener  = loopback_fixture.listener();
-    auto  ssl_cfg   = loopback_fixture.ssl_cfg();
+    auto server_ep = loopback_fixture.server_endpoint();
+    auto& listener = loopback_fixture.listener();
+    auto ssl_cfg = loopback_fixture.ssl_cfg();
 
     // Build a separate TransportFactory for the Session (FR-026: SSL_CTX cached once).
     // Use the same cert/CA as the fixture.
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
 
     auto cs_result = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
@@ -327,9 +316,9 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
 
     fixpp::tls::SslCtxConfig session_ssl_cfg;
     session_ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    session_ssl_cfg.cs      = std::move(*cs_result);
-    session_ssl_cfg.clock   = nullptr;
-    session_ssl_cfg.caps    = fixpp::tls::CertSourceCaps{};
+    session_ssl_cfg.cs = std::move(*cs_result);
+    session_ssl_cfg.clock = nullptr;
+    session_ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
 
     auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, session_ssl_cfg);
@@ -340,25 +329,24 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     // takes the permissive branch (3) — no peer_identity needed.
     // US2 (T011/T012) adds mTLS binding; US1 proves the transport path only.
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id  = "INITIATOR";
-    cfg.target_comp_id  = "ACCEPTOR";
-    cfg.begin_string    = "FIX.4.2";
-    cfg.heartbeat_interval     = std::chrono::seconds{30};
+    cfg.sender_comp_id = "INITIATOR";
+    cfg.target_comp_id = "ACCEPTOR";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.logout_disconnect_timeout_ms = 2000;
-    cfg.role            = fixpp::session::session_role::initiator;
-    cfg.executor_override       = ioc.get_executor();
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.executor_override = ioc.get_executor();
     // Use one_way_ca so the Logon-ack authorization gate is permissive (skip).
     // The 013 mTLS fail-closed gate (RC#A) requires either a live attached peer
     // identity or one_way_ca to avoid the fail-closed arm. US1 uses one_way_ca.
-    cfg.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::one_way_ca};
-    cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::one_way_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // SessionConfig::transport_factory_override is shared_ptr (013 T011); move
     // unique_ptr into shared_ptr.
-    auto session_factory_shared = std::shared_ptr<fixpp::transport::TransportFactory>{
-        std::move(session_factory)};
+    auto session_factory_shared =
+        std::shared_ptr<fixpp::transport::TransportFactory>{std::move(session_factory)};
     cfg.transport_factory_override = session_factory_shared;
     cfg.reconnect_endpoint = server_ep;
 
@@ -385,11 +373,8 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     // (see make_handshaken_pair in test_inflight_exclusivity.cpp).
 
     // Reconnect FSM — drives the client side (connect + handshake).
-    fixpp::session::ReconnectFsm reconnect_fsm(
-        session_factory_shared.get(),
-        make_fast_policy(3),
-        30s,
-        2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3),
+                                               30s, 2000ms);
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     // Session was built with mtls_ca profile (for the factory's SSL_CTX setup).
@@ -398,8 +383,8 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
     // Spawn client-side: drive_reconnect_attempt.
-    auto client_fut = asio::co_spawn(
-        ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
+    auto client_fut =
+        asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
 
     // Spawn server-side: accept the incoming TCP connection then drive the
     // server-side TLS handshake. Without this the client's async_handshake
@@ -407,14 +392,12 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     asio::co_spawn(
         ioc,
         [&listener, &ssl_cfg]() -> asio::awaitable<void> {
-            co_await asio::this_coro::reset_cancellation_state(
-                asio::enable_total_cancellation());
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             // async_accept returns expected_t<unique_ptr<Transport>>
             auto accept_r = co_await listener.async_accept();
             if (!accept_r.has_value()) co_return;
             auto& transport_ptr = *accept_r;
-            auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(
-                transport_ptr.get());
+            auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(transport_ptr.get());
             if (tls) {
                 // Drive the server-side TLS handshake. Result is discarded;
                 // if it fails, the client handshake will also fail.
@@ -433,8 +416,7 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
 
     auto drive_r = client_fut.get();
     ASSERT_TRUE(drive_r.has_value())
-        << "drive_reconnect_attempt() failed with error: "
-        << static_cast<int>(drive_r.error());
+        << "drive_reconnect_attempt() failed with error: " << static_cast<int>(drive_r.error());
 
     // install_reconnected_transport() has been called → LogonSent.
     EXPECT_EQ(session.state(), fixpp::session::fsm_state::LogonSent)
@@ -446,18 +428,15 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     //   begin_string   = "FIX.4.2"
     //   reset_seqnum_policy = bilateral_lenient (no 141=Y required)
     //   clock = null → SendingTime latency check skipped
-    auto logon_ack = make_logon_frame(
-        "FIX.4.2",
-        1,           // seq=1
-        "ACCEPTOR",  // 49= (peer sender = our target)
-        "INITIATOR"  // 56= (peer target = our sender)
+    auto logon_ack = make_logon_frame("FIX.4.2",
+                                      1,           // seq=1
+                                      "ACCEPTOR",  // 49= (peer sender = our target)
+                                      "INITIATOR"  // 56= (peer target = our sender)
     );
 
     {
         auto feed_fut = asio::co_spawn(
-            ioc,
-            session.on_inbound_frame(std::span<const std::byte>{logon_ack}),
-            asio::use_future);
+            ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
 
         ioc.run_for(1s);
         ioc.restart();

@@ -4,16 +4,16 @@
 
 #include <gtest/gtest.h>
 
-#include "support/pmr_allocation_tracking_resource.hpp"
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/dict/dictionary.hpp>
-
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
 #include <string>
+
+#include "support/pmr_allocation_tracking_resource.hpp"
 
 namespace {
 
@@ -54,8 +54,7 @@ TEST(PmrAllocation, LoadFromStringAlsoRoutesThroughMr) {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     std::ifstream ifs{path};
     ASSERT_TRUE(ifs.is_open()) << "Cannot open " << path;
-    std::string text{std::istreambuf_iterator<char>{ifs},
-                     std::istreambuf_iterator<char>{}};
+    std::string text{std::istreambuf_iterator<char>{ifs}, std::istreambuf_iterator<char>{}};
 
     static std::array<std::byte, kBufSize> buf;
     std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};

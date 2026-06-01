@@ -24,19 +24,17 @@
 // Seam #3: tests/session/seqnum_manager_test.cpp.
 //
 // Infrastructure: asio::io_context for awaitable execution.
-#include <cstdint>
-#include <future>
-#include <memory>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
-
-#include <gtest/gtest.h>
+#include <future>
+#include <memory>
 
 namespace fixpp::session::test {
 
@@ -122,8 +120,7 @@ TEST_F(SeqnumManagerTest, TooLowInboundIsSessionFatal) {
         << "Expected session_seqnum_too_low (slot 69)";
 
     // Counter must NOT advance on error (I-2).
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 5u)
-        << "Counter must not advance on too-low error";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 5u) << "Counter must not advance on too-low error";
 
     run_sync(ioc, mgr.drain());
 }
@@ -150,8 +147,7 @@ TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
            "a semantic misnomer for this error path)";
 
     // Counter must NOT advance on error.
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 1u)
-        << "Counter must not advance on too-high error";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 1u) << "Counter must not advance on too-high error";
 
     run_sync(ioc, mgr.drain());
 }
@@ -190,8 +186,7 @@ TEST_F(SeqnumManagerTest, OutboundOverflowAtSeqnumMax) {
         << "Expected store_seqnum_overflow (slot 60, reuse [2e §6.7]). I-8 no wrap.";
 
     // Counter must NOT wrap (stays at seqnum_max).
-    EXPECT_EQ(mgr.next_outbound_unsafe(), seqnum_max)
-        << "Counter must not wrap past seqnum_max";
+    EXPECT_EQ(mgr.next_outbound_unsafe(), seqnum_max) << "Counter must not wrap past seqnum_max";
 
     run_sync(ioc, mgr.drain());
 #else
@@ -232,8 +227,7 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
         // Outbound: assign returns i+1.
         auto out_r = run_sync(ioc, mgr.assign_outbound());
         ASSERT_TRUE(out_r.has_value()) << "assign_outbound at i=" << i;
-        EXPECT_EQ(*out_r, static_cast<seqnum_t>(i + 1))
-            << "outbound seqnum mismatch at i=" << i;
+        EXPECT_EQ(*out_r, static_cast<seqnum_t>(i + 1)) << "outbound seqnum mismatch at i=" << i;
 
         // Inbound: check in-seq.
         auto in_r = run_sync(ioc, mgr.check_inbound(static_cast<seqnum_t>(i + 1)));
@@ -241,7 +235,7 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
     }
 
     // Final state: both counters at N+1.
-    EXPECT_EQ(mgr.next_inbound_unsafe(),  static_cast<seqnum_t>(N + 1));
+    EXPECT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(N + 1));
     EXPECT_EQ(mgr.next_outbound_unsafe(), static_cast<seqnum_t>(N + 1));
 
     run_sync(ioc, mgr.drain());

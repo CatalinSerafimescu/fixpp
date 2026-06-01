@@ -44,7 +44,10 @@ struct TestLeg {
     }
     // Parse the first field from the sub-frame (tag=value<SOH>).
     // Returns {tag, value_sv} of the first field in the slice.
-    struct first_field_result { std::uint16_t tag; std::string_view value; };
+    struct first_field_result {
+        std::uint16_t tag;
+        std::string_view value;
+    };
     [[nodiscard]] first_field_result parse_first_field() const noexcept {
         std::string_view raw{reinterpret_cast<char const*>(data), len};
         auto eq = raw.find('=');
@@ -54,14 +57,15 @@ struct TestLeg {
         std::uint32_t tag_val = 0;
         for (std::size_t i = 0; i < eq; ++i) {
             char c = raw[i];
-            if (c < '0' || c > '9') { return {0, {}}; }
+            if (c < '0' || c > '9') {
+                return {0, {}};
+            }
             tag_val = (tag_val * 10U) + static_cast<std::uint32_t>(c - '0');
         }
         auto val_start = eq + 1;
         auto soh = raw.find('\x01', val_start);
         auto val_end = (soh == std::string_view::npos) ? raw.size() : soh;
-        return {static_cast<std::uint16_t>(tag_val),
-                raw.substr(val_start, val_end - val_start)};
+        return {static_cast<std::uint16_t>(tag_val), raw.substr(val_start, val_end - val_start)};
     }
 };
 
@@ -112,22 +116,18 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
     // RC#2 real-parse assertion: each slice starts with the delimiter field
     // (tag 600 = "600=") so a real GroupT can parse it as "tag=value<SOH>...".
     auto ff0 = gv[0].parse_first_field();
-    EXPECT_EQ(ff0.tag, 600U)
-        << "first parsed field of leg[0] must be the delimiter tag 600, got "
-        << ff0.tag;
+    EXPECT_EQ(ff0.tag, 600U) << "first parsed field of leg[0] must be the delimiter tag 600, got "
+                             << ff0.tag;
     EXPECT_EQ(ff0.value, "SYM1");
 
     auto ff1 = gv[1].parse_first_field();
-    EXPECT_EQ(ff1.tag, 600U)
-        << "first parsed field of leg[1] must be the delimiter tag 600, got "
-        << ff1.tag;
+    EXPECT_EQ(ff1.tag, 600U) << "first parsed field of leg[1] must be the delimiter tag 600, got "
+                             << ff1.tag;
     EXPECT_EQ(ff1.value, "SYM2");
 
     // Each leg should contain its 608 field byte for byte.
-    EXPECT_NE(via_index[0].find("608=A"), std::string::npos)
-        << "leg[0] must contain 608=A";
-    EXPECT_NE(via_index[1].find("608=B"), std::string::npos)
-        << "leg[1] must contain 608=B";
+    EXPECT_NE(via_index[0].find("608=A"), std::string::npos) << "leg[0] must contain 608=A";
+    EXPECT_NE(via_index[1].find("608=B"), std::string::npos) << "leg[1] must contain 608=B";
 }
 
 // #8 regression: group slices live in the OffsetTable's per-message arena,

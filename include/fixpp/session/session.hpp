@@ -43,12 +43,12 @@
 #include <utility>
 // (the unique_ptr<MessageStore> member's
 // nested type alias flush_hook_fn requires it).
-#include <fixpp/session/reconnect_fsm.hpp>    // 013 T023 — ReconnectFsm driver (FR-009 state owner)
+#include <fixpp/session/reconnect_fsm.hpp>   // 013 T023 — ReconnectFsm driver (FR-009 state owner)
 #include <fixpp/session/seqnum.hpp>          // 005 US2 — seqnum_t / seqnum_min
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2 — SeqnumManager (T031)
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
-#include <fixpp/session/session_event.hpp>   // 013 T013a — SessionEvent + kSessionEventRingCapacity
-#include <fixpp/session/session_fsm.hpp>  // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/session/session_event.hpp>  // 013 T013a — SessionEvent + kSessionEventRingCapacity
+#include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
 
 namespace fixpp::core {
 struct EngineConfig;
@@ -285,8 +285,8 @@ public:
     // The real leaf SHA-256 fingerprint is computed inside drive_reconnect_attempt
     // via co_await snap->load_credentials() per FR-010.
     // DEFERRED comment from 013 RESOLVED. [FR-032; data-model §E-3; T017/T018]
-    [[nodiscard]] fixpp::core::expected_t<void>
-    reload_credentials(std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
 
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
@@ -356,9 +356,8 @@ public:
     // By convention only the engine's accept loop should call this method.
     // §XV.9: handshake_result forward-declared on line 60; full def in session.cpp.
     // [data-model §E-2; T011; contracts C1 step 5; FR-005/006; T-041]
-    void attach_accepted_transport(
-        std::unique_ptr<fixpp::transport::Transport> transport,
-        fixpp::transport::handshake_result hr) noexcept;
+    void attach_accepted_transport(std::unique_ptr<fixpp::transport::Transport> transport,
+                                   fixpp::transport::handshake_result hr) noexcept;
 
     // 015 T016(b) — Engine connect-loop driver (SC-010 delta (7)).
     // Public awaitable over the private reconnect_fsm_.drive_reconnect_attempt():
@@ -373,8 +372,7 @@ public:
     // emit is folded in here (NOT a third public method) to hold the SC-010
     // surface at exactly the two documented additions.
     // [data-model §E-1a; T016(b); FR-003/FR-004; SC-010 (7)]
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    drive_reconnect() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
 
     // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
     // Returns the live transport installed post-connect: reconnected_transport_
@@ -469,7 +467,7 @@ private:
     // is tracked separately (fsm_visit_write_idx_) so the ring keeps rotating
     // even after fsm_visit_count_ saturates (F-13 fix).
     std::array<fsm_state, 16> fsm_visit_history_{};
-    std::uint8_t  fsm_visit_count_     = 0;
+    std::uint8_t fsm_visit_count_ = 0;
     std::uint32_t fsm_visit_write_idx_ = 0;
 
     // FR-004 / D-2 — route every FSM transition through this helper so the
@@ -482,8 +480,8 @@ private:
     // Ring wraps at kSessionEventRingCapacity; membership-witness semantics
     // (NOT chronologically ordered). [data-model §E-6]
     std::array<SessionEvent, kSessionEventRingCapacity> recent_events_{};
-    std::size_t  events_count_     = 0;
-    std::size_t  events_write_idx_ = 0;
+    std::size_t events_count_ = 0;
+    std::size_t events_write_idx_ = 0;
 
     // 013 FR-035 — emit a SessionEvent into recent_events_. Called from the
     // per-session strand only ([const §XI.4]). Body wired in Phase 5 T040;
@@ -511,9 +509,8 @@ private:
     // "fixpp/transport/tls_transport.hpp". [const §XV.9; 8e2d362 guard]
     //
     // [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
-    void install_reconnected_transport(
-        std::unique_ptr<fixpp::transport::Transport> transport,
-        fixpp::transport::handshake_result hr) noexcept;
+    void install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
+                                       fixpp::transport::handshake_result hr) noexcept;
 
     // ReconnectFsm is a value member of Session and needs access to the
     // private install_reconnected_transport() method. The friend declaration
@@ -654,8 +651,7 @@ private:
     // tests destroy a Session without calling close() (e.g., after verifying
     // FSM state but before explicit teardown).
     // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4]
-    std::shared_ptr<std::atomic<int>> liveness_counter_{
-        std::make_shared<std::atomic<int>>(0)};
+    std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
 
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
@@ -684,15 +680,14 @@ private:
     // the caller propagates it. Does NOT perform the LogonSent transition (the
     // caller owns that: open() before the call, install_reconnected_transport
     // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    emit_initiator_logon_() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_initiator_logon_() noexcept;
 
     // FQ-A (gate-b/r2): returns the live transport as a shared_ptr<Transport>.
     // The keepalive across the async_write co_await ensures the Transport is not
     // freed by registry_.clear() while the write is in-flight (Q-1 UAF fix).
     // Returns nullptr if no live transport is attached yet.
-    [[nodiscard]] std::shared_ptr<fixpp::transport::Transport>
-    live_transport_shared_() const noexcept;
+    [[nodiscard]] std::shared_ptr<fixpp::transport::Transport> live_transport_shared_()
+        const noexcept;
 
     // FQ-A (gate-b/r2): one serialized live write. Acquires write_gate_, holds a
     // shared_ptr<Transport> keepalive across the async_write, releases the gate
@@ -701,8 +696,8 @@ private:
     //   - async_write returns !has_value() (any transport error)
     // NEVER holds the gate across any read — guards write-submit→complete only.
     // [transport.hpp:47-50; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    live_write_serialized_(std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> live_write_serialized_(
+        std::span<const std::byte> frame) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a

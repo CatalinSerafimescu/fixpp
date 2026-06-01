@@ -27,18 +27,16 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::core::error;
+using fixpp::sync::async_mutex;
 
 using fixpp::sync::test::yield_n;
 
@@ -95,17 +93,14 @@ TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(total_completed.load(), N)
-        << "All waiters must complete exactly once";
+    EXPECT_EQ(total_completed.load(), N) << "All waiters must complete exactly once";
 
     int g = granted_count.load();
     int a = aborted_count.load();
@@ -132,8 +127,7 @@ TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 4);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N);
         // unlock.
     };
@@ -155,9 +149,7 @@ TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();
@@ -185,8 +177,7 @@ TEST(SeamRaceCancelPreDrain, MutexFreeAfterRace) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 3);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N);
     };
 
@@ -195,17 +186,14 @@ TEST(SeamRaceCancelPreDrain, MutexFreeAfterRace) {
         auto r = co_await mtx.async_lock();
         (void)r;
         total.fetch_add(1, std::memory_order_acq_rel);
-        if (r.has_value())
-            co_await yield_n(1);
+        if (r.has_value()) co_await yield_n(1);
     };
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();

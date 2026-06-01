@@ -57,17 +57,16 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/ssl/context.hpp>
 #include <asio/ssl/stream.hpp>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-
-#include <fixpp/core/error.hpp>             // core::expected_t<T>
-#include <fixpp/tls/peer_identity.hpp>      // fixpp::tls::peer_identity
-#include <fixpp/tls/pinset.hpp>             // fixpp::tls::pin_snapshot
-#include <fixpp/tls/security_profile.hpp>   // fixpp::tls::SslCtxConfig
+#include <fixpp/core/error.hpp>                 // core::expected_t<T>
+#include <fixpp/tls/peer_identity.hpp>          // fixpp::tls::peer_identity
+#include <fixpp/tls/pinset.hpp>                 // fixpp::tls::pin_snapshot
+#include <fixpp/tls/security_profile.hpp>       // fixpp::tls::SslCtxConfig
 #include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
 #include <fixpp/transport/tls_transport.hpp>    // TlsTransport + handshake_result
 #include <fixpp/transport/transport.hpp>        // Transport + ConnectInfo + Config
+#include <memory>
+#include <memory_resource>
+#include <optional>
 
 namespace fixpp::transport {
 
@@ -122,9 +121,8 @@ public:
     // wraps this in trap_throw and surfaces transport_factory_failed.
     //
     // MUST NOT be called outside of a trap_throw boundary at runtime.
-    explicit asio_tls_transport(asio::any_io_executor     exec,
-                                Transport::Config          cfg,
-                                fixpp::tls::SslCtxConfig   ssl_cfg);
+    explicit asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
+                                fixpp::tls::SslCtxConfig ssl_cfg);
 
     // ── Factory-path constructor (FR-026 shared-context path) ──────────────
     //
@@ -140,11 +138,9 @@ public:
     // May throw on socket initialisation failure (ENOMEM from socket(2)).
     // Wrapped in trap_throw by the factory's make().
     struct from_factory_tag {};
-    asio_tls_transport(from_factory_tag,
-                       asio::any_io_executor                 exec,
-                       Transport::Config                     cfg,
-                       fixpp::tls::SslCtxConfig              ssl_cfg,
-                       std::shared_ptr<asio::ssl::context>   shared_ctx);
+    asio_tls_transport(from_factory_tag, asio::any_io_executor exec, Transport::Config cfg,
+                       fixpp::tls::SslCtxConfig ssl_cfg,
+                       std::shared_ptr<asio::ssl::context> shared_ctx);
 
     // ── Accept-adoption constructor (US3 — asio_listener mint path per FR-024) ─
     //
@@ -159,50 +155,45 @@ public:
     // listener typically binds via `acceptor_.async_accept(exec)` overload, or
     // the test does the equivalent). Throws on OpenSSL SSL_CTX setup failure
     // per the [arch §5.3] engine-bootstrap carve-out.
-    asio_tls_transport(asio::any_io_executor       exec,
-                       Transport::Config           cfg,
-                       fixpp::tls::SslCtxConfig    ssl_cfg,
-                       asio::ip::tcp::socket       accepted_socket);
+    asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
+                       fixpp::tls::SslCtxConfig ssl_cfg, asio::ip::tcp::socket accepted_socket);
 
     // ── Accept-adoption factory-path constructor (FR-026 + US3 combined) ───
     //
     // Like the from_factory_tag ctor but also adopts an already-connected socket
     // (server-mode acceptor path). Sets state_ = connected + role_ = server.
-    asio_tls_transport(from_factory_tag,
-                       asio::any_io_executor                 exec,
-                       Transport::Config                     cfg,
-                       fixpp::tls::SslCtxConfig              ssl_cfg,
-                       std::shared_ptr<asio::ssl::context>   shared_ctx,
-                       asio::ip::tcp::socket                 accepted_socket);
+    asio_tls_transport(from_factory_tag, asio::any_io_executor exec, Transport::Config cfg,
+                       fixpp::tls::SslCtxConfig ssl_cfg,
+                       std::shared_ptr<asio::ssl::context> shared_ctx,
+                       asio::ip::tcp::socket accepted_socket);
 
     // Non-copyable; non-movable (ssl_stream_ holds a ref to socket_).
-    asio_tls_transport(asio_tls_transport const&)            = delete;
+    asio_tls_transport(asio_tls_transport const&) = delete;
     asio_tls_transport& operator=(asio_tls_transport const&) = delete;
-    asio_tls_transport(asio_tls_transport&&)                 = delete;
-    asio_tls_transport& operator=(asio_tls_transport&&)      = delete;
+    asio_tls_transport(asio_tls_transport&&) = delete;
+    asio_tls_transport& operator=(asio_tls_transport&&) = delete;
 
     ~asio_tls_transport() override = default;
 
     // ── Transport overrides (bodies in asio_tls_transport.cpp — T027) ─────
 
-    [[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>>
-        async_connect(Endpoint const& ep) override;
+    [[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
+        Endpoint const& ep) override;
 
-    [[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-        async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override;
+    [[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override;
 
-    [[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-        async_write(std::span<const std::byte> bytes [[clang::lifetimebound]]) override;
+    [[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> bytes [[clang::lifetimebound]]) override;
 
     [[nodiscard]] core::expected_t<void> cancel() noexcept override;
 
-    [[nodiscard]] core::expected_t<void> close()  noexcept override;
+    [[nodiscard]] core::expected_t<void> close() noexcept override;
 
     // ── TlsTransport override ───────────────────────────────────────────────
 
-    [[nodiscard]] asio::awaitable<core::expected_t<handshake_result>>
-        async_handshake(fixpp::tls::SslCtxConfig const& cfg
-                            [[clang::lifetimebound]]) override;
+    [[nodiscard]] asio::awaitable<core::expected_t<handshake_result>> async_handshake(
+        fixpp::tls::SslCtxConfig const& cfg [[clang::lifetimebound]]) override;
 
     // ── 013 T039 — ListenerEvents association ──────────────────────────────
     //
@@ -241,48 +232,48 @@ private:
 
 private:
     // ── Configuration (frozen at construction) ──────────────────────────────
-    Transport::Config          cfg_;       // per-session knobs (E-7)
-    fixpp::tls::SslCtxConfig   ssl_cfg_;   // TLS profile; pinset lives here
+    Transport::Config cfg_;             // per-session knobs (E-7)
+    fixpp::tls::SslCtxConfig ssl_cfg_;  // TLS profile; pinset lives here
 
     // ── ASIO execution context ──────────────────────────────────────────────
-    asio::any_io_executor      exec_;      // session executor ([2d §4.8])
+    asio::any_io_executor exec_;  // session executor ([2d §4.8])
 
     // ── Network objects ─────────────────────────────────────────────────────
     // socket_ MUST be declared before ssl_stream_ so it is destroyed last.
-    asio::ip::tcp::socket      socket_;    // underlying TCP socket
+    asio::ip::tcp::socket socket_;  // underlying TCP socket
 
     // ssl_ctx_ holds the asio::ssl::context (wrapping OpenSSL SSL_CTX*).
     // In the per-ctor build path it is an owned unique_ptr converted to shared_ptr.
     // In the factory path it is a shared_ptr pointing to the factory's cached
     // context (FR-026). All paths satisfy: ssl_ctx_ must outlive ssl_stream_.
-    std::shared_ptr<asio::ssl::context>    ssl_ctx_;
+    std::shared_ptr<asio::ssl::context> ssl_ctx_;
 
     // ssl_stream_ is constructed lazily at async_handshake start. It wraps
     // socket_ by reference — therefore socket_ and ssl_ctx_ MUST outlive it.
     // Declared as optional so we defer construction until the TCP socket is
     // in a connected state (the ASIO ssl::stream constructor sets up internal
     // SSL state that requires a valid socket fd on some impls).
-    std::optional<asio::ssl::stream<asio::ip::tcp::socket&>>  ssl_stream_;
+    std::optional<asio::ssl::stream<asio::ip::tcp::socket&>> ssl_stream_;
 
     // ── Handshake-time pinset snapshot (captured once per [2g §6.5.1]) ─────
-    std::shared_ptr<const fixpp::tls::pin_snapshot>  captured_pinset_;
+    std::shared_ptr<const fixpp::tls::pin_snapshot> captured_pinset_;
 
     // ── Peer identity (populated by verify_peer trampoline via ssl_cfg_) ───
-    fixpp::tls::peer_identity  peer_id_;
+    fixpp::tls::peer_identity peer_id_;
 
     // ── State ───────────────────────────────────────────────────────────────
-    state_t  state_  {state_t::fresh};
+    state_t state_{state_t::fresh};
 
     // ── Role (initiator vs acceptor — set by ctor; used by async_handshake) ─
-    role_t   role_   {role_t::client};
+    role_t role_{role_t::client};
 
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ─────────
     //
     // These booleans are read and written exclusively from coroutines running
     // on exec_'s strand. cancel() is the only off-strand writer and it does
     // NOT touch these flags — it only fires cancel_signal_.
-    bool  read_in_flight_  {false};
-    bool  write_in_flight_ {false};
+    bool read_in_flight_{false};
+    bool write_in_flight_{false};
 
     // ── 013 T039 — ListenerEvents sink (null on initiator side) ─────────────
     // Non-owning pointer to the listener's event ring. Non-null only when this
@@ -316,11 +307,9 @@ private:
 // destroy-before-mint ordering.
 //
 // Body lives in src/transport/transport_factory.cpp (T028).
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-make_asio_tls_transport(asio::any_io_executor      exec,
-                        Transport::Config           cfg,
-                        fixpp::tls::SslCtxConfig    ssl_cfg,
-                        std::pmr::memory_resource*  mr) noexcept;
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make_asio_tls_transport(
+    asio::any_io_executor exec, Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+    std::pmr::memory_resource* mr) noexcept;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // make_accepted_asio_tls_transport — noexcept factory (US3 / FR-024 path).
@@ -334,11 +323,8 @@ make_asio_tls_transport(asio::any_io_executor      exec,
 //
 // Body lives in src/transport/transport_factory.cpp alongside the initiator
 // mint helper.
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-make_accepted_asio_tls_transport(asio::any_io_executor      exec,
-                                 Transport::Config          cfg,
-                                 fixpp::tls::SslCtxConfig   ssl_cfg,
-                                 asio::ip::tcp::socket      accepted_socket,
-                                 std::pmr::memory_resource* mr) noexcept;
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make_accepted_asio_tls_transport(
+    asio::any_io_executor exec, Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+    asio::ip::tcp::socket accepted_socket, std::pmr::memory_resource* mr) noexcept;
 
 }  // namespace fixpp::transport

@@ -21,12 +21,14 @@ namespace fixpp::test_support {
 
 // ClOrdID(11)="ORD1", MsgType(35)="D", v44. BodyLength + CheckSum computed.
 [[nodiscard]] inline std::vector<std::byte> make_nos_frame() {
-    std::string const body = std::string("35=D\x01") + "34=1\x01" + "49=S\x01"
-                             + "56=T\x01" + "11=ORD1\x01" + "55=AAPL\x01";
-    std::string pre = std::string("8=FIX.4.4\x01") + "9="
-                      + std::to_string(body.size()) + "\x01" + body;
+    std::string const body = std::string("35=D\x01") + "34=1\x01" + "49=S\x01" + "56=T\x01" +
+                             "11=ORD1\x01" + "55=AAPL\x01";
+    std::string pre =
+        std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01" + body;
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     std::array<char, 8> chk{};
     std::snprintf(chk.data(), chk.size(), "10=%03u\x01", sum % 256U);
     std::string full = pre + chk.data();

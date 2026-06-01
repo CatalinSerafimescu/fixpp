@@ -13,21 +13,20 @@
 // Authored RED (T033) — must fail/not link before Writer lands (T034/T035).
 // Goes GREEN at T036.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/decimal_alias.hpp>  // decimal_t (append<T> coverage)
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/writer.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/core/decimal_alias.hpp>  // decimal_t (append<T> coverage)
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/writer.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -44,9 +43,7 @@ using fixpp::wire::Writer;
 // Tags the Writer auto-computes; skip them when re-emitting via Writer.
 // tag=9 (BodyLength) is injected by the Writer after the 8= field.
 // tag=10 (CheckSum) is appended by commit().
-static bool is_auto_framing_tag(std::uint16_t tag) noexcept {
-    return tag == 9 || tag == 10;
-}
+static bool is_auto_framing_tag(std::uint16_t tag) noexcept { return tag == 9 || tag == 10; }
 
 // Build a single well-formed FIX 4.4 frame from the body fields (the span
 // between 9=...\x01 and 10=...\x01).
@@ -68,8 +65,7 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
 
 // Parse the given byte buffer into MessageView<Iter> so we can walk fields.
 // Returns the MessageView on success or fails the test.
-MessageView<access_mode::Iter>
-parse_iter(std::span<const std::byte> buf) {
+MessageView<access_mode::Iter> parse_iter(std::span<const std::byte> buf) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     if (!fv.has_value()) {
         ADD_FAILURE() << "make_frame_view failed: " << static_cast<int>(fv.error());
@@ -93,7 +89,7 @@ parse_iter(std::span<const std::byte> buf) {
 // fields that the Writer recomputes). All other fields (including opaque/custom
 // tags) are written verbatim in document order.
 std::vector<std::byte> structural_round_trip(std::span<const std::byte> original,
-                                              std::vector<std::byte>& scratch_buf) {
+                                             std::vector<std::byte>& scratch_buf) {
     auto mv = parse_iter(original);
 
     // The Writer injects a 6-digit placeholder for 9= after the 8= field.
@@ -103,8 +99,7 @@ std::vector<std::byte> structural_round_trip(std::span<const std::byte> original
     scratch_buf.assign(original.size() + max_bl_placeholder_overhead, std::byte{0});
 
     std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()},
-                  &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}, &scratch_mr};
 
     // Iterate ALL fields in document order (dict-free Iter path), skipping
     // the auto-framing fields (9=BodyLength and 10=CheckSum) that the Writer
@@ -153,7 +148,9 @@ void emit_fields(MessageView<Mode> const& mv, Writer& writer) {
 TEST(RoundTripProperty, GoldenFrameHeartbeat) {
     // Golden: 8=FIX.4.4\x01 9=10\x01 35=0\x01 34=1\x01 10=165\x01
     // Build it via make_frame and assert Writer reproduces it.
-    auto golden = make_frame("35=0\x01" "34=1\x01");
+    auto golden = make_frame(
+        "35=0\x01"
+        "34=1\x01");
 
     // +6 for the placeholder overhead (6-digit 9= that gets memmoved away).
     std::vector<std::byte> scratch(golden.size() + 6);
@@ -169,8 +166,7 @@ TEST(RoundTripProperty, GoldenFrameHeartbeat) {
     emit_fields(*mv, writer);
 
     auto result = std::move(writer).commit();
-    ASSERT_TRUE(result.has_value()) << "commit() failed: "
-                                    << static_cast<int>(result.error());
+    ASSERT_TRUE(result.has_value()) << "commit() failed: " << static_cast<int>(result.error());
     std::size_t written = *result;
     ASSERT_EQ(written, golden.size()) << "committed size mismatch";
 
@@ -180,7 +176,11 @@ TEST(RoundTripProperty, GoldenFrameHeartbeat) {
 }
 
 TEST(RoundTripProperty, GoldenFrameNewOrderSingle) {
-    auto golden = make_frame("35=D\x01" "34=1\x01" "49=SENDER\x01" "56=TARGET\x01");
+    auto golden = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01");
 
     std::vector<std::byte> scratch(golden.size() + 6);
     std::pmr::monotonic_buffer_resource scratch_mr;
@@ -202,13 +202,16 @@ TEST(RoundTripProperty, GoldenFrameNewOrderSingle) {
 
 // Structural round-trip: parse any message, re-emit, re-parse, fields match.
 TEST(RoundTripProperty, StructuralRoundTripSimple) {
-    auto original = make_frame("35=D\x01" "34=42\x01"
-                                "49=ACME\x01" "56=BROKER\x01"
-                                "11=ORD123\x01" "55=AAPL\x01");
+    auto original = make_frame(
+        "35=D\x01"
+        "34=42\x01"
+        "49=ACME\x01"
+        "56=BROKER\x01"
+        "11=ORD123\x01"
+        "55=AAPL\x01");
     std::vector<std::byte> scratch_buf;
     auto round_tripped = structural_round_trip(original, scratch_buf);
-    ASSERT_EQ(round_tripped.size(), original.size())
-        << "round-trip size mismatch";
+    ASSERT_EQ(round_tripped.size(), original.size()) << "round-trip size mismatch";
     EXPECT_EQ(std::memcmp(round_tripped.data(), original.data(), original.size()), 0)
         << "round-trip bytes not identical";
 }
@@ -217,9 +220,11 @@ TEST(RoundTripProperty, StructuralRoundTripSimple) {
 // the structural round-trip byte-identical.
 TEST(RoundTripProperty, OpaqueCustomFieldPreservation) {
     // Tags 9999 and 9998 are "custom" / unknown to any standard dictionary.
-    auto original = make_frame("35=0\x01" "34=1\x01"
-                                "9999=custom_value\x01"
-                                "9998=another\x01");
+    auto original = make_frame(
+        "35=0\x01"
+        "34=1\x01"
+        "9999=custom_value\x01"
+        "9998=another\x01");
     std::vector<std::byte> scratch_buf;
     auto round_tripped = structural_round_trip(original, scratch_buf);
     ASSERT_EQ(round_tripped.size(), original.size());
@@ -230,10 +235,12 @@ TEST(RoundTripProperty, OpaqueCustomFieldPreservation) {
 // Document-order preservation: multiple occurrences of the same tag must survive
 // in original order.
 TEST(RoundTripProperty, RepeatedTagOrderPreservation) {
-    auto original = make_frame("35=D\x01" "34=1\x01"
-                                "448=PARTY-A\x01"
-                                "448=PARTY-B\x01"
-                                "448=PARTY-C\x01");
+    auto original = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "448=PARTY-A\x01"
+        "448=PARTY-B\x01"
+        "448=PARTY-C\x01");
     std::vector<std::byte> scratch_buf;
     auto round_tripped = structural_round_trip(original, scratch_buf);
     ASSERT_EQ(round_tripped.size(), original.size());
@@ -245,8 +252,7 @@ TEST(RoundTripProperty, RepeatedTagOrderPreservation) {
 TEST(RoundTripProperty, TooSmallBufferReturnsError) {
     std::array<std::byte, 4> tiny_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{tiny_buf.data(), tiny_buf.size()},
-                  &scratch_mr};
+    Writer writer{std::span<std::byte>{tiny_buf.data(), tiny_buf.size()}, &scratch_mr};
 
     // Append a field that won't fit.
     std::string val = "FIX.4.4";
@@ -269,13 +275,10 @@ TEST(RoundTripProperty, TenThousandSampleCorpus) {
     // Generate a varied corpus: different body lengths, different tag counts,
     // different values (including high-numbered "custom" tags).
     static const char* const msg_types[] = {"0", "D", "8", "A", "5"};
-    static const std::uint16_t extra_tags[] = {49, 56, 34, 35, 11, 55, 448,
-                                                9000, 9001, 9999};
-    static const char* const extra_vals[] = {
-        "SENDER", "TARGET", "1", "D", "ORD001", "AAPL",
-        "PARTYID", "cust1", "cust2", "opaque"};
-    static constexpr std::size_t n_extra =
-        sizeof(extra_tags) / sizeof(extra_tags[0]);
+    static const std::uint16_t extra_tags[] = {49, 56, 34, 35, 11, 55, 448, 9000, 9001, 9999};
+    static const char* const extra_vals[] = {"SENDER", "TARGET",  "1",     "D",     "ORD001",
+                                             "AAPL",   "PARTYID", "cust1", "cust2", "opaque"};
+    static constexpr std::size_t n_extra = sizeof(extra_tags) / sizeof(extra_tags[0]);
 
     constexpr std::size_t N = 10000;
     std::size_t failures = 0;
@@ -303,9 +306,7 @@ TEST(RoundTripProperty, TenThousandSampleCorpus) {
         // +6 for the 6-digit BodyLength placeholder overshoot.
         std::vector<std::byte> scratch_buf(original.size() + 6);
         std::pmr::monotonic_buffer_resource scratch_mr;
-        Writer writer{
-            std::span<std::byte>{scratch_buf.data(), scratch_buf.size()},
-            &scratch_mr};
+        Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}, &scratch_mr};
 
         auto fv = fixpp::wire::test::make_frame_view(original);
         if (!fv.has_value()) {
@@ -350,8 +351,7 @@ TEST(RoundTripProperty, TenThousandSampleCorpus) {
         }
     }
 
-    EXPECT_EQ(failures, 0U)
-        << failures << " of " << N << " round-trip samples failed";
+    EXPECT_EQ(failures, 0U) << failures << " of " << N << " round-trip samples failed";
 }
 
 // ── Coverage for the typed append<T> path (T034/T035 hardening) ───────────────
@@ -368,8 +368,8 @@ std::vector<std::byte> bytes_of(std::string_view s) {
 TEST(RoundTripProperty, AppendTypedDecimalEmitsTraitBytes) {
     std::pmr::monotonic_buffer_resource arena;
     auto dbytes = bytes_of("1234.56");
-    auto dec = fixpp::decimal_t::parse(
-        std::span<const std::byte>{dbytes.data(), dbytes.size()}, &arena);
+    auto dec =
+        fixpp::decimal_t::parse(std::span<const std::byte>{dbytes.data(), dbytes.size()}, &arena);
     ASSERT_TRUE(dec.has_value()) << "decimal_t::parse failed";
 
     // Independently compute what the 2a trait to_chars produces for this value.
@@ -387,7 +387,8 @@ TEST(RoundTripProperty, AppendTypedDecimalEmitsTraitBytes) {
     auto one = bytes_of("1");
     ASSERT_TRUE(writer.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
     ASSERT_TRUE(writer.append_raw(35, std::span<const std::byte>{d.data(), d.size()}).has_value());
-    ASSERT_TRUE(writer.append_raw(34, std::span<const std::byte>{one.data(), one.size()}).has_value());
+    ASSERT_TRUE(
+        writer.append_raw(34, std::span<const std::byte>{one.data(), one.size()}).has_value());
     // The typed path under test.
     ASSERT_TRUE(writer.append<fixpp::decimal_t>(44, *dec).has_value())
         << "Writer::append<decimal_t> (2a trait to_chars path) failed";
@@ -414,10 +415,14 @@ TEST(RoundTripProperty, AppendTypedDecimalEmitsTraitBytes) {
 
 TEST(RoundTripProperty, OpenGroupProducesByteIdenticalRepeatingGroup) {
     // NoPartyIDs(453)=2 with two {PartyID(448), PartyRole(452)} entries.
-    auto golden = make_frame("35=D\x01" "34=1\x01"
-                             "453=2\x01"
-                             "448=PARTYA\x01" "452=1\x01"
-                             "448=PARTYB\x01" "452=2\x01");
+    auto golden = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=2\x01"
+        "448=PARTYA\x01"
+        "452=1\x01"
+        "448=PARTYB\x01"
+        "452=2\x01");
 
     std::vector<std::byte> scratch(golden.size() + 6);
     std::pmr::monotonic_buffer_resource scratch_mr;
@@ -428,7 +433,8 @@ TEST(RoundTripProperty, OpenGroupProducesByteIdenticalRepeatingGroup) {
     auto one = bytes_of("1");
     ASSERT_TRUE(writer.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
     ASSERT_TRUE(writer.append_raw(35, std::span<const std::byte>{d.data(), d.size()}).has_value());
-    ASSERT_TRUE(writer.append_raw(34, std::span<const std::byte>{one.data(), one.size()}).has_value());
+    ASSERT_TRUE(
+        writer.append_raw(34, std::span<const std::byte>{one.data(), one.size()}).has_value());
 
     auto gw = writer.open_group(453, 2);
     ASSERT_TRUE(gw.has_value()) << "open_group failed";
@@ -436,10 +442,14 @@ TEST(RoundTripProperty, OpenGroupProducesByteIdenticalRepeatingGroup) {
     auto pb = bytes_of("PARTYB");
     auto r1 = bytes_of("1");
     auto r2 = bytes_of("2");
-    ASSERT_TRUE(gw->append_field(448, std::span<const std::byte>{pa.data(), pa.size()}).has_value());
-    ASSERT_TRUE(gw->append_field(452, std::span<const std::byte>{r1.data(), r1.size()}).has_value());
-    ASSERT_TRUE(gw->append_field(448, std::span<const std::byte>{pb.data(), pb.size()}).has_value());
-    ASSERT_TRUE(gw->append_field(452, std::span<const std::byte>{r2.data(), r2.size()}).has_value());
+    ASSERT_TRUE(
+        gw->append_field(448, std::span<const std::byte>{pa.data(), pa.size()}).has_value());
+    ASSERT_TRUE(
+        gw->append_field(452, std::span<const std::byte>{r1.data(), r1.size()}).has_value());
+    ASSERT_TRUE(
+        gw->append_field(448, std::span<const std::byte>{pb.data(), pb.size()}).has_value());
+    ASSERT_TRUE(
+        gw->append_field(452, std::span<const std::byte>{r2.data(), r2.size()}).has_value());
     std::move(*gw).close();
 
     auto committed = std::move(writer).commit();

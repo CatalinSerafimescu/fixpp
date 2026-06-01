@@ -18,20 +18,18 @@
 // TDD: RED until T043 (trap_throw wiring on retrieve boundary) ships.
 #include <gtest/gtest.h>
 
-#include <memory_resource>
-#include <new>
-#include <span>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <memory_resource>
+#include <new>
+#include <span>
+#include <vector>
 
 #include "_fixtures_/test_double_fsm.hpp"
 
@@ -45,11 +43,11 @@ using fixpp::store_test::make_test_frame;
 
 MemoryStore make_store() {
     MemoryStore::Config cfg;
-    cfg.policy            = fixpp::session::capacity_policy::bounded;
-    cfg.inbound_capacity  = 100;
+    cfg.policy = fixpp::session::capacity_policy::bounded;
+    cfg.inbound_capacity = 100;
     cfg.outbound_capacity = 100;
-    cfg.max_frame_bytes   = 4096;
-    cfg.store_resource    = nullptr;
+    cfg.max_frame_bytes = 4096;
+    cfg.store_resource = nullptr;
     return MemoryStore{cfg};
 }
 
@@ -59,9 +57,7 @@ MemoryStore make_store() {
 
 class poison_memory_resource final : public std::pmr::memory_resource {
 protected:
-    void* do_allocate(std::size_t, std::size_t) override {
-        throw std::bad_alloc{};
-    }
+    void* do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
 
     void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
 
@@ -83,9 +79,8 @@ class pmr_poisoned_visitor final : public fixpp::session::retrieve_visitor {
 public:
     explicit pmr_poisoned_visitor(std::pmr::memory_resource* mr) : mr_{mr} {}
 
-    asio::awaitable<fixpp::core::expected_t<visit_result>>
-    on_frame(seqnum_t, std::span<const std::byte>) noexcept override
-    {
+    asio::awaitable<fixpp::core::expected_t<visit_result>> on_frame(
+        seqnum_t, std::span<const std::byte>) noexcept override {
         // Attempt to allocate from the poisoned resource — throws bad_alloc.
         // The noexcept on on_frame means if this throw escapes the coroutine
         // frame it would call terminate(). T043's catch block in retrieve()
@@ -115,12 +110,13 @@ TEST(StorePmrPoisonRetrieve, PmrThrowRoutedThroughTrapThrow) {
     asio::thread_pool pool{1};
     auto store = make_store();
 
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         [&store]() -> asio::awaitable<void> {
             // Store one frame
             auto frame = make_test_frame(1, direction_t::outbound);
-            auto sr = co_await store.store(1,
-                std::span<const std::byte>(frame), direction_t::outbound);
+            auto sr =
+                co_await store.store(1, std::span<const std::byte>(frame), direction_t::outbound);
             EXPECT_TRUE(sr.has_value());
 
             // Retrieve with a PMR-poisoned visitor
@@ -147,16 +143,12 @@ TEST(StorePmrPoisonRetrieve, PmrThrowRoutedThroughTrapThrow) {
 
 // ── Test 2: PMR poison from second frame — first frame was processed ──────────
 
-class pmr_poisoned_on_second_visitor final
-    : public fixpp::session::retrieve_visitor
-{
+class pmr_poisoned_on_second_visitor final : public fixpp::session::retrieve_visitor {
 public:
-    explicit pmr_poisoned_on_second_visitor(std::pmr::memory_resource* mr)
-        : mr_{mr} {}
+    explicit pmr_poisoned_on_second_visitor(std::pmr::memory_resource* mr) : mr_{mr} {}
 
-    asio::awaitable<fixpp::core::expected_t<visit_result>>
-    on_frame(seqnum_t, std::span<const std::byte>) noexcept override
-    {
+    asio::awaitable<fixpp::core::expected_t<visit_result>> on_frame(
+        seqnum_t, std::span<const std::byte>) noexcept override {
         ++call_count_;
         if (call_count_ >= 2) {
             // Second call: trigger PMR poison
@@ -180,14 +172,14 @@ TEST(StorePmrPoisonRetrieve, PmrPoisonOnSecondFrameReturnsStoreVisitorAborted) {
     asio::thread_pool pool{1};
     auto store = make_store();
 
-    auto fut = asio::co_spawn(pool.get_executor(),
+    auto fut = asio::co_spawn(
+        pool.get_executor(),
         [&store]() -> asio::awaitable<void> {
             // Store 3 frames
             for (int i = 1; i <= 3; ++i) {
-                auto frame = make_test_frame(static_cast<seqnum_t>(i),
-                                             direction_t::inbound);
-                co_await store.store(static_cast<seqnum_t>(i),
-                    std::span<const std::byte>(frame), direction_t::inbound);
+                auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
+                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
+                                     direction_t::inbound);
             }
 
             poison_memory_resource poison;

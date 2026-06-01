@@ -27,18 +27,16 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
 using fixpp::core::error;
+using fixpp::sync::async_mutex;
 
 using fixpp::sync::test::yield_n;
 
@@ -89,16 +87,13 @@ TEST(SeamRaceCancelDuringResume, LateSignalIsNoOpWaiterKeepsLock) {
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     // Wire the cancel signal into the waiter's cancellation state.
     auto fw = asio::co_spawn(ioc, waiter(),
-                             asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                          asio::use_future));
+                             asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fw.get();
 
-    EXPECT_TRUE(waiter_got_lock)
-        << "Waiter must receive the granted lock";
-    EXPECT_TRUE(waiter_kept_lock)
-        << "Late cancel signal must NOT revoke the already-granted lock";
+    EXPECT_TRUE(waiter_got_lock) << "Waiter must receive the granted lock";
+    EXPECT_TRUE(waiter_kept_lock) << "Late cancel signal must NOT revoke the already-granted lock";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,15 +141,13 @@ TEST(SeamRaceCancelDuringResume, GrantOrCancelExactlyOneOutcomePerWaiter) {
 
         auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
         auto fw = asio::co_spawn(ioc, waiter(),
-                                 asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                              asio::use_future));
+                                 asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
         ioc.restart();  // drained by the prior round's run(); restart each round.
         ioc.run();
         fh.get();
         fw.get();
 
-        EXPECT_TRUE(waiter_completed)
-            << "Round " << r << ": waiter must always complete";
+        EXPECT_TRUE(waiter_completed) << "Round " << r << ": waiter must always complete";
     }
 
     EXPECT_EQ(lock_granted.load() + lock_aborted.load(), ROUNDS)
@@ -179,8 +172,7 @@ TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         co_await yield_n(N * 2);
-        for (int i = 0; i < N; ++i)
-            sigs[i].emit(asio::cancellation_type::total);
+        for (int i = 0; i < N; ++i) sigs[i].emit(asio::cancellation_type::total);
         co_await yield_n(N);
     };
 
@@ -196,9 +188,7 @@ TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
     std::vector<std::future<void>> futs;
     for (int i = 0; i < N; ++i) {
         futs.push_back(asio::co_spawn(
-            ioc,
-            make_waiter(i),
-            asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
+            ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
     ioc.run();

@@ -26,11 +26,14 @@ constexpr std::byte EQ{static_cast<std::byte>('=')};
 // delimiter, so embedded SOH bytes inside Data values are handled correctly.
 // Duplicated from the same table in parser.hpp (which we cannot include here
 // to avoid a circular dependency); kept in sync with the parser's copy.
-struct len_data_pair_t { std::uint16_t length_tag; std::uint16_t data_tag; };
+struct len_data_pair_t {
+    std::uint16_t length_tag;
+    std::uint16_t data_tag;
+};
 constexpr len_data_pair_t len_data_pairs[] = {
-    {93,  89},   // SignatureLength / Signature
-    {90,  91},   // SecureDataLen / SecureData
-    {95,  96},   // RawDataLength / RawData
+    {93, 89},    // SignatureLength / Signature
+    {90, 91},    // SecureDataLen / SecureData
+    {95, 96},    // RawDataLength / RawData
     {212, 213},  // XmlDataLen / XmlData
     {348, 349},  // EncodedHeaderLen / EncodedHeader
     {350, 351},  // EncodedMsgLen / EncodedMsg
@@ -38,7 +41,9 @@ constexpr len_data_pair_t len_data_pairs[] = {
 
 [[nodiscard]] constexpr std::uint16_t data_tag_for(std::uint16_t length_tag) noexcept {
     for (auto const& p : len_data_pairs) {
-        if (p.length_tag == length_tag) { return p.data_tag; }
+        if (p.length_tag == length_tag) {
+            return p.data_tag;
+        }
     }
     return 0;
 }
@@ -48,7 +53,7 @@ constexpr len_data_pair_t len_data_pairs[] = {
 // the first tag digit (i.e., the start of the full "tag=value" field).
 // Returns val_start if the buffer layout is somehow invalid (defense).
 constexpr std::uint32_t field_start_from_val(std::byte const* frame_base,
-                                              std::uint32_t val_start) noexcept {
+                                             std::uint32_t val_start) noexcept {
     if (val_start == 0U) {
         return 0U;  // pathological: no room for '='
     }
@@ -100,8 +105,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
-                         void const* opaque_dict,
-                         group_member_fn_t group_member_fn) noexcept
+                         void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
     : frame_base_{nullptr},
       cfg_{},
       opaque_dict_{opaque_dict},
@@ -126,10 +130,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
     build(frame);
 }
 
-OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
-                         Config cfg,
-                         void const* opaque_dict,
-                         group_member_fn_t group_member_fn) noexcept
+OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
+                         void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
     : frame_base_{nullptr},
       cfg_{cfg},
       opaque_dict_{opaque_dict},
@@ -188,8 +190,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
 
             // Length+Data: if a previous Length tag told us this Data tag has
             // a fixed byte count, use it instead of scanning for SOH.
-            if (pending_data_tag != 0 &&
-                static_cast<std::uint16_t>(tag) == pending_data_tag) {
+            if (pending_data_tag != 0 && static_cast<std::uint16_t>(tag) == pending_data_tag) {
                 std::size_t const end = val_start + pending_data_len;
                 val_len = (end <= n) ? pending_data_len : n - val_start;
                 i = (end < n) ? end + 1U : n;  // skip trailing SOH if present
@@ -211,7 +212,9 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                     std::uint32_t dlen = 0;
                     for (std::size_t k = val_start; k < val_start + val_len; ++k) {
                         auto const c = static_cast<unsigned char>(buf[k]);
-                        if (c < '0' || c > '9') { break; }
+                        if (c < '0' || c > '9') {
+                            break;
+                        }
                         dlen = dlen * 10U + static_cast<std::uint32_t>(c - '0');
                     }
                     pending_data_tag = dt;
@@ -403,17 +406,16 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
                         // RC#2 fix: slice must begin at the delimiter's "tag="
                         // prefix, NOT at its value. Walk back from val_start to
                         // find the first digit of the tag ([2b §4.7]).
-                        std::uint32_t const fs = field_start_from_val(
-                            frame_base_, entries_[inst_start].offset);
+                        std::uint32_t const fs =
+                            field_start_from_val(frame_base_, entries_[inst_start].offset);
                         std::byte const* d = frame_base_ + fs;
                         // End = one past the last value byte of the last field
                         // in this instance (which terminates before the trailing
                         // SOH — length is exclusive of SOH by contract).
                         std::uint32_t const end_off =
                             entries_[k - 1U].offset + entries_[k - 1U].length;
-                        std::size_t const len = (end_off > fs)
-                                                    ? static_cast<std::size_t>(end_off - fs)
-                                                    : 0U;
+                        std::size_t const len =
+                            (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
                         group_slices_.push_back(group_slice{.data = d, .len = len});
                         inst_start = k;
                     }

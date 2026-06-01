@@ -30,6 +30,8 @@
 //   compid set. O(N) lookup over a typically small set (≤10 CompIDs per principal).
 //   The header comment's "approximating the flat_set shape" note covers this choice.
 
+#include "fixpp/session/compid_authorization_policy.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -43,7 +45,6 @@
 #include <vector>
 
 #include "fixpp/core/error.hpp"
-#include "fixpp/session/compid_authorization_policy.hpp"
 // peer_identity.hpp is transitively included via compid_authorization_policy.hpp.
 // Direct include here would violate [arch §2.3] session→tls edge per check_layers.py.
 // Access via fixpp::tls::peer_identity is already available through the transitively
@@ -68,7 +69,7 @@ namespace fixpp::session {
 //
 // The mr_ field is stored per the contract header to satisfy the PMR-ctor form.
 struct CompIdAuthorizationPolicy::impl {
-    std::pmr::memory_resource*              mr;
+    std::pmr::memory_resource* mr;
     std::map<std::string, std::vector<std::string>> bindings;
 
     explicit impl(std::pmr::memory_resource* r)
@@ -159,25 +160,22 @@ namespace {
 // noexcept — pure byte→char mapping.
 static constexpr char kHexChars[] = "0123456789abcdef";
 
-[[nodiscard]] std::string_view fingerprint_to_hex(
-    const std::array<std::byte, 32>& fp,
-    std::array<char, 64>& out) noexcept
-{
+[[nodiscard]] std::string_view fingerprint_to_hex(const std::array<std::byte, 32>& fp,
+                                                  std::array<char, 64>& out) noexcept {
     for (std::size_t i = 0; i < 32; ++i) {
         const auto b = static_cast<unsigned char>(fp[i]);
-        out[2 * i]     = kHexChars[b >> 4u];
+        out[2 * i] = kHexChars[b >> 4u];
         out[2 * i + 1] = kHexChars[b & 0xFu];
     }
     return std::string_view{out.data(), 64};
 }
 
 struct ExtractedPrincipal {
-    std::string            value;   // canonical principal value (used as lookup key)
+    std::string value;  // canonical principal value (used as lookup key)
     bound_principal::source source;
 };
 
-[[nodiscard]] ExtractedPrincipal
-extract_principal(fixpp::tls::peer_identity const& pid) noexcept {
+[[nodiscard]] ExtractedPrincipal extract_principal(fixpp::tls::peer_identity const& pid) noexcept {
     // Step 1: CN from subject_dn.
     const std::string_view dn = pid.subject_dn_view();
     if (!dn.empty()) {
@@ -211,30 +209,24 @@ extract_principal(fixpp::tls::peer_identity const& pid) noexcept {
 // ── Constructors / destructor ─────────────────────────────────────────────────
 
 CompIdAuthorizationPolicy::CompIdAuthorizationPolicy() noexcept
-    : impl_{std::make_unique<impl>(std::pmr::get_default_resource())}
-{}
+    : impl_{std::make_unique<impl>(std::pmr::get_default_resource())} {}
 
-CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(
-    std::pmr::memory_resource* mr) noexcept
-    : impl_{std::make_unique<impl>(mr)}
-{}
+CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(std::pmr::memory_resource* mr) noexcept
+    : impl_{std::make_unique<impl>(mr)} {}
 
-CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(
-    CompIdAuthorizationPolicy const& other)
-    : impl_{std::make_unique<impl>(*other.impl_)}
-{}
+CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(CompIdAuthorizationPolicy const& other)
+    : impl_{std::make_unique<impl>(*other.impl_)} {}
 
 CompIdAuthorizationPolicy& CompIdAuthorizationPolicy::operator=(
-    CompIdAuthorizationPolicy const& other)
-{
+    CompIdAuthorizationPolicy const& other) {
     if (this != &other) {
         impl_ = std::make_unique<impl>(*other.impl_);
     }
     return *this;
 }
 
-CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(
-    CompIdAuthorizationPolicy&&) noexcept = default;
+CompIdAuthorizationPolicy::CompIdAuthorizationPolicy(CompIdAuthorizationPolicy&&) noexcept =
+    default;
 
 CompIdAuthorizationPolicy& CompIdAuthorizationPolicy::operator=(
     CompIdAuthorizationPolicy&&) noexcept = default;
@@ -249,9 +241,7 @@ CompIdAuthorizationPolicy::~CompIdAuthorizationPolicy() = default;
 // Idempotent: inserting the same (principal, compid) pair twice is a no-op
 // (deduplication via sorted insert + find).
 
-void CompIdAuthorizationPolicy::add_binding(std::string_view principal,
-                                             std::string_view compid)
-{
+void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::string_view compid) {
     if (principal.empty()) {
         throw std::invalid_argument(
             "CompIdAuthorizationPolicy::add_binding: principal must not be empty");
@@ -292,11 +282,8 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal,
 // On miss / empty-policy / compid not in set: return unexpected(session_compid_unauthorized).
 //   noexcept: all internal paths are noexcept (pure map lookups; no allocation).
 
-[[nodiscard]] core::expected_t<bound_principal>
-CompIdAuthorizationPolicy::authorize(
-    fixpp::tls::peer_identity const& pid,
-    std::string_view asserted_compid) const noexcept
-{
+[[nodiscard]] core::expected_t<bound_principal> CompIdAuthorizationPolicy::authorize(
+    fixpp::tls::peer_identity const& pid, std::string_view asserted_compid) const noexcept {
     // Empty policy → default-deny (FR-023 / D-9).
     if (impl_->bindings.empty()) {
         return std::unexpected{core::error::session_compid_unauthorized};
@@ -316,8 +303,8 @@ CompIdAuthorizationPolicy::authorize(
     // Principal found. Check if asserted_compid is in the authorized set.
     const auto& compid_vec = it->second;
     // Binary search (vector is sorted via add_binding dedup logic).
-    const auto pos = std::lower_bound(compid_vec.begin(), compid_vec.end(),
-                                      std::string{asserted_compid});
+    const auto pos =
+        std::lower_bound(compid_vec.begin(), compid_vec.end(), std::string{asserted_compid});
     if (pos == compid_vec.end() || *pos != asserted_compid) {
         // Principal found but asserted CompID not authorized.
         return std::unexpected{core::error::session_compid_unauthorized};
@@ -328,7 +315,7 @@ CompIdAuthorizationPolicy::authorize(
     // further insertions, valid for the lifetime of impl_.
     return bound_principal{
         .value = std::string_view{it->first},
-        .from  = extracted.source,
+        .from = extracted.source,
     };
 }
 
@@ -339,8 +326,7 @@ CompIdAuthorizationPolicy::authorize(
 }
 
 [[nodiscard]] bool CompIdAuthorizationPolicy::has_principal(
-    std::string_view principal) const noexcept
-{
+    std::string_view principal) const noexcept {
     return impl_->bindings.count(std::string{principal}) > 0;
 }
 

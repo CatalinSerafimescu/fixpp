@@ -23,31 +23,29 @@
 // TDD: linker-RED until T020 (MemoryStore) and T023/T024/T026 (FileStore) ship.
 #include <gtest/gtest.h>
 
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
+#include <cstring>
+#include <filesystem>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fstream>
+#include <string>
+#include <vector>
 
 #include "../session/_fixtures_/test_double_fsm.hpp"
 
 namespace {
 
 using fixpp::session::direction_t;
-using fixpp::session::MemoryStore;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
+using fixpp::session::MemoryStore;
 using fixpp::session::seqnum_t;
 using fixpp::store_test::byte_collecting_visitor;
 namespace fs = std::filesystem;
@@ -55,7 +53,7 @@ namespace fs = std::filesystem;
 // ── Corpus loading ────────────────────────────────────────────────────────────
 
 struct CorpusEntry {
-    seqnum_t    seq{};
+    seqnum_t seq{};
     direction_t dir{};
     std::vector<std::byte> bytes;
 };
@@ -68,8 +66,20 @@ std::vector<CorpusEntry> make_synthetic_corpus() {
 
     // Group 1: Short outbound frames (Logon-like, <100 bytes)
     const char* short_frames[] = {
-        "8=FIX.4.4\x019=56\x01""35=A\x01""49=SENDER\x01""56=TARGET\x01""34=1\x01""108=30\x01""10=099\x01",
-        "8=FIX.4.4\x019=57\x01""35=A\x01""49=SENDER\x01""56=TARGET\x01""34=2\x01""108=30\x01""10=100\x01",
+        "8=FIX.4.4\x019=56\x01"
+        "35=A\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=1\x01"
+        "108=30\x01"
+        "10=099\x01",
+        "8=FIX.4.4\x019=57\x01"
+        "35=A\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=2\x01"
+        "108=30\x01"
+        "10=100\x01",
     };
     seqnum_t seq = 1;
     for (const char* raw : short_frames) {
@@ -162,8 +172,8 @@ std::vector<CorpusEntry> load_corpus() {
                 if (!f) continue;
                 CorpusEntry e;
                 std::uint32_t seq_le{};
-                std::uint8_t  dir_byte{};
-                std::uint8_t  padding[3]{};
+                std::uint8_t dir_byte{};
+                std::uint8_t padding[3]{};
                 f.read(reinterpret_cast<char*>(&seq_le), 4);
                 f.read(reinterpret_cast<char*>(&dir_byte), 1);
                 f.read(reinterpret_cast<char*>(padding), 3);
@@ -192,27 +202,29 @@ TEST(StoreCorpusReplay, MemoryStoreRoundTrip) {
     // Separate inbound and outbound entries
     std::vector<CorpusEntry*> inbound_entries, outbound_entries;
     for (auto& e : corpus) {
-        if (e.dir == direction_t::inbound)  inbound_entries.push_back(&e);
-        else                                outbound_entries.push_back(&e);
+        if (e.dir == direction_t::inbound)
+            inbound_entries.push_back(&e);
+        else
+            outbound_entries.push_back(&e);
     }
 
     auto run = [&](const std::vector<CorpusEntry*>& entries, direction_t dir_val) {
         if (entries.empty()) return;
-        auto fut = asio::co_spawn(pool.get_executor(),
+        auto fut = asio::co_spawn(
+            pool.get_executor(),
             [entries_copy = entries, dir_val]() -> asio::awaitable<void> {
                 MemoryStore::Config cfg;
-                cfg.policy            = fixpp::session::capacity_policy::bounded;
-                cfg.inbound_capacity  = entries_copy.size() + 10;
+                cfg.policy = fixpp::session::capacity_policy::bounded;
+                cfg.inbound_capacity = entries_copy.size() + 10;
                 cfg.outbound_capacity = entries_copy.size() + 10;
-                cfg.max_frame_bytes   = 256 * 1024;
+                cfg.max_frame_bytes = 256 * 1024;
                 MemoryStore store{cfg};
 
                 seqnum_t seq = 1;
                 for (const auto* e : entries_copy) {
-                    auto r = co_await store.store(seq,
-                        std::span<const std::byte>(e->bytes), dir_val);
-                    EXPECT_TRUE(r.has_value())
-                        << "MemoryStore::store() failed at seq=" << seq;
+                    auto r =
+                        co_await store.store(seq, std::span<const std::byte>(e->bytes), dir_val);
+                    EXPECT_TRUE(r.has_value()) << "MemoryStore::store() failed at seq=" << seq;
                     ++seq;
                 }
 
@@ -221,18 +233,17 @@ TEST(StoreCorpusReplay, MemoryStoreRoundTrip) {
                 EXPECT_TRUE(rr.has_value()) << "MemoryStore::retrieve() failed";
                 EXPECT_EQ(visitor.entries().size(), entries_copy.size());
 
-                for (std::size_t i = 0; i < entries_copy.size() &&
-                                        i < visitor.entries().size(); ++i) {
+                for (std::size_t i = 0; i < entries_copy.size() && i < visitor.entries().size();
+                     ++i) {
                     EXPECT_EQ(visitor.entries()[i].bytes, entries_copy[i]->bytes)
-                        << "MemoryStore corpus frame " << i
-                        << " failed byte-equality check";
+                        << "MemoryStore corpus frame " << i << " failed byte-equality check";
                 }
             },
             asio::use_future);
         fut.get();
     };
 
-    run(inbound_entries,  direction_t::inbound);
+    run(inbound_entries, direction_t::inbound);
     run(outbound_entries, direction_t::outbound);
 }
 
@@ -248,40 +259,40 @@ TEST(StoreCorpusReplay, FileStoreRoundTrip) {
 
     std::vector<CorpusEntry*> inbound_entries, outbound_entries;
     for (auto& e : corpus) {
-        if (e.dir == direction_t::inbound)  inbound_entries.push_back(&e);
-        else                                outbound_entries.push_back(&e);
+        if (e.dir == direction_t::inbound)
+            inbound_entries.push_back(&e);
+        else
+            outbound_entries.push_back(&e);
     }
 
-    auto run = [&](const std::vector<CorpusEntry*>& entries,
-                   direction_t dir_val, const std::string& suffix) {
+    auto run = [&](const std::vector<CorpusEntry*>& entries, direction_t dir_val,
+                   const std::string& suffix) {
         if (entries.empty()) return;
         auto sub_dir = base_dir / suffix;
         fs::create_directories(sub_dir);
 
-        auto fut = asio::co_spawn(pool.get_executor(),
-            [entries_copy = entries, sub_dir, dir_val, &pool]()
-                -> asio::awaitable<void>
-            {
+        auto fut = asio::co_spawn(
+            pool.get_executor(),
+            [entries_copy = entries, sub_dir, dir_val, &pool]() -> asio::awaitable<void> {
                 FileStore::Config cfg;
-                cfg.directory        = sub_dir;
-                cfg.sender_comp_id   = "CORPUS";
-                cfg.target_comp_id   = "REPLAY";
-                cfg.max_frame_bytes  = 256 * 1024;
+                cfg.directory = sub_dir;
+                cfg.sender_comp_id = "CORPUS";
+                cfg.target_comp_id = "REPLAY";
+                cfg.max_frame_bytes = 256 * 1024;
                 cfg.file_io_executor = pool.get_executor();
 
                 FileStoreFactory factory{cfg};
-                auto minted = factory.make("CORPUS", "REPLAY", nullptr,
-                                            1024*1024*1024, pool.get_executor());
+                auto minted = factory.make("CORPUS", "REPLAY", nullptr, 1024 * 1024 * 1024,
+                                           pool.get_executor());
                 EXPECT_TRUE(minted.has_value()) << "FileStore make() failed";
                 if (!minted.has_value()) co_return;
                 auto& store = *minted.value();
 
                 seqnum_t seq = 1;
                 for (const auto* e : entries_copy) {
-                    auto r = co_await store.store(seq,
-                        std::span<const std::byte>(e->bytes), dir_val);
-                    EXPECT_TRUE(r.has_value())
-                        << "FileStore::store() failed at seq=" << seq;
+                    auto r =
+                        co_await store.store(seq, std::span<const std::byte>(e->bytes), dir_val);
+                    EXPECT_TRUE(r.has_value()) << "FileStore::store() failed at seq=" << seq;
                     ++seq;
                 }
 
@@ -290,18 +301,17 @@ TEST(StoreCorpusReplay, FileStoreRoundTrip) {
                 EXPECT_TRUE(rr.has_value()) << "FileStore::retrieve() failed";
                 EXPECT_EQ(visitor.entries().size(), entries_copy.size());
 
-                for (std::size_t i = 0; i < entries_copy.size() &&
-                                        i < visitor.entries().size(); ++i) {
+                for (std::size_t i = 0; i < entries_copy.size() && i < visitor.entries().size();
+                     ++i) {
                     EXPECT_EQ(visitor.entries()[i].bytes, entries_copy[i]->bytes)
-                        << "FileStore corpus frame " << i
-                        << " failed byte-equality check";
+                        << "FileStore corpus frame " << i << " failed byte-equality check";
                 }
             },
             asio::use_future);
         fut.get();
     };
 
-    run(inbound_entries,  direction_t::inbound,  "inbound");
+    run(inbound_entries, direction_t::inbound, "inbound");
     run(outbound_entries, direction_t::outbound, "outbound");
 
     fs::remove_all(base_dir);

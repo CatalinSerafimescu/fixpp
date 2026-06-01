@@ -17,13 +17,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/writer.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <vector>
-
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/writer.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"  // concrete dict::table_view (seam #1)
@@ -61,9 +60,7 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
     return out;
 }
 
-constexpr bool is_auto_framing_tag(std::uint16_t tag) noexcept {
-    return tag == 9U || tag == 10U;
-}
+constexpr bool is_auto_framing_tag(std::uint16_t tag) noexcept { return tag == 9U || tag == 10U; }
 
 }  // namespace
 
@@ -71,9 +68,17 @@ constexpr bool is_auto_framing_tag(std::uint16_t tag) noexcept {
 // markers; only the parse/serialize hot path is measured.
 TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
     auto const frame = make_frame(
-        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=42\x01"
-        "11=ORD-1\x01" "55=AAPL\x01" "54=1\x01" "38=100\x01"
-        "40=2\x01" "44=185.25\x01" "59=0\x01");
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=42\x01"
+        "11=ORD-1\x01"
+        "55=AAPL\x01"
+        "54=1\x01"
+        "38=100\x01"
+        "40=2\x01"
+        "44=185.25\x01"
+        "59=0\x01");
 
     auto fv = fixpp::wire::test::make_frame_view(frame);
     ASSERT_TRUE(fv.has_value());
@@ -88,9 +93,8 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
 
     alloc_guard_start();
     for (int i = 0; i < 1000; ++i) {
-        std::pmr::monotonic_buffer_resource parse_arena{
-            parse_buf.data(), parse_buf.size(),
-            std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource parse_arena{parse_buf.data(), parse_buf.size(),
+                                                        std::pmr::null_memory_resource()};
 
         Parser<access_mode::Index> idx{};
         auto mv = idx.parse(*fv, &parse_arena);
@@ -103,15 +107,13 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         ASSERT_TRUE(symbol.has_value());
 
         // Full serialize path: dict-free Iter walk → Writer → commit.
-        std::pmr::monotonic_buffer_resource write_mr{
-            write_scratch.data(), write_scratch.size(),
-            std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource write_mr{write_scratch.data(), write_scratch.size(),
+                                                     std::pmr::null_memory_resource()};
         Parser<access_mode::Iter> itp{};
         auto iv = itp.parse_iter(*fv);
         ASSERT_TRUE(iv.has_value());
 
-        Writer writer{std::span<std::byte>{dst_buf.data(), dst_buf.size()},
-                      &write_mr};
+        Writer writer{std::span<std::byte>{dst_buf.data(), dst_buf.size()}, &write_mr};
         for (auto it = iv->begin(); !(it == iv->end()); ++it) {
             auto const& f = *it;
             if (is_auto_framing_tag(f.tag)) {

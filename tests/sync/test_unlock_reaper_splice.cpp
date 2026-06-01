@@ -21,11 +21,9 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -52,16 +50,14 @@ TEST(SeamUnlockReaperSplice, ResidualFifoChainDrainedCorrectly) {
         EXPECT_TRUE(g.has_value());
         // Yield N times to let all waiters push onto the LIFO.
         for (int i = 0; i < N * 2; ++i)
-            co_await asio::post(co_await asio::this_coro::executor,
-                                asio::use_awaitable);
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         // Release: first unlock reverses LIFO → grants first waiter,
         // remaining N-1 spliced into next_drain_head_.
     };
 
     auto make_waiter = [&]() -> asio::awaitable<void> {
         // One yield so holder acquires first.
-        co_await asio::post(co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -80,8 +76,8 @@ TEST(SeamUnlockReaperSplice, ResidualFifoChainDrainedCorrectly) {
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap, 0)   << "Mutual exclusion violated";
-    EXPECT_EQ(total, N)     << "Lost waiter in residual FIFO chain";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated";
+    EXPECT_EQ(total, N) << "Lost waiter in residual FIFO chain";
 }
 
 TEST(SeamUnlockReaperSplice, MultipleRoundsResidualChain) {

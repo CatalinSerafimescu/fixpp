@@ -37,12 +37,7 @@
 // Drive path: acceptor loopback (US1 wired: accept→handshake→resolve→attach→
 //   admit). Mirrors engine_acceptor_test.cpp + engine_firstframe_test.cpp.
 
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -52,22 +47,25 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <asio/write.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <string>
+#include <vector>
 
 #include "engine_loopback_harness.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -80,14 +78,9 @@ namespace {
 
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_fix_frame(
-    std::string_view begin_str,
-    std::string_view msg_type,
-    int              seq_num,
-    std::string_view sender,
-    std::string_view target,
-    std::string      extra_body = "")
-{
+static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
+                                             int seq_num, std::string_view sender,
+                                             std::string_view target, std::string extra_body = "") {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -115,21 +108,16 @@ static std::vector<std::byte> make_fix_frame(
     return out;
 }
 
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_str,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                               std::string_view target) {
     return make_fix_frame(begin_str, "A", 1, sender, target,
-        "98=0\x01" "108=30\x01");
+                          "98=0\x01"
+                          "108=30\x01");
 }
 
-static std::vector<std::byte> make_heartbeat_frame(
-    std::string_view begin_str,
-    int              seq_num,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
+                                                   std::string_view sender,
+                                                   std::string_view target) {
     return make_fix_frame(begin_str, "0", seq_num, sender, target);
 }
 
@@ -139,14 +127,12 @@ static std::vector<std::byte> make_heartbeat_frame(
 // setup.  Returns nullptr if the fixture directory is absent.
 
 struct ReadPumpHarness {
-    std::unique_ptr<fixpp::session::Engine>              engine;
-    fixpp::session::SessionId                            acc_id;
+    std::unique_ptr<fixpp::session::Engine> engine;
+    fixpp::session::SessionId acc_id;
     std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture> fixture;
 };
 
-static std::unique_ptr<ReadPumpHarness>
-build_harness(asio::io_context& ioc)
-{
+static std::unique_ptr<ReadPumpHarness> build_harness(asio::io_context& ioc) {
     const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
     static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
@@ -157,18 +143,18 @@ build_harness(asio::io_context& ioc)
     if (!fixture_dir || fixture_dir[0] == '\0') return nullptr;
 
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     if (!cs_r.has_value()) return nullptr;
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -183,32 +169,30 @@ build_harness(asio::io_context& ioc)
 
     auto h = std::make_unique<ReadPumpHarness>();
 
-    h->engine = std::make_unique<fixpp::session::Engine>(
-        ioc.get_executor(), std::move(eng_cfg));
+    h->engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(eng_cfg));
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id   = "ACCEPTOR";
-    acc.target_comp_id   = "INITIATOR";
-    acc.begin_string     = "FIX.4.2";
-    acc.role             = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    acc.compid_authorization_policy      = authz;
-    acc.dictionary       = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.compid_authorization_policy = authz;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac;
-    acc.heartbeat_interval         = std::chrono::seconds{30};
+    acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
-    acc.reconnect_endpoint         = fixpp::transport::Endpoint{"127.0.0.1", 0};
-    acc.transport_send             = [](std::span<const std::byte>) {};
+    acc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
+    acc.transport_send = [](std::span<const std::byte>) {};
 
     h->acc_id = fixpp::session::SessionId::from_config(acc);
     if (!h->engine->register_session(std::move(acc))) return nullptr;
 
-    h->fixture = std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(
-        fixture_dir, ioc.get_executor());
+    h->fixture = std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(fixture_dir,
+                                                                              ioc.get_executor());
 
     return h;
 }
@@ -218,22 +202,16 @@ build_harness(asio::io_context& ioc)
 // Sends a Logon and then the provided `extra_frames` before waiting for
 // `wait_after` then closing.  Self-deadline prevents infinite hang on stub.
 
-static asio::awaitable<void>
-run_client_with_extra_frames(
-    asio::io_context&                           ioc,
-    fixpp::transport::test::LoopbackTlsFixture& fixture,
-    uint16_t                                    acceptor_port,
-    std::string                                 sender,
-    std::string                                 target,
-    std::vector<std::vector<std::byte>>         extra_frames,
-    std::chrono::milliseconds                   wait_after = 1500ms)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_client_with_extra_frames(
+    asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
+    uint16_t acceptor_port, std::string sender, std::string target,
+    std::vector<std::vector<std::byte>> extra_frames,
+    std::chrono::milliseconds wait_after = 1500ms) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     try {
         auto client = fixture.make_client(ioc.get_executor());
-        auto* tls   = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
         if (!tls) co_return;
 
         fixpp::transport::Endpoint ep{"127.0.0.1", acceptor_port};
@@ -245,8 +223,7 @@ run_client_with_extra_frames(
 
         // Send Logon (MsgSeqNum=1).
         auto logon = make_logon_frame("FIX.4.2", sender, target);
-        (void)co_await client->async_write(
-            std::span<const std::byte>{logon});
+        (void)co_await client->async_write(std::span<const std::byte>{logon});
 
         // Brief pause so the acceptor can process the Logon before we send more.
         asio::steady_timer pause{ioc};
@@ -255,8 +232,7 @@ run_client_with_extra_frames(
 
         // Send extra frames (Heartbeats or oversized payload).
         for (auto const& frame : extra_frames) {
-            (void)co_await client->async_write(
-                std::span<const std::byte>{frame});
+            (void)co_await client->async_write(std::span<const std::byte>{frame});
         }
 
         // Wait for the server to reply / process, then close.
@@ -265,7 +241,8 @@ run_client_with_extra_frames(
         co_await t.async_wait(asio::use_awaitable);
 
         (void)client->close();
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 }  // namespace
@@ -292,7 +269,9 @@ run_client_with_extra_frames(
 TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     asio::io_context ioc;
     auto h = build_harness(ioc);
-    if (!h) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
 
     h->engine->start();
     ioc.run_for(50ms);
@@ -316,12 +295,11 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     hb_frames.push_back(std::move(concat));
 
     asio::co_spawn(ioc,
-        run_client_with_extra_frames(
-            ioc, *h->fixture, port,
-            /*sender=*/"INITIATOR", /*target=*/"ACCEPTOR",
-            std::move(hb_frames),
-            /*wait_after=*/1500ms),
-        asio::detached);
+                   run_client_with_extra_frames(ioc, *h->fixture, port,
+                                                /*sender=*/"INITIATOR", /*target=*/"ACCEPTOR",
+                                                std::move(hb_frames),
+                                                /*wait_after=*/1500ms),
+                   asio::detached);
 
     // Bound: 4s — the stub co_returns immediately so no hang risk.
     ioc.run_for(4s);
@@ -336,7 +314,8 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     if (!acc) {
         // stop cleanly then skip
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run(); stop_fut.get();
+        ioc.run();
+        stop_fut.get();
         GTEST_SKIP() << "acceptor session not found — acceptance path not live";
     }
 
@@ -350,9 +329,9 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     auto st = acc->state();
     if (st == fsm_state::NotConnected || st == fsm_state::LogonSent) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run(); stop_fut.get();
-        GTEST_SKIP() << "session never reached established state (state="
-                     << static_cast<int>(st)
+        ioc.run();
+        stop_fut.get();
+        GTEST_SKIP() << "session never reached established state (state=" << static_cast<int>(st)
                      << ") — Logon accept path not fully wired for this run";
     }
 
@@ -360,12 +339,12 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     // After Logon (seq=1) is delivered, next_inbound advances 1→2.
     // After each of the N=2 Heartbeats (seq=2,3), it should advance to 4.
     // With the stub, the pump never feeds those frames, so it stays at 2.
-    const auto next_inbound =
-        static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
+    const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
     constexpr int expected = 2 + N;  // 4
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run(); stop_fut.get();
+    ioc.run();
+    stop_fut.get();
 
     EXPECT_EQ(next_inbound, expected)
         << "SC-003 / US2 AC1: each of the " << N << " in-sequence post-Logon "
@@ -396,7 +375,9 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
 TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     asio::io_context ioc;
     auto h = build_harness(ioc);
-    if (!h) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
 
     h->engine->start();
     ioc.run_for(50ms);
@@ -416,17 +397,14 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
         // overlong BodyLength and reject it as wire_frame_too_large.
         auto extra = "58=" + std::string(kOversizeBody, 'X') + "\x01";
         oversize_frames.push_back(
-            make_fix_frame("FIX.4.2", "0", /*seq=*/2, "INITIATOR", "ACCEPTOR",
-                           std::move(extra)));
+            make_fix_frame("FIX.4.2", "0", /*seq=*/2, "INITIATOR", "ACCEPTOR", std::move(extra)));
     }
 
     asio::co_spawn(ioc,
-        run_client_with_extra_frames(
-            ioc, *h->fixture, port,
-            "INITIATOR", "ACCEPTOR",
-            std::move(oversize_frames),
-            /*wait_after=*/1500ms),
-        asio::detached);
+                   run_client_with_extra_frames(ioc, *h->fixture, port, "INITIATOR", "ACCEPTOR",
+                                                std::move(oversize_frames),
+                                                /*wait_after=*/1500ms),
+                   asio::detached);
 
     ioc.run_for(4s);
     ioc.restart();
@@ -434,16 +412,17 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     fixpp::session::Session* acc = h->engine->lookup(h->acc_id);
     if (!acc) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run(); stop_fut.get();
+        ioc.run();
+        stop_fut.get();
         GTEST_SKIP() << "acceptor session not found";
     }
 
-    auto st           = acc->state();
-    const auto next_inbound =
-        static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
+    auto st = acc->state();
+    const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run(); stop_fut.get();
+    ioc.run();
+    stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the oversized
     // frame and called close(terminal), driving the FSM to Disconnected.
@@ -481,7 +460,9 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
 TEST(EngineReadPumpTest, EofDisconnectsSession) {
     asio::io_context ioc;
     auto h = build_harness(ioc);
-    if (!h) { GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; }
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
 
     h->engine->start();
     ioc.run_for(50ms);
@@ -492,12 +473,10 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
 
     // Client sends only the Logon and then immediately closes (EOF).
     asio::co_spawn(ioc,
-        run_client_with_extra_frames(
-            ioc, *h->fixture, port,
-            "INITIATOR", "ACCEPTOR",
-            /*extra_frames=*/{},
-            /*wait_after=*/200ms),  // close quickly after Logon
-        asio::detached);
+                   run_client_with_extra_frames(ioc, *h->fixture, port, "INITIATOR", "ACCEPTOR",
+                                                /*extra_frames=*/{},
+                                                /*wait_after=*/200ms),  // close quickly after Logon
+                   asio::detached);
 
     // Allow up to 4s for the session to detect the EOF and disconnect.
     ioc.run_for(4s);
@@ -508,14 +487,16 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         // Session already freed — reached terminal state and was cleaned up.
         // This is the GREEN outcome: the pump drove the session through close().
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run(); stop_fut.get();
+        ioc.run();
+        stop_fut.get();
         SUCCEED() << "Session already freed (terminal state reached) — GREEN path.";
         return;
     }
 
     auto st = acc->state();
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run(); stop_fut.get();
+    ioc.run();
+    stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the client EOF
     // (transport_read_eof from async_read_some) and called close(terminal),

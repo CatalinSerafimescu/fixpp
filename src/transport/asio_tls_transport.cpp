@@ -19,12 +19,13 @@
 
 #include "asio_tls_transport.hpp"
 
+#include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
-#include <openssl/err.h>
-#include <openssl/evp.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_type.hpp>
@@ -40,12 +41,20 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
-
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/peer_identity.hpp>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents emit
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -54,17 +63,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/peer_identity.hpp>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/security_profile.hpp>
-#include <fixpp/transport/endpoint.hpp>
-#include <fixpp/transport/listener_events.hpp>   // 013 T039: ListenerEvents emit
-#include <fixpp/transport/tls_transport.hpp>
-#include <fixpp/transport/transport.hpp>
 
 // asio::async_connect is a free function in <asio/connect.hpp>.
 // Use it via namespace alias to avoid conflict with our member function name.
@@ -157,16 +155,14 @@ std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexce
 // Returns false on any allocation or parse failure.
 // Out parameters: `der_bytes`, `subject_buf`, `issuer_buf`, `san_*_storage`
 // all provide backing storage for the returned Certificate's views.
-bool parse_x509_to_certificate(X509* x509,
-                                std::pmr::memory_resource& mr,
-                                fixpp::tls::Certificate& cert,
-                                std::pmr::vector<std::byte>& der_bytes,
-                                std::pmr::string& subject_buf,
-                                std::pmr::string& issuer_buf,
-                                std::pmr::vector<std::string>& san_dns_storage,
-                                std::pmr::vector<std::string_view>& san_dns_views,
-                                std::pmr::vector<std::string>& san_uri_storage,
-                                std::pmr::vector<std::string_view>& san_uri_views) noexcept {
+bool parse_x509_to_certificate(X509* x509, std::pmr::memory_resource& mr,
+                               fixpp::tls::Certificate& cert,
+                               std::pmr::vector<std::byte>& der_bytes,
+                               std::pmr::string& subject_buf, std::pmr::string& issuer_buf,
+                               std::pmr::vector<std::string>& san_dns_storage,
+                               std::pmr::vector<std::string_view>& san_dns_views,
+                               std::pmr::vector<std::string>& san_uri_storage,
+                               std::pmr::vector<std::string_view>& san_uri_views) noexcept {
     // ── DER bytes ────────────────────────────────────────────────────────────
     int der_len = i2d_X509(x509, nullptr);
     if (der_len <= 0) {
@@ -236,7 +232,7 @@ bool parse_x509_to_certificate(X509* x509,
 
     // ── Validity window ──────────────────────────────────────────────────────
     cert.not_before_ = asn1_time_to_tp(X509_get0_notBefore(x509));
-    cert.not_after_  = asn1_time_to_tp(X509_get0_notAfter(x509));
+    cert.not_after_ = asn1_time_to_tp(X509_get0_notAfter(x509));
 
     // ── Signature algorithm + key info ───────────────────────────────────────
     {
@@ -279,18 +275,16 @@ bool parse_x509_to_certificate(X509* x509,
                         const unsigned char* data = ASN1_STRING_get0_data(gn->d.ia5);
                         int len = ASN1_STRING_length(gn->d.ia5);
                         if (data && len > 0) {
-                            san_dns_storage.emplace_back(
-                                reinterpret_cast<const char*>(data),
-                                static_cast<std::size_t>(len));
+                            san_dns_storage.emplace_back(reinterpret_cast<const char*>(data),
+                                                         static_cast<std::size_t>(len));
                         }
                     } else if (gn->type == GEN_URI) {
                         const unsigned char* data =
                             ASN1_STRING_get0_data(gn->d.uniformResourceIdentifier);
                         int len = ASN1_STRING_length(gn->d.uniformResourceIdentifier);
                         if (data && len > 0) {
-                            san_uri_storage.emplace_back(
-                                reinterpret_cast<const char*>(data),
-                                static_cast<std::size_t>(len));
+                            san_uri_storage.emplace_back(reinterpret_cast<const char*>(data),
+                                                         static_cast<std::size_t>(len));
                         }
                     }
                 }
@@ -314,10 +308,9 @@ bool parse_x509_to_certificate(X509* x509,
         return false;
     }
 
-    cert.san_dns_names_ = std::span<const std::string_view>{san_dns_views.data(),
-                                                              san_dns_views.size()};
-    cert.san_uris_ = std::span<const std::string_view>{san_uri_views.data(),
-                                                         san_uri_views.size()};
+    cert.san_dns_names_ =
+        std::span<const std::string_view>{san_dns_views.data(), san_dns_views.size()};
+    cert.san_uris_ = std::span<const std::string_view>{san_uri_views.data(), san_uri_views.size()};
 
     (void)mr;  // PMR is used implicitly via the pmr containers passed in
     return true;
@@ -359,164 +352,162 @@ int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noex
     //
     // Design anchor: spec.md FR-035; .specify/2h-transport.md §1 item 5.
     try {
+        // Retrieve SSL* from the store context.
+        SSL* ssl = static_cast<SSL*>(
+            X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
+        if (!ssl) {
+            return 0;
+        }
 
-    // Retrieve SSL* from the store context.
-    SSL* ssl = static_cast<SSL*>(
-        X509_STORE_CTX_get_ex_data(store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
-    if (!ssl) {
-        return 0;
-    }
+        // Retrieve the HandshakeCtx.
+        HandshakeCtx* hctx =
+            static_cast<HandshakeCtx*>(SSL_get_ex_data(ssl, ssl_ex_data_transport_idx()));
+        if (!hctx) {
+            return 0;
+        }
 
-    // Retrieve the HandshakeCtx.
-    HandshakeCtx* hctx = static_cast<HandshakeCtx*>(
-        SSL_get_ex_data(ssl, ssl_ex_data_transport_idx()));
-    if (!hctx) {
-        return 0;
-    }
+        // Only run the full policy at depth 0 (the peer leaf).
+        // At deeper depths, pass — chain validation is handled by OpenSSL.
+        int depth = X509_STORE_CTX_get_error_depth(store_ctx);
+        if (depth != 0) {
+            return 1;
+        }
 
-    // Only run the full policy at depth 0 (the peer leaf).
-    // At deeper depths, pass — chain validation is handled by OpenSSL.
-    int depth = X509_STORE_CTX_get_error_depth(store_ctx);
-    if (depth != 0) {
+        // ── Build the peer chain array ────────────────────────────────────────────
+        // The verified chain from OpenSSL contains [leaf, intermediates, root].
+        STACK_OF(X509)* x509_chain = X509_STORE_CTX_get0_chain(store_ctx);
+        int raw_chain_len = x509_chain ? sk_X509_num(x509_chain) : 0;
+        if (raw_chain_len <= 0) {
+            // Fallback: just the current cert.
+            X509* leaf = X509_STORE_CTX_get_current_cert(store_ctx);
+            if (!leaf) {
+                return 0;
+            }
+            raw_chain_len = 1;
+            // We'll handle this inline below.
+        }
+
+        // Cap at 16 to avoid stack overflows.
+        static constexpr int kMaxChainLen = 16;
+        int chain_len = std::min(raw_chain_len, kMaxChainLen);
+
+        // Backing storage for each certificate's fields.
+        // Using system allocator here (not PMR) since the trampoline builds
+        // temporary views — per [const §VIII.5] the HOT path is async_read_some;
+        // the handshake is a cold path.
+        struct CertBacking {
+            std::vector<std::byte> der_bytes;
+            std::string subject_buf;
+            std::string issuer_buf;
+            std::vector<std::string> san_dns_storage;
+            std::vector<std::string_view> san_dns_views;
+            std::vector<std::string> san_uri_storage;
+            std::vector<std::string_view> san_uri_views;
+        };
+
+        // Use PMR-based intermediates fed by hctx->mr for the strings passed to
+        // parse_x509_to_certificate (which writes into pmr containers).
+        // Declare with system allocator as the out-params; they write into
+        // system-heap std::strings and std::vectors.
+        // NOTE: verify_peer itself will allocate peer_identity into hctx->mr;
+        //       Certificate views are temporary locals here.
+        std::array<CertBacking, kMaxChainLen> backings{};
+        std::array<fixpp::tls::Certificate, kMaxChainLen> certs{};
+
+        // Adapt pmr-based function to system-allocator storage.
+        // We declare wrapper pmr containers backed by new_delete_resource and
+        // pass them to parse_x509_to_certificate.
+        auto* sys_mr = std::pmr::new_delete_resource();
+
+        int built = 0;
+        for (int i = 0; i < chain_len; ++i) {
+            X509* x509 = nullptr;
+            if (x509_chain && raw_chain_len > 1) {
+                x509 = sk_X509_value(x509_chain, i);
+            } else if (i == 0) {
+                x509 = X509_STORE_CTX_get_current_cert(store_ctx);
+            }
+            if (!x509) {
+                continue;
+            }
+
+            // Temporary pmr containers backed by sys_mr (new_delete_resource).
+            std::pmr::vector<std::byte> der_pmr{sys_mr};
+            std::pmr::string subject_pmr{sys_mr};
+            std::pmr::string issuer_pmr{sys_mr};
+            std::pmr::vector<std::string> san_dns_pmr{sys_mr};
+            std::pmr::vector<std::string_view> san_dns_views_pmr{sys_mr};
+            std::pmr::vector<std::string> san_uri_pmr{sys_mr};
+            std::pmr::vector<std::string_view> san_uri_views_pmr{sys_mr};
+
+            certs[i] = fixpp::tls::Certificate{};
+            if (!parse_x509_to_certificate(x509, *sys_mr, certs[i], der_pmr, subject_pmr,
+                                           issuer_pmr, san_dns_pmr, san_dns_views_pmr, san_uri_pmr,
+                                           san_uri_views_pmr)) {
+                return 0;
+            }
+
+            // Transfer backing data into our persistent CertBacking for this slot.
+            // The Certificate views point into `backings[i]`, which outlives `certs`.
+            backings[i].der_bytes.assign(der_pmr.begin(), der_pmr.end());
+            backings[i].subject_buf.assign(subject_pmr.begin(), subject_pmr.end());
+            backings[i].issuer_buf.assign(issuer_pmr.begin(), issuer_pmr.end());
+            backings[i].san_dns_storage.assign(san_dns_pmr.begin(), san_dns_pmr.end());
+            backings[i].san_uri_storage.assign(san_uri_pmr.begin(), san_uri_pmr.end());
+
+            // Rebuild the Certificate views to point into backings[i].
+            certs[i].raw_der_ = std::span<const std::byte>{backings[i].der_bytes.data(),
+                                                           backings[i].der_bytes.size()};
+            certs[i].subject_dn_ = std::string_view{backings[i].subject_buf};
+            certs[i].issuer_dn_ = std::string_view{backings[i].issuer_buf};
+
+            // Rebuild SAN views.
+            backings[i].san_dns_views.clear();
+            for (auto const& s : backings[i].san_dns_storage) {
+                backings[i].san_dns_views.emplace_back(s.data(), s.size());
+            }
+            backings[i].san_uri_views.clear();
+            for (auto const& s : backings[i].san_uri_storage) {
+                backings[i].san_uri_views.emplace_back(s.data(), s.size());
+            }
+            certs[i].san_dns_names_ = std::span<const std::string_view>{
+                backings[i].san_dns_views.data(), backings[i].san_dns_views.size()};
+            certs[i].san_uris_ = std::span<const std::string_view>{
+                backings[i].san_uri_views.data(), backings[i].san_uri_views.size()};
+
+            ++built;
+        }
+
+        if (built == 0) {
+            return 0;
+        }
+
+        std::span<const fixpp::tls::Certificate> peer_chain{certs.data(),
+                                                            static_cast<std::size_t>(built)};
+
+        // ── Invoke verify_peer against the augmented config ────────────────────────
+        // augmented_cfg.pinset_snapshot was set at handshake start (captured-once).
+        // verify_peer reads pinset_snapshot; it NEVER calls cfg.pinset->find/snapshot.
+        auto result = fixpp::tls::verify_peer(hctx->augmented_cfg, peer_chain);
+        if (!result) {
+            hctx->accepted = false;
+            // 013 T039: capture the precise tls_* error code + sub_reason BY COPY.
+            // async_handshake reads these AFTER the handshake completes to emit
+            // session_event_tls_validation_failed. The copy happens here inside the
+            // trampoline (same thread); the values are then stable for the
+            // async_handshake resume. [FR-027 / data-model §E-5]
+            hctx->verify_error = result.error();
+            // Copy last_handshake_sub_reason() into a std::string (not a view) so
+            // the value survives the thread-local being reset by any subsequent call.
+            // String literal storage is static, but defensive copy is required per
+            // data-model §E-5 sub_reason capture semantics.
+            hctx->sub_reason_copy = std::string{fixpp::tls::last_handshake_sub_reason()};
+            return 0;
+        }
+
+        hctx->peer_id = std::move(*result);
+        hctx->accepted = true;
         return 1;
-    }
-
-    // ── Build the peer chain array ────────────────────────────────────────────
-    // The verified chain from OpenSSL contains [leaf, intermediates, root].
-    STACK_OF(X509)* x509_chain = X509_STORE_CTX_get0_chain(store_ctx);
-    int raw_chain_len = x509_chain ? sk_X509_num(x509_chain) : 0;
-    if (raw_chain_len <= 0) {
-        // Fallback: just the current cert.
-        X509* leaf = X509_STORE_CTX_get_current_cert(store_ctx);
-        if (!leaf) {
-            return 0;
-        }
-        raw_chain_len = 1;
-        // We'll handle this inline below.
-    }
-
-    // Cap at 16 to avoid stack overflows.
-    static constexpr int kMaxChainLen = 16;
-    int chain_len = std::min(raw_chain_len, kMaxChainLen);
-
-    // Backing storage for each certificate's fields.
-    // Using system allocator here (not PMR) since the trampoline builds
-    // temporary views — per [const §VIII.5] the HOT path is async_read_some;
-    // the handshake is a cold path.
-    struct CertBacking {
-        std::vector<std::byte> der_bytes;
-        std::string subject_buf;
-        std::string issuer_buf;
-        std::vector<std::string> san_dns_storage;
-        std::vector<std::string_view> san_dns_views;
-        std::vector<std::string> san_uri_storage;
-        std::vector<std::string_view> san_uri_views;
-    };
-
-    // Use PMR-based intermediates fed by hctx->mr for the strings passed to
-    // parse_x509_to_certificate (which writes into pmr containers).
-    // Declare with system allocator as the out-params; they write into
-    // system-heap std::strings and std::vectors.
-    // NOTE: verify_peer itself will allocate peer_identity into hctx->mr;
-    //       Certificate views are temporary locals here.
-    std::array<CertBacking, kMaxChainLen> backings{};
-    std::array<fixpp::tls::Certificate, kMaxChainLen> certs{};
-
-    // Adapt pmr-based function to system-allocator storage.
-    // We declare wrapper pmr containers backed by new_delete_resource and
-    // pass them to parse_x509_to_certificate.
-    auto* sys_mr = std::pmr::new_delete_resource();
-
-    int built = 0;
-    for (int i = 0; i < chain_len; ++i) {
-        X509* x509 = nullptr;
-        if (x509_chain && raw_chain_len > 1) {
-            x509 = sk_X509_value(x509_chain, i);
-        } else if (i == 0) {
-            x509 = X509_STORE_CTX_get_current_cert(store_ctx);
-        }
-        if (!x509) {
-            continue;
-        }
-
-        // Temporary pmr containers backed by sys_mr (new_delete_resource).
-        std::pmr::vector<std::byte>    der_pmr{sys_mr};
-        std::pmr::string               subject_pmr{sys_mr};
-        std::pmr::string               issuer_pmr{sys_mr};
-        std::pmr::vector<std::string>  san_dns_pmr{sys_mr};
-        std::pmr::vector<std::string_view> san_dns_views_pmr{sys_mr};
-        std::pmr::vector<std::string>  san_uri_pmr{sys_mr};
-        std::pmr::vector<std::string_view> san_uri_views_pmr{sys_mr};
-
-        certs[i] = fixpp::tls::Certificate{};
-        if (!parse_x509_to_certificate(x509, *sys_mr, certs[i],
-                                        der_pmr, subject_pmr, issuer_pmr,
-                                        san_dns_pmr, san_dns_views_pmr,
-                                        san_uri_pmr, san_uri_views_pmr)) {
-            return 0;
-        }
-
-        // Transfer backing data into our persistent CertBacking for this slot.
-        // The Certificate views point into `backings[i]`, which outlives `certs`.
-        backings[i].der_bytes.assign(der_pmr.begin(), der_pmr.end());
-        backings[i].subject_buf.assign(subject_pmr.begin(), subject_pmr.end());
-        backings[i].issuer_buf.assign(issuer_pmr.begin(), issuer_pmr.end());
-        backings[i].san_dns_storage.assign(san_dns_pmr.begin(), san_dns_pmr.end());
-        backings[i].san_uri_storage.assign(san_uri_pmr.begin(), san_uri_pmr.end());
-
-        // Rebuild the Certificate views to point into backings[i].
-        certs[i].raw_der_ = std::span<const std::byte>{backings[i].der_bytes.data(),
-                                                         backings[i].der_bytes.size()};
-        certs[i].subject_dn_ = std::string_view{backings[i].subject_buf};
-        certs[i].issuer_dn_  = std::string_view{backings[i].issuer_buf};
-
-        // Rebuild SAN views.
-        backings[i].san_dns_views.clear();
-        for (auto const& s : backings[i].san_dns_storage) {
-            backings[i].san_dns_views.emplace_back(s.data(), s.size());
-        }
-        backings[i].san_uri_views.clear();
-        for (auto const& s : backings[i].san_uri_storage) {
-            backings[i].san_uri_views.emplace_back(s.data(), s.size());
-        }
-        certs[i].san_dns_names_ = std::span<const std::string_view>{
-            backings[i].san_dns_views.data(), backings[i].san_dns_views.size()};
-        certs[i].san_uris_ = std::span<const std::string_view>{
-            backings[i].san_uri_views.data(), backings[i].san_uri_views.size()};
-
-        ++built;
-    }
-
-    if (built == 0) {
-        return 0;
-    }
-
-    std::span<const fixpp::tls::Certificate> peer_chain{certs.data(),
-                                                         static_cast<std::size_t>(built)};
-
-    // ── Invoke verify_peer against the augmented config ────────────────────────
-    // augmented_cfg.pinset_snapshot was set at handshake start (captured-once).
-    // verify_peer reads pinset_snapshot; it NEVER calls cfg.pinset->find/snapshot.
-    auto result = fixpp::tls::verify_peer(hctx->augmented_cfg, peer_chain);
-    if (!result) {
-        hctx->accepted = false;
-        // 013 T039: capture the precise tls_* error code + sub_reason BY COPY.
-        // async_handshake reads these AFTER the handshake completes to emit
-        // session_event_tls_validation_failed. The copy happens here inside the
-        // trampoline (same thread); the values are then stable for the
-        // async_handshake resume. [FR-027 / data-model §E-5]
-        hctx->verify_error = result.error();
-        // Copy last_handshake_sub_reason() into a std::string (not a view) so
-        // the value survives the thread-local being reset by any subsequent call.
-        // String literal storage is static, but defensive copy is required per
-        // data-model §E-5 sub_reason capture semantics.
-        hctx->sub_reason_copy = std::string{fixpp::tls::last_handshake_sub_reason()};
-        return 0;
-    }
-
-    hctx->peer_id = std::move(*result);
-    hctx->accepted = true;
-    return 1;
 
     } catch (const std::bad_alloc&) {
         // OOM during cert parsing or peer_identity construction: reject the peer.
@@ -543,15 +534,13 @@ int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noex
 // pre-built context is available (tests, standalone usage, legacy callers).
 // For production use via the factory, use the from_factory_tag ctor instead.
 // ─────────────────────────────────────────────────────────────────────────────
-asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
-                                        Transport::Config         cfg,
-                                        fixpp::tls::SslCtxConfig  ssl_cfg)
+asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
+                                       fixpp::tls::SslCtxConfig ssl_cfg)
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{exec_},
-      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)}
-{
+      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)} {
     setup_ssl_ctx_();
     // state_ default-initialized to fresh per asio_tls_transport.hpp.
 }
@@ -562,17 +551,14 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor     exec,
 // Takes the pre-built shared context from asio_tls_transport_factory::make().
 // Does NOT call setup_ssl_ctx_() — the context is already configured.
 // ─────────────────────────────────────────────────────────────────────────────
-asio_tls_transport::asio_tls_transport(from_factory_tag,
-                                        asio::any_io_executor               exec,
-                                        Transport::Config                   cfg,
-                                        fixpp::tls::SslCtxConfig            ssl_cfg,
-                                        std::shared_ptr<asio::ssl::context> shared_ctx)
+asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor exec,
+                                       Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+                                       std::shared_ptr<asio::ssl::context> shared_ctx)
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{exec_},
-      ssl_ctx_{std::move(shared_ctx)}
-{
+      ssl_ctx_{std::move(shared_ctx)} {
     // ssl_ctx_ already configured by the factory; no setup_ssl_ctx_() call.
     // state_ default-initialized to fresh; role_ default-initialized to client.
 }
@@ -583,21 +569,18 @@ asio_tls_transport::asio_tls_transport(from_factory_tag,
 // Adopts an already-connected TCP socket + uses the factory's shared context.
 // Sets state_ = connected + role_ = server (TLS server mode).
 // ─────────────────────────────────────────────────────────────────────────────
-asio_tls_transport::asio_tls_transport(from_factory_tag,
-                                        asio::any_io_executor               exec,
-                                        Transport::Config                   cfg,
-                                        fixpp::tls::SslCtxConfig            ssl_cfg,
-                                        std::shared_ptr<asio::ssl::context> shared_ctx,
-                                        asio::ip::tcp::socket               accepted_socket)
+asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor exec,
+                                       Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+                                       std::shared_ptr<asio::ssl::context> shared_ctx,
+                                       asio::ip::tcp::socket accepted_socket)
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{std::move(accepted_socket)},
-      ssl_ctx_{std::move(shared_ctx)}
-{
+      ssl_ctx_{std::move(shared_ctx)} {
     apply_socket_options_();
     state_ = state_t::connected;
-    role_  = role_t::server;
+    role_ = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -613,20 +596,18 @@ asio_tls_transport::asio_tls_transport(from_factory_tag,
 // Throws on OpenSSL SSL_CTX setup failure per the [arch §5.3] engine-bootstrap
 // carve-out; callers wrap in [2a §4.2] trap_throw.
 // ─────────────────────────────────────────────────────────────────────────────
-asio_tls_transport::asio_tls_transport(asio::any_io_executor      exec,
-                                        Transport::Config          cfg,
-                                        fixpp::tls::SslCtxConfig   ssl_cfg,
-                                        asio::ip::tcp::socket      accepted_socket)
+asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
+                                       fixpp::tls::SslCtxConfig ssl_cfg,
+                                       asio::ip::tcp::socket accepted_socket)
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{std::move(accepted_socket)},
-      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)}
-{
+      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)} {
     setup_ssl_ctx_();
     apply_socket_options_();
     state_ = state_t::connected;
-    role_  = role_t::server;
+    role_ = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -692,10 +673,7 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // Note: SSL_OP_NO_EARLY_DATA is deprecated in OpenSSL 3.x; TLS 1.3
     // 0-RTT is disabled by not calling SSL_CTX_set_early_data_enabled (it
     // is off by default in ASIO's context).
-    constexpr long opts =
-        SSL_OP_NO_RENEGOTIATION |
-        SSL_OP_NO_COMPRESSION  |
-        SSL_OP_NO_TICKET;
+    constexpr long opts = SSL_OP_NO_RENEGOTIATION | SSL_OP_NO_COMPRESSION | SSL_OP_NO_TICKET;
     SSL_CTX_set_options(ctx, opts);
 
     // ── TLS 1.3 cipher suites ─────────────────────────────────────────────────
@@ -767,8 +745,7 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // with peer verification per [2g §4.5.1]).  The trampoline dispatches into
     // verify_peer for the actual policy; OpenSSL's depth-0 callback at depth 0
     // returns the final accept/reject.
-    SSL_CTX_set_verify(ctx,
-                       SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
                        verify_peer_trampoline);
 
     // ── Disable session caching (per-session ephemeral connections) ───────────
@@ -868,8 +845,7 @@ void asio_tls_transport::setup_ssl_ctx_() {
                     if (ca_der.empty()) {
                         continue;
                     }
-                    const unsigned char* p =
-                        reinterpret_cast<const unsigned char*>(ca_der.data());
+                    const unsigned char* p = reinterpret_cast<const unsigned char*>(ca_der.data());
                     X509Ptr x509{d2i_X509(nullptr, &p, static_cast<long>(ca_der.size()))};
                     if (x509) {
                         // X509_STORE_add_cert increments refcount; we still own x509.
@@ -884,8 +860,8 @@ void asio_tls_transport::setup_ssl_ctx_() {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_connect
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>>
-asio_tls_transport::async_connect(Endpoint const& ep) {
+[[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>> asio_tls_transport::async_connect(
+    Endpoint const& ep) {
     using E = core::error;
 
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
@@ -906,9 +882,7 @@ asio_tls_transport::async_connect(Endpoint const& ep) {
     asio::ip::tcp::resolver resolver{exec_};
     asio::error_code resolve_ec;
     auto endpoints = co_await resolver.async_resolve(
-        ep.host,
-        std::to_string(ep.port),
-        asio::redirect_error(asio::use_awaitable, resolve_ec));
+        ep.host, std::to_string(ep.port), asio::redirect_error(asio::use_awaitable, resolve_ec));
 
     if (resolve_ec) {
         if (resolve_ec == asio::error::operation_aborted) {
@@ -939,9 +913,7 @@ asio_tls_transport::async_connect(Endpoint const& ep) {
     // Use the free function asio::async_connect via an explicit namespace
     // to avoid the ambiguity with our member method name.
     auto connected_ep = co_await asio_free::async_connect(
-        socket_,
-        endpoints,
-        asio::redirect_error(asio::use_awaitable, connect_ec));
+        socket_, endpoints, asio::redirect_error(asio::use_awaitable, connect_ec));
 
     timer.cancel();
 
@@ -1042,19 +1014,16 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     });
 
     asio::error_code handshake_ec;
-    const auto hs_role = (role_ == role_t::server)
-                         ? asio::ssl::stream_base::server
-                         : asio::ssl::stream_base::client;
-    co_await ssl_stream_->async_handshake(
-        hs_role,
-        asio::redirect_error(asio::use_awaitable, handshake_ec));
+    const auto hs_role =
+        (role_ == role_t::server) ? asio::ssl::stream_base::server : asio::ssl::stream_base::client;
+    co_await ssl_stream_->async_handshake(hs_role,
+                                          asio::redirect_error(asio::use_awaitable, handshake_ec));
 
     timer.cancel();
 
     // Clear the ex_data pointer before HandshakeCtx leaves scope.
     if (ssl_stream_) {
-        SSL_set_ex_data(ssl_stream_->native_handle(),
-                        ssl_ex_data_transport_idx(), nullptr);
+        SSL_set_ex_data(ssl_stream_->native_handle(), ssl_ex_data_transport_idx(), nullptr);
     }
 
     if (handshake_ec) {
@@ -1083,8 +1052,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
                 asio::error_code ep_ec;
                 auto remote = socket_.remote_endpoint(ep_ec);
                 if (!ep_ec) {
-                    peer_ep_str = remote.address().to_string()
-                                  + ":" + std::to_string(remote.port());
+                    peer_ep_str =
+                        remote.address().to_string() + ":" + std::to_string(remote.port());
                 }
             }
 
@@ -1092,11 +1061,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
             // The listener's parallel string arrays hold the copies; the
             // string_views in the event point into those arrays. [data-model §E-5]
             hctx.listener_events->emit_with_strings(
-                fixpp::session::session_event_tls_validation_failed{},
-                code,
-                hctx.sub_reason_copy,
-                peer_ep_str,
-                "TLS peer cert rejected: " + hctx.sub_reason_copy);
+                fixpp::session::session_event_tls_validation_failed{}, code, hctx.sub_reason_copy,
+                peer_ep_str, "TLS peer cert rejected: " + hctx.sub_reason_copy);
         }
 
         co_return std::unexpected{E::transport_handshake_failed};
@@ -1116,13 +1082,14 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     //    coroutine throw). State transition happens AFTER all PMR allocs
     //    succeed so a fault-injection unwind leaves state_ == closed, not
     //    the half-set "handshake-completed-but-result-broken" middle. ────
-    std::pmr::memory_resource* mr = (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
+    std::pmr::memory_resource* mr =
+        (cfg_.mr != nullptr) ? cfg_.mr : std::pmr::new_delete_resource();
     const char* cipher_name = SSL_get_cipher_name(ssl_stream_->native_handle());
     handshake_result result;
     try {
         peer_id_ = std::move(hctx.peer_id);
-        result.peer_id           = peer_id_;
-        result.captured_pinset   = captured_pinset_;
+        result.peer_id = peer_id_;
+        result.captured_pinset = captured_pinset_;
         result.negotiated_cipher = std::pmr::string{cipher_name ? cipher_name : "", mr};
     } catch (...) {
         state_ = state_t::closed;
@@ -1136,8 +1103,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_read_some
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-asio_tls_transport::async_read_some(std::span<std::byte> buf) {
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> asio_tls_transport::async_read_some(
+    std::span<std::byte> buf) {
     using E = core::error;
 
     // Enable total cancellation (D-17).
@@ -1170,8 +1137,7 @@ asio_tls_transport::async_read_some(std::span<std::byte> buf) {
     // asio::ssl::stream::async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
     std::size_t bytes_read = co_await ssl_stream_->async_read_some(
-        asio::buffer(buf.data(), buf.size()),
-        asio::redirect_error(asio::use_awaitable, ec));
+        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
 
     read_in_flight_ = false;
 
@@ -1198,8 +1164,8 @@ asio_tls_transport::async_read_some(std::span<std::byte> buf) {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_write
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-asio_tls_transport::async_write(std::span<const std::byte> bytes) {
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> asio_tls_transport::async_write(
+    std::span<const std::byte> bytes) {
     using E = core::error;
 
     // Enable total cancellation (D-17).
@@ -1227,10 +1193,9 @@ asio_tls_transport::async_write(std::span<const std::byte> bytes) {
 
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;
-    std::size_t bytes_written = co_await asio::async_write(
-        *ssl_stream_,
-        asio::buffer(bytes.data(), bytes.size()),
-        asio::redirect_error(asio::use_awaitable, ec));
+    std::size_t bytes_written =
+        co_await asio::async_write(*ssl_stream_, asio::buffer(bytes.data(), bytes.size()),
+                                   asio::redirect_error(asio::use_awaitable, ec));
 
     write_in_flight_ = false;
 

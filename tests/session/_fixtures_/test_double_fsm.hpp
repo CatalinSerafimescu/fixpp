@@ -22,24 +22,22 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
-
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace fixpp::store_test {
 
@@ -47,19 +45,17 @@ namespace fixpp::store_test {
 
 // A single scripted store operation with the expected call and direction.
 struct store_step {
-    fixpp::session::seqnum_t    seq{};
+    fixpp::session::seqnum_t seq{};
     fixpp::session::direction_t dir{};
-    std::vector<std::byte>      frame_bytes;  // the raw FIX frame bytes (opaque)
+    std::vector<std::byte> frame_bytes;  // the raw FIX frame bytes (opaque)
 };
 
 // Build a synthetic FIX-like frame for testing.
 // The bytes are: "8=FIX.4.4\x01" + "35=D\x01" + "34=<N>\x01" + padding.
 // The content is OPAQUE to the store; we just need byte-identical round-trips.
-[[nodiscard]] inline std::vector<std::byte>
-make_test_frame(fixpp::session::seqnum_t seq,
-                fixpp::session::direction_t dir,
-                std::size_t extra_bytes = 0)
-{
+[[nodiscard]] inline std::vector<std::byte> make_test_frame(fixpp::session::seqnum_t seq,
+                                                            fixpp::session::direction_t dir,
+                                                            std::size_t extra_bytes = 0) {
     std::string raw;
     raw += "8=FIX.4.4\x01";
     raw += "35=D\x01";
@@ -83,11 +79,9 @@ make_test_frame(fixpp::session::seqnum_t seq,
 }
 
 // Build a default N-step store script: seqnums 1..N for a given direction.
-[[nodiscard]] inline std::vector<store_step>
-make_store_script(std::size_t count,
-                  fixpp::session::direction_t dir,
-                  std::size_t extra_bytes = 0)
-{
+[[nodiscard]] inline std::vector<store_step> make_store_script(std::size_t count,
+                                                               fixpp::session::direction_t dir,
+                                                               std::size_t extra_bytes = 0) {
     std::vector<store_step> steps;
     steps.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
@@ -105,22 +99,19 @@ class byte_collecting_visitor final : public fixpp::session::retrieve_visitor {
 public:
     struct entry {
         fixpp::session::seqnum_t seq{};
-        std::vector<std::byte>   bytes;
+        std::vector<std::byte> bytes;
     };
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-    on_frame(fixpp::session::seqnum_t seq,
-             std::span<const std::byte> frame [[clang::lifetimebound]]) noexcept override
-    {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+        fixpp::session::seqnum_t seq,
+        std::span<const std::byte> frame [[clang::lifetimebound]]) noexcept override {
         // Deep-copy the frame bytes immediately (span lifetime bound)
         entries_.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
         co_return fixpp::core::expected_t<fixpp::session::visit_result>{
             fixpp::session::visit_result::cont};
     }
 
-    [[nodiscard]] const std::vector<entry>& entries() const noexcept {
-        return entries_;
-    }
+    [[nodiscard]] const std::vector<entry>& entries() const noexcept { return entries_; }
 
     void clear() noexcept { entries_.clear(); }
 
@@ -136,17 +127,13 @@ private:
 // This is intentionally synchronous-like (runs on a single coroutine chain)
 // to keep US1 deterministic. Writer-mutex wiring is US3's concern; US1 bodies
 // are single-threaded-correct.
-[[nodiscard]] inline asio::awaitable<bool>
-drive_store_and_retrieve(fixpp::session::MessageStore& store,
-                         const std::vector<store_step>& script,
-                         fixpp::session::direction_t dir)
-{
+[[nodiscard]] inline asio::awaitable<bool> drive_store_and_retrieve(
+    fixpp::session::MessageStore& store, const std::vector<store_step>& script,
+    fixpp::session::direction_t dir) {
     // Phase 1: store all frames in order
     for (const auto& step : script) {
-        auto result = co_await store.store(
-            step.seq,
-            std::span<const std::byte>(step.frame_bytes),
-            step.dir);
+        auto result =
+            co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
         if (!result) {
             co_return false;  // store failed
         }
@@ -154,11 +141,9 @@ drive_store_and_retrieve(fixpp::session::MessageStore& store,
 
     // Phase 2: retrieve all frames and check byte equality
     byte_collecting_visitor visitor;
-    auto rresult = co_await store.retrieve(
-        1,     // begin = 1
-        0,     // end = 0 (to-end sentinel)
-        dir,
-        visitor);
+    auto rresult = co_await store.retrieve(1,  // begin = 1
+                                           0,  // end = 0 (to-end sentinel)
+                                           dir, visitor);
     if (!rresult) {
         co_return false;  // retrieve failed
     }
@@ -171,7 +156,7 @@ drive_store_and_retrieve(fixpp::session::MessageStore& store,
     // Check byte equality in seqnum order
     for (std::size_t i = 0; i < script.size(); ++i) {
         const auto& expected = script[i].frame_bytes;
-        const auto& got      = visitor.entries()[i].bytes;
+        const auto& got = visitor.entries()[i].bytes;
         if (expected.size() != got.size()) {
             co_return false;
         }

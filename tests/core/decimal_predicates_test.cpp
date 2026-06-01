@@ -97,12 +97,7 @@ static_assert(noexcept(trap_throw([] { return 0; })));
 TEST(DecimalToPod, InDomainRoundTrip) {
     // Representative in-domain values
     const pod_decimal cases[] = {
-        {1, 0},
-        {12345, -2},
-        {-999, -3},
-        {9223372036854775806LL, -38},
-        {0, 0},
-        {0, -10},
+        {1, 0}, {12345, -2}, {-999, -3}, {9223372036854775806LL, -38}, {0, 0}, {0, -10},
     };
     for (auto const& v : cases) {
         auto r = decimal_traits<pod_decimal>::to_pod(v);
@@ -132,11 +127,7 @@ TEST(DecimalToPod, SentinelMantissaReturnsOverflow) {
 
 TEST(DecimalFromPod, InDomainRoundTrip) {
     const pod_decimal cases[] = {
-        {1, 0},
-        {12345, -2},
-        {-999, -3},
-        {9223372036854775806LL, -38},
-        {0, 0},
+        {1, 0}, {12345, -2}, {-999, -3}, {9223372036854775806LL, -38}, {0, 0},
     };
     for (auto const& v : cases) {
         auto r = decimal_traits<pod_decimal>::from_pod(v);

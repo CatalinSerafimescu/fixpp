@@ -22,17 +22,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <fixpp/session/session_event.hpp>
+#include <fixpp/transport/listener_events.hpp>
 #include <span>
 #include <variant>
 
-#include <fixpp/session/session_event.hpp>
-#include <fixpp/transport/listener_events.hpp>
-
+using fixpp::core::error;
 using fixpp::session::kSessionEventRingCapacity;
-using fixpp::session::SessionEvent;
 using fixpp::session::session_event_sequence_numbers_reset;
 using fixpp::session::session_event_tls_validation_failed;
-using fixpp::core::error;
+using fixpp::session::SessionEvent;
 using fixpp::transport::ListenerEvents;
 
 namespace {
@@ -73,15 +72,15 @@ inline SessionEvent make_tagged_event(std::size_t tag) {
     session_event_tls_validation_failed ev{};
     // Cast the tag to an error code (value 200 + tag is well above all defined
     // error codes so it's distinctive). This is test-only usage.
-    ev.code = static_cast<error>(static_cast<int>(error::tls_load_cancelled) + 100
-                                 + static_cast<int>(tag));
+    ev.code = static_cast<error>(static_cast<int>(error::tls_load_cancelled) + 100 +
+                                 static_cast<int>(tag));
     return ev;
 }
 
 // Check whether a span of SessionEvents contains an event with the given tag.
 bool span_contains_tag(std::span<const SessionEvent> span, std::size_t tag) {
-    const auto expected_code = static_cast<error>(
-        static_cast<int>(error::tls_load_cancelled) + 100 + static_cast<int>(tag));
+    const auto expected_code = static_cast<error>(static_cast<int>(error::tls_load_cancelled) +
+                                                  100 + static_cast<int>(tag));
     for (const auto& ev : span) {
         if (const auto* p = std::get_if<session_event_tls_validation_failed>(&ev)) {
             if (p->code == expected_code) {
@@ -135,8 +134,7 @@ TEST(ListenerEventsRingOverflow, OneOverCapacityDropsOldest) {
 
     // The LAST emitted event (tag=16) must be present.
     EXPECT_TRUE(span_contains_tag(span, kSessionEventRingCapacity))
-        << "Newest event (tag=" << kSessionEventRingCapacity
-        << ") must be retained after overflow";
+        << "Newest event (tag=" << kSessionEventRingCapacity << ") must be retained after overflow";
 
     // Events 1..16 (tags 1..16) must all be present.
     for (std::size_t i = 1; i <= kSessionEventRingCapacity; ++i) {
@@ -155,12 +153,9 @@ TEST(ListenerEventsRingOverflow, EmitWithStringsRetainsLastSixteen) {
     // Emit 17 events via emit_with_strings so the owning-string paths are
     // exercised. Each event has a unique sub_reason string "sr-N".
     for (std::size_t i = 0; i <= kSessionEventRingCapacity; ++i) {
-        ring.emit_with_strings(
-            fixpp::session::session_event_tls_validation_failed{},
-            error::tls_handshake_failed,
-            "sr-" + std::to_string(i),
-            "127.0.0.1:1234",
-            "reason-" + std::to_string(i));
+        ring.emit_with_strings(fixpp::session::session_event_tls_validation_failed{},
+                               error::tls_handshake_failed, "sr-" + std::to_string(i),
+                               "127.0.0.1:1234", "reason-" + std::to_string(i));
     }
 
     auto span = ring.recent_events();
@@ -169,10 +164,9 @@ TEST(ListenerEventsRingOverflow, EmitWithStringsRetainsLastSixteen) {
     // The oldest event (i=0, sub_reason="sr-0") must be overwritten by i=16.
     // The newest event (i=16, sub_reason="sr-16") must be present with a valid view.
     bool found_16 = false;
-    bool found_0  = false;
+    bool found_0 = false;
     for (const auto& ev : span) {
-        if (const auto* p =
-                std::get_if<fixpp::session::session_event_tls_validation_failed>(&ev)) {
+        if (const auto* p = std::get_if<fixpp::session::session_event_tls_validation_failed>(&ev)) {
             if (p->sub_reason == "sr-16") {
                 found_16 = true;
                 // The view must point into valid memory (not dangling).
@@ -186,8 +180,7 @@ TEST(ListenerEventsRingOverflow, EmitWithStringsRetainsLastSixteen) {
     }
     EXPECT_TRUE(found_16)
         << "Event sr-16 (newest) must be present after emit_with_strings overflow";
-    EXPECT_FALSE(found_0)
-        << "Event sr-0 (oldest) must be dropped after emit_with_strings overflow";
+    EXPECT_FALSE(found_0) << "Event sr-0 (oldest) must be dropped after emit_with_strings overflow";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,8 +212,7 @@ TEST(ListenerEventsRingOverflow, EmitWithStringsRetainsLastSixteen) {
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ListenerEventsRingOverflow, RingCapacityConstantIs16) {
     // Verify the constant is exactly 16 per FR-035 v1.0 contract.
-    EXPECT_EQ(kSessionEventRingCapacity, 16u)
-        << "FR-035 v1.0 contract: ring capacity must be 16";
+    EXPECT_EQ(kSessionEventRingCapacity, 16u) << "FR-035 v1.0 contract: ring capacity must be 16";
 }
 
 }  // namespace

@@ -13,16 +13,15 @@
 // session wiring (framer carry pool) and a global-operator-new shim — that
 // is DISABLED below as the honest red marker.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <string>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -36,8 +35,7 @@ using fixpp::wire::Parser;
 // monotonic buffer so a fall-through to the global heap would be observable
 // (the buffer never hands back to ::operator new).
 struct counting_resource final : std::pmr::memory_resource {
-    explicit counting_resource(std::pmr::memory_resource* up) noexcept
-        : up_{up} {}
+    explicit counting_resource(std::pmr::memory_resource* up) noexcept : up_{up} {}
     std::size_t allocations = 0;
     std::size_t bytes = 0;
     std::pmr::memory_resource* up_;
@@ -47,11 +45,8 @@ struct counting_resource final : std::pmr::memory_resource {
         bytes += n;
         return up_->allocate(n, a);
     }
-    void do_deallocate(void* p, std::size_t n, std::size_t a) override {
-        up_->deallocate(p, n, a);
-    }
-    [[nodiscard]] bool do_is_equal(
-        std::pmr::memory_resource const& o) const noexcept override {
+    void do_deallocate(void* p, std::size_t n, std::size_t a) override { up_->deallocate(p, n, a); }
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& o) const noexcept override {
         return this == &o;
     }
 };
@@ -65,14 +60,18 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 }
 
 TEST(WireThreeArenaPinning, OffsetTableStorageRoutesThroughPerMessageArena) {
-    auto buf = make_raw_frame("35=D\x01" "34=1\x01" "49=S\x01"
-                              "56=T\x01" "448=A\x01" "448=B\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "49=S\x01"
+        "56=T\x01"
+        "448=A\x01"
+        "448=B\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
     std::array<std::byte, 8192> backing{};
-    std::pmr::monotonic_buffer_resource upstream{backing.data(),
-                                                 backing.size()};
+    std::pmr::monotonic_buffer_resource upstream{backing.data(), backing.size()};
     counting_resource arena{&upstream};
 
     Parser<access_mode::Index> parser{};
@@ -94,8 +93,14 @@ TEST(WireThreeArenaPinning, OffsetTableStorageRoutesThroughPerMessageArena) {
 }
 
 TEST(WireThreeArenaPinning, PerMessageArenasAreIsolated) {
-    auto b1 = make_raw_frame("35=D\x01" "34=1\x01" "11=ORD-1\x01");
-    auto b2 = make_raw_frame("35=D\x01" "34=2\x01" "11=ORD-2\x01");
+    auto b1 = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "11=ORD-1\x01");
+    auto b2 = make_raw_frame(
+        "35=D\x01"
+        "34=2\x01"
+        "11=ORD-2\x01");
     auto f1 = fixpp::wire::test::make_frame_view(b1);
     auto f2 = fixpp::wire::test::make_frame_view(b2);
     ASSERT_TRUE(f1.has_value());

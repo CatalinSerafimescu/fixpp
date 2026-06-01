@@ -31,24 +31,15 @@
 //   will FAIL because the event is not emitted. After T036, both cells must
 //   simultaneously go GREEN (any asymmetry → residual RED in one cell).
 
-#include <algorithm>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -58,6 +49,13 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -73,8 +71,8 @@ static std::string field(int tag, std::string_view val) {
 }
 
 static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                                std::string_view sender, std::string_view target,
-                                                int hbt = 30) {
+                                               std::string_view sender, std::string_view target,
+                                               int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -113,8 +111,8 @@ static bool has_peer_identity_bound_event(const fixpp::session::Session& sess) {
 static bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
-        return std::holds_alternative<
-            fixpp::session::session_event_compid_authorization_failed>(ev);
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
     });
 }
 
@@ -124,15 +122,15 @@ static bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
 
 class CompidBindingSymmetricTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
@@ -165,15 +163,15 @@ protected:
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderCompId) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "ISLD";
-    cfg.target_comp_id    = "TW";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
-    cfg.role              = fixpp::session::session_role::acceptor;
+    cfg.role = fixpp::session::session_role::acceptor;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
@@ -224,15 +222,15 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCompId) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "TW";
-    cfg.target_comp_id    = "ISLD";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "TW";
+    cfg.target_comp_id = "ISLD";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
-    cfg.role              = fixpp::session::session_role::initiator;
+    cfg.role = fixpp::session::session_role::initiator;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 
@@ -275,15 +273,15 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "ISLD";
-    cfg.target_comp_id    = "TW";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
-    cfg.role              = fixpp::session::session_role::acceptor;
+    cfg.role = fixpp::session::session_role::acceptor;
     // RC#C (gate-b/r1): bilateral_lenient — cell tests compid binding, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
 

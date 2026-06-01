@@ -9,9 +9,8 @@
 // [2d §4.1] / §6.6. Realizes specs/007-threading-clock/contracts/clock.hpp.
 #pragma once
 
-#include <chrono>
-
 #include <asio/awaitable.hpp>
+#include <chrono>
 
 namespace fixpp::session {
 class Session;  // opaque key for forget_session (defined in fixpp/session/session.hpp)
@@ -19,17 +18,17 @@ class Session;  // opaque key for forget_session (defined in fixpp/session/sessi
 
 namespace fixpp::core {
 
-using utc_time_point    = std::chrono::time_point<std::chrono::system_clock>;
+using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
 using steady_time_point = std::chrono::time_point<std::chrono::steady_clock>;
 
 class Clock {
 public:
-    Clock()                        = default;
-    Clock(const Clock&)            = delete;
+    Clock() = default;
+    Clock(const Clock&) = delete;
     Clock& operator=(const Clock&) = delete;
-    Clock(Clock&&)                 = delete;
-    Clock& operator=(Clock&&)      = delete;
-    virtual ~Clock()               = default;
+    Clock(Clock&&) = delete;
+    Clock& operator=(Clock&&) = delete;
+    virtual ~Clock() = default;
 
     // Wall-clock UTC; NOT promised monotonic (C-P2-5 / FR-004 / I-02) — used
     // only for wire-formatted and log/OTel timestamps.

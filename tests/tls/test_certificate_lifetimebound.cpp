@@ -22,16 +22,15 @@
 // object parameters only. These tests exercise the function-parameter form
 // on the accessor sites.
 
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/peer_identity.hpp>
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/peer_identity.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory_resource>
 #include <span>
 #include <string_view>
@@ -44,15 +43,15 @@ TEST(CertificateLifetimeBound, CertificateViewAccessors) {
     // POSITIVE: all view accessors called on a live object — no dangling.
     static std::array<std::byte, 32> der_data{};
     static std::string_view subj = "CN=test";
-    static std::string_view iss  = "CN=CA";
+    static std::string_view iss = "CN=CA";
 
     Certificate cert{};
-    cert.raw_der_    = std::span<const std::byte>{der_data};
+    cert.raw_der_ = std::span<const std::byte>{der_data};
     cert.subject_dn_ = subj;
-    cert.issuer_dn_  = iss;
+    cert.issuer_dn_ = iss;
     cert.x509_version_ = 3;
-    cert.alg_        = signature_algorithm::ecdsa;
-    cert.curve_      = ecdsa_curve::p256;
+    cert.alg_ = signature_algorithm::ecdsa;
+    cert.curve_ = ecdsa_curve::p256;
 
     // These calls must compile without -Werror=dangling under any mode.
     EXPECT_FALSE(cert.raw_der().empty());
@@ -67,7 +66,7 @@ TEST(CertificateLifetimeBound, CertificateViewAccessors) {
     // not_before/not_after default to epoch (equal); the important thing is
     // the accessors compile and are callable — no lifetime issue.
     EXPECT_EQ(cert.not_before(), std::chrono::system_clock::time_point{});
-    EXPECT_EQ(cert.not_after(),  std::chrono::system_clock::time_point{});
+    EXPECT_EQ(cert.not_after(), std::chrono::system_clock::time_point{});
 }
 
 // ── pin_view accessors ────────────────────────────────────────────────────────
@@ -108,14 +107,13 @@ TEST(CertificateLifetimeBound, LoadTrustAnchorsAnnotationPresent) {
 
     // Inline stub to test the call pattern.
     class inline_stub final : public cert_source {
-     public:
-        asio::awaitable<fixpp::core::expected_t<local_credentials>>
-        load_credentials() override {
+    public:
+        asio::awaitable<fixpp::core::expected_t<local_credentials>> load_credentials() override {
             co_return fixpp::core::expected_t<local_credentials>{
                 std::unexpect, fixpp::core::error::tls_load_cancelled};
         }
-        fixpp::core::expected_t<std::span<const Certificate>>
-        load_trust_anchors() [[clang::lifetimebound]] override {
+        fixpp::core::expected_t<std::span<const Certificate>> load_trust_anchors()
+            [[clang::lifetimebound]] override {
             return std::span<const Certificate>{};
         }
     };

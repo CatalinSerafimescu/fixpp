@@ -20,12 +20,11 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/transport/transport.hpp>
-#include <fixpp/transport/tls_transport.hpp>
-
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 #include <span>
 #include <vector>
 
@@ -47,7 +46,7 @@ TEST(DurableBeforeTransmit, ErrorCodeContract) {
     // cancelled; transport_write_short is the result for partial writes under
     // cancellation per [2h §6.6]:1182.
     EXPECT_EQ(static_cast<int>(fixpp::core::error::transport_write_cancelled), 113);
-    EXPECT_EQ(static_cast<int>(fixpp::core::error::transport_write_short),     105);
+    EXPECT_EQ(static_cast<int>(fixpp::core::error::transport_write_short), 105);
     // These are distinct (short-write ≠ cancelled).
     EXPECT_NE(fixpp::core::error::transport_write_cancelled,
               fixpp::core::error::transport_write_short);
@@ -62,10 +61,9 @@ TEST(DurableBeforeTransmit, TransportWriteIsNotRollbackAware) {
     // Structural check: Transport::cancel() is not a rollback. cancel() only
     // cancels the in-flight async operation.
     using T = fixpp::transport::Transport;
-    static_assert(std::is_same_v<decltype(&T::cancel),
-                                 fc::expected_t<void> (T::*)() noexcept>,
-        "Transport::cancel() signature changed — durable-before-transmit "
-        "invariant may be at risk");
+    static_assert(std::is_same_v<decltype(&T::cancel), fc::expected_t<void> (T::*)() noexcept>,
+                  "Transport::cancel() signature changed — durable-before-transmit "
+                  "invariant may be at risk");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -4,19 +4,19 @@
 //       reversed_from_logon acceptor-resolution mapping.
 // RED-first per [const §VII.3]; turns GREEN when engine.hpp T004 impl lands.
 
+#include <gtest/gtest.h>
+
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <gtest/gtest.h>
 #include <unordered_map>
 #include <unordered_set>
 
 using fixpp::session::SessionId;
 
 namespace {
-fixpp::session::SessionConfig make_cfg(std::string bs, std::string sender,
-                                       std::string target) {
+fixpp::session::SessionConfig make_cfg(std::string bs, std::string sender, std::string target) {
     fixpp::session::SessionConfig cfg{};
-    cfg.begin_string   = std::move(bs);
+    cfg.begin_string = std::move(bs);
     cfg.sender_comp_id = std::move(sender);
     cfg.target_comp_id = std::move(target);
     return cfg;
@@ -44,9 +44,8 @@ TEST(SessionIdTest, HashConsistentForEqualObjects) {
 }
 TEST(SessionIdTest, HashDistributedAcrossAllThreeFields) {
     std::hash<SessionId> h;
-    std::unordered_set<std::size_t> buckets{
-        h({"FIX.4.4", "S", "T"}), h({"FIX.5.0", "S", "T"}),
-        h({"FIX.4.4", "X", "T"}), h({"FIX.4.4", "S", "Y"})};
+    std::unordered_set<std::size_t> buckets{h({"FIX.4.4", "S", "T"}), h({"FIX.5.0", "S", "T"}),
+                                            h({"FIX.4.4", "X", "T"}), h({"FIX.4.4", "S", "Y"})};
     EXPECT_EQ(buckets.size(), 4u);
 }
 TEST(SessionIdTest, UsableAsUnorderedMapKey) {
@@ -60,7 +59,7 @@ TEST(SessionIdTest, UsableAsUnorderedMapKey) {
 // from_config round-trip.
 TEST(SessionIdTest, FromConfigExtractsAllThreeFields) {
     auto id = SessionId::from_config(make_cfg("FIX.4.4", "MY_SENDER", "MY_TARGET"));
-    EXPECT_EQ(id.begin_string,   "FIX.4.4");
+    EXPECT_EQ(id.begin_string, "FIX.4.4");
     EXPECT_EQ(id.sender_comp_id, "MY_SENDER");
     EXPECT_EQ(id.target_comp_id, "MY_TARGET");
 }
@@ -74,13 +73,13 @@ TEST(SessionIdTest, FromConfigRoundTrip) {
 // Logon with SenderCompID=PEER, TargetCompID=ME.
 TEST(SessionIdTest, ReversedFromLogonSwapsCompIds) {
     auto id = SessionId::reversed_from_logon("FIX.4.4", "PEER", "ME");
-    EXPECT_EQ(id.begin_string,   "FIX.4.4");
+    EXPECT_EQ(id.begin_string, "FIX.4.4");
     EXPECT_EQ(id.sender_comp_id, "ME");    // logon_target → our sender
     EXPECT_EQ(id.target_comp_id, "PEER");  // logon_sender → our target
 }
 TEST(SessionIdTest, ReversedMatchesFromConfigForAcceptor) {
     auto registry_key = SessionId::from_config(make_cfg("FIX.4.4", "ME", "PEER"));
-    auto resolved     = SessionId::reversed_from_logon("FIX.4.4", "PEER", "ME");
+    auto resolved = SessionId::reversed_from_logon("FIX.4.4", "PEER", "ME");
     EXPECT_EQ(registry_key, resolved);
 }
 TEST(SessionIdTest, ReversedIsNotIdentity) {

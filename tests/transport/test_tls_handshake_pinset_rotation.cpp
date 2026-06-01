@@ -22,16 +22,15 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/transport/tls_transport.hpp>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
-#include <fixpp/tls/peer_identity.hpp>
-#include <fixpp/tls/security_profile.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/peer_identity.hpp>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 #include <memory>
 
 namespace {
@@ -39,9 +38,9 @@ namespace {
 using namespace fixpp::core;
 using namespace fixpp::transport;
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
 using fixpp::tls::pin_snapshot;
+using fixpp::tls::Pinset;
 
 // Build a Certificate with a given SHA-256 fingerprint and subject DN.
 // Uses the Certificate's public field shape per certificate.hpp.
@@ -88,35 +87,33 @@ TEST(PinsetRotationContract, SnapshotStableAfterRotation) {
     ASSERT_TRUE(r2.has_value()) << "remove(fp_old) must succeed";
 
     // The Pinset post-rotation: contains fp_new only.
-    EXPECT_FALSE(ps.contains(fp_old))
-        << "Pinset must not contain fp_old after rotation";
-    EXPECT_TRUE(ps.contains(fp_new))
-        << "Pinset must contain fp_new after rotation";
+    EXPECT_FALSE(ps.contains(fp_old)) << "Pinset must not contain fp_old after rotation";
+    EXPECT_TRUE(ps.contains(fp_new)) << "Pinset must contain fp_new after rotation";
 
     // Snapshot captured BEFORE rotation still contains fp_old.
     // pin_snapshot = std::pmr::vector<pin>. Scan by sha256 field.
     ASSERT_NE(snap, nullptr);
-    bool snap_has_old = std::any_of(snap->begin(), snap->end(),
-        [&fp_old](const fixpp::tls::pin& p) { return p.sha256 == fp_old; });
-    EXPECT_TRUE(snap_has_old)
-        << "Pre-rotation snapshot must contain fp_old even after rotation";
+    bool snap_has_old =
+        std::any_of(snap->begin(), snap->end(),
+                    [&fp_old](const fixpp::tls::pin& p) { return p.sha256 == fp_old; });
+    EXPECT_TRUE(snap_has_old) << "Pre-rotation snapshot must contain fp_old even after rotation";
 
-    bool snap_has_new = std::any_of(snap->begin(), snap->end(),
-        [&fp_new](const fixpp::tls::pin& p) { return p.sha256 == fp_new; });
-    EXPECT_FALSE(snap_has_new)
-        << "Pre-rotation snapshot must NOT contain fp_new";
+    bool snap_has_new =
+        std::any_of(snap->begin(), snap->end(),
+                    [&fp_new](const fixpp::tls::pin& p) { return p.sha256 == fp_new; });
+    EXPECT_FALSE(snap_has_new) << "Pre-rotation snapshot must NOT contain fp_new";
 
     // A fresh snapshot reflects post-rotation state.
     auto snap2 = ps.snapshot();
     ASSERT_NE(snap2, nullptr);
-    bool snap2_has_old = std::any_of(snap2->begin(), snap2->end(),
-        [&fp_old](const fixpp::tls::pin& p) { return p.sha256 == fp_old; });
-    bool snap2_has_new = std::any_of(snap2->begin(), snap2->end(),
-        [&fp_new](const fixpp::tls::pin& p) { return p.sha256 == fp_new; });
-    EXPECT_FALSE(snap2_has_old)
-        << "Post-rotation snapshot must NOT contain fp_old";
-    EXPECT_TRUE(snap2_has_new)
-        << "Post-rotation snapshot must contain fp_new";
+    bool snap2_has_old =
+        std::any_of(snap2->begin(), snap2->end(),
+                    [&fp_old](const fixpp::tls::pin& p) { return p.sha256 == fp_old; });
+    bool snap2_has_new =
+        std::any_of(snap2->begin(), snap2->end(),
+                    [&fp_new](const fixpp::tls::pin& p) { return p.sha256 == fp_new; });
+    EXPECT_FALSE(snap2_has_old) << "Post-rotation snapshot must NOT contain fp_old";
+    EXPECT_TRUE(snap2_has_new) << "Post-rotation snapshot must contain fp_new";
 }
 
 // Test: two snapshots are independent.
@@ -136,13 +133,13 @@ TEST(PinsetRotationContract, TwoSnapshotsIndependent) {
     ASSERT_NE(s2, nullptr);
 
     bool s1_has_fp1 = std::any_of(s1->begin(), s1->end(),
-        [&fp1](const fixpp::tls::pin& p) { return p.sha256 == fp1; });
+                                  [&fp1](const fixpp::tls::pin& p) { return p.sha256 == fp1; });
     bool s1_has_fp2 = std::any_of(s1->begin(), s1->end(),
-        [&fp2](const fixpp::tls::pin& p) { return p.sha256 == fp2; });
+                                  [&fp2](const fixpp::tls::pin& p) { return p.sha256 == fp2; });
     bool s2_has_fp1 = std::any_of(s2->begin(), s2->end(),
-        [&fp1](const fixpp::tls::pin& p) { return p.sha256 == fp1; });
+                                  [&fp1](const fixpp::tls::pin& p) { return p.sha256 == fp1; });
     bool s2_has_fp2 = std::any_of(s2->begin(), s2->end(),
-        [&fp2](const fixpp::tls::pin& p) { return p.sha256 == fp2; });
+                                  [&fp2](const fixpp::tls::pin& p) { return p.sha256 == fp2; });
 
     EXPECT_TRUE(s1_has_fp1);
     EXPECT_FALSE(s1_has_fp2);

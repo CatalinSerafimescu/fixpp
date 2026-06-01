@@ -25,10 +25,10 @@ namespace fixpp::transport {
 struct Endpoint {
     // Hostname OR IP literal OR "host%zone" for IPv6 link-local addresses.
     // IPv6 zone-id full conformance corpus DEFERRED to Phase-4 per [2h §10 Q6].
-    std::string   host;
+    std::string host;
 
     // Initiator: peer port. Acceptor: bind port (0 = OS-picked).
-    std::uint16_t port {0};
+    std::uint16_t port{0};
 
     // For acceptor-side construction only: listen queue depth. OS may cap
     // silently (Linux: /proc/sys/net/core/somaxconn; Windows: SOMAXCONN).
@@ -36,11 +36,10 @@ struct Endpoint {
     // type-system level (which method consumes the Endpoint), NOT a runtime
     // predicate. The v0.1 is_initiator_shape() heuristic was dropped per
     // [2h §4.3].
-    std::uint32_t backlog {128};
+    std::uint32_t backlog{128};
 
     Endpoint() = default;
-    Endpoint(std::string h, std::uint16_t p)
-        : host(std::move(h)), port(p) {}
+    Endpoint(std::string h, std::uint16_t p) : host(std::move(h)), port(p) {}
     Endpoint(std::string h, std::uint16_t p, std::uint32_t b)
         : host(std::move(h)), port(p), backlog(b) {}
 };

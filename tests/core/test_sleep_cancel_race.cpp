@@ -12,15 +12,13 @@
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
-
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <memory>
 #include <system_error>
 #include <thread>
-
-#include <fixpp/core/system_clock_source.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
 
 namespace {
 
@@ -51,8 +49,7 @@ void race(MakeClock make_clock, Drain drain) {
             pool,
             [&]() -> asio::awaitable<void> {
                 try {
-                    co_await clk->sleep_until(
-                        std::chrono::steady_clock::now() + 50ms);
+                    co_await clk->sleep_until(std::chrono::steady_clock::now() + 50ms);
                     deadline.fetch_add(1, std::memory_order_relaxed);
                 } catch (const std::system_error&) {
                     aborted.fetch_add(1, std::memory_order_relaxed);
@@ -63,7 +60,7 @@ void race(MakeClock make_clock, Drain drain) {
             asio::detached);
     }
 
-    std::this_thread::sleep_for(5ms);            // let waiters park
+    std::this_thread::sleep_for(5ms);  // let waiters park
     std::thread canceller{[&] { clk->cancel_sleeps(); }};
     std::thread canceller2{[&] { clk->cancel_sleeps(); }};  // idempotent/concurrent
     canceller.join();
@@ -86,9 +83,8 @@ void race(MakeClock make_clock, Drain drain) {
 TEST(SeamSleepCancelRace, MockClockEveryAwaiterCompletesExactlyOnce) {
     race(
         [](asio::any_io_executor ex) {
-            return std::make_shared<fixpp::core::mock_clock>(
-                fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-                ex);
+            return std::make_shared<fixpp::core::mock_clock>(fixpp::core::utc_time_point{},
+                                                             fixpp::core::steady_time_point{}, ex);
         },
         [](auto& clk) { clk->cancel_sleeps(); });
 }

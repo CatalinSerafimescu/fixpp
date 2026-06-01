@@ -40,24 +40,23 @@
 //     invoked for a new attempt. The FSM holds at most one live Transport per
 //     session at any time.
 
-#include "asio_tls_transport.hpp"  // asio_tls_transport + make_asio_tls_transport decl
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ssl/context.hpp>
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
-
-#include <fixpp/core/decimal_helpers.hpp>   // fixpp::core::detail::trap_throw
-#include <fixpp/core/error.hpp>             // core::error::transport_factory_failed
-#include <fixpp/tls/cert_source.hpp>        // local_credentials + cert_source
-#include <fixpp/tls/security_profile.hpp>   // SslCtxConfig
+#include <fixpp/core/decimal_helpers.hpp>         // fixpp::core::detail::trap_throw
+#include <fixpp/core/error.hpp>                   // core::error::transport_factory_failed
+#include <fixpp/tls/cert_source.hpp>              // local_credentials + cert_source
+#include <fixpp/tls/security_profile.hpp>         // SslCtxConfig
 #include <fixpp/transport/transport_factory.hpp>  // asio_tls_transport_factory decl
-
 #include <optional>
 #include <stdexcept>
 #include <string>
+
+#include "asio_tls_transport.hpp"  // asio_tls_transport + make_asio_tls_transport decl
 
 // Forward-declare the verify_peer_trampoline defined in asio_tls_transport.cpp.
 // Both TUs link into the same library; the trampoline is extern "C" for the
@@ -78,12 +77,9 @@ namespace fixpp::transport {
 // strings). When non-null it is stored in cfg.mr (overriding the template's
 // mr field) before forwarding. When null, cfg.mr is used as-is.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-make_asio_tls_transport(asio::any_io_executor      exec,
-                        Transport::Config           cfg,
-                        fixpp::tls::SslCtxConfig    ssl_cfg,
-                        std::pmr::memory_resource*  mr) noexcept
-{
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make_asio_tls_transport(
+    asio::any_io_executor exec, Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+    std::pmr::memory_resource* mr) noexcept {
     // Override cfg.mr if the call site supplies an explicit resource.
     if (mr != nullptr) {
         cfg.mr = mr;
@@ -99,8 +95,8 @@ make_asio_tls_transport(asio::any_io_executor      exec,
     // the pattern with the correct error variant instead of reusing the
     // template directly.
     try {
-        auto ptr = std::make_unique<asio_tls_transport>(
-            std::move(exec), std::move(cfg), std::move(ssl_cfg));
+        auto ptr = std::make_unique<asio_tls_transport>(std::move(exec), std::move(cfg),
+                                                        std::move(ssl_cfg));
         return std::unique_ptr<Transport>(std::move(ptr));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
@@ -120,13 +116,9 @@ make_asio_tls_transport(asio::any_io_executor      exec,
 // US3 / FR-024 mint path for tests still wiring the legacy accept-adoption
 // seam directly. Production callers use asio_tls_transport_factory::make_accepted().
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-make_accepted_asio_tls_transport(asio::any_io_executor      exec,
-                                 Transport::Config          cfg,
-                                 fixpp::tls::SslCtxConfig   ssl_cfg,
-                                 asio::ip::tcp::socket      accepted_socket,
-                                 std::pmr::memory_resource* mr) noexcept
-{
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make_accepted_asio_tls_transport(
+    asio::any_io_executor exec, Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
+    asio::ip::tcp::socket accepted_socket, std::pmr::memory_resource* mr) noexcept {
     if (mr != nullptr) {
         cfg.mr = mr;
     }
@@ -150,16 +142,15 @@ make_accepted_asio_tls_transport(asio::any_io_executor      exec,
 // Direct construction is intentionally private from external callers; use
 // make_asio_tls_transport_factory() instead.
 // ─────────────────────────────────────────────────────────────────────────────
-asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag,
-                                                       Transport::Config cfg,
+asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag, Transport::Config cfg,
                                                        fixpp::tls::SslCtxConfig ssl_cfg,
                                                        std::shared_ptr<void> ctx) noexcept
     : cfg_{std::move(cfg)},
       ssl_cfg_{std::move(ssl_cfg)},
       ssl_ctx_{std::move(ctx)},
-      cert_source_slot_{ssl_cfg_.cs}           // 013 T012: init from already-moved ssl_cfg_
-                                               // (ssl_cfg_ initialized before cert_source_slot_
-                                               //  per member-declaration order in header)
+      cert_source_slot_{ssl_cfg_.cs}  // 013 T012: init from already-moved ssl_cfg_
+                                      // (ssl_cfg_ initialized before cert_source_slot_
+                                      //  per member-declaration order in header)
 {}
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,10 +161,8 @@ asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag,
 // [[feedback_half_restructure_symmetric_api]].
 // nullptr → session_invalid_argument (slot 119) per data-model §E-7.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<void>
-asio_tls_transport_factory::reload_credentials(
-    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept
-{
+[[nodiscard]] core::expected_t<void> asio_tls_transport_factory::reload_credentials(
+    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept {
     if (!new_source) {
         return std::unexpected{core::error::session_invalid_argument};
     }
@@ -190,8 +179,7 @@ asio_tls_transport_factory::reload_credentials(
 // alive for the handshake duration even if reload_credentials lands mid-handshake.
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source>
-asio_tls_transport_factory::cert_source_snapshot() const noexcept
-{
+asio_tls_transport_factory::cert_source_snapshot() const noexcept {
     return cert_source_slot_.load(std::memory_order_acquire);
 }
 
@@ -204,11 +192,9 @@ asio_tls_transport_factory::cert_source_snapshot() const noexcept
 // caps) that are NOT baked into the SSL_CTX. The mr parameter overrides
 // ssl_cfg.mr when non-null.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-asio_tls_transport_factory::make(asio::any_io_executor     exec,
-                                 fixpp::tls::SslCtxConfig   ssl_cfg,
-                                 std::pmr::memory_resource* mr) noexcept
-{
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> asio_tls_transport_factory::make(
+    asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg,
+    std::pmr::memory_resource* mr) noexcept {
     Transport::Config cfg = cfg_;
     if (mr != nullptr) {
         cfg.mr = mr;
@@ -224,9 +210,7 @@ asio_tls_transport_factory::make(asio::any_io_executor     exec,
     // this factory. ssl_stream_ is constructed lazily at async_handshake start.
     try {
         auto ptr = std::make_unique<asio_tls_transport>(
-            asio_tls_transport::from_factory_tag{},
-            std::move(exec),
-            std::move(cfg),
+            asio_tls_transport::from_factory_tag{}, std::move(exec), std::move(cfg),
             std::move(ssl_cfg),
             std::move(typed_ctx));  // shared_ptr — safe; asio::ssl::stream refs SSL_CTX
         return std::unique_ptr<Transport>(std::move(ptr));
@@ -241,8 +225,7 @@ asio_tls_transport_factory::make(asio::any_io_executor     exec,
 
 [[nodiscard]] core::expected_t<std::unique_ptr<asio_tls_transport>>
 asio_tls_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socket,
-                                          std::pmr::memory_resource* mr) noexcept
-{
+                                          std::pmr::memory_resource* mr) noexcept {
     Transport::Config cfg = cfg_;
     if (mr != nullptr) {
         cfg.mr = mr;
@@ -251,12 +234,8 @@ asio_tls_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socket,
         ssl_ctx_, static_cast<asio::ssl::context*>(ssl_ctx_.get())};
     try {
         return std::make_unique<asio_tls_transport>(
-            asio_tls_transport::from_factory_tag{},
-            accepted_socket.get_executor(),
-            std::move(cfg),
-            ssl_cfg_,
-            std::move(typed_ctx),
-            std::move(accepted_socket));
+            asio_tls_transport::from_factory_tag{}, accepted_socket.get_executor(), std::move(cfg),
+            ssl_cfg_, std::move(typed_ctx), std::move(accepted_socket));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
     } catch (std::system_error const&) {
@@ -279,9 +258,8 @@ asio_tls_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socket,
 //
 // On failure, throws std::runtime_error (caller wraps in try/catch).
 // ─────────────────────────────────────────────────────────────────────────────
-static std::shared_ptr<asio::ssl::context>
-prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
-{
+static std::shared_ptr<asio::ssl::context> prepare_ssl_ctx_(
+    fixpp::tls::SslCtxConfig const& ssl_cfg) {
     using namespace fixpp::tls;
 
     auto ctx_ptr = std::make_shared<asio::ssl::context>(asio::ssl::context::tls);
@@ -357,8 +335,7 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
 
     // ── Verify mode + trampoline ──────────────────────────────────────────────
     // verify_peer_trampoline is forward-declared at file scope above (extern "C").
-    SSL_CTX_set_verify(ctx,
-                       SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
                        verify_peer_trampoline);
 
     SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
@@ -389,7 +366,9 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
 
     // ── Install the leaf certificate ──────────────────────────────────────────
     {
-        struct X509Del { void operator()(X509* x) const noexcept { X509_free(x); } };
+        struct X509Del {
+            void operator()(X509* x) const noexcept { X509_free(x); }
+        };
         using X509Ptr = std::unique_ptr<X509, X509Del>;
 
         auto leaf_der = creds.leaf.raw_der();
@@ -427,7 +406,9 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
 
     // ── Install intermediate chain certs ──────────────────────────────────────
     {
-        struct X509Del { void operator()(X509* x) const noexcept { X509_free(x); } };
+        struct X509Del {
+            void operator()(X509* x) const noexcept { X509_free(x); }
+        };
         using X509Ptr = std::unique_ptr<X509, X509Del>;
 
         for (auto const& chain_cert : creds.chain) {
@@ -447,7 +428,9 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
 
     // ── Install trust anchors (CA certs) ──────────────────────────────────────
     {
-        struct X509Del { void operator()(X509* x) const noexcept { X509_free(x); } };
+        struct X509Del {
+            void operator()(X509* x) const noexcept { X509_free(x); }
+        };
         using X509Ptr = std::unique_ptr<X509, X509Del>;
 
         auto trust_result = ssl_cfg.cs->load_trust_anchors();
@@ -457,8 +440,7 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
                 for (auto const& ca_cert : *trust_result) {
                     auto ca_der = ca_cert.raw_der();
                     if (ca_der.empty()) continue;
-                    const unsigned char* p =
-                        reinterpret_cast<const unsigned char*>(ca_der.data());
+                    const unsigned char* p = reinterpret_cast<const unsigned char*>(ca_der.data());
                     X509Ptr x509{d2i_X509(nullptr, &p, static_cast<long>(ca_der.size()))};
                     if (x509) {
                         X509_STORE_add_cert(store, x509.get());
@@ -477,19 +459,15 @@ prepare_ssl_ctx_(fixpp::tls::SslCtxConfig const& ssl_cfg)
 // Builds the SSL_CTX + loads credentials ONCE. Returns an expected_t wrapping
 // the factory on success, or transport_factory_failed on any error.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
-make_asio_tls_transport_factory(Transport::Config         cfg,
-                                 fixpp::tls::SslCtxConfig  ssl_cfg) noexcept
-{
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>> make_asio_tls_transport_factory(
+    Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg) noexcept {
     try {
         auto ctx = prepare_ssl_ctx_(ssl_cfg);
         // Type-erase the context pointer to avoid exposing asio::ssl::context in
         // the public header. The factory's make() recovers it via static_cast.
         std::shared_ptr<void> ctx_void = ctx;
         auto factory = std::make_unique<asio_tls_transport_factory>(
-            asio_tls_transport_factory::shared_ctx_tag{},
-            std::move(cfg),
-            std::move(ssl_cfg),
+            asio_tls_transport_factory::shared_ctx_tag{}, std::move(cfg), std::move(ssl_cfg),
             std::move(ctx_void));
         return std::unique_ptr<TransportFactory>(std::move(factory));
     } catch (std::bad_alloc const&) {

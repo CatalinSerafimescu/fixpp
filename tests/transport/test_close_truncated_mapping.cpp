@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -39,16 +40,13 @@
 #include <asio/ssl/verify_mode.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
-#include <array>
 #include <chrono>
 #include <cstddef>
-#include <string>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
+#include <string>
 
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -62,12 +60,13 @@ namespace fe = fixpp::transport::errors;
 }  // namespace
 
 // ── SC-006 slot-distinctness: eof ≠ truncated ────────────────────────────────
-static_assert(static_cast<int>(error::transport_read_eof) != static_cast<int>(error::transport_read_truncated),
-    "SC-006: transport_read_eof and transport_read_truncated must be distinct slots");
-static_assert(static_cast<int>(error::transport_read_eof)       == 102,
-    "transport_read_eof must occupy slot 102");
+static_assert(static_cast<int>(error::transport_read_eof) !=
+                  static_cast<int>(error::transport_read_truncated),
+              "SC-006: transport_read_eof and transport_read_truncated must be distinct slots");
+static_assert(static_cast<int>(error::transport_read_eof) == 102,
+              "transport_read_eof must occupy slot 102");
 static_assert(static_cast<int>(error::transport_read_truncated) == 103,
-    "transport_read_truncated must occupy slot 103 (distinct from 102)");
+              "transport_read_truncated must occupy slot 103 (distinct from 102)");
 
 // ── ASIO error codes are distinct system-level values ────────────────────────
 // Confirms the two ASIO error codes we branch on in async_read_some are not
@@ -85,13 +84,13 @@ TEST(CloseTruncatedMapping, AsioEofAndStreamTruncatedAreDistinct) {
 TEST(CloseTruncatedMapping, TransportReadEofAndTruncatedAreDistinct) {
     // SC-006 compliance: each failure mode maps to a distinct named variant.
     EXPECT_NE(error::transport_read_eof, error::transport_read_truncated);
-    EXPECT_EQ(static_cast<int>(error::transport_read_eof),       102);
+    EXPECT_EQ(static_cast<int>(error::transport_read_eof), 102);
     EXPECT_EQ(static_cast<int>(error::transport_read_truncated), 103);
 }
 
 // ── namespace alias exports ───────────────────────────────────────────────────
 TEST(CloseTruncatedMapping, NamespaceAliasConsistency) {
-    EXPECT_EQ(fe::transport_read_eof,       error::transport_read_eof);
+    EXPECT_EQ(fe::transport_read_eof, error::transport_read_eof);
     EXPECT_EQ(fe::transport_read_truncated, error::transport_read_truncated);
 }
 
@@ -119,8 +118,7 @@ TEST(CloseTruncatedMapping, LiveLoopbackTruncatedClose) {
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
     // Result captured from the server-side async_read_some.
-    expected_t<std::size_t> read_result =
-        std::unexpected{error::transport_read_in_progress};
+    expected_t<std::size_t> read_result = std::unexpected{error::transport_read_in_progress};
 
     // Server coroutine: accept → handshake → one read (will get truncated).
     asio::co_spawn(
@@ -138,8 +136,7 @@ TEST(CloseTruncatedMapping, LiveLoopbackTruncatedClose) {
 
             // Now wait for data — the client will close without SSL_shutdown.
             std::array<std::byte, 256> buf{};
-            read_result = co_await server_t->async_read_some(
-                std::span<std::byte>{buf});
+            read_result = co_await server_t->async_read_some(std::span<std::byte>{buf});
         },
         asio::detached);
 
@@ -151,18 +148,16 @@ TEST(CloseTruncatedMapping, LiveLoopbackTruncatedClose) {
             // Build a minimal TLS client context (same certs as fixture).
             asio::ssl::context raw_ctx{asio::ssl::context::tls_client};
             raw_ctx.load_verify_file(std::string{FIXPP_TLS_FIXTURE_DIR} + "/ca.pem");
-            raw_ctx.use_certificate_chain_file(
-                std::string{FIXPP_TLS_FIXTURE_DIR} + "/leaf_rsa2048.pem");
-            raw_ctx.use_private_key_file(
-                std::string{FIXPP_TLS_FIXTURE_DIR} + "/leaf_rsa2048.key",
-                asio::ssl::context::pem);
+            raw_ctx.use_certificate_chain_file(std::string{FIXPP_TLS_FIXTURE_DIR} +
+                                               "/leaf_rsa2048.pem");
+            raw_ctx.use_private_key_file(std::string{FIXPP_TLS_FIXTURE_DIR} + "/leaf_rsa2048.key",
+                                         asio::ssl::context::pem);
             // Fixture cert has CN=fixpp-leaf-rsa2048 (no IP SAN) — disable
             // hostname check; the server still verifies our client cert via CA.
             raw_ctx.set_verify_mode(asio::ssl::verify_none);
 
             auto ep = fixture.server_endpoint();
-            asio::ip::tcp::endpoint asio_ep{
-                asio::ip::make_address(ep.host), ep.port};
+            asio::ip::tcp::endpoint asio_ep{asio::ip::make_address(ep.host), ep.port};
 
             using ssl_sock = asio::ssl::stream<asio::ip::tcp::socket>;
             ssl_sock stream{co_await asio::this_coro::executor, raw_ctx};
@@ -174,9 +169,8 @@ TEST(CloseTruncatedMapping, LiveLoopbackTruncatedClose) {
             if (ec) co_return;
 
             // TLS handshake (client role).
-            co_await stream.async_handshake(
-                asio::ssl::stream_base::client,
-                asio::redirect_error(asio::use_awaitable, ec));
+            co_await stream.async_handshake(asio::ssl::stream_base::client,
+                                            asio::redirect_error(asio::use_awaitable, ec));
             if (ec) co_return;
 
             // Raw TCP close WITHOUT ssl::stream::async_shutdown — this omits

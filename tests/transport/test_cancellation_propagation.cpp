@@ -28,10 +28,6 @@
 
 // Compile-time shape check: the abstract types from Phase 2 are sufficient
 // to verify the error code contract and the cancellation_type reset pattern.
-#include <fixpp/transport/transport_errors.hpp>
-#include <fixpp/transport/transport.hpp>
-#include <fixpp/transport/tls_transport.hpp>
-
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
@@ -42,8 +38,10 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 #include <future>
 #include <optional>
 
@@ -118,9 +116,9 @@ TEST(DISABLED_CancellationPropagation, HandshakeCancelledDirect) {
 
 TEST(CancellationPropagation, ErrorCodesPresent) {
     // Verify that every cancellation variant required by seam #5 has a slot.
-    EXPECT_EQ(static_cast<int>(error::transport_connect_cancelled),   111);
-    EXPECT_EQ(static_cast<int>(error::transport_read_cancelled),      112);
-    EXPECT_EQ(static_cast<int>(error::transport_write_cancelled),     113);
+    EXPECT_EQ(static_cast<int>(error::transport_connect_cancelled), 111);
+    EXPECT_EQ(static_cast<int>(error::transport_read_cancelled), 112);
+    EXPECT_EQ(static_cast<int>(error::transport_write_cancelled), 113);
     EXPECT_EQ(static_cast<int>(error::transport_handshake_cancelled), 114);
 }
 
@@ -138,14 +136,10 @@ TEST(CancellationPropagation, TotalVsTerminalDistinct) {
 
 // Verify the namespace alias re-export for ergonomic at-site use.
 TEST(CancellationPropagation, NamespaceAliasConsistency) {
-    EXPECT_EQ(errors::transport_connect_cancelled,
-              error::transport_connect_cancelled);
-    EXPECT_EQ(errors::transport_read_cancelled,
-              error::transport_read_cancelled);
-    EXPECT_EQ(errors::transport_write_cancelled,
-              error::transport_write_cancelled);
-    EXPECT_EQ(errors::transport_handshake_cancelled,
-              error::transport_handshake_cancelled);
+    EXPECT_EQ(errors::transport_connect_cancelled, error::transport_connect_cancelled);
+    EXPECT_EQ(errors::transport_read_cancelled, error::transport_read_cancelled);
+    EXPECT_EQ(errors::transport_write_cancelled, error::transport_write_cancelled);
+    EXPECT_EQ(errors::transport_handshake_cancelled, error::transport_handshake_cancelled);
 }
 
 }  // namespace

@@ -2,11 +2,10 @@
 // Smoke test: verifies the core module compiles and links correctly.
 
 #include <gtest/gtest.h>
+
 #include "fixpp/core/version.hpp"
 
-TEST(CoreSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(CoreSmoke, Compiles) { SUCCEED(); }
 
 TEST(CoreSmoke, VersionStringNonEmpty) {
     ASSERT_NE(nullptr, fixpp::core::FIXPP_VERSION);

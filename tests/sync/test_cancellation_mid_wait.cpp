@@ -26,20 +26,18 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <optional>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <optional>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 // Post N yields on the calling coroutine's executor.
 using fixpp::sync::test::yield_n;
@@ -54,8 +52,8 @@ TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
     asio::cancellation_signal cancel_sig;
 
     std::optional<expected_t<async_lock_guard>> waiter_result;
-    bool waiter_ran     = false;
-    int  holder_counter = 0;
+    bool waiter_ran = false;
+    int holder_counter = 0;
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -93,8 +91,7 @@ TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
     // waiter coroutine's this_coro::cancellation_state propagates into
     // co_await mtx.async_lock() → on_cancel registration (T038).
     auto fw = asio::co_spawn(ioc, waiter(),
-                             asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                          asio::use_future));
+                             asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fw.get();
@@ -103,8 +100,7 @@ TEST(SeamCancellationMidWait, TotalCancelYieldsSyncLockAborted) {
     ASSERT_TRUE(waiter_result.has_value());
 
     // Primary assertion: waiter must see sync_lock_aborted.
-    EXPECT_FALSE(waiter_result->has_value())
-        << "Cancelled waiter must NOT hold the lock";
+    EXPECT_FALSE(waiter_result->has_value()) << "Cancelled waiter must NOT hold the lock";
     EXPECT_EQ(waiter_result->error(), error::sync_lock_aborted)
         << "Cancelled waiter error must be sync_lock_aborted";
 
@@ -138,8 +134,7 @@ TEST(SeamCancellationMidWait, PartialCancelTreatedAsTotal) {
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fw = asio::co_spawn(ioc, waiter(),
-                             asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                          asio::use_future));
+                             asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fw.get();
@@ -177,8 +172,7 @@ TEST(SeamCancellationMidWait, TerminalCancelTreatedAsTotal) {
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fw = asio::co_spawn(ioc, waiter(),
-                             asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                          asio::use_future));
+                             asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fw.get();
@@ -197,7 +191,7 @@ TEST(SeamCancellationMidWait, CancelledWaiterDoesNotAcquireOwnership) {
     asio::cancellation_signal cancel_sig;
 
     bool cancelled_got_lock = false;
-    bool second_got_lock    = false;
+    bool second_got_lock = false;
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -224,10 +218,9 @@ TEST(SeamCancellationMidWait, CancelledWaiterDoesNotAcquireOwnership) {
         second_got_lock = g.has_value();
     };
 
-    auto fh  = asio::co_spawn(ioc, holder(), asio::use_future);
+    auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fcw = asio::co_spawn(ioc, cancelled_waiter(),
-                              asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                           asio::use_future));
+                              asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     auto fsw = asio::co_spawn(ioc, second_waiter(), asio::use_future);
     ioc.run();
     fh.get();
@@ -235,7 +228,7 @@ TEST(SeamCancellationMidWait, CancelledWaiterDoesNotAcquireOwnership) {
     fsw.get();
 
     EXPECT_FALSE(cancelled_got_lock) << "Cancelled waiter must NOT acquire";
-    EXPECT_TRUE(second_got_lock)     << "Second waiter must eventually acquire";
+    EXPECT_TRUE(second_got_lock) << "Second waiter must eventually acquire";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,8 +259,7 @@ TEST(SeamCancellationMidWait, MutexEmptyAfterCancellation) {
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fw = asio::co_spawn(ioc, waiter(),
-                              asio::bind_cancellation_slot(cancel_sig.slot(),
-                                                           asio::use_future));
+                             asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fw.get();

@@ -38,14 +38,14 @@ enum class fsm_label : std::uint8_t {
     execution_report,
     heartbeat,
     logout,
-    advance_clock,        // step the injected Clock by `delta`
-    request_close,        // trigger Session::close(close_mode)
+    advance_clock,  // step the injected Clock by `delta`
+    request_close,  // trigger Session::close(close_mode)
 };
 
 struct fsm_step {
-    fsm_label                 label;
-    std::chrono::nanoseconds  delta{0};   // used only by advance_clock
-    bool                      terminal{false};  // used only by request_close
+    fsm_label label;
+    std::chrono::nanoseconds delta{0};  // used only by advance_clock
+    bool terminal{false};               // used only by request_close
 };
 
 using fsm_script = std::vector<fsm_step>;
@@ -65,8 +65,8 @@ using fsm_script = std::vector<fsm_step>;
 // A heartbeat-window script (seam 9): N heartbeat cycles each preceded by a
 // deterministic clock advance. `interval` is a value 2d does not pin —
 // chosen by the fixture (D-5 / Assumptions).
-[[nodiscard]] inline fsm_script
-make_heartbeat_script(int cycles, std::chrono::nanoseconds interval) {
+[[nodiscard]] inline fsm_script make_heartbeat_script(int cycles,
+                                                      std::chrono::nanoseconds interval) {
     fsm_script s;
     s.push_back({fsm_label::logon});
     for (int i = 0; i < cycles; ++i) {
@@ -93,10 +93,10 @@ make_heartbeat_script(int cycles, std::chrono::nanoseconds interval) {
 class observation_log {
 public:
     struct entry {
-        fsm_label             label{};
-        std::uint64_t         order{};        // global monotonic sequence
-        std::thread::id       tid;            // which thread ran the callback (default-id)
-        bool                  reentered{};    // overlap detected (must stay false)
+        fsm_label label{};
+        std::uint64_t order{};  // global monotonic sequence
+        std::thread::id tid;    // which thread ran the callback (default-id)
+        bool reentered{};       // overlap detected (must stay false)
     };
 
     // Called at callback ENTRY. Returns the assigned order index. Records an
@@ -134,9 +134,9 @@ public:
     }
 
 private:
-    mutable std::mutex        m_;
-    std::vector<entry>        entries_;
-    std::atomic<bool>         inside_{false};
+    mutable std::mutex m_;
+    std::vector<entry> entries_;
+    std::atomic<bool> inside_{false};
     std::atomic<std::uint64_t> next_{0};
 };
 
@@ -145,14 +145,12 @@ private:
 // overlap/serialisation property is observed without a real FIX FSM.
 class observed_callback {
 public:
-    observed_callback(observation_log& log, fsm_label l) : log_(log) {
-        log_.on_enter(l);
-    }
+    observed_callback(observation_log& log, fsm_label l) : log_(log) { log_.on_enter(l); }
     ~observed_callback() { log_.on_leave(); }
-    observed_callback(const observed_callback&)            = delete;
+    observed_callback(const observed_callback&) = delete;
     observed_callback& operator=(const observed_callback&) = delete;
-    observed_callback(observed_callback&&)                 = delete;
-    observed_callback& operator=(observed_callback&&)      = delete;
+    observed_callback(observed_callback&&) = delete;
+    observed_callback& operator=(observed_callback&&) = delete;
 
 private:
     observation_log& log_;

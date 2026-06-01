@@ -50,20 +50,20 @@ protected:
         auto utc = std::chrono::system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         auto clk = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clk;
+        engine.clock = clk;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_initiator_cfg() {
         SessionConfig cfg;
-        cfg.sender_comp_id    = "TW";
-        cfg.target_comp_id    = "ISLD";
-        cfg.begin_string      = "FIX.4.4";
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.4";
         cfg.heartbeat_interval = 0s;  // disable liveness loop
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.role              = session_role::initiator;
+        cfg.role = session_role::initiator;
         return cfg;
     }
 };
@@ -82,7 +82,8 @@ protected:
 // NotConnected → LogonSent before the emit; on transport failure the W3.4 fix
 // adds an explicit transition to Disconnected before the co_return so the
 // caller observes the session-fatal end-state, matching the acceptor witness.
-TEST_F(InitiatorTransportThrowTest, InitiatorOpen_TransportThrowsOnLogonEmit_ReturnsDocumentedError) {
+TEST_F(InitiatorTransportThrowTest,
+       InitiatorOpen_TransportThrowsOnLogonEmit_ReturnsDocumentedError) {
     auto cfg = make_initiator_cfg();
     // Transport always throws — simulates a network send failure during Logon emit.
     cfg.transport_send = [](std::span<const std::byte> /*frame*/) {
@@ -104,7 +105,8 @@ TEST_F(InitiatorTransportThrowTest, InitiatorOpen_TransportThrowsOnLogonEmit_Ret
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), fixpp::core::error::dispatch_aborted)
             << "Session::open() must return dispatch_aborted when transport throws; "
-               "got error=" << static_cast<int>(result.error())
+               "got error="
+            << static_cast<int>(result.error())
             << ". [FR-009; SC-007; store_then_emit transport-throw contract]";
     }
 
@@ -128,8 +130,7 @@ TEST_F(InitiatorTransportThrowTest, InitiatorOpen_TransportThrowsOnLogonEmit_Ret
         if (s == fsm_state::LogonSent) saw_logon_sent = true;
         if (s == fsm_state::Disconnected) saw_disconnected = true;
     }
-    EXPECT_TRUE(saw_logon_sent)
-        << "visit history must record LogonSent (set before emit attempt)";
+    EXPECT_TRUE(saw_logon_sent) << "visit history must record LogonSent (set before emit attempt)";
     EXPECT_TRUE(saw_disconnected)
         << "visit history must record Disconnected (set after transport throw)";
 }

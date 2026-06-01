@@ -15,13 +15,13 @@
 //   SYNC_ASIO_INC           — asio interface include directory
 // ─────────────────────────────────────────────────────────────────────────────
 #include <gtest/gtest.h>
+#include <sys/wait.h>
 
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <sys/wait.h>
 
 namespace {
 
@@ -42,25 +42,24 @@ std::string env(const char* name) {
 // the full stderr content.
 
 struct GateResult {
-    int  exit_code;
+    int exit_code;
     std::string stderr_out;
 };
 
-GateResult run_gate(const std::string& fixture_name,
-                    const std::string& extra_def = "") {
-    const std::string script      = env("SYNC_GREP_GATE_SCRIPT");
-    const std::string fixtures    = env("SYNC_FIXTURES_DIR");
-    const std::string gate_inc    = env("SYNC_GATE_INC");
-    const std::string asio_inc    = env("SYNC_ASIO_INC");
+GateResult run_gate(const std::string& fixture_name, const std::string& extra_def = "") {
+    const std::string script = env("SYNC_GREP_GATE_SCRIPT");
+    const std::string fixtures = env("SYNC_FIXTURES_DIR");
+    const std::string gate_inc = env("SYNC_GATE_INC");
+    const std::string asio_inc = env("SYNC_ASIO_INC");
 
-    EXPECT_FALSE(script.empty())   << "SYNC_GREP_GATE_SCRIPT not set";
+    EXPECT_FALSE(script.empty()) << "SYNC_GREP_GATE_SCRIPT not set";
     EXPECT_FALSE(fixtures.empty()) << "SYNC_FIXTURES_DIR not set";
     EXPECT_FALSE(gate_inc.empty()) << "SYNC_GATE_INC not set";
     EXPECT_FALSE(asio_inc.empty()) << "SYNC_ASIO_INC not set";
 
     // Write stderr to a temp file so we can read it back.
     char tmp_path[] = "/tmp/sync_gate_stderr_XXXXXX";
-    int  tmp_fd = ::mkstemp(tmp_path);
+    int tmp_fd = ::mkstemp(tmp_path);
     if (tmp_fd >= 0) ::close(tmp_fd);
 
     std::string fixture_path = fixtures + "/" + fixture_name;
@@ -70,12 +69,9 @@ GateResult run_gate(const std::string& fixture_name,
         def_part = " -D" + extra_def;
     }
 
-    std::string cmd = "bash '" + script + "'"
-        + " -I '" + gate_inc + "'"
-        + " -I '" + asio_inc + "'"
-        + def_part
-        + " -- '" + fixture_path + "'"
-        + " 2>'" + std::string(tmp_path) + "'";
+    std::string cmd = "bash '" + script + "'" + " -I '" + gate_inc + "'" + " -I '" + asio_inc +
+                      "'" + def_part + " -- '" + fixture_path + "'" + " 2>'" +
+                      std::string(tmp_path) + "'";
 
     int raw = std::system(cmd.c_str());
     int exit_code = WIFEXITED(raw) ? WEXITSTATUS(raw) : 127;
@@ -103,24 +99,25 @@ TEST_F(SyncNoStdMutexCiGate, ViolationFixtureFiresPerSpelling) {
         const char* spelling;
     };
     static constexpr Row kTable[] = {
-        {"FX_MUTEX",                "std::mutex"},
-        {"FX_RECURSIVE_MUTEX",      "std::recursive_mutex"},
-        {"FX_TIMED_MUTEX",          "std::timed_mutex"},
-        {"FX_RECURSIVE_TIMED_MUTEX","std::recursive_timed_mutex"},
-        {"FX_SHARED_MUTEX",         "std::shared_mutex"},
-        {"FX_SHARED_TIMED_MUTEX",   "std::shared_timed_mutex"},
+        {"FX_MUTEX", "std::mutex"},
+        {"FX_RECURSIVE_MUTEX", "std::recursive_mutex"},
+        {"FX_TIMED_MUTEX", "std::timed_mutex"},
+        {"FX_RECURSIVE_TIMED_MUTEX", "std::recursive_timed_mutex"},
+        {"FX_SHARED_MUTEX", "std::shared_mutex"},
+        {"FX_SHARED_TIMED_MUTEX", "std::shared_timed_mutex"},
     };
 
     for (const auto& row : kTable) {
         SCOPED_TRACE(std::string("macro=") + row.macro);
         GateResult r = run_gate("header_with_std_mutex_and_awaitable.hpp", row.macro);
-        EXPECT_NE(r.exit_code, 0)
-            << "Gate did not fire for " << row.macro
-            << "; stderr:\n" << r.stderr_out;
+        EXPECT_NE(r.exit_code, 0) << "Gate did not fire for " << row.macro << "; stderr:\n"
+                                  << r.stderr_out;
         EXPECT_NE(r.stderr_out.find(row.spelling), std::string::npos)
-            << "Spelling '" << row.spelling << "' not found in stderr:\n" << r.stderr_out;
+            << "Spelling '" << row.spelling << "' not found in stderr:\n"
+            << r.stderr_out;
         EXPECT_NE(r.stderr_out.find("VIOLATION:"), std::string::npos)
-            << "'VIOLATION:' not found in stderr for " << row.macro << ":\n" << r.stderr_out;
+            << "'VIOLATION:' not found in stderr for " << row.macro << ":\n"
+            << r.stderr_out;
     }
 }
 
@@ -129,10 +126,10 @@ TEST_F(SyncNoStdMutexCiGate, ViolationFixtureFiresPerSpelling) {
 // internally uses std::mutex (the zero-FP guarantee).
 TEST_F(SyncNoStdMutexCiGate, LegitimateAwaitableHeaderDoesNotFire) {
     GateResult r = run_gate("header_without_violation.hpp");
-    EXPECT_EQ(r.exit_code, 0)
-        << "Gate fired a false positive; stderr:\n" << r.stderr_out;
+    EXPECT_EQ(r.exit_code, 0) << "Gate fired a false positive; stderr:\n" << r.stderr_out;
     EXPECT_EQ(r.stderr_out.find("VIOLATION:"), std::string::npos)
-        << "Unexpected 'VIOLATION:' in stderr:\n" << r.stderr_out;
+        << "Unexpected 'VIOLATION:' in stderr:\n"
+        << r.stderr_out;
 }
 
 // T065: Transitive-awaitable catch — asio::awaitable pulled transitively (not
@@ -140,8 +137,9 @@ TEST_F(SyncNoStdMutexCiGate, LegitimateAwaitableHeaderDoesNotFire) {
 // correctly caught.
 TEST_F(SyncNoStdMutexCiGate, TransitiveAwaitablePullIsCaught) {
     GateResult r = run_gate("header_transitive_awaitable_include.hpp");
-    EXPECT_NE(r.exit_code, 0)
-        << "Gate missed transitive awaitable violation; stderr:\n" << r.stderr_out;
+    EXPECT_NE(r.exit_code, 0) << "Gate missed transitive awaitable violation; stderr:\n"
+                              << r.stderr_out;
     EXPECT_NE(r.stderr_out.find("std::mutex"), std::string::npos)
-        << "'std::mutex' not found in stderr:\n" << r.stderr_out;
+        << "'std::mutex' not found in stderr:\n"
+        << r.stderr_out;
 }

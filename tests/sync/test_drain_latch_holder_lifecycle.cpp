@@ -25,20 +25,18 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -59,7 +57,7 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     std::atomic<int> aborted_count{0};
     std::atomic<int> completed_count{0};
     bool drain_completed = false;
-    bool drain_ok        = false;
+    bool drain_ok = false;
     std::atomic<bool> holder_released{false};
 
     asio::io_context ioc;
@@ -85,7 +83,7 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
         co_await yield_n(N * 2);
 
         auto d = co_await mtx.cancel_and_drain();
-        drain_ok        = d.has_value();
+        drain_ok = d.has_value();
         drain_completed = true;
 
         // At this point holder_released must have fired.
@@ -97,8 +95,8 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     auto make_waiter = [&]() -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
-        if (!r.has_value() && (r.error() == error::sync_lock_aborted ||
-                               r.error() == error::sync_lock_drained))
+        if (!r.has_value() &&
+            (r.error() == error::sync_lock_aborted || r.error() == error::sync_lock_drained))
             aborted_count.fetch_add(1, std::memory_order_acq_rel);
         completed_count.fetch_add(1, std::memory_order_acq_rel);
     };
@@ -116,7 +114,7 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     for (auto& f : futs) f.get();
 
     EXPECT_TRUE(drain_completed) << "cancel_and_drain() must complete";
-    EXPECT_TRUE(drain_ok)        << "cancel_and_drain() must return success";
+    EXPECT_TRUE(drain_ok) << "cancel_and_drain() must return success";
     EXPECT_EQ(completed_count.load(), N) << "All N waiters must complete";
     EXPECT_EQ(aborted_count.load(), N)
         << "All N waiters must receive sync_lock_aborted (not granted)";
@@ -149,13 +147,12 @@ TEST(SeamDrainLatchHolderLifecycle, NeverDrainedMutexWorksNormally) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     ioc.run();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap, 0)  << "Mutual exclusion must hold on undraned mutex";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion must hold on undraned mutex";
     EXPECT_EQ(granted.load(), N) << "All N acquirers must succeed on undraned mutex";
 }
 
@@ -177,8 +174,7 @@ TEST(SeamDrainLatchHolderLifecycle, AcquireAfterDrainIsRejected) {
 
         // Any subsequent acquire must fail with sync_lock_drained.
         auto r = co_await mtx.async_lock();
-        post_drain_acquire_rejected = !r.has_value() &&
-                                      r.error() == error::sync_lock_drained;
+        post_drain_acquire_rejected = !r.has_value() && r.error() == error::sync_lock_drained;
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);

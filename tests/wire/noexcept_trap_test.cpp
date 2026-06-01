@@ -5,22 +5,21 @@
 // New per /analyze finding C1. Authored red; GREEN against the T024/T027
 // core::detail::trap_throw fence. Holds in both debug and release.
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/decimal_helpers.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/core/decimal_helpers.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -34,13 +33,11 @@ using fixpp::wire::Parser;
 
 // Structural fence: the trait-crossing accessor and the parse entry point
 // sit inside a noexcept window — the compiler must enforce it.
-static_assert(noexcept(std::declval<MessageView<access_mode::Index>>()
-                           .get_decimal(44, nullptr)),
+static_assert(noexcept(std::declval<MessageView<access_mode::Index>>().get_decimal(44, nullptr)),
               "get_decimal must be noexcept (FR-013 parse->fromApp window)");
-static_assert(
-    noexcept(std::declval<Parser<access_mode::Index>>().parse(
-        std::declval<fixpp::wire::frame_view const&>(), nullptr)),
-    "Parser::parse must be noexcept");
+static_assert(noexcept(std::declval<Parser<access_mode::Index>>().parse(
+                  std::declval<fixpp::wire::frame_view const&>(), nullptr)),
+              "Parser::parse must be noexcept");
 static_assert(noexcept(fixpp::core::detail::trap_throw([] { return 0; })),
               "trap_throw is the noexcept fence itself");
 
@@ -74,8 +71,7 @@ TEST(WireNoexceptTrap, ThrowingTraitIsTranslatedNotPropagated) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_invalid_input);
 
-    auto oom = fixpp::core::detail::trap_throw(
-        []() -> int { throw std::bad_alloc{}; });
+    auto oom = fixpp::core::detail::trap_throw([]() -> int { throw std::bad_alloc{}; });
     ASSERT_FALSE(oom.has_value());
     EXPECT_EQ(oom.error(), error::out_of_memory);
 }
@@ -83,7 +79,10 @@ TEST(WireNoexceptTrap, ThrowingTraitIsTranslatedNotPropagated) {
 TEST(WireNoexceptTrap, GetDecimalStaysInsideTheWindow) {
     // End-to-end: the trait-crossing accessor returns an error (not throws)
     // even for a value the trait rejects; the call itself is noexcept.
-    auto buf = make_frame("35=D\x01" "34=1\x01" "44=not-a-number\x01");
+    auto buf = make_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "44=not-a-number\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -95,8 +94,7 @@ TEST(WireNoexceptTrap, GetDecimalStaysInsideTheWindow) {
     bool escaped = false;
     try {
         auto d = mv->get_decimal(44, &arena);
-        EXPECT_FALSE(d.has_value())
-            << "an unparseable FLOAT must be an error, not a value";
+        EXPECT_FALSE(d.has_value()) << "an unparseable FLOAT must be an error, not a value";
     } catch (...) {
         escaped = true;
     }

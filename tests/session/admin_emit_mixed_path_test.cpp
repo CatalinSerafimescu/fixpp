@@ -34,23 +34,16 @@
 #error "admin_emit_mixed_path_test.cpp requires FIXPP_TEST_HOOKS"
 #endif
 
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <future>
-#include <limits>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -59,11 +52,16 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <limits>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -75,8 +73,7 @@ namespace {
 
 std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
                                    std::string_view sender, std::string_view target,
-                                   std::string_view begin_string,
-                                   std::string_view sending_time,
+                                   std::string_view begin_string, std::string_view sending_time,
                                    std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
@@ -91,7 +88,7 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
+    unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
     cs &= 0xFFU;
     char csbuf[4];
@@ -106,9 +103,11 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
 
 // Build a valid Logon frame with correct sending_time.
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
-                                   std::string_view st, std::uint32_t seq = 1,
-                                   int heartbt = 30) {
-    std::string extra = "98=0\x01" "108=" + std::to_string(heartbt) + "\x01";
+                                   std::string_view st, std::uint32_t seq = 1, int heartbt = 30) {
+    std::string extra =
+        "98=0\x01"
+        "108=" +
+        std::to_string(heartbt) + "\x01";
     return build_frame("A", seq, sender, target, "FIX.4.2", st, extra);
 }
 
@@ -140,32 +139,32 @@ protected:
     // could not catch a contract violation. transport_send capture closes that gap.
     std::vector<std::vector<std::byte>> captured_frames;
 
-    static constexpr std::string_view kSender   = "SENDER";
-    static constexpr std::string_view kTarget   = "TARGET";
+    static constexpr std::string_view kSender = "SENDER";
+    static constexpr std::string_view kTarget = "TARGET";
     static constexpr std::string_view kBeginStr = "FIX.4.2";
     // Sending time matching the mock clock at t=0.
     static constexpr std::string_view kSendingTime = "20240101-00:00:00.000";
 
     void SetUp() override {
-        using sc     = std::chrono::system_clock;
-        auto utc     = sc::time_point{} + std::chrono::seconds{1704067200};
-        auto stp     = fixpp::core::steady_time_point{};
-        clock        = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        using sc = std::chrono::system_clock;
+        auto utc = sc::time_point{} + std::chrono::seconds{1704067200};
+        auto stp = fixpp::core::steady_time_point{};
+        clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(int heartbt_sec = 0) {
         // heartbt_sec = 0 disables liveness loop (no background coroutine to race).
         SessionConfig cfg;
-        cfg.sender_comp_id     = std::string(kSender);
-        cfg.target_comp_id     = std::string(kTarget);
-        cfg.begin_string       = std::string(kBeginStr);
+        cfg.sender_comp_id = std::string(kSender);
+        cfg.target_comp_id = std::string(kTarget);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_sec};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = session_role::initiator;
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         // W3.3 — capture every outbound frame for per-test gated-emit assertions.

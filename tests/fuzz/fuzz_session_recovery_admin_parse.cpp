@@ -23,21 +23,19 @@
 //   then: build/linux-clang-asan/bin/fuzz_session_recovery_admin_parse
 //         -max_len=512 -runs=10000
 
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <span>
-
-#include <asio/io_context.hpp>
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <span>
 
 // These headers are relative because fuzz binaries have
 //   target_include_directories(...PRIVATE "${CMAKE_SOURCE_DIR}/tests").
@@ -63,7 +61,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     // NotConnected→Active path and the post-Active recovery paths).
     const std::uint8_t preamble = data[0];
     const std::uint8_t* payload = data + 1;
-    const std::size_t   payload_len = size - 1;
+    const std::size_t payload_len = size - 1;
 
     asio::io_context ioc;
     auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
@@ -71,16 +69,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     auto clk = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
 
     fixpp::core::EngineConfig engine;
-    engine.clock    = clk;
+    engine.clock = clk;
     engine.executor = ioc.get_executor();
 
     fixpp::session::SessionConfig cfg;
-    cfg.sender_comp_id    = "ISLD";
-    cfg.target_comp_id    = "TW";
-    cfg.begin_string      = "FIX.4.2";
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     // Swallow outbound frames (we don't care about the content in fuzz mode).
     cfg.transport_send = [](std::span<const std::byte>) {};
@@ -93,16 +91,27 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
-        try { (void)fut.get(); } catch (...) { return 0; }
+        try {
+            (void)fut.get();
+        } catch (...) {
+            return 0;
+        }
     }
 
     // Optionally drive through a Logon first (preamble bit 0 set).
     if (preamble & 0x01) {
         // Minimal Logon frame (well-formed enough to pass framer).
         constexpr std::string_view logon_wire =
-            "8=FIX.4.2\x01" "9=67\x01"
-            "35=A\x01" "34=1\x01" "49=TW\x01" "52=20240101-00:00:00.000\x01"
-            "56=ISLD\x01" "98=0\x01" "108=30\x01" "10=";
+            "8=FIX.4.2\x01"
+            "9=67\x01"
+            "35=A\x01"
+            "34=1\x01"
+            "49=TW\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=ISLD\x01"
+            "98=0\x01"
+            "108=30\x01"
+            "10=";
         // Compute a rough checksum (fuzzer doesn't need correctness here;
         // the framer will reject malformed frames gracefully).
         const char* logon_str = logon_wire.data();
@@ -111,12 +120,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         cs &= 0xFF;
         char full[256];
         snprintf(full, sizeof(full), "%s%03u\x01", logon_str, cs);
-        auto buf = std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(full), strlen(full));
+        auto buf =
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(full), strlen(full));
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
-        try { (void)fut.get(); } catch (...) { return 0; }
+        try {
+            (void)fut.get();
+        } catch (...) {
+            return 0;
+        }
     }
 
     // Feed the fuzzer payload. The Framer will reject garbage frames gracefully.
@@ -130,7 +143,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
-        try { (void)fut.get(); } catch (...) {}
+        try {
+            (void)fut.get();
+        } catch (...) {
+        }
     };
 
     feed_span(payload, split);

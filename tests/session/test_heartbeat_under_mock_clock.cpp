@@ -12,16 +12,14 @@
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
-#include <future>
-#include <memory>
-#include <thread>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <future>
+#include <memory>
+#include <thread>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -38,22 +36,21 @@ TEST(SeamHeartbeatUnderMockClock, DeterministicHeartbeatWindowViaScriptedFsm) {
     std::thread runner{[&] { ioc.run(); }};
 
     auto clk = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ioc.get_executor());
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ioc.get_executor());
 
     fixpp::core::EngineConfig engine;
     engine.executor = ioc.get_executor();
-    engine.clock    = clk;
+    engine.clock = clk;
     fixpp::session::SessionConfig cfg;
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary(); // T050
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();  // RC#1
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();              // T050
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     fixpp::session::Session s{engine, cfg};
 
     ASSERT_TRUE(asio::co_spawn(ioc, s.open(), asio::use_future).get().has_value());
-    ASSERT_EQ(s.effective_clock(), clk);   // I-03: resolved to engine clock
+    ASSERT_EQ(s.effective_clock(), clk);  // I-03: resolved to engine clock
 
     constexpr int kCycles = 8;
-    const auto interval = 30ms;            // fixture-picked (2d does not pin)
+    const auto interval = 30ms;  // fixture-picked (2d does not pin)
     const auto script = ts::make_heartbeat_script(kCycles, interval);
     ts::observation_log log;
 
@@ -67,7 +64,7 @@ TEST(SeamHeartbeatUnderMockClock, DeterministicHeartbeatWindowViaScriptedFsm) {
                 ts::observed_callback span{log, l};
                 ran.set_value();
             });
-            done.wait();                   // serialise the scripted step order
+            done.wait();  // serialise the scripted step order
         }
     }
     wg.reset();
@@ -75,7 +72,8 @@ TEST(SeamHeartbeatUnderMockClock, DeterministicHeartbeatWindowViaScriptedFsm) {
 
     auto order = log.label_order();
     int heartbeats = 0;
-    for (auto l : order) if (l == ts::fsm_label::heartbeat) ++heartbeats;
+    for (auto l : order)
+        if (l == ts::fsm_label::heartbeat) ++heartbeats;
     EXPECT_EQ(heartbeats, kCycles);
     EXPECT_TRUE(log.strictly_serialised());
     EXPECT_EQ(order.front(), ts::fsm_label::logon);

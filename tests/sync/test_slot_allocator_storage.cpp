@@ -30,11 +30,10 @@
 
 #include <array>
 #include <cstddef>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <memory_resource>
 #include <new>
 #include <stdexcept>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
 
@@ -56,9 +55,9 @@ TEST(SyncSlotAllocatorStorage, Case1InlineBufferAllocate) {
     // The pointer must lie within the awaiter's slot_storage_ array.
     // slot_storage_ is 32 bytes aligned to 8 (see async_mutex_awaiter layout).
     auto* begin = awaiter.slot_storage_.data();
-    auto* end   = begin + awaiter.slot_storage_.size();
+    auto* end = begin + awaiter.slot_storage_.size();
     EXPECT_GE(p, begin) << "allocate() must return a ptr inside slot_storage_";
-    EXPECT_LT(p, end)   << "allocate() must return a ptr inside slot_storage_";
+    EXPECT_LT(p, end) << "allocate() must return a ptr inside slot_storage_";
 
     // A second allocate (without intervening deallocate) must throw bad_alloc
     // (used_inline_ == true; only one inline allocation at a time).
@@ -101,9 +100,8 @@ TEST(SyncSlotAllocatorStorage, Case3PmrAllocateDeallocate) {
 
     // Stack buffer for the PMR resource.
     std::array<std::byte, 256> buf{};
-    std::pmr::monotonic_buffer_resource mbr{
-        buf.data(), buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource mbr{buf.data(), buf.size(),
+                                            std::pmr::null_memory_resource()};
 
     slot_allocator alloc{&awaiter, &mbr};
 
@@ -112,9 +110,9 @@ TEST(SyncSlotAllocatorStorage, Case3PmrAllocateDeallocate) {
     ASSERT_NE(p, nullptr);
 
     auto* buf_begin = buf.data();
-    auto* buf_end   = buf.data() + buf.size();
+    auto* buf_end = buf.data() + buf.size();
     EXPECT_GE(p, buf_begin) << "PMR allocate() ptr must be in the backing buffer";
-    EXPECT_LT(p, buf_end)   << "PMR allocate() ptr must be in the backing buffer";
+    EXPECT_LT(p, buf_end) << "PMR allocate() ptr must be in the backing buffer";
 
     // deallocate forwards to mr — must not crash.
     EXPECT_NO_THROW(alloc.deallocate(p, 32));
@@ -125,9 +123,8 @@ TEST(SyncSlotAllocatorStorage, Case3PmrExhaustionThrows) {
 
     // Tiny buffer: 8 bytes, null upstream → first large allocation must fail.
     std::array<std::byte, 8> tiny_buf{};
-    std::pmr::monotonic_buffer_resource tiny_mr{
-        tiny_buf.data(), tiny_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource tiny_mr{tiny_buf.data(), tiny_buf.size(),
+                                                std::pmr::null_memory_resource()};
 
     slot_allocator alloc{&awaiter, &tiny_mr};
 
@@ -139,17 +136,17 @@ TEST(SyncSlotAllocatorStorage, EqualityOperator) {
     async_mutex_awaiter aw1{};
     async_mutex_awaiter aw2{};
     std::array<std::byte, 64> buf{};
-    std::pmr::monotonic_buffer_resource mbr{
-        buf.data(), buf.size(), std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource mbr{buf.data(), buf.size(),
+                                            std::pmr::null_memory_resource()};
 
     slot_allocator a1{&aw1, nullptr};
     slot_allocator a2{&aw1, nullptr};
     slot_allocator a3{&aw2, nullptr};
     slot_allocator a4{&aw1, &mbr};
 
-    EXPECT_EQ(a1, a2)   << "same awaiter + same mr → equal";
-    EXPECT_NE(a1, a3)   << "different awaiter → not equal";
-    EXPECT_NE(a1, a4)   << "different mr → not equal";
+    EXPECT_EQ(a1, a2) << "same awaiter + same mr → equal";
+    EXPECT_NE(a1, a3) << "different awaiter → not equal";
+    EXPECT_NE(a1, a4) << "different mr → not equal";
 }
 
 }  // namespace

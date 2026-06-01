@@ -30,9 +30,21 @@
 //
 // Anchors: research D-10; spec FR-005; data-model E2; error slot 73;
 // [FIX-SL §4.6]. [const §VII.5]: ships only in-scope subset green.
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -40,24 +52,10 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 
@@ -66,12 +64,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -86,23 +81,24 @@ static std::vector<std::byte> make_logon_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_logout_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target) {
+static std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
+                                                std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=5\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -115,28 +111,35 @@ static std::vector<std::byte> make_logout_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
 // Extract a field value from a SOH-delimited FIX frame.
-static std::string extract_field(std::span<const std::byte> frame,
-                                  std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -153,20 +156,20 @@ struct SessionFixture {
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_cfg(std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
         // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset.
@@ -183,7 +186,7 @@ struct SessionFixture {
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
-        auto fut2  = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
@@ -240,8 +243,7 @@ TEST(TC009Logout, Fix42_13b_UnsolicitedLogoutMessage) {
         << "Server must emit a confirming Logout (E:Logout in oracle)";
     {
         const auto last = f.transport.sent(f.transport.sent_count() - 1);
-        EXPECT_EQ(extract_field(last, 35), "5")
-            << "Confirming Logout must have MsgType=5";
+        EXPECT_EQ(extract_field(last, 35), "5") << "Confirming Logout must have MsgType=5";
         // FR-013 / FR-002 / FR-003: tag 8 and tag 52 must be present on every outbound frame.
         EXPECT_EQ(extract_field(last, 8), "FIX.4.2")
             << "Confirming Logout must carry 8=FIX.4.2 (negotiated begin_string)";
@@ -266,12 +268,10 @@ TEST(TC009Logout, Fix44_13b_UnsolicitedLogoutMessage) {
     auto peer_logout = make_logout_frame("FIX.4.4", 2, "TW", "ISLD");
     f.feed(sess, peer_logout);
 
-    ASSERT_GE(f.transport.sent_count(), 1u)
-        << "Server must emit confirming Logout";
+    ASSERT_GE(f.transport.sent_count(), 1u) << "Server must emit confirming Logout";
     {
         const auto last = f.transport.sent(f.transport.sent_count() - 1);
-        EXPECT_EQ(extract_field(last, 35), "5")
-            << "Confirming Logout must have MsgType=5";
+        EXPECT_EQ(extract_field(last, 35), "5") << "Confirming Logout must have MsgType=5";
         // FR-013 / FR-002 / FR-003: tag 8 and tag 52 on every outbound frame.
         EXPECT_EQ(extract_field(last, 8), "FIX.4.4")
             << "Confirming Logout must carry 8=FIX.4.4 (negotiated begin_string)";
@@ -294,15 +294,14 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
     // Server initiates Logout (close graceful).
-    auto close_fut = asio::co_spawn(
-        f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+    auto close_fut =
+        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
     // Let phase 1 start (Logout emitted, LogoutSent).
     f.ioc.run_for(100ms);
     f.ioc.restart();
 
-    EXPECT_GE(f.transport.sent_count(), 1u)
-        << "Graceful close must emit Logout";
+    EXPECT_GE(f.transport.sent_count(), 1u) << "Graceful close must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
         << "After emitting Logout, FSM should be LogoutSent";
 
@@ -327,8 +326,8 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     fixpp::session::Session sess(f.engine, cfg);
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
-    auto close_fut = asio::co_spawn(
-        f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+    auto close_fut =
+        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
     f.ioc.run_for(100ms);
     f.ioc.restart();

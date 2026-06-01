@@ -18,19 +18,17 @@
 // acceptor and initiator), so this single primitive serves both roles' cells.
 #pragma once
 
-#include <cstddef>
-#include <memory>
-#include <span>
-#include <utility>
-
 #include <asio/awaitable.hpp>
-
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/tls/peer_identity.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>  // handshake_result
 #include <fixpp/transport/transport.hpp>
+#include <memory>
+#include <span>
+#include <utility>
 
 namespace fixpp::test_support {
 
@@ -44,19 +42,19 @@ public:
     async_connect(fixpp::transport::Endpoint const& ep) override {
         fixpp::transport::ConnectInfo info;
         info.remote = ep;
-        info.local  = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
         info.family = 2;
         co_return info;
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_read_some(std::span<std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> buf [[clang::lifetimebound]]) override {
         (void)buf;
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>>
-    async_write(std::span<const std::byte> buf [[clang::lifetimebound]]) override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf [[clang::lifetimebound]]) override {
         co_return buf.size();
     }
 
@@ -70,12 +68,10 @@ public:
 // bound). Mirrors the engine accept loop's attach-before-first-frame
 // happens-before (Gate A New-1 / E-4); the gate consumes live_peer_id_ one-shot
 // when the next inbound Logon / Logon-ack is processed.
-inline void inject_live_identity(fixpp::session::Session& s,
-                                 fixpp::tls::peer_identity pid) {
+inline void inject_live_identity(fixpp::session::Session& s, fixpp::tls::peer_identity pid) {
     fixpp::transport::handshake_result hr{};
     hr.peer_id = std::move(pid);
-    s.attach_accepted_transport(
-        std::make_unique<NullSinkTransport>(), std::move(hr));
+    s.attach_accepted_transport(std::make_unique<NullSinkTransport>(), std::move(hr));
 }
 
 }  // namespace fixpp::test_support

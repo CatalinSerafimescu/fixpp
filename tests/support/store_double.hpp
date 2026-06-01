@@ -27,18 +27,16 @@
 // so no std::mutex is visible in an awaitable context — [const §XV.9]).
 #pragma once
 
+#include <asio/awaitable.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <span>
-#include <vector>
-
-#include <asio/awaitable.hpp>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <span>
+#include <vector>
 
 namespace fixpp::session::test {
 
@@ -49,34 +47,40 @@ public:
     // No flush-for-session-close hook (MemoryStore path — nullptr thunk).
     StoreDouble() : MessageStore(flush_thunk_for<StoreDouble>()) {}
 
-    StoreDouble(const StoreDouble&)            = delete;
+    StoreDouble(const StoreDouble&) = delete;
     StoreDouble& operator=(const StoreDouble&) = delete;
-    StoreDouble(StoreDouble&&)                 = delete;
-    StoreDouble& operator=(StoreDouble&&)      = delete;
-    ~StoreDouble() noexcept(false) override    = default;
+    StoreDouble(StoreDouble&&) = delete;
+    StoreDouble& operator=(StoreDouble&&) = delete;
+    ~StoreDouble() noexcept(false) override = default;
 
     // ── 4-pure-virtual interface ([2e §4.1]) ──────────────────────────────────
 
     // store: deep-copy the frame; advance the direction counter.
     // Returns immediately (no I/O, no mutex — test only).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        store(seqnum_t seq,
-              std::span<const std::byte> frame [[clang::lifetimebound]],
-              direction_t dir) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],
+        direction_t dir) noexcept override {
         (void)seq;
         auto& buf = (dir == direction_t::outbound) ? outbound_ : inbound_;
         stored_frames_.emplace_back(frame.begin(), frame.end());
         buf.push_back(&stored_frames_.back());
-        if (dir == direction_t::outbound) { next_out_++; } else { next_in_++; }
+        if (dir == direction_t::outbound) {
+            next_out_++;
+        } else {
+            next_in_++;
+        }
         co_return fixpp::core::expected_t<void>{};
     }
 
     // retrieve: walk frames in [begin, end] (end==0 → to current tail).
     // Synchronous; calls visitor sequentially. No gap errors for test use.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
-                 retrieve_visitor& visitor [[clang::lifetimebound]]) noexcept override {
-        (void)begin; (void)end; (void)dir; (void)visitor;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        retrieve_visitor& visitor [[clang::lifetimebound]]) noexcept override {
+        (void)begin;
+        (void)end;
+        (void)dir;
+        (void)visitor;
         // Retrieval is the deferred recovery feature's path (D-4 / FR-010).
         // Return ok — tests that need retrieve() use the production MemoryStore.
         co_return fixpp::core::expected_t<void>{};
@@ -85,49 +89,50 @@ public:
     // next_seqnum: read (increment=false) or read-then-increment (increment=true).
     // No overflow check (test double — production store handles overflow via
     // store_seqnum_overflow / session-fatal path, D-1 / I-8).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>>
-        next_seqnum(direction_t dir, bool increment) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
         auto& counter = (dir == direction_t::outbound) ? next_out_ : next_in_;
         const seqnum_t current = counter;
-        if (increment) { ++counter; }
+        if (increment) {
+            ++counter;
+        }
         co_return fixpp::core::expected_t<seqnum_t>{current};
     }
 
     // reset: clear both frame lists and rewind counters to 1.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-        reset() noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         inbound_.clear();
         outbound_.clear();
         stored_frames_.clear();
-        next_in_  = seqnum_min;
+        next_in_ = seqnum_min;
         next_out_ = seqnum_min;
         co_return fixpp::core::expected_t<void>{};
     }
 
     // ── Test-only inspection API ──────────────────────────────────────────────
 
-    [[nodiscard]] seqnum_t current_next_inbound()  const noexcept { return next_in_; }
+    [[nodiscard]] seqnum_t current_next_inbound() const noexcept { return next_in_; }
     [[nodiscard]] seqnum_t current_next_outbound() const noexcept { return next_out_; }
 
-    [[nodiscard]] std::size_t stored_inbound_count()  const noexcept { return inbound_.size(); }
+    [[nodiscard]] std::size_t stored_inbound_count() const noexcept { return inbound_.size(); }
     [[nodiscard]] std::size_t stored_outbound_count() const noexcept { return outbound_.size(); }
 
     void reset_sync() {
         inbound_.clear();
         outbound_.clear();
         stored_frames_.clear();
-        next_in_  = seqnum_min;
+        next_in_ = seqnum_min;
         next_out_ = seqnum_min;
     }
 
 private:
     // Stable storage so pointers in inbound_/outbound_ never invalidate.
-    std::vector<std::vector<std::byte>>   stored_frames_;
-    std::vector<std::vector<std::byte>*>  inbound_;   // ordered frames
-    std::vector<std::vector<std::byte>*>  outbound_;  // ordered frames
+    std::vector<std::vector<std::byte>> stored_frames_;
+    std::vector<std::vector<std::byte>*> inbound_;   // ordered frames
+    std::vector<std::vector<std::byte>*> outbound_;  // ordered frames
 
-    seqnum_t next_in_  = seqnum_min;   // next expected inbound  seqnum
-    seqnum_t next_out_ = seqnum_min;   // next expected outbound seqnum
+    seqnum_t next_in_ = seqnum_min;   // next expected inbound  seqnum
+    seqnum_t next_out_ = seqnum_min;  // next expected outbound seqnum
 };
 
 }  // namespace fixpp::session::test

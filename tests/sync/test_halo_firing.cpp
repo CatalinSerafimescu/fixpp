@@ -24,11 +24,9 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 namespace {
 
@@ -38,7 +36,7 @@ using fixpp::sync::detail::async_mutex_awaiter;
 // Compile-time budget check — mirrored from the header's own static_assert
 // (§1.1 / §6.4). Placed here as documentation of the seam oracle.
 static_assert(sizeof(async_mutex_awaiter) <= 96,
-    "async_mutex_awaiter exceeds the §1.1 ≤ 96 B HALO-eligibility budget.");
+              "async_mutex_awaiter exceeds the §1.1 ≤ 96 B HALO-eligibility budget.");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test 1: awaiter size budget — runtime mirror.
@@ -51,8 +49,7 @@ TEST(SyncHaloFiring, AwaiterSizeBudget) {
            "with the current struct layout.";
 
     // Informational: print actual size.
-    std::printf("[INFO] sizeof(async_mutex_awaiter) = %zu B\n",
-                sizeof(async_mutex_awaiter));
+    std::printf("[INFO] sizeof(async_mutex_awaiter) = %zu B\n", sizeof(async_mutex_awaiter));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,8 +64,8 @@ TEST(SyncHaloFiring, ContendedEmbeddedPathFunctional) {
     constexpr int N = 64;
 
     std::atomic<int> in_critical{0};
-    int overlap  = 0;
-    int counter  = 0;
+    int overlap = 0;
+    int counter = 0;
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -77,8 +74,7 @@ TEST(SyncHaloFiring, ContendedEmbeddedPathFunctional) {
         // mr == nullptr → embedded path (HALO-eligible frame layout).
         auto g = co_await mtx.async_lock(nullptr);
         if (!g.has_value()) {
-            ADD_FAILURE() << "unexpected error on embedded path: "
-                          << static_cast<int>(g.error());
+            ADD_FAILURE() << "unexpected error on embedded path: " << static_cast<int>(g.error());
             co_return;
         }
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -90,14 +86,13 @@ TEST(SyncHaloFiring, ContendedEmbeddedPathFunctional) {
 
     std::vector<std::future<void>> futs;
     futs.reserve(N);
-    for (int i = 0; i < N; ++i)
-        futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
+    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, make_coro(), asio::use_future));
 
     ioc.run();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap,  0) << "Mutual exclusion violated on embedded path";
-    EXPECT_EQ(counter,  N) << "Lost waiter on embedded path";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated on embedded path";
+    EXPECT_EQ(counter, N) << "Lost waiter on embedded path";
 }
 
 }  // namespace

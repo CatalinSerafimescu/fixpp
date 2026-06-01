@@ -7,8 +7,6 @@
 
 extern "C" {
 
-const char* fixpp_version_string(void) {
-    return fixpp::core::FIXPP_VERSION;
-}
+const char* fixpp_version_string(void) { return fixpp::core::FIXPP_VERSION; }
 
 }  // extern "C"

@@ -4,13 +4,12 @@
 // excludes the debug generation token from sizeof; debug embeds it. A
 // public probe subclass exposes the protected ctor for the runtime checks.
 
-#include <cstddef>
-#include <span>
-#include <type_traits>
-
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <fixpp/wire/view.hpp>
+#include <span>
+#include <type_traits>
 
 namespace {
 
@@ -20,8 +19,7 @@ using fixpp::wire::detail::generation_token;
 // Probe: a minimal concrete View exposing the protected ctor + check_alive.
 class ProbeView : public View {
 public:
-    ProbeView(std::byte const* d, std::size_t n, generation_token g) noexcept
-        : View{d, n, g} {}
+    ProbeView(std::byte const* d, std::size_t n, generation_token g) noexcept : View{d, n, g} {}
     using View::check_alive;
 };
 
@@ -39,8 +37,8 @@ static_assert(sizeof(View) == sizeof(std::byte const*) + sizeof(std::size_t),
               "[2b §4.1] release View excludes the generation token");
 #else
 // Debug: token embedded for the use-after-buffer-reuse trap.
-static_assert(sizeof(View) >= sizeof(std::byte const*) + sizeof(std::size_t)
-                                   + sizeof(generation_token),
+static_assert(sizeof(View) >=
+                  sizeof(std::byte const*) + sizeof(std::size_t) + sizeof(generation_token),
               "[2b §4.1] debug View embeds the generation token");
 #endif
 

@@ -27,10 +27,9 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/transport/reconnect_policy.hpp>
-
 #include <chrono>
 #include <cstdint>
+#include <fixpp/transport/reconnect_policy.hpp>
 #include <memory_resource>
 
 namespace {
@@ -94,8 +93,7 @@ TEST(ReconnectPolicy, ZeroJitterReturnsExactScheduleEntries) {
     p.jitter = 0.0;  // override for this cell
 
     for (std::uint32_t n = 0; n < p.schedule.size(); ++n) {
-        EXPECT_EQ(p.delay_for_attempt(n), p.schedule[n])
-            << "attempt " << n;
+        EXPECT_EQ(p.delay_for_attempt(n), p.schedule[n]) << "attempt " << n;
     }
 }
 
@@ -103,7 +101,7 @@ TEST(ReconnectPolicy, ZeroJitterReturnsExactScheduleEntries) {
 // Cell 5 — jitter=0.10 keeps delay within ±10% of base schedule entry.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ReconnectPolicy, TenPercentJitterStaysWithinPlusMinusTenPercent) {
-    auto p = ReconnectPolicy::defaults();   // jitter = 0.10
+    auto p = ReconnectPolicy::defaults();  // jitter = 0.10
     p.session_id_seed = 0xDEADBEEFCAFEBABE;
 
     for (std::uint32_t n = 0; n < p.schedule.size(); ++n) {
@@ -124,10 +122,9 @@ TEST(ReconnectPolicy, PlateauAtLastClampsBeyondScheduleSize) {
     auto p = ReconnectPolicy::defaults();
     p.jitter = 0.0;  // disable jitter so the clamp is exact.
 
-    EXPECT_EQ(p.delay_for_attempt(10),  p.schedule.back());
+    EXPECT_EQ(p.delay_for_attempt(10), p.schedule.back());
     EXPECT_EQ(p.delay_for_attempt(100), p.schedule.back());
-    EXPECT_EQ(p.delay_for_attempt(std::numeric_limits<std::uint32_t>::max()),
-              p.schedule.back());
+    EXPECT_EQ(p.delay_for_attempt(std::numeric_limits<std::uint32_t>::max()), p.schedule.back());
 }
 
 // Plateau also holds for defaults_quickfix_compat (size=1; every attempt → 30s).
@@ -150,8 +147,7 @@ TEST(ReconnectPolicy, SameSeedAndAttemptReturnsSameDelay) {
     b.session_id_seed = 0x1234567890ABCDEF;
 
     for (std::uint32_t n = 0; n < 12; ++n) {  // include 2 plateau attempts
-        EXPECT_EQ(a.delay_for_attempt(n), b.delay_for_attempt(n))
-            << "attempt " << n;
+        EXPECT_EQ(a.delay_for_attempt(n), b.delay_for_attempt(n)) << "attempt " << n;
     }
 }
 
@@ -173,9 +169,8 @@ TEST(ReconnectPolicy, DifferentSeedsDivergeAtSomeAttempt) {
             break;
         }
     }
-    EXPECT_TRUE(any_diff)
-        << "Two distinct seeds yielded identical schedules across 10 attempts — "
-           "the seed is not threading through to the RNG.";
+    EXPECT_TRUE(any_diff) << "Two distinct seeds yielded identical schedules across 10 attempts — "
+                             "the seed is not threading through to the RNG.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

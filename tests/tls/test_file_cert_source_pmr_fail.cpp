@@ -22,27 +22,25 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <memory_resource>
 #include <string>
 #include <vector>
 
 namespace {
 
-using fixpp::tls::file_cert_source;
-using fixpp::tls::cert_source;
-using fixpp::tls::local_credentials;
 using fixpp::core::error;
 using fixpp::core::expected_t;
+using fixpp::tls::cert_source;
+using fixpp::tls::file_cert_source;
+using fixpp::tls::local_credentials;
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
@@ -60,11 +58,10 @@ TEST(FileCertSourcePmrFail, FactoryNeverThrows) {
     try {
         // Deliberately trigger a load failure (missing file).
         file_cert_source::Config cfg;
-        cfg.leaf_path        = "/nonexistent/path/cert.pem";
+        cfg.leaf_path = "/nonexistent/path/cert.pem";
         cfg.private_key_path = "/nonexistent/path/key.pem";
         auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-        ASSERT_FALSE(result.has_value())
-            << "Missing file must fail";
+        ASSERT_FALSE(result.has_value()) << "Missing file must fail";
         EXPECT_EQ(result.error(), error::tls_cert_load_failed)
             << "Load failure must surface as tls_cert_load_failed";
     } catch (...) {
@@ -89,11 +86,10 @@ TEST(FileCertSourcePmrFail, ParseFailureSurfacesAsCertParseFailed) {
     bool threw = false;
     try {
         file_cert_source::Config cfg;
-        cfg.leaf_path        = tmp;
+        cfg.leaf_path = tmp;
         cfg.private_key_path = tmp;
         auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
-        EXPECT_FALSE(result.has_value())
-            << "Malformed PEM must fail";
+        EXPECT_FALSE(result.has_value()) << "Malformed PEM must fail";
         if (!result.has_value()) {
             EXPECT_TRUE(result.error() == error::tls_cert_parse_failed ||
                         result.error() == error::tls_cert_load_failed)
@@ -111,9 +107,9 @@ TEST(FileCertSourcePmrFail, ParseFailureSurfacesAsCertParseFailed) {
 // load_credentials must not throw on any path. Drive it via io_context.
 TEST(FileCertSourcePmrFail, LoadCredentialsDoesNotThrow) {
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
-    cfg.ca_bundle_path   = fixture("ca.pem");
+    cfg.ca_bundle_path = fixture("ca.pem");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
     // Fixtures are baked into FIXPP_TLS_FIXTURE_DIR and checked in; any
@@ -125,7 +121,7 @@ TEST(FileCertSourcePmrFail, LoadCredentialsDoesNotThrow) {
     auto cs_ptr = *result;
     asio::io_context ioc;
 
-    bool threw    = false;
+    bool threw = false;
     bool complete = false;
 
     auto future = asio::co_spawn(
@@ -159,7 +155,7 @@ TEST(FileCertSourcePmrFail, TrapThrowBoundaryIsPresent) {
 
     // Runtime: on success with default PMR, factory must return a usable shared_ptr.
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
 
     auto result = file_cert_source::make_file_cert_source(cfg, nullptr);
@@ -167,9 +163,8 @@ TEST(FileCertSourcePmrFail, TrapThrowBoundaryIsPresent) {
     if (result.has_value()) {
         EXPECT_NE(*result, nullptr) << "Success must yield non-null shared_ptr";
     } else {
-        EXPECT_TRUE(
-            result.error() == error::tls_cert_load_failed ||
-            result.error() == error::tls_cert_parse_failed)
+        EXPECT_TRUE(result.error() == error::tls_cert_load_failed ||
+                    result.error() == error::tls_cert_parse_failed)
             << "Failure must be a typed error";
     }
 }
@@ -187,13 +182,12 @@ TEST(FileCertSourcePmrFail, TrapThrowBoundaryIsPresent) {
 TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFailed) {
     // Load a real cert DER via a normal factory call first (to get the raw bytes).
     file_cert_source::Config cfg_full;
-    cfg_full.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg_full.leaf_path = fixture("leaf_rsa2048.pem");
     cfg_full.private_key_path = fixture("leaf_rsa2048.key");
     // We need the raw DER bytes. Read them via the make_file_cert_source path
     // first to confirm the fixture is present and valid.
     auto full_result = file_cert_source::make_file_cert_source(cfg_full, nullptr);
-    ASSERT_TRUE(full_result.has_value())
-        << "Fixture leaf_rsa2048.pem must be present and loadable";
+    ASSERT_TRUE(full_result.has_value()) << "Fixture leaf_rsa2048.pem must be present and loadable";
 
     // Read the DER bytes from the PEM fixture file directly using the fixture path.
     // PEM → DER conversion via OpenSSL BIO so we have raw bytes to feed
@@ -206,11 +200,11 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFai
     // parse_certificate_der will throw bad_alloc once the 1-byte buffer is
     // exhausted. The factory must catch it and return tls_cert_load_failed.
     char tiny_buf[1]{};
-    std::pmr::monotonic_buffer_resource tiny_mr{
-        tiny_buf, sizeof(tiny_buf), std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource tiny_mr{tiny_buf, sizeof(tiny_buf),
+                                                std::pmr::null_memory_resource()};
 
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_rsa2048.pem");
+    cfg.leaf_path = fixture("leaf_rsa2048.pem");
     cfg.private_key_path = fixture("leaf_rsa2048.key");
 
     // This call exercises parse_certificate_der with an arena that throws on
@@ -249,11 +243,11 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionInSanBlockSurfacesCe
     // (~70 bytes for "host-1-fixpp-test-fixtures-very-long-subdomain...").
     // The null_memory_resource upstream ensures bad_alloc once the buffer fills.
     char medium_buf[512]{};
-    std::pmr::monotonic_buffer_resource medium_mr{
-        medium_buf, sizeof(medium_buf), std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource medium_mr{medium_buf, sizeof(medium_buf),
+                                                  std::pmr::null_memory_resource()};
 
     file_cert_source::Config cfg;
-    cfg.leaf_path        = fixture("leaf_san_64.pem");
+    cfg.leaf_path = fixture("leaf_san_64.pem");
     cfg.private_key_path = fixture("leaf_san_64.key");
 
     // This call exercises parse_certificate_der with a cert that has 64 DNS SANs
@@ -267,7 +261,8 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionInSanBlockSurfacesCe
         << "PMR exhaustion in SAN block must surface as a typed error, not terminate";
     EXPECT_TRUE(result.error() == error::tls_cert_load_failed ||
                 result.error() == error::tls_cert_parse_failed)
-        << "PMR exhaustion in SAN block must surface as tls_cert_load_failed or tls_cert_parse_failed";
+        << "PMR exhaustion in SAN block must surface as tls_cert_load_failed or "
+           "tls_cert_parse_failed";
 }
 
 }  // namespace

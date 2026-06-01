@@ -22,25 +22,28 @@
 // [2d §4.8]. Realizes specs/007-threading-clock/contracts/session_executor.hpp.
 #pragma once
 
-#include <memory_resource>
-#include <type_traits>
-#include <utility>
-
 #include <asio/any_io_executor.hpp>
 #include <asio/execution.hpp>
 #include <asio/prefer.hpp>
 #include <asio/query.hpp>
 #include <asio/require.hpp>
-
-#include <fixpp/core/error.hpp>   // expected_t (std::expected) — core leaf, no session edge
+#include <fixpp/core/error.hpp>  // expected_t (std::expected) — core leaf, no session edge
+#include <memory_resource>
+#include <type_traits>
+#include <utility>
 
 // Forward declarations ONLY — core/ MUST NOT include any session/ header
 // ([arch §2.3] leaf rule). threading_mode is defined in
 // session/session_config.hpp; make_session_executor's body lives in a
 // session/ TU (src/session/session_executor.cpp, T019) where the complete
 // enum is visible. The header here only declares it.
-namespace fixpp::session { class Session; enum class threading_mode : unsigned char; }
-namespace fixpp::otel    { struct trace_context; }   // bridge return — incomplete OK in this decl
+namespace fixpp::session {
+class Session;
+enum class threading_mode : unsigned char;
+}  // namespace fixpp::session
+namespace fixpp::otel {
+struct trace_context;
+}  // namespace fixpp::otel
 
 namespace fixpp::core {
 
@@ -55,27 +58,18 @@ public:
     // `error::executor_not_serialised` invariant. This constructor exists
     // for copy / require / prefer re-wrap on the dispatch hot path (round-3
     // RC#1 survival) and for default construction.
-    session_executor(asio::any_io_executor inner,
-                     fixpp::session::Session* session,
+    session_executor(asio::any_io_executor inner, fixpp::session::Session* session,
                      bool strand_wrapped) noexcept
-        : inner_(std::move(inner)),
-          session_(session),
-          strand_wrapped_(strand_wrapped) {}
+        : inner_(std::move(inner)), session_(session), strand_wrapped_(strand_wrapped) {}
 
     // ── project-specific accessors ──────────────────────────────────────
-    [[nodiscard]] fixpp::session::Session* session_ptr() const noexcept {
-        return session_;
-    }
+    [[nodiscard]] fixpp::session::Session* session_ptr() const noexcept { return session_; }
     // true when constructed under per_session_strand ([2d §4.8]:947-950).
     // Used by debug-build asserts + the seam-16 re-entrancy guard; NOT on
     // the runtime hot path.
-    [[nodiscard]] bool is_strand_wrapped() const noexcept {
-        return strand_wrapped_;
-    }
+    [[nodiscard]] bool is_strand_wrapped() const noexcept { return strand_wrapped_; }
     // Engine-internal: the resolved inner executor (strand-wrapped or bare).
-    [[nodiscard]] const asio::any_io_executor& underlying() const noexcept {
-        return inner_;
-    }
+    [[nodiscard]] const asio::any_io_executor& underlying() const noexcept { return inner_; }
 
     // ── ASIO executor-concept surface (forwarded to inner_) ─────────────
     template <class F>
@@ -123,18 +117,15 @@ public:
     }
 
     bool operator==(const session_executor& other) const noexcept {
-        return inner_ == other.inner_
-               && session_ == other.session_
-               && strand_wrapped_ == other.strand_wrapped_;
+        return inner_ == other.inner_ && session_ == other.session_ &&
+               strand_wrapped_ == other.strand_wrapped_;
     }
-    bool operator!=(const session_executor& other) const noexcept {
-        return !(*this == other);
-    }
+    bool operator!=(const session_executor& other) const noexcept { return !(*this == other); }
 
 private:
-    asio::any_io_executor    inner_;
-    fixpp::session::Session* session_         = nullptr;
-    bool                     strand_wrapped_  = false;
+    asio::any_io_executor inner_;
+    fixpp::session::Session* session_ = nullptr;
+    bool strand_wrapped_ = false;
 };
 
 static_assert(asio::execution::is_executor_v<session_executor>,
@@ -185,11 +176,9 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
 //
 // Cf. the book chapter `book/concurrency_model.md` for the full topology
 // + worked examples + A-vs-B selection guidance.
-[[nodiscard]] expected_t<session_executor>
-make_session_executor(asio::any_io_executor resolved_exec,
-                       fixpp::session::threading_mode mode,
-                       bool already_serialized_executor,
-                       fixpp::session::Session* session) noexcept;
+[[nodiscard]] expected_t<session_executor> make_session_executor(
+    asio::any_io_executor resolved_exec, fixpp::session::threading_mode mode,
+    bool already_serialized_executor, fixpp::session::Session* session) noexcept;
 
 // The [2d §6.5]:1153-1154 arena-derivation bridge: recovers the never-null
 // session PMR arena THROUGH the wrapper (== exec.session_ptr()->
@@ -200,8 +189,7 @@ make_session_executor(asio::any_io_executor resolved_exec,
 // complete ([arch §2.3] leaf rule — mirrors make_session_executor). Returns
 // nullptr only for a default-constructed (session-less) wrapper — never on
 // the dispatch path, where the wrapper always carries a Session*.
-[[nodiscard]] std::pmr::memory_resource*
-session_arena_of(const session_executor& exec) noexcept;
+[[nodiscard]] std::pmr::memory_resource* session_arena_of(const session_executor& exec) noexcept;
 
 // The [2d §4.6] / E8 / I-11 current-trace-context bridge: resolves the
 // session-domain trace_context THROUGH the typed wrapper (session_ptr() — a
@@ -215,7 +203,7 @@ session_arena_of(const session_executor& exec) noexcept;
 // without core/ including any session/ header; DEFINITION lands in the
 // session TU (src/session/session_executor.cpp) where Session is complete
 // ([arch §2.3] — mirrors session_arena_of / make_session_executor).
-[[nodiscard]] fixpp::otel::trace_context
-session_trace_context_of(const session_executor& exec) noexcept;
+[[nodiscard]] fixpp::otel::trace_context session_trace_context_of(
+    const session_executor& exec) noexcept;
 
 }  // namespace fixpp::core

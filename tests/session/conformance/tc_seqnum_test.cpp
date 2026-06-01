@@ -20,8 +20,20 @@
 // [const §VII.5]: ships only the in-scope subset green; deferred cases not attempted.
 //
 // Infrastructure: same as tc_establishment_test.cpp.
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -29,24 +41,10 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 
@@ -55,12 +53,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -76,22 +71,24 @@ static std::vector<std::byte> make_logon_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_heartbeat_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target) {
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
+                                                   std::string_view sender,
+                                                   std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -105,24 +102,26 @@ static std::vector<std::byte> make_heartbeat_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
 // Build a frame with an unknown MsgType (for 2q/2r).
-static std::vector<std::byte> make_unknown_msgtype_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view msg_type) {
+static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_string,
+                                                         std::uint32_t seq, std::string_view sender,
+                                                         std::string_view target,
+                                                         std::string_view msg_type) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -136,14 +135,18 @@ static std::vector<std::byte> make_unknown_msgtype_frame(
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -153,27 +156,27 @@ static std::vector<std::byte> make_unknown_msgtype_frame(
 
 class TcSeqnumTest : public ::testing::Test {
 protected:
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig                engine{};
+    fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
         using namespace std::chrono;
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_acceptor_cfg() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset.
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
@@ -187,8 +190,8 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed_sync(
-            fixpp::session::Session& s, std::span<const std::byte> frame) {
+    fixpp::core::expected_t<void> feed_sync(fixpp::session::Session& s,
+                                            std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
@@ -199,7 +202,9 @@ protected:
     // open() → receive Logon(seq=1) → state ∈ {Active, LogonReceived}.
     bool drive_to_active(fixpp::session::Session& s) {
         auto open_r = open_sync(s);
-        if (!open_r.has_value()) { return false; }
+        if (!open_r.has_value()) {
+            return false;
+        }
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         auto feed_r = feed_sync(s, logon);
         (void)feed_r;
@@ -251,8 +256,7 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     fixpp::session::Session sess(engine, cfg);
 
     // Drive to Active: Logon consumed seq=1; next expected = 2.
-    ASSERT_TRUE(drive_to_active(sess))
-        << "2c: Failed to drive to Active";
+    ASSERT_TRUE(drive_to_active(sess)) << "2c: Failed to drive to Active";
 
     // Send a Heartbeat with seq=1 (too low; no PossDupFlag).
     // 013 FR-009 / T020-A: too-low Heartbeat is silently ignored → stays Active.

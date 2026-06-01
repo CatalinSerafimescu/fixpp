@@ -25,11 +25,11 @@ class session_local {
 public:
     session_local() noexcept = default;
 
-    [[nodiscard]] T const& load() const noexcept { return value_; }   // in-domain only
-    [[nodiscard]] T&       load() noexcept        { return value_; }   // in-domain only
+    [[nodiscard]] T const& load() const noexcept { return value_; }  // in-domain only
+    [[nodiscard]] T& load() noexcept { return value_; }              // in-domain only
 
-    void store(T value) noexcept { value_ = std::move(value); }        // open: from initial_trace_context
-    void clear() noexcept        { value_ = T{}; }                     // close: reset to default
+    void store(T value) noexcept { value_ = std::move(value); }  // open: from initial_trace_context
+    void clear() noexcept { value_ = T{}; }                      // close: reset to default
 
 private:
     T value_{};

@@ -43,13 +43,7 @@
 // Anti-hang: every co_spawn carries a self-deadline (steady_timer). All
 //   ioc.run_for() calls are explicitly bounded. Whole test <= 5s.
 
-#include <atomic>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -57,22 +51,26 @@
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -84,14 +82,9 @@ namespace {
 
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_fix_frame(
-    std::string_view begin_str,
-    std::string_view msg_type,
-    int              seq_num,
-    std::string_view sender,
-    std::string_view target,
-    std::string      extra_body = "")
-{
+static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
+                                             int seq_num, std::string_view sender,
+                                             std::string_view target, std::string extra_body = "") {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -120,22 +113,18 @@ static std::vector<std::byte> make_fix_frame(
 }
 
 // Logon-ack frame (server sends seq=1 back to initiator).
-static std::vector<std::byte> make_logon_ack_frame(
-    std::string_view begin_str,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_ack_frame(std::string_view begin_str,
+                                                   std::string_view sender,
+                                                   std::string_view target) {
     return make_fix_frame(begin_str, "A", 1, sender, target,
-                          "98=0\x01" "108=30\x01");
+                          "98=0\x01"
+                          "108=30\x01");
 }
 
 // Heartbeat frame.
-static std::vector<std::byte> make_heartbeat_frame(
-    std::string_view begin_str,
-    int              seq_num,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
+                                                   std::string_view sender,
+                                                   std::string_view target) {
     return make_fix_frame(begin_str, "0", seq_num, sender, target);
 }
 
@@ -167,15 +156,11 @@ static const char* get_fixture_dir() {
 //
 // Caller must ensure server_received_logon and fixture outlive this coroutine.
 
-static asio::awaitable<void>
-run_server_driver(
-    fixpp::transport::test::LoopbackTlsFixture& fixture,
-    std::atomic<bool>&                          server_received_logon,
-    int                                         n_heartbeats,
-    std::chrono::milliseconds                   deadline)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_server_driver(fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                               std::atomic<bool>& server_received_logon,
+                                               int n_heartbeats,
+                                               std::chrono::milliseconds deadline) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     auto executor = co_await asio::this_coro::executor;
 
@@ -206,8 +191,7 @@ run_server_driver(
         }
 
         // Got a TCP connection. Drive the TLS handshake.
-        std::unique_ptr<fixpp::transport::Transport> transport =
-            std::move(*accept_r);
+        std::unique_ptr<fixpp::transport::Transport> transport = std::move(*accept_r);
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
         if (!tls) co_return;
 
@@ -219,17 +203,14 @@ run_server_driver(
         std::vector<std::byte> buf(4096);
         std::vector<std::byte> received;
         while (received.size() < 4096) {
-            auto read_r = co_await transport->async_read_some(
-                std::span<std::byte>{buf});
+            auto read_r = co_await transport->async_read_some(std::span<std::byte>{buf});
             if (!read_r.has_value()) break;
             auto n = *read_r;
             received.insert(received.end(), buf.begin(), buf.begin() + n);
 
             // Check for "35=A" in received bytes (FIX Logon MsgType).
-            auto it = std::search(
-                received.begin(), received.end(),
-                (const std::byte*)"35=A",
-                (const std::byte*)"35=A" + 4);
+            auto it = std::search(received.begin(), received.end(), (const std::byte*)"35=A",
+                                  (const std::byte*)"35=A" + 4);
             if (it != received.end()) {
                 server_received_logon.store(true, std::memory_order_release);
                 break;
@@ -240,15 +221,12 @@ run_server_driver(
 
         // Send Logon-ack (seq=1, sender=ACCEPTOR, target=INITIATOR).
         auto logon_ack = make_logon_ack_frame("FIX.4.2", "ACCEPTOR", "INITIATOR");
-        (void)co_await transport->async_write(
-            std::span<const std::byte>{logon_ack});
+        (void)co_await transport->async_write(std::span<const std::byte>{logon_ack});
 
         // Send N heartbeats (seq=2..N+1).
         for (int i = 0; i < n_heartbeats; ++i) {
-            auto hb = make_heartbeat_frame(
-                "FIX.4.2", /*seq=*/2 + i, "ACCEPTOR", "INITIATOR");
-            (void)co_await transport->async_write(
-                std::span<const std::byte>{hb});
+            auto hb = make_heartbeat_frame("FIX.4.2", /*seq=*/2 + i, "ACCEPTOR", "INITIATOR");
+            (void)co_await transport->async_write(std::span<const std::byte>{hb});
         }
 
         // Stay connected past the test's state-capture window (mirror of the US1
@@ -294,23 +272,22 @@ run_server_driver(
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     // ── Build TLS factory ────────────────────────────────────────────────────
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -319,8 +296,8 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
 
     // ── Build the loopback TLS fixture (provides the server-side listener) ───
     asio::io_context ioc;
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
 
     // The server's bound port — the initiator's reconnect_endpoint.
     uint16_t server_port = fixture.bound_port();
@@ -341,28 +318,26 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig ini;
-    ini.sender_comp_id   = "INITIATOR";
-    ini.target_comp_id   = "ACCEPTOR";
-    ini.begin_string     = "FIX.4.2";
-    ini.role             = fixpp::session::session_role::initiator;
+    ini.sender_comp_id = "INITIATOR";
+    ini.target_comp_id = "ACCEPTOR";
+    ini.begin_string = "FIX.4.2";
+    ini.role = fixpp::session::session_role::initiator;
     ini.executor_override = ioc.get_executor();
-    ini.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
-    ini.compid_authorization_policy      = authz;
-    ini.dictionary       = fixpp::test_support::make_minimal_dictionary();
-    ini.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    ini.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    ini.compid_authorization_policy = authz;
+    ini.dictionary = fixpp::test_support::make_minimal_dictionary();
+    ini.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     ini.transport_factory_override = fac;
-    ini.heartbeat_interval         = std::chrono::seconds{30};
+    ini.heartbeat_interval = std::chrono::seconds{30};
     ini.logout_disconnect_timeout_ms = 2000;
-    ini.reconnect_endpoint         = fixpp::transport::Endpoint{"127.0.0.1", server_port};
+    ini.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", server_port};
     // Rebindable no-op send slot (E-1 / E-1a): captured at open(), rebound to
     // live transport_send_ after drive_reconnect() succeeds.
     ini.transport_send = [](std::span<const std::byte>) {};
 
     auto ini_id = fixpp::session::SessionId::from_config(ini);
-    ASSERT_TRUE(engine.register_session(std::move(ini)).has_value())
-        << "register_session failed";
+    ASSERT_TRUE(engine.register_session(std::move(ini)).has_value()) << "register_session failed";
 
     // ── Server driver: observability flag ────────────────────────────────────
     // std::atomic<bool> so the coroutine and the test body can share it safely.
@@ -371,11 +346,10 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     // Spawn the server driver coroutine BEFORE engine.start() so the listener
     // is already waiting when the initiator's connect loop fires.
     constexpr int kN = 2;  // N heartbeats sent after Logon-ack
-    asio::co_spawn(
-        ioc,
-        run_server_driver(fixture, server_received_logon, kN,
-                          /*deadline=*/3500ms),
-        asio::detached);
+    asio::co_spawn(ioc,
+                   run_server_driver(fixture, server_received_logon, kN,
+                                     /*deadline=*/3500ms),
+                   asio::detached);
 
     // ── Start the engine ─────────────────────────────────────────────────────
     engine.start();
@@ -398,8 +372,8 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     if (ini_session != nullptr) {
         state = ini_session->state();
 #ifdef FIXPP_TEST_HOOKS
-        next_inbound = static_cast<int>(
-            ini_session->seqnum_mgr_test_access().next_inbound_unsafe());
+        next_inbound =
+            static_cast<int>(ini_session->seqnum_mgr_test_access().next_inbound_unsafe());
 #endif
     }
 
@@ -440,8 +414,8 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     //   RED: no frames delivered by the read-pump → next_inbound stays 1.
     EXPECT_EQ(next_inbound, 2 + kN)
         << "SC-010 / C2i: next_inbound_unsafe() must be exactly 2 + kN after the "
-        << "Logon-ack (seq=1, 1→2) and the " << kN << " heartbeats (seq=2.."
-        << (1 + kN) << ", each +1) are delivered IN ORDER by the read-pump. "
+        << "Logon-ack (seq=1, 1→2) and the " << kN << " heartbeats (seq=2.." << (1 + kN)
+        << ", each +1) are delivered IN ORDER by the read-pump. "
         << "RED: no drive_reconnect() → no live transport → no read-pump → "
         << "no frames delivered → next_inbound stays 1 "
         << "(actual=" << next_inbound << "). "

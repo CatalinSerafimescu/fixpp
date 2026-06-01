@@ -106,7 +106,8 @@ constexpr FieldTypeEntry kFieldTypeTable[] = {
 
 [[nodiscard]] bool resolve_field_type(std::string_view name, field_data_type& out) noexcept {
     for (auto const& row : kFieldTypeTable) {
-        // cppcheck-suppress useStlAlgorithm  // linear search over a small constexpr table; std::find_if's predicate-wrap isn't a win here
+        // cppcheck-suppress useStlAlgorithm  // linear search over a small constexpr table;
+        // std::find_if's predicate-wrap isn't a win here
         if (row.xml_name == name) {
             out = row.enum_value;
             return true;
@@ -559,8 +560,8 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
                 continue;
             }
             auto const& info = it->second;
-            bool const is_data = (info.type == field_data_type::Data ||
-                                  info.type == field_data_type::XmlData);
+            bool const is_data =
+                (info.type == field_data_type::Data || info.type == field_data_type::XmlData);
             if (prev_is_length && is_data) {
                 mark_pair(prev_tag, info.tag);
             }
@@ -582,8 +583,8 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
                 continue;
             }
             auto const& info = it->second;
-            bool const is_data = (info.type == field_data_type::Data ||
-                                  info.type == field_data_type::XmlData);
+            bool const is_data =
+                (info.type == field_data_type::Data || info.type == field_data_type::XmlData);
             if (prev_is_length && is_data) {
                 mark_pair(prev_tag, info.tag);
             }
@@ -635,7 +636,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // First pass: estimate name pool size.
     std::size_t pool_estimate = 0;
     for (auto const& md : messages_) {
-        // cppcheck-suppress useStlAlgorithm  // two-field accumulation; std::accumulate with binary op + projection is less readable
+        // cppcheck-suppress useStlAlgorithm  // two-field accumulation; std::accumulate with binary
+        // op + projection is less readable
         pool_estimate += md.msg_type.size() + md.name.size();
     }
     for (auto const& cd : components_) {
@@ -759,10 +761,10 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
                           /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
 
         auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
-        auto const cnt = static_cast<std::uint16_t>(
-            std::min<std::size_t>(comp_fields.size(), 65535u));
-        h.component_fields_.insert(h.component_fields_.end(),
-                                   comp_fields.begin(), comp_fields.end());
+        auto const cnt =
+            static_cast<std::uint16_t>(std::min<std::size_t>(comp_fields.size(), 65535u));
+        h.component_fields_.insert(h.component_fields_.end(), comp_fields.begin(),
+                                   comp_fields.end());
 
         // Derive parent_component_id: look up the pre-built reverse map from
         // collect_components(). 0 = top-level (no enclosing component); otherwise
@@ -801,10 +803,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
-            cnt = static_cast<std::uint16_t>(
-                std::min<std::size_t>(grp_fields.size(), 65535u));
-            h.group_fields_.insert(h.group_fields_.end(),
-                                   grp_fields.begin(), grp_fields.end());
+            cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535u));
+            h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());
         }
 
         GroupRef gr{};

@@ -26,28 +26,29 @@
 //     - Transport replays new-cert exchange.
 
 #include <gtest/gtest.h>
-#include "mock_transport.hpp"
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <algorithm>
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory>
+
+#include "mock_transport.hpp"
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
 using fixpp::tls::pin_snapshot;
-using fixpp::tls::test::MockTransport;
+using fixpp::tls::Pinset;
 using fixpp::tls::test::direction;
 using fixpp::tls::test::make_handshake_script;
+using fixpp::tls::test::MockTransport;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -66,8 +67,7 @@ constexpr pin_fingerprint kNew = [] {
 
 // Simulate "handshake-time" Pinset scan: capture snapshot once, scan for fp.
 // Returns true if fp is found in the captured snapshot.
-bool handshake_verify(std::shared_ptr<const pin_snapshot> snap,
-                      pin_fingerprint const& peer_fp) {
+bool handshake_verify(std::shared_ptr<const pin_snapshot> snap, pin_fingerprint const& peer_fp) {
     for (auto const& p : *snap) {
         if (p.sha256 == peer_fp) return true;
     }
@@ -106,8 +106,7 @@ TEST(FixsRotation, CrossHandshakeAtomicity) {
     ASSERT_TRUE(ps.remove(kOld).has_value());
 
     // The snap1 captured above is UNAFFECTED by the rotation.
-    EXPECT_EQ(snap1->size(), 1u)
-        << "snap1 must be immutable after rotation";
+    EXPECT_EQ(snap1->size(), 1u) << "snap1 must be immutable after rotation";
     EXPECT_TRUE(handshake_verify(snap1, kOld))
         << "snap1 still sees OLD (immutable snapshot invariant)";
 
@@ -118,8 +117,7 @@ TEST(FixsRotation, CrossHandshakeAtomicity) {
     ASSERT_EQ(snap2->size(), 1u);
 
     // snap1 and snap2 must be DIFFERENT objects (rotation replaced the pointer).
-    EXPECT_NE(snap1.get(), snap2.get())
-        << "rotation must have published a new snapshot pointer";
+    EXPECT_NE(snap1.get(), snap2.get()) << "rotation must have published a new snapshot pointer";
 
     EXPECT_TRUE(handshake_verify(snap2, kNew))
         << "Handshake 2: NEW pin must be present in fresh snapshot";

@@ -19,20 +19,15 @@
 //   expected_t::unexpected{store_factory_failed} at config-load time.
 
 #include <gtest/gtest.h>
+#include <unistd.h>  // pathconf, _PC_NAME_MAX
 
 #include <array>
-#include <climits>
-#include <cstddef>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <unistd.h>   // pathconf, _PC_NAME_MAX
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
+#include <climits>
+#include <cstddef>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store_factory.hpp>
@@ -40,6 +35,9 @@
 #include <fixpp/session/quickfix_compat/cfg_loader.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fstream>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -61,8 +59,7 @@ fs::path make_scratch_dir(const char* suffix) {
 }
 
 // Write a QuickFIX .cfg snippet to a file and return the path.
-fs::path write_cfg(const fs::path& scratch,
-                   const std::string& content,
+fs::path write_cfg(const fs::path& scratch, const std::string& content,
                    const char* name = "test.cfg") {
     fs::path p = scratch / name;
     std::ofstream ofs(p, std::ios::trunc);
@@ -76,9 +73,8 @@ class CollectVisitor : public fixpp::session::retrieve_visitor {
 public:
     std::vector<std::vector<std::byte>> frames;
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>>
-    on_frame(seqnum_t /*seq*/,
-             std::span<const std::byte> data) noexcept override {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
+        seqnum_t /*seq*/, std::span<const std::byte> data) noexcept override {
         frames.emplace_back(data.begin(), data.end());
         co_return fixpp::session::visit_result::cont;
     }
@@ -95,16 +91,17 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
     // Write a minimal QuickFIX .cfg.
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     // ── Call under test ───────────────────────────────────────────────────────
     auto result = cfg_to_file_store_factory(cfg_path);
-    ASSERT_TRUE(result.has_value())
-        << "Expected success but got error: "
-        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+    ASSERT_TRUE(result.has_value()) << "Expected success but got error: "
+                                    << (result.has_value() ? 0 : static_cast<int>(result.error()));
 
     std::unique_ptr<FileStoreFactory>& factory = *result;
     ASSERT_NE(factory, nullptr);
@@ -112,9 +109,8 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
     // ── Verify Config.directory mirrors FileStorePath ─────────────────────────
     // Access the factory's stored Config.directory via make().
     // We call make() with the executor from the pool to populate file_io_executor.
-    auto store_result = factory->make(
-        "SENDER", "TARGET", nullptr, 1024UL * 1024UL * 1024UL,
-        pool.get_executor());
+    auto store_result =
+        factory->make("SENDER", "TARGET", nullptr, 1024UL * 1024UL * 1024UL, pool.get_executor());
     ASSERT_TRUE(store_result.has_value())
         << "factory->make() failed with error: "
         << (store_result.has_value() ? 0 : static_cast<int>(store_result.error()));
@@ -124,7 +120,11 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
 
     // ── Round-trip a single frame ─────────────────────────────────────────────
     // Store one outbound frame with seq=1.
-    const std::string payload = "8=FIX.4.4\x01""35=D\x01""49=SENDER\x01""56=TARGET\x01";
+    const std::string payload =
+        "8=FIX.4.4\x01"
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01";
     std::vector<std::byte> frame_bytes;
     for (unsigned char c : payload) {
         frame_bytes.push_back(static_cast<std::byte>(c));
@@ -132,10 +132,8 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
     const std::span<const std::byte> frame_span(frame_bytes);
 
     // store() is an awaitable; run it on the pool.
-    auto store_fut = asio::co_spawn(
-        pool,
-        store_ptr->store(1, frame_span, direction_t::outbound),
-        asio::use_future);
+    auto store_fut = asio::co_spawn(pool, store_ptr->store(1, frame_span, direction_t::outbound),
+                                    asio::use_future);
     auto store_ec = store_fut.get();
     ASSERT_TRUE(store_ec.has_value())
         << "store() failed with error: "
@@ -144,17 +142,14 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
     // retrieve() the frame back and verify byte-equality.
     CollectVisitor visitor;
     auto retrieve_fut = asio::co_spawn(
-        pool,
-        store_ptr->retrieve(1, 1, direction_t::outbound, visitor),
-        asio::use_future);
+        pool, store_ptr->retrieve(1, 1, direction_t::outbound, visitor), asio::use_future);
     auto retrieve_ec = retrieve_fut.get();
     ASSERT_TRUE(retrieve_ec.has_value())
         << "retrieve() failed with error: "
         << (retrieve_ec.has_value() ? 0 : static_cast<int>(retrieve_ec.error()));
 
     ASSERT_EQ(visitor.frames.size(), 1u) << "Expected exactly 1 retrieved frame";
-    EXPECT_EQ(visitor.frames[0], frame_bytes)
-        << "Round-trip frame mismatch: byte content differs";
+    EXPECT_EQ(visitor.frames[0], frame_bytes) << "Round-trip frame mismatch: byte content differs";
 
     pool.join();
     fs::remove_all(scratch);
@@ -168,20 +163,24 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
 
 // Helper: write a .cfg with the given SenderCompID, call cfg_to_file_store_factory,
 // assert it returns store_factory_failed.
-void assert_compid_rejected(const std::string& sender_compid,
-                             const char* suffix,
-                             const char* label) {
+void assert_compid_rejected(const std::string& sender_compid, const char* suffix,
+                            const char* label) {
     auto scratch = make_scratch_dir(suffix);
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
-        "SenderCompID=" + sender_compid + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
+        "SenderCompID=" +
+        sender_compid +
+        "\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content, "test.cfg");
 
     auto result = cfg_to_file_store_factory(cfg_path);
     EXPECT_FALSE(result.has_value())
-        << label << ": expected cfg_to_file_store_factory to FAIL at config-load "
+        << label
+        << ": expected cfg_to_file_store_factory to FAIL at config-load "
            "time (store_factory_failed) but it succeeded.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed)
@@ -192,14 +191,12 @@ void assert_compid_rejected(const std::string& sender_compid,
 
 // Sub-case 1: path traversal in SenderCompID
 TEST(CfgLoaderDefenseInDepth, PathTraversalSenderRejected) {
-    assert_compid_rejected("../../etc/passwd", "traversal",
-                           "SenderCompID='../../etc/passwd'");
+    assert_compid_rejected("../../etc/passwd", "traversal", "SenderCompID='../../etc/passwd'");
 }
 
 // Sub-case 2: path separator in SenderCompID
 TEST(CfgLoaderDefenseInDepth, PathSeparatorSenderRejected) {
-    assert_compid_rejected("foo/bar", "separator",
-                           "SenderCompID='foo/bar'");
+    assert_compid_rejected("foo/bar", "separator", "SenderCompID='foo/bar'");
 }
 
 // Sub-case 3: empty SenderCompID (key present but value is blank)
@@ -208,7 +205,9 @@ TEST(CfgLoaderDefenseInDepth, EmptySenderCompIDRejected) {
     auto scratch = make_scratch_dir("empty_sender");
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
@@ -234,7 +233,8 @@ TEST(CfgLoaderDefenseInDepth, ControlCharSenderRejected) {
         std::ofstream ofs(cfg_path, std::ios::trunc | std::ios::binary);
         ofs << "[DEFAULT]\n"
             << "FileStorePath=" << scratch.string() << "\n"
-            << "SenderCompID=\x01" "abc\n"
+            << "SenderCompID=\x01"
+               "abc\n"
             << "TargetCompID=TARGET\n";
     }
 
@@ -264,16 +264,20 @@ TEST(CfgLoaderDefenseInDepth, NameMaxExcessSenderRejected) {
 
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
-        "SenderCompID=" + long_sender + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
+        "SenderCompID=" +
+        long_sender +
+        "\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     auto result = cfg_to_file_store_factory(cfg_path);
     EXPECT_FALSE(result.has_value())
         << "SenderCompID exceeding NAME_MAX: expected cfg_to_file_store_factory "
-           "to FAIL at config-load time but it succeeded. name_max=" << name_max
-        << " sender_len=" << excess_len;
+           "to FAIL at config-load time but it succeeded. name_max="
+        << name_max << " sender_len=" << excess_len;
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -293,8 +297,7 @@ TEST(CfgLoaderEdgeCases, MissingFileStorePathRejected) {
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Missing FileStorePath: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Missing FileStorePath: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -310,8 +313,7 @@ TEST(CfgLoaderEdgeCases, NonExistentFileRejected) {
     fs::remove(nonexistent);  // ensure it doesn't exist
 
     auto result = cfg_to_file_store_factory(nonexistent);
-    EXPECT_FALSE(result.has_value())
-        << "Non-existent file: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Non-existent file: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -333,16 +335,17 @@ TEST(CfgLoaderCoverageUplift, SessionSectionOverridesDefault) {
         "SenderCompID=DEFAULT_SENDER\n"
         "TargetCompID=DEFAULT_TARGET\n"
         "[SESSION]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SESSION_SENDER\n"
         "TargetCompID=SESSION_TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     // Expected: SESSION values win the merge
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_TRUE(result.has_value())
-        << "[SESSION] override: expected success but got error: "
-        << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+    EXPECT_TRUE(result.has_value()) << "[SESSION] override: expected success but got error: "
+                                    << (!result.has_value() ? static_cast<int>(result.error()) : 0);
     fs::remove_all(scratch);
 }
 
@@ -352,7 +355,9 @@ TEST(CfgLoaderCoverageUplift, LowercaseSessionSectionRecognised) {
     auto scratch = make_scratch_dir("lc_session");
     const std::string cfg_content =
         "[default]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
@@ -374,7 +379,9 @@ TEST(CfgLoaderCoverageUplift, LowercaseSessionOverrideRecognised) {
         "SenderCompID=DEFAULT_SENDER\n"
         "TargetCompID=DEFAULT_TARGET\n"
         "[session]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SESSION_SND\n"
         "TargetCompID=SESSION_TGT\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
@@ -394,7 +401,9 @@ TEST(CfgLoaderCoverageUplift, UnknownSectionKeysIgnored) {
     auto scratch = make_scratch_dir("unknown_section");
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n"
         "[STORE]\n"
@@ -415,7 +424,9 @@ TEST(CfgLoaderCoverageUplift, KeyWithoutEqualsIgnored) {
     auto scratch = make_scratch_dir("no_equals");
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n"
         "SomeKeyWithoutEquals\n";
@@ -434,8 +445,7 @@ TEST(CfgLoaderCoverageUplift, EmptyFileRejected) {
     fs::path cfg_path = write_cfg(scratch, "");
 
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Empty file: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Empty file: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -452,8 +462,7 @@ TEST(CfgLoaderCoverageUplift, CommentOnlyFileRejected) {
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Comment-only file: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Comment-only file: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -465,13 +474,14 @@ TEST(CfgLoaderCoverageUplift, MissingSenderCompIDRejected) {
     auto scratch = make_scratch_dir("missing_sender");
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Missing SenderCompID: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Missing SenderCompID: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -483,13 +493,14 @@ TEST(CfgLoaderCoverageUplift, MissingTargetCompIDRejected) {
     auto scratch = make_scratch_dir("missing_target");
     const std::string cfg_content =
         "[DEFAULT]\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Missing TargetCompID: expected store_factory_failed.";
+    EXPECT_FALSE(result.has_value()) << "Missing TargetCompID: expected store_factory_failed.";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
@@ -522,7 +533,9 @@ TEST(CfgLoaderCoverageUplift, DuplicateFileStorePathLastWins) {
     const std::string cfg_content =
         "[DEFAULT]\n"
         "FileStorePath=/tmp/first_ignored\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
@@ -541,16 +554,17 @@ TEST(CfgLoaderCoverageUplift, MalformedSectionHeaderRejected) {
     auto scratch = make_scratch_dir("malformed_section");
     const std::string cfg_content =
         "[DEFAULT\n"
-        "FileStorePath=" + scratch.string() + "\n"
+        "FileStorePath=" +
+        scratch.string() +
+        "\n"
         "SenderCompID=SENDER\n"
         "TargetCompID=TARGET\n";
     fs::path cfg_path = write_cfg(scratch, cfg_content);
 
     // The section is not recognised → keys are in Section::none context → ignored.
     auto result = cfg_to_file_store_factory(cfg_path);
-    EXPECT_FALSE(result.has_value())
-        << "Malformed section header: expected store_factory_failed "
-           "(keys outside a valid section are ignored).";
+    EXPECT_FALSE(result.has_value()) << "Malformed section header: expected store_factory_failed "
+                                        "(keys outside a valid section are ignored).";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }

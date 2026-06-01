@@ -47,15 +47,14 @@ using fixpp::test_support::make_nos_frame;
 // Reify a NOS into owning_mr; the source frame buffer + arena are built and
 // DESTROYED inside, so a returned ONOS that still reads fields proves the
 // owning deep-copy survived the source's death (AC-R4 / SC-006).
-[[nodiscard]] inline fixpp::core::expected_t<ONOS>
-reify_nos(std::pmr::memory_resource* owning_mr) {
+[[nodiscard]] inline fixpp::core::expected_t<ONOS> reify_nos(std::pmr::memory_resource* owning_mr) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource frame_mr;
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     if (!framed || framed->empty()) {
         return std::unexpected{fixpp::core::error::dict_reify_wire_body_not_ready};
     }
@@ -103,8 +102,7 @@ TEST(ReifyMoveTest, FromViewSucceeds) {
     // succeeds. (Was the retired R6 dict_reify_wire_body_not_ready oracle.)
     std::pmr::monotonic_buffer_resource owning_mr;
     auto r = reify_nos(&owning_mr);
-    ASSERT_TRUE(r.has_value())
-        << "from_view must succeed post-cutover (real owning deep-copy)";
+    ASSERT_TRUE(r.has_value()) << "from_view must succeed post-cutover (real owning deep-copy)";
     auto cl = r->cl_ord_id();
     ASSERT_TRUE(cl.has_value());
     EXPECT_EQ(cl.value(), "ORD1");
@@ -146,7 +144,7 @@ TEST(ReifyMoveTest, MovedToCanCallAccessors) {
     auto r = reify_nos(&owning_mr);
     ASSERT_TRUE(r.has_value());
     ONOS moved = std::move(*r);
-    EXPECT_TRUE(moved.cl_ord_id().has_value());     // tag 11 — in frame
+    EXPECT_TRUE(moved.cl_ord_id().has_value());      // tag 11 — in frame
     EXPECT_TRUE(moved.field_value(55).has_value());  // tag 55 Symbol — in frame
     EXPECT_FALSE(moved.field_value(54).has_value())  // tag 54 Side — NOT in frame
         << "absent field reports absent (no UB)";

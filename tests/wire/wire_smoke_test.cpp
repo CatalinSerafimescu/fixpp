@@ -3,6 +3,4 @@
 
 #include <gtest/gtest.h>
 
-TEST(WireSmoke, Compiles) {
-    SUCCEED();
-}
+TEST(WireSmoke, Compiles) { SUCCEED(); }

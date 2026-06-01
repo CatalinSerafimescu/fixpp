@@ -34,21 +34,15 @@
 //          data-model E-5/E-7; research R9; [const §XI.2/§XV.9];
 //          [[feedback_asio_cospawn_total_cancellation_default]].
 
-#include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -61,6 +55,10 @@
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
 
 #include "support/minimal_dictionary.hpp"
 
@@ -91,9 +89,8 @@ uint16_t reserve_free_port(asio::io_context& ioc) {
 }
 
 bool is_established(fixpp::session::Session* s) {
-    return s != nullptr &&
-        (s->state() == fixpp::session::fsm_state::Active ||
-         s->state() == fixpp::session::fsm_state::LogonReceived);
+    return s != nullptr && (s->state() == fixpp::session::fsm_state::Active ||
+                            s->state() == fixpp::session::fsm_state::LogonReceived);
 }
 
 }  // namespace
@@ -102,25 +99,24 @@ bool is_established(fixpp::session::Session* s) {
 
 TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
 
     // Shared TLS factory + cert_source (same leaf cert for both ends — mTLS-CA).
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -134,22 +130,20 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     // The leaf cert CN is "fixpp-leaf-rsa2048" (loopback fixture convention).
-    auto make_cfg = [&](const char* sender, const char* target,
-                        fixpp::session::session_role role,
+    auto make_cfg = [&](const char* sender, const char* target, fixpp::session::session_role role,
                         const char* peer_compid) {
         fixpp::session::SessionConfig c;
-        c.sender_comp_id    = sender;
-        c.target_comp_id    = target;
-        c.begin_string      = "FIX.4.2";
-        c.role              = role;
+        c.sender_comp_id = sender;
+        c.target_comp_id = target;
+        c.begin_string = "FIX.4.2";
+        c.role = role;
         c.executor_override = ioc.get_executor();
-        c.security_profile  = fixpp::session::SecurityProfile{
-            fixpp::session::SecurityProfile::kind::mtls_ca};
+        c.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
         // Authorize the peer's live cert identity (CN) → its expected CompID.
         c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer_compid);
-        c.dictionary        = fixpp::test_support::make_minimal_dictionary();
-        c.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        c.dictionary = fixpp::test_support::make_minimal_dictionary();
+        c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         c.transport_factory_override = fac;
         c.heartbeat_interval = std::chrono::seconds{30};
         c.logout_disconnect_timeout_ms = 2000;
@@ -159,10 +153,10 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
         return c;
     };
 
-    auto acc = make_cfg("ACCEPTOR", "INITIATOR",
-                        fixpp::session::session_role::acceptor, "INITIATOR");
-    auto ini = make_cfg("INITIATOR", "ACCEPTOR",
-                        fixpp::session::session_role::initiator, "ACCEPTOR");
+    auto acc =
+        make_cfg("ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR");
+    auto ini =
+        make_cfg("INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR");
     const auto acc_id = fixpp::session::SessionId::from_config(acc);
     const auto ini_id = fixpp::session::SessionId::from_config(ini);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
@@ -242,10 +236,10 @@ TEST(EngineLifecycleTest, DuplicateIdentityRejected) {
 
     auto make_cfg = [&] {
         fixpp::session::SessionConfig c;
-        c.sender_comp_id    = "ACCEPTOR";
-        c.target_comp_id    = "INITIATOR";
-        c.begin_string      = "FIX.4.2";
-        c.role              = fixpp::session::session_role::acceptor;
+        c.sender_comp_id = "ACCEPTOR";
+        c.target_comp_id = "INITIATOR";
+        c.begin_string = "FIX.4.2";
+        c.role = fixpp::session::session_role::acceptor;
         c.executor_override = ioc.get_executor();
         return c;
     };

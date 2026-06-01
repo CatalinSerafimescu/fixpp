@@ -48,24 +48,22 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstring>
-#include <thread>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <thread>
+#include <vector>
 
 #include "support/disjoint_session_executor.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -78,20 +76,18 @@ using fixpp::core::EngineConfig;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 
-bool eq(const fixpp::otel::trace_context& a,
-        const fixpp::otel::trace_context& b) {
+bool eq(const fixpp::otel::trace_context& a, const fixpp::otel::trace_context& b) {
     return std::memcmp(&a, &b, sizeof(a)) == 0;
 }
 
 // Shared test fixture: 4-thread io_context backing a session, populated
 // trace_context seed, opened session. Both tests share this prelude.
 struct SeamTraceContextResume : ::testing::Test {
-    asio::io_context           ioc;
-    asio::executor_work_guard<asio::io_context::executor_type> work{
-        asio::make_work_guard(ioc)};
-    std::vector<std::thread>   threads;
-    EngineConfig               engine;
-    SessionConfig              cfg;
+    asio::io_context ioc;
+    asio::executor_work_guard<asio::io_context::executor_type> work{asio::make_work_guard(ioc)};
+    std::vector<std::thread> threads;
+    EngineConfig engine;
+    SessionConfig cfg;
     fixpp::otel::trace_context seed{};
 
     SeamTraceContextResume() {
@@ -99,15 +95,13 @@ struct SeamTraceContextResume : ::testing::Test {
             threads.emplace_back([this] { ioc.run(); });
         }
         engine.executor = ioc.get_executor();
-        engine.clock    = std::make_shared<fixpp::core::system_clock_source>(
-            ioc.get_executor());
+        engine.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         for (std::size_t i = 0; i < seed.trace_id.size(); ++i)
             seed.trace_id[i] = std::byte(0xA0 + i);
-        for (std::size_t i = 0; i < seed.span_id.size(); ++i)
-            seed.span_id[i] = std::byte(0x10 + i);
+        for (std::size_t i = 0; i < seed.span_id.size(); ++i) seed.span_id[i] = std::byte(0x10 + i);
         seed.flags = 0x01;
         cfg.initial_trace_context = seed;
     }
@@ -165,7 +159,7 @@ TEST_F(SeamTraceContextResume, SurvivesExplicitCrossThreadHop) {
                     // current_trace_context() runs on side_thread, under a
                     // session_executor for &sess → recovers session state.
                     const auto c1 = co_await fixpp::current_trace_context();
-                    EXPECT_TRUE(eq(c1, seed));   // contract: survives hop
+                    EXPECT_TRUE(eq(c1, seed));  // contract: survives hop
                     co_return t;
                 },
                 asio::use_awaitable);
@@ -218,10 +212,10 @@ TEST_F(SeamTraceContextResume, SurvivesSchedulingResumes) {
             const auto t0 = std::this_thread::get_id();
             bool thread_changed = false;
             for (int i = 0; i < 200; ++i) {
-                co_await sess.effective_clock()->sleep_until(
-                    std::chrono::steady_clock::now() + 1ms);
+                co_await sess.effective_clock()->sleep_until(std::chrono::steady_clock::now() +
+                                                             1ms);
                 const auto again = co_await fixpp::current_trace_context();
-                EXPECT_TRUE(eq(again, seed));   // contract — every iter
+                EXPECT_TRUE(eq(again, seed));  // contract — every iter
                 if (std::this_thread::get_id() != t0) thread_changed = true;
             }
             co_return thread_changed;
@@ -232,8 +226,7 @@ TEST_F(SeamTraceContextResume, SurvivesSchedulingResumes) {
     // byte-equality) is what matters; the cross-thread observation is a
     // function of asio's routing on the host and is not guaranteed.
     const bool observed = thread_changed_f.get();
-    ::testing::Test::RecordProperty("thread_changed_observed",
-                                    observed ? "true" : "false");
+    ::testing::Test::RecordProperty("thread_changed_observed", observed ? "true" : "false");
 }
 
 }  // namespace

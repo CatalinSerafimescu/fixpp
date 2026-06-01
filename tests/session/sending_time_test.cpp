@@ -29,19 +29,14 @@
 //
 // Anchors: data-model.md E7/E8; research D-3/D-5/D-8; error slot 71;
 // [FIX-SL §4.2.3]; spec FR-013; SC-007; tasks.md T051/T055/T056.
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <future>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -49,12 +44,15 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -69,22 +67,20 @@ using fixpp::core::utc_time_point;
 TEST(SendingTimeCheck, WithinMaxLatency) {
     utc_time_point epoch{};
     auto inbound = epoch + std::chrono::seconds{1000};
-    auto now     = epoch + std::chrono::seconds{1090};  // 90 s delta, < 120 s
+    auto now = epoch + std::chrono::seconds{1090};  // 90 s delta, < 120 s
 
     auto r = fixpp::session::check_sending_time(inbound, now, std::chrono::seconds{120});
-    EXPECT_TRUE(r.has_value())
-        << "90 s delta with 120 s MaxLatency must return ok";
+    EXPECT_TRUE(r.has_value()) << "90 s delta with 120 s MaxLatency must return ok";
 }
 
 // Test 2: exceeds MaxLatency → session_sending_time_accuracy
 TEST(SendingTimeCheck, ExceedsMaxLatency) {
     utc_time_point epoch{};
     auto inbound = epoch + std::chrono::seconds{1000};
-    auto now     = epoch + std::chrono::seconds{1200};  // 200 s delta, > 120 s
+    auto now = epoch + std::chrono::seconds{1200};  // 200 s delta, > 120 s
 
     auto r = fixpp::session::check_sending_time(inbound, now, std::chrono::seconds{120});
-    ASSERT_FALSE(r.has_value())
-        << "200 s delta with 120 s MaxLatency must return error";
+    ASSERT_FALSE(r.has_value()) << "200 s delta with 120 s MaxLatency must return error";
     EXPECT_EQ(r.error(), fixpp::core::error::session_sending_time_accuracy)
         << "Error must be session_sending_time_accuracy (slot 71)";
 }
@@ -93,7 +89,7 @@ TEST(SendingTimeCheck, ExceedsMaxLatency) {
 TEST(SendingTimeCheck, ExactBoundaryIsOk) {
     utc_time_point epoch{};
     auto inbound = epoch + std::chrono::seconds{1000};
-    auto now     = epoch + std::chrono::seconds{1120};  // exactly 120 s delta
+    auto now = epoch + std::chrono::seconds{1120};  // exactly 120 s delta
 
     auto r = fixpp::session::check_sending_time(inbound, now, std::chrono::seconds{120});
     EXPECT_TRUE(r.has_value())
@@ -104,7 +100,7 @@ TEST(SendingTimeCheck, ExactBoundaryIsOk) {
 TEST(SendingTimeCheck, StaleInPast) {
     utc_time_point epoch{};
     auto inbound = epoch + std::chrono::seconds{1000};
-    auto now     = epoch + std::chrono::seconds{1200};  // inbound is 200s in the past
+    auto now = epoch + std::chrono::seconds{1200};  // inbound is 200s in the past
 
     auto r = fixpp::session::check_sending_time(inbound, now, std::chrono::seconds{120});
     ASSERT_FALSE(r.has_value());
@@ -115,7 +111,7 @@ TEST(SendingTimeCheck, StaleInPast) {
 TEST(SendingTimeCheck, FarFutureSendingTime) {
     utc_time_point epoch{};
     auto inbound = epoch + std::chrono::seconds{1300};  // 300s in the future
-    auto now     = epoch + std::chrono::seconds{1000};
+    auto now = epoch + std::chrono::seconds{1000};
 
     auto r = fixpp::session::check_sending_time(inbound, now, std::chrono::seconds{120});
     ASSERT_FALSE(r.has_value());
@@ -126,47 +122,52 @@ TEST(SendingTimeCheck, FarFutureSendingTime) {
 
 // Build a FIX frame with an explicit SendingTime value.
 static std::vector<std::byte> make_frame_with_sending_time(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view sending_time,
-        std::string_view extra_body = {}) {
+    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
+    std::string_view sender, std::string_view target, std::string_view sending_time,
+    std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_body.empty()) { body += extra_body; }
+    if (!extra_body.empty()) {
+        body += extra_body;
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::string extract_field(std::span<const std::byte> frame,
-                                  std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -187,21 +188,21 @@ struct SendingTimeFixture {
         auto utc = system_clock::time_point{} + seconds{kNowSec};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     SessionConfig make_cfg(std::string_view begin_string = "FIX.4.2") {
         SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = 30s;
         // Use default MaxLatency (120 s) — no sending_time_threshold override.
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
         // RC#C (gate-b/r1): bilateral_lenient — tests here don't exercise reset semantics.
@@ -211,8 +212,7 @@ struct SendingTimeFixture {
 
     // Drive session to Active via initiator path.
     // Uses the mock clock's "now" (2024-01-01-00:00:00) as the valid SendingTime.
-    void open_to_active(Session& sess,
-                        std::string_view begin_string = "FIX.4.2") {
+    void open_to_active(Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
@@ -220,11 +220,11 @@ struct SendingTimeFixture {
 
         // Feed a valid Logon with SendingTime matching mock clock now.
         // "now" = 2024-01-01 00:00:00 UTC → "20240101-00:00:00.000"
-        auto logon = make_frame_with_sending_time(
-            begin_string, "A", 1, "TW", "ISLD",
-            "20240101-00:00:00.000",
-            "98=0\x01""108=30\x01");
-        auto fut2  = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto logon = make_frame_with_sending_time(begin_string, "A", 1, "TW", "ISLD",
+                                                  "20240101-00:00:00.000",
+                                                  "98=0\x01"
+                                                  "108=30\x01");
+        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
@@ -252,9 +252,8 @@ TEST(SendingTimeIntegration, StaleSendingTimeInActiveTriggersRejectThenLogout) {
     // Feed a Heartbeat(35=0) with SendingTime 300 s in the past
     // (well beyond the 120 s MaxLatency).
     // "20231231-23:55:00.000" = 2024-01-01 00:00:00 − 300 s
-    auto stale_hb = make_frame_with_sending_time(
-        "FIX.4.2", "0", 2, "TW", "ISLD",
-        "20231231-23:55:00.000");
+    auto stale_hb =
+        make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", "20231231-23:55:00.000");
     f.feed(sess, stale_hb);
 
     // Must emit a Reject(35=3) with RefTagID=52, SessionRejectReason=10.
@@ -306,10 +305,10 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
 
     // Feed a Logon with SendingTime 300 s in the past.
     // "20231231-23:55:00.000" = now − 300 s (well beyond 120 s MaxLatency).
-    auto stale_logon = make_frame_with_sending_time(
-        "FIX.4.2", "A", 1, "TW", "ISLD",
-        "20231231-23:55:00.000",
-        "98=0\x01""108=30\x01");
+    auto stale_logon =
+        make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", "20231231-23:55:00.000",
+                                     "98=0\x01"
+                                     "108=30\x01");
     f.feed(sess, stale_logon);
 
     // Must emit a Logout(35=5) as the error response.
@@ -317,8 +316,12 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
     bool found_logout = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") { found_reject = true; }
-        if (mt == "5") { found_logout = true; }
+        if (mt == "3") {
+            found_reject = true;
+        }
+        if (mt == "5") {
+            found_logout = true;
+        }
     }
 
     EXPECT_FALSE(found_reject)
@@ -345,73 +348,73 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
 
 // Build a FIX frame with tag 52 ABSENT (no SendingTime field at all).
 static std::vector<std::byte> make_frame_missing_sending_time(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra_body = {}) {
+    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
+    std::string_view sender, std::string_view target, std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     // Tag 52 deliberately omitted.
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_body.empty()) { body += extra_body; }
+    if (!extra_body.empty()) {
+        body += extra_body;
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
 // Helper: assert Reject(35=3, 371=52, 373=10) + Logout(35=5) in outbound frames
 // and session state == Disconnected.
 // Verifies the ordering guarantee: Reject is emitted before Logout.
-static void assert_reject_then_logout_then_disconnected(
-        const TransportDouble& transport,
-        std::size_t before,
-        const fixpp::session::Session& sess,
-        const char* context) {
+static void assert_reject_then_logout_then_disconnected(const TransportDouble& transport,
+                                                        std::size_t before,
+                                                        const fixpp::session::Session& sess,
+                                                        const char* context) {
     bool found_reject = false;
     bool found_logout = false;
-    int  reject_pos   = -1;
-    int  logout_pos   = -1;
+    int reject_pos = -1;
+    int logout_pos = -1;
 
     for (std::size_t i = before; i < transport.sent_count(); ++i) {
         auto mt = extract_field(transport.sent(i), 35);
         if (mt == "3" && !found_reject) {
             found_reject = true;
-            reject_pos   = static_cast<int>(i);
+            reject_pos = static_cast<int>(i);
             EXPECT_EQ(extract_field(transport.sent(i), 371), "52")
                 << context << ": RefTagID(371) value must be \"52\" (SendingTime tag number)";
             EXPECT_EQ(extract_field(transport.sent(i), 373), "10")
-                << context << ": SessionRejectReason(373) value must be \"10\" (SendingTime accuracy)";
+                << context
+                << ": SessionRejectReason(373) value must be \"10\" (SendingTime accuracy)";
         } else if (mt == "5" && !found_logout) {
             found_logout = true;
-            logout_pos   = static_cast<int>(i);
+            logout_pos = static_cast<int>(i);
         }
     }
 
     EXPECT_TRUE(found_reject)
         << context << ": must emit Reject(35=3, 373=10, 371=52) for missing/malformed SendingTime";
-    EXPECT_TRUE(found_logout)
-        << context << ": must emit Logout(35=5) after Reject";
+    EXPECT_TRUE(found_logout) << context << ": must emit Logout(35=5) after Reject";
 
     if (found_reject && found_logout) {
-        EXPECT_LT(reject_pos, logout_pos)
-            << context << ": Reject must be emitted before Logout";
+        EXPECT_LT(reject_pos, logout_pos) << context << ": Reject must be emitted before Logout";
     }
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
@@ -435,7 +438,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInActiveRejects) {
     f.feed(sess, frame);
 
     assert_reject_then_logout_then_disconnected(f.transport, before, sess,
-        "MissingSendingTimeInActiveRejects");
+                                                "MissingSendingTimeInActiveRejects");
 }
 
 // T015 test 2: MalformedSendingTimeInActiveRejects
@@ -455,7 +458,7 @@ TEST(SendingTimeIntegration, MalformedSendingTimeInActiveRejects) {
     f.feed(sess, frame);
 
     assert_reject_then_logout_then_disconnected(f.transport, before, sess,
-        "MalformedSendingTimeInActiveRejects");
+                                                "MalformedSendingTimeInActiveRejects");
 }
 
 // T015 test 3: MissingSendingTimeInLogonReceivedRejects
@@ -480,13 +483,14 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
     // F1 (Round-A drift fix): acceptor now emits reply Logon and transitions to Active
     // within on_inbound_frame; LogonReceived is internal/transient. After feed_sync
     // the state is Active (spec.md FR-005 §US2 AC2).
-    auto peer_logon = make_frame_with_sending_time(
-        "FIX.4.2", "A", 1, "TW", "ISLD",
-        "20240101-00:00:00.000",
-        "98=0\x01""108=30\x01");
+    auto peer_logon =
+        make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", "20240101-00:00:00.000",
+                                     "98=0\x01"
+                                     "108=30\x01");
     f.feed(sess, peer_logon);
     ASSERT_EQ(sess.state(), fsm_state::Active)
-        << "acceptor must be in Active after valid peer Logon (F1 drift fix: LogonReceived is transient)";
+        << "acceptor must be in Active after valid peer Logon (F1 drift fix: LogonReceived is "
+           "transient)";
 
     const std::size_t before = f.transport.sent_count();
 
@@ -495,7 +499,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
     f.feed(sess, frame);
 
     assert_reject_then_logout_then_disconnected(f.transport, before, sess,
-        "MissingSendingTimeInLogonReceivedRejects");
+                                                "MissingSendingTimeInLogonReceivedRejects");
 }
 
 // ── T017 [US3] — FR-009: missing/malformed SendingTime on inbound Logon (LogonSent) ──
@@ -523,8 +527,9 @@ TEST(SendingTimeIntegration, MissingSendingTimeOnLogonEmitsLogoutOnly) {
     const std::size_t before = f.transport.sent_count();
 
     // Peer Logon with tag 52 absent (no SendingTime field).
-    auto stale_logon = make_frame_missing_sending_time(
-        "FIX.4.2", "A", 1, "TW", "ISLD", "98=0\x01""108=30\x01");
+    auto stale_logon = make_frame_missing_sending_time("FIX.4.2", "A", 1, "TW", "ISLD",
+                                                       "98=0\x01"
+                                                       "108=30\x01");
     f.feed(sess, stale_logon);
 
     // Must NOT emit Reject(35=3). MUST emit Logout(35=5). Session → Disconnected.
@@ -533,21 +538,24 @@ TEST(SendingTimeIntegration, MissingSendingTimeOnLogonEmitsLogoutOnly) {
     bool found_logout_text = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") { found_reject = true; }
+        if (mt == "3") {
+            found_reject = true;
+        }
         if (mt == "5") {
             found_logout = true;
             // Tag 58 (Text) must be present with an error description.
             auto text = extract_field(f.transport.sent(i), 58);
-            if (!text.empty()) { found_logout_text = true; }
+            if (!text.empty()) {
+                found_logout_text = true;
+            }
         }
     }
 
     EXPECT_FALSE(found_reject)
         << "MissingSendingTimeOnLogonEmitsLogoutOnly: D-3 LogonSent-special: "
            "NO standalone Reject(35=3) before establishment";
-    EXPECT_TRUE(found_logout)
-        << "MissingSendingTimeOnLogonEmitsLogoutOnly: must emit Logout(35=5) "
-           "as logout-with-error response";
+    EXPECT_TRUE(found_logout) << "MissingSendingTimeOnLogonEmitsLogoutOnly: must emit Logout(35=5) "
+                                 "as logout-with-error response";
     EXPECT_TRUE(found_logout_text)
         << "MissingSendingTimeOnLogonEmitsLogoutOnly: Logout must carry Text(58) error";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
@@ -571,10 +579,10 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
     const std::size_t before = f.transport.sent_count();
 
     // Peer Logon with tag 52=abc (not a valid FIX timestamp).
-    auto malformed_logon = make_frame_with_sending_time(
-        "FIX.4.2", "A", 1, "TW", "ISLD",
-        "abc",  // malformed timestamp
-        "98=0\x01""108=30\x01");
+    auto malformed_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD",
+                                                        "abc",  // malformed timestamp
+                                                        "98=0\x01"
+                                                        "108=30\x01");
     f.feed(sess, malformed_logon);
 
     // Must NOT emit Reject(35=3). MUST emit Logout(35=5). Session → Disconnected.
@@ -583,11 +591,15 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
     bool found_logout_text = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") { found_reject = true; }
+        if (mt == "3") {
+            found_reject = true;
+        }
         if (mt == "5") {
             found_logout = true;
             auto text = extract_field(f.transport.sent(i), 58);
-            if (!text.empty()) { found_logout_text = true; }
+            if (!text.empty()) {
+                found_logout_text = true;
+            }
         }
     }
 
@@ -603,5 +615,5 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
         << "MalformedSendingTimeOnLogonEmitsLogoutOnly: session must be Disconnected";
 }
 
-}  // namespace (anonymous)
+}  // namespace
 }  // namespace fixpp::session::test

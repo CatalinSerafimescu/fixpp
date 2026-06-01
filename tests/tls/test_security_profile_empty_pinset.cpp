@@ -12,12 +12,11 @@
 //     "distinct from tls_pin_mismatch so operator logs separate config problem
 //     from peer-cert problem".
 
-#include <fixpp/tls/security_profile.hpp>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <gtest/gtest.h>
 
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/pinset.hpp>
+#include <fixpp/tls/security_profile.hpp>
 #include <memory>
 #include <span>
 
@@ -27,20 +26,19 @@ using fixpp::core::error;
 namespace {
 
 class stub_cs3 final : public cert_source {
- public:
-    asio::awaitable<fixpp::core::expected_t<local_credentials>>
-    load_credentials() override {
-        co_return fixpp::core::expected_t<local_credentials>{
-            std::unexpect, error::tls_load_cancelled};
+public:
+    asio::awaitable<fixpp::core::expected_t<local_credentials>> load_credentials() override {
+        co_return fixpp::core::expected_t<local_credentials>{std::unexpect,
+                                                             error::tls_load_cancelled};
     }
-    fixpp::core::expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    fixpp::core::expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return std::span<const Certificate>{};
     }
 };
 
 class stub_clk3 final : public fixpp::core::Clock {
- public:
+public:
     fixpp::core::utc_time_point now() const noexcept override {
         return std::chrono::system_clock::now();
     }
@@ -63,14 +61,10 @@ TEST(SecurityProfileEmptyPinset, EmptyPinsetReturnsPinEmptyAtOpen) {
     // Confirm the Pinset IS empty.
     ASSERT_EQ(pinset->size(), 0u) << "Pinset must be empty for this test";
 
-    auto result = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs3>(),
-        std::make_shared<stub_clk3>(),
-        pinset, nullptr);
+    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
+                                      std::make_shared<stub_clk3>(), pinset, nullptr);
 
-    ASSERT_FALSE(result.has_value())
-        << "make_ssl_ctx_config with empty Pinset must fail";
+    ASSERT_FALSE(result.has_value()) << "make_ssl_ctx_config with empty Pinset must fail";
     EXPECT_EQ(result.error(), error::tls_pin_empty_at_open)
         << "Empty Pinset must return tls_pin_empty_at_open (not tls_invalid_security_profile)";
 }
@@ -78,11 +72,8 @@ TEST(SecurityProfileEmptyPinset, EmptyPinsetReturnsPinEmptyAtOpen) {
 // ── Null Pinset → tls_invalid_security_profile (DIFFERENT from empty) ─────────
 
 TEST(SecurityProfileEmptyPinset, NullPinsetReturnsInvalidProfile) {
-    auto result = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs3>(),
-        std::make_shared<stub_clk3>(),
-        nullptr, nullptr);
+    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
+                                      std::make_shared<stub_clk3>(), nullptr, nullptr);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile)
@@ -102,14 +93,10 @@ TEST(SecurityProfileEmptyPinset, NonEmptyPinsetAccepted) {
     ASSERT_TRUE(pinset->add(cert).has_value());
     ASSERT_EQ(pinset->size(), 1u);
 
-    auto result = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs3>(),
-        std::make_shared<stub_clk3>(),
-        pinset, nullptr);
+    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
+                                      std::make_shared<stub_clk3>(), pinset, nullptr);
 
-    ASSERT_TRUE(result.has_value())
-        << "mtls_pinned with non-empty Pinset should succeed";
+    ASSERT_TRUE(result.has_value()) << "mtls_pinned with non-empty Pinset should succeed";
 }
 
 // ── Session never opens (the SslCtxConfig is not returned on failure) ─────────
@@ -118,11 +105,8 @@ TEST(SecurityProfileEmptyPinset, FailureYieldsNoSslCtxConfig) {
     auto pinset_r = Pinset::make_pinset(Pinset::Config{}, nullptr);
     ASSERT_TRUE(pinset_r.has_value());
 
-    auto result = make_ssl_ctx_config(
-        SecurityProfile::mtls_pinned,
-        std::make_shared<stub_cs3>(),
-        std::make_shared<stub_clk3>(),
-        *pinset_r, nullptr);
+    auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
+                                      std::make_shared<stub_clk3>(), *pinset_r, nullptr);
 
     // The SslCtxConfig is NOT returned; the session never proceeds to open.
     ASSERT_FALSE(result.has_value());

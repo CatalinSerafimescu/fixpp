@@ -24,13 +24,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 
-#include <fixpp/wire/framer.hpp>
-
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    using fixpp::wire::Framer;
     using fixpp::wire::frame_view;
+    using fixpp::wire::Framer;
     using fixpp::wire::pmr_carry_buffer;
 
     // Use a small max_frame_bytes to keep the fuzzer's memory footprint
@@ -41,9 +40,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Carry arena (session lifetime): sized to kMaxFrame + small constant.
     // Stack-allocated so no heap usage in the fuzzer's hot path.
     std::array<std::byte, kMaxFrame + 256> carry_arena_buf{};
-    std::pmr::monotonic_buffer_resource carry_arena{
-        carry_arena_buf.data(), carry_arena_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource carry_arena{carry_arena_buf.data(), carry_arena_buf.size(),
+                                                    std::pmr::null_memory_resource()};
 
     pmr_carry_buffer carry{kMaxFrame, &carry_arena};
 
@@ -54,15 +52,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     cfg.max_frame_bytes = kMaxFrame;
     Framer framer{cfg};
 
-    auto incoming = std::span<const std::byte>{
-        reinterpret_cast<const std::byte*>(data), size};
+    auto incoming = std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), size};
 
     // feed() is noexcept; any exception escape would call std::terminate,
     // which libFuzzer reports as a crash.
-    auto result = framer.feed(
-        incoming,
-        carry,
-        std::span<frame_view>{out_views.data(), out_views.size()});
+    auto result =
+        framer.feed(incoming, carry, std::span<frame_view>{out_views.data(), out_views.size()});
 
     // Either a valid span of frame_views or a defined wire_* error — no UB.
     // Touching the result prevents the optimizer from eliding the call.

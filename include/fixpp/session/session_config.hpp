@@ -22,9 +22,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
-#include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
@@ -75,9 +75,9 @@ enum class RejectPolicy : std::uint8_t;  // owned by 005; declared for the field
 // Per-session granularity (not engine-wide) so multi-tenant acceptors can pair
 // counterparties running different engines. [data-model §E-4]
 enum class reset_seqnum_policy : std::uint8_t {
-    bilateral_strict  = 0,
+    bilateral_strict = 0,
     bilateral_lenient = 1,
-    unilateral        = 2,
+    unilateral = 2,
 };
 
 enum class threading_mode : std::uint8_t {
@@ -201,8 +201,7 @@ struct SessionConfig {
     // RC#C (gate-b/r1): restored from bilateral_lenient → bilateral_strict per FR-017.
     // Pre-013 tests updated to send 141=Y in their test Logon frames to comply.
     // [FR-017; Clarifications Q1=A; triage RC#C(a)]
-    reset_seqnum_policy reset_seqnum_policy_field{
-        reset_seqnum_policy::bilateral_strict};
+    reset_seqnum_policy reset_seqnum_policy_field{reset_seqnum_policy::bilateral_strict};
 
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J

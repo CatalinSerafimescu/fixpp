@@ -309,8 +309,8 @@ namespace {
 // / text / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logout(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view text,
-    std::string_view begin_string, std::string_view sending_time) noexcept {
+    std::string_view target_comp_id, std::string_view text, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Build a Logout(35=5) frame.
     // Fields: 8=begin_string, 35=5, 34=seq, 49=SenderCompID, 52=sending_time,
@@ -387,8 +387,8 @@ namespace {
 // / test_req_id / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_heartbeat(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id,
-    std::string_view begin_string, std::string_view sending_time) noexcept {
+    std::string_view target_comp_id, std::string_view test_req_id, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -462,8 +462,8 @@ namespace {
 // / test_req_id / begin_string / sending_time).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_test_request(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id,
-    std::string_view begin_string, std::string_view sending_time) noexcept {
+    std::string_view target_comp_id, std::string_view test_req_id, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -540,8 +540,8 @@ namespace {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
-    std::string_view ref_msg_type, int session_reject_reason,
-    std::string_view begin_string, std::string_view sending_time) noexcept {
+    std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());

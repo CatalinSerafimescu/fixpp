@@ -21,22 +21,20 @@
 // ctor (I-18) — open() only needed where close()'s two-phase body runs.
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <exception>
-#include <optional>
-
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <exception>
 #include <fixpp/core/cancellable_dispatch.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <optional>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -67,8 +65,7 @@ TEST(SeamCancellationParseToFromApp, SignalledBeforePickupIsReapedDispatchAborte
     engine.executor = work.get_executor();
     SessionConfig cfg;
     Session sess{engine, cfg};
-    auto se = *make_session_executor(work.get_executor(),
-                                     threading_mode::per_session_strand,
+    auto se = *make_session_executor(work.get_executor(), threading_mode::per_session_strand,
                                      /*attested=*/false, &sess);
     asio::cancellation_signal sig;
     std::atomic<bool> handler_ran{false};
@@ -78,22 +75,22 @@ TEST(SeamCancellationParseToFromApp, SignalledBeforePickupIsReapedDispatchAborte
     asio::co_spawn(
         drive,
         [&]() -> asio::awaitable<expected_t<void>> {
-            co_return co_await cancellable_dispatch(
-                se, sig.slot(), [&] { handler_ran.store(true); });
+            co_return co_await cancellable_dispatch(se, sig.slot(),
+                                                    [&] { handler_ran.store(true); });
         },
         [&](std::exception_ptr ep, expected_t<void> v) {
-            EXPECT_FALSE(ep);                    // I-09: never thrown
+            EXPECT_FALSE(ep);  // I-09: never thrown
             r = v;
             done = true;
         });
 
-    drive.poll();                                // park at the hand-off
-    sig.emit(asio::cancellation_type::total);    // signalled BEFORE pickup
-    work.poll();                                 // continuation reaps
-    drive.poll();                                // co_spawn completion
+    drive.poll();                              // park at the hand-off
+    sig.emit(asio::cancellation_type::total);  // signalled BEFORE pickup
+    work.poll();                               // continuation reaps
+    drive.poll();                              // co_spawn completion
 
     EXPECT_TRUE(done);
-    EXPECT_FALSE(handler_ran.load());            // handler REAPED
+    EXPECT_FALSE(handler_ran.load());  // handler REAPED
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dispatch_aborted);
 }
@@ -104,8 +101,7 @@ TEST(SeamCancellationParseToFromApp, NotSignalledRunsHandlerExactlyOnce) {
     engine.executor = ctx.get_executor();
     SessionConfig cfg;
     Session sess{engine, cfg};
-    auto se = *make_session_executor(ctx.get_executor(),
-                                     threading_mode::per_session_strand,
+    auto se = *make_session_executor(ctx.get_executor(), threading_mode::per_session_strand,
                                      /*attested=*/false, &sess);
     asio::cancellation_signal sig;
     std::atomic<int> calls{0};
@@ -113,12 +109,11 @@ TEST(SeamCancellationParseToFromApp, NotSignalledRunsHandlerExactlyOnce) {
     auto fut = asio::co_spawn(
         ctx,
         [&]() -> asio::awaitable<expected_t<void>> {
-            co_return co_await cancellable_dispatch(
-                se, sig.slot(), [&] { calls.fetch_add(1); });
+            co_return co_await cancellable_dispatch(se, sig.slot(), [&] { calls.fetch_add(1); });
         },
         asio::use_future);
 
-    ctx.run();   // slot never emitted → case 3
+    ctx.run();  // slot never emitted → case 3
 
     auto r = fut.get();
     EXPECT_EQ(calls.load(), 1);
@@ -132,7 +127,7 @@ TEST(SeamCancellationParseToFromApp, CloseGracefulPhase2FiresRootTotal) {
     EngineConfig engine;
     engine.executor = ctx.get_executor();
     SessionConfig cfg;
-    cfg.dictionary       = fixpp::test_support::make_minimal_dictionary(); // T050
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();              // T050
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session sess{engine, cfg};
 
@@ -146,18 +141,16 @@ TEST(SeamCancellationParseToFromApp, CloseGracefulPhase2FiresRootTotal) {
     std::atomic<bool> root_total_fired{false};
     auto root = sess.root_cancellation_slot();
     root.assign([&](asio::cancellation_type t) {
-        if ((t & asio::cancellation_type::total) !=
-            asio::cancellation_type::none) {
+        if ((t & asio::cancellation_type::total) != asio::cancellation_type::none) {
             root_total_fired.store(true);
         }
     });
 
-    auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful),
-                                 asio::use_future);
+    auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful), asio::use_future);
     ctx.run();
 
     EXPECT_TRUE(closed.get().has_value());
-    EXPECT_TRUE(root_total_fired.load());        // phase-2 propagation point
+    EXPECT_TRUE(root_total_fired.load());  // phase-2 propagation point
 }
 
 }  // namespace

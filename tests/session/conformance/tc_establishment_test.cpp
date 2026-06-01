@@ -18,10 +18,24 @@
 //
 // Anchors: spec FR-002/003/004/011/016/018; data-model E2; research D-10;
 // [FIX-SL §4.2]–§4.3.
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstring>
+#include <fixpp/core/clock.hpp>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/security_profile.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -29,27 +43,11 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/clock.hpp>
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/security_profile.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/frame_field_extract.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -59,12 +57,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        int heartbt) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -79,23 +74,25 @@ static std::vector<std::byte> make_logon_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_heartbeat_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target) {
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
+                                                   std::string_view sender,
+                                                   std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -108,15 +105,19 @@ static std::vector<std::byte> make_heartbeat_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
@@ -134,34 +135,31 @@ struct Harness {
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     // make_cfg: basic config without transport capture.
     // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset semantics.
-    fixpp::session::SessionConfig make_cfg(
-            std::string sender, std::string target,
-            std::string begin_string = "FIX.4.2",
-            int heartbt = 30) {
+    fixpp::session::SessionConfig make_cfg(std::string sender, std::string target,
+                                           std::string begin_string = "FIX.4.2", int heartbt = 30) {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = std::move(sender);
-        cfg.target_comp_id     = std::move(target);
-        cfg.begin_string       = std::move(begin_string);
+        cfg.sender_comp_id = std::move(sender);
+        cfg.target_comp_id = std::move(target);
+        cfg.begin_string = std::move(begin_string);
         cfg.heartbeat_interval = std::chrono::seconds{heartbt};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         return cfg;
     }
 
     // make_cfg_with_transport: config with transport_send wired to outbound_frames.
     // [F8 drift fix; spec.md FR-013; data-model.md §E1]
-    fixpp::session::SessionConfig make_cfg_with_transport(
-            std::string sender, std::string target,
-            std::string begin_string = "FIX.4.2",
-            int heartbt = 30) {
+    fixpp::session::SessionConfig make_cfg_with_transport(std::string sender, std::string target,
+                                                          std::string begin_string = "FIX.4.2",
+                                                          int heartbt = 30) {
         auto cfg = make_cfg(std::move(sender), std::move(target), std::move(begin_string), heartbt);
         cfg.transport_send = [this](std::span<const std::byte> frame) {
             outbound_frames.emplace_back(frame.begin(), frame.end());
@@ -177,7 +175,7 @@ struct Harness {
     }
 
     fixpp::core::expected_t<void> feed_frame(fixpp::session::Session& s,
-                                              std::span<const std::byte> frame) {
+                                             std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         ioc.run_for(std::chrono::milliseconds{200});
         ioc.restart();
@@ -246,14 +244,14 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
             EXPECT_TRUE(tag52.has_value())
                 << "1a_fix42: reply Logon missing tag 52 (SendingTime) per FR-013";
             if (tag52) {
-                EXPECT_FALSE(tag52->empty())
-                    << "1a_fix42: tag 52 must be non-empty (mock_clock_now formatted) per FR-003/FR-013";
+                EXPECT_FALSE(tag52->empty()) << "1a_fix42: tag 52 must be non-empty "
+                                                "(mock_clock_now formatted) per FR-003/FR-013";
             }
             break;
         }
     }
-    EXPECT_TRUE(found_reply_logon)
-        << "1a_fix42: acceptor must emit a Logon reply (35=A) on LogonReceived→Active (FR-005/FR-013)";
+    EXPECT_TRUE(found_reply_logon) << "1a_fix42: acceptor must emit a Logon reply (35=A) on "
+                                      "LogonReceived→Active (FR-005/FR-013)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -300,14 +298,14 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
             EXPECT_TRUE(tag52.has_value())
                 << "1a_fix44: reply Logon missing tag 52 (SendingTime) per FR-013";
             if (tag52) {
-                EXPECT_FALSE(tag52->empty())
-                    << "1a_fix44: tag 52 must be non-empty (mock_clock_now formatted) per FR-003/FR-013";
+                EXPECT_FALSE(tag52->empty()) << "1a_fix44: tag 52 must be non-empty "
+                                                "(mock_clock_now formatted) per FR-003/FR-013";
             }
             break;
         }
     }
-    EXPECT_TRUE(found_reply_logon)
-        << "1a_fix44: acceptor must emit a Logon reply (35=A) on LogonReceived→Active (FR-005/FR-013)";
+    EXPECT_TRUE(found_reply_logon) << "1a_fix44: acceptor must emit a Logon reply (35=A) on "
+                                      "LogonReceived→Active (FR-005/FR-013)";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -326,10 +324,12 @@ TEST(TcEstablishment, Scenario1c_InvalidSenderCompID) {
     h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)       << "1c_InvalidSenderCompID: must not enter Active";
-    EXPECT_NE(s, fsm_state::LogonReceived) << "1c_InvalidSenderCompID: must not enter LogonReceived";
+    EXPECT_NE(s, fsm_state::Active) << "1c_InvalidSenderCompID: must not enter Active";
+    EXPECT_NE(s, fsm_state::LogonReceived)
+        << "1c_InvalidSenderCompID: must not enter LogonReceived";
     // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
-    EXPECT_EQ(s, fsm_state::Disconnected) << "1c_InvalidSenderCompID: must reach Disconnected per FR-006";
+    EXPECT_EQ(s, fsm_state::Disconnected)
+        << "1c_InvalidSenderCompID: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -347,10 +347,12 @@ TEST(TcEstablishment, Scenario1c_InvalidTargetCompID) {
     h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)       << "1c_InvalidTargetCompID: must not enter Active";
-    EXPECT_NE(s, fsm_state::LogonReceived) << "1c_InvalidTargetCompID: must not enter LogonReceived";
+    EXPECT_NE(s, fsm_state::Active) << "1c_InvalidTargetCompID: must not enter Active";
+    EXPECT_NE(s, fsm_state::LogonReceived)
+        << "1c_InvalidTargetCompID: must not enter LogonReceived";
     // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
-    EXPECT_EQ(s, fsm_state::Disconnected) << "1c_InvalidTargetCompID: must reach Disconnected per FR-006";
+    EXPECT_EQ(s, fsm_state::Disconnected)
+        << "1c_InvalidTargetCompID: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -368,10 +370,11 @@ TEST(TcEstablishment, Scenario1d_WrongBeginString) {
     h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)       << "1d_WrongBeginString: must not enter Active";
+    EXPECT_NE(s, fsm_state::Active) << "1d_WrongBeginString: must not enter Active";
     EXPECT_NE(s, fsm_state::LogonReceived) << "1d_WrongBeginString: must not enter LogonReceived";
     // T014 [US3] FR-006: refused Logon must reach Disconnected (not preserved-in-NotConnected).
-    EXPECT_EQ(s, fsm_state::Disconnected) << "1d_WrongBeginString: must reach Disconnected per FR-006";
+    EXPECT_EQ(s, fsm_state::Disconnected)
+        << "1d_WrongBeginString: must reach Disconnected per FR-006";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -389,7 +392,7 @@ TEST(TcEstablishment, Scenario1e_NotLogonMessage) {
     h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)       << "1e_NotLogonMessage: must not enter Active";
+    EXPECT_NE(s, fsm_state::Active) << "1e_NotLogonMessage: must not enter Active";
     EXPECT_NE(s, fsm_state::LogonReceived) << "1e_NotLogonMessage: must not enter LogonReceived";
 }
 
@@ -415,8 +418,7 @@ TEST(TcEstablishment, Scenario2i_BeginStringValueUnexpected) {
 
     // The session must disconnect (no longer Active) on unexpected BeginString.
     const auto s = sess.state();
-    EXPECT_NE(s, fsm_state::Active)
-        << "2i: session must not remain Active after wrong BeginString";
+    EXPECT_NE(s, fsm_state::Active) << "2i: session must not remain Active after wrong BeginString";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -25,20 +25,18 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-#include <vector>
-
 #include <fixpp/core/sync/async_mutex.hpp>
+#include <vector>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -125,8 +123,7 @@ TEST(SeamCancelAndDrain, PostDrainAcquireReturnsSyncLockDrained) {
 
         // After drain, any fresh async_lock() must get sync_lock_drained.
         auto r = co_await mtx.async_lock();
-        post_drain_correct = !r.has_value() &&
-                             r.error() == error::sync_lock_drained;
+        post_drain_correct = !r.has_value() && r.error() == error::sync_lock_drained;
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
@@ -134,8 +131,7 @@ TEST(SeamCancelAndDrain, PostDrainAcquireReturnsSyncLockDrained) {
     f.get();
 
     EXPECT_TRUE(drain_ok) << "cancel_and_drain() must succeed";
-    EXPECT_TRUE(post_drain_correct)
-        << "Post-drain async_lock() must return sync_lock_drained";
+    EXPECT_TRUE(post_drain_correct) << "Post-drain async_lock() must return sync_lock_drained";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,11 +154,14 @@ TEST(SeamCancelAndDrain, NoDoubleResumeNoLostWaiter) {
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < N; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                auto r = co_await mtx.async_lock();
-                (void)r;
-                total_completed.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    auto r = co_await mtx.async_lock();
+                    (void)r;
+                    total_completed.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(N * 4);
@@ -206,11 +205,14 @@ TEST(SeamCancelAndDrain, MultiplePostDrainAcquiresAllGetDrained) {
 
         // Spawn M post-drain acquirers.
         for (int i = 0; i < M; ++i) {
-            asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-                auto r = co_await mtx.async_lock();
-                if (!r.has_value() && r.error() == error::sync_lock_drained)
-                    drained_count.fetch_add(1, std::memory_order_acq_rel);
-            }, asio::detached);
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    auto r = co_await mtx.async_lock();
+                    if (!r.has_value() && r.error() == error::sync_lock_drained)
+                        drained_count.fetch_add(1, std::memory_order_acq_rel);
+                },
+                asio::detached);
         }
 
         co_await yield_n(M * 4);
@@ -221,8 +223,7 @@ TEST(SeamCancelAndDrain, MultiplePostDrainAcquiresAllGetDrained) {
     f.get();
 
     EXPECT_TRUE(drain_ok);
-    EXPECT_EQ(drained_count.load(), M)
-        << "All post-drain acquirers must get sync_lock_drained";
+    EXPECT_EQ(drained_count.load(), M) << "All post-drain acquirers must get sync_lock_drained";
 }
 
 }  // namespace

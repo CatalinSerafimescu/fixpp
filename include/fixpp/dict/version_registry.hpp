@@ -9,14 +9,13 @@
 // specs/003-dictionary-codegen/contracts/version_registry.hpp; data-model
 // Entity 7.
 #pragma once
-#include <memory>
-#include <vector>
-
 #include <fixpp/core/error.hpp>            // expected_t, error
 #include <fixpp/dict/dictionary.hpp>       // Dictionary (002-shipped)
 #include <fixpp/dict/version_profile.hpp>  // application_version enum (002);
-                                           // version_profile struct is 003-owned
-                                           // (RC#1; spec §8 audit).
+#include <memory>
+#include <vector>
+// version_profile struct is 003-owned
+// (RC#1; spec §8 audit).
 
 namespace fixpp::dict {
 
@@ -35,8 +34,7 @@ public:
     // per-message ApplVerID(1128) selects the application dict). The
     // borrowed pointers returned by get() alias the shared_ptr keepalives
     // held in this registry's entries_ vector (lifetime = registry lifetime).
-    explicit version_registry(
-        const std::vector<std::shared_ptr<const Dictionary>>& dicts) noexcept;
+    explicit version_registry(const std::vector<std::shared_ptr<const Dictionary>>& dicts) noexcept;
 
     version_registry(version_registry&&) noexcept = default;
     version_registry& operator=(version_registry&&) noexcept = default;
@@ -44,7 +42,7 @@ public:
     // Non-copyable: shared_ptr keepalives could be copied, but the borrowed
     // pointer contract (get() returns Dictionary const* aliasing storage
     // with lifetime = registry lifetime) is cleaner without copy semantics.
-    version_registry(const version_registry&)            = delete;
+    version_registry(const version_registry&) = delete;
     version_registry& operator=(const version_registry&) = delete;
 
     ~version_registry() = default;

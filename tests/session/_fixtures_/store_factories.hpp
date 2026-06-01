@@ -12,22 +12,18 @@
 // own inline config.
 #pragma once
 
-#include <filesystem>
-#include <string_view>
-
 #include <asio/any_io_executor.hpp>
-
+#include <filesystem>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/memory_store.hpp>
+#include <string_view>
 
 namespace fixpp::store_test {
 
 /// Build a MemoryStore with bounded policy and the given capacities.
-inline fixpp::session::MemoryStore make_default_memory_store(
-    std::size_t inbound_cap = 100,
-    std::size_t outbound_cap = 100,
-    std::size_t max_frame_bytes = 4096)
-{
+inline fixpp::session::MemoryStore make_default_memory_store(std::size_t inbound_cap = 100,
+                                                             std::size_t outbound_cap = 100,
+                                                             std::size_t max_frame_bytes = 4096) {
     fixpp::session::MemoryStore::Config cfg;
     cfg.policy = fixpp::session::capacity_policy::bounded;
     cfg.inbound_capacity = inbound_cap;
@@ -39,12 +35,9 @@ inline fixpp::session::MemoryStore make_default_memory_store(
 /// Build a FileStore::Config with common defaults (sender=SENDER, target=TARGET,
 /// commit_per_message policy, max_frame_bytes=4096).
 inline fixpp::session::FileStore::Config make_default_file_config(
-    const std::filesystem::path& dir,
-    asio::any_io_executor exec,
-    std::string_view sender = "SENDER",
-    std::string_view target = "TARGET",
-    fixpp::session::FileStorePolicy policy = {})
-{
+    const std::filesystem::path& dir, asio::any_io_executor exec,
+    std::string_view sender = "SENDER", std::string_view target = "TARGET",
+    fixpp::session::FileStorePolicy policy = {}) {
     fixpp::session::FileStore::Config cfg;
     cfg.directory = dir;
     cfg.file_io_executor = std::move(exec);

@@ -64,6 +64,6 @@ namespace fixpp::session {
 // [[nodiscard]]: the caller MUST check the expected_t; discarding a lock
 // acquisition is a logic error.
 [[nodiscard]] asio::awaitable<fixpp::sync::expected_t<fixpp::sync::async_lock_guard>>
-    async_lock_via_session_executor(fixpp::sync::async_mutex& m) noexcept;
+async_lock_via_session_executor(fixpp::sync::async_mutex& m) noexcept;
 
 }  // namespace fixpp::session

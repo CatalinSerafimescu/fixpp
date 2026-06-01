@@ -19,11 +19,11 @@
 // (Expected: ASan reports heap-use-after-free.)
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <cstddef>
 #include <cstdlib>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <memory_resource>
 #include <optional>
 #include <string>
@@ -31,13 +31,13 @@
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -90,7 +90,8 @@ TEST(PinsetSnapshotOutlivesPinset, PositiveSnapshotValidAfterDrop) {
 TEST(PinsetSnapshotOutlivesPinset, NegativeManualAsan) {
     const char* env = std::getenv("FIXPP_TEST_NEGATIVE_MR_LIFETIME");
     if (!env || std::string(env) != "1") {
-        GTEST_SKIP() << "Skipped in CI; set FIXPP_TEST_NEGATIVE_MR_LIFETIME=1 to run the ASan UAF witness";
+        GTEST_SKIP()
+            << "Skipped in CI; set FIXPP_TEST_NEGATIVE_MR_LIFETIME=1 to run the ASan UAF witness";
     }
 
     // MR scope INSIDE the block that holds the snapshot — UAF on access.

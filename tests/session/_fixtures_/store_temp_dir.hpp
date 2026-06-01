@@ -15,12 +15,13 @@
 //   std::filesystem::remove_all(dir);
 #pragma once
 
+#include <unistd.h>  // getpid()
+
 #include <atomic>
-#include <cstdlib>        // ::getpid()
+#include <cstdlib>  // ::getpid()
 #include <filesystem>
 #include <string>
 #include <string_view>
-#include <unistd.h>       // getpid()
 
 namespace fixpp::store_test {
 
@@ -31,8 +32,7 @@ inline std::filesystem::path unique_store_dir(std::string_view tag) {
     const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
     auto p = std::filesystem::temp_directory_path() /
              (std::string("fixpp_test_") + std::string(tag) + "_" +
-              std::to_string(static_cast<unsigned>(::getpid())) + "_" +
-              std::to_string(seq));
+              std::to_string(static_cast<unsigned>(::getpid())) + "_" + std::to_string(seq));
     std::filesystem::create_directories(p);
     return p;
 }

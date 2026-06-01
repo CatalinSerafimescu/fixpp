@@ -26,16 +26,16 @@
 //         data-model Entity 4/6; spec AC-R1..R3/R6/R8; spec §5 R6 deferral.
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
 #include <fixpp/wire/parser.hpp>  // Framer, pmr_carry_buffer, MessageView (T059)
-#include <cstddef>
 #include <memory_resource>
 #include <optional>
-#include <string>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -58,16 +58,16 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value());
     EXPECT_FALSE(framed->empty());
     return MV{(*framed)[0], mr};
 }
 
 std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view body) {
-    std::string pre = std::string("8=") + std::string(begin_string) + "\x01"
-                      + "9=" + std::to_string(body.size()) + "\x01" + std::string(body);
+    std::string pre = std::string("8=") + std::string(begin_string) + "\x01" +
+                      "9=" + std::to_string(body.size()) + "\x01" + std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -154,26 +154,24 @@ TEST(ReifyTest, FromViewEmptySourceIsWellFormed) {
     auto result = ONOS::from_view(mv, &arena);
     ASSERT_TRUE(result.has_value())
         << "from_view must succeed (real deep-copy; R6 placeholder retired)";
-    EXPECT_FALSE(result->cl_ord_id().has_value())
-        << "empty source → every field absent, no UB";
+    EXPECT_FALSE(result->cl_ord_id().has_value()) << "empty source → every field absent, no UB";
 }
 
 TEST(ReifyTest, ReifyDefaultMessageViewNormalizesMissingMsgType) {
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::v44, true, 0};
     auto r = fixpp::dict::reify(MV{}, profile, &arena);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_wire_body_not_ready);
 }
 
 TEST(ReifyTest, ReifyFixtAdminFrameHitsReachableStubExit) {
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v50sp2, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::v50sp2, true, 0};
     for (char mt : {'0', '1', '2', '3', '4', '5', 'A'}) {
-        auto frame = make_frame("FIXT.1.1",
-                                std::string("35=") + mt + "\x01" + "34=1\x01" + "49=S\x01"
-                                    + "56=T\x01");
+        auto frame = make_frame(
+            "FIXT.1.1", std::string("35=") + mt + "\x01" + "34=1\x01" + "49=S\x01" + "56=T\x01");
         std::pmr::monotonic_buffer_resource arena;
         auto mv = parse_frame(frame, &arena);
 
@@ -188,8 +186,8 @@ TEST(ReifyTest, ReifyApplicationFrameUsesProfileDefaultWhen1128Absent) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(buf, &arena);
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::v44, true, 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -198,11 +196,15 @@ TEST(ReifyTest, ReifyApplicationFrameUsesProfileDefaultWhen1128Absent) {
 
 TEST(ReifyTest, ReifyApplicationFramePropagatesUnknownApplVerId) {
     auto frame = make_frame("FIXT.1.1",
-                            "35=D\x01" "1128=bogus\x01" "34=1\x01" "49=S\x01" "56=T\x01");
+                            "35=D\x01"
+                            "1128=bogus\x01"
+                            "34=1\x01"
+                            "49=S\x01"
+                            "56=T\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(frame, &arena);
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::v44, true, 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -213,8 +215,8 @@ TEST(ReifyTest, ReifyApplicationFramePropagatesUnresolvedDefault) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(buf, &arena);
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::Unknown, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::Unknown, true, 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -222,11 +224,15 @@ TEST(ReifyTest, ReifyApplicationFramePropagatesUnresolvedDefault) {
 }
 
 TEST(ReifyTest, ReifyMultiCharMsgTypeSkipsFixtAdminCheck) {
-    auto frame = make_frame("FIXT.1.1", "35=AB\x01" "34=1\x01" "49=S\x01" "56=T\x01");
+    auto frame = make_frame("FIXT.1.1",
+                            "35=AB\x01"
+                            "34=1\x01"
+                            "49=S\x01"
+                            "56=T\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(frame, &arena);
-    fixpp::dict::version_profile const profile{
-        fixpp::dict::session_version::vt11, fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
+                                               fixpp::dict::application_version::v44, true, 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -239,8 +245,8 @@ TEST(ReifyTest, FromViewReturnsOwning) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};
@@ -264,8 +270,8 @@ TEST(ReifyTest, FromViewSurvivesSourceArenaReset) {
         fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
         fixpp::wire::Framer fr{};
         fixpp::wire::frame_view fvs[1]{};
-        auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                              carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+        auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                              std::span<fixpp::wire::frame_view>{fvs, 1});
         ASSERT_TRUE(framed.has_value());
         ASSERT_FALSE(framed->empty());
         MV src{(*framed)[0], &frame_mr};
@@ -275,8 +281,7 @@ TEST(ReifyTest, FromViewSurvivesSourceArenaReset) {
     }  // buf + frame_mr (+ src) destroyed here
 
     auto cl = owned->cl_ord_id();
-    ASSERT_TRUE(cl.has_value())
-        << "owning deep-copy must outlive the source arena (AC-R4/SC-006)";
+    ASSERT_TRUE(cl.has_value()) << "owning deep-copy must outlive the source arena (AC-R4/SC-006)";
     EXPECT_EQ(cl.value(), "ORD1");
 }
 
@@ -286,8 +291,8 @@ TEST(ReifyTest, ViewAndFieldValueForward) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &frame_mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()},
-                          carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
     MV src{(*framed)[0], &frame_mr};

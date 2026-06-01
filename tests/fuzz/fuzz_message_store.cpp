@@ -31,18 +31,19 @@
 //       tests/fuzz/corpus/message_store/ \
 //       -max_total_time=600 -timeout=10 -rss_limit_mb=1024
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <unistd.h>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
@@ -312,8 +313,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         const auto fuzz_dir_seq = fuzz_dir_ctr.fetch_add(1, std::memory_order_relaxed);
         const std::filesystem::path tmp_dir =
             std::filesystem::temp_directory_path() /
-            ("fixpp_fuzz_fs_" + std::to_string(static_cast<unsigned>(::getpid())) +
-             "_" + std::to_string(fuzz_dir_seq));
+            ("fixpp_fuzz_fs_" + std::to_string(static_cast<unsigned>(::getpid())) + "_" +
+             std::to_string(fuzz_dir_seq));
 
         std::error_code ec;
         std::filesystem::create_directories(tmp_dir, ec);

@@ -17,28 +17,24 @@
 //   - (c) No-drop-oldest binding ([const §XV.15] / FR-039) — same scope.
 
 #define FIXPP_ALLOW_MOCK_TRANSPORT
-#include <fixpp/transport/test/mock_transport.hpp>
-
 #include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
+#include <fixpp/transport/test/mock_transport.hpp>
 #include <vector>
 
 namespace {
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
-using fixpp::transport::test::Script;
 using fixpp::transport::test::mock_transport;
+using fixpp::transport::test::Script;
 
 // Helper — synchronous std::byte construction.
-constexpr std::byte b(unsigned v) {
-    return static_cast<std::byte>(v & 0xFFu);
-}
+constexpr std::byte b(unsigned v) { return static_cast<std::byte>(v & 0xFFu); }
 
 // ════════════════════════════════════════════════════════════════════════════
 // Cell A — 10³ sequential outbound writes through a mock with write_latency:
@@ -94,10 +90,8 @@ TEST(Backpressure, PartialWriteReturnsWriteShort) {
 
     std::vector<std::byte> frame(64, b(0x55));
 
-    auto fut = asio::co_spawn(
-        ioc.get_executor(),
-        mt.async_write(std::span<const std::byte>{frame}),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc.get_executor(), mt.async_write(std::span<const std::byte>{frame}),
+                              asio::use_future);
 
     ioc.run();
     auto result = fut.get();
@@ -129,10 +123,8 @@ TEST(Backpressure, SingleWriteSucceeds) {
 
     std::vector<std::byte> frame(16, b(0x01));
 
-    auto fut = asio::co_spawn(
-        ioc.get_executor(),
-        mt.async_write(std::span<const std::byte>{frame}),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc.get_executor(), mt.async_write(std::span<const std::byte>{frame}),
+                              asio::use_future);
 
     ioc.run();
     auto result = fut.get();

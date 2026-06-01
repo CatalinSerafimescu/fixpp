@@ -66,8 +66,8 @@ TEST(DecimalCABILayout, NonZeroReservedTolerated) {
 // ── Gate B P1 #3 — direct coverage for the _checked siblings (AC-C6) ────────
 
 TEST(DecimalCABIChecked, CompareCheckedInDomainReturnsOrdering) {
-    fixpp_decimal_t a{2, -1, {}};   // 0.2
-    fixpp_decimal_t b{1, -1, {}};   // 0.1
+    fixpp_decimal_t a{2, -1, {}};  // 0.2
+    fixpp_decimal_t b{1, -1, {}};  // 0.1
     int ord = 99;
     EXPECT_EQ(fixpp_decimal_compare_checked(a, b, &ord), FIXPP_ERR_OK);
     EXPECT_EQ(ord, 1);  // 0.2 > 0.1
@@ -104,9 +104,9 @@ TEST(DecimalCABIChecked, CompareCheckedRejectsNullOut) {
 }
 
 TEST(DecimalCABIChecked, EqualCheckedInDomain) {
-    fixpp_decimal_t a{10, -1, {}};   // 1.0
-    fixpp_decimal_t b{1, 0, {}};     // 1
-    fixpp_decimal_t c{2, 0, {}};     // 2
+    fixpp_decimal_t a{10, -1, {}};  // 1.0
+    fixpp_decimal_t b{1, 0, {}};    // 1
+    fixpp_decimal_t c{2, 0, {}};    // 2
     int eq = 99;
 
     EXPECT_EQ(fixpp_decimal_equal_checked(a, b, &eq), FIXPP_ERR_OK);

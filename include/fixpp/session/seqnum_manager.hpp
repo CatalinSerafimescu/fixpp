@@ -131,9 +131,7 @@ public:
     // Test-only: expose the internal async_mutex for drain-lifecycle tests.
     // Used by T021 (test_seqnum_drain_on_close.cpp) to acquire the mutex directly
     // and manufacture a genuine holder-during-drain scenario (FR-011 / SC-004).
-    [[nodiscard]] fixpp::sync::async_mutex& mutex_test_access() noexcept {
-        return mutex_;
-    }
+    [[nodiscard]] fixpp::sync::async_mutex& mutex_test_access() noexcept { return mutex_; }
 #endif
 
 private:

@@ -20,16 +20,15 @@
 // Campaign note: A full ≥1-hour campaign is the /speckit-verify (T053)
 // responsibility. For T034 verification a 60-second smoke run suffices.
 
-#include <fixpp/tls/cert_source.hpp>
-#include <fixpp/tls/file_cert_source.hpp>
-#include <fixpp/core/error.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fixpp/core/error.hpp>
+#include <fixpp/tls/cert_source.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
 #include <memory_resource>
 #include <string>
 
@@ -58,12 +57,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Exercise 1: Feed as leaf cert (PEM or DER — auto-detected by content).
     {
         fixpp::tls::file_cert_source::Config cfg;
-        cfg.leaf_path        = tmp_path;
+        cfg.leaf_path = tmp_path;
         cfg.private_key_path = tmp_path;  // also fuzz the key parse
 
         // Factory must not throw; result is always expected_t.
-        auto result = fixpp::tls::file_cert_source::make_file_cert_source(
-            cfg, nullptr);
+        auto result = fixpp::tls::file_cert_source::make_file_cert_source(cfg, nullptr);
         // Consume the result to avoid unused-variable optimisation.
         if (result.has_value()) {
             // Try load_trust_anchors (synchronous, non-awaitable).
@@ -78,24 +76,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         fixpp::tls::file_cert_source::Config cfg;
         cfg.ca_bundle_path = tmp_path;
 
-        auto result = fixpp::tls::file_cert_source::make_file_cert_source(
-            cfg, nullptr);
+        auto result = fixpp::tls::file_cert_source::make_file_cert_source(cfg, nullptr);
         (void)result;
     }
 
     // Exercise 3: Tiny PMR arena — ensure exhaustion doesn't throw.
     {
         std::array<std::byte, 64> arena_buf{};
-        std::pmr::monotonic_buffer_resource arena{
-            arena_buf.data(), arena_buf.size(),
-            std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                                  std::pmr::null_memory_resource()};
 
         fixpp::tls::file_cert_source::Config cfg;
-        cfg.leaf_path        = tmp_path;
+        cfg.leaf_path = tmp_path;
         cfg.private_key_path = tmp_path;
 
-        auto result = fixpp::tls::file_cert_source::make_file_cert_source(
-            cfg, &arena);
+        auto result = fixpp::tls::file_cert_source::make_file_cert_source(cfg, &arena);
         (void)result;
     }
 

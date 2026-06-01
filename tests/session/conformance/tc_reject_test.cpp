@@ -50,9 +50,21 @@
 // Anchors: research D-10; spec FR-007; data-model matrix "Active row"; I-5;
 // error slot 72; [FIX-SL §4.5.4]; [FIX-TC] TC-005/TC-010; tasks.md T052.
 // [const §VII.5]: ships the in-scope 14a–14g subset green; 14h/14i/14j deferred.
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -60,24 +72,10 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/transport_double.hpp"
 #include "support/store_double.hpp"
-
-#include <gtest/gtest.h>
+#include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
 
@@ -86,12 +84,9 @@ namespace {
 
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(
-        std::string_view begin_string,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        int heartbt = 30) {
+static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                               std::string_view sender, std::string_view target,
+                                               int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -106,59 +101,69 @@ static std::vector<std::byte> make_logon_frame(
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::vector<std::byte> make_frame_with_type(
-        std::string_view begin_string,
-        std::string_view msg_type,
-        std::uint32_t seq,
-        std::string_view sender,
-        std::string_view target,
-        std::string_view extra_body = {}) {
+static std::vector<std::byte> make_frame_with_type(std::string_view begin_string,
+                                                   std::string_view msg_type, std::uint32_t seq,
+                                                   std::string_view sender, std::string_view target,
+                                                   std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=" + std::string(target) + "\x01";
-    if (!extra_body.empty()) { body += extra_body; }
+    if (!extra_body.empty()) {
+        body += extra_body;
+    }
 
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
-    for (unsigned char c : full) { cs += c; }
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
 
     std::vector<std::byte> frame;
-    for (char c : full) { frame.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame.push_back(static_cast<std::byte>(c));
+    }
     return frame;
 }
 
-static std::string extract_field(std::span<const std::byte> frame,
-                                  std::uint32_t tag_wanted) {
+static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -175,20 +180,20 @@ struct RejectConformanceFixture {
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     fixpp::session::SessionConfig make_cfg(std::string_view begin_string = "FIX.4.2") {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id     = "ISLD";
-        cfg.target_comp_id     = "TW";
-        cfg.begin_string       = std::string(begin_string);
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = std::string(begin_string);
         cfg.heartbeat_interval = 30s;
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.transport_send     = [this](std::span<const std::byte> frame) {
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
             transport.capture_outbound(frame);
         };
         // RC#C (gate-b/r1): bilateral_lenient — conformance tests don't exercise reset.
@@ -204,7 +209,7 @@ struct RejectConformanceFixture {
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
-        auto fut2  = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(200ms);
         ioc.restart();
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
@@ -238,7 +243,8 @@ TEST(TC005Reject, Fix42_7_ReceiveReject_NoLoop) {
 
     // Feed an inbound Reject(35=3) from the peer.
     auto peer_reject = make_frame_with_type("FIX.4.2", "3", 2, "TW", "ISLD",
-        "45=1\x01""373=0\x01");
+                                            "45=1\x01"
+                                            "373=0\x01");
     f.feed(sess, peer_reject);
 
     // I-5: must NOT emit a Reject in response.
@@ -259,7 +265,8 @@ TEST(TC005Reject, Fix44_7_ReceiveReject_NoLoop) {
     const std::size_t before = f.transport.sent_count();
 
     auto peer_reject = make_frame_with_type("FIX.4.4", "3", 2, "TW", "ISLD",
-        "45=1\x01""373=0\x01");
+                                            "45=1\x01"
+                                            "373=0\x01");
     f.feed(sess, peer_reject);
 
     EXPECT_EQ(f.transport.sent_count(), before)
@@ -363,7 +370,7 @@ TEST(TC010Reject, Fix42_14b_RequiredFieldMissing) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -385,7 +392,7 @@ TEST(TC010Reject, Fix44_14b_RequiredFieldMissing) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -408,7 +415,7 @@ TEST(TC010Reject, Fix42_14c_TagNotDefinedForMsgType) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -430,7 +437,7 @@ TEST(TC010Reject, Fix44_14c_TagNotDefinedForMsgType) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -453,7 +460,7 @@ TEST(TC010Reject, Fix42_14d_TagSpecifiedWithoutValue) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -475,7 +482,7 @@ TEST(TC010Reject, Fix44_14d_TagSpecifiedWithoutValue) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -499,7 +506,7 @@ TEST(TC010Reject, Fix42_14e_IncorrectEnumValue) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -521,7 +528,7 @@ TEST(TC010Reject, Fix44_14e_IncorrectEnumValue) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -544,7 +551,7 @@ TEST(TC010Reject, Fix42_14f_IncorrectDataFormat) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -566,7 +573,7 @@ TEST(TC010Reject, Fix44_14f_IncorrectDataFormat) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -589,7 +596,7 @@ TEST(TC010Reject, Fix42_14g_HeaderBodyTrailerFieldsOutOfOrder) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.2");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }
@@ -611,7 +618,7 @@ TEST(TC010Reject, Fix44_14g_HeaderBodyTrailerFieldsOutOfOrder) {
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
         if (extract_field(f.transport.sent(i), 35) == "3") {
             found_reject = true;
-            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");  // FR-013
+            EXPECT_EQ(extract_field(f.transport.sent(i), 8), "FIX.4.4");                 // FR-013
             EXPECT_EQ(extract_field(f.transport.sent(i), 52), "20240101-00:00:00.000");  // FR-013
         }
     }

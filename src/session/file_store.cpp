@@ -897,8 +897,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
     // the index snapshot does NOT allocate from the global heap. retrieve()
     // releases the writer mutex before disk reads, so concurrent store() calls
     // use store_scratch_ while retrieve() uses retrieve_scratch_ — no aliasing.
-    auto* snap_mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
-                                              : std::pmr::get_default_resource();
+    auto* snap_mr =
+        impl_->cfg.store_resource ? impl_->cfg.store_resource : std::pmr::get_default_resource();
     std::pmr::vector<IndexEntry> snap{std::pmr::polymorphic_allocator<IndexEntry>{snap_mr}};
     bool gap_hit = false;
     {
@@ -951,7 +951,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
         fixpp::core::expected_t<visit_result> vr{visit_result::cont};
         try {
-            vr = co_await visitor.on_frame(ie.seq, std::span<const std::byte>(impl_->retrieve_scratch_));
+            vr = co_await visitor.on_frame(ie.seq,
+                                           std::span<const std::byte>(impl_->retrieve_scratch_));
         } catch (...) {
             co_return std::unexpected(fixpp::core::error::store_visitor_aborted);
         }
@@ -1201,7 +1202,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     impl_->inbound_index.clear();
     impl_->outbound_index.clear();
     impl_->write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                                  record_disk_size(kCounterPayloadSize));
+                                                 record_disk_size(kCounterPayloadSize));
     impl_->next_inbound = seqnum_min;
     impl_->next_outbound = seqnum_min;
 
@@ -1269,12 +1270,12 @@ bool FileStore::open_log(const std::string& log_path) noexcept {
     {
         auto* mr = impl_->cfg.store_resource ? impl_->cfg.store_resource
                                              : std::pmr::get_default_resource();
-        impl_->store_scratch_ = std::pmr::vector<std::byte>{
-            std::pmr::polymorphic_allocator<std::byte>{mr}};
+        impl_->store_scratch_ =
+            std::pmr::vector<std::byte>{std::pmr::polymorphic_allocator<std::byte>{mr}};
         impl_->store_scratch_.reserve(impl_->cfg.max_frame_bytes);
 
-        impl_->retrieve_scratch_ = std::pmr::vector<std::byte>{
-            std::pmr::polymorphic_allocator<std::byte>{mr}};
+        impl_->retrieve_scratch_ =
+            std::pmr::vector<std::byte>{std::pmr::polymorphic_allocator<std::byte>{mr}};
         impl_->retrieve_scratch_.reserve(impl_->cfg.max_frame_bytes);
     }
 

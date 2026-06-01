@@ -43,16 +43,16 @@
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
-#include <fixpp/wire/writer.hpp>                     // 013 FR-010: replay-frame re-serialization
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
 #include <fixpp/session/sending_time.hpp>  // 005 US5: check_sending_time (T055)
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_event.hpp>    // 013 T036: SessionEvent variants
-#include <fixpp/session/session_fsm.hpp>  // 005 US1: fsm_state enum (T023–T025)
+#include <fixpp/session/session_event.hpp>  // 013 T036: SessionEvent variants
+#include <fixpp/session/session_fsm.hpp>    // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
+#include <fixpp/wire/writer.hpp>  // 013 FR-010: replay-frame re-serialization
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
@@ -90,10 +90,13 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
 }  // namespace
 
 Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
-    : engine_(engine), cfg_(cfg), session_arena_(resolve_session_arena(engine, cfg)),
+    : engine_(engine),
+      cfg_(cfg),
+      session_arena_(resolve_session_arena(engine, cfg)),
       reconnect_fsm_(
           cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
-          fixpp::transport::ReconnectPolicy{},   // default policy; Phase 4 wires cfg_.reconnect_policy
+          fixpp::transport::ReconnectPolicy{},   // default policy; Phase 4 wires
+                                                 // cfg_.reconnect_policy
           cfg.heartbeat_interval.value_or(std::chrono::seconds{30}),
           std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms}) {
     // Resolution chain always terminates at std::pmr::get_default_resource()
@@ -175,10 +178,8 @@ std::span<const SessionEvent> Session::recent_events() const noexcept {
 //   [[project_013_carryforwards_to_014]] / data-model §E-7 / FR-032.
 //
 // [FR-030 / FR-033 / US4 AC1+AC2 / D-11]
-fixpp::core::expected_t<void>
-Session::reload_credentials(
-    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept
-{
+fixpp::core::expected_t<void> Session::reload_credentials(
+    std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept {
     if (!new_source) {
         return std::unexpected{fixpp::core::error::session_invalid_argument};
     }
@@ -206,10 +207,8 @@ Session::reload_credentials(
 //
 // noexcept: move + optional-assign + record_state_transition_ are all
 // non-throwing. [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
-void Session::install_reconnected_transport(
-    std::unique_ptr<fixpp::transport::Transport> transport,
-    fixpp::transport::handshake_result hr) noexcept
-{
+void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
+                                            fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for arm (1-live) in the Logon-ack guard.
     //    The peer_id is moved out of hr (hr.peer_id is owning-by-value per
     //    tls_transport.hpp:52-53). [data-model §E-2; contracts C2; FR-006]
@@ -261,10 +260,9 @@ fixpp::transport::Transport& Session::live_transport() noexcept {
 // The shared_ptr keepalive ensures the Transport is not freed by
 // registry_.clear() while a write is in-flight (restores Q-1 UAF fix).
 // Returns nullptr if no live transport is attached yet.
-std::shared_ptr<fixpp::transport::Transport>
-Session::live_transport_shared_() const noexcept {
+std::shared_ptr<fixpp::transport::Transport> Session::live_transport_shared_() const noexcept {
     if (reconnected_transport_) return reconnected_transport_;
-    if (accepted_transport_)    return accepted_transport_;
+    if (accepted_transport_) return accepted_transport_;
     return nullptr;
 }
 
@@ -282,8 +280,8 @@ Session::live_transport_shared_() const noexcept {
 // If no live transport is present, returns ok (no-op; pre-live path).
 // NEVER holds the gate across any read (write-submit→complete window only).
 // [transport.hpp:47-50; FQ-A D-6; gate-b/r2]
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::live_write_serialized_(std::span<const std::byte> frame) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
+    std::span<const std::byte> frame) noexcept {
     auto live = live_transport_shared_();
     if (!live) {
         // No live transport — pre-live path, no-op.
@@ -338,10 +336,8 @@ Session::live_write_serialized_(std::span<const std::byte> frame) noexcept {
 // Does NOT transition the FSM — the acceptor stays NotConnected; the gate at
 // :1048 fires when on_inbound_frame processes the first Logon.
 // [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041; FQ-A]
-void Session::attach_accepted_transport(
-    std::unique_ptr<fixpp::transport::Transport> transport,
-    fixpp::transport::handshake_result hr) noexcept
-{
+void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transport> transport,
+                                        fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for the acceptor authorization gate (E-4).
     //    Consumed one-shot by the gate at :1048 in on_inbound_frame.
     live_peer_id_ = std::move(hr.peer_id);
@@ -391,11 +387,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // [spec.md FR-017; Clarifications Q1=A]
     const bool initr_reset_seqnum =
         (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
-    auto logon_result =
-        fixpp::session::build_logon(std::span<std::byte>{logon_buf.data(), logon_buf.size()},
-                                    logon_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                                    cfg_.begin_string, heartbt_sec, sending_time_view,
-                                    initr_reset_seqnum);
+    auto logon_result = fixpp::session::build_logon(
+        std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
+        cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum);
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -590,8 +584,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         using SK = fixpp::session::SecurityProfile::kind;
         using TK = fixpp::tls::SecurityProfile;
         TK tls_profile = TK::unset;
-        if      (k == SK::mtls_ca)     tls_profile = TK::mtls_ca;
-        else if (k == SK::mtls_pinned) tls_profile = TK::mtls_pinned;
+        if (k == SK::mtls_ca)
+            tls_profile = TK::mtls_ca;
+        else if (k == SK::mtls_pinned)
+            tls_profile = TK::mtls_pinned;
         else if (k == SK::one_way_ca) {
             // one_way_ca is deprecated in the TLS layer but still supported
             // for legacy interop (session layer retains it per [const §XII.5]).
@@ -719,11 +715,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
             auto ex = co_await asio::this_coro::executor;
             asio::steady_timer close_grace{ex};
-            close_grace.expires_after(
-                std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
+            close_grace.expires_after(std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
 
-            auto phase1_or_timeout = co_await (
-                run_logout_phase1() || close_grace.async_wait(asio::use_awaitable));
+            auto phase1_or_timeout =
+                co_await (run_logout_phase1() || close_grace.async_wait(asio::use_awaitable));
             if (phase1_or_timeout.index() == 0) {
                 auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
                 (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
@@ -854,17 +849,17 @@ struct FrameHeader {
     std::string_view begin_string;
     std::string_view sender_comp_id;
     std::string_view target_comp_id;
-    std::string_view msg_seq_num;      // tag 34 raw string value
-    std::string_view msg_type;         // tag 35 raw string value (T041 US3)
-    std::string_view sending_time;     // tag 52 raw string value (T055 US5)
-    std::string_view test_req_id;      // tag 112 raw string value (T041 US3)
+    std::string_view msg_seq_num;   // tag 34 raw string value
+    std::string_view msg_type;      // tag 35 raw string value (T041 US3)
+    std::string_view sending_time;  // tag 52 raw string value (T055 US5)
+    std::string_view test_req_id;   // tag 112 raw string value (T041 US3)
     // 013 Phase 3 — recovery / reset fields
-    std::string_view begin_seqno;      // tag 7 (BeginSeqNo in ResendRequest)
-    std::string_view end_seqno;        // tag 16 (EndSeqNo in ResendRequest)
-    std::string_view new_seqno;        // tag 36 (NewSeqNo in SequenceReset)
-    std::string_view poss_dup_flag;    // tag 43 (PossDupFlag "Y"/"N")
-    std::string_view gap_fill_flag;    // tag 123 (GapFillFlag in SequenceReset)
-    std::string_view reset_seqnum_flag;// tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view begin_seqno;        // tag 7 (BeginSeqNo in ResendRequest)
+    std::string_view end_seqno;          // tag 16 (EndSeqNo in ResendRequest)
+    std::string_view new_seqno;          // tag 36 (NewSeqNo in SequenceReset)
+    std::string_view poss_dup_flag;      // tag 43 (PossDupFlag "Y"/"N")
+    std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
+    std::string_view reset_seqnum_flag;  // tag 141 (ResetSeqNumFlag in Logon)
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -1028,11 +1023,11 @@ struct SendingTimeStamp {
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
-        if (i < n) ++i;  // skip SOH
+        if (i < n) ++i;                       // skip SOH
         if (tag == 9 || tag == 10) continue;  // BodyLength/CheckSum recomputed on commit
         if (tag == 52) {
-            orig_sending_time = std::string_view{reinterpret_cast<const char*>(val.data()),
-                                                 val.size()};
+            orig_sending_time =
+                std::string_view{reinterpret_cast<const char*>(val.data()), val.size()};
         }
         if (auto r = w.append_raw(tag, val); !r) return std::unexpected(r.error());
     }
@@ -1045,8 +1040,8 @@ struct SendingTimeStamp {
     }
     // OrigSendingTime(122) = the stored SendingTime(52) value.
     {
-        std::span<const std::byte> ost{
-            reinterpret_cast<const std::byte*>(orig_sending_time.data()), orig_sending_time.size()};
+        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(orig_sending_time.data()),
+                                       orig_sending_time.size()};
         if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
     }
     auto committed = std::move(w).commit();
@@ -1074,8 +1069,7 @@ public:
     bool truncated = false;
 
     asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
-        fixpp::session::seqnum_t /*seq*/,
-        std::span<const std::byte> frame) noexcept override {
+        fixpp::session::seqnum_t /*seq*/, std::span<const std::byte> frame) noexcept override {
         if (frame.size() <= buf.size()) {
             std::copy(frame.begin(), frame.end(), buf.begin());
             len = frame.size();
@@ -1096,8 +1090,7 @@ public:
 // compid_authorization_policy.cpp (which is in an anonymous namespace there).
 // Declared locally here to avoid cross-TU linkage of an internal helper.
 // noexcept — pure string scanning.
-[[nodiscard]] static std::string_view
-parse_cn_from_dn_local(std::string_view dn) noexcept {
+[[nodiscard]] static std::string_view parse_cn_from_dn_local(std::string_view dn) noexcept {
     std::size_t pos = 0;
     while (pos < dn.size()) {
         const auto found = dn.find("CN=", pos);
@@ -1215,8 +1208,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // RC#C (gate-b/r1): surface the typed error code instead of bare
                     // Disconnected, per triage RC#C(b) + spec.md FR-017 / US1 AC7.
                     record_state_transition_(fsm_state::Disconnected);
-                    co_return std::unexpected(
-                        fixpp::core::error::session_seqnum_reset_mismatch);
+                    co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
                 }
 
                 // peer_sent_reset: reset + event emission deferred to after the
@@ -1258,12 +1250,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     //     attach_accepted_transport. Mirrors the initiator arm at :1864.
                     const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
-                    auto auth_r = cfg_.compid_authorization_policy.authorize(
-                        auth_pid, asserted_compid);
+                    auto auth_r =
+                        cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
                     if (!auth_r) {
                         // Fail-closed: off-list or absent identity.
                         emit_event(fixpp::session::session_event_compid_authorization_failed{
-                            .cn              = {},
+                            .cn = {},
                             .asserted_compid = asserted_compid,
                             .expected_compids = {},
                             .principal_source = fixpp::session::bound_principal::source::CN,
@@ -1276,12 +1268,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // cn EMPTY: live_peer_id_.reset() frees backing store (UAF guard,
                     // matching the initiator arm pattern at :1900-1911).
                     emit_event(fixpp::session::session_event_peer_identity_bound{
-                        .cn                = {},
-                        .sans              = {},
+                        .cn = {},
+                        .sans = {},
                         .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                        .cipher            = {},
-                        .bound_compid      = asserted_compid,
-                        .principal_source  = auth_r->from,
+                        .cipher = {},
+                        .bound_compid = asserted_compid,
+                        .principal_source = auth_r->from,
                     });
                     live_peer_id_.reset();  // consume (one-shot per Logon)
                 } else if (is_mtls) {
@@ -1292,8 +1284,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Silent-admit here would bake a fail-open default. [triage RC#A]
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
-                        .cn               = {},
-                        .asserted_compid  = asserted_compid,
+                        .cn = {},
+                        .asserted_compid = asserted_compid,
                         .expected_compids = {},
                         .principal_source = fixpp::session::bound_principal::source::CN,
                     });
@@ -1350,8 +1342,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                     // FR-018: event fires AFTER post-reset state is consistent.
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
-                        .by_peer_request = true
-                    });
+                        .by_peer_request = true});
                 }
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
@@ -1522,8 +1513,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Too-high: enter AwaitingResend and emit ResendRequest(2).
                     // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
                     // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
-                    auto enter_r = co_await reconnect_fsm_.enter_awaiting_resend(
-                        next_expected, seq - 1U);
+                    auto enter_r =
+                        co_await reconnect_fsm_.enter_awaiting_resend(next_expected, seq - 1U);
                     (void)enter_r;  // state set; emit inline below
 
                     // Emit ResendRequest(2){BeginSeqNo=next_expected, EndSeqNo=0}
@@ -1612,8 +1603,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // logout-driven sequence-reset context (by_peer_request=false
                     // because it's an inbound Logout, not an inbound 141=Y reset).
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
-                        .by_peer_request = false
-                    });
+                        .by_peer_request = false});
                 }
                 // Both Active and LogonReceived → Disconnected.
                 record_state_transition_(fsm_state::Disconnected);
@@ -1646,8 +1636,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
                     if (!pending_test_req_id_.empty()) {
                         // We have an outstanding TestRequest. Check echo.
-                        if (!hdr.test_req_id.empty() &&
-                            hdr.test_req_id != pending_test_req_id_) {
+                        if (!hdr.test_req_id.empty() && hdr.test_req_id != pending_test_req_id_) {
                             // TestReqID mismatch: peer sent a Heartbeat echoing a
                             // different (or stale) TestReqID than our outstanding one.
                             // session_testreqid_mismatch=118 → Disconnected.
@@ -1731,7 +1720,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // counter and are not re-stored.
                 if (hdr.msg_type == "2") {  // ResendRequest (35=2)
                     const seqnum_t rr_begin = parse_seqnum(hdr.begin_seqno);
-                    const seqnum_t rr_end   = parse_seqnum(hdr.end_seqno);
+                    const seqnum_t rr_end = parse_seqnum(hdr.end_seqno);
                     const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                           : SendingTimeStamp{};
 
@@ -1748,7 +1737,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto wr = co_await live_write_serialized_(f);
                             co_return wr.has_value();
                         }
-                        if (!transport_send_) { co_return true; }
+                        if (!transport_send_) {
+                            co_return true;
+                        }
                         try {
                             transport_send_(f);
                             co_return true;
@@ -1757,8 +1748,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                     };
                     const auto is_admin_type = [](std::string_view mt) -> bool {
-                        return mt == "0" || mt == "1" || mt == "2" || mt == "3" ||
-                               mt == "4" || mt == "5" || mt == "A";
+                        return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
+                               mt == "5" || mt == "A";
                     };
                     const auto emit_gapfill_async =
                         [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
@@ -1767,7 +1758,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
                             cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
                             st52_sr.value);
-                        if (!gf) { co_return true; }  // build failure treated as no-op
+                        if (!gf) {
+                            co_return true;
+                        }  // build failure treated as no-op
                         co_return co_await transmit_async(*gf);
                     };
 
@@ -1785,10 +1778,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // No store, or nothing to replay in range → single GapFill
                     // covering the whole requested range (empty-store CHK032).
                     if (!store_ || our_last == 0 || rr_begin > eff_end) {
-                        const seqnum_t new_seq_no = (rr_end == 0)
-                            ? seqnum_mgr_.peek_outbound()
-                            : (rr_end + 1U);
-                        if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U, new_seq_no)) {
+                        const seqnum_t new_seq_no =
+                            (rr_end == 0) ? seqnum_mgr_.peek_outbound() : (rr_end + 1U);
+                        if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U,
+                                                         new_seq_no)) {
                             record_state_transition_(fsm_state::Disconnected);
                         }
                         co_return fixpp::core::expected_t<void>{};
@@ -1819,8 +1812,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                         const bool app_present =
                             rr && cv.captured &&
-                            !is_admin_type(scan_frame_header(
-                                 std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
+                            !is_admin_type(
+                                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len})
+                                    .msg_type);
                         if (app_present) {
                             if (gap_open) {
                                 if (!co_await emit_gapfill_async(gap_start, k)) {
@@ -1874,12 +1868,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
                     // "2" = ResendRequest (handled above), "4" = SequenceReset (handled above).
                     // "A" (dup-Logon-in-Active) deliberately EXCLUDED — falls through to Reject.
-                    const bool is_session_admin = (hdr.msg_type == "0" ||  // Heartbeat
-                                                   hdr.msg_type == "1" ||  // TestRequest
-                                                   hdr.msg_type == "2" ||  // ResendRequest (handled above)
-                                                   hdr.msg_type == "3" ||  // Reject (handled above)
-                                                   hdr.msg_type == "4" ||  // SequenceReset (handled above)
-                                                   hdr.msg_type == "5");   // Logout (handled above)
+                    const bool is_session_admin =
+                        (hdr.msg_type == "0" ||  // Heartbeat
+                         hdr.msg_type == "1" ||  // TestRequest
+                         hdr.msg_type == "2" ||  // ResendRequest (handled above)
+                         hdr.msg_type == "3" ||  // Reject (handled above)
+                         hdr.msg_type == "4" ||  // SequenceReset (handled above)
+                         hdr.msg_type == "5");   // Logout (handled above)
 
                     if (!is_session_admin) {
                         // Unknown / app-type MsgType in Active →
@@ -2041,8 +2036,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!peer_ack_sent_reset &&
                     cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
                     record_state_transition_(fsm_state::Disconnected);
-                    co_return std::unexpected(
-                        fixpp::core::error::session_seqnum_reset_mismatch);
+                    co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
                 }
                 if (peer_ack_sent_reset) {
                     // RC#C-1 (gate-b/r2): reset live counters + store before event.
@@ -2103,8 +2097,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // the residual fabricated auth payload from the live path.
                     const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
-                    auto auth_r = cfg_.compid_authorization_policy.authorize(
-                        auth_pid, asserted_compid);
+                    auto auth_r =
+                        cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
                     if (!auth_r) {
                         // Fail-closed: emit event, Disconnected.
                         // On the open-Logon path (not reconnect), Disconnected
@@ -2119,7 +2113,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // recent_events_ ring. (Owned-cn fix + the success-arm cn
                         // lifetime are tracked in the 014 verify doc.)
                         emit_event(fixpp::session::session_event_compid_authorization_failed{
-                            .cn              = {},
+                            .cn = {},
                             .asserted_compid = asserted_compid,
                             .expected_compids = {},
                             .principal_source = fixpp::session::bound_principal::source::CN,
@@ -2134,20 +2128,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // std::array) and bound_compid (config-stable) are safe. Matches
                     // the failure-arm precedent (gate-b/r2 FQ-2).
                     emit_event(fixpp::session::session_event_peer_identity_bound{
-                        .cn                = {},
-                        .sans              = {},
+                        .cn = {},
+                        .sans = {},
                         .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                        .cipher            = {},
-                        .bound_compid      = asserted_compid,
-                        .principal_source  = auth_r->from,
+                        .cipher = {},
+                        .bound_compid = asserted_compid,
+                        .principal_source = auth_r->from,
                     });
                     live_peer_id_.reset();  // consume (one-shot per Logon-ack)
                 } else if (is_mtls) {
                     // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     emit_event(fixpp::session::session_event_compid_authorization_failed{
-                        .cn               = {},
-                        .asserted_compid  = asserted_compid,
+                        .cn = {},
+                        .asserted_compid = asserted_compid,
                         .expected_compids = {},
                         .principal_source = fixpp::session::bound_principal::source::CN,
                     });
@@ -2491,9 +2485,9 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
         while (fsm_state_ == fsm_state::Active) {
             // Compute earliest sleep deadline.
             const auto outbound_deadline = last_outbound_steady_ + heartbt_int;
-            const auto inbound_deadline  = last_inbound_steady_  + heartbt_int;
-            const auto deadline = outbound_deadline < inbound_deadline
-                                      ? outbound_deadline : inbound_deadline;
+            const auto inbound_deadline = last_inbound_steady_ + heartbt_int;
+            const auto deadline =
+                outbound_deadline < inbound_deadline ? outbound_deadline : inbound_deadline;
 
             // Sleep until that deadline (or until cancellation fires).
             co_await effective_clock_->sleep_until(deadline);
@@ -2513,9 +2507,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 const auto st52_hb = stamp_sending_time(*effective_clock_);
                 const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
                 auto hb_result = fixpp::session::build_heartbeat(
-                    std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
-                    cfg_.sender_comp_id, cfg_.target_comp_id, {},
-                    cfg_.begin_string, st52_hb.value);
+                    std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq, cfg_.sender_comp_id,
+                    cfg_.target_comp_id, {}, cfg_.begin_string, st52_hb.value);
                 if (hb_result) {
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
@@ -2591,7 +2584,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // Heartbeat echo. The 1ns offset preserves Cell C (advance 11s > 10s+1ns)
             // while letting TR_DistinctNow's echo arrive before the grace fires.
             // [T018 Cell C grace_deadline bug fix; admin_builder_distinct_now_test compat]
-            const auto grace_deadline = inbound_deadline + heartbt_int + std::chrono::nanoseconds{1};
+            const auto grace_deadline =
+                inbound_deadline + heartbt_int + std::chrono::nanoseconds{1};
             co_await effective_clock_->sleep_until(grace_deadline);
 
             if (fsm_state_ != fsm_state::Active) {

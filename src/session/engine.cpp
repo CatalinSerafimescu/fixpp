@@ -11,32 +11,29 @@
 //   frame read → reversed-CompID resolve → attach → deliver first Logon → stub pump.
 // US2 (T015/T016) will replace the read-pump stub.
 
-#include <fixpp/session/engine.hpp>
-
+#include <array>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
+#include <asio/read.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-#include <asio/read.hpp>
-
-#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
-#include <memory>
-#include <span>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <memory>
+#include <span>
+#include <vector>
 
 // Internal concrete transport/listener types — only used in this .cpp.
 // [arch §5.3 engine-bootstrap carve-out]
@@ -44,8 +41,8 @@
 
 namespace fixpp::session {
 
-using core::expected_t;
 using core::error;
+using core::expected_t;
 
 // Shared outstanding-loop counter for join-before-clear (E-7 / Gate A New-4).
 // Each spawned loop decrements on exit. stop() waits until count == 0 before
@@ -61,40 +58,37 @@ struct counter_guard {
     explicit counter_guard(outstanding_t c) : counter{std::move(c)} {}
     counter_guard(counter_guard&&) = default;
     counter_guard(counter_guard const&) = delete;
-    ~counter_guard() { if (counter) --(*counter); }
+    ~counter_guard() {
+        if (counter) --(*counter);
+    }
 };
 
 // ── ctor ─────────────────────────────────────────────────────────────────────
 
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
-    : exec_{std::move(exec)}
-    , engine_cfg_{std::move(cfg)}
-    // E-5: single-executor confinement — no strand, no mutex (015 scope).
-    , stopped_{false}
-{}
+    : exec_{std::move(exec)},
+      engine_cfg_{std::move(cfg)}
+      // E-5: single-executor confinement — no strand, no mutex (015 scope).
+      ,
+      stopped_{false} {}
 
 // ── dtor ──────────────────────────────────────────────────────────────────────
 // STRICT precondition: assert(stopped()).
 // No synchronous best-effort teardown — synchronous dtor cannot drain
 // in-flight coroutines holding raw Session* → UAF (Gate A Codex-9 / E-7).
 
-Engine::~Engine()
-{
-    assert(stopped_ && "Engine destroyed without calling co_await stop() first");
-}
+Engine::~Engine() { assert(stopped_ && "Engine destroyed without calling co_await stop() first"); }
 
 // ── register_session (FR-002 / E-1) ──────────────────────────────────────────
 // Records config + role only; does NOT construct a Session (lazy — Gate A New-3).
 // Duplicate SessionId::from_config(cfg) → session_invalid_argument (119 / R5).
 
-expected_t<void> Engine::register_session(SessionConfig cfg)
-{
+expected_t<void> Engine::register_session(SessionConfig cfg) {
     SessionId id = SessionId::from_config(cfg);  // derive key BEFORE move
-    if (registry_.count(id) != 0)
-        return std::unexpected(error::session_invalid_argument);
+    if (registry_.count(id) != 0) return std::unexpected(error::session_invalid_argument);
 
-    SessionEntry::role role = (cfg.role == session_role::acceptor)
-        ? SessionEntry::role::acceptor : SessionEntry::role::initiator;
+    SessionEntry::role role = (cfg.role == session_role::acceptor) ? SessionEntry::role::acceptor
+                                                                   : SessionEntry::role::initiator;
 
     // operator[] default-constructs in-place (SessionEntry contains
     // non-movable asio::cancellation_signal — cannot move-insert).
@@ -106,8 +100,7 @@ expected_t<void> Engine::register_session(SessionConfig cfg)
 
 // ── lookup (Gate A New-3) ─────────────────────────────────────────────────────
 
-Session* Engine::lookup(SessionId const& id) const
-{
+Session* Engine::lookup(SessionId const& id) const {
     auto it = registry_.find(id);
     return (it == registry_.end()) ? nullptr : it->second.session.get();
 }
@@ -133,9 +126,7 @@ struct FirstFrameIds {
     std::string_view target_comp_id;
 };
 
-[[nodiscard]] FirstFrameIds scan_first_frame_ids(
-    std::span<const std::byte> frame) noexcept
-{
+[[nodiscard]] FirstFrameIds scan_first_frame_ids(std::span<const std::byte> frame) noexcept {
     FirstFrameIds ids;
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
@@ -159,12 +150,11 @@ struct FirstFrameIds {
         ++i;  // skip '='
         std::size_t vstart = i;
         while (i < n && frame[i] != SOH) ++i;
-        std::string_view val{reinterpret_cast<const char*>(frame.data() + vstart),
-                             i - vstart};
+        std::string_view val{reinterpret_cast<const char*>(frame.data() + vstart), i - vstart};
         if (i < n) ++i;  // skip SOH
-        if (tag == 8)  ids.begin_string    = val;
-        if (tag == 49) ids.sender_comp_id  = val;
-        if (tag == 56) ids.target_comp_id  = val;
+        if (tag == 8) ids.begin_string = val;
+        if (tag == 49) ids.sender_comp_id = val;
+        if (tag == 56) ids.target_comp_id = val;
     }
     return ids;
 }
@@ -181,12 +171,9 @@ struct FirstFrameIds {
 // "Complete frame" == Framer::feed returns at least one frame_view.
 //
 // [FR-014; E-2; data-model "Bounded first-frame read"]
-asio::awaitable<fixpp::core::expected_t<std::size_t>>
-read_first_frame_bounded(fixpp::transport::Transport& transport,
-                         std::vector<std::byte>& buf,
-                         std::chrono::milliseconds deadline,
-                         std::size_t max_bytes)
-{
+asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
+    fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
+    std::chrono::milliseconds deadline, std::size_t max_bytes) {
     using namespace std::chrono_literals;
     using fixpp::core::error;
 
@@ -201,7 +188,10 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
     // SC-011). transport.cancel() aborts the pending read → the read-error arm below
     // returns transport_handshake_timeout.
     timer.async_wait([&timed_out, &transport](const std::error_code& ec) {
-        if (!ec) { timed_out = true; transport.cancel(); }
+        if (!ec) {
+            timed_out = true;
+            transport.cancel();
+        }
     });
 
     // Build a framer to detect frame boundaries.
@@ -239,10 +229,8 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
         // would duplicate the already-carried prefix and corrupt a fragmented first
         // frame (a valid Logon split across TLS reads → rejected). Mirrors the
         // incremental feed in run_read_pump. [F-015-001]
-        auto feed_r = framer.feed(
-            std::span<const std::byte>{read_buf.data(), n},
-            carry,
-            std::span<fixpp::wire::frame_view>{out_frames});
+        auto feed_r = framer.feed(std::span<const std::byte>{read_buf.data(), n}, carry,
+                                  std::span<fixpp::wire::frame_view>{out_frames});
         if (!feed_r.has_value()) {
             timer.cancel();
             if (feed_r.error() == error::wire_frame_too_large)
@@ -286,23 +274,19 @@ read_first_frame_bounded(fixpp::transport::Transport& transport,
 // [tasks.md T015; FR-004/012; C2; [[feedback_asio_cospawn_total_cancellation_default]]]
 constexpr std::size_t kReadPumpCarryCapacity = 64u * 1024u;  // 64 KiB
 
-asio::awaitable<void>
-run_read_pump(fixpp::transport::Transport& transport,
-              fixpp::session::Session&     session,
-              fixpp::session::SessionConfig const& cfg,
-              std::span<const std::byte>   initial_bytes = {})
-{
+asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
+                                    fixpp::session::Session& session,
+                                    fixpp::session::SessionConfig const& cfg,
+                                    std::span<const std::byte> initial_bytes = {}) {
     // MANDATORY total-cancel reset — required if this coroutine is ever
     // co_spawned (co_spawn defaults to terminal-only). Harmless when co_awaited
     // inline. [[feedback_asio_cospawn_total_cancellation_default]] / [const §XI.2]
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // Session-lifetime carry buffer. One allocation from the configured arena
     // (or new_delete if none supplied). Never reallocated; overflow → wire_frame_too_large.
     std::pmr::memory_resource* arena =
-        cfg.framer_carry_arena ? cfg.framer_carry_arena
-                               : std::pmr::new_delete_resource();
+        cfg.framer_carry_arena ? cfg.framer_carry_arena : std::pmr::new_delete_resource();
     fixpp::wire::pmr_carry_buffer carry{kReadPumpCarryCapacity, arena};
 
     // Per-read scratch buffer — unrelated to the carry; plain stack array.
@@ -332,8 +316,7 @@ run_read_pump(fixpp::transport::Transport& transport,
     if (!initial_bytes.empty()) {
         std::span<const std::byte> incoming = initial_bytes;
         for (;;) {
-            auto feed_r = framer.feed(
-                incoming, carry, std::span<fixpp::wire::frame_view>{out});
+            auto feed_r = framer.feed(incoming, carry, std::span<fixpp::wire::frame_view>{out});
             if (!feed_r.has_value()) {
                 co_await stop_pump();
                 co_return;
@@ -372,8 +355,7 @@ run_read_pump(fixpp::transport::Transport& transport,
         // EOF — violating exactly-once in-order delivery (SC-003 / US2 AC1).
         std::span<const std::byte> incoming{read_buf.data(), *read_r};
         for (;;) {
-            auto feed_r = framer.feed(
-                incoming, carry, std::span<fixpp::wire::frame_view>{out});
+            auto feed_r = framer.feed(incoming, carry, std::span<fixpp::wire::frame_view>{out});
 
             if (!feed_r.has_value()) {
                 // wire_frame_too_large or other framing error.
@@ -393,8 +375,8 @@ run_read_pump(fixpp::transport::Transport& transport,
                 }
             }
 
-            incoming = {};                      // subsequent drains are carry-only
-            if (produced < out.size()) break;   // framer withheld nothing more
+            incoming = {};                     // subsequent drains are carry-only
+            if (produced < out.size()) break;  // framer withheld nothing more
         }
     }
 }
@@ -411,20 +393,15 @@ run_read_pump(fixpp::transport::Transport& transport,
 // then loops: async_accept → async_handshake → bounded first-frame read →
 // reversed-CompID resolve → attach → direct-deliver first Logon → spawn pump.
 // [data-model E-2/E-7; FR-005/006/014; C1/C7; T012; T-041 acceptor path]
-asio::awaitable<void>
-run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
-                Engine& engine,
-                SessionId const& session_id,
-                SessionEntry& entry,
-                asio::cancellation_signal& /*accept_scope_signal*/,
-                outstanding_t counter)
-{
+asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cfg, Engine& engine,
+                                      SessionId const& session_id, SessionEntry& entry,
+                                      asio::cancellation_signal& /*accept_scope_signal*/,
+                                      outstanding_t counter) {
     counter_guard guard{counter};
 
     // MANDATORY total-cancel reset (stop() emits total; co_spawn defaults to
     // terminal-only). [[feedback_asio_cospawn_total_cancellation_default]]
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     auto exec = co_await asio::this_coro::executor;
 
@@ -447,7 +424,7 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         if (entry.config.transport_factory_override)
             ssl_cfg.cs = entry.config.transport_factory_override->cert_source_snapshot();
         ssl_cfg.clock = nullptr;  // skip cert expiry check (same as loopback fixture)
-        ssl_cfg.caps  = fixpp::tls::CertSourceCaps{};
+        ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
     }
 
     // ── Build the asio_listener (bind/listen) ────────────────────────────────
@@ -455,12 +432,11 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
     // Port 0 → OS-assigned; discoverable via acceptor_bound_endpoint().
     fixpp::transport::asio_listener::Config lcfg;
     lcfg.bind_endpoint = entry.config.reconnect_endpoint;
-    lcfg.ssl_cfg       = ssl_cfg;  // copy — listener stores its own config
+    lcfg.ssl_cfg = ssl_cfg;  // copy — listener stores its own config
     // FR-014: bound the TLS handshake with a short timeout so stalled or
     // non-TLS clients are rejected promptly (part of the bounded first-frame
     // window). 2s < the probe's 2s self-deadline but large enough for real TLS.
-    lcfg.accepted_transport_config.tls_handshake_timeout =
-        std::chrono::milliseconds{1500};
+    lcfg.accepted_transport_config.tls_handshake_timeout = std::chrono::milliseconds{1500};
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
     try {
@@ -474,8 +450,8 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
     auto bound_ep = listener->bound_endpoint();
     engine.listener_endpoints_[session_id] = bound_ep;
     engine.listeners_[session_id] = std::move(listener);
-    auto* raw_listener = static_cast<fixpp::transport::asio_listener*>(
-        engine.listeners_[session_id].get());
+    auto* raw_listener =
+        static_cast<fixpp::transport::asio_listener*>(engine.listeners_[session_id].get());
 
     // ── Accept loop ──────────────────────────────────────────────────────────
     // Session construction is LAZY + MATCH-GATED (FQ-2 / data-model C1 step 6):
@@ -496,8 +472,7 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // async_accept returns a TLS-capable transport (see asio_listener.cpp
         // which builds transports via asio_tls_transport_factory::make_accepted).
         // We dynamic_cast to TlsTransport to call async_handshake.
-        auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(
-            transport.get());
+        auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
         if (!tls_transport) {
             transport->close();
             continue;  // not a TLS transport — config error; re-accept
@@ -534,25 +509,20 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
         // beyond it are surplus (a coalesced next frame) that must reach the
         // read-pump rather than being delivered as part of the Logon (F-015-002).
         std::span<const std::byte> first_frame{frame_buf.data(), first_frame_len};
-        std::span<const std::byte> surplus{
-            frame_buf.data() + first_frame_len,
-            frame_buf.size() - first_frame_len};
+        std::span<const std::byte> surplus{frame_buf.data() + first_frame_len,
+                                           frame_buf.size() - first_frame_len};
 
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
-        if (ids.begin_string.empty() || ids.sender_comp_id.empty() ||
-            ids.target_comp_id.empty()) {
+        if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
             transport->close();
             continue;  // malformed first frame → reclaim
         }
 
         // Step 5: registry resolution.
         // Acceptor key: {bs, sender=ME=logon_target, target=PEER=logon_sender}
-        fixpp::session::SessionId resolved_id =
-            fixpp::session::SessionId::reversed_from_logon(
-                std::string{ids.begin_string},
-                ids.sender_comp_id,
-                ids.target_comp_id);
+        fixpp::session::SessionId resolved_id = fixpp::session::SessionId::reversed_from_logon(
+            std::string{ids.begin_string}, ids.sender_comp_id, ids.target_comp_id);
 
         if (resolved_id != session_id) {
             // No registry match — unknown acceptor session (slot 121).
@@ -628,15 +598,11 @@ run_accept_loop(fixpp::core::EngineConfig const& engine_cfg,
 //      Logon POST-connect over that live sink.
 //   4. run_read_pump on the live transport until EOF → close(terminal).
 // [data-model E-1a; FR-003/004; C2/C2i/C5; T016(b)-(e); SC-010 (7)/(8)]
-asio::awaitable<void>
-run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
-                 SessionEntry& entry,
-                 outstanding_t counter)
-{
+asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
+                                       SessionEntry& entry, outstanding_t counter) {
     counter_guard guard{counter};
 
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
     entry.config.engine_managed = true;
@@ -644,7 +610,10 @@ run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await entry.session->open();
-    if (!res.has_value()) { entry.session.reset(); co_return; }
+    if (!res.has_value()) {
+        entry.session.reset();
+        co_return;
+    }
 
     Session* session = entry.session.get();
 
@@ -675,23 +644,20 @@ run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
 // Non-blocking. co_spawns one per-role loop per registered session on exec_.
 // Each loop co_awaits open() itself — cannot run in this synchronous void.
 
-void Engine::start()
-{
+void Engine::start() {
     auto counter = std::make_shared<std::atomic<int>>(0);
 
     for (auto& [id, entry] : registry_) {
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {
             auto& scope_sig = accept_scope_signals_[id];  // default-constructs
-            asio::co_spawn(exec_,
-                run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
-                asio::bind_cancellation_slot(
-                    entry.session_cancel.slot(), asio::detached));
+            asio::co_spawn(
+                exec_, run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
+                asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         } else {
-            asio::co_spawn(exec_,
-                run_connect_loop(engine_cfg_, entry, counter),
-                asio::bind_cancellation_slot(
-                    entry.session_cancel.slot(), asio::detached));
+            asio::co_spawn(
+                exec_, run_connect_loop(engine_cfg_, entry, counter),
+                asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
     outstanding_counter_ = counter;
@@ -706,15 +672,14 @@ void Engine::start()
 //     no Session* dereference after registry_.clear() (Gate A New-4 / E-7).
 //  4. Clear registry.
 
-asio::awaitable<void> Engine::stop()
-{
-    if (stopped_) { co_return; }
+asio::awaitable<void> Engine::stop() {
+    if (stopped_) {
+        co_return;
+    }
     stopped_ = true;
 
-    for (auto& [id, entry] : registry_)
-        entry.session_cancel.emit(asio::cancellation_type::total);
-    for (auto& [id, sig] : accept_scope_signals_)
-        sig.emit(asio::cancellation_type::total);
+    for (auto& [id, entry] : registry_) entry.session_cancel.emit(asio::cancellation_type::total);
+    for (auto& [id, sig] : accept_scope_signals_) sig.emit(asio::cancellation_type::total);
 
     // Close every live transport (the "closes transports" step in this function's
     // contract). An established session's read-pump is blocked in async_read_some
@@ -723,8 +688,7 @@ asio::awaitable<void> Engine::stop()
     // is synchronous + idempotent; the transport is owned by the Session (alive
     // until the join-before-clear below). [T018; Gate A New-4; E-7]
     for (auto& [id, entry] : registry_)
-        if (entry.live_transport != nullptr)
-            entry.live_transport->close();
+        if (entry.live_transport != nullptr) entry.live_transport->close();
 
     // JOIN: yield until all loops have co_return'd.
     if (outstanding_counter_) {
@@ -750,12 +714,9 @@ asio::awaitable<void> Engine::stop()
 // listener at the start of run_accept_loop; the endpoint is readable once the
 // executor runs at least one step after start().
 
-fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(
-    SessionId const& id) const
-{
+fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(SessionId const& id) const {
     auto it = listener_endpoints_.find(id);
-    if (it == listener_endpoints_.end())
-        return fixpp::transport::Endpoint{};
+    if (it == listener_endpoints_.end()) return fixpp::transport::Endpoint{};
     return it->second;
 }
 

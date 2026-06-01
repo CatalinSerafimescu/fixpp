@@ -27,14 +27,8 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
-#include <future>
-#include <optional>
-#include <string>
-#include <thread>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
@@ -42,6 +36,10 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <optional>
+#include <string>
+#include <thread>
 
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
@@ -50,18 +48,24 @@ namespace {
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
-using fixpp::transport::Endpoint;
 using fixpp::transport::asio_listener;
+using fixpp::transport::Endpoint;
 
 class counting_cert_source final : public fixpp::tls::cert_source {
 public:
-    explicit counting_cert_source(std::shared_ptr<fixpp::tls::cert_source> inner) : inner_{std::move(inner)} {}
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>> load_credentials() override {
+    explicit counting_cert_source(std::shared_ptr<fixpp::tls::cert_source> inner)
+        : inner_{std::move(inner)} {}
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>>
+    load_credentials() override {
         ++calls_;
         co_return co_await inner_->load_credentials();
     }
-    [[nodiscard]] fixpp::core::expected_t<std::span<const fixpp::tls::Certificate>> load_trust_anchors() [[clang::lifetimebound]] override { return inner_->load_trust_anchors(); }
+    [[nodiscard]] fixpp::core::expected_t<std::span<const fixpp::tls::Certificate>>
+    load_trust_anchors() [[clang::lifetimebound]] override {
+        return inner_->load_trust_anchors();
+    }
     [[nodiscard]] int calls() const noexcept { return calls_.load(); }
+
 private:
     std::shared_ptr<fixpp::tls::cert_source> inner_;
     std::atomic<int> calls_{0};
@@ -72,15 +76,12 @@ private:
 // ssl_cfg. Only `async_accept` → make_accepted_asio_tls_transport touches it
 // (and on a stub it returns transport_factory_failed; the cell verifies the
 // LISTENER surface, not mint success).
-fixpp::tls::SslCtxConfig stub_ssl_cfg() {
-    return fixpp::tls::SslCtxConfig{};
-}
+fixpp::tls::SslCtxConfig stub_ssl_cfg() { return fixpp::tls::SslCtxConfig{}; }
 
-asio_listener::Config make_listener_cfg(std::uint16_t port = 0,
-                                         std::uint32_t backlog = 16) {
+asio_listener::Config make_listener_cfg(std::uint16_t port = 0, std::uint32_t backlog = 16) {
     asio_listener::Config cfg;
     cfg.bind_endpoint = Endpoint{"127.0.0.1", port, backlog};
-    cfg.ssl_cfg       = stub_ssl_cfg();
+    cfg.ssl_cfg = stub_ssl_cfg();
     return cfg;
 }
 
@@ -88,14 +89,12 @@ asio_listener::Config make_listener_cfg(std::uint16_t port = 0,
 // socket on success; surfaces the error_code on failure. Synchronous —
 // the test drives the io_context via run() / run_for().
 struct ConnectResult {
-    asio::ip::tcp::socket  socket;
-    asio::error_code       ec;
+    asio::ip::tcp::socket socket;
+    asio::error_code ec;
 };
 
-ConnectResult sync_tcp_connect(asio::io_context& ioc,
-                                std::string const& host,
-                                std::uint16_t port,
-                                std::chrono::milliseconds timeout = 500ms) {
+ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, std::uint16_t port,
+                               std::chrono::milliseconds timeout = 500ms) {
     asio::ip::tcp::socket sock{ioc};
     asio::error_code ec;
     asio::ip::tcp::endpoint ep{asio::ip::make_address(host), port};
@@ -146,10 +145,10 @@ TEST(ListenerAcceptor, CancelIsIdempotent) {
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
 
-    auto first  = listener.cancel();
+    auto first = listener.cancel();
     auto second = listener.cancel();
 
-    EXPECT_TRUE(first.has_value())  << "first cancel() must succeed";
+    EXPECT_TRUE(first.has_value()) << "first cancel() must succeed";
     EXPECT_TRUE(second.has_value()) << "second cancel() must be a no-op success";
 }
 
@@ -165,10 +164,7 @@ TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
 
-    auto fut = asio::co_spawn(
-        ioc.get_executor(),
-        listener.async_accept(),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc.get_executor(), listener.async_accept(), asio::use_future);
 
     // Schedule the cancel after the first async_accept queues. Running the
     // io_context drains both the queued accept and the post that triggers
@@ -181,8 +177,7 @@ TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
     ioc.run();
 
     auto result = fut.get();
-    ASSERT_FALSE(result.has_value())
-        << "in-flight async_accept must error after cancel()";
+    ASSERT_FALSE(result.has_value()) << "in-flight async_accept must error after cancel()";
     EXPECT_EQ(result.error(), error::transport_accept_cancelled);
 }
 
@@ -205,22 +200,19 @@ TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
     // promptly with transport_accept_cancelled — the acceptor handle is
     // closed; the asio::ip::tcp::acceptor::async_accept surfaces
     // operation_aborted / bad_descriptor, which the listener maps.
-    auto fut = asio::co_spawn(
-        ioc.get_executor(),
-        listener.async_accept(),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc.get_executor(), listener.async_accept(), asio::use_future);
 
     ioc.run();
 
     auto result = fut.get();
-    ASSERT_FALSE(result.has_value())
-        << "post-cancel async_accept must NOT yield a Transport";
+    ASSERT_FALSE(result.has_value()) << "post-cancel async_accept must NOT yield a Transport";
     // RC#H (P3-1): asio_listener::async_accept now pre-checks acceptor_.is_open()
     // before dispatching to the OS — closed handle returns transport_accept_cancelled
     // directly, avoiding the bad_descriptor → transport_factory_failed path.
     EXPECT_EQ(result.error(), error::transport_accept_cancelled)
         << "post-cancel async_accept must return transport_accept_cancelled; "
-           "got variant: " << static_cast<int>(result.error());
+           "got variant: "
+        << static_cast<int>(result.error());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -262,8 +254,7 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     // Connect a raw TCP client.
     asio::io_context client_ioc;
     auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 500ms);
-    EXPECT_FALSE(static_cast<bool>(cr.ec))
-        << "client connect failed: " << cr.ec.message();
+    EXPECT_FALSE(static_cast<bool>(cr.ec)) << "client connect failed: " << cr.ec.message();
 
     // Wait briefly for the accept to resume.
     fut.wait_for(500ms);
@@ -370,15 +361,12 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
 
     ioc.run_for(std::chrono::seconds{10});
 
-    ASSERT_TRUE(accept_result.has_value())
-        << "async_accept must return a Transport; error="
-        << static_cast<int>(accept_result.error());
-    EXPECT_TRUE(server_hs_result.has_value())
-        << "server async_handshake must succeed; error="
-        << static_cast<int>(server_hs_result.error());
-    EXPECT_TRUE(client_hs_result.has_value())
-        << "client async_handshake must succeed; error="
-        << static_cast<int>(client_hs_result.error());
+    ASSERT_TRUE(accept_result.has_value()) << "async_accept must return a Transport; error="
+                                           << static_cast<int>(accept_result.error());
+    EXPECT_TRUE(server_hs_result.has_value()) << "server async_handshake must succeed; error="
+                                              << static_cast<int>(server_hs_result.error());
+    EXPECT_TRUE(client_hs_result.has_value()) << "client async_handshake must succeed; error="
+                                              << static_cast<int>(client_hs_result.error());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -408,10 +396,8 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
     std::unique_ptr<Transport> server_transport;
-    expected_t<handshake_result> server_hs =
-        std::unexpected{error::transport_handshake_cancelled};
-    expected_t<handshake_result> client_hs =
-        std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> client_hs = std::unexpected{error::transport_handshake_cancelled};
 
     // Server: accept + handshake, store transport.
     asio::co_spawn(
@@ -452,15 +438,14 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     // The server Transport must still be usable (write a small payload).
     // We expect the write to succeed or at minimum not crash / assert closed.
     // The client peer is still alive (client Transport not closed yet).
-    expected_t<std::size_t> write_result =
-        std::unexpected{error::transport_write_in_progress};
+    expected_t<std::size_t> write_result = std::unexpected{error::transport_write_in_progress};
 
     const std::array<std::byte, 4> payload{};
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            write_result = co_await server_transport->async_write(
-                std::span<const std::byte>{payload});
+            write_result =
+                co_await server_transport->async_write(std::span<const std::byte>{payload});
         },
         asio::detached);
 
@@ -470,8 +455,7 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     // Acceptable outcomes: success (bytes written) or connection-related error
     // (peer may have reset) — but NOT transport_accept_cancelled (which would
     // indicate the listener incorrectly forwarded its cancel to the Transport).
-    EXPECT_NE(write_result.error_or(error::transport_read_eof),
-              error::transport_accept_cancelled)
+    EXPECT_NE(write_result.error_or(error::transport_read_eof), error::transport_accept_cancelled)
         << "listener cancel() must NOT affect already-resumed Transport";
 }
 
@@ -483,25 +467,54 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
     cs_cfg.leaf_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/leaf_rsa2048.key";
     cs_cfg.ca_bundle_path = std::string(FIXPP_TLS_FIXTURE_DIR) + "/ca.pem";
-    auto server_inner = tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
-    auto client_cs = tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
+    auto server_inner =
+        tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
+    auto client_cs =
+        tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(server_inner.has_value() && client_cs.has_value());
     auto server_cs = std::make_shared<counting_cert_source>(std::move(*server_inner));
-    tls::SslCtxConfig server_ssl_cfg; server_ssl_cfg.profile = tls::SecurityProfile::mtls_ca; server_ssl_cfg.cs = server_cs;
-    tls::SslCtxConfig client_ssl_cfg; client_ssl_cfg.profile = tls::SecurityProfile::mtls_ca; client_ssl_cfg.cs = std::move(*client_cs);
+    tls::SslCtxConfig server_ssl_cfg;
+    server_ssl_cfg.profile = tls::SecurityProfile::mtls_ca;
+    server_ssl_cfg.cs = server_cs;
+    tls::SslCtxConfig client_ssl_cfg;
+    client_ssl_cfg.profile = tls::SecurityProfile::mtls_ca;
+    client_ssl_cfg.cs = std::move(*client_cs);
     auto client_factory = fixpp::transport::make_asio_tls_transport_factory({}, client_ssl_cfg);
     ASSERT_TRUE(client_factory.has_value());
     asio::io_context ioc;
-    asio_listener::Config cfg; cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, 16}; cfg.ssl_cfg = server_ssl_cfg;
+    asio_listener::Config cfg;
+    cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, 16};
+    cfg.ssl_cfg = server_ssl_cfg;
     asio_listener listener{ioc.get_executor(), std::move(cfg)};
     ASSERT_EQ(server_cs->calls(), 0);
     for (int i = 0; i != 3; ++i) {
-        expected_t<std::unique_ptr<fixpp::transport::Transport>> accepted = std::unexpected{error::transport_accept_cancelled};
-        expected_t<fixpp::transport::handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled}, client_hs = std::unexpected{error::transport_handshake_cancelled};
-        asio::co_spawn(ioc.get_executor(), [&]() -> asio::awaitable<void> { accepted = co_await listener.async_accept(); if (accepted) server_hs = co_await dynamic_cast<fixpp::transport::TlsTransport*>(accepted->get())->async_handshake(server_ssl_cfg); }, asio::detached);
-        auto client = (*client_factory)->make(ioc.get_executor(), client_ssl_cfg, nullptr); ASSERT_TRUE(client.has_value());
-        auto* client_tls = dynamic_cast<fixpp::transport::TlsTransport*>(client->get()); ASSERT_NE(client_tls, nullptr);
-        asio::co_spawn(ioc.get_executor(), [&, client = std::move(*client), client_tls]() mutable -> asio::awaitable<void> { auto conn = co_await client->async_connect(Endpoint{"127.0.0.1", listener.bound_endpoint().port, 0}); if (conn) client_hs = co_await client_tls->async_handshake(client_ssl_cfg); }, asio::detached);
+        expected_t<std::unique_ptr<fixpp::transport::Transport>> accepted =
+            std::unexpected{error::transport_accept_cancelled};
+        expected_t<fixpp::transport::handshake_result>
+            server_hs = std::unexpected{error::transport_handshake_cancelled},
+            client_hs = std::unexpected{error::transport_handshake_cancelled};
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&]() -> asio::awaitable<void> {
+                accepted = co_await listener.async_accept();
+                if (accepted)
+                    server_hs =
+                        co_await dynamic_cast<fixpp::transport::TlsTransport*>(accepted->get())
+                            ->async_handshake(server_ssl_cfg);
+            },
+            asio::detached);
+        auto client = (*client_factory)->make(ioc.get_executor(), client_ssl_cfg, nullptr);
+        ASSERT_TRUE(client.has_value());
+        auto* client_tls = dynamic_cast<fixpp::transport::TlsTransport*>(client->get());
+        ASSERT_NE(client_tls, nullptr);
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&, client = std::move(*client), client_tls]() mutable -> asio::awaitable<void> {
+                auto conn = co_await client->async_connect(
+                    Endpoint{"127.0.0.1", listener.bound_endpoint().port, 0});
+                if (conn) client_hs = co_await client_tls->async_handshake(client_ssl_cfg);
+            },
+            asio::detached);
         ioc.run_for(std::chrono::seconds{10});
         ioc.restart();
         ASSERT_TRUE(accepted.has_value());

@@ -14,23 +14,23 @@
 // as the caller holds the pin_view — regardless of concurrent removes.
 
 #include <gtest/gtest.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <atomic>
 #include <cstddef>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <thread>
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn = "CN=stress") {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }
@@ -53,8 +53,8 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
     std::atomic<bool> writer_done{false};
     // finder_ready: the finder sets this to 1 after its first loop iteration,
     // ensuring the main thread waits until the finder has actually started.
-    std::atomic<int>  finder_started{0};
-    std::atomic<int>  find_count{0};
+    std::atomic<int> finder_started{0};
+    std::atomic<int> find_count{0};
 
     // Thread B: finder — runs concurrently with writer.
     std::thread finder([&] {
@@ -83,7 +83,7 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
     }
 
     // Thread A (main): add/remove loop.
-    bool added = true; // we pre-added above
+    bool added = true;  // we pre-added above
     for (int i = 0; i < kRounds; ++i) {
         if (added) {
             // Remove current pin.

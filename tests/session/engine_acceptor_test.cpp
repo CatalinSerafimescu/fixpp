@@ -20,14 +20,9 @@
 // Anchors: tasks.md T008; spec.md US1 AC1 / SC-001; contracts C1/C3;
 //          data-model E-2/E-4; research R3/R4/R7.
 
-#include <algorithm>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <future>
-#include <string>
-#include <vector>
+#include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -36,9 +31,9 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <asio/write.hpp>
-
-#include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
@@ -52,6 +47,9 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <string>
+#include <vector>
 
 #include "engine_loopback_harness.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -64,21 +62,18 @@ using namespace std::chrono_literals;
 namespace {
 
 // Build a valid FIX Logon frame with given sender/target.
-static std::vector<std::byte> make_logon_frame(
-    std::string_view begin_str,
-    std::string_view sender,
-    std::string_view target)
-{
+static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                               std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "A");   // MsgType = Logon
-    body += field(34, "1");   // MsgSeqNum
+    body += field(35, "A");  // MsgType = Logon
+    body += field(34, "1");  // MsgSeqNum
     body += field(49, sender);
     body += field(56, target);
-    body += field(98, "0");   // EncryptMethod = none
-    body += field(108, "30"); // HeartBtInt
+    body += field(98, "0");    // EncryptMethod = none
+    body += field(108, "30");  // HeartBtInt
 
     std::string msg;
     msg += "8=" + std::string(begin_str) + "\x01";
@@ -102,15 +97,11 @@ static std::vector<std::byte> make_logon_frame(
 // a FIX Logon. The acceptor's accept loop will process it.
 // After sending, we wait briefly for the acceptor to reply (it will send a
 // reply Logon once it admits the session), then close.
-static asio::awaitable<void>
-run_test_initiator(asio::io_context& ioc,
-                   fixpp::transport::test::LoopbackTlsFixture& fixture,
-                   uint16_t acceptor_port,
-                   std::string sender,
-                   std::string target)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
+                                                fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                                uint16_t acceptor_port, std::string sender,
+                                                std::string target) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     try {
         // Mint a fresh TLS client transport.
@@ -129,8 +120,7 @@ run_test_initiator(asio::io_context& ioc,
 
         // Send a valid FIX Logon frame.
         auto logon_bytes = make_logon_frame("FIX.4.2", sender, target);
-        auto write_r = co_await client->async_write(
-            std::span<const std::byte>{logon_bytes});
+        auto write_r = co_await client->async_write(std::span<const std::byte>{logon_bytes});
         (void)write_r;
 
         // Stay connected past the test's 3s state-capture window. Since US2
@@ -144,20 +134,20 @@ run_test_initiator(asio::io_context& ioc,
         co_await t.async_wait(asio::use_awaitable);
 
         (void)client->close();
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 // Build a valid FIX Heartbeat (35=0) frame with a given MsgSeqNum.
-static std::vector<std::byte> make_heartbeat_frame(
-    std::string_view begin_str, std::string_view sender,
-    std::string_view target, int seq)
-{
+static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str,
+                                                   std::string_view sender, std::string_view target,
+                                                   int seq) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "0");                         // MsgType = Heartbeat
-    body += field(34, std::to_string(seq));         // MsgSeqNum
+    body += field(35, "0");                  // MsgType = Heartbeat
+    body += field(34, std::to_string(seq));  // MsgSeqNum
     body += field(49, sender);
     body += field(56, target);
 
@@ -182,14 +172,10 @@ static std::vector<std::byte> make_heartbeat_frame(
 // acceptor's bounded first-frame read observes it as TWO separate reads. The
 // incremental-feed fix must reassemble + admit it (the pre-fix whole-buffer
 // re-feed duplicated the carried prefix → malformed → rejected).
-static asio::awaitable<void>
-run_test_initiator_fragmented(asio::io_context& ioc,
-                              fixpp::transport::test::LoopbackTlsFixture& fixture,
-                              uint16_t acceptor_port,
-                              std::string sender, std::string target)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_test_initiator_fragmented(
+    asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
+    uint16_t acceptor_port, std::string sender, std::string target) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto client = fixture.make_client(ioc.get_executor());
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
@@ -200,8 +186,7 @@ run_test_initiator_fragmented(asio::io_context& ioc,
 
         auto logon = make_logon_frame("FIX.4.2", sender, target);
         std::size_t split = logon.size() / 2;
-        (void)co_await client->async_write(
-            std::span<const std::byte>{logon.data(), split});
+        (void)co_await client->async_write(std::span<const std::byte>{logon.data(), split});
         // Gap forces the acceptor's first read to see only the first half.
         asio::steady_timer gap{ioc};
         gap.expires_after(150ms);
@@ -213,21 +198,18 @@ run_test_initiator_fragmented(asio::io_context& ioc,
         t.expires_after(5s);
         co_await t.async_wait(asio::use_awaitable);
         (void)client->close();
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 // F-015-002: send Logon (seq 1) + Heartbeat (seq 2) COALESCED in a single write.
 // The acceptor must admit the Logon AND drain the Heartbeat surplus through the
 // read-pump (next_inbound advances past the post-Logon value of 2 to 3). The
 // pre-fix code delivered the whole buffer as the "Logon" and dropped the surplus.
-static asio::awaitable<void>
-run_test_initiator_coalesced(asio::io_context& ioc,
-                             fixpp::transport::test::LoopbackTlsFixture& fixture,
-                             uint16_t acceptor_port,
-                             std::string sender, std::string target)
-{
-    co_await asio::this_coro::reset_cancellation_state(
-        asio::enable_total_cancellation());
+static asio::awaitable<void> run_test_initiator_coalesced(
+    asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
+    uint16_t acceptor_port, std::string sender, std::string target) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto client = fixture.make_client(ioc.get_executor());
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
@@ -237,7 +219,7 @@ run_test_initiator_coalesced(asio::io_context& ioc,
         if (!(co_await tls->async_handshake(fixture.ssl_cfg())).has_value()) co_return;
 
         auto logon = make_logon_frame("FIX.4.2", sender, target);
-        auto hb    = make_heartbeat_frame("FIX.4.2", sender, target, /*seq=*/2);
+        auto hb = make_heartbeat_frame("FIX.4.2", sender, target, /*seq=*/2);
         std::vector<std::byte> both;
         both.reserve(logon.size() + hb.size());
         both.insert(both.end(), logon.begin(), logon.end());
@@ -248,7 +230,8 @@ run_test_initiator_coalesced(asio::io_context& ioc,
         t.expires_after(5s);
         co_await t.async_wait(asio::use_awaitable);
         (void)client->close();
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 // Shared mTLS-acceptor rig for the fragmented/coalesced first-frame tests:
@@ -256,25 +239,22 @@ run_test_initiator_coalesced(asio::io_context& ioc,
 // registers the acceptor {ACCEPTOR,INITIATOR} on `engine`, starts it, and returns
 // {acc_id, bound_port}. `fac_keepalive` must outlive `engine` (the Session holds
 // the factory). Returns nullopt if the fixtures are missing or bind fails.
-static std::optional<std::pair<fixpp::session::SessionId, uint16_t>>
-start_mtls_acceptor(asio::io_context& ioc,
-                    fixpp::session::Engine& engine,
-                    const std::string& fixture_dir,
-                    std::shared_ptr<fixpp::transport::TransportFactory>& fac_keepalive)
-{
+static std::optional<std::pair<fixpp::session::SessionId, uint16_t>> start_mtls_acceptor(
+    asio::io_context& ioc, fixpp::session::Engine& engine, const std::string& fixture_dir,
+    std::shared_ptr<fixpp::transport::TransportFactory>& fac_keepalive) {
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = fixture_dir + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = fixture_dir + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = fixture_dir + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = fixture_dir + "/ca.pem";
+    cs_cfg.ca_bundle_path = fixture_dir + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     if (!cs_r.has_value()) return std::nullopt;
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
     if (!fac_r.has_value()) return std::nullopt;
@@ -284,17 +264,16 @@ start_mtls_acceptor(asio::io_context& ioc,
     authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id  = "ACCEPTOR";
-    acc.target_comp_id  = "INITIATOR";
-    acc.begin_string    = "FIX.4.2";
-    acc.role            = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     acc.compid_authorization_policy = authz;
-    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac_keepalive;
     acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
@@ -333,8 +312,7 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -342,18 +320,18 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
 
     // Build a shared TLS factory + cert_source.
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -369,17 +347,16 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id  = "ACCEPTOR";
-    acc.target_comp_id  = "INITIATOR";
-    acc.begin_string    = "FIX.4.2";
-    acc.role            = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     acc.compid_authorization_policy = authz;  // on-list policy
-    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac;
     acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
@@ -399,14 +376,14 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind (port is 0)";
 
     // Build the loopback TLS fixture (for client-side transport).
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
 
     // Spawn the standalone test-initiator client.
     asio::co_spawn(ioc,
-        run_test_initiator(ioc, fixture, bound_port,
-                           /*sender=*/"INITIATOR", /*target=*/"ACCEPTOR"),
-        asio::detached);
+                   run_test_initiator(ioc, fixture, bound_port,
+                                      /*sender=*/"INITIATOR", /*target=*/"ACCEPTOR"),
+                   asio::detached);
 
     // Run for up to 3s to allow accept→handshake→auth→admit.
     ioc.run_for(3s);
@@ -415,24 +392,22 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     // Capture state BEFORE stop() frees the session.
     fixpp::session::Session* acc_session = engine.lookup(acc_id);
     bool established = (acc_session != nullptr) &&
-        (acc_session->state() == fixpp::session::fsm_state::Active ||
-         acc_session->state() == fixpp::session::fsm_state::LogonReceived);
+                       (acc_session->state() == fixpp::session::fsm_state::Active ||
+                        acc_session->state() == fixpp::session::fsm_state::LogonReceived);
 
-    std::string state_str = (acc_session != nullptr)
-        ? std::to_string(static_cast<int>(acc_session->state()))
-        : "null";
+    std::string state_str =
+        (acc_session != nullptr) ? std::to_string(static_cast<int>(acc_session->state())) : "null";
 
     // Stop cleanly.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
     stop_fut.get();
 
-    EXPECT_TRUE(established)
-        << "SC-001: the acceptor session must reach Active (or LogonReceived) "
-        << "after an on-list initiator connects over loopback-TLS. "
-        << "state=" << state_str
-        << ". GREEN after T011/T012/T013: full accept→handshake→resolve→"
-        << "attach→arm(1-live)→admit; session reaches established state.";
+    EXPECT_TRUE(established) << "SC-001: the acceptor session must reach Active (or LogonReceived) "
+                             << "after an on-list initiator connects over loopback-TLS. "
+                             << "state=" << state_str
+                             << ". GREEN after T011/T012/T013: full accept→handshake→resolve→"
+                             << "attach→arm(1-live)→admit; session reaches established state.";
 }
 
 // ── F-015-001: a Logon fragmented across two reads is reassembled + admitted ──
@@ -450,8 +425,7 @@ TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -462,19 +436,17 @@ TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
     ASSERT_TRUE(rig.has_value()) << "acceptor rig setup failed";
     auto [acc_id, port] = *rig;
 
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
-    asio::co_spawn(ioc,
-        run_test_initiator_fragmented(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
-        asio::detached);
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
+    asio::co_spawn(ioc, run_test_initiator_fragmented(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
+                   asio::detached);
 
     ioc.run_for(3s);
     ioc.restart();
 
     fixpp::session::Session* s = engine.lookup(acc_id);
-    bool established = (s != nullptr) &&
-        (s->state() == fixpp::session::fsm_state::Active ||
-         s->state() == fixpp::session::fsm_state::LogonReceived);
+    bool established = (s != nullptr) && (s->state() == fixpp::session::fsm_state::Active ||
+                                          s->state() == fixpp::session::fsm_state::LogonReceived);
     std::string state_str = s ? std::to_string(static_cast<int>(s->state())) : "null";
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
@@ -501,8 +473,7 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -513,22 +484,18 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     ASSERT_TRUE(rig.has_value()) << "acceptor rig setup failed";
     auto [acc_id, port] = *rig;
 
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
-    asio::co_spawn(ioc,
-        run_test_initiator_coalesced(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
-        asio::detached);
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
+    asio::co_spawn(ioc, run_test_initiator_coalesced(ioc, fixture, port, "INITIATOR", "ACCEPTOR"),
+                   asio::detached);
 
     ioc.run_for(3s);
     ioc.restart();
 
     fixpp::session::Session* s = engine.lookup(acc_id);
-    bool established = (s != nullptr) &&
-        (s->state() == fixpp::session::fsm_state::Active ||
-         s->state() == fixpp::session::fsm_state::LogonReceived);
-    int next_inbound = s
-        ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe())
-        : -1;
+    bool established = (s != nullptr) && (s->state() == fixpp::session::fsm_state::Active ||
+                                          s->state() == fixpp::session::fsm_state::LogonReceived);
+    int next_inbound = s ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe()) : -1;
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
@@ -582,26 +549,25 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     static const char* kDir = nullptr;
 #endif
     const char* fixture_dir = dir ? dir : kDir;
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
 
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = std::string(fixture_dir) + "/ca.pem";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
     auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
         cs_cfg, std::pmr::new_delete_resource());
     ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
 
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    ssl.cs      = std::move(*cs_r);
-    ssl.clock   = nullptr;
-    ssl.caps    = fixpp::tls::CertSourceCaps{};
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
 
     auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl);
@@ -614,17 +580,16 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig acc;
-    acc.sender_comp_id  = "ACCEPTOR";
-    acc.target_comp_id  = "INITIATOR";
-    acc.begin_string    = "FIX.4.2";
-    acc.role            = fixpp::session::session_role::acceptor;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
     acc.executor_override = ioc.get_executor();
-    acc.security_profile = fixpp::session::SecurityProfile{
-        fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
     acc.compid_authorization_policy = authz;
-    acc.dictionary     = fixpp::test_support::make_minimal_dictionary();
-    acc.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     acc.transport_factory_override = fac;
     acc.heartbeat_interval = std::chrono::seconds{30};
     acc.logout_disconnect_timeout_ms = 2000;
@@ -647,14 +612,14 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
         << "lookup() must be nullptr for a registered acceptor with no peer yet "
         << "(lazy + match-gated construction; engine.hpp:200-204)";
 
-    fixpp::transport::test::LoopbackTlsFixture fixture{
-        std::string(fixture_dir), ioc.get_executor()};
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
 
     // Client sends a Logon whose reversed CompID matches NO registered acceptor.
     asio::co_spawn(ioc,
-        run_test_initiator(ioc, fixture, bound_port,
-                           /*sender=*/"STRANGER", /*target=*/"NOBODY"),
-        asio::detached);
+                   run_test_initiator(ioc, fixture, bound_port,
+                                      /*sender=*/"STRANGER", /*target=*/"NOBODY"),
+                   asio::detached);
 
     ioc.run_for(3s);
     ioc.restart();
@@ -683,8 +648,8 @@ TEST(EngineAcceptorTest, LookupNullBeforeStart) {
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
 
-    auto harness = fixpp::test_support::EngineLoopbackHarness::build(
-        ioc.get_executor(), std::move(eng_cfg));
+    auto harness =
+        fixpp::test_support::EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg));
     if (!harness) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }

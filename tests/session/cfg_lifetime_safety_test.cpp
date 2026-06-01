@@ -27,9 +27,20 @@
 //      independent.
 //
 // Anchors: FR-001 / D-1 / SC-001 / W-5 (010 spec.md).
+#include <gtest/gtest.h>
+
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <optional>
@@ -38,21 +49,8 @@
 #include <string_view>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
-#include <gtest/gtest.h>
 
 using namespace std::chrono_literals;
 
@@ -66,10 +64,14 @@ static std::string extract_tag(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
-    if (pos == std::string::npos) { return {}; }
+    if (pos == std::string::npos) {
+        return {};
+    }
     pos += needle.size();
     auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) { return {}; }
+    if (end == std::string::npos) {
+        return {};
+    }
     return wire.substr(pos, end - pos);
 }
 
@@ -86,25 +88,23 @@ protected:
         auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
 
     // Build a minimal initiator cfg. The heartbt_int parameter controls the
     // HeartBtInt(108) value emitted in the initial Logon frame so tests can
     // verify which copy is being read by the session.
-    SessionConfig make_cfg(std::string_view sender,
-                           std::string_view target,
-                           int heartbt_int = 30) {
+    SessionConfig make_cfg(std::string_view sender, std::string_view target, int heartbt_int = 30) {
         SessionConfig cfg;
-        cfg.sender_comp_id     = std::string(sender);
-        cfg.target_comp_id     = std::string(target);
-        cfg.begin_string       = "FIX.4.2";
+        cfg.sender_comp_id = std::string(sender);
+        cfg.target_comp_id = std::string(target);
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = std::chrono::seconds{heartbt_int};
-        cfg.security_profile   = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary         = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override  = ioc.get_executor();
-        cfg.role               = session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = session_role::initiator;
         return cfg;
     }
 
@@ -163,9 +163,8 @@ TEST_F(CfgLifetimeSafetyTest, CallerCfgDropsAfterCtor_SessionContinuesWithoutUAF
     // cfg_.begin_string, cfg_.heartbeat_interval inside open().
     // Pre-fix: this is a UAF. Post-fix: reads from the owned copy. (FR-001)
     auto result = open_sync(*sess);
-    ASSERT_TRUE(result.has_value())
-        << "Session::open() failed after caller cfg dropped: error="
-        << static_cast<int>(result.error());
+    ASSERT_TRUE(result.has_value()) << "Session::open() failed after caller cfg dropped: error="
+                                    << static_cast<int>(result.error());
 
     // Session entered LogonSent — confirms open() completed a full
     // execution path including reading cfg_. (SC-001)
@@ -174,8 +173,7 @@ TEST_F(CfgLifetimeSafetyTest, CallerCfgDropsAfterCtor_SessionContinuesWithoutUAF
 
     // Logon frame was captured — confirms sender_comp_id from the owned
     // copy was used to build the frame. (FR-001)
-    ASSERT_FALSE(captured_frame.empty())
-        << "Expected an outbound Logon frame to be emitted";
+    ASSERT_FALSE(captured_frame.empty()) << "Expected an outbound Logon frame to be emitted";
     EXPECT_EQ(extract_tag(captured_frame, 49), "SENDER")
         << "Logon frame tag 49 (SenderCompID) must match the original cfg value";
 
@@ -207,8 +205,7 @@ TEST_F(CfgLifetimeSafetyTest, CallerMutatesCfgAfterCtor_SessionUnaffected) {
     ASSERT_TRUE(result.has_value())
         << "Session::open() failed; error=" << static_cast<int>(result.error());
 
-    ASSERT_FALSE(captured_frame.empty())
-        << "Expected an outbound Logon frame";
+    ASSERT_FALSE(captured_frame.empty()) << "Expected an outbound Logon frame";
 
     // Tag 49 = SenderCompID; must be the original value from the copied cfg.
     EXPECT_EQ(extract_tag(captured_frame, 49), "ORIGINAL")
@@ -264,14 +261,12 @@ TEST_F(CfgLifetimeSafetyTest, MultipleSessionsFromSameCfgEvolveIndependently) {
     // sess1 Logon must carry the original values (heartbt=10, sender=SENDER1).
     EXPECT_EQ(extract_tag(frame1, 108), "10")
         << "sess1 Logon HeartBtInt must be 10 (the value at sess1 ctor time)";
-    EXPECT_EQ(extract_tag(frame1, 49), "SENDER1")
-        << "sess1 Logon SenderCompID must be SENDER1";
+    EXPECT_EQ(extract_tag(frame1, 49), "SENDER1") << "sess1 Logon SenderCompID must be SENDER1";
 
     // sess2 Logon must carry the mutated values (heartbt=20, sender=SENDER2).
     EXPECT_EQ(extract_tag(frame2, 108), "20")
         << "sess2 Logon HeartBtInt must be 20 (the value at sess2 ctor time)";
-    EXPECT_EQ(extract_tag(frame2, 49), "SENDER2")
-        << "sess2 Logon SenderCompID must be SENDER2";
+    EXPECT_EQ(extract_tag(frame2, 49), "SENDER2") << "sess2 Logon SenderCompID must be SENDER2";
 
     close_sync(sess1);
     close_sync(sess2);

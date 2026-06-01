@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -27,23 +28,20 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <array>
 #include <atomic>
 #include <cstddef>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <memory_resource>
 #include <vector>
-
-#include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -61,8 +59,8 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
     std::array<std::byte, 32768> buf{};
 
     std::atomic<int> in_critical{0};
-    int overlap  = 0;
-    int counter  = 0;
+    int overlap = 0;
+    int counter = 0;
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -83,8 +81,7 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
         co_await yield_n(1);
         auto g = co_await mtx.async_lock(mr);
         if (!g.has_value()) {
-            ADD_FAILURE() << "PMR waiter failed unexpectedly: "
-                          << static_cast<int>(g.error());
+            ADD_FAILURE() << "PMR waiter failed unexpectedly: " << static_cast<int>(g.error());
             co_return;
         }
         int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -111,8 +108,8 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
     fh.get();
     for (auto& f : futs) f.get();
 
-    EXPECT_EQ(overlap,  0) << "Mutual exclusion violated on PMR path";
-    EXPECT_EQ(counter,  N) << "Lost waiter on PMR path";
+    EXPECT_EQ(overlap, 0) << "Mutual exclusion violated on PMR path";
+    EXPECT_EQ(counter, N) << "Lost waiter on PMR path";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,22 +135,24 @@ TEST(SyncPmrFallback, TinyPmrExhaustionReturnsAllocFailed) {
         auto holder = co_await mtx.async_lock();
         EXPECT_TRUE(holder.has_value());
 
-        std::pmr::monotonic_buffer_resource tiny_mr{
-            tiny_buf.data(), tiny_buf.size(),
-            std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource tiny_mr{tiny_buf.data(), tiny_buf.size(),
+                                                    std::pmr::null_memory_resource()};
 
         auto ex = co_await asio::this_coro::executor;
         std::atomic<bool> result_ready{false};
         std::atomic<bool> got_alloc_failed{false};
 
         // Spawn a waiter that uses the tiny resource — must fail to allocate.
-        asio::co_spawn(ex, [&]() -> asio::awaitable<void> {
-            co_await yield_n(1);
-            auto r = co_await mtx.async_lock(&tiny_mr);
-            if (!r.has_value() && r.error() == error::sync_lock_alloc_failed)
-                got_alloc_failed.store(true, std::memory_order_release);
-            result_ready.store(true, std::memory_order_release);
-        }, asio::detached);
+        asio::co_spawn(
+            ex,
+            [&]() -> asio::awaitable<void> {
+                co_await yield_n(1);
+                auto r = co_await mtx.async_lock(&tiny_mr);
+                if (!r.has_value() && r.error() == error::sync_lock_alloc_failed)
+                    got_alloc_failed.store(true, std::memory_order_release);
+                result_ready.store(true, std::memory_order_release);
+            },
+            asio::detached);
 
         // Yield until the waiter has run and set its result.
         co_await yield_n(8);
@@ -188,10 +187,8 @@ TEST(SyncPmrFallback, TinyPmrExhaustionReturnsAllocFailed) {
 
 TEST(SyncPmrFallback, UncontendedPmrTakesFastPath) {
     std::array<std::byte, 4096> buf{};
-    std::pmr::monotonic_buffer_resource mbr{
-        buf.data(), buf.size(),
-        std::pmr::null_memory_resource()};
-
+    std::pmr::monotonic_buffer_resource mbr{buf.data(), buf.size(),
+                                            std::pmr::null_memory_resource()};
 
     asio::io_context ioc;
     async_mutex mtx;

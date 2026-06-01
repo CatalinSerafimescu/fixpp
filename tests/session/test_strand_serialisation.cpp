@@ -16,15 +16,13 @@
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
-#include <thread>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <thread>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -59,9 +57,9 @@ void open_session(Session& s, asio::thread_pool& pool) {
 TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
     asio::thread_pool pool{8};
     EngineConfig engine = make_engine(pool.get_executor());
-    SessionConfig cfg;                          // default per_session_strand
-    cfg.dictionary        = g_dict;            // T050: non-null dict required at open
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();  // RC#1
+    SessionConfig cfg;        // default per_session_strand
+    cfg.dictionary = g_dict;  // T050: non-null dict required at open
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session s{engine, cfg};
     open_session(s, pool);
 
@@ -99,7 +97,7 @@ TEST(SeamStrandSerialisation, CrossSessionConcurrentSamEngineExecutor) {
     asio::thread_pool pool{8};
     EngineConfig engine = make_engine(pool.get_executor());
     SessionConfig cfg;
-    cfg.dictionary       = g_dict;             // T050: non-null dict required at open
+    cfg.dictionary = g_dict;  // T050: non-null dict required at open
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();  // RC#1
     Session a{engine, cfg};
     Session b{engine, cfg};

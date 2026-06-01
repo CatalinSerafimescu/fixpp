@@ -13,15 +13,14 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
+#include <fixpp/core/error.hpp>            // defines core::expected_t<T>
+#include <fixpp/tls/peer_identity.hpp>     // [2g §4.5] peer_identity (LOCKED)
+#include <fixpp/tls/pinset.hpp>            // [2g §4.3] pin_snapshot (LOCKED)
+#include <fixpp/tls/security_profile.hpp>  // [2g §4.5] SslCtxConfig (LOCKED)
+#include <fixpp/transport/transport.hpp>
 #include <memory>
 #include <memory_resource>
 #include <string>
-
-#include <fixpp/core/error.hpp>             // defines core::expected_t<T>
-#include <fixpp/tls/peer_identity.hpp>      // [2g §4.5] peer_identity (LOCKED)
-#include <fixpp/tls/pinset.hpp>             // [2g §4.3] pin_snapshot (LOCKED)
-#include <fixpp/tls/security_profile.hpp>   // [2g §4.5] SslCtxConfig (LOCKED)
-#include <fixpp/transport/transport.hpp>
 
 namespace fixpp::transport {
 
@@ -50,9 +49,10 @@ namespace fixpp::transport {
 // result's lifetime by composition.
 // ─────────────────────────────────────────────────────────────────────────────
 struct handshake_result {
-    fixpp::tls::peer_identity                       peer_id;
-    std::shared_ptr<const fixpp::tls::pin_snapshot> captured_pinset;  // null IFF non-pinned profile.
-    std::pmr::string                                negotiated_cipher;
+    fixpp::tls::peer_identity peer_id;
+    std::shared_ptr<const fixpp::tls::pin_snapshot>
+        captured_pinset;  // null IFF non-pinned profile.
+    std::pmr::string negotiated_cipher;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,9 +113,8 @@ public:
     //
     //     [[clang::lifetimebound]] on cfg — caller MUST keep SslCtxConfig
     //     alive past awaitable completion.
-    [[nodiscard]] virtual asio::awaitable<core::expected_t<handshake_result>>
-        async_handshake(fixpp::tls::SslCtxConfig const& cfg
-                            [[clang::lifetimebound]]) = 0;
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<handshake_result>> async_handshake(
+        fixpp::tls::SslCtxConfig const& cfg [[clang::lifetimebound]]) = 0;
 };
 
 }  // namespace fixpp::transport

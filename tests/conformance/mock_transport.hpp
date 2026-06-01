@@ -24,13 +24,13 @@ namespace fixpp::tls::test {
 enum class direction { send, recv };
 
 struct frame {
-    direction             dir;
+    direction dir;
     std::vector<std::byte> bytes;
 };
 
 // MockTransport — sequential replay of recorded send/recv frames.
 class MockTransport {
- public:
+public:
     explicit MockTransport(std::vector<frame> script) noexcept
         : script_{std::move(script)}, pos_{0} {}
 
@@ -40,13 +40,12 @@ class MockTransport {
         check_bounds("send");
         auto const& expected = script_[pos_];
         if (expected.dir != direction::send) {
-            throw std::logic_error(
-                "MockTransport: expected recv at step " + std::to_string(pos_) +
-                " but got send");
+            throw std::logic_error("MockTransport: expected recv at step " + std::to_string(pos_) +
+                                   " but got send");
         }
         if (payload != expected.bytes) {
-            throw std::logic_error(
-                "MockTransport: send payload mismatch at step " + std::to_string(pos_));
+            throw std::logic_error("MockTransport: send payload mismatch at step " +
+                                   std::to_string(pos_));
         }
         ++pos_;
     }
@@ -57,9 +56,8 @@ class MockTransport {
         check_bounds("recv");
         auto const& expected = script_[pos_];
         if (expected.dir != direction::recv) {
-            throw std::logic_error(
-                "MockTransport: expected send at step " + std::to_string(pos_) +
-                " but got recv");
+            throw std::logic_error("MockTransport: expected send at step " + std::to_string(pos_) +
+                                   " but got recv");
         }
         auto result = expected.bytes;
         ++pos_;
@@ -72,18 +70,17 @@ class MockTransport {
     [[nodiscard]] std::size_t step() const noexcept { return pos_; }
     [[nodiscard]] std::size_t total_steps() const noexcept { return script_.size(); }
 
- private:
+private:
     void check_bounds(const char* op) const {
         if (pos_ >= script_.size()) {
-            throw std::out_of_range(
-                std::string("MockTransport: ") + op +
-                " called past end of script (step " + std::to_string(pos_) +
-                " of " + std::to_string(script_.size()) + ")");
+            throw std::out_of_range(std::string("MockTransport: ") + op +
+                                    " called past end of script (step " + std::to_string(pos_) +
+                                    " of " + std::to_string(script_.size()) + ")");
         }
     }
 
     std::vector<frame> script_;
-    std::size_t        pos_;
+    std::size_t pos_;
 };
 
 // Helper: build a synthetic send/recv pair for a "handshake" with a given label.

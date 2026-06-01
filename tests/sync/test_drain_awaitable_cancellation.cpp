@@ -27,19 +27,17 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
 
 namespace {
 
-using fixpp::sync::async_mutex;
-using fixpp::sync::async_lock_guard;
-using fixpp::sync::expected_t;
 using fixpp::core::error;
+using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
+using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
 
@@ -71,8 +69,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire))
-            co_await yield_n(1);
+        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -86,8 +83,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     auto drain_coro = [&]() -> asio::awaitable<void> {
         co_await yield_n(N * 2);  // let holder + waiters settle
         auto d = co_await mtx.cancel_and_drain();
-        if (!d.has_value() && d.error() == error::sync_lock_aborted)
-            drain_aborted = true;
+        if (!d.has_value() && d.error() == error::sync_lock_aborted) drain_aborted = true;
     };
 
     auto canceller = [&]() -> asio::awaitable<void> {
@@ -104,9 +100,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
     auto fd = asio::co_spawn(
-        ioc,
-        drain_coro(),
-        asio::bind_cancellation_slot(drain_cancel_sig.slot(), asio::use_future));
+        ioc, drain_coro(), asio::bind_cancellation_slot(drain_cancel_sig.slot(), asio::use_future));
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
     ioc.run();
@@ -126,8 +120,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     asio::io_context ioc2;
     auto check = [&]() -> asio::awaitable<void> {
         auto r = co_await mtx.async_lock();
-        post_cancel_lock_drained = !r.has_value() &&
-                                   r.error() == error::sync_lock_drained;
+        post_cancel_lock_drained = !r.has_value() && r.error() == error::sync_lock_drained;
     };
     auto fc = asio::co_spawn(ioc2, check(), asio::use_future);
     ioc2.run();
@@ -160,10 +153,8 @@ TEST(SeamDrainAwaitableCancellation, NoDanglingFuturesOnDrainCancellation) {
     // Fire the drain's slot immediately before it runs.
     drain_sig.emit(asio::cancellation_type::total);
 
-    auto fd = asio::co_spawn(
-        ioc,
-        drain_coro(),
-        asio::bind_cancellation_slot(drain_sig.slot(), asio::use_future));
+    auto fd = asio::co_spawn(ioc, drain_coro(),
+                             asio::bind_cancellation_slot(drain_sig.slot(), asio::use_future));
 
     ioc.run();
     fd.get();  // must not block
