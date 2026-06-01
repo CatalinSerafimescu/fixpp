@@ -622,10 +622,14 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         asio::co_spawn(ioc,
             sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}),
             asio::detached);
-    }
 
-    ioc.run_for(500ms);
-    ioc.restart();
+        // rr_bytes MUST outlive run_for(): on_inbound_frame() takes a non-owning
+        // span and the detached coroutine reads it when the executor resumes it
+        // below (not at co_spawn() time). If rr_bytes dies first this is a
+        // heap-use-after-free — invisible to the debug build, caught by TSan/ASan.
+        ioc.run_for(500ms);
+        ioc.restart();
+    }
 
     // The replay transmit (GapFill) fails with broken_pipe → force-disconnect.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
