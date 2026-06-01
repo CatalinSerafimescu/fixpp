@@ -195,3 +195,37 @@ fixpp_add_interop_test(
     SOURCES parity/replay_subsumes_reorder_queue_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
+
+# ── US2 thorny-corpus P1 witnesses (T020-T021) ────────────────────────────────
+# Standalone provenance-linked replays of upstream closed-with-fix bugs; reuse the
+# parity ParityAcceptorFixture (parity/parity_support.hpp) — no counterparty, no
+# live transport. Each asserts fixpp's spec-conformant outcome (FR-018).
+# Provenance + bucketing: thorny/CORPUS-INDEX.md.
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj750_logout_seqnum_mismatch_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;recovery"
+    SOURCES thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj603_unsupported_beginstring_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;framing"
+    SOURCES thorny/framing/qfj-603-unsupported-beginstring_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj721_non_logon_first_message_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;framing"
+    SOURCES thorny/framing/qfj-721-non-logon-first-message_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj271_sequencereset_large_gapfill_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;recovery"
+    SOURCES thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
