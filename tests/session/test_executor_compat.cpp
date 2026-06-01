@@ -14,6 +14,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/strand.hpp>
 #include <asio/system_executor.hpp>
 #include <asio/thread_pool.hpp>
@@ -83,6 +84,26 @@ void run_combo(asio::any_io_executor ex, threading_mode mode, bool attested,
     ASSERT_EQ(observed.size(), script.size());
     for (std::size_t i = 0; i < script.size(); ++i)
         EXPECT_EQ(observed[i], script[i].label) << "label order broke at " << i;
+
+    // Drain the session's serialisation domain BEFORE `s` (stack-local) is
+    // destroyed. drive_script signals completion (`last.set_value()`) from
+    // INSIDE the last callback body, but `dispatch_app_callback`'s debug
+    // re-entrancy `dispatch_guard` dtor (session.hpp ~323, an atomic store to
+    // the session's `in_dispatch_` member) runs AFTER the body returns — so
+    // `fut.wait()` can release the main thread while a worker is still inside
+    // that dtor, touching `s` after its scope ends. A plain post onto `exec_`
+    // (`s.executor()`) is FIFO-ordered strictly after every prior callback's
+    // FULL handler (guard dtor included) and carries no trailing guard, so
+    // waiting on it guarantees the session is quiescent. The pool/io_context
+    // combos had an incidental join barrier; the system_executor combos
+    // (global context, no join) did not — their lingering store raced the
+    // next test's Session ctor under CI TSan (pre-existing, intermittent).
+    {
+        std::promise<void> drained;
+        auto drained_fut = drained.get_future();
+        asio::post(s.executor(), [&drained] { drained.set_value(); });
+        drained_fut.wait();
+    }
 
     if (pool_to_join) pool_to_join->join();
 }
