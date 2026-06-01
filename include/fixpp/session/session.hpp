@@ -661,6 +661,19 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept;
 
+    // apply_inbound_sequence_reset: apply an inbound SequenceReset(35=4)
+    // NewSeqNo(36) to the expected-inbound counter (S-023; FIX-SL §4.8 /
+    // QuickFIX Session::nextSequenceReset arms):
+    //   new_seqno > expected  → set_next_inbound (advance past gap / hard-reset)
+    //   new_seqno < expected  → Reject(RefTagID=36, SessionRejectReason=5)
+    //   new_seqno == expected → no-op
+    //   new_seqno == 0 (absent/invalid) → no-op
+    // Shared by both GapFill (123=Y) and Reset (123=N/absent) modes; the caller
+    // places each mode relative to the seqnum gate (Reset bypasses it).
+    // ref_seq is the rejected message's MsgSeqNum (for the Reject RefSeqNum).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> apply_inbound_sequence_reset(
+        seqnum_t new_seqno, seqnum_t ref_seq) noexcept;
+
     // send_impl: the actual send pipeline (frame building + store_then_emit).
     // Called from the noexcept send() wrapper which catches asio::system_error
     // thrown on async cancellation. May throw on store awaitable cancellation.
