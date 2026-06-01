@@ -12,3 +12,45 @@
 # undefined during static analysis; cppcheck cannot resolve computed includes
 # without -D.
 preprocessorErrorDirective:*decimal_alias.hpp
+
+# ── chore/repo-wide-lint (2026-06-01): clear the W-2 cppcheck carry-forward ──
+# Each class below was source-read across all sites; no real defect found
+# (consistent with every /speckit-verify Step-1 triage). Categorical here rather
+# than inline because each fires across many sites or is a whole-program limitation.
+
+# Library public API + test-only accessors are used cross-TU / by external
+# consumers; cppcheck's whole-program view can't see those callers (the W-2
+# pattern, 89 sites). unusedFunction is meaningless for a published library surface.
+unusedFunction
+
+# House style deliberately uses explicit loops over <algorithm> calls; matches the
+# clang-tidy posture. Pure style, fires widely.
+useStlAlgorithm
+
+# Minor-style classes the codebase deliberately does not adopt — mirrors the already-
+# suppressed clang-tidy misc-const-correctness (.clang-tidy): local scope/const are a
+# deliberate authoring choice here, not a defect.
+variableScope
+constVariablePointer
+constParameterReference
+constParameterPointer
+shadowVariable
+passedByValue
+
+# False positives confirmed by source-read (scoped per-file to stay narrow):
+#   engine.cpp: `session` is from make_unique / a guaranteed-set acceptor session;
+#     cppcheck's unique_ptr::get() flow analysis is conservatively null-pessimistic.
+nullPointer:src/session/engine.cpp
+#   system_clock_source.cpp: `released` exists ONLY to destroy the timer slot AFTER
+#     the lock is released (deliberate destroy-outside-lock RAII), not dead.
+unreadVariable:src/core/system_clock_source.cpp
+#   compid_authorization_policy.cpp: the SAN-accessor return is opaque to cppcheck;
+#     the !empty() guards before [0] are correct and necessary.
+knownConditionTrueFalse:src/session/compid_authorization_policy.cpp
+#   reconnect_fsm.cpp: a correct `session_ != nullptr` guard before deref (the
+#     standalone-fsm test path has no Session owner).
+duplicateCondition:src/session/reconnect_fsm.cpp
+#   parser.hpp: local `end` deliberately named; shadows std::end only by name.
+shadowFunction:*parser.hpp
+#   unknown_fields_view intentionally provides its own empty() over View::empty().
+duplInheritedMember:*unknown_fields.hpp
