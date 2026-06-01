@@ -427,6 +427,18 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ---
 
+## 016 interop-harness — production-touch ledger
+
+> Tests-only feature with one bounded production prerequisite from T008. This
+> ledger records traceability for that touch only; it does not claim the live
+> QuickFIX matrix has run.
+
+| Production touch | Spec section / requirement | Catalogue row(s) | Evidence / disposition |
+|---|---|---|---|
+| `SessionConfig::reconnect_policy` field (`include/fixpp/session/session_config.hpp`), `resolve_reconnect_policy()` in `src/session/session.cpp` around line 93, and bounded/cancellable connect/stop behavior in `src/session/engine.cpp` | `[FIX-SL §4.4]` reconnection / `ResetSeqNumFlag=N` continuity; 016 FR-004 and FR-028 | S-014 (session recovery / reconnect flow), S-032 (ResetSeqNumFlag policy, once row is populated) | `tests/session/reconnect_policy_witness_test.cpp` and `tests/interop/happy/hp_down_peer_stop_watchdog_test.cpp` prove finite reconnect policy and bounded `Engine::stop()` for the down-peer regression. Article IX §1 95/85 assessment is seeded for `/speckit-verify`; sanitizer full-matrix execution remains a 016 SC-004 parent/verify obligation. |
+
+---
+
 ## 013-session-reconnect-binding — Merged (PR #86 squash `bd84e08`, 2026-05-29; Gate B converged 3 rounds, Sonnet 2/2, gate-b-waived)
 
 > Session-Phase-4 surface: reconnect FSM driver + recovery sub-protocol + CompID↔TLS-identity binding + TLS-validation-outcome SessionEvent + in-process credential rotation. Ships catalogue rows **S-005 / S-006 / S-014 / S-024 → `done`** (recovery sub-protocol: ResendRequest issue+reply, SequenceReset-GapFill, ResetSeqNumFlag(141) 3-mode matrix, recovery FSM). Completes co-owned **T-039 / T-040 → `done`** (012 shipped the wiring half; 013 binds TLS outcome → `SessionEvent` and adds in-process `reload_credentials`). **T-041** stays `implementing` — policy/extraction/fail-CLOSED-when-mTLS Logon gate SHIPPED; production `handshake_result.peer_id → Session` source wiring needs the live `TlsTransport` → 014.

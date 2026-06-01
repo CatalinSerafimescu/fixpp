@@ -229,3 +229,19 @@ fixpp_add_interop_test(
     SOURCES thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
+
+# ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
+# Validates cell_results.yaml against the parent gate-evaluator's result schema
+# (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs
+# deferred disambiguation, corpus P1 block rule. Pure-Python (PyYAML) — no
+# instrumented .so, so it runs under every preset (unlike the decimal oracle).
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME interop_cell_results_schema_check
+    COMMAND ${Python3_EXECUTABLE} -m pytest -xq
+            "${CMAKE_CURRENT_SOURCE_DIR}/cell_results_schema_check_test.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+set_tests_properties(interop_cell_results_schema_check PROPERTIES
+    LABELS "interop;016;interop-thorny;us4;schema-check"
+)
