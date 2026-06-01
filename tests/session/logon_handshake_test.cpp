@@ -374,6 +374,12 @@ TEST_F(LogonHandshakeTest, BuildLogonProducesValidFrame) {
     // Check TargetCompID(56)=ISLD.
     auto target = extract_field(*result, 56);
     EXPECT_EQ(target, "ISLD") << "TargetCompID(56) not ISLD";
+
+    // S-021: EncryptMethod(98)=0 (None) — required by [FIX-SL §4.2]. Witness the
+    // emit (admin_messages.cpp:126) so a future builder refactor can't silently
+    // drop it; QuickFIX/Fix8 both reject a Logon without 98.
+    auto encrypt = extract_field(*result, 98);
+    EXPECT_EQ(encrypt, "0") << "EncryptMethod(98) not 0 (None)";
 }
 
 // T9a: interpret_logon() — valid frame returns HeartBtInt.

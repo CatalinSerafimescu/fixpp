@@ -875,6 +875,12 @@ struct FrameHeader {
             if (c < '0' || c > '9') {
                 tag_ok = false;
             }
+            // Overflow guard: a tag wider than UINT32_MAX would wrap and could
+            // ALIAS a known small tag (e.g. 2^32+35 → 35 overrides MsgType).
+            // Mark unparseable so the field is skipped, never aliased.
+            if (tag > 429496729U) {
+                tag_ok = false;
+            }
             tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }

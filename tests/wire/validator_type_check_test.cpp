@@ -181,6 +181,23 @@ TEST(ValidatorTypeCheck, IntFieldNonDigitCharRejected) {
     EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
 }
 
+TEST(ValidatorTypeCheck, IntFieldWidthOverflowPassesValidatorEnforcedDownstream) {
+    // 9.G witness: the wire validator's Int check is width-agnostic by design —
+    // FIX `INT` carries no width, so a numerically-oversized-but-well-formed
+    // value (INT32_MAX+1) PASSES structural validation here. Per-width overflow
+    // is enforced downstream at the typed convertor (dict::field_traits<int32>,
+    // std::from_chars), tested in tests/dictionary/field_traits_test.cpp. This
+    // pins that boundary so nobody "hardens" the validator with a spurious width.
+    table_view t;
+    t.add_valid("D", 34).set_type(34, field_type::Int);
+    dictionary_driven_validator v{std::move(t)};
+
+    auto val = bv("2147483648");  // INT32_MAX + 1: digit-format valid
+    auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
+    EXPECT_TRUE(rc.has_value())
+        << "validator is width-agnostic; overflow is the convertor's job, not the validator's";
+}
+
 // ── check_field_type: Char path ───────────────────────────────────────────────
 
 TEST(ValidatorTypeCheck, CharFieldSingleByteAccepted) {

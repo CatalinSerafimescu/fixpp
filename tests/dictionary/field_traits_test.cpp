@@ -115,6 +115,35 @@ TEST(FieldTraitsDecode, Int64AcceptsWholeNumberAndRejectsMalformedInput) {
     }
 }
 
+// 9.G integer-convertor overflow bounds (parity-matrix "highest-value genuine
+// correctness gap"). Per-width overflow is enforced HERE at the typed convertor
+// (std::from_chars → result_out_of_range), NOT at the wire validator, which is
+// width-agnostic by design (FIX `INT` carries no width). These pin both bounds
+// exactly: the max/min boundary accepts, one past it rejects.
+TEST(FieldTraitsDecode, Int32AcceptsExactBoundsAndRejectsOnePast) {
+    for (std::string_view ok : {"2147483647", "-2147483648"}) {  // INT32_MAX / INT32_MIN
+        auto r = field_traits<std::int32_t>::from_field_view(make_field_view(ok));
+        ASSERT_TRUE(r.has_value()) << "boundary must be accepted: " << ok;
+    }
+    for (std::string_view bad : {"2147483648", "-2147483649"}) {  // one past max / min
+        auto r = field_traits<std::int32_t>::from_field_view(make_field_view(bad));
+        ASSERT_FALSE(r.has_value()) << "overflow must be rejected: " << bad;
+        EXPECT_EQ(r.error(), error::dict_xml_parse_failed);
+    }
+}
+
+TEST(FieldTraitsDecode, Int64AcceptsExactBoundsAndRejectsOnePast) {
+    for (std::string_view ok : {"9223372036854775807", "-9223372036854775808"}) {  // MAX / MIN
+        auto r = field_traits<std::int64_t>::from_field_view(make_field_view(ok));
+        ASSERT_TRUE(r.has_value()) << "boundary must be accepted: " << ok;
+    }
+    for (std::string_view bad : {"9223372036854775808", "-9223372036854775809"}) {  // one past
+        auto r = field_traits<std::int64_t>::from_field_view(make_field_view(bad));
+        ASSERT_FALSE(r.has_value()) << "overflow must be rejected: " << bad;
+        EXPECT_EQ(r.error(), error::dict_xml_parse_failed);
+    }
+}
+
 TEST(FieldTraitsDecode, BoolAcceptsYAndNOnly) {
     auto yes = field_traits<bool>::from_field_view(make_field_view("Y"));
     ASSERT_TRUE(yes.has_value());
