@@ -1493,6 +1493,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
+            // ── Inbound SequenceReset(35=4) — Reset mode (GapFillFlag ≠ Y) ───
+            // FIX-SL §4.8.6: a Reset-mode SequenceReset is processed REGARDLESS
+            // of its own MsgSeqNum — it bypasses the seqnum gate (its purpose as
+            // an admin recovery tool). Mirrors QuickFIX verify(msg, false, false).
+            // GapFill mode (123=Y) is handled AFTER the gate (it IS subject to
+            // ordering). [S-023; QuickFIX Session::nextSequenceReset]
+            if (hdr.msg_type == "4" && hdr.gap_fill_flag != "Y") {
+                co_return co_await apply_inbound_sequence_reset(
+                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
+            }
+
             // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
             {
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
@@ -1566,6 +1577,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         reconnect_fsm_.current_resend_state().outstanding_end) {
                     reconnect_fsm_.exit_awaiting_resend();
                 }
+            }
+
+            // ── Inbound SequenceReset(35=4) — GapFill mode (GapFillFlag = Y) ─
+            // Subject to seqnum ordering: Guard 4 above advanced the counter by
+            // 1 for the in-seq GapFill (MsgSeqNum = gap start); now jump it to
+            // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
+            // Reset mode was handled before Guard 4. [S-023]
+            if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
+                co_return co_await apply_inbound_sequence_reset(
+                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
             }
 
             // T046 (US4): inbound Logout in Active/LogonReceived state.
@@ -1857,8 +1878,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
                 // 2026-05-23): "A" (dup-Logon) IS NOT in is_session_admin — per 005
                 // data-model row 22 + FR-017 "never silent no-op" it must emit a Reject.
-                // "2" (ResendRequest) and "4" (SequenceReset) are now handled above
-                // (013 Phase 3 T015) — they no longer reach the Reject branch.
+                // "2" (ResendRequest, 013 Phase 3 T015) and "4" (SequenceReset,
+                // S-023 — both GapFill + Reset arms) are now handled above —
+                // they no longer reach the Reject branch.
                 // The "A" (dup-Logon) cell stays Reject per 005's intentional
                 // defensive divergence from QuickFIX convention.
                 {
@@ -2688,6 +2710,67 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         last_outbound_steady_ = effective_clock_->steady_now();
     }
 
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// ── apply_inbound_sequence_reset (S-023) ────────────────────────────────────
+//
+// Apply an inbound SequenceReset(35=4) NewSeqNo(36) to the expected-inbound
+// counter. Mirrors QuickFIX-cpp Session::nextSequenceReset (Session.cpp:339)
+// arms; the caller places GapFill vs Reset mode relative to the seqnum gate.
+asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_reset(
+    seqnum_t new_seqno, seqnum_t ref_seq) noexcept {
+    // NewSeqNo(36) absent/invalid (parse_seqnum → 0): nothing to apply → no-op
+    // (matches QuickFIX getFieldIfSet: absent NewSeqNo ⇒ no counter change).
+    if (new_seqno == 0) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    const seqnum_t expected = seqnum_mgr_.next_inbound_unsafe();
+
+    if (new_seqno > expected) {
+        // Advance past the filled gap (GapFill) or to the admin reset target
+        // (Reset). [QuickFIX setNextTargetMsgSeqNum]
+        auto sr = co_await seqnum_mgr_.set_next_inbound(new_seqno);
+        if (!sr) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(sr.error());
+        }
+        // If this completes an outstanding resend span, leave recovery.
+        if (reconnect_fsm_.is_awaiting_resend()) {
+            reconnect_fsm_.exit_awaiting_resend();
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    if (new_seqno < expected) {
+        // Below expected — would move the inbound stream backward. Reject with
+        // SessionRejectReason=5 (ValueIsIncorrect), RefTagID=36; counter
+        // unchanged. [QuickFIX generateReject(SessionRejectReason_VALUE_IS_INCORRECT)]
+        std::array<std::byte, 512> rj_buf{};
+        const auto st52 =
+            effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+        auto rj_result = fixpp::session::build_reject(
+            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
+            cfg_.target_comp_id, ref_seq,
+            36,   // RefTagID = 36 (NewSeqNo)
+            "4",  // RefMsgType = SequenceReset
+            5,    // SessionRejectReason = 5 (ValueIsIncorrect)
+            cfg_.begin_string, st52.value);
+        if (rj_result) {
+            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+            if (!assign_r) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return std::unexpected(assign_r.error());
+            }
+            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // new_seqno == expected → no-op (counter already aligned).
     co_return fixpp::core::expected_t<void>{};
 }
 

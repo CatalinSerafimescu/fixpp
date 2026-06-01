@@ -136,4 +136,22 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noe
     co_return fixpp::core::expected_t<void>{};
 }
 
+// ── set_next_inbound ────────────────────────────────────────────────────────
+//
+// Acquire the mutex, set next_inbound_ to n. Called when an inbound
+// SequenceReset(35=4) (GapFill or Reset mode) carries NewSeqNo(36) > expected.
+// Production path. Only the inbound counter moves.
+
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
+    seqnum_t n) noexcept {
+    auto lk_result = co_await mutex_.async_lock();
+    if (!lk_result) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
+    auto lk = std::move(*lk_result);
+
+    next_inbound_ = n;
+    co_return fixpp::core::expected_t<void>{};
+}
+
 }  // namespace fixpp::session

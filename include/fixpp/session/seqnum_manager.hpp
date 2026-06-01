@@ -112,6 +112,15 @@ public:
     // so the event fires after post-reset state is consistent (FR-018).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to_one() noexcept;
 
+    // set_next_inbound(n): force next_inbound_ to n for an inbound
+    // SequenceReset(35=4) NewSeqNo(36) application (FIX-SL §4.8 — GapFill or
+    // Reset mode, when NewSeqNo > current expected). Mutex-guarded; production
+    // path. Only the inbound counter moves (a SequenceReset affects the peer→us
+    // stream only); store persistence — when applicable — is the session's
+    // responsibility, mirroring reset_to_one()'s split.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_inbound(
+        seqnum_t n) noexcept;
+
     // drain(): required before destruction to satisfy async_mutex destructor
     // precondition. Safe to call even if no lock was ever acquired.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drain() noexcept {

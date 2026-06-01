@@ -464,6 +464,11 @@ add_threading_test(reconnect_happy_path test_reconnect_happy_path.cpp)
 # T015 — seam recovery-admin-span-gapfill: all-admin ResendRequest → SequenceReset-GapFill.
 add_threading_test(recovery_admin_span_gapfill test_recovery_admin_span_gapfill.cpp)
 
+# S-023: inbound SequenceReset(35=4) NewSeqNo(36) application (GapFill + Reset
+# arms). FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() to read next-inbound.
+add_threading_test(session_inbound_sequence_reset test_inbound_sequence_reset.cpp)
+target_compile_definitions(session_inbound_sequence_reset PRIVATE FIXPP_TEST_HOOKS)
+
 # T016 — seam recovery-store-horizon: pre-horizon GapFill + PossDupFlag replay.
 add_threading_test(recovery_store_horizon test_recovery_store_horizon.cpp)
 
