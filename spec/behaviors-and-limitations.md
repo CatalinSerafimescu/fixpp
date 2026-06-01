@@ -78,3 +78,21 @@ Scope and conventions:
   no C-ABI / control-plane / observability / pybind, and no user sink for inbound
   *application* messages (the read-pump delivers every frame to the admin/session layer).
   **Status: wontfix for 015** (intentional scope bound). *(FR-013; spec "Scope guard".)*
+
+- **L-015-4 — A `Session` must outlive all work dispatched on its executor (lifetime
+  contract; not enforced at `~Session`).** `Session::dispatch_app_callback` posts a
+  handler that captures `this`, and in debug/sanitizer builds the re-entrancy
+  `dispatch_guard` dtor stores to `in_dispatch_` *after* the user callback returns.
+  Destroying the `Session` while a dispatched callback is queued/running (incl. that
+  trailing store) is a use-after-scope / data race. **Production is safe today:**
+  `dispatch_app_callback` has no production callers (the `Application` app-callback path is
+  Phase-5, L-015-3), and the Engine drains every session on teardown (`stop()` →
+  `close(terminal)` + join-before-registry-clear; `~Engine()` asserts `stop()`). The hazard
+  is only reachable by **bypassing the Engine** — constructing a raw `Session`, dispatching
+  on it, and destroying it without draining `exec_` (the seam tests; fixed in
+  `test_executor_compat.cpp run_combo` by a guard-less post onto `executor()` + wait).
+  Unlike `~Engine()`, `~Session()` does **not** assert a drained precondition. **Status:
+  follow-up — Phase-5 app-callback wiring MUST drain dispatched app work on session
+  teardown** (a shared keepalive, cf. the 014 detached-write fix), and should consider a
+  debug `~Session` guard once the precise "no in-flight executor work" invariant is
+  trackable. *(`include/fixpp/session/session.hpp dispatch_app_callback`; CI-TSan, 2026-06-01.)*

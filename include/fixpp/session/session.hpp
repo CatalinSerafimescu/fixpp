@@ -298,6 +298,20 @@ public:
     // already-serialised executor. The engine NEVER picks a concrete
     // executor — exec_ derives from
     // SessionConfig::executor_override.value_or(EngineConfig::executor).
+    //
+    // LIFETIME PRECONDITION (engine-internal contract): the caller MUST keep
+    // this Session alive until ALL work dispatched here has fully run — the
+    // posted handler captures `this`, and in debug builds its re-entrancy
+    // dispatch_guard dtor (~below) stores to `in_dispatch_` AFTER the user
+    // callback returns. Destroying the Session while a dispatched callback is
+    // queued or running (incl. that trailing guard store) is UB / a data race.
+    // The Engine satisfies this on teardown via stop() → close(terminal) +
+    // join-before-registry-clear; a caller that constructs a raw Session and
+    // drives it directly (the seam/unit tests) MUST drain `exec_` itself before
+    // the Session goes out of scope (e.g. a guard-less post onto executor() +
+    // wait — see tests/session/test_executor_compat.cpp run_combo). Phase-5
+    // app-callback wiring inherits this requirement (spec/behaviors-and-
+    // limitations.md L-015-4; cf. detached-write keepalive, 014).
     template <class F>
     void dispatch_app_callback(F&& f) const {
         asio::post(exec_, [this, g = std::forward<F>(f)]() mutable {
