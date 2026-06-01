@@ -95,8 +95,7 @@ namespace fixpp::transport {
     // the pattern with the correct error variant instead of reusing the
     // template directly.
     try {
-        auto ptr = std::make_unique<asio_tls_transport>(std::move(exec), std::move(cfg),
-                                                        std::move(ssl_cfg));
+        auto ptr = std::make_unique<asio_tls_transport>(std::move(exec), cfg, std::move(ssl_cfg));
         return std::unique_ptr<Transport>(std::move(ptr));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
@@ -123,8 +122,8 @@ namespace fixpp::transport {
         cfg.mr = mr;
     }
     try {
-        auto ptr = std::make_unique<asio_tls_transport>(
-            std::move(exec), std::move(cfg), std::move(ssl_cfg), std::move(accepted_socket));
+        auto ptr = std::make_unique<asio_tls_transport>(std::move(exec), cfg, std::move(ssl_cfg),
+                                                        std::move(accepted_socket));
         return std::unique_ptr<Transport>(std::move(ptr));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
@@ -145,7 +144,7 @@ namespace fixpp::transport {
 asio_tls_transport_factory::asio_tls_transport_factory(shared_ctx_tag, Transport::Config cfg,
                                                        fixpp::tls::SslCtxConfig ssl_cfg,
                                                        std::shared_ptr<void> ctx) noexcept
-    : cfg_{std::move(cfg)},
+    : cfg_{cfg},
       ssl_cfg_{std::move(ssl_cfg)},
       ssl_ctx_{std::move(ctx)},
       cert_source_slot_{ssl_cfg_.cs}  // 013 T012: init from already-moved ssl_cfg_
@@ -210,8 +209,7 @@ asio_tls_transport_factory::cert_source_snapshot() const noexcept {
     // this factory. ssl_stream_ is constructed lazily at async_handshake start.
     try {
         auto ptr = std::make_unique<asio_tls_transport>(
-            asio_tls_transport::from_factory_tag{}, std::move(exec), std::move(cfg),
-            std::move(ssl_cfg),
+            asio_tls_transport::from_factory_tag{}, std::move(exec), cfg, std::move(ssl_cfg),
             std::move(typed_ctx));  // shared_ptr — safe; asio::ssl::stream refs SSL_CTX
         return std::unique_ptr<Transport>(std::move(ptr));
     } catch (std::bad_alloc const&) {
@@ -234,8 +232,8 @@ asio_tls_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socket,
         ssl_ctx_, static_cast<asio::ssl::context*>(ssl_ctx_.get())};
     try {
         return std::make_unique<asio_tls_transport>(
-            asio_tls_transport::from_factory_tag{}, accepted_socket.get_executor(), std::move(cfg),
-            ssl_cfg_, std::move(typed_ctx), std::move(accepted_socket));
+            asio_tls_transport::from_factory_tag{}, accepted_socket.get_executor(), cfg, ssl_cfg_,
+            std::move(typed_ctx), std::move(accepted_socket));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
     } catch (std::system_error const&) {
@@ -467,7 +465,7 @@ static std::shared_ptr<asio::ssl::context> prepare_ssl_ctx_(
         // the public header. The factory's make() recovers it via static_cast.
         std::shared_ptr<void> ctx_void = ctx;
         auto factory = std::make_unique<asio_tls_transport_factory>(
-            asio_tls_transport_factory::shared_ctx_tag{}, std::move(cfg), std::move(ssl_cfg),
+            asio_tls_transport_factory::shared_ctx_tag{}, cfg, std::move(ssl_cfg),
             std::move(ctx_void));
         return std::unique_ptr<TransportFactory>(std::move(factory));
     } catch (std::bad_alloc const&) {

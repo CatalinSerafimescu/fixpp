@@ -141,7 +141,7 @@ public:
     // MessageView that captured the previous generation will trap on their
     // next bytes() / get() call ([2b §6.4] / FR-016). Call this whenever
     // the per-message buffer pool resets its storage.
-    void recycle_pool() noexcept { (void)detail::bump_pool_generation(pool_id_); }
+    void recycle_pool() const noexcept { (void)detail::bump_pool_generation(pool_id_); }
     [[nodiscard]] detail::generation_token frame_token() const noexcept {
         return detail::current_pool_token(pool_id_);
     }

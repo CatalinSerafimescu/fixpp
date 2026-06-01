@@ -214,7 +214,7 @@ struct SessionConfig {
     // allow-list = default-deny (rejects ALL Logons). Operator MUST enumerate
     // bindings before opening any session. COPY-CONSTRUCTIBLE per [data-model §E-3]
     // + 010 W-5 (CompIdAuthorizationPolicy pimpl supports copy). [data-model §E-4]
-    CompIdAuthorizationPolicy compid_authorization_policy{};
+    CompIdAuthorizationPolicy compid_authorization_policy;
 
     // FR-030 / 2h Appendix D §D.2 reservation — operator-supplied per-session
     // transport factory override. Default nullptr => engine substitutes
@@ -228,14 +228,14 @@ struct SessionConfig {
     // via a Session::open-time hygiene assertion (Phase 3 T030) checking
     // use_count()==1. The shared_ptr type is for SessionConfig COPY SEMANTICS
     // ONLY; cross-Session sharing is FORBIDDEN. [2h Appendix D §D.1+§D.2]
-    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override{};
+    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory_override;
 
     // 014 T009 — peer endpoint for initiator reconnect attempts.
     // Set by the operator at SessionConfig-build time; consumed by
     // Session::open() which calls reconnect_fsm_.set_reconnect_endpoint().
     // Default-constructed Endpoint (empty host, port=0) means "not configured".
     // [data-model §E-1 step 5 — async_connect(ep)]
-    fixpp::transport::Endpoint reconnect_endpoint{};
+    fixpp::transport::Endpoint reconnect_endpoint;
 
     // 015 T016(d) — engine-managed lazy-connect discriminator (connect-then-Logon).
     // Set ONLY by the Engine's run_connect_loop for initiator sessions it drives.

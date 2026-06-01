@@ -26,7 +26,7 @@ inline constexpr int kCanonicalExpMax = 0;
 
 // Locale-independent ASCII digit test. std::isdigit is locale-dependent and is
 // UB for negative char values — neither acceptable on the FIX-FLOAT parse path.
-constexpr bool is_ascii_digit(char c) noexcept { return c >= '0' && c <= '9'; }
+static constexpr bool is_ascii_digit(char c) noexcept { return c >= '0' && c <= '9'; }
 
 // ── T019a: from_chars ────────────────────────────────────────────────────────
 // Single-pass FIX FLOAT parser.  Grammar:

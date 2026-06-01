@@ -70,7 +70,9 @@ struct SessionId {
     // Used when registering a session (both initiator and acceptor) in the
     // engine registry.  [E-1 / data-model "SessionId"]
     static SessionId from_config(SessionConfig const& cfg) {
-        return {cfg.begin_string, cfg.sender_comp_id, cfg.target_comp_id};
+        return {.begin_string = cfg.begin_string,
+                .sender_comp_id = cfg.sender_comp_id,
+                .target_comp_id = cfg.target_comp_id};
     }
 
     // Acceptor resolution: reverse the inbound Logon's CompIDs (R4 / E-2).
@@ -81,9 +83,9 @@ struct SessionId {
     static SessionId reversed_from_logon(std::string begin_string,
                                          std::string_view logon_sender_comp_id,
                                          std::string_view logon_target_comp_id) {
-        return {std::move(begin_string),
-                std::string{logon_target_comp_id},   // sender = logon_target
-                std::string{logon_sender_comp_id}};  // target = logon_sender
+        return {.begin_string = std::move(begin_string),
+                .sender_comp_id = std::string{logon_target_comp_id},   // sender = logon_target
+                .target_comp_id = std::string{logon_sender_comp_id}};  // target = logon_sender
     }
 };
 
@@ -98,8 +100,8 @@ struct std::hash<fixpp::session::SessionId> {
         // on boost::hash_combine.  All three fields participate (E-5 / data-model).
         std::hash<std::string> h;
         std::size_t seed = h(id.begin_string);
-        seed ^= h(id.sender_comp_id) + 0x9e3779b9u + (seed << 6) + (seed >> 2);
-        seed ^= h(id.target_comp_id) + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+        seed ^= h(id.sender_comp_id) + 0x9e3779b9U + (seed << 6) + (seed >> 2);
+        seed ^= h(id.target_comp_id) + 0x9e3779b9U + (seed << 6) + (seed >> 2);
         return seed;
     }
 };

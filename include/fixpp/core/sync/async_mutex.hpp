@@ -246,7 +246,7 @@ private:
     // NEW v1.3 RC-β; UPDATED v1.4 — lazy drain latch.
     // NOT lock-free in general; cold path only (cancel_and_drain invocation).
     // I-23..I-24 ordering sites.
-    std::atomic<std::shared_ptr<detail::drain_latch_state>> drain_latch_ptr_{};
+    std::atomic<std::shared_ptr<detail::drain_latch_state>> drain_latch_ptr_;
 
     // Per-mutex completion policy (immutable after construction).
     completion_policy const policy_{completion_policy::dispatch};
@@ -351,7 +351,7 @@ namespace detail {
 // reaper's frame (I-1/I-3; keeps `async_mutex()` constexpr + executor-free).
 class drain_latch_state {
 public:
-    explicit drain_latch_state(asio::any_io_executor ex) : channel_(std::move(ex), 1) {}
+    explicit drain_latch_state(asio::any_io_executor ex) : channel_(ex, 1) {}
 
     std::atomic<bool> released_{false};
     std::atomic<bool> aborted_{false};
@@ -487,7 +487,7 @@ struct alignas(std::max_align_t) waiter_record {
     async_mutex* mutex_{};
     waiter_record* next_{nullptr};
     std::atomic<waiter_phase> phase_{waiter_phase::queued};
-    fixpp::sync::expected_t<fixpp::sync::async_lock_guard> result_{};
+    fixpp::sync::expected_t<fixpp::sync::async_lock_guard> result_;
     std::atomic<async_mutex_awaiter*> attached_awaiter_{nullptr};
     alignas(std::max_align_t) std::array<std::byte, 64> exec_storage_{};
     std::atomic<std::uint32_t> refcount_{0};
@@ -573,7 +573,7 @@ struct alignas(8) async_mutex_awaiter {
         }
     }
 
-    void on_cancel(asio::cancellation_type) noexcept;
+    void on_cancel(asio::cancellation_type) const noexcept;
 };
 
 template <typename Executor>
@@ -728,7 +728,8 @@ inline void schedule_record_resume(
 
 }  // namespace
 
-inline void fixpp::sync::detail::async_mutex_awaiter::on_cancel(asio::cancellation_type) noexcept {
+inline void fixpp::sync::detail::async_mutex_awaiter::on_cancel(
+    asio::cancellation_type) const noexcept {
     auto* record = record_;
     if (record == nullptr) return;
 

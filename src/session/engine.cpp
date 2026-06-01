@@ -68,9 +68,9 @@ struct counter_guard {
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)},
       engine_cfg_{std::move(cfg)}
-      // E-5: single-executor confinement — no strand, no mutex (015 scope).
-      ,
-      stopped_{false} {}
+// E-5: single-executor confinement — no strand, no mutex (015 scope).
+
+{}
 
 // ── dtor ──────────────────────────────────────────────────────────────────────
 // STRICT precondition: assert(stopped()).
@@ -85,7 +85,7 @@ Engine::~Engine() { assert(stopped_ && "Engine destroyed without calling co_awai
 
 expected_t<void> Engine::register_session(SessionConfig cfg) {
     SessionId id = SessionId::from_config(cfg);  // derive key BEFORE move
-    if (registry_.count(id) != 0) return std::unexpected(error::session_invalid_argument);
+    if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);
 
     SessionEntry::role role = (cfg.role == session_role::acceptor) ? SessionEntry::role::acceptor
                                                                    : SessionEntry::role::initiator;
@@ -272,7 +272,7 @@ asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
 // (kOversizeBody = 128 KiB) so wire_frame_too_large fires in the framer, AND
 // large enough to hold any valid FIX admin frame. 64 KiB is the right value.
 // [tasks.md T015; FR-004/012; C2; [[feedback_asio_cospawn_total_cancellation_default]]]
-constexpr std::size_t kReadPumpCarryCapacity = 64u * 1024u;  // 64 KiB
+constexpr std::size_t kReadPumpCarryCapacity = 64U * 1024U;  // 64 KiB
 
 asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
                                     fixpp::session::Session& session,
@@ -417,6 +417,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
         else if (k == sk::one_way_ca)
+            // The engine must still map the deprecated-but-supported legacy profile.
+            // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::one_way_ca;
         else  // mtls_ca (default for acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
@@ -598,8 +600,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 //      Logon POST-connect over that live sink.
 //   4. run_read_pump on the live transport until EOF → close(terminal).
 // [data-model E-1a; FR-003/004; C2/C2i/C5; T016(b)-(e); SC-010 (7)/(8)]
-asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
-                                       SessionEntry& entry, outstanding_t counter) {
+static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
+                                              SessionEntry& entry, outstanding_t counter) {
     counter_guard guard{counter};
 
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());

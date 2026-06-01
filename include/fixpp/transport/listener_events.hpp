@@ -57,7 +57,7 @@ public:
     // NOTE: prefer emit_with_strings() for events carrying string_view fields
     // to ensure proper string lifetime. [data-model §E-5]
     void emit(session::SessionEvent ev) noexcept {
-        events_[write_idx_++ % session::kSessionEventRingCapacity] = std::move(ev);
+        events_[write_idx_++ % session::kSessionEventRingCapacity] = ev;
         if (count_ < session::kSessionEventRingCapacity) {
             ++count_;
         }
@@ -103,7 +103,7 @@ public:
         ev.peer_endpoint = std::string_view{peer_ep_store_[slot]};
         ev.reason_string = std::string_view{reason_str_store_[slot]};
 
-        events_[slot] = std::move(ev);
+        events_[slot] = ev;
         ++write_idx_;
         if (count_ < session::kSessionEventRingCapacity) {
             ++count_;

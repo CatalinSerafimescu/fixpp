@@ -600,7 +600,7 @@ private:
     // session is never re-authorized. [data-model §E-2; contracts C2; FR-006]
     // peer_identity is transitively available via session_config.hpp →
     // compid_authorization_policy.hpp → peer_identity.hpp.
-    std::optional<fixpp::tls::peer_identity> live_peer_id_{};
+    std::optional<fixpp::tls::peer_identity> live_peer_id_;
 
     // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
     // Use seqnum_mgr_.peek_outbound() to read; seqnum_mgr_.assign_outbound() to advance.

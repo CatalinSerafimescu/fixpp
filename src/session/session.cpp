@@ -146,7 +146,7 @@ std::span<const fsm_state> Session::fsm_visit_history() const noexcept {
 // per-session strand ([const §XI.4]). Body wired fully in Phase 5 T040;
 // this stub is link-green for Phase 2/3/4. [data-model §E-6]
 void Session::emit_event(SessionEvent ev) noexcept {
-    recent_events_[events_write_idx_++ % kSessionEventRingCapacity] = std::move(ev);
+    recent_events_[events_write_idx_++ % kSessionEventRingCapacity] = ev;
     if (events_count_ < kSessionEventRingCapacity) {
         ++events_count_;
     }
@@ -572,9 +572,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // Resolves the "DEFERRED to 014" comment at session.hpp:274.
     // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
     reconnect_fsm_.set_emit_credentials_rotated(
-        [this](fixpp::session::session_event_credentials_rotated ev) noexcept {
-            emit_event(std::move(ev));
-        });
+        [this](fixpp::session::session_event_credentials_rotated ev) noexcept { emit_event(ev); });
     // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
     // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
     // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
@@ -1071,7 +1069,7 @@ public:
     asio::awaitable<fixpp::core::expected_t<fixpp::session::visit_result>> on_frame(
         fixpp::session::seqnum_t /*seq*/, std::span<const std::byte> frame) noexcept override {
         if (frame.size() <= buf.size()) {
-            std::copy(frame.begin(), frame.end(), buf.begin());
+            std::ranges::copy(frame, buf.begin());
             len = frame.size();
             captured = true;
         } else {
@@ -1337,7 +1335,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(rst_r.error());
                     }
                     if (store_) {
-                        auto store_rst_r = co_await store_->reset();
+                        auto store_rst_r = co_await (*store_).reset();
                         (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
                     }
                     // FR-018: event fires AFTER post-reset state is consistent.
@@ -2049,7 +2047,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(rst_r.error());
                     }
                     if (store_) {
-                        auto store_rst_r = co_await store_->reset();
+                        auto store_rst_r = co_await (*store_).reset();
                         (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
                     }
                     // FR-018 mode mapping: bilateral_strict initiator-confirm path →
@@ -2386,7 +2384,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     {
         char cs_buf[4];
         cs_buf[0] = static_cast<char>('0' + (csum / 100U));
-        cs_buf[1] = static_cast<char>('0' + (csum % 100U) / 10U);
+        cs_buf[1] = static_cast<char>('0' + ((csum % 100U) / 10U));
         cs_buf[2] = static_cast<char>('0' + (csum % 10U));
         if (!wfield("10=", std::string_view{cs_buf, 3})) {
             co_return std::unexpected(error::wire_frame_too_large);

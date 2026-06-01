@@ -245,7 +245,7 @@ private:
 
     // 014 T009 — peer endpoint for async_connect (set by Session::open via
     // set_reconnect_endpoint before drive_reconnect_attempt is first called).
-    fixpp::transport::Endpoint endpoint_{};
+    fixpp::transport::Endpoint endpoint_;
 
     // 014 T009/T010 — NON-OWNING back-pointer to the owning Session (set by
     // Session::open via set_session_owner). Used to call the private
@@ -292,7 +292,7 @@ private:
     // reconnect_fsm.cpp (via cert_source.hpp).  A shared_ptr data member only
     // needs the forward declaration for the pointer itself; ~shared_ptr needs
     // the complete type — ensured by the explicit destructor in .cpp. [§XV.9]
-    std::shared_ptr<fixpp::tls::cert_source> last_active_source_{};
+    std::shared_ptr<fixpp::tls::cert_source> last_active_source_;
 
     // last_active_fp_ — SHA-256 of last_active_source_'s leaf DER.
     // All-zero while last_active_source_ == nullptr (first-load state).
@@ -308,7 +308,7 @@ private:
     // Default-constructed (empty function): emit is silently skipped (standalone
     // FSM test path where the caller injects the callback via set_emit_credentials_rotated).
     // [data-model §E-3; contracts C3; FR-009; §XI.4]
-    std::function<void(session_event_credentials_rotated)> emit_credentials_rotated_{};
+    std::function<void(session_event_credentials_rotated)> emit_credentials_rotated_;
 };
 
 }  // namespace fixpp::session

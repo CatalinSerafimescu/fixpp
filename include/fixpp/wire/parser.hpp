@@ -377,6 +377,9 @@ public:
     Parser() noexcept = default;
 
     template <class TV>
+    // dict_metadata is lvalue-constrained and only address-taken (opaque_dict_);
+    // forwarding would be wrong, so missing-std-forward is a false positive here.
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     explicit Parser(TV&& dict_metadata) noexcept
         requires(std::is_lvalue_reference_v<TV &&>)
         : opaque_dict_{std::addressof(dict_metadata)},

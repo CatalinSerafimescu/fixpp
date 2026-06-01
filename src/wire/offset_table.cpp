@@ -31,12 +31,12 @@ struct len_data_pair_t {
     std::uint16_t data_tag;
 };
 constexpr len_data_pair_t len_data_pairs[] = {
-    {93, 89},    // SignatureLength / Signature
-    {90, 91},    // SecureDataLen / SecureData
-    {95, 96},    // RawDataLength / RawData
-    {212, 213},  // XmlDataLen / XmlData
-    {348, 349},  // EncodedHeaderLen / EncodedHeader
-    {350, 351},  // EncodedMsgLen / EncodedMsg
+    {.length_tag = 93, .data_tag = 89},    // SignatureLength / Signature
+    {.length_tag = 90, .data_tag = 91},    // SecureDataLen / SecureData
+    {.length_tag = 95, .data_tag = 96},    // RawDataLength / RawData
+    {.length_tag = 212, .data_tag = 213},  // XmlDataLen / XmlData
+    {.length_tag = 348, .data_tag = 349},  // EncodedHeaderLen / EncodedHeader
+    {.length_tag = 350, .data_tag = 351},  // EncodedMsgLen / EncodedMsg
 };
 
 [[nodiscard]] constexpr std::uint16_t data_tag_for(std::uint16_t length_tag) noexcept {
@@ -93,10 +93,8 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
-    : frame_base_{nullptr},
-      cfg_{},
-      opaque_dict_{nullptr},
-      group_member_fn_{nullptr},
+    : cfg_{},
+
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
@@ -106,8 +104,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
                          void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
-    : frame_base_{nullptr},
-      cfg_{},
+    : cfg_{},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
       entries_(mr),
@@ -119,10 +116,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
                          Config cfg) noexcept
-    : frame_base_{nullptr},
-      cfg_{cfg},
-      opaque_dict_{nullptr},
-      group_member_fn_{nullptr},
+    : cfg_{cfg},
+
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
@@ -132,8 +127,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
                          void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
-    : frame_base_{nullptr},
-      cfg_{cfg},
+    : cfg_{cfg},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
       entries_(mr),
@@ -186,7 +180,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
             }
             ++i;  // step over '='
             std::size_t const val_start = i;
-            std::size_t val_len;
+            std::size_t val_len = 0;
 
             // Length+Data: if a previous Length tag told us this Data tag has
             // a fixed byte count, use it instead of scanning for SOH.
@@ -215,7 +209,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                         if (c < '0' || c > '9') {
                             break;
                         }
-                        dlen = dlen * 10U + static_cast<std::uint32_t>(c - '0');
+                        dlen = (dlen * 10U) + static_cast<std::uint32_t>(c - '0');
                     }
                     pending_data_tag = dt;
                     pending_data_len = dlen;

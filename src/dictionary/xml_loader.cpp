@@ -762,7 +762,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 
         auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
         auto const cnt =
-            static_cast<std::uint16_t>(std::min<std::size_t>(comp_fields.size(), 65535u));
+            static_cast<std::uint16_t>(std::min<std::size_t>(comp_fields.size(), 65535U));
         h.component_fields_.insert(h.component_fields_.end(), comp_fields.begin(),
                                    comp_fields.end());
 
@@ -803,7 +803,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
-            cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535u));
+            cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535U));
             h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());
         }
 

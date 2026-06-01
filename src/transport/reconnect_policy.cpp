@@ -69,7 +69,7 @@ std::chrono::milliseconds ReconnectPolicy::delay_for_attempt(
     // every (seed, attempt) pair gets its own minstd_rand state. minstd_rand is
     // small + deterministic; replay across architectures matches the
     // [const §VII.7] requirement.
-    const auto lo = static_cast<std::uint32_t>(session_id_seed & 0xFFFFFFFFu);
+    const auto lo = static_cast<std::uint32_t>(session_id_seed & 0xFFFFFFFFU);
     const auto hi = static_cast<std::uint32_t>(session_id_seed >> 32);
     std::seed_seq sseq{lo, hi, attempt_n};
     std::minstd_rand rng(sseq);

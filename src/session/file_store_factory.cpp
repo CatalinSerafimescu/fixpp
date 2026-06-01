@@ -55,6 +55,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/wire/framer.hpp>  // default_max_frame_bytes (256 KiB cap per T030 / I-11)
+#include <utility>
 
 namespace fixpp::session {
 
@@ -81,13 +82,13 @@ namespace detail {
     }
 
     // (2) NUL byte check (string_view can hold embedded NUL)
-    if (compid.find('\0') != std::string_view::npos) {
+    if (compid.contains('\0')) {
         return fixpp::core::error::store_factory_failed;
     }
 
     // (3) Path separator check
     // '/' is a separator on all platforms. '\\' is also a separator on Windows.
-    if (compid.find('/') != std::string_view::npos) {
+    if (compid.contains('/')) {
         return fixpp::core::error::store_factory_failed;
     }
 #ifdef _WIN32
@@ -103,7 +104,7 @@ namespace detail {
 
     // (5) Control characters [0x00, 0x1F] and 0x7F check
     for (unsigned char c : compid) {
-        if (c < 0x20u || c == 0x7Fu) {
+        if (c < 0x20U || c == 0x7FU) {
             return fixpp::core::error::store_factory_failed;
         }
     }
@@ -128,7 +129,7 @@ namespace detail {
             // pathconf failed (e.g., directory doesn't exist yet); use POSIX minimum
             name_max = 255;
         }
-        if (composed_len > static_cast<std::size_t>(name_max)) {
+        if (std::cmp_greater(composed_len, name_max)) {
             return fixpp::core::error::store_factory_failed;
         }
     }

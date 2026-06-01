@@ -536,7 +536,7 @@ int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noex
 // ─────────────────────────────────────────────────────────────────────────────
 asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
                                        fixpp::tls::SslCtxConfig ssl_cfg)
-    : cfg_{std::move(cfg)},
+    : cfg_{cfg},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{exec_},
@@ -554,7 +554,7 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Co
 asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor exec,
                                        Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
                                        std::shared_ptr<asio::ssl::context> shared_ctx)
-    : cfg_{std::move(cfg)},
+    : cfg_{cfg},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{exec_},
@@ -573,14 +573,14 @@ asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor e
                                        Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg,
                                        std::shared_ptr<asio::ssl::context> shared_ctx,
                                        asio::ip::tcp::socket accepted_socket)
-    : cfg_{std::move(cfg)},
+    : cfg_{cfg},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{std::move(accepted_socket)},
-      ssl_ctx_{std::move(shared_ctx)} {
+      ssl_ctx_{std::move(shared_ctx)},
+      role_(role_t::server),
+      state_(state_t::connected) {
     apply_socket_options_();
-    state_ = state_t::connected;
-    role_ = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,15 +599,15 @@ asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor e
 asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Config cfg,
                                        fixpp::tls::SslCtxConfig ssl_cfg,
                                        asio::ip::tcp::socket accepted_socket)
-    : cfg_{std::move(cfg)},
+    : cfg_{cfg},
       ssl_cfg_{std::move(ssl_cfg)},
       exec_{exec},
       socket_{std::move(accepted_socket)},
-      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)} {
+      ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)},
+      role_(role_t::server),
+      state_(state_t::connected) {
     setup_ssl_ctx_();
     apply_socket_options_();
-    state_ = state_t::connected;
-    role_ = role_t::server;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

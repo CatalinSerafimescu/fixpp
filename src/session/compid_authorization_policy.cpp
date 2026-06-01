@@ -72,8 +72,7 @@ struct CompIdAuthorizationPolicy::impl {
     std::pmr::memory_resource* mr;
     std::map<std::string, std::vector<std::string>> bindings;
 
-    explicit impl(std::pmr::memory_resource* r)
-        : mr{r ? r : std::pmr::get_default_resource()}, bindings{} {}
+    explicit impl(std::pmr::memory_resource* r) : mr{r ? r : std::pmr::get_default_resource()} {}
 
     impl(impl const&) = default;
     impl& operator=(impl const&) = default;
@@ -158,14 +157,14 @@ namespace {
 // Encode 32 raw bytes as a 64-char lowercase hexadecimal string.
 // Writes into `out[0..63]`. Returns a string_view into `out`.
 // noexcept — pure byte→char mapping.
-static constexpr char kHexChars[] = "0123456789abcdef";
+constexpr char kHexChars[] = "0123456789abcdef";
 
 [[nodiscard]] std::string_view fingerprint_to_hex(const std::array<std::byte, 32>& fp,
                                                   std::array<char, 64>& out) noexcept {
     for (std::size_t i = 0; i < 32; ++i) {
         const auto b = static_cast<unsigned char>(fp[i]);
-        out[2 * i] = kHexChars[b >> 4u];
-        out[2 * i + 1] = kHexChars[b & 0xFu];
+        out[2 * i] = kHexChars[b >> 4U];
+        out[(2 * i) + 1] = kHexChars[b & 0xFU];
     }
     return std::string_view{out.data(), 64};
 }
@@ -181,27 +180,27 @@ struct ExtractedPrincipal {
     if (!dn.empty()) {
         const std::string_view cn = parse_cn_from_dn(dn);
         if (!cn.empty()) {
-            return {std::string{cn}, bound_principal::source::CN};
+            return {.value = std::string{cn}, .source = bound_principal::source::CN};
         }
     }
 
     // Step 2: first SAN-DNS name.
     const auto dns_names = pid.san_dns_names();
     if (!dns_names.empty() && !dns_names[0].empty()) {
-        return {std::string{dns_names[0]}, bound_principal::source::SAN_DNS};
+        return {.value = std::string{dns_names[0]}, .source = bound_principal::source::SAN_DNS};
     }
 
     // Step 3: first SAN-URI.
     const auto uris = pid.san_uris();
     if (!uris.empty() && !uris[0].empty()) {
-        return {std::string{uris[0]}, bound_principal::source::SAN_URI};
+        return {.value = std::string{uris[0]}, .source = bound_principal::source::SAN_URI};
     }
 
     // Step 4: SHA-256 fingerprint → 64-char lowercase hex.
     // Stack buffer — no heap allocation.
     std::array<char, 64> hex_buf{};
     const std::string_view hex = fingerprint_to_hex(pid.leaf_fingerprint, hex_buf);
-    return {std::string{hex}, bound_principal::source::SHA256_FINGERPRINT};
+    return {.value = std::string{hex}, .source = bound_principal::source::SHA256_FINGERPRINT};
 }
 
 }  // namespace
@@ -261,7 +260,7 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
         // Dedup: only insert if not already present.
         std::string cid{compid};
         auto& vec = it->second;
-        const auto pos = std::lower_bound(vec.begin(), vec.end(), cid);
+        const auto pos = std::ranges::lower_bound(vec, cid);
         if (pos == vec.end() || *pos != cid) {
             vec.insert(pos, std::move(cid));
         }
@@ -303,8 +302,7 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
     // Principal found. Check if asserted_compid is in the authorized set.
     const auto& compid_vec = it->second;
     // Binary search (vector is sorted via add_binding dedup logic).
-    const auto pos =
-        std::lower_bound(compid_vec.begin(), compid_vec.end(), std::string{asserted_compid});
+    const auto pos = std::ranges::lower_bound(compid_vec, std::string{asserted_compid});
     if (pos == compid_vec.end() || *pos != asserted_compid) {
         // Principal found but asserted CompID not authorized.
         return std::unexpected{core::error::session_compid_unauthorized};
@@ -327,7 +325,7 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
 
 [[nodiscard]] bool CompIdAuthorizationPolicy::has_principal(
     std::string_view principal) const noexcept {
-    return impl_->bindings.count(std::string{principal}) > 0;
+    return impl_->bindings.contains(std::string{principal});
 }
 
 }  // namespace fixpp::session
