@@ -70,12 +70,13 @@ function(fixpp_add_interop_test)
     # LABEL is multiValue: a quoted "a;b;c" passed to a oneValue keyword collapses
     # to just "a" (CMake flattens the list), so the ctest -L interop-happy / -parity
     # workflow (quickstart) would match nothing. multiValue preserves the full list.
-    set(multiValue SOURCES LABEL)
+    set(multiValue SOURCES LABEL EXTRA_LIBS)
     cmake_parse_arguments(IT "${options}" "${oneValue}" "${multiValue}" ${ARGN})
 
     add_executable(${IT_NAME} ${IT_SOURCES})
     target_link_libraries(${IT_NAME} PRIVATE
         interop_support
+        ${IT_EXTRA_LIBS}   # e.g. fixpp_mock_clock for the parity witnesses
         GTest::gtest
         GTest::gtest_main
     )
@@ -167,4 +168,30 @@ fixpp_add_interop_test(
     LABEL "interop;016;interop-happy;us1;reconnect"
     SOURCES happy/hp_fix44_disconnect_reconnect_noreset_test.cpp
     TLS
+)
+
+# ── US3 parity GAP-closure witnesses (T023-T025) ──────────────────────────────
+# Standalone (no counterparty, no live transport): drive crafted admin frames
+# through Session::on_inbound_frame() over the sync transport_send_ path and
+# observe fixpp's recovery behavior. Run green locally (interop-parity label).
+fixpp_add_interop_test(
+    NAME interop_parity_resend_abort_on_failing_write_test
+    GROUP parity
+    LABEL "interop;016;interop-parity;us3"
+    SOURCES parity/resend_abort_on_failing_write_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_parity_inbound_sequencereset_arms_test
+    GROUP parity
+    LABEL "interop;016;interop-parity;us3"
+    SOURCES parity/inbound_sequencereset_arms_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_parity_replay_subsumes_reorder_queue_test
+    GROUP parity
+    LABEL "interop;016;interop-parity;us3"
+    SOURCES parity/replay_subsumes_reorder_queue_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
 )
