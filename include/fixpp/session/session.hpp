@@ -643,8 +643,10 @@ private:
     fixpp::sync::async_mutex write_gate_;
 
     // FQ-A (gate-b/r2) — liveness-loop lifetime counter.
-    // Initialized to 0 at construction. The liveness coroutine increments it at
-    // start (via a shared_ptr<atomic<int>> RAII guard) and decrements at exit.
+    // Initialized to 0 at construction. The spawn sites increment it
+    // synchronously BEFORE co_spawn so the counter is > 0 the instant a
+    // detached liveness frame exists; the coroutine body owns only the
+    // matching decrement via its RAII guard at exit.
     // Session::close() polls until it reaches 0 AFTER firing root_cancel_, so
     // that registry_.clear() cannot destroy the Session while the liveness
     // coroutine is still running and touching Session members / the live transport.
@@ -697,7 +699,6 @@ private:
     // on completion (success or error). Returns dispatch_aborted on:
     //   - write_gate_ acquire cancelled (operation_aborted from cancel_and_drain)
     //   - async_write returns !has_value() (any transport error)
-    // Replay-only callers pass replay=true to skip the clock update in the caller.
     // NEVER holds the gate across any read — guards write-submit→complete only.
     // [transport.hpp:47-50; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>

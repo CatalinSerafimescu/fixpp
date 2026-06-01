@@ -737,6 +737,69 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
         << "blocked send() must surface dispatch_aborted after terminal close";
 }
 
+TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+    cfg.logout_disconnect_timeout_ms = 100;
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    auto* raw_ptr = raw_transport.get();
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto logon_fut = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+    raw_ptr->arm_block();
+
+    std::array<std::byte, 4> payload{};
+    auto send_fut = asio::co_spawn(
+        ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    auto close_fut = asio::co_spawn(
+        ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+    ioc.run_for(500ms);
+    ioc.restart();
+
+    const bool close_ready = close_fut.wait_for(0ms) == std::future_status::ready;
+    if (!close_ready) {
+        // Cleanup for the unfixed behavior: force-release the parked write so the
+        // test fails fast instead of leaving the runner wedged.
+        raw_ptr->close();
+        run_until_ready(ioc, close_fut, 20ms, 1s);
+    }
+
+    EXPECT_TRUE(close_ready)
+        << "close(graceful) must bound phase-1 Logout behind blocked live writes; "
+        << "current HEAD hangs here until the transport is manually closed";
+
+    run_until_ready(ioc, send_fut, 20ms, 1s);
+
+    ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready);
+    auto close_r = close_fut.get();
+    ASSERT_TRUE(close_r.has_value()) << "close() failed unexpectedly";
+
+    ASSERT_EQ(send_fut.wait_for(0ms), std::future_status::ready);
+    auto send_r = send_fut.get();
+    ASSERT_FALSE(send_r.has_value()) << "blocked send() must fail when graceful close aborts it";
+    EXPECT_EQ(send_r.error(), fixpp::core::error::dispatch_aborted)
+        << "blocked send() must surface dispatch_aborted after graceful close";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell D — liveness drain: Session::close() drains liveness_done_ + write_gate_
 //

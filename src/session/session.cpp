@@ -19,7 +19,9 @@
 #include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
 #include <asio/detached.hpp>
 #include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
+#include <asio/experimental/awaitable_operators.hpp>
 #include <asio/post.hpp>
+#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <charconv>
@@ -68,6 +70,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 
 namespace fixpp::session {
 
@@ -309,7 +312,15 @@ Session::live_write_serialized_(std::span<const std::byte> frame) noexcept {
 
     // Gate held — at most one async_write in-flight. `live` shared_ptr is the
     // keepalive so the transport cannot be freed while we are suspended here.
-    auto write_r = co_await live->async_write(frame);
+    fixpp::core::expected_t<std::size_t> write_r;
+    try {
+        write_r = co_await live->async_write(frame);
+    } catch (const asio::system_error& e) {
+        if (e.code() == asio::error::operation_aborted) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
     // guard destructor releases the gate when we leave this scope.
     if (!write_r.has_value()) {
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
@@ -704,8 +715,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // slot for the child; the run_logout_phase1 coroutine resets to
         // enable_total_cancellation internally.
         if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
-            auto phase1_r = co_await run_logout_phase1();
-            (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
+            using namespace asio::experimental::awaitable_operators;
+
+            auto ex = co_await asio::this_coro::executor;
+            asio::steady_timer close_grace{ex};
+            close_grace.expires_after(
+                std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
+
+            auto phase1_or_timeout = co_await (
+                run_logout_phase1() || close_grace.async_wait(asio::use_awaitable));
+            if (phase1_or_timeout.index() == 0) {
+                auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
+                (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
+            } else if (auto live = live_transport_shared_()) {
+                // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
+                // force-close the transport so the blocked writer unwinds and
+                // phase 2 can drain the gate without deadlocking close(graceful).
+                (void)live->close();
+            }
         }
     }
 
