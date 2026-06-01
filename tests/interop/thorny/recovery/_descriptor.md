@@ -11,6 +11,7 @@ fixpp's spec-conformant recovery behavior.
 |---|---|---|---|
 | P1 | `qfj-750-logout-seqnum-mismatch_test.cpp` | quickfix-j#750 | inbound Logout w/ too-high(999) & too-low(1) MsgSeqNum → still `Disconnected` |
 | P1 | `qfj-271-sequencereset-large-gapfill_test.cpp` | quickfix-j#271 | inbound SequenceReset-GapFill NewSeqNo=20000 → resync to 20000, Active, no recursion |
+| P2 | `qfj-626-resend-recomputes-checksum_test.cpp` | quickfix-j#626 (C-101) | stored frame with wrong `9=`/`10=` → ResendRequest replay recomputes correct `9=`/`10=` (+ `43=Y`, `122=`) |
 
 Covered-by-parity (NOT re-encoded — see `../CORPUS-INDEX.md` C-001..C-003):
 quickfix-j#646 (T023), #658/#750/#788 reorder-queue (T024), inbound bare
