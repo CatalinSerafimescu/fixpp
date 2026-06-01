@@ -58,6 +58,7 @@ The full matrix × {normal, ASan/UBSan, TSan} (FR-019) + the thorny corpus, run 
 | Smoke completes within PR-latency budget; catches an introduced wire regression | SC-005 |
 | Every cell cites a FIX spec section; zero "because engine X" justifications | SC-006 |
 | Badge published with exact versions + transcript links | SC-007 |
+| §VII.6 business-message residual recorded in `behaviors-and-limitations.md` + catalogue; zero 016 artifact claims the business flow ran or that the badge closes §VII.6 | SC-008 |
 
 ## Known caveat
 

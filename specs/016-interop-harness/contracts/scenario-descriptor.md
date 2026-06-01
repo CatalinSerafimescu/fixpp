@@ -31,6 +31,9 @@ stop_watchdog_ms: <bound>                                 # asserts Engine::stop
 spec_ref:         [FIX-SL §x.y] | [FIX-TC TC-NNN] | [FIXS §3.x]   # FR-018: reconcile to spec, not engine
 ```
 
+**`counterparty_terminal` population (parent-proxy boundary, FR-007)**
+The in-repo GoogleTest driver asserts fixpp's own FSM end-state + seqnum deltas directly (it owns the fixpp side). The `counterparty_terminal` evidence (received `Logout(35=5)` / orderly socket close) is **wire-observed from the parent-captured transcript**, not an in-process probe of the counterparty FSM. Population rule: the **parent harness** writes the wire-observed terminal token into the per-cell `cell_result` (contract `parent-harness-gate-contract.md`); the in-repo driver consumes it from the parent-provided capture artifact (file/pipe handed to the fixture) and asserts the expected token, OR — when run standalone without the parent (e.g. the smoke cell in a minimal env) — records `counterparty_terminal: unobserved` and relies on the parent tier for the FR-007 assertion. A driver MUST NOT fabricate the terminal token from fixpp-side state.
+
 **Required invariants**
 - Every cell cites a `spec_ref` (FR-018). A cell justified "because QFC/QFJ does X" is invalid.
 - `security: tls-logon` cells require a `SecurityProfile` the counterparty config can satisfy (R8).
