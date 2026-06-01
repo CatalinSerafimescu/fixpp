@@ -25,7 +25,6 @@
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
-#include <fixpp/tls/peer_identity.hpp>                    // 013 T036 seam: logon_peer_identity_override
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
@@ -218,16 +217,6 @@ struct SessionConfig {
     // + 010 W-5 (CompIdAuthorizationPolicy pimpl supports copy). [data-model §E-4]
     CompIdAuthorizationPolicy compid_authorization_policy{};
 
-    // 013 T036 US2 — test-seam for injecting a scripted peer_identity at
-    // Logon time. When set, the Session Logon path uses this peer_identity
-    // in place of the real handshake_result.peer_id (which is unavailable
-    // with mock_transport). Production wiring (real TLS) leaves this empty
-    // and reads peer_id from the handshake_result. [FR-019/FR-024; D-10]
-    // Optional: std::nullopt means "use real handshake peer_id" (the default).
-    // Declared here (not under FIXPP_TEST_HOOKS) so SessionConfig copy
-    // semantics remain clean; no runtime penalty when nullopt.
-    std::optional<fixpp::tls::peer_identity> logon_peer_identity_override{};
-
     // FR-030 / 2h Appendix D §D.2 reservation — operator-supplied per-session
     // transport factory override. Default nullptr => engine substitutes
     // EngineConfig::default_transport_factory at Session::open-time per:
@@ -248,6 +237,19 @@ struct SessionConfig {
     // Default-constructed Endpoint (empty host, port=0) means "not configured".
     // [data-model §E-1 step 5 — async_connect(ep)]
     fixpp::transport::Endpoint reconnect_endpoint{};
+
+    // 015 T016(d) — engine-managed lazy-connect discriminator (connect-then-Logon).
+    // Set ONLY by the Engine's run_connect_loop for initiator sessions it drives.
+    // When true, Session::open()'s initiator arm is a NO-OP (no LogonSent
+    // transition, no Logon emission) — exactly like the acceptor arm — because
+    // there is no live transport yet. The connect loop then calls
+    // Session::drive_reconnect(), whose install_reconnected_transport rebinds
+    // transport_send_ and re-enters LogonSent, after which the initial Logon is
+    // emitted POST-connect over the now-live sink (FR-003 / E-1a / Clarifications
+    // 2026-05-31; grounded in QuickFIX-cpp setResponder→generateLogon + Fix8
+    // connect→send(generate_logon)). DEFAULT false preserves the 013/014
+    // per-session-direct model where open() emits the Logon at open.
+    bool engine_managed = false;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

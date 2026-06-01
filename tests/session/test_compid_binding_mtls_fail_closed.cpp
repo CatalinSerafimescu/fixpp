@@ -22,7 +22,7 @@
 //   Cell C: acceptor, one_way_ca profile, no peer_identity override.
 //     Expected: Logon ACCEPTED → Active (no client cert → no CompID gate).
 //
-// RED (before fix): the guard only fires when logon_peer_identity_override is set,
+// RED (before fix): the guard only fired when an injected peer identity was set,
 //   so Cells A+B reach Active instead of Disconnected → assertions fail.
 //
 // Anchors: spec.md FR-019/FR-021/FR-024; triage RC#A; [FR-023 fail-closed].
@@ -171,8 +171,8 @@ TEST_F(MtlsFailClosedTest, Acceptor_MtlsCa_NoPeerIdentity_FailsClosed) {
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // Non-empty policy with a valid binding for "TW".
     cfg.compid_authorization_policy.add_binding("CN=TW-PROD-01,O=Acme,C=US", {"TW"});
-    // logon_peer_identity_override is NOT set (nullopt) — simulates production path
-    // where real TLS peer_id is unavailable (no mock_transport handshake).
+    // No live peer identity is attached — simulates the production path where the
+    // real TLS peer_id is unavailable (no handshake / happens-before attach).
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
@@ -211,7 +211,7 @@ TEST_F(MtlsFailClosedTest, Initiator_MtlsCa_NoPeerIdentity_FailsClosed) {
     // RC#C (gate-b/r1): bilateral_lenient — cell tests mTLS fail-closed, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.compid_authorization_policy.add_binding("CN=ISLD-PROD-01,O=Exchange,C=US", {"ISLD"});
-    // logon_peer_identity_override NOT set.
+    // No live peer identity attached.
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());

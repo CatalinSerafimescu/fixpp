@@ -1,6 +1,45 @@
 # tests/session/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
+# OpenSSL/zlib resolution for the live-TLS engine + CompID-binding tests that
+# link fixpp_transport directly (015 engine_* + 013/014 binding witnesses).
+# fixpp_tls/fixpp_transport's PRIVATE OpenSSL is not propagated to test
+# executables linking the static libs — same pattern as tests/transport and
+# tests/tls. find_library may MISS under sanitizer presets (conan emits a
+# non-_RELEASE config suffix, so openssl_LIB_DIRS_RELEASE is empty); the
+# OpenSSL::/ZLIB:: target fallback then resolves it regardless of config.
+# (015 /speckit-verify: tests/session consumed FIXPP_TRANSPORT_OPENSSL_*_LIB
+# without resolving them itself, breaking the sanitizer/CI build.)
+find_package(OpenSSL 3.0 REQUIRED)
+find_library(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_library(FIXPP_TRANSPORT_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    PATHS "${openssl_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+find_package(ZLIB REQUIRED)
+find_library(FIXPP_TRANSPORT_ZLIB_LIB
+    NAMES z libz
+    PATHS "${zlib_LIB_DIRS_RELEASE}"
+    NO_DEFAULT_PATH
+)
+if(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB STREQUAL "FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB)
+    set(FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB OpenSSL::Crypto)
+endif()
+if(FIXPP_TRANSPORT_OPENSSL_SSL_LIB STREQUAL "FIXPP_TRANSPORT_OPENSSL_SSL_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_OPENSSL_SSL_LIB)
+    set(FIXPP_TRANSPORT_OPENSSL_SSL_LIB OpenSSL::SSL)
+endif()
+if(FIXPP_TRANSPORT_ZLIB_LIB STREQUAL "FIXPP_TRANSPORT_ZLIB_LIB-NOTFOUND"
+   OR NOT FIXPP_TRANSPORT_ZLIB_LIB)
+    set(FIXPP_TRANSPORT_ZLIB_LIB ZLIB::ZLIB)
+endif()
+
 # ── 009-session-fsm-finalize T005 — shared test helper ──────────────────────
 # OBJECT library so executables can absorb the helper without an install/link
 # step; consumed via $<TARGET_OBJECTS:session_test_support> in test sources.
@@ -597,8 +636,9 @@ set_tests_properties(live_identity_binding PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us2;live_tls;identity_binding")
 
-# T012 — CompID binding seam: on-list/off-list/absent via logon_peer_identity_override.
-# FR-007 / US2 AC2/AC3 / SC-003.
+# T012/T021 — CompID binding no-identity gate arms (fail-closed mTLS / permissive
+# non-mTLS); the on-list/off-list seam cells were removed in 015 US4 (SC-006).
+# FR-007/FR-009 / US2 AC3 / SC-003/SC-006.
 add_executable(compid_binding_seam
   test_compid_binding_seam.cpp)
 target_link_libraries(compid_binding_seam PRIVATE
@@ -614,6 +654,27 @@ add_test(NAME compid_binding_seam COMMAND compid_binding_seam)
 set_tests_properties(compid_binding_seam PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us2;compid;seam")
+
+# ── 015-runtime-engine T019 (US4) — seam-removal grep gate + live-binding ────
+# SC-006/FR-009: zero per-config peer-identity test-seam references across
+# src/+include/+tests/, AND the binding gate authorizes from a live handshake
+# identity (the production live_peer_id_ path), not a config seam.
+add_executable(engine_seam_removal
+  engine_seam_removal_test.cpp)
+target_link_libraries(engine_seam_removal PRIVATE
+  fixpp_session
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_seam_removal PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(engine_seam_removal PRIVATE
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME engine_seam_removal COMMAND engine_seam_removal)
+set_tests_properties(engine_seam_removal PROPERTIES
+  LABELS "015;us4;compid;seam_removal")
 
 # T013 auth-fail cell lives in reconnect_backoff_cap (already registered above
 # as reconnect_backoff_cap). The new AuthFailReconnectCapTest class is compiled
@@ -652,6 +713,264 @@ add_test(NAME credentials_rotated_emit COMMAND credentials_rotated_emit)
 set_tests_properties(credentials_rotated_emit PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "014;us3;live_tls;credentials_rotated")
+
+# ── 015-runtime-engine Phase 2 (T004) — SessionId unit test ─────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T004 impl lands in
+# include/fixpp/session/engine.hpp.
+# CTest filter: ctest -R 'engine_session_id'
+
+add_executable(engine_session_id_test
+  engine_session_id_test.cpp
+)
+target_link_libraries(engine_session_id_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_session_id_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME engine_session_id COMMAND engine_session_id_test)
+set_tests_properties(engine_session_id PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;foundational;session_id")
+
+# ── 015-runtime-engine Phase 2 (T007) — Engine harness compile smoke ─────────
+# Proves engine_loopback_harness.hpp compiles and the Engine ctor/stop() shape
+# is correct. Behavioral coverage is provided by US1/US2/US3 live tests.
+# CTest filter: ctest -R 'engine_harness_compile_smoke'
+add_executable(engine_harness_compile_smoke_test
+  engine_harness_compile_smoke_test.cpp
+)
+target_link_libraries(engine_harness_compile_smoke_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_harness_compile_smoke_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_harness_compile_smoke_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME engine_harness_compile_smoke COMMAND engine_harness_compile_smoke_test)
+set_tests_properties(engine_harness_compile_smoke PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;foundational;harness;compile_smoke")
+
+# ── 015-runtime-engine Phase 3 (US1) — T008/T009/T010 ───────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T011/T012/T013 impl lands.
+# CTest filter: ctest -R 'engine_acceptor|engine_firstframe'
+#
+# All three tests drive the Engine through its public API over real loopback-TLS.
+# They need fixpp_session + fixpp_transport + fixpp_tls + OpenSSL libs + the
+# src/ include path (for loopback_tls_fixture.hpp) and FIXPP_TLS_FIXTURE_DIR.
+# Mirrors the reconnect_live_happy_path and live_identity_binding test targets.
+
+# T008 — on-list live identity admits to established state (SC-001 / US1 AC1).
+add_executable(engine_acceptor_test
+  engine_acceptor_test.cpp
+)
+target_link_libraries(engine_acceptor_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_acceptor_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_acceptor_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  # exposes seqnum_mgr_test_access().next_inbound_unsafe() for the coalesced
+  # first-frame surplus witness (F-015-002).
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_acceptor COMMAND engine_acceptor_test)
+set_tests_properties(engine_acceptor PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us1;live_tls;acceptor")
+
+# T009 — off-list + absent/delayed identity → fail-CLOSED (SC-002 / US1 AC2).
+add_executable(engine_acceptor_failclosed_test
+  engine_acceptor_failclosed_test.cpp
+)
+target_link_libraries(engine_acceptor_failclosed_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_acceptor_failclosed_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(engine_acceptor_failclosed_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME engine_acceptor_failclosed COMMAND engine_acceptor_failclosed_test)
+set_tests_properties(engine_acceptor_failclosed PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us1;live_tls;acceptor;failclosed")
+
+# T010 — bounded pre-session window: stall/silent/partial/over-budget →
+#         close + reclaim (SC-011 / FR-014 / C1/C5).
+add_executable(engine_firstframe_test
+  engine_firstframe_test.cpp
+)
+target_link_libraries(engine_firstframe_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_firstframe_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(engine_firstframe_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME engine_firstframe COMMAND engine_firstframe_test)
+set_tests_properties(engine_firstframe PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us1;live_tls;firstframe;window")
+
+# ── 015-runtime-engine Phase 4 (US2) — T014 ────────────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T015 (real read-pump) lands.
+# CTest filter: ctest -R 'engine_readpump'
+#
+# T014 — read-pump delivers subsequent frames exactly-once in order (SC-003 /
+#         US2 AC1/AC2; FR-004/012; C2). Observability via next_inbound_unsafe()
+#         (FIXPP_TEST_HOOKS) and Session::state().
+add_executable(engine_readpump_test
+  engine_readpump_test.cpp
+)
+target_link_libraries(engine_readpump_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_readpump_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_readpump_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_readpump COMMAND engine_readpump_test)
+set_tests_properties(engine_readpump PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us2;live_tls;readpump")
+
+# ── 015-runtime-engine Phase 4 (US2) — T016(a) ──────────────────────────────
+# TDD RED-first per [const §VII.3]; turns GREEN when T016(b)-(e) impl lands.
+# CTest filter: ctest -R 'engine_connect'
+#
+# T016(a) — initiator connect-then-Logon: server receives initiator Logon on
+#            the wire; session reaches Active; read-pump advances next_inbound.
+#            (FR-003 / C2i / E-1a / SC-010)
+# Observability via next_inbound_unsafe() (FIXPP_TEST_HOOKS) + Session::state().
+add_executable(engine_connect_test
+  engine_connect_test.cpp
+)
+target_link_libraries(engine_connect_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_connect_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_connect_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_connect COMMAND engine_connect_test)
+set_tests_properties(engine_connect PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us2;live_tls;connect")
+
+# CTest filter: ctest -R 'engine_lifecycle'
+#
+# T017 [US3] — programmatic multi-session lifecycle: register initiator+acceptor,
+#   non-blocking start, both loops run + both lookup()-retrievable by SessionId
+#   (null before open, non-null after), clean idempotent stop, duplicate-identity
+#   rejection. (FR-001/002/011 / SC-004/005 / C5/C6 / E-5/E-7)
+add_executable(engine_lifecycle_test
+  engine_lifecycle_test.cpp
+)
+target_link_libraries(engine_lifecycle_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_lifecycle_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp" (via loopback_tls_fixture.hpp)
+)
+target_compile_definitions(engine_lifecycle_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME engine_lifecycle COMMAND engine_lifecycle_test)
+set_tests_properties(engine_lifecycle PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "015;us3;live_tls;lifecycle")
+
+# ── gate-b/r1 FQ-1: live outbound serialization + error propagation ──────────
+# Proves (1a) write-error propagates through store_then_emit → FSM → Disconnected
+# and (1b) at most one async_write is in-flight per Transport (≤1-in-flight
+# contract, transport.hpp:47-50). Uses custom transport doubles (no live TLS).
+# CTest filter: ctest -R 'live_outbound_serialized'
+add_threading_test(live_outbound_serialized test_live_outbound_serialized.cpp)
+target_include_directories(live_outbound_serialized PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.

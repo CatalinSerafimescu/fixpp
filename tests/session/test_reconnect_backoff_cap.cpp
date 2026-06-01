@@ -354,7 +354,7 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     cfg.dictionary      = fixpp::test_support::make_minimal_dictionary();
     cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    // NO logon_peer_identity_override — auth must come from step 7 (T014).
+    // NO injected-identity seam — auth must come from step 7 (T014).
     cfg.transport_factory_override = factory;
     cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19877};
     // Minimal transport_send for Session::open() to reach LogonSent.

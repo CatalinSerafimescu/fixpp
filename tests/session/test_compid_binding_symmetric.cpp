@@ -59,8 +59,8 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/tls/peer_identity.hpp>
 
+#include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
-#include "support/minimal_security_profile.hpp"
 
 using namespace std::chrono_literals;
 
@@ -169,7 +169,8 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
     cfg.target_comp_id    = "TW";
     cfg.begin_string      = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    cfg.security_profile  = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
@@ -179,14 +180,14 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
     // Policy: SAN-DNS → authorized for SenderCompID "TW".
     cfg.compid_authorization_policy.add_binding("tw-prod.example.com", "TW");
 
-    // Inject peer_identity (client cert) with SAN-DNS only (no CN).
+    // Live handshake identity (client cert) with SAN-DNS only (no CN).
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "";
     pid.san_dns_names_owned.emplace_back("tw-prod.example.com");
-    cfg.logon_peer_identity_override = std::move(pid);
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
+    fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
     // Peer (TW initiator) sends Logon with SenderCompID(49)="TW".
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
@@ -227,7 +228,8 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
     cfg.target_comp_id    = "ISLD";
     cfg.begin_string      = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    cfg.security_profile  = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::initiator;
@@ -237,14 +239,14 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
     // Policy: CN "ISLD-PROD-01" → authorized for TargetCompID "ISLD".
     cfg.compid_authorization_policy.add_binding("ISLD-PROD-01", "ISLD");
 
-    // Inject peer_identity (server cert) with CN=ISLD-PROD-01.
+    // Live handshake identity (server cert) with CN=ISLD-PROD-01.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "CN=ISLD-PROD-01,O=Exchange,C=US";
-    cfg.logon_peer_identity_override = std::move(pid);
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+    fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
     // Peer (ISLD acceptor) sends Logon-ack: SenderCompID=ISLD, TargetCompID=TW.
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ISLD", "TW");
@@ -277,7 +279,8 @@ TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
     cfg.target_comp_id    = "TW";
     cfg.begin_string      = "FIX.4.2";
     cfg.heartbeat_interval = 30s;
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    cfg.security_profile  = fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::mtls_ca};
     cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
     cfg.executor_override = ioc.get_executor();
     cfg.role              = fixpp::session::session_role::acceptor;
@@ -290,10 +293,10 @@ TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
 
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "CN=STRANGER,O=Unknown,C=US";
-    cfg.logon_peer_identity_override = std::move(pid);
 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(run_open(sess).has_value());
+    fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
     feed(sess, logon);

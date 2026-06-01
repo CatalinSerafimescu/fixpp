@@ -13,6 +13,7 @@
 
 add_library(fixpp_session STATIC
   session.cpp
+  engine.cpp             # 015-runtime-engine T006: Engine lifecycle substrate
   session_executor.cpp   # fixpp::core::make_session_executor (T019; the
                          # core-namespace bridge defined session-side so
                          # core/ stays the asio-free leaf — [arch §2.3])
@@ -25,6 +26,13 @@ add_library(fixpp::session ALIAS fixpp_session)
 
 target_include_directories(fixpp_session PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
+)
+
+# engine.cpp (015 T012) needs src/transport/asio_listener.hpp (internal header).
+# The src/ path is PRIVATE — not exposed to consumers of fixpp_session.
+# [arch §5.3 engine-bootstrap carve-out]
+target_include_directories(fixpp_session PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
 )
 
 # Allowed dependencies: core, dictionary, wire, transport (interface),

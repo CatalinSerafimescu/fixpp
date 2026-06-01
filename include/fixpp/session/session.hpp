@@ -346,6 +346,45 @@ public:
     [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
 #endif
 
+    // 015 T011 — Engine-internal acceptor attach primitive.
+    // Called by the engine's run_accept_loop STRICTLY-BEFORE the first
+    // on_inbound_frame (happens-before invariant Gate A New-1 / E-4).
+    // Actions: set live_peer_id_, rebind transport_send_, take ownership.
+    // Does NOT transition the FSM. NOT install_reconnected_transport (which
+    // re-enters LogonSent — initiator-only; Gate A Codex-2).
+    // Declared public for accessibility from engine.cpp's run_accept_loop.
+    // By convention only the engine's accept loop should call this method.
+    // §XV.9: handshake_result forward-declared on line 60; full def in session.cpp.
+    // [data-model §E-2; T011; contracts C1 step 5; FR-005/006; T-041]
+    void attach_accepted_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport,
+        fixpp::transport::handshake_result hr) noexcept;
+
+    // 015 T016(b) — Engine connect-loop driver (SC-010 delta (7)).
+    // Public awaitable over the private reconnect_fsm_.drive_reconnect_attempt():
+    // connects + handshakes + authorizes + install_reconnected_transport (which
+    // rebinds transport_send_ to the live sink + re-enters LogonSent), and THEN
+    // emits the initial Logon POST-connect over that now-live sink (connect-then-
+    // Logon, FR-003 / E-1a — grounded in QuickFIX-cpp setResponder→generateLogon
+    // and Fix8 connect→send(generate_logon)). On reconnect exhaustion/cancel or a
+    // Logon-emit failure the session is left Disconnected and the error returned.
+    // Declared public for accessibility from engine.cpp's run_connect_loop; by
+    // convention only the engine's connect loop should call it. The post-connect
+    // emit is folded in here (NOT a third public method) to hold the SC-010
+    // surface at exactly the two documented additions.
+    // [data-model §E-1a; T016(b); FR-003/FR-004; SC-010 (7)]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    drive_reconnect() noexcept;
+
+    // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
+    // Returns the live transport installed post-connect: reconnected_transport_
+    // (initiator, via drive_reconnect → install_reconnected_transport) or
+    // accepted_transport_ (acceptor, via attach_accepted_transport). PRECONDITION:
+    // a live transport has been installed (post drive_reconnect / attach); the
+    // engine only calls this after a successful install. Declared public for
+    // accessibility from engine.cpp's run_connect_loop. [T016(b); FR-003; SC-010 (8)]
+    [[nodiscard]] fixpp::transport::Transport& live_transport() noexcept;
+
 private:
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
@@ -527,9 +566,15 @@ private:
     std::uint32_t next_test_request_id_ = 0;
 
     // ── US4 / T046 transport surface ─────────────────────────────────────────
-    // transport_send_ — captured from cfg_.transport_send at open(). Called
-    // from store_then_emit() AFTER the outbound store() call completes (I-3).
-    // Non-null only when SessionConfig::transport_send was set.
+    // transport_send_ — two uses:
+    //   (1) Pre-live / config-time sync sink: captured from cfg_.transport_send
+    //       at open(); used by store_then_emit() when live_transport_ptr_()
+    //       returns null (no live transport attached yet).
+    //   (2) Gap-fill/resend-replay transmit-only path (on_inbound_frame, Active
+    //       state ResendRequest handling): the fire-and-forget bridge is
+    //       acceptable there (errors are synchronously detected and disconnect).
+    // For normal outbound frames, store_then_emit() uses live_transport_ptr_()
+    // for a direct co_await async_write (FQ-1, gate-b/r1).
     // Always called from the session strand (single-writer, no races).
     std::function<void(std::span<const std::byte>)> transport_send_;
 
@@ -538,7 +583,16 @@ private:
     // The type is forward-declared in this header; the destructor is
     // instantiated in session.cpp where the full Transport definition is visible.
     // [data-model §E-1 step 8; contracts C1; FR-001]
-    std::unique_ptr<fixpp::transport::Transport> reconnected_transport_;
+    // shared_ptr (015 /simplify Q-1): the rebound transport_send_ detached write
+    // captures a keepalive copy so an in-flight write outlives a Session freed by
+    // Engine::stop()'s registry clear (the writes are not in the join counter).
+    std::shared_ptr<fixpp::transport::Transport> reconnected_transport_;
+
+    // 015 T011 — live accepted transport (owned by Session after a successful
+    // attach_accepted_transport call). Null until the engine's accept loop
+    // attaches a peer. shared_ptr per 015 /simplify Q-1 (see reconnected_transport_).
+    // [data-model §E-2; T011; contracts C1 step 5]
+    std::shared_ptr<fixpp::transport::Transport> accepted_transport_;
 
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed
@@ -577,6 +631,32 @@ private:
     // Used by the liveness loop to detect outbound idle → Heartbeat (T018 Cell A).
     fixpp::core::steady_time_point last_outbound_steady_;
 
+    // FQ-A (gate-b/r2) — single serialized live-outbound write gate.
+    // Held ACROSS each live async_write (acquire before write, release after
+    // write completes). Ensures at most one async_write is ever in-flight on
+    // the live Transport, satisfying transport.hpp:47-50 ≤1-in-flight contract.
+    // Every live emit site (store_then_emit direct path, ResendRequest replay,
+    // liveness HB/TR) acquires this gate before submitting to the transport.
+    // Must be drained (cancel_and_drain()) in Session::close() AFTER root
+    // cancellation fires, before seqnum_mgr_ drain, to satisfy the async_mutex
+    // destructor's not_locked precondition. [transport.hpp:47-50; FQ-A D-6]
+    fixpp::sync::async_mutex write_gate_;
+
+    // FQ-A (gate-b/r2) — liveness-loop lifetime counter.
+    // Initialized to 0 at construction. The spawn sites increment it
+    // synchronously BEFORE co_spawn so the counter is > 0 the instant a
+    // detached liveness frame exists; the coroutine body owns only the
+    // matching decrement via its RAII guard at exit.
+    // Session::close() polls until it reaches 0 AFTER firing root_cancel_, so
+    // that registry_.clear() cannot destroy the Session while the liveness
+    // coroutine is still running and touching Session members / the live transport.
+    // Using a shared_ptr avoids async_mutex destructor precondition issues when
+    // tests destroy a Session without calling close() (e.g., after verifying
+    // FSM state but before explicit teardown).
+    // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4]
+    std::shared_ptr<std::atomic<int>> liveness_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
@@ -591,6 +671,38 @@ private:
     // [F5 Round-A drift fix: noexcept-throw trap separation]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
         std::span<const std::byte> app_payload);
+
+    // 015 T016(d) — emit the initial initiator Logon via the admin-builder path
+    // (build_logon + assign_outbound + store_then_emit). Extracted from open()'s
+    // initiator arm so it can be driven from TWO call sites:
+    //   • open() (per-session-direct model, 013/014) — emitted AT open;
+    //   • drive_reconnect() (engine lazy-connect model) — emitted POST-connect
+    //     once install_reconnected_transport has rebound transport_send_ to the
+    //     live sink (connect-then-Logon, FR-003 / E-1a).
+    // On any failure (build overflow / seqnum overflow / store-or-transport
+    // throw) it transitions the session to Disconnected and returns the error —
+    // the caller propagates it. Does NOT perform the LogonSent transition (the
+    // caller owns that: open() before the call, install_reconnected_transport
+    // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    emit_initiator_logon_() noexcept;
+
+    // FQ-A (gate-b/r2): returns the live transport as a shared_ptr<Transport>.
+    // The keepalive across the async_write co_await ensures the Transport is not
+    // freed by registry_.clear() while the write is in-flight (Q-1 UAF fix).
+    // Returns nullptr if no live transport is attached yet.
+    [[nodiscard]] std::shared_ptr<fixpp::transport::Transport>
+    live_transport_shared_() const noexcept;
+
+    // FQ-A (gate-b/r2): one serialized live write. Acquires write_gate_, holds a
+    // shared_ptr<Transport> keepalive across the async_write, releases the gate
+    // on completion (success or error). Returns dispatch_aborted on:
+    //   - write_gate_ acquire cancelled (operation_aborted from cancel_and_drain)
+    //   - async_write returns !has_value() (any transport error)
+    // NEVER holds the gate across any read — guards write-submit→complete only.
+    // [transport.hpp:47-50; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    live_write_serialized_(std::span<const std::byte> frame) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
