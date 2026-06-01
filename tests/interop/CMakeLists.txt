@@ -230,6 +230,22 @@ fixpp_add_interop_test(
     EXTRA_LIBS fixpp_mock_clock
 )
 
+# ── Gate-B/r1 thorny witnesses: C-101 (qfj#626) + C-102 (qfj#557) ───────────
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj626_resend_recomputes_checksum_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;recovery"
+    SOURCES thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+fixpp_add_interop_test(
+    NAME interop_thorny_qfj557_generatereject_advances_seqnum_test
+    GROUP thorny
+    LABEL "interop;016;interop-thorny;us2;reject"
+    SOURCES thorny/reject/qfj-557-generatereject-advances-seqnum_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
+
 # ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
 # Validates cell_results.yaml against the parent gate-evaluator's result schema
 # (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs

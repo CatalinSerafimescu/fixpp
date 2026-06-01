@@ -75,8 +75,8 @@ each a triggering sequence distinct from the US3 witnesses.
 
 | # | Provenance | Category | Why not P1 | Disposition |
 |---|---|---|---|---|
-| C-101 | quickfix-j#626 | persistence/recovery | Resend replays stored frames; fixpp recomputes checksum on emit (stores raw, never replays a stored bad checksum) — differentiator, but covered structurally by `test_recovery_store_horizon` | `pass` — covered-by `tests/store/test_recovery_store_horizon` (P2) |
-| C-102 | quickfix-j#557 | reject | GenerateReject advances target seqnum over a run — covered by `session_reject_test` + `fsm_matrix_witness` | `pass` — covered-by `tests/session/session_reject_test` (P2) |
+| C-101 | quickfix-j#626 | persistence/recovery | Resend replays stored frames; fixpp recomputes checksum on emit — `build_replay_frame()` (session.cpp) explicitly skips stored 9=/10= and lets `wire::Writer::commit()` recompute them; differentiator | `pass` — `thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp` (gate-b/r1): stores frame with deliberately wrong 9=/10=, feeds ResendRequest, asserts replayed frame has correct 9=/10= + 43=Y + 122= |
+| C-102 | quickfix-j#557 | reject | GenerateReject advances target seqnum over a run — fixpp advances `next_inbound_unsafe()` past each invalid message that triggers a Reject | `pass` — `thorny/reject/qfj-557-generatereject-advances-seqnum_test.cpp` (gate-b/r1): feeds two invalid 35=D at seq=2+3 in Active state, asserts two Reject(35=3) emitted AND next_inbound==4 (advanced past both) |
 | C-103 | quickfix-j#751 | SequenceReset/GapFill | Configurable `ResendRequestChunkSize` splitting — fixpp resend walks the full range (no chunk knob) | `known-limitation:S-backlog-chunked-resend` (P3) |
 
 ## known-limitation — deferred-by-design (open tracking, NOT executed at v1.0)
