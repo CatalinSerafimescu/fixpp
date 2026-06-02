@@ -67,7 +67,11 @@ struct counter_guard {
 
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)},
-      engine_cfg_{std::move(cfg)}
+      engine_cfg_{std::move(cfg)},
+      // 017 owned amendment #2: seed the engine-level trace_context snapshot
+      // from EngineConfig::engine_trace_context at construction time.
+      // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
+      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context}
 // E-5: single-executor confinement — no strand, no mutex (015 scope).
 
 {}
@@ -745,6 +749,17 @@ fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(SessionId const& id) 
     auto it = listener_endpoints_.find(id);
     if (it == listener_endpoints_.end()) return fixpp::transport::Endpoint{};
     return it->second;
+}
+
+// ── 017 owned amendment #2: engine_trace_context() / clock() ─────────────────
+// contracts/adjacent-amendments.md §2 / [2k App D §D.2].
+
+fixpp::otel::trace_context Engine::engine_trace_context() const noexcept {
+    return engine_trace_ctx_snapshot_.load();
+}
+
+const std::shared_ptr<fixpp::core::Clock>& Engine::clock() const noexcept {
+    return engine_cfg_.clock;
 }
 
 }  // namespace fixpp::session

@@ -1,4 +1,5 @@
 find_package(GTest CONFIG REQUIRED)
+find_package(asio CONFIG REQUIRED)
 
 # ── Slice 3a: layout smoke test ───────────────────────────────────────────
 add_executable(log_smoke_test log_smoke_test.cpp)
@@ -99,3 +100,24 @@ target_link_libraries(log_syslog_test PRIVATE
   GTest::gtest_main
 )
 add_test(NAME log_syslog COMMAND log_syslog_test)
+
+# ── Phase 4: T031 (TS-6) — LOG-003 trace correlation (three macros) ──────────
+# Links fixpp_session (for Engine + Session) + fixpp_log + fixpp_mock_clock.
+add_executable(log_trace_correlation_test test_trace_correlation.cpp)
+target_link_libraries(log_trace_correlation_test PRIVATE
+  fixpp_log
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_trace_correlation COMMAND log_trace_correlation_test)
+
+# ── Phase 4: T032 (TS-7) — FIXPP_LOG0 from a raw thread ─────────────────────
+add_executable(log_log0_raw_thread_test test_log0_raw_thread.cpp)
+target_link_libraries(log_log0_raw_thread_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_log0_raw_thread COMMAND log_log0_raw_thread_test)

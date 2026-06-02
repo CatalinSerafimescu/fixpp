@@ -27,6 +27,9 @@
 #pragma once
 
 #include <atomic>
+#include <bit>      // std::bit_cast — used by FIXPP_SLOG/FIXPP_ELOG to convert
+                    // otel::trace_context::span_id (std::array<std::byte,8>) to
+                    // uint64_t for Logger::enqueue(). No mutex/asio includes added.
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -222,14 +225,10 @@ private:
 namespace detail {
 
 // enqueue_record_notrace: called by FIXPP_LOG0.
-// Looks up the effective logger from a global/thread context (for 3b-i we
-// use a module-local pointer; in production the engine wires this via the
-// Logger passed at construction).
 // Zeroed trace_id / span_id (context-free; not a bug per [2k §6.4]).
-//
-// NOTE: For 3b-i the function takes an explicit Logger* so tests can pass
-// a concrete Logger directly.  The macro is defined to use a clock for
-// the timestamp (std::chrono::system_clock::now()).
+// Takes an explicit Logger* so tests can pass a concrete Logger directly.
+// The macro supplies the timestamp from std::chrono::system_clock::now().
+// No thread_local ([const §XIII.3]).
 inline void enqueue_record_notrace(
     Logger*                          logger,
     Level                            level,
@@ -244,6 +243,25 @@ inline void enqueue_record_notrace(
                     zeroed_trace_id, 0u, timestamp, args);
 }
 
+// enqueue_record (with-trace): called by FIXPP_SLOG and FIXPP_ELOG.
+// trace_id and span_id are the OTel correlation fields from the caller's
+// trace_context (session strand or engine scope).
+// No thread_local on any path ([const §XIII.3]).
+// contracts/log-core.md LOG-003 / [2k §4.3].
+inline void enqueue_record(
+    Logger*                                logger,
+    Level                                  level,
+    Category                               category,
+    std::uint32_t                          format_id,
+    std::array<std::uint8_t, 16> const&    trace_id,
+    std::uint64_t                          span_id,
+    fixpp::core::utc_time_point            timestamp,
+    std::initializer_list<ArgValue>        args) noexcept
+{
+    if (logger == nullptr) return;
+    logger->enqueue(level, category, format_id, trace_id, span_id, timestamp, args);
+}
+
 }  // namespace detail
 
 }  // namespace fixpp::log
@@ -255,7 +273,7 @@ inline void enqueue_record_notrace(
 // No thread_local. No co_await.
 //
 // Usage:
-//   FIXPP_LOG0(logger_ptr, info, cat::session, FIXPP_FORMAT_ID("msg {}"), args...)
+//   FIXPP_LOG0(logger_ptr, info, cat::session, "msg {}", args...)
 //
 // The compile-time level cutoff is checked via if constexpr so that sites
 // below FIXPP_LOG_MIN_LEVEL compile to zero bytes (contracts/log-core.md FR-010).
@@ -272,6 +290,83 @@ inline void enqueue_record_notrace(
                 FIXPP_FORMAT_ID(fmt),                                         \
                 ::fixpp::core::utc_time_point{                               \
                     std::chrono::system_clock::now().time_since_epoch()},    \
+                {__VA_ARGS__});                                               \
+        }                                                                     \
+    } while (false)
+
+// ── FIXPP_SLOG ──────────────────────────────────────────────────────────────
+//
+// Session-strand log macro (Tier 1 per LOG-003).
+// Caller passes explicit `tc = session.get_trace_context()` — no co_await, no
+// thread_local. trace_id and span_id come from the session's trace_context.
+// Timestamp from system_clock::now() (session clock is not carried in tc; the
+// session's effective_clock is injected separately at the engine level for OTel
+// export; system_clock is sufficient for log record ordering here).
+//
+// Usage (session strand):
+//   auto const& tc = session.get_trace_context();
+//   FIXPP_SLOG(logger_ptr, info, tc, cat::session, "msg {}", args...)
+//
+// No thread_local ([const §XIII.3]). No co_await.
+// [2k §4.3] / contracts/log-core.md LOG-003 / [2k App D §D.1].
+#define FIXPP_SLOG(logger_ptr, lvl, tc, cat, fmt, ...)                        \
+    do {                                                                      \
+        if constexpr (static_cast<int>(::fixpp::log::Level::lvl)             \
+                      >= FIXPP_LOG_MIN_LEVEL) {                               \
+            /* otel::trace_context::trace_id is std::array<std::byte,16>;  */\
+            /* Record::trace_id is std::array<std::uint8_t,16> — same size  */\
+            /* and alignment; reinterpret_cast is safe (both char-based).   */\
+            /* otel::trace_context::span_id is std::array<std::byte,8>;    */\
+            /* Record::span_id is uint64_t — convert via std::bit_cast.     */\
+            ::fixpp::log::detail::enqueue_record(                            \
+                (logger_ptr),                                                 \
+                ::fixpp::log::Level::lvl,                                     \
+                (cat),                                                        \
+                FIXPP_FORMAT_ID(fmt),                                         \
+                reinterpret_cast<std::array<std::uint8_t, 16> const&>(       \
+                    (tc).trace_id),                                           \
+                std::bit_cast<std::uint64_t>((tc).span_id),                  \
+                ::fixpp::core::utc_time_point{                               \
+                    std::chrono::system_clock::now().time_since_epoch()},    \
+                {__VA_ARGS__});                                               \
+        }                                                                     \
+    } while (false)
+
+// ── FIXPP_ELOG ──────────────────────────────────────────────────────────────
+//
+// Engine-scope log macro (Tier 2 per LOG-003).
+// Reads engine.engine_trace_context() (atomic snapshot) for trace fields, and
+// engine.clock()->now() for the timestamp (the effective clock injected via
+// EngineConfig::clock — satisfies FR-006 effective-clock routing).
+//
+// Usage (control-plane / listener accept coroutines):
+//   FIXPP_ELOG(logger_ptr, info, engine, cat::control, "msg {}", args...)
+//
+// No thread_local ([const §XIII.3]). No co_await.
+// [2k §4.3] / contracts/log-core.md LOG-003.
+// T031(d): with a mock clock injected via EngineConfig::clock, the delivered
+// record's timestamp equals mock.now() — exercising FR-006 routing.
+#define FIXPP_ELOG(logger_ptr, lvl, engine_ref, cat, fmt, ...)                \
+    do {                                                                      \
+        if constexpr (static_cast<int>(::fixpp::log::Level::lvl)             \
+                      >= FIXPP_LOG_MIN_LEVEL) {                               \
+            auto const _elog_tc = (engine_ref).engine_trace_context();       \
+            auto const _elog_ts = (engine_ref).clock()                       \
+                                       ? ::fixpp::core::utc_time_point{      \
+                                             (engine_ref).clock()->now()     \
+                                                 .time_since_epoch()}        \
+                                       : ::fixpp::core::utc_time_point{      \
+                                             std::chrono::system_clock::now()\
+                                                 .time_since_epoch()};       \
+            ::fixpp::log::detail::enqueue_record(                            \
+                (logger_ptr),                                                 \
+                ::fixpp::log::Level::lvl,                                     \
+                (cat),                                                        \
+                FIXPP_FORMAT_ID(fmt),                                         \
+                reinterpret_cast<std::array<std::uint8_t, 16> const&>(       \
+                    _elog_tc.trace_id),                                       \
+                std::bit_cast<std::uint64_t>(_elog_tc.span_id),              \
+                _elog_ts,                                                     \
                 {__VA_ARGS__});                                               \
         }                                                                     \
     } while (false)

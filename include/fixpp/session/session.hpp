@@ -161,14 +161,18 @@ public:
     [[nodiscard]] const fixpp::core::session_executor& executor() const noexcept { return exec_; }
     [[nodiscard]] bool is_open() const noexcept { return state_ == lifecycle::open; }
 
-    // ENGINE-INTERNAL (fixpp::session/ + the session_trace_context_of
-    // bridge). The session-domain trace context (FR-014/FR-015/I-11): the
-    // session_local<trace_context> slot, populated at open() from
-    // SessionConfig::initial_trace_context and cleared at close completion
-    // (T045). Read through the borrowed stable Session* by
-    // current_trace_context — survives cross-thread coroutine resume because
-    // it is plain value ownership, NOT thread_local (E7/E8).
-    [[nodiscard]] const fixpp::otel::trace_context& trace_context_value() const noexcept {
+    // The canonical session trace-context accessor (017 owned amendment #1 /
+    // contracts/adjacent-amendments.md §1 / [2k App D §D.1]).
+    // Returns the session-domain trace_context stored in trace_slot_ at open()
+    // from SessionConfig::initial_trace_context. Used by FIXPP_SLOG callers:
+    //   auto const& tc = session.get_trace_context();
+    //   FIXPP_SLOG(logger, info, tc, cat::session, "msg {}", ...);
+    // Valid only after a successful open(); plain value ownership (NOT thread_local).
+    // [[clang::lifetimebound]] on the implicit *this: the returned reference is
+    // bound to the Session object lifetime.
+    [[nodiscard]]
+    const fixpp::otel::trace_context& get_trace_context() const noexcept
+            [[clang::lifetimebound]] {
         return trace_slot_.load();
     }
 
