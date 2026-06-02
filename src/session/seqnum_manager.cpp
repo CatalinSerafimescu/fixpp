@@ -40,11 +40,12 @@ namespace fixpp::session {
 // Return error variants without advancing on mismatch.
 //
 // Error variants:
-//   session_seqnum_too_low (69)          — seq < next_inbound_ (no PossDup — S-010 OOS)
-//   session_test_request_unanswered (74) — seq > next_inbound_ (too-high stand-in;
-//     slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
-//     013 Phase 3 T026: session.cpp intercepts too-high BEFORE check_inbound and
-//     routes via reconnect_fsm_.enter_awaiting_resend() per FR-009)
+//   session_seqnum_too_low (69)   — seq < next_inbound_ (no PossDup — S-010 OOS)
+//   session_seqnum_too_high (120) — seq > next_inbound_ (014 FR-016 / E-4). The
+//     historical slot-74 session_test_request_unanswered stand-in (and the deleted
+//     slot 70 session_seqnum_gap_unrecoverable, per 013 T006a) were replaced by this
+//     dedicated slot. 013 Phase 3 T026: session.cpp intercepts too-high BEFORE
+//     check_inbound and routes via reconnect_fsm_.enter_awaiting_resend() per FR-009.
 //
 // The mutex serialises both inbound and outbound counter operations (D-7).
 // Under the per-session-strand discipline the fast-path CAS always succeeds;
