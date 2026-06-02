@@ -1,4 +1,25 @@
 find_package(GTest CONFIG REQUIRED)
+find_package(asio CONFIG REQUIRED)
+
+# ── E2 (T044): test_engine_close_teardown ─────────────────────────────────────
+# Regression: Engine::stop() invokes TracerProvider::shutdown(),
+# MeterProvider::shutdown(), and Logger sink flush before returning.
+# FR-014 / T044 / [2k §6.6] / NO session-FSM edit.
+if(TARGET opentelemetry-cpp::api)
+  add_executable(test_engine_close_teardown test_engine_close_teardown.cpp)
+  target_link_libraries(test_engine_close_teardown PRIVATE
+    fixpp_otel
+    fixpp_session
+    fixpp_mock_clock
+    opentelemetry-cpp::api
+    opentelemetry-cpp::trace
+    opentelemetry-cpp::metrics
+    asio::asio
+    GTest::gtest
+    GTest::gtest_main
+  )
+  add_test(NAME e2_engine_close_teardown COMMAND test_engine_close_teardown)
+endif()
 
 # ── TS-11: test_dual_metric_export ────────────────────────────────────────────
 # Tests: counter==3 visible via real Prometheus scrape on :9464 AND via a mock

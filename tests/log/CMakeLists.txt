@@ -121,3 +121,18 @@ target_link_libraries(log_log0_raw_thread_test PRIVATE
   GTest::gtest_main
 )
 add_test(NAME log_log0_raw_thread COMMAND log_log0_raw_thread_test)
+
+# ── Phase 5: T037 (TS-10) + E10 — OtlpLogSink field mapping + failing exporter
+# Requires the OTel SDK (fixpp_log_otlp separate target).
+if(TARGET opentelemetry-cpp::api AND TARGET fixpp_log_otlp)
+  add_executable(log_otlp_sink_test test_otlp_log_sink.cpp)
+  target_link_libraries(log_otlp_sink_test PRIVATE
+    fixpp_log_otlp
+    opentelemetry-cpp::logs
+    opentelemetry-cpp::exporter_otlp_http_log
+    opentelemetry-cpp::otlp_recordable
+    GTest::gtest
+    GTest::gtest_main
+  )
+  add_test(NAME ts10_otlp_log_sink COMMAND log_otlp_sink_test)
+endif()

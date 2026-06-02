@@ -26,6 +26,11 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/engine.hpp>
+// T044: full definitions needed to call shutdown() on lifecycle teardown.
+// These headers are included only in the .cpp (not in engine.hpp) to keep
+// the awaitable-header include-edge clean ([const §XV.9]).
+#include <fixpp/log/logger.hpp>
+#include <fixpp/otel/providers.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
@@ -736,6 +741,23 @@ asio::awaitable<void> Engine::stop() {
     listeners_.clear();
     listener_endpoints_.clear();
     registry_.clear();
+
+    // FR-014 / T044: flush sinks and shut down the OTel providers.
+    // Ordering: sessions are torn down BEFORE provider shutdown so no
+    // session-level span/metric emission races the provider Shutdown().
+    // Logger flush: drain in-flight log records before releasing the logger.
+    // Provider shutdown: flush + stop the SDK exporter workers.
+    // Lifecycle only — NO session-FSM transition edit ([2k §6.6] / T044).
+    if (engine_cfg_.logger) {
+        using namespace std::chrono_literals;
+        (void)engine_cfg_.logger->shutdown(5000ms);
+    }
+    if (engine_cfg_.tracer) {
+        engine_cfg_.tracer->shutdown();
+    }
+    if (engine_cfg_.meter) {
+        engine_cfg_.meter->shutdown();
+    }
 }
 
 // ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────
