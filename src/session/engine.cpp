@@ -675,6 +675,13 @@ void Engine::start() {
 //  4. Clear registry.
 
 asio::awaitable<void> Engine::stop() {
+    // F2 (Gate-B/r1): stop() is the teardown driver — it MUST run to completion once
+    // it sets stopped_=true, else a later stop() short-circuits at the guard below
+    // leaving the registry/sessions/liveness loops half-torn-down. Shield it from a
+    // caller's cancellation (a slot-bound co_spawn) before mutating any state. The
+    // production callers spawn stop() under use_future (no slot); this is defensive
+    // hardening so the contract holds regardless of how stop() is awaited. [Codex P2]
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
     if (stopped_) {
         co_return;
     }
@@ -700,6 +707,24 @@ asio::awaitable<void> Engine::stop() {
             co_await t.async_wait(asio::use_awaitable);
         }
         outstanding_counter_.reset();
+    }
+
+    // F2: drive each surviving session through its own close() to drain the
+    // per-session liveness loop. The role loops (run_read_pump) DO call
+    // session.close(terminal) on read EOF/error, but when Engine::stop() total-
+    // cancels them the loop's `co_await session.close()` throws operation_aborted at
+    // the cancelled await BEFORE close() is entered, so a parked run_liveness_loop
+    // sleep_until is never joined — it survives to io_context shutdown, where its
+    // system_clock_source dereg guard touches the (freed) clock pimpl: a heap-use-
+    // after-free (first seen on the live QuickFIX-cpp interop cell). This stop()
+    // coroutine is NOT cancelled, so close() runs to completion here, draining the
+    // liveness loop + write/seqnum gates. close() is idempotent (session_already_
+    // closed if a loop already drained it). Must precede registry_.clear() so no
+    // Session* is dereferenced after free.
+    for (auto& [id, entry] : registry_) {
+        if (entry.session) {
+            (void)co_await entry.session->close(fixpp::session::close_mode::terminal);
+        }
     }
 
     // Safe now: all loops have exited; Session objects may be freed.

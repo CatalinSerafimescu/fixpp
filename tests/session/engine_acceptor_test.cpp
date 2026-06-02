@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
@@ -663,4 +664,132 @@ TEST(EngineAcceptorTest, LookupNullBeforeStart) {
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
     ioc.run();
     stop_fut.get();
+}
+
+// ── F2: Engine::stop() must drain a session's parked liveness loop ────────────
+// Regression witness for the heap-use-after-free first seen on the live
+// QuickFIX-cpp interop cell. With a real system_clock_source + a non-zero
+// heartbeat, an Active session's run_liveness_loop parks in sleep_until (the clock
+// registers an in-flight timer). The per-session role loop calls
+// session.close(terminal) on read EOF, but when Engine::stop() total-cancels that
+// loop the `co_await session.close()` aborts at the cancelled await BEFORE close()
+// is entered, so the parked sleep_until is never joined — it survives to io_context
+// shutdown, where its dereg guard touches the freed clock pimpl (UAF). Engine::stop()
+// must therefore drive close() per session AFTER joining the loops (in its own,
+// un-cancelled coroutine). Witness: after stop() the clock has NO in-flight sleep.
+// [F2; mirrors run_read_pump teardown under Engine::stop()]
+TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
+    const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+#ifdef FIXPP_TLS_FIXTURE_DIR
+    static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
+#else
+    static const char* kDir = nullptr;
+#endif
+    const char* fixture_dir = dir ? dir : kDir;
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    // A REAL clock so run_liveness_loop actually parks in sleep_until (the null-clock
+    // arm returns immediately, which is why the existing tests never hit this).
+    auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    eng_cfg.clock = clock;
+
+    fixpp::tls::file_cert_source::Config cs_cfg;
+    cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
+    cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
+    cs_cfg.ca_bundle_path = std::string(fixture_dir) + "/ca.pem";
+    auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
+    ASSERT_TRUE(cs_r.has_value()) << "cert_source build failed";
+
+    fixpp::tls::SslCtxConfig ssl;
+    ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
+    ssl.cs = std::move(*cs_r);
+    ssl.clock = nullptr;
+    ssl.caps = fixpp::tls::CertSourceCaps{};
+    auto fac_r = fixpp::transport::make_asio_tls_transport_factory(
+        fixpp::transport::Transport::Config{}, ssl);
+    ASSERT_TRUE(fac_r.has_value()) << "transport factory build failed";
+    std::shared_ptr<fixpp::transport::TransportFactory> fac{std::move(*fac_r)};
+
+    fixpp::session::CompIdAuthorizationPolicy authz;
+    authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+
+    fixpp::session::SessionConfig acc;
+    acc.sender_comp_id = "ACCEPTOR";
+    acc.target_comp_id = "INITIATOR";
+    acc.begin_string = "FIX.4.2";
+    acc.role = fixpp::session::session_role::acceptor;
+    acc.executor_override = ioc.get_executor();
+    acc.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    acc.compid_authorization_policy = authz;
+    acc.dictionary = fixpp::test_support::make_minimal_dictionary();
+    acc.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    acc.transport_factory_override = fac;
+    // 5s heartbeat: long enough that the session stays Active (no unanswered-
+    // TestRequest self-disconnect) while we assert + stop, yet the liveness loop
+    // still spawns and parks in a 5s sleep_until.
+    acc.heartbeat_interval = std::chrono::seconds{5};
+    acc.logout_disconnect_timeout_ms = 2000;
+    acc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
+    acc.transport_send = [](std::span<const std::byte>) {};
+
+    auto acc_id = fixpp::session::SessionId::from_config(acc);
+    ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
+
+    engine.start();
+    ioc.run_for(50ms);
+    ioc.restart();
+    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
+
+    fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
+                                                       ioc.get_executor()};
+    asio::co_spawn(ioc, run_test_initiator(ioc, fixture, bound_port, "INITIATOR", "ACCEPTOR"),
+                   asio::detached);
+
+    // Poll until the acceptor session reaches Active (liveness loop spawns + parks).
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    fixpp::session::Session* acc_session = nullptr;
+    while (std::chrono::steady_clock::now() < deadline) {
+        ioc.run_for(50ms);
+        ioc.restart();
+        acc_session = engine.lookup(acc_id);
+        if (acc_session != nullptr && acc_session->state() == fixpp::session::fsm_state::Active) {
+            break;
+        }
+    }
+    ASSERT_NE(acc_session, nullptr);
+    ASSERT_EQ(acc_session->state(), fixpp::session::fsm_state::Active)
+        << "acceptor must reach Active so its liveness loop parks before stop()";
+    // Let the liveness loop spawn + register its sleep.
+    ioc.run_for(100ms);
+    ioc.restart();
+    ASSERT_GE(clock->inflight_count(), 1u)
+        << "liveness loop must be parked in sleep_until before stop()";
+
+    // Stop. After stop() completes, the parked liveness sleep_until MUST be drained.
+    // Bounded: don't wait on the detached client's 5s timer, and FAIL (not hang) if a
+    // drain regression wedges stop().
+    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+    const auto stop_deadline = std::chrono::steady_clock::now() + 10s;
+    while (stop_fut.wait_for(0ms) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < stop_deadline) {
+        ioc.run_for(20ms);
+        ioc.restart();
+    }
+    ASSERT_EQ(stop_fut.wait_for(0ms), std::future_status::ready)
+        << "Engine::stop() did not complete within 10s — a teardown drain wedged.";
+    stop_fut.get();
+
+    const std::size_t inflight = clock->inflight_count();
+    EXPECT_EQ(inflight, 0u)
+        << "Engine::stop() left a parked liveness sleep_until (inflight=" << inflight
+        << ") — the F2 heap-use-after-free: stop() must drive each session through "
+        << "close() to join its liveness loop.";
 }

@@ -110,6 +110,11 @@ system_clock_source::~system_clock_source() {
     cancel_sleeps();
 }
 
+std::size_t system_clock_source::inflight_count() const noexcept {
+    std::scoped_lock g(impl_->m);
+    return impl_->inflight.size();
+}
+
 utc_time_point system_clock_source::now() const noexcept {
     return std::chrono::system_clock::now();
 }
