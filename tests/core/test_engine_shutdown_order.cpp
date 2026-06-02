@@ -13,6 +13,7 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
+#include <asio/system_executor.hpp>
 #include <asio/thread_pool.hpp>
 #include <chrono>
 #include <fixpp/core/engine_config.hpp>
