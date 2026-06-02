@@ -58,7 +58,7 @@
    - **Criterion C — drop counter.** On overflow (95% fill rate with an intentional slow drain), the drop counter increments correctly; no memory unsafety under TSan.
    - **Criterion D — OTel correlation.** The record struct can carry `trace_id` (16 bytes) and `span_id` (8 bytes) as plain fields; no additional allocation for correlation data.
    - **Criterion E — PMR sink.** The logger's internal ring buffer can be allocated from a `std::pmr::memory_resource*` supplied at construction.
-4. **Candidates evaluated.** (a) `quill` v3.x (latest tagged release per `[const §XV.17]`). (b) own impl (bounded MPSC ring using a power-of-two atomic head/tail with the sequence-number Disruptor variant for minimal CAS contention).
+4. **Candidates evaluated.** (a) `quill` v11.x (latest tagged release per `[const §XV.17]`; `quill/11.1.0` on Conan Center — refreshed 2026-06-02 from the original v3.x, which was Conan Center's latest when this doc was authored). NB: quill 11.x is a major-API rewrite vs 3.x; the TS-13 spike harness targets the 11.x API. (b) own impl (bounded MPSC ring using a power-of-two atomic head/tail with the sequence-number Disruptor variant for minimal CAS contention).
 5. **Decision rule.** If quill passes all five criteria → **adopt quill**; smaller maintenance footprint per `[SYN §3.8]`. If quill fails any criterion → **own impl**. The decision is recorded in Appendix C after Phase 3 spike execution.
 
 **Provisional recommendation (v0.1, without spike execution).** Provisional recommendation is **own impl**, with the door left open to adopt quill if the spike passes Criterion A (zero alloc). The rationale:
@@ -1250,11 +1250,11 @@ The `drain_timeout` value comes from `LoggerConfig::drain_timeout` (default 5 se
 
 **Q2.** W3C TraceContext injection into outbound FIX messages — explicitly post-v1.0 per §2 non-goals. Deferred to Phase 4 session-module spec + a future amendment.
 
-**Q3.** OTel C++ SDK version pinning — lock the exact version in `CMakeLists.txt` / Conan recipe. Deferred to Phase 3 build scaffold. Minimum constraint: OTel C++ SDK ≥ 1.12 (first version with stable logs API). The exact pinned version is recorded in `conanfile.py` at Phase 3.
+**Q3.** OTel C++ SDK version pinning — lock the exact version in `CMakeLists.txt` / Conan recipe. Minimum constraint: OTel C++ SDK ≥ 1.12 (first version with stable logs API). **RESOLVED at 017 build scaffold (2026-06-02):** pinned exactly to `opentelemetry-cpp/1.26.0` (latest on Conan Center; upstream `1.27.0` is not yet packaged) with `with_abi_v2=True` (API V2, `OPENTELEMETRY_ABI_VERSION_NO=2`), `with_no_deprecated_code=True`, `with_prometheus=True` (the recipe default is `False` — required by OBS-002/FR-017), `with_otlp_http=True`. Recorded in `conanfile.py` + spec `017-log-otel` FR-023, which owns the pin.
 
 **Q4.** `PrometheusExporter` embedded HTTP server port and thread model — the embedded single-threaded server is the v1.0 minimum. Post-v1.0 options: (a) push-gateway integration, (b) ASIO-based HTTP server (eliminates the dedicated server thread). The v1.0 minimum (embedded server on port 9464) is sufficient for the OBS-002 requirement.
 
-**Q5.** `quill` Conan package name and version — `quill/3.x` exists in Conan Center; verify the exact name and pin at Phase 3 build scaffold. The benchmark spike (TS-13) depends on this.
+**Q5.** `quill` Conan package name and version — **RESOLVED (2026-06-02):** pinned to `quill/11.1.0` (latest on Conan Center; refreshed from the original `quill/3.x`), pulled only when `FIXPP_LOG_SPIKE_QUILL=ON` (spike-only, TS-13). The benchmark spike harness targets the quill 11.x API.
 
 **Q6.** `GrpcStreamSink` backpressure policy — `close-on-overflow` per `[2j §6.4]`. Confirm at 2j sign-off whether the `GrpcStreamSink` should also support `drop-oldest` (for less noisy gRPC stream teardowns on slow consumers) or if `close-on-overflow` is the sole policy. Defer to the 2j cross-doc amendment.
 
@@ -1265,7 +1265,7 @@ The `drain_timeout` value comes from `LoggerConfig::drain_timeout` (default 5 se
 This doc unblocks:
 
 - **`2l-tap.md`**: session-tap can reference the `Sink` abstraction pattern from 2k. Not hard-blocked but informed. 2l may introduce a `TapSink` that forwards tap records to an external consumer using the same interface shape.
-- **Phase 3 build scaffold**: OTel C++ SDK Conan recipe (≥ 1.12), quill Conan recipe (v3.x, spike-only), `FIXPP_LOG_MIN_LEVEL` CMake option, `FIXPP_LOG_SPIKE_QUILL` CMake option.
+- **017 build scaffold** (formerly labelled "Phase 3"): OTel C++ SDK Conan recipe `opentelemetry-cpp/1.26.0` (`with_abi_v2=True`/`with_prometheus=True`/`with_otlp_http=True`), quill Conan recipe `quill/11.1.0` (spike-only), `FIXPP_LOG_MIN_LEVEL` CMake option, `FIXPP_LOG_SPIKE_QUILL` CMake option.
 - **Phase 4 session-module spec**: `SessionConfig::logger_override`, `SessionConfig::tracer_override`, `SessionConfig::initial_trace_context`, `SessionSpans` construction in the FSM open path, `ParseSpan` / `StoreSpan` / `DispatchSpan` usage in the message-processing coroutine.
 - **2j cross-doc amendment (v1.x)**: C-ABI subscription surface `fixpp_logger_subscribe_drain_cb` in `c_api/log.h`; 2i amendment for the symbol's reentrancy annotation. Unblocks `StreamLogs` log-stream integration per §7 / Q1.
 

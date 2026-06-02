@@ -6,9 +6,9 @@ This is the integration/validation map: each row is a test seam from the anchor 
 ## Build prerequisites (FR-023; do first)
 ```bash
 cd research/G19-fix-fpml-iso20022/library
-# conanfile.py pins opentelemetry-cpp/1.16.1 (a tagged release >=1.12, the first stable logs API) ; CMake exposes:
+# conanfile.py pins opentelemetry-cpp/1.26.0 (latest conancenter; with_abi_v2=True API V2, with_prometheus=True, with_otlp_http=True) ; CMake exposes:
 #   -DFIXPP_LOG_MIN_LEVEL=<0..5>      (compile-time level cutoff; default trace(debug)/info(release))
-#   -DFIXPP_LOG_SPIKE_QUILL=ON|OFF    (OFF default; ON pulls quill/3.9.0 for TS-13 only)
+#   -DFIXPP_LOG_SPIKE_QUILL=ON|OFF    (OFF default; ON pulls quill/11.1.0 for TS-13 only)
 cmake --preset linux-clang-debug-py     # default build must NOT require quill
 ```
 
