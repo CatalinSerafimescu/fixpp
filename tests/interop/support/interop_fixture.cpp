@@ -6,6 +6,7 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <future>
 #include <utility>
 
@@ -15,10 +16,22 @@ namespace {
 // io_context pump granularity. Small enough that wall-clock deadlines are honored
 // promptly, large enough to avoid busy-spinning the test thread.
 constexpr std::chrono::milliseconds kPumpSlice{5};
+
+// Inject a real system clock into the EngineConfig when the caller left it null,
+// so outbound admin messages carry a populated SendingTime(52) a real counterparty
+// accepts. Honors an explicit caller-supplied clock (does not overwrite).
+fixpp::core::EngineConfig with_clock(fixpp::core::EngineConfig cfg,
+                                     std::shared_ptr<fixpp::core::Clock> clock) {
+    if (!cfg.clock) {
+        cfg.clock = std::move(clock);
+    }
+    return cfg;
+}
 }  // namespace
 
 InteropEngineFixture::InteropEngineFixture(fixpp::core::EngineConfig cfg)
-    : engine_(ioc_.get_executor(), std::move(cfg)) {}
+    : clock_(std::make_shared<fixpp::core::system_clock_source>(ioc_.get_executor())),
+      engine_(ioc_.get_executor(), with_clock(std::move(cfg), clock_)) {}
 
 InteropEngineFixture::~InteropEngineFixture() {
     // The Engine dtor asserts stopped(); guarantee a completed stop() first.

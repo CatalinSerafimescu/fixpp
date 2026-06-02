@@ -24,9 +24,11 @@
 
 #include <asio/io_context.hpp>
 #include <chrono>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/engine.hpp>
 #include <functional>
+#include <memory>
 
 namespace fixpp::interop {
 
@@ -63,6 +65,15 @@ public:
 
 private:
     asio::io_context ioc_;
+    // A real wall-clock source so outbound admin messages carry a populated
+    // SendingTime(52). Without it effective_clock_ is null and the session emits an
+    // EMPTY 52= — tolerated by mock peers (test_reconnect_live_happy_path) but REJECTED
+    // by a real QuickFIX counterparty ("Tag specified without a value:52"), so live
+    // interop logon never completes. Injected into EngineConfig::clock when the caller
+    // did not supply one. (No special member ordering needed: Engine::stop() drains
+    // every per-session liveness sleep_until before the fixture dtor returns, so no
+    // parked coroutine survives to touch the clock at io_context teardown.)
+    std::shared_ptr<fixpp::core::Clock> clock_;
     fixpp::session::Engine engine_;
 };
 
