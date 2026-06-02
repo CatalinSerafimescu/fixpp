@@ -72,3 +72,30 @@ add_test(NAME log_alloc_mallocnesia
 set_tests_properties(log_alloc_mallocnesia PROPERTIES
   PASS_REGULAR_EXPRESSION "PASSED"
   FAIL_REGULAR_EXPRESSION "\\[mallocnesia\\] FAIL")
+
+# ── Slice 3c: T017 (TS-4) — FileSink rotation + byte bound ───────────────────
+add_executable(log_file_rotation_test test_file_sink_rotation.cpp)
+target_link_libraries(log_file_rotation_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_file_rotation COMMAND log_file_rotation_test)
+
+# ── Slice 3c: T018 (TS-5) — FileSink fsync on drain thread ───────────────────
+add_executable(log_file_fsync_test test_file_sink_async_fsync.cpp)
+target_link_libraries(log_file_fsync_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_file_fsync COMMAND log_file_fsync_test)
+
+# ── Slice 3c: T029 — SyslogSink smoke test (POSIX-only; guard inside test) ───
+add_executable(log_syslog_test test_syslog_sink.cpp)
+target_link_libraries(log_syslog_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_syslog COMMAND log_syslog_test)

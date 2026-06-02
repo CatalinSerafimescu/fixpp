@@ -8,6 +8,8 @@
 add_library(fixpp_log STATIC
   format_registry.cpp
   logger.cpp
+  file_sink.cpp
+  syslog_sink.cpp
 )
 add_library(fixpp::log ALIAS fixpp_log)
 
