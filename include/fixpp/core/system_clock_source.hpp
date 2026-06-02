@@ -72,14 +72,14 @@ public:
     // from Session::~Session (D-23). No-op if this session never slept.
     void forget_session(fixpp::session::Session* session) noexcept override;
 
-    // Number of currently-registered (suspended) sleeps. A sleep that survives
-    // teardown — e.g. a parked liveness-loop sleep_until that close() failed to
-    // drain — is observable here as a non-zero residue after a clean stop().
-    // Read-only diagnostic (const noexcept; takes the in-flight lock); changes no
-    // behaviour. Defined unconditionally because the pimpl state lives in the .cpp
-    // and fixpp_core is not compiled with FIXPP_TEST_HOOKS, so it cannot be a gated
-    // header-inline accessor. Used by the F2 teardown-drain witness. [F2]
-    [[nodiscard]] std::size_t inflight_count_test_access() const noexcept;
+    // Supported read-only diagnostic: the number of currently-registered (suspended)
+    // sleeps. A sleep that survives teardown — e.g. a parked liveness-loop sleep_until
+    // that close() failed to drain — shows up here as a non-zero residue after a clean
+    // stop(), which is exactly the F2 teardown invariant. const noexcept; takes the
+    // in-flight lock; changes no behaviour and no object layout (non-virtual). Defined
+    // unconditionally (the pimpl state lives in the .cpp and fixpp_core is not built
+    // with FIXPP_TEST_HOOKS, so it cannot be a gated header-inline accessor). [F2]
+    [[nodiscard]] std::size_t inflight_count() const noexcept;
 
 private:
     struct state;  // opaque (intrusive list + mutex; in .cpp)

@@ -770,16 +770,26 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     // Let the liveness loop spawn + register its sleep.
     ioc.run_for(100ms);
     ioc.restart();
-    ASSERT_GE(clock->inflight_count_test_access(), 1u)
+    ASSERT_GE(clock->inflight_count(), 1u)
         << "liveness loop must be parked in sleep_until before stop()";
 
     // Stop. After stop() completes, the parked liveness sleep_until MUST be drained.
+    // Bounded: don't wait on the detached client's 5s timer, and FAIL (not hang) if a
+    // drain regression wedges stop().
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    const auto stop_deadline = std::chrono::steady_clock::now() + 10s;
+    while (stop_fut.wait_for(0ms) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < stop_deadline) {
+        ioc.run_for(20ms);
+        ioc.restart();
+    }
+    ASSERT_EQ(stop_fut.wait_for(0ms), std::future_status::ready)
+        << "Engine::stop() did not complete within 10s — a teardown drain wedged.";
     stop_fut.get();
 
-    EXPECT_EQ(clock->inflight_count_test_access(), 0u)
-        << "Engine::stop() left a parked liveness sleep_until (inflight="
-        << clock->inflight_count_test_access() << ") — the F2 heap-use-after-free: "
-        << "stop() must drive each session through close() to join its liveness loop.";
+    const std::size_t inflight = clock->inflight_count();
+    EXPECT_EQ(inflight, 0u)
+        << "Engine::stop() left a parked liveness sleep_until (inflight=" << inflight
+        << ") — the F2 heap-use-after-free: stop() must drive each session through "
+        << "close() to join its liveness loop.";
 }

@@ -652,6 +652,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     using fixpp::core::error;
 
+    // F2 (Gate-B/r1): close() is teardown — once it commits to `closing` it MUST run
+    // to completion and publish close_result_. If the CALLER is cancelled mid-close
+    // (run_read_pump's `co_await session.close(terminal)` entered just as Engine::stop()
+    // fires session_cancel.emit) a later co_await here would otherwise abort with
+    // operation_aborted, unwinding BEFORE close_result_ is set — and then the
+    // Engine::stop() post-join drain re-enters, takes the `closing` branch below, and
+    // awaits a result nobody will ever set → hang. Disable cancellation on this
+    // coroutine for the whole of close() so it is immune to the caller's signal. This
+    // shields close()'s OWN co_awaits only; the session work it tears down is still
+    // cancelled via root_cancel_.emit(total) + cancel_sleeps() fired in phase 2.
+    // (Engine::stop() also drives a fresh close() for sessions whose role-loop close()
+    // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+
     // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]:830-832,863) ──
     // never-opened OR already-closed(drained) → session_already_closed
     // (slot 52); no side effects.

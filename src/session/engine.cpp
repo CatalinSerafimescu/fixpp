@@ -675,6 +675,13 @@ void Engine::start() {
 //  4. Clear registry.
 
 asio::awaitable<void> Engine::stop() {
+    // F2 (Gate-B/r1): stop() is the teardown driver — it MUST run to completion once
+    // it sets stopped_=true, else a later stop() short-circuits at the guard below
+    // leaving the registry/sessions/liveness loops half-torn-down. Shield it from a
+    // caller's cancellation (a slot-bound co_spawn) before mutating any state. The
+    // production callers spawn stop() under use_future (no slot); this is defensive
+    // hardening so the contract holds regardless of how stop() is awaited. [Codex P2]
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
     if (stopped_) {
         co_return;
     }

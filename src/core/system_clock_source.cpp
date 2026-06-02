@@ -110,7 +110,7 @@ system_clock_source::~system_clock_source() {
     cancel_sleeps();
 }
 
-std::size_t system_clock_source::inflight_count_test_access() const noexcept {
+std::size_t system_clock_source::inflight_count() const noexcept {
     std::scoped_lock g(impl_->m);
     return impl_->inflight.size();
 }
