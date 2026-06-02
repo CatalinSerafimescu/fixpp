@@ -702,6 +702,24 @@ asio::awaitable<void> Engine::stop() {
         outstanding_counter_.reset();
     }
 
+    // F2: drive each surviving session through its own close() to drain the
+    // per-session liveness loop. The role loops (run_read_pump) DO call
+    // session.close(terminal) on read EOF/error, but when Engine::stop() total-
+    // cancels them the loop's `co_await session.close()` throws operation_aborted at
+    // the cancelled await BEFORE close() is entered, so a parked run_liveness_loop
+    // sleep_until is never joined — it survives to io_context shutdown, where its
+    // system_clock_source dereg guard touches the (freed) clock pimpl: a heap-use-
+    // after-free (first seen on the live QuickFIX-cpp interop cell). This stop()
+    // coroutine is NOT cancelled, so close() runs to completion here, draining the
+    // liveness loop + write/seqnum gates. close() is idempotent (session_already_
+    // closed if a loop already drained it). Must precede registry_.clear() so no
+    // Session* is dereferenced after free.
+    for (auto& [id, entry] : registry_) {
+        if (entry.session) {
+            (void)co_await entry.session->close(fixpp::session::close_mode::terminal);
+        }
+    }
+
     // Safe now: all loops have exited; Session objects may be freed.
     accept_scope_signals_.clear();
     listeners_.clear();

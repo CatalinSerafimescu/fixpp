@@ -27,9 +27,21 @@
 // not thread-safe; cancel_sleeps posts cancel() onto the timer's strand).
 // forget_session() (called from Session::~Session) releases a session's
 // slot BEFORE its arena is reclaimed.
+//
+// ── LIFETIME CONTRACT: the clock MUST outlive the io_context/executor it serves.
+// A suspended sleep_until awaitable holds an RAII `dereg` guard whose destructor
+// reaches back into this object's pimpl state (to erase the in-flight entry). If a
+// sleep is still parked when the owning io_context is destroyed, asio reaps the
+// suspended coroutine frame during io_context shutdown — running `dereg::~dereg()`.
+// Should the clock have been destroyed first, that is a heap-use-after-free. So the
+// owner MUST keep the clock alive until AFTER the io_context is gone (declare it so
+// it is destroyed last), and SHOULD drive every session through Session::close()
+// (which cancel_sleeps() + joins the liveness loop) so no sleep is left parked at
+// teardown. Both belts are correct; rely on neither alone. [F2; Session::close()]
 #pragma once
 
 #include <asio/any_io_executor.hpp>
+#include <cstddef>
 #include <fixpp/core/clock.hpp>
 #include <memory>
 
@@ -59,6 +71,15 @@ public:
     // session's arena memory is reclaimed by ~Session. Idempotent; called
     // from Session::~Session (D-23). No-op if this session never slept.
     void forget_session(fixpp::session::Session* session) noexcept override;
+
+    // Number of currently-registered (suspended) sleeps. A sleep that survives
+    // teardown — e.g. a parked liveness-loop sleep_until that close() failed to
+    // drain — is observable here as a non-zero residue after a clean stop().
+    // Read-only diagnostic (const noexcept; takes the in-flight lock); changes no
+    // behaviour. Defined unconditionally because the pimpl state lives in the .cpp
+    // and fixpp_core is not compiled with FIXPP_TEST_HOOKS, so it cannot be a gated
+    // header-inline accessor. Used by the F2 teardown-drain witness. [F2]
+    [[nodiscard]] std::size_t inflight_count_test_access() const noexcept;
 
 private:
     struct state;  // opaque (intrusive list + mutex; in .cpp)
