@@ -45,7 +45,10 @@ namespace fixpp::tls {
 class cert_source;
 }
 namespace fixpp::log {
-class Sink;
+class Logger;  // 017 T012: logger_override field ([2d §4.5]; replaces log_sink_override)
+}
+namespace fixpp::otel {
+class TracerProvider;  // 017 T012: tracer_override field ([2d §4.5])
 }
 // Endpoint is a value type used by reconnect_endpoint field; needs full def.
 // [const §XV.9] check: endpoint.hpp only includes <cstdint>/<string>/<utility>
@@ -178,9 +181,21 @@ struct SessionConfig {
     std::pmr::memory_resource* framer_carry_arena = nullptr;  // owned by 2b; recorded here
     std::pmr::memory_resource* session_arena = nullptr;
 
-    fixpp::otel::trace_context initial_trace_context{};   // value-typed (C-P2-4)
-    std::shared_ptr<fixpp::log::Sink> log_sink_override;  // null → engine default
-    fixpp::tap::TapConsumer tap_consumer;                 // default = no tap
+    fixpp::otel::trace_context initial_trace_context{};  // value-typed (C-P2-4)
+
+    // 017 T012 — per-session logger override (engine-anchor + session-override
+    // per [2d §4.5]). null → Engine resolves its own EngineConfig::logger.
+    // Replaces the former log_sink_override (a single Sink); logger_override
+    // supplies a whole Logger instance so the session can enqueue records to
+    // a custom ring. [2k §4.5 / contracts/adjacent-amendments.md item 3/4]
+    std::shared_ptr<fixpp::log::Logger> logger_override;  // null → engine default
+
+    // 017 T012 — per-session tracer override. null → Engine resolves its own
+    // EngineConfig::tracer. meter_override intentionally omitted — metrics are
+    // engine-scoped (anchor §4.8). [2k / contracts/adjacent-amendments.md item 3]
+    std::shared_ptr<fixpp::otel::TracerProvider> tracer_override;  // null → engine default
+
+    fixpp::tap::TapConsumer tap_consumer;  // default = no tap
 
     backpressure_mode app_backpressure = backpressure_mode::block;
 

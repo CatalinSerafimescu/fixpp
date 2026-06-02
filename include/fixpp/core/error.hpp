@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <string_view>
 
 namespace fixpp::core {
 
@@ -680,9 +681,190 @@ enum class error : std::uint8_t {
                                              //   deferred — 015 has no log surface (FR-013).
                                              //   Static matching only in 015 (R2).
                                              //   → FIXPP_ERR_SESSION_REJECT
+
+    // ── 017-log-otel: 7 log_*/otel_* variants per contracts/error-block.md +
+    //    [2k §6.3]. Non-renumbering append at unused slots 122–128, next
+    //    contiguous range after 015's session_unknown_acceptor_session = 121
+    //    per [const §X.4]. The [1000,1099] C-ABI block is a FUTURE v1.x
+    //    fixpp_error_t mapping reservation (see tools/abi_history/
+    //    error_codes_v1.txt); the enum is std::uint8_t-backed so [1000,1099]
+    //    are NOT enumerator values here.
+    //
+    //    C-ABI fixpp_error_t block [1000,1099] (documented for 2i; no extern "C"
+    //    surface added by this feature — FR-020):
+    //      FIXPP_ERR_LOG_QUEUE_OVERFLOW   ← 1000 (internal-only; maps to
+    //                                           Logger::drop_count() counter)
+    //      FIXPP_ERR_LOG_SINK_OPEN        ← 1001
+    //      FIXPP_ERR_LOG_SINK_WRITE       ← 1002
+    //      FIXPP_ERR_LOG_SINK_FLUSH       ← 1003
+    //      FIXPP_ERR_LOG_DRAIN_TIMEOUT    ← 1004
+    //      (1005–1009 reserved for future log variants)
+    //      FIXPP_ERR_OTEL_EXPORT_FAILED   ← 1010
+    //      FIXPP_ERR_OTEL_PROVIDER_INIT   ← 1011
+    //      (1012–1099 reserved for future otel variants)
+    log_queue_overflow = 122,      // [2k §6.3] — MPSC ring overflowed; record
+                                   //   dropped (drop_newest mode). Increments
+                                   //   Logger::drop_count() atomically. NOT
+                                   //   returned to callers (macros are void).
+                                   //   → C-ABI 1000 (future mapping; no return path in v1.0)
+    log_sink_open_failed = 123,    // [2k §6.3] — Sink::open() returned an error
+                                   //   at Logger startup; sink disabled; Logger
+                                   //   continues with remaining sinks.
+                                   //   → C-ABI 1001
+    log_sink_write_failed = 124,   // [2k §6.3] — Sink::emit() threw (caught by
+                                   //   drain); increments sink_error_count(i).
+                                   //   → C-ABI 1002
+    log_sink_flush_failed = 125,   // [2k §6.3] — Sink::flush() threw (caught
+                                   //   by drain).
+                                   //   → C-ABI 1003
+    log_drain_timeout = 126,       // [2k §6.3] — Logger::shutdown(drain_timeout)
+                                   //   timed out; returned via expected_t<void>;
+                                   //   increments timeout_drop_count() (NOT
+                                   //   drop_count() — separate counters).
+                                   //   → C-ABI 1004
+    otel_export_failed = 127,      // [2k §6.3] — OTLP trace/metric/log batch
+                                   //   export failure; internal counter; engine
+                                   //   continues.
+                                   //   → C-ABI 1010
+    otel_provider_init_failed = 128,  // [2k §6.3] — TracerProvider/MeterProvider
+                                      //   construction failed; returned via
+                                      //   expected_t<void>; no-op provider
+                                      //   substituted.
+                                      //   → C-ABI 1011
 };
 
 template <class T>
 using expected_t = std::expected<T, error>;
+
+// error_message — returns a short human-readable description of the error
+// variant. Covers the full enum surface including the 017-log-otel additions
+// (slots 122–128). Returns a non-empty string_view for every defined variant.
+// For unknown/future enumerators, returns "unknown error".
+// Anchor: FR-015 / contracts/error-block.md (017-log-otel).
+[[nodiscard]] constexpr std::string_view error_message(error e) noexcept {
+    switch (e) {
+        case error::out_of_memory:                     return "out of memory";
+        case error::decimal_invalid_input:             return "decimal: invalid input";
+        case error::decimal_overflow:                  return "decimal: overflow";
+        case error::decimal_precision_loss:            return "decimal: precision loss";
+        case error::decimal_buffer_too_small:          return "decimal: buffer too small";
+        case error::dict_xml_parse_failed:             return "dict: XML parse failed";
+        case error::dict_unknown_version:              return "dict: unknown version";
+        case error::dict_xml_oom:                      return "dict: XML out of memory";
+        case error::dict_reify_msg_type_mismatch:      return "dict: reify message type mismatch";
+        case error::dict_reify_unknown_msg_type:       return "dict: reify unknown message type";
+        case error::dict_reify_oom:                    return "dict: reify out of memory";
+        case error::dict_unresolved_application_version: return "dict: unresolved application version";
+        case error::dict_unknown_appl_ver_id:          return "dict: unknown ApplVerID";
+        case error::dict_no_dictionary_for_application_version: return "dict: no dictionary for application version";
+        case error::dict_reify_wire_body_not_ready:    return "dict: reify wire body not ready";
+        case error::wire_frame_too_large:              return "wire: frame too large";
+        case error::wire_invalid_body_length:          return "wire: invalid body length";
+        case error::wire_checksum_mismatch:            return "wire: checksum mismatch";
+        case error::wire_framing_resync:               return "wire: framing resync";
+        case error::wire_invalid_field_format:         return "wire: invalid field format";
+        case error::wire_offset_table_full:            return "wire: offset table full";
+        case error::wire_group_too_large:              return "wire: group too large";
+        case error::wire_tag_out_of_range:             return "wire: tag out of range";
+        case error::wire_required_field_missing:       return "wire: required field missing";
+        case error::wire_header_out_of_order:          return "wire: header out of order";
+        case error::wire_field_value_out_of_range:     return "wire: field value out of range";
+        case error::wire_field_value_truncated:        return "wire: field value truncated";
+        case error::wire_unexpected_tag:               return "wire: unexpected tag";
+        case error::sync_lock_aborted:                 return "sync: lock aborted";
+        case error::sync_lock_alloc_failed:            return "sync: lock alloc failed";
+        case error::sync_lock_outside_session:         return "sync: lock outside session";
+        case error::sync_lock_drained:                 return "sync: lock drained";
+        case error::executor_already_stopped:          return "executor already stopped";
+        case error::executor_not_serialised:           return "executor not serialised";
+        case error::clock_sleeps_cancelled:            return "clock sleeps cancelled";
+        case error::strand_dispatch_failed_oom:        return "strand dispatch failed: out of memory";
+        case error::session_already_open:              return "session already open";
+        case error::session_already_closed:            return "session already closed";
+        case error::invalid_session_config:            return "invalid session config";
+        case error::clock_not_set:                     return "clock not set";
+        case error::dispatch_aborted:                  return "dispatch aborted";
+        case error::store_io_failure:                  return "store: I/O failure";
+        case error::store_seqnum_gap:                  return "store: seqnum gap";
+        case error::store_seqnum_out_of_order:         return "store: seqnum out of order";
+        case error::store_capacity_exhausted:          return "store: capacity exhausted";
+        case error::store_seqnum_overflow:             return "store: seqnum overflow";
+        case error::store_factory_failed:              return "store: factory failed";
+        case error::store_visitor_aborted:             return "store: visitor aborted";
+        case error::store_seqnum_invalid:              return "store: seqnum invalid";
+        case error::store_invalid_range:               return "store: invalid range";
+        case error::store_cancelled:                   return "store: cancelled";
+        case error::session_invalid_logon:             return "session: invalid logon";
+        case error::session_compid_mismatch:           return "session: CompID mismatch";
+        case error::session_begin_string_unsupported:  return "session: BeginString unsupported";
+        case error::session_seqnum_too_low:            return "session: seqnum too low";
+        case error::session_sending_time_accuracy:     return "session: sending time accuracy";
+        case error::session_msg_type_invalid_for_state: return "session: message type invalid for state";
+        case error::session_logout_timeout:            return "session: logout timeout";
+        case error::session_test_request_unanswered:   return "session: test request unanswered";
+        case error::session_admin_not_supported:       return "session: admin not supported";
+        case error::session_invalid_config:            return "session: invalid config";
+        case error::session_invalid_state_for_send:    return "session: invalid state for send";
+        case error::tls_cert_load_failed:              return "TLS: cert load failed";
+        case error::tls_cert_parse_failed:             return "TLS: cert parse failed";
+        case error::tls_cipher_not_allowed:            return "TLS: cipher not allowed";
+        case error::tls_invalid_security_profile:      return "TLS: invalid security profile";
+        case error::tls_sign_callback_unavailable:     return "TLS: sign callback unavailable";
+        case error::tls_pin_empty_at_open:             return "TLS: pin set empty at open";
+        case error::tls_pin_not_found:                 return "TLS: pin not found";
+        case error::tls_pin_already_present:           return "TLS: pin already present";
+        case error::tls_pinset_capacity_exhausted:     return "TLS: pinset capacity exhausted";
+        case error::tls_pinset_alloc_failed:           return "TLS: pinset alloc failed";
+        case error::tls_handshake_failed:              return "TLS: handshake failed";
+        case error::tls_rsa_key_too_large:             return "TLS: RSA key too large";
+        case error::tls_cert_der_too_large:            return "TLS: cert DER too large";
+        case error::tls_san_entries_exceeded:          return "TLS: SAN entries exceeded";
+        case error::tls_pin_mismatch:                  return "TLS: pin mismatch";
+        case error::tls_load_cancelled:                return "TLS: load cancelled";
+        case error::transport_resolve_failed:          return "transport: resolve failed";
+        case error::transport_connect_refused:         return "transport: connect refused";
+        case error::transport_connect_timeout:         return "transport: connect timeout";
+        case error::transport_already_connected:       return "transport: already connected";
+        case error::transport_already_closed:          return "transport: already closed";
+        case error::transport_read_in_progress:        return "transport: read in progress";
+        case error::transport_write_in_progress:       return "transport: write in progress";
+        case error::transport_reconnect_limit_exceeded: return "transport: reconnect limit exceeded";
+        case error::transport_read_eof:                return "transport: read EOF";
+        case error::transport_read_truncated:          return "transport: read truncated";
+        case error::transport_read_error:              return "transport: read error";
+        case error::transport_write_short:             return "transport: write short";
+        case error::transport_write_error:             return "transport: write error";
+        case error::transport_handshake_failed:        return "transport: handshake failed";
+        case error::transport_handshake_timeout:       return "transport: handshake timeout";
+        case error::transport_factory_failed:          return "transport: factory failed";
+        case error::transport_psk_unsupported:         return "transport: PSK unsupported";
+        case error::transport_connect_cancelled:       return "transport: connect cancelled";
+        case error::transport_read_cancelled:          return "transport: read cancelled";
+        case error::transport_write_cancelled:         return "transport: write cancelled";
+        case error::transport_handshake_cancelled:     return "transport: handshake cancelled";
+        case error::transport_accept_cancelled:        return "transport: accept cancelled";
+        case error::session_seqnum_reset_mismatch:     return "session: seqnum reset mismatch";
+        case error::session_compid_unauthorized:       return "session: CompID unauthorized";
+        case error::session_testreqid_mismatch:        return "session: TestReqID mismatch";
+        case error::session_invalid_argument:          return "session: invalid argument";
+        case error::session_seqnum_too_high:           return "session: seqnum too high";
+        case error::session_unknown_acceptor_session:  return "session: unknown acceptor session";
+        // ── 017-log-otel (slots 122–128) ──────────────────────────────────
+        case error::log_queue_overflow:                return "log: queue overflow";
+        case error::log_sink_open_failed:              return "log: sink open failed";
+        case error::log_sink_write_failed:             return "log: sink write failed";
+        case error::log_sink_flush_failed:             return "log: sink flush failed";
+        case error::log_drain_timeout:                 return "log: drain timeout";
+        case error::otel_export_failed:                return "otel: export failed";
+        case error::otel_provider_init_failed:         return "otel: provider init failed";
+    }
+    return "unknown error";
+}
+
+// to_string — convenience alias returning the same string_view as error_message.
+// Anchor: FR-015 / contracts/error-block.md (017-log-otel).
+[[nodiscard]] constexpr std::string_view to_string(error e) noexcept {
+    return error_message(e);
+}
 
 }  // namespace fixpp::core

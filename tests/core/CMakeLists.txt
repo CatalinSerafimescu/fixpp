@@ -101,3 +101,15 @@ target_link_libraries(fixpp_capi_tests PRIVATE
   GTest::gtest_main
 )
 gtest_discover_tests(fixpp_capi_tests)
+
+# ── 017-log-otel T008 — error completeness gate ─────────────────────────────
+# Asserts exactly 7 new enumerators at slots 122–128 with exact-SET equality
+# and smoke-asserts error_message/to_string non-empty (FR-015).
+# Links fixpp_core only (no session/transport dependency).
+add_executable(error_017_completeness test_017_error_completeness.cpp)
+target_link_libraries(error_017_completeness PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_017_completeness COMMAND error_017_completeness)
