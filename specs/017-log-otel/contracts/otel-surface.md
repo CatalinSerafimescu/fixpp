@@ -8,7 +8,7 @@
 ## `TracerProvider` / `MeterProvider` (FR-019, OBS-001/002)
 - `OtelResourceAttributes{service_name, service_version, deployment_environment, extra[]}`; `OtelConfig{endpoint, use_grpc=false, resource, cert_source (null⇒no TLS), export_interval=60s, export_timeout=30s}`.
 - `TracerProvider(OtelConfig)`: `get_tracer(string_view) const` (lifetimebound, borrowed), `shutdown()` (flush at `Engine::close()`). `MeterProvider(OtelConfig)`: `get_meter(string_view) const` (lifetimebound), `shutdown()`.
-- **Thin RAII wrappers** over the official OTel SDK — no re-implementation of the OTel data model (FR-019). On provider-init failure ⇒ `otel_provider_init_failed` (1011), engine substitutes a **no-op provider** and continues. OTLP export retries capped. SDK internals not under PMR (documented caveat, §8).
+- **Thin RAII wrappers** over the official OTel SDK — no re-implementation of the OTel data model (FR-019). On provider-init failure ⇒ `otel_provider_init_failed` (core slot 128; C-ABI map 1011), engine substitutes a **no-op provider** and continues. OTLP export retries capped. SDK internals not under PMR (documented caveat, §8).
 - Owned by `EngineConfig` as `shared_ptr` (`fixpp::otel::TracerProvider` / `MeterProvider` — the types `EngineConfig` forward-declares; 017 defines them).
 
 ## `SessionSpans` (FR-016, OBS-001, TS-12) — standalone helper; FSM wiring deferred (clarified boundary 1)

@@ -9,10 +9,10 @@ There are **no `[NEEDS CLARIFICATION]` markers** in the spec; the three scope-bo
 
 ## R1 — OTel C++ SDK version pin + dual metric export wiring
 
-- **Decision**: Pin `opentelemetry-cpp/1.12.0` (or the latest ≥ 1.12 patch available in Conan Center at scaffold time) in `conanfile.py` with a tagged-release version per `[const §XV.17]`; record the exact pin in the convergence/verify record. Dual export = **one `MeterProvider` with two `MetricReader`s via two `AddMetricReader()` calls**: (1) `PrometheusExporter` (a `MetricReader`, pull model), (2) a `PeriodicExportingMetricReader` wrapping `OtlpMetricExporter` (a `PushMetricExporter`). `OtelDualExportBuilder::build()` performs both registrations; a single `meter.add(counter, 1)` fans out to both readers via the SDK internally.
+- **Decision**: Pin **exactly `opentelemetry-cpp/1.16.1`** (a tagged Conan-Center release; ≥ 1.12 for the stable logs API) in `conanfile.py` per `[const §XV.17]`. A scaffold-time re-confirm of the exact patch is a doc-update, not an open pin. Dual export = **one `MeterProvider` with two `MetricReader`s via two `AddMetricReader()` calls**: (1) `PrometheusExporter` (a `MetricReader`, pull model), (2) a `PeriodicExportingMetricReader` wrapping `OtlpMetricExporter` (a `PushMetricExporter`). `OtelDualExportBuilder::build()` performs both registrations; a single `meter.add(counter, 1)` fans out to both readers via the SDK internally.
 - **Rationale**: 1.12 is the first SDK with the stable logs API (needed for `OtlpLogSink`/OBS-003). The two-reader pattern is the documented SDK idiom; there is **no** public `MultiMetricExporter` that accepts a `PrometheusExporter` (different base type — `MetricReader` vs `PushMetricExporter`), so the builder must register readers, not wrap exporters (anchor §4.10 mechanics note).
 - **Alternatives considered**: (a) `MultiMetricExporter` — rejected: API-incompatible base types. (b) Two separate `MeterProvider`s — rejected: double-counts instruments and breaks the "single `meter.add` propagates to both" contract.
-- **Open until scaffold**: exact patch version (anchor §10 Q3). Resolved at the build-scaffold task; not blocking design.
+- **Pinned**: `opentelemetry-cpp/1.16.1` (exact). A scaffold-time re-confirm of the Conan-Center patch is a doc-update only (the pin is committed, not open).
 
 ## R2 — Embedded Prometheus HTTP server (pull endpoint, port 9464)
 
@@ -28,12 +28,12 @@ There are **no `[NEEDS CLARIFICATION]` markers** in the spec; the three scope-bo
 - **Risk + mitigation**: CRC32 **collision** between two distinct format literals would mis-resolve a record on the drain side. Mitigation: a build-time/`static_assert`-style collision check over the registered literals (or a debug-build duplicate-id assertion); document the (astronomically low, but non-zero) collision domain. Resolve the exact mechanism in Phase 1 contract (`log-core.md`).
 - **Alternatives considered**: (a) pass `const char* fmt` to the producer — rejected: defeats deferred formatting and risks dangling for non-literal fmt; (b) full string hashing (FNV-1a 64-bit) — viable lower-collision alternative; the anchor specifies CRC32, kept for the locked `format_id` (uint32) field. Collision mitigation chosen over a wider hash to preserve the 4-byte `Record::format_id`.
 
-## R4 — Quill-vs-own backend spike (TS-13) — own ring is the v1.0 backend
+## R4 — Quill-vs-own backend spike (TS-13) — own ring is the v1.0 shipping candidate behind the backend-agnostic facade; disposition PROVISIONAL
 
-- **Decision** (confirmed at clarify, FR-021): implement the **own** Vyukov-style lock-free MPSC ring as the shippable v1.0 backend. `bench/log_spike.cpp` (TS-13) is a **non-blocking** harness: 4 producer threads, 10M records, capacity 65536, 10/50/95% fill, p99/p999 primary, mallocnesia zero-alloc gate (Criterion A). It records the disposition (own vs quill) in the convergence/verify record but does **not** gate delivery of the own-ring `Logger`. Quill is compiled only under `FIXPP_LOG_SPIKE_QUILL=ON`; a default build never requires quill.
+- **Decision** (confirmed at clarify, FR-021): implement the **own** Vyukov-style lock-free MPSC ring as the v1.0 **shipping candidate** behind the backend-agnostic `Logger` facade; its disposition stays **PROVISIONAL**. `bench/log_spike.cpp` (TS-13) **executes + records** (does not gate delivery) — a **non-blocking** harness: 4 producer threads, 10M records, capacity 65536, 10/50/95% fill, p99/p999 primary, mallocnesia zero-alloc gate (Criterion A). It records the disposition (own vs quill) in the convergence/verify record but does **not** gate delivery of the own-ring `Logger`. Quill is compiled only under `FIXPP_LOG_SPIKE_QUILL=ON`; a default build never requires quill.
 - **Rationale**: the anchor §1.2 provisional recommendation is own-impl; the facade contract is identical regardless of backend, so the spike can run after the core lands without reshaping the API. Gating implementation on the spike would serialize 017 behind quill Conan/infra for no design benefit.
 - **Alternatives considered**: gate-on-spike — rejected at clarify (serializes the feature; the facade is backend-agnostic).
-- **Open until scaffold**: quill Conan package name/version (anchor §10 Q5), needed only when `FIXPP_LOG_SPIKE_QUILL=ON`.
+- **Quill Conan pin**: `quill/3.9.0` (anchor §10 Q5), pulled only when `FIXPP_LOG_SPIKE_QUILL=ON`.
 
 ## R5 — MPSC ring memory-ordering + drain mechanics (TSan-correct)
 
@@ -56,13 +56,23 @@ There are **no `[NEEDS CLARIFICATION]` markers** in the spec; the three scope-bo
 
 ## R8 — Adjacent-module touch surface (confirm what 2d already shipped)
 
-- **Finding** (from the current tree): `EngineConfig` (`include/fixpp/core/engine_config.hpp`) **already** declares `logger`/`tracer`/`meter` `shared_ptr` stubs (lines 127–129) + `engine_trace_context` (line 157) + an `engine_trace_context_snapshot` atomic publish mechanism. `SessionConfig` **already** has `clock_override` + `initial_trace_context` (value-typed). `Session` **already** holds the `session_local<trace_context> trace_slot_` (line 409). `fixpp::core::trace_context` exists (`core/trace_context.hpp`). The error block `[1000,1099]` is **free** (highest used slot is 121).
-- **Decision** — 017's minimal surface amendments (NOT FSM wiring, per clarified boundary 1):
+- **Finding** (from the current tree): `EngineConfig` (`include/fixpp/core/engine_config.hpp`) **already** declares `logger`/`tracer`/`meter` `shared_ptr` stubs (lines 127–129) + the `engine_trace_context` seed VALUE (line 157) + the `core::detail::trace_context_snapshot` helper TYPE (a seqlock/atomic `.store()`/`.load()` wrapper, lines 64–114). There is **no** `EngineConfig::engine_trace_context_snapshot` member instance — the identifier appears only in a comment at line 11; 017 adds the publishable snapshot as an `Engine`-held member seeded from the seed value (the `Engine::engine_trace_context()` item of the four-item 2d-surface amendment set; Decision step 5 below). `SessionConfig` **already** has `clock_override` + `initial_trace_context` (value-typed) **and a `log_sink_override` `shared_ptr<log::Sink>`** (`session_config.hpp:182`) that 017 replaces. `Session` **already** holds the `session_local<trace_context> trace_slot_` (line 409) **and a public `trace_context_value()` accessor over it** (`session.hpp:171`). `fixpp::core::trace_context` exists (`core/trace_context.hpp`). `Engine` (`engine.hpp`) has **no** `engine_trace_context()` accessor (verified absent). The `core::error` enum is `std::uint8_t`-backed with slot 121 the current highest — slots 122+ are free.
+
+  **2d surface — consumed vs owned-amendment** (authoritative table also in `contracts/adjacent-amendments.md`):
+  | 2d surface | 017 disposition |
+  |---|---|
+  | `trace_slot_` / `session_local<trace_context>` storage | **consumed** (read-only; no second storage read introduced) |
+  | `Session::get_trace_context()` accessor | **owned amendment** — canonical name over `trace_slot_`; reconciles the existing `trace_context_value()` (see #2) |
+  | `Engine::engine_trace_context()` accessor | **owned amendment** — ADD (absent today) |
+  | `SessionConfig::{logger,tracer}_override` | **owned amendment** — ADD |
+  | `SessionConfig::log_sink_override` | **owned amendment** — REMOVE (replaced by `logger_override`) |
+  | `EngineConfig::{logger,tracer,meter,engine_trace_context}`, `SessionConfig::{clock_override,initial_trace_context}`, `core::trace_context` | **consumed** (confirm only; do not re-add) |
+- **Decision** — 017's surface-completion steps (NOT FSM wiring, per clarified boundary 1; steps 2/3/5 + the step-3 removal are the four-item 2d-surface amendment set, plus type-definition (step 1) and error slots (step 4)):
   1. **Define** the forward-declared types: `fixpp::log::Logger` (+ `fixpp::core::Logger` alias used by `EngineConfig::logger`), `fixpp::otel::TracerProvider`, `fixpp::otel::MeterProvider`, and confirm/alias `fixpp::otel::trace_context` over the existing `fixpp::core::trace_context`.
-  2. **Add** `Session::get_trace_context() const noexcept` — a read-only accessor over `trace_slot_` (absent today; required by the `FIXPP_SLOG` contract).
-  3. **Add** `SessionConfig::logger_override` + `tracer_override` (`shared_ptr`, nullable; engine-anchor+session-override per `[2d §4.5]`). `meter_override` intentionally omitted (metrics engine-scoped, anchor §4.8).
-  4. **Add** 7 error variants to `core/error.hpp` at slots 1000/1001/1002/1003/1004/1010/1011 (anchor §6.3).
-  5. Confirm `Engine::engine_trace_context()` accessor (the atomic snapshot read used by `FIXPP_ELOG`) exists or add the thin accessor over the existing snapshot field.
+  2. **Own** the public `Session::get_trace_context() const noexcept` accessor over the existing `trace_slot_` (the storage is **consumed** from 2d, not owned). The live header already has a public `trace_context_value()` over the same `trace_slot_` (`session.hpp:171`); `get_trace_context()` is the anchor-mandated canonical name (anchor §6.4 / App D §D.1) — make it the canonical accessor as a thin alias of (or rename of) `trace_context_value()`, introducing **no** second storage read. Callers of `trace_context_value()` must be checked (`codegraph_callers`) before any removal.
+  3. **Add** `SessionConfig::logger_override` + `tracer_override` (`shared_ptr`, nullable; engine-anchor+session-override per `[2d §4.5]`) and **remove** `SessionConfig::log_sink_override` — the new `logger_override` (a whole `Logger`) **replaces** the 2d `log_sink_override` stub (a single `Sink`), per anchor App D §D.1; leaving both would create two competing, undefined-precedence log-override surfaces. `meter_override` intentionally omitted (metrics engine-scoped, anchor §4.8).
+  4. **Add** 7 `fixpp::core::error` enumerators at the next free `std::uint8_t` slots 122–128 (the enum is `uint8_t`-backed; slot 121 is the current highest; append-only per `[const §X.4]`). The `[1000,1099]` integers are the future C-ABI `fixpp_error_t` mapping (no C-ABI symbols in v1.0), recorded in `tools/abi_history/error_codes_v1.txt` — NOT enum values (anchor §6.3; see `contracts/error-block.md`).
+  5. **Add** `Engine::engine_trace_context() const noexcept` — an owned public accessor on the `Engine` class (the atomic snapshot read used by `FIXPP_ELOG`), plus a NEW `Engine`-held member `fixpp::core::detail::trace_context_snapshot engine_trace_ctx_snapshot_` (the helper TYPE at `engine_config.hpp:64`) seeded at construction from the `EngineConfig::engine_trace_context` seed field (`engine_config.hpp:157`) via `trace_context_snapshot{engine_cfg_.engine_trace_context}`; the accessor returns `.load()`. Verified ABSENT from `include/fixpp/session/engine.hpp`; `EngineConfig` carries only the seed VALUE + the helper TYPE — there is **no** `EngineConfig::engine_trace_context_snapshot` member (that identifier appears only in a comment at `engine_config.hpp:11`). This is a new public C++ surface amendment, not a "confirm".
 - **Rationale**: the EngineConfig stubs were placed by 2d expecting 017 to define the types; defining them + the accessor + config fields is surface completion, not FSM behavior. Constructing `SessionSpans` in the FSM open path and emitting parse/store/dispatch spans from the message coroutine remain with the session-module feature (anchor §11).
 - **Risk**: `[const §XV.9]` include-edge — `logger.hpp` is widely included; keep `Logger::Impl` pimpl'd and OTel SDK headers out of `log/*.hpp` and `session/*.hpp`. (Watch-item in plan.md.)
 
@@ -72,13 +82,13 @@ There are **no `[NEEDS CLARIFICATION]` markers** in the spec; the three scope-bo
 
 | # | Topic | Decision | Blocking? |
 |---|---|---|---|
-| R1 | OTel SDK pin + dual export | `opentelemetry-cpp ≥1.12` pinned; two `AddMetricReader()` calls | exact patch at scaffold |
+| R1 | OTel SDK pin + dual export | `opentelemetry-cpp/1.16.1` pinned exactly; two `AddMetricReader()` calls | no (pin committed) |
 | R2 | Prometheus endpoint | SDK embedded HTTP server, `:9464`, dedicated non-asio thread | no |
 | R3 | Format-id registry | constexpr CRC32 key + drain-side `std::vformat`; collision check | mechanism finalized in Phase 1 |
-| R4 | Backend | own MPSC ring is v1.0; TS-13 spike non-blocking; quill opt-in | no |
+| R4 | Backend | own MPSC ring is the v1.0 shipping candidate (disposition PROVISIONAL); TS-13 spike executes+records, non-blocking; quill opt-in | no |
 | R5 | Ring ordering | dual atomic seq counters, load-check-CAS, relaxed read load | no |
 | R6 | FileSink fsync | deadline-bounded `fdatasync` on drain thread | no |
 | R7 | OtlpLogSink | non-blocking `emit` via `BatchLogRecordProcessor`; single write path | no |
-| R8 | Adjacent touch | define fwd types + add `get_trace_context` + 2 SessionConfig fields + 7 error slots; NO FSM wiring | no |
+| R8 | Adjacent touch | define fwd types + 4-item amendment set (canonical `Session::get_trace_context()` reconciling `trace_context_value()`; add `Engine::engine_trace_context()`; add `SessionConfig::{logger,tracer}_override`; remove `SessionConfig::log_sink_override`) + 7 `core::error` enumerators (slots 122-128); NO FSM wiring | no |
 
 No unresolved `[NEEDS CLARIFICATION]`. Ready for Phase 1 (data-model, contracts, quickstart).

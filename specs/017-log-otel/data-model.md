@@ -10,9 +10,10 @@
 - Compile-time cutoff: `FIXPP_LOG_MIN_LEVEL` (CMake int 0..5); call sites below it compile to zero bytes.
 
 ### `Category` (`log/level.hpp`) — LOG-004
-- `using Category = std::uint16_t`; CRC32-interned from a string literal at static init (no heap).
-- Built-ins (`cat::`): `session=0x0001, wire=0x0002, transport=0x0003, tls=0x0004, store=0x0005, otel=0x0006, control=0x0007, user=0x0008`. User categories via `FIXPP_LOG_CATEGORY("name")` (compile-time CRC32).
-- Runtime filter: `Logger::enabled_categories_mask_` (`std::atomic<uint64_t>`), bit clear ⇒ dropped before enqueue, counted in `filter_count()`.
+- `using Category = std::uint16_t`; CRC32-interned from a string literal at static init (no heap). The `Category` value is the **identity** stored in `Record::category`.
+- Built-ins (`cat::`): `session=0x0001, wire=0x0002, transport=0x0003, tls=0x0004, store=0x0005, otel=0x0006, control=0x0007, user=0x0008` (values 1–8 ⇒ mask bit indices 1–8). User categories via `FIXPP_LOG_CATEGORY("name")` (compile-time CRC32).
+- **Category → 64-bit-mask index mapping (resolves the anchor §4.1 silence; no 2k amendment).** The runtime filter bit index = `category & 63u` (the low 6 bits) — well-defined for any uint16 CRC32 value (no `1ull << n` with `n ≥ 64` UB). Built-ins (0x0001..0x0008) occupy bits 1–8 and are collision-free by construction. `FIXPP_LOG_CATEGORY("name")` carries a **build-time `static_assert` collision check** against the built-in low-6-bits: a user category whose `crc32("name") & 63u` collides with a built-in (bits 1–8) is **rejected at compile time** (or, if a project opts in, documented as a shared-bit alias — but the default is reject). Two user categories whose low-6-bits collide alias the same mask bit; this is documented and the collision check surfaces it.
+- Runtime filter: `Logger::enabled_categories_mask_` (`std::atomic<uint64_t>`), bit `(category & 63u)` clear ⇒ dropped before enqueue, counted in `filter_count()`.
 
 ### `ArgValue` (struct, `log/record.hpp`) — **`sizeof == 24`, trivially copyable**
 - Tagged union. `Kind` (`uint8_t`): `empty=0, u64, i64, f64, bool_val, inline_str=5, static_str=6`.
@@ -35,10 +36,10 @@
 
 ### `Logger` (class, `log/logger.hpp`) — LOG-001 / LOG-004 — **pimpl**
 - Ctor: `Logger(LoggerConfig, std::pmr::vector<std::unique_ptr<Sink>> sinks)`. Sinks fixed at construction (not swappable mid-flight). Dtor joins drain thread.
-- Producer: `void enqueue(Level, Category, uint32_t format_id, trace_id const&, span_id, utc_time_point, initializer_list<ArgValue>) noexcept` (called by the macros; zero alloc, lock-free).
+- Producer: `void enqueue(Level, Category, uint32_t format_id, trace_id const&, span_id, utc_time_point, initializer_list<ArgValue>) noexcept` (called by the macros; zero alloc, lock-free). Copies **at most `k_max_args=6`** `ArgValue`s **by value** into `Record::args`, no dynamic container (excess truncated / `static_assert`-bounded); the `initializer_list` backing array is stack-allocated (New 3).
 - Config: `set_category_enabled(Category,bool) noexcept`, `is_category_enabled(Category) const noexcept`.
 - Accounting: `[[nodiscard]]` `drop_count()` / `timeout_drop_count()` / `filter_count()` (all `uint64_t`, separate atomics) + `reset_*`; `sink_error_count(size_t) const noexcept`.
-- Flush/shutdown: `[[nodiscard]] asio::awaitable<void> async_flush()` (posts completion to caller executor; one alloc, off hot path); `[[nodiscard]] expected_t<void> shutdown(std::chrono::milliseconds drain_timeout)` (drains, flushes each sink, returns `unexpected(log_drain_timeout)` + bumps `timeout_drop_count()` on timeout).
+- Flush/shutdown: `[[nodiscard]] asio::awaitable<void> async_flush()` (posts completion to caller executor; one alloc, off hot path); `[[nodiscard]] expected_t<void> shutdown(std::chrono::milliseconds drain_timeout)` (drains, flushes each sink, returns `unexpected(log_drain_timeout)` + bumps `timeout_drop_count()` on timeout). **Both are off-hot-path control/shutdown ops, EXCLUDED from the FR-001 zero-alloc producer gate** (New 4).
 - **State**: `write_sequence_`/`read_sequence_` (`std::atomic<uint64_t>`, each `alignas(64)`), `enabled_categories_mask_`, the three counters, the per-sink error counters, the ring buffer (PMR), the drain `std::thread`.
 - **Aliased** as `fixpp::core::Logger` (forward-declared by `EngineConfig::logger`).
 
@@ -57,7 +58,7 @@
 
 ### `FileSink` (`log/file_sink.hpp`) — LOG-002
 - `FileSinkConfig`: `directory`, `base_name="fixpp"`, `max_file_bytes=256MiB`, `max_keep_count=8`, `async_fsync=true`.
-- Rotation when `bytes_written() > max_file_bytes`: rename live `<base>.log → <base>.<iso8601>.log`, open fresh, delete oldest when count > keep. **Disk bound = `max_file_bytes × max_keep_count`** (DoS bound, §6.5). `flush` = deadline-bounded `fdatasync` on drain thread.
+- Rotation when `bytes_written() > max_file_bytes`: rename live `<base>.log → <base>.<iso8601>.log`, open fresh, delete oldest archived file when count > keep. **Disk bound = `max_file_bytes × max_keep_count` (archived files only; the live file is additional) + one live file that may transiently overshoot `max_file_bytes` by at most one record before the `>`-triggered rotation** (DoS bound, §6.5). `flush` = deadline-bounded `fdatasync` on drain thread.
 - Accessors: `current_path()` (lifetimebound), `bytes_written()`, `rotation_count()`.
 
 ### `OtlpLogSink` (`log/otlp_log_sink.hpp`) — LOG-002 / OBS-003
@@ -83,24 +84,27 @@
 - `OtlpMetricExporter(OtelConfig)` = `PushMetricExporter` wrapped in `PeriodicExportingMetricReader`; `sdk_reader()` registered via `AddMetricReader()`.
 - `OtelDualExportBuilder`: `with_prometheus(cfg).with_otlp(cfg).build() → shared_ptr<MeterProvider>` (two `AddMetricReader()` calls; single `meter.add` fans out to both).
 
-### Error block `[1000,1099]` (`core/error.hpp`) — §6.3
-| Variant | Value | Surface |
-|---|---|---|
-| `log_queue_overflow` | 1000 | internal C++ only (macros are `void`; reserved slot; counter via `drop_count()`) |
-| `log_sink_open_failed` | 1001 | sink disabled, Logger continues |
-| `log_sink_write_failed` | 1002 | `emit` threw (caught by drain) |
-| `log_sink_flush_failed` | 1003 | `flush` threw |
-| `log_drain_timeout` | 1004 | returned from `shutdown()`; bumps `timeout_drop_count()` |
-| `otel_export_failed` | 1010 | OTLP batch export failure counter; engine continues |
-| `otel_provider_init_failed` | 1011 | provider ctor failure; no-op fallback |
-- No other slot in the block consumed in v1.0 (1005–1009, 1012–1099 reserved).
+### Error block — 7 `core::error` enumerators at slots 122–128 + C-ABI `[1000,1099]` mapping (`core/error.hpp`) — §6.3
+`core/error.hpp` is `enum class error : std::uint8_t` (slot 121 is the current highest); the 7 new variants are added at the next free uint8_t slots **122–128** (append-only / non-renumbering per `[const §X.4]`). The `[1000,1099]` integers are the **C-ABI `fixpp_error_t` mapping** (a future v1.x exposure; no C-ABI symbols in v1.0 per FR-020) — NOT enum values. See `contracts/error-block.md`.
 
-### Adjacent-module amendments (minimal; NO FSM wiring — clarified boundary 1)
-- `Session::get_trace_context() const noexcept` — **new** read-only accessor over the existing `trace_slot_` (`session_local<trace_context>`).
-- `SessionConfig::logger_override`, `SessionConfig::tracer_override` — **new** nullable `shared_ptr` (engine-anchor + session-override; `meter_override` omitted).
-- `fixpp::core::Logger` alias = `fixpp::log::Logger` (satisfies `EngineConfig::logger`'s forward decl).
-- `Engine::engine_trace_context()` accessor confirmed/added (atomic snapshot read for `FIXPP_ELOG`).
-- **Already present (confirm only)**: `EngineConfig::{logger,tracer,meter,engine_trace_context}`, `SessionConfig::{clock_override,initial_trace_context}`, `Session::trace_slot_`, `fixpp::core::trace_context`.
+| Enumerator | `core::error` slot (uint8_t) | C-ABI `fixpp_error_t` map | Surface |
+|---|---|---|---|
+| `log_queue_overflow` | 122 | 1000 | internal C++ only (macros are `void`; counter via `drop_count()`; C-ABI slot maps to no return path in v1.0) |
+| `log_sink_open_failed` | 123 | 1001 | sink disabled, Logger continues |
+| `log_sink_write_failed` | 124 | 1002 | `emit` threw (caught by drain) |
+| `log_sink_flush_failed` | 125 | 1003 | `flush` threw |
+| `log_drain_timeout` | 126 | 1004 | returned via `expected_t<void>` from `shutdown()`; bumps `timeout_drop_count()` |
+| `otel_export_failed` | 127 | 1010 | OTLP batch export failure counter; engine continues |
+| `otel_provider_init_failed` | 128 | 1011 | provider ctor failure; returned via `expected_t<void>`; no-op fallback |
+- The completeness test asserts the **enumerator set** at slots 122–128 (exact-SET). The C-ABI occupancy (1000/1001/1002/1003/1004/1010/1011; 1005–1009, 1012–1099 reserved) is recorded in `tools/abi_history/error_codes_v1.txt` (abidiff / `tools/check_capi_occupancy.sh`).
+
+### Adjacent-module amendments — four-item owned set (NO FSM wiring — clarified boundary 1)
+- `Session::get_trace_context() const noexcept` — **owned amendment**: the canonical anchor-mandated accessor over the existing `trace_slot_`. Reconciles the live `trace_context_value()` (`session.hpp:171`, same `trace_slot_`) — make `get_trace_context()` the single canonical accessor (thin alias of / rename of `trace_context_value()`), **no** second storage read; check callers before removal.
+- `Engine::engine_trace_context() const noexcept` — **owned amendment**: NEW public accessor on the `Engine` class (verified absent today) plus a NEW `Engine`-held member `fixpp::core::detail::trace_context_snapshot engine_trace_ctx_snapshot_` (the helper TYPE at `engine_config.hpp:64`), seeded at `Engine` construction from the `EngineConfig::engine_trace_context` seed field (`engine_config.hpp:157`) via `trace_context_snapshot{engine_cfg_.engine_trace_context}`; the accessor returns `engine_trace_ctx_snapshot_.load()`. There is **no** `EngineConfig::engine_trace_context_snapshot` member (only the seed value + the helper type). Required by `FIXPP_ELOG`.
+- `SessionConfig::logger_override`, `SessionConfig::tracer_override` — **owned amendment**: NEW nullable `shared_ptr` (engine-anchor + session-override; `meter_override` omitted).
+- `SessionConfig::log_sink_override` — **owned amendment (REMOVE)**: the new `logger_override` replaces this 2d stub (`session_config.hpp:182`); a grep/compile regression asserts it is gone.
+- Type-completion (not surface amendments): `fixpp::core::Logger` alias = `fixpp::log::Logger`; define `fixpp::otel::{TracerProvider,MeterProvider}`; confirm/alias `fixpp::otel::trace_context`.
+- **Consumed — confirm only (do NOT re-add)**: `EngineConfig::{logger,tracer,meter,engine_trace_context}`, `SessionConfig::{clock_override,initial_trace_context}`, `Session::trace_slot_`, `fixpp::core::trace_context`.
 
 ## Relationships
 
