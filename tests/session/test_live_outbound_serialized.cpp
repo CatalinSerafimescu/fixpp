@@ -36,12 +36,16 @@
 #include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_state.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>
 #include <asio/io_context.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
@@ -915,6 +919,90 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // If we reach here without crash, the drain invariant holds.
     // Under ASan, a UAF from a post-close liveness write would have been caught.
     SUCCEED() << "FQ-A Cell D: Session::close() completed; liveness drain OK.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell E (F2 Gate-B/r1) — close() entered then CALLER-cancelled mid-drain must STILL
+// complete (publish close_result_), so a concurrent second close() cannot hang.
+//
+// The P1 race: a peer EOF races Engine::stop(); the role loop ENTERS close(graceful),
+// which sets state_=closing and suspends in phase-1 (Logout exchange, bounded by the
+// logout-disconnect timeout). Engine::stop() then total-cancels the role loop. Without
+// the cancellation-immune shield at the top of close(), that phase-1 await aborts and
+// close() unwinds BEFORE publishing close_result_ — and the stop() post-join drain's
+// second close() takes the `closing` branch and awaits a result nobody sets → HANG.
+//
+// Deterministic (no EOF/stop timing): phase-1 of a graceful close suspends for the
+// logout timeout (the peer never ACKs), giving a reliable window to fire caller
+// cancellation. Then a second (un-cancelled) close(terminal) — the Engine::stop()
+// drain analogue — must complete. RED (second close hangs → bounded ASSERT fails)
+// before the shield; GREEN after. [Codex Gate-B/r2 deterministic-regression sketch]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    auto cfg = make_acceptor_cfg(ioc.get_executor());
+    cfg.logout_disconnect_timeout_ms = 500;  // phase-1 suspends ~500ms (no peer ACK)
+
+    fixpp::session::Session sess{eng, cfg};
+    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+    auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+    auto* raw_ptr = raw_transport.get();
+    fixpp::transport::handshake_result hr{};
+    sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
+    ioc.run_for(100ms);
+    ioc.restart();
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+    // Block the NEXT write so the phase-1 Logout emit blocks in async_write — this
+    // deterministically suspends close #1 inside phase-1's cancellable
+    // `run_logout_phase1() || close_grace` await (the unblocked path completes too
+    // fast to be a meaningful witness). close()'s FQ-G force-close unblocks it at the
+    // logout timeout, so close #1 still completes once it is allowed to.
+    raw_ptr->arm_block();
+
+    // close #1 (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
+    asio::cancellation_signal sig;
+    auto close1 = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            co_return co_await sess.close(fixpp::session::close_mode::graceful);
+        },
+        asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    ioc.run_for(50ms);  // let close #1 enter phase-1 and suspend (no peer Logout ACK)
+    ioc.restart();
+    sig.emit(asio::cancellation_type::total);  // cancel the caller mid-close
+
+    // close #2 (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
+    auto close2 = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
+                                 asio::use_future);
+
+    run_until_ready(ioc, close1, 20ms, 3s);
+    run_until_ready(ioc, close2, 20ms, 3s);
+
+    EXPECT_EQ(close1.wait_for(0ms), std::future_status::ready)
+        << "the caller-cancelled close(graceful) must still complete";
+    ASSERT_EQ(close2.wait_for(0ms), std::future_status::ready)
+        << "second close() hung: close #1 was aborted mid-drain without publishing "
+        << "close_result_, so the `closing`-branch wait never resolves. close() must "
+        << "be cancellation-immune once entered.";
+    (void)close1.get();
+    auto r2 = close2.get();
+    EXPECT_TRUE(r2.has_value() || r2.error() == fixpp::core::error::session_already_closed)
+        << "second close() must observe a completed first close (ok or already-closed)";
+
+    raw_ptr->close();
+    ioc.run_for(100ms);
+    ioc.restart();
 }
 
 }  // namespace fixpp::session::test
