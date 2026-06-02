@@ -34,6 +34,19 @@ ALLOWED: dict[str, set[str]] = {
     "c":          {"capi"},
 }
 
+# Explicit FORBIDDEN edges per [arch §2.3] (017-log-otel D1 remediation).
+# Negative-edge assertions that must hold REGARDLESS of the ALLOWED whitelist
+# above. `otel ↛ transport`: the otel module is an observability leaf (depends
+# only on core + log) and must NEVER include from transport. Today the
+# constraint holds implicitly (transport is absent from otel's ALLOWED set), but
+# a future edit that adds "transport" to otel's ALLOWED set would silently
+# re-permit the edge. Encoding it here makes the negative edge explicit and
+# grep-able; the self-consistency check in main() fails fast if ALLOWED ever
+# widens to contain a FORBIDDEN edge.
+FORBIDDEN: dict[str, set[str]] = {
+    "otel": {"transport"},
+}
+
 # Regex to match #include "fixpp/<module>/..." or #include <fixpp/<module>/...>
 INCLUDE_RE = re.compile(r'#\s*include\s+[<"](fixpp/(\w+)/[^>"]*)[>"]')
 
@@ -139,6 +152,17 @@ def check_file(path: Path, violations: list[str]) -> None:
 
 def main() -> int:
     violations: list[str] = []
+
+    # Self-consistency guard ([arch §2.3] negative edges; 017 D1): no FORBIDDEN
+    # edge may appear in the ALLOWED whitelist. Catches an accidental widening
+    # (e.g. someone adding "transport" to otel's ALLOWED set) at the source,
+    # before any file is even scanned.
+    for mod, banned in FORBIDDEN.items():
+        leaked = banned & ALLOWED.get(mod, set())
+        if leaked:
+            print(f"[check_layers] FAIL — module '{mod}' ALLOWED set contains "
+                  f"FORBIDDEN edge(s) {sorted(leaked)} ([arch §2.3] negative edge)")
+            return 1
 
     # Scan src/ and bindings/
     for pattern in ("src/**/*.cpp", "src/**/*.hpp", "src/**/*.h",

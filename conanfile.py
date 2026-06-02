@@ -50,6 +50,16 @@ class FixppConan(ConanFile):
     #   + sentinel CRC32 over the Castagnoli polynomial 0x1EDC6F41; research D-3).
     #   BSD-3-Clause, AGPL-compatible per [const §V.3]. FileStore-touching
     #   targets only (PRIVATE link from fixpp_session).
+    # opentelemetry-cpp/1.26.0 added 2026-06-02 for 017-log-otel (Phase 4 —
+    #   the OTel observability surface: TracerProvider/MeterProvider wrappers,
+    #   OtlpLogSink, dual metric export). Pinned EXACTLY per FR-023 / [const
+    #   §XV.17] (latest on Conan Center; >=1.12 for the stable logs API).
+    #   Apache-2.0, AGPL-compatible per [const §V.3]. otel/log-touching targets
+    #   only. Option set is FR-driven (see default_options): with_abi_v2 (API V2)
+    #   + with_no_deprecated_code (pairs with abi_v2) + with_prometheus (FR-017,
+    #   recipe default False) + with_otlp_http (FR-018, HTTP transport) +
+    #   with_otlp_grpc=False (Phase-5 deferral per the grpc note above).
+    #   with_prometheus pulls prometheus-cpp/1.1.0 transitively.
     requires = [
         "gtest/1.17.0",
         "benchmark/1.9.5",
@@ -57,7 +67,17 @@ class FixppConan(ConanFile):
         "asio/1.38.0",
         "crc32c/1.1.2",
         "openssl/3.6.2",
+        "opentelemetry-cpp/1.26.0",
     ]
+
+    # quill/11.1.0 is the TS-13 spike-only benchmark backend (FR-023): pulled
+    #   ONLY when the spike_quill option is on (paired with the CMake option
+    #   FIXPP_LOG_SPIKE_QUILL=ON). A default build MUST NOT require quill.
+    options = {"spike_quill": [True, False]}
+
+    def requirements(self):
+        if self.options.spike_quill:
+            self.requires("quill/11.1.0")
 
     # ── Build-time tools ─────────────────────────────────────────────────────
     # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
@@ -68,4 +88,12 @@ class FixppConan(ConanFile):
     default_options = {
         "gtest*:shared": False,
         "benchmark*:shared": False,
+        "spike_quill": False,
+        # 017-log-otel FR-023 OTel SDK option set (recipe option names verified
+        # against opentelemetry-cpp/1.26.0):
+        "opentelemetry-cpp*:with_abi_v2": True,
+        "opentelemetry-cpp*:with_no_deprecated_code": True,
+        "opentelemetry-cpp*:with_prometheus": True,
+        "opentelemetry-cpp*:with_otlp_http": True,
+        "opentelemetry-cpp*:with_otlp_grpc": False,
     }

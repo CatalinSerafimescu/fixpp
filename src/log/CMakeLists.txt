@@ -10,3 +10,8 @@ target_include_directories(fixpp_log INTERFACE
 
 # Allowed dependencies: core only [arch §2.3]
 target_link_libraries(fixpp_log INTERFACE fixpp_core)
+
+# Compile-time minimum log level (FR-010 / SC-003): propagated to every
+# consumer so the `if constexpr` cutoff in the LOG macros is build-wide.
+# Default set in the top-level CMakeLists (build-type-conditional).
+target_compile_definitions(fixpp_log INTERFACE FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL})

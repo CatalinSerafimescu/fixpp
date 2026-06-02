@@ -45,6 +45,29 @@ find_package(Crc32c CONFIG QUIET)
 # Technical Context. QUIET while tls/ symbols are still landing; src/tls
 # tightens to REQUIRED once fixpp_tls grows .cpp sources.
 find_package(OpenSSL 3.0 QUIET)
+# opentelemetry-cpp/1.26.0 — 017-log-otel [arch §4.8] (FR-023). QUIET while
+# otel/ + log/ sources are still landing; the otel module tightens to REQUIRED
+# once fixpp_otel grows .cpp sources (Phase 5 / US3). Built with with_abi_v2 +
+# with_prometheus + with_otlp_http (conanfile.py default_options).
+find_package(opentelemetry-cpp CONFIG QUIET)
+
+# ── 017-log-otel build options (FR-023) ──────────────────────────────────────
+# FIXPP_LOG_MIN_LEVEL — compile-time minimum log level: trace=0 debug=1 info=2
+# warn=3 error=4 fatal=5. Below-level call sites are eliminated by `if constexpr`
+# (FR-010 / SC-003). The default is build-type-conditional (NOT a single
+# hardcoded value, which would break one build type): trace (0) in Debug for
+# full diagnostics, info (2) in optimized builds. Override with -D on configure.
+if(NOT DEFINED FIXPP_LOG_MIN_LEVEL)
+  if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+    set(FIXPP_LOG_MIN_LEVEL 2 CACHE STRING "Compile-time minimum log level (0=trace .. 5=fatal)")
+  else()
+    set(FIXPP_LOG_MIN_LEVEL 0 CACHE STRING "Compile-time minimum log level (0=trace .. 5=fatal)")
+  endif()
+endif()
+# FIXPP_LOG_SPIKE_QUILL — TS-13 quill spike backend (FR-021/FR-023). OFF by
+# default; a default build MUST NOT require quill. When ON, also pass the
+# conanfile option -o fixpp/*:spike_quill=True so the quill dependency resolves.
+option(FIXPP_LOG_SPIKE_QUILL "Build the TS-13 quill spike backend" OFF)
 
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
