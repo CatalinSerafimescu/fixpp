@@ -29,6 +29,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <memory_resource>
@@ -187,21 +188,29 @@ public:
 
     // Synchronous flush + shutdown. Drains in-flight records and calls
     // flush(drain_timeout) on each Sink. On timeout returns
-    // unexpected(log_drain_timeout) and bumps timeout_drop_count().
+    // unexpected(log_drain_timeout) and bumps timeout_drop_count() (the
+    // SEPARATE timeout counter — does NOT inflate drop_count()).
     // Callable from any thread; blocks until drain completes or times out.
-    // [T027 scope] — declared here; body in logger.cpp.
+    // Safe to call multiple times (idempotent after first call).
+    // [2k §4.3] / contracts/log-core.md FR-014 / SC-007.
     [[nodiscard]] fixpp::core::expected_t<void> shutdown(
         std::chrono::milliseconds drain_timeout);
 
-    // Async flush — posts a flush sentinel onto the ring; the drain thread
-    // processes all pending records and posts a completion signal to the caller.
+    // Async flush — enqueues a flush sentinel into the ring; the drain thread
+    // processes all pending records before this sentinel and then invokes
+    // on_done() on the drain thread.
     // Off-hot-path; one allocation per call (completion handler).
-    // [T027 scope — declared only; body deferred to slice 3b-ii]
-    // NOTE: the full asio::awaitable<void> signature is in T033/T034 scope.
-    // For 3b-i the declaration is present as a stub to avoid compile errors
-    // in TUs that forward-declare Logger.  The implementation asserts/aborts
-    // in this slice; callers that need async_flush must wait for 3b-ii.
-    void async_flush();
+    // The on_done callback MUST NOT call back into Logger (no enqueue, no
+    // shutdown) — it is called from the drain thread with no re-entrancy.
+    // [T027 scope]
+    //
+    // NOTE: the full asio::awaitable<void> signature (executor-posting variant)
+    // is in T033/T034 scope. The std::function<void()> variant ships here.
+    //
+    // This method is EXCLUDED from the FR-001 zero-alloc gate (New-4 contract).
+    // [const §XV.9]: std::function does NOT drag asio/std::mutex into this
+    // header — the allocation happens inside the .cpp implementation only.
+    void async_flush(std::function<void()> on_done);
 
 private:
     struct Impl;

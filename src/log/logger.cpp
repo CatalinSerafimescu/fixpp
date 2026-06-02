@@ -52,9 +52,12 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <functional>
 #include <memory_resource>
 #include <mutex>
+#include <queue>
 #include <thread>
 #include <vector>
 
@@ -62,6 +65,12 @@
 #include <pthread.h>
 #include <sched.h>
 #endif
+
+namespace {
+// Sentinel marker stored in Record::flags.
+// A record with this flag is a flush sentinel, not a real log record.
+inline constexpr std::uint8_t k_flush_sentinel_flag = 0xFF;
+}  // namespace
 
 namespace fixpp::log {
 
@@ -109,6 +118,19 @@ struct Logger::Impl {
     // std::atomic is non-copyable/movable so we use a heap array.
     std::size_t                              num_sinks_{0};
     std::unique_ptr<std::atomic<std::uint64_t>[]> sink_error_counts_;
+
+    // ── Flush-sentinel completion queue ──────────────────────────────────────
+    // Protected by flush_mutex_. The drain thread pops under the lock, then
+    // invokes the completion OUTSIDE the lock to avoid re-entrancy risk.
+    std::mutex                          flush_mutex_;
+    std::queue<std::function<void()>>   flush_queue_;
+
+    // ── Drain-done notification (for shutdown timeout) ────────────────────────
+    // The drain thread sets drain_done_ = true and notifies drain_done_cv_
+    // just before drain_loop() returns. shutdown() uses wait_for().
+    std::mutex               drain_done_mutex_;
+    std::condition_variable  drain_done_cv_;
+    bool                     drain_done_{false};
 
     // ── Drain thread lifecycle ─────────────────────────────────────────────
     std::atomic<bool> stop_flag_{false};
@@ -237,13 +259,12 @@ struct Logger::Impl {
             // Step 3: overflow check BEFORE claiming a slot (R5).
             if (w - r >= capacity_) {
                 if (config_.on_overflow == overflow_policy::block) {
-                    // block mode: spin until a slot becomes available.
+                    // block mode: spin-yield until a slot becomes available.
                     // MUST NOT be called from a session-strand coroutine ([const §XI.3]).
-                    // Debug-FIXPP_ASSERT: the condition is always false here (we are inside
-                    // the block-mode branch), so this always fires in debug builds — that
-                    // is the intentional diagnostic behaviour per contracts/log-core.md.
-                    assert(!"overflow_policy::block enqueue — verify this is NOT a "
-                            "session-strand coroutine ([const §XI.3], data-model §overflow_policy)");
+                    // TODO(T033/T034): Add session-strand thread detection here and
+                    // fire a debug assert if block is called from the session executor.
+                    // For now: unconditional spin-yield is correct for raw-thread
+                    // producer paths (FR-004 / TS-3).
                     std::this_thread::yield();
                     continue;
                 }
@@ -302,8 +323,10 @@ struct Logger::Impl {
     //
     // Dedicated OS thread. Not an asio strand. Holds no session/engine refs.
     // Reads records in read_sequence_ order. For each consumed record:
-    //   1. Looks up the format string via format_registry.
-    //   2. Fans out to each Sink::emit() wrapped in try/catch (T026 FR-005).
+    //   1. If rec.flags == k_flush_sentinel_flag: pop one completion from
+    //      flush_queue_ and invoke it (async_flush protocol).
+    //   2. Otherwise: look up the format string via format_registry, fan-out
+    //      to sinks (T026 FR-005).
     void drain_loop()
     {
         std::uint64_t r = 0;  // local copy of read_sequence_ (drain owns it)
@@ -326,7 +349,28 @@ struct Logger::Impl {
                 // rather than racing for the freed slot.
                 // Spec §4.3: "consume the record; advance read_sequence_" —
                 // consume = emit() complete; then advance.
-                fan_out(rec);
+
+                if (rec.flags == k_flush_sentinel_flag) {
+                    // Flush sentinel: pop and invoke the matching completion.
+                    std::function<void()> completion;
+                    {
+                        std::lock_guard<std::mutex> lock(flush_mutex_);
+                        if (!flush_queue_.empty()) {
+                            completion = std::move(flush_queue_.front());
+                            flush_queue_.pop();
+                        }
+                    }
+                    // Invoke OUTSIDE the lock to avoid re-entrancy.
+                    if (completion) {
+                        try {
+                            completion();
+                        } catch (...) {
+                            // Swallow; completion must not throw.
+                        }
+                    }
+                } else {
+                    fan_out(rec);
+                }
 
                 // Advance read_sequence_ (release store).
                 read_sequence_.store(r + 1, std::memory_order_release);
@@ -336,7 +380,6 @@ struct Logger::Impl {
                 // No record available yet.
                 if (stop_flag_.load(std::memory_order_acquire)) {
                     // Drain remaining slots before exiting.
-                    // spin briefly to catch any in-flight producers.
                     // We loop until the ring is empty (read catches write).
                     std::uint64_t w = write_sequence_.load(std::memory_order_acquire);
                     if (r >= w) {
@@ -348,7 +391,7 @@ struct Logger::Impl {
             }
         }
 
-        // Flush all sinks after draining.
+        // Flush all sinks after draining (with the configured drain_timeout).
         for (std::size_t i = 0; i < sinks_.size(); ++i) {
             if (sinks_[i]) {
                 try {
@@ -360,6 +403,13 @@ struct Logger::Impl {
                 }
             }
         }
+
+        // Signal that the drain is done (for shutdown timeout notification).
+        {
+            std::lock_guard<std::mutex> lock(drain_done_mutex_);
+            drain_done_ = true;
+        }
+        drain_done_cv_.notify_all();
     }
 
     // T026: fan-out catch-all.
@@ -454,24 +504,115 @@ std::uint64_t Logger::sink_error_count(std::size_t sink_index) const noexcept
     return impl_->sink_error_counts_[sink_index].load(std::memory_order_relaxed);
 }
 
-// shutdown() — T027 scope; stub for 3b-i.
-// Signals the drain and waits for it to finish.
+// shutdown() — T027.
+// [2k §4.3] / contracts/log-core.md FR-014 / SC-007.
+//
+// Protocol:
+//   1. Idempotent: if the drain is already done (drain_done_==true), return ok.
+//   2. Signal the drain thread to stop (stop_flag_ = true).
+//   3. Wait on drain_done_cv_ for up to drain_timeout.
+//   4a. On timeout: bump timeout_drop_count_ (NOT drop_count_) and return
+//       unexpected(log_drain_timeout).
+//   4b. On success: join the thread (it may already be done by then).
+//
+// IMPORTANT: drain_done_ is set INSIDE the drain thread just before return.
+// The join() in 4b is still needed to reclaim the OS thread handle, but it
+// should be nearly instantaneous since drain_done_ is only set after the
+// thread is about to exit.
 fixpp::core::expected_t<void> Logger::shutdown(
-    std::chrono::milliseconds /*drain_timeout*/)
+    std::chrono::milliseconds drain_timeout)
 {
-    // For 3b-i: signal stop and join drain thread synchronously.
-    // Full deadline-bounded logic with timeout_drop_count is T027 scope.
+    // Step 1: idempotent guard — if the drain already signalled done, just join.
+    {
+        std::unique_lock<std::mutex> lock(impl_->drain_done_mutex_);
+        if (impl_->drain_done_) {
+            lock.unlock();
+            if (impl_->drain_thread_.joinable()) {
+                impl_->drain_thread_.join();
+            }
+            return {};
+        }
+    }
+
+    // Step 2: signal the drain thread to stop.
     impl_->stop_flag_.store(true, std::memory_order_release);
+
+    // Step 3: wait with deadline.
+    {
+        std::unique_lock<std::mutex> lock(impl_->drain_done_mutex_);
+        bool signalled = impl_->drain_done_cv_.wait_for(
+            lock, drain_timeout, [this] { return impl_->drain_done_; });
+
+        if (!signalled) {
+            // Timeout: bump timeout_drop_count_ (SEPARATE from drop_count_).
+            // [contracts/log-core.md §Runtime obligations: three separate counters]
+            impl_->timeout_drop_count_.fetch_add(1, std::memory_order_relaxed);
+            return std::unexpected(fixpp::core::error::log_drain_timeout);
+        }
+    }
+
+    // Step 4b: join the thread (near-instant since drain_done_ is set just before return).
     if (impl_->drain_thread_.joinable()) {
         impl_->drain_thread_.join();
     }
     return {};
 }
 
-// async_flush() — T027 scope; asserts if called in 3b-i.
-void Logger::async_flush()
+// async_flush() — T027.
+// Enqueues a flush sentinel into the ring. The drain thread, on consuming it,
+// invokes on_done() (off-hot-path; one allocation for the std::function).
+// [contracts/log-core.md New-4: excluded from FR-001 zero-alloc gate]
+void Logger::async_flush(std::function<void()> on_done)
 {
-    assert(false && "async_flush() is not implemented in slice 3b-i (T027 scope)");
+    if (!on_done) return;  // no-op for null completion
+
+    // Register the completion in the queue BEFORE enqueuing the sentinel, so
+    // the drain sees the queue entry before it processes the sentinel slot.
+    {
+        std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
+        impl_->flush_queue_.push(std::move(on_done));
+    }
+
+    // Enqueue a sentinel record into the ring (drop_newest if ring is full).
+    // The sentinel is a zero Record with flags == k_flush_sentinel_flag.
+    // We encode it as a direct enqueue via the Impl's ring protocol.
+    //
+    // Note: if the sentinel is dropped (overflow), the completion will never
+    // fire. Callers should ensure the ring is not perpetually full when calling
+    // async_flush(). This is acceptable: async_flush is off-hot-path and
+    // callers that care about delivery use shutdown() instead.
+    for (;;) {
+        std::uint64_t w = impl_->write_sequence_.load(std::memory_order_relaxed);
+        std::uint64_t r = impl_->read_sequence_.load(std::memory_order_relaxed);
+        if (w - r >= impl_->capacity_) {
+            // Ring full: drop the sentinel (pop the completion we just pushed).
+            std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
+            if (!impl_->flush_queue_.empty()) {
+                // Pop ours back out. If another thread pushed too, we might
+                // pop the wrong one — but async_flush is documented as
+                // single-caller-at-a-time for simplicity.
+                impl_->flush_queue_.pop();
+            }
+            return;  // sentinel dropped; completion will not fire
+        }
+
+        if (!impl_->write_sequence_.compare_exchange_weak(
+                w, w + 1,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            continue;
+        }
+
+        // CAS success — write the sentinel record.
+        RingSlot& slot = impl_->ring_[w % impl_->capacity_];
+        Record& rec = slot.record;
+        // Zero-initialise the record, then set the sentinel flag.
+        rec = Record{};
+        rec.flags = k_flush_sentinel_flag;
+
+        slot.sequence.store(w + 1, std::memory_order_release);
+        return;
+    }
 }
 
 }  // namespace fixpp::log

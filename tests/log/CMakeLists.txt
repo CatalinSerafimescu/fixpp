@@ -26,3 +26,49 @@ target_link_libraries(log_filter_test PRIVATE
   GTest::gtest_main
 )
 add_test(NAME log_filter COMMAND log_filter_test)
+
+# ── Slice 3b-ii: T027 — shutdown(drain_timeout) + async_flush ────────────
+add_executable(log_shutdown_test test_shutdown_async_flush.cpp)
+target_link_libraries(log_shutdown_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_shutdown COMMAND log_shutdown_test)
+
+# ── Slice 3b-ii: T016 (TS-3) — block overflow on raw std::thread ─────────
+add_executable(log_block_test test_block_overflow_raw_thread.cpp)
+target_link_libraries(log_block_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_block COMMAND log_block_test)
+
+# ── Slice 3b-ii: T014 (TS-1) — compile cutoff + dual-gate zero-alloc ─────
+# NOTE: This test is compiled with FIXPP_LOG_MIN_LEVEL overridden to warn(3)
+# so that debug/info call sites are compiled out.
+add_executable(log_alloc_test test_compile_cutoff_zero_alloc.cpp)
+target_compile_definitions(log_alloc_test PRIVATE
+  FIXPP_LOG_MIN_LEVEL=3   # warn (Level::warn == 3)
+)
+target_link_libraries(log_alloc_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME log_alloc COMMAND log_alloc_test
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+# T014 gate: run under LD_PRELOAD=mallocnesia to catch global new() calls.
+# MALLOCNESIA_MAX_ALLOCS=0 means zero allocations allowed in the guard window.
+set(MALLOCNESIA_SO "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+add_test(NAME log_alloc_mallocnesia
+  COMMAND ${CMAKE_COMMAND} -E env
+    "LD_PRELOAD=${MALLOCNESIA_SO}"
+    "MALLOCNESIA_MAX_ALLOCS=0"
+    $<TARGET_FILE:log_alloc_test>
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(log_alloc_mallocnesia PROPERTIES
+  PASS_REGULAR_EXPRESSION "PASSED"
+  FAIL_REGULAR_EXPRESSION "\\[mallocnesia\\] FAIL")
