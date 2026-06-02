@@ -1,5 +1,19 @@
 find_package(GTest CONFIG REQUIRED)
 
+# ── TS-11: test_dual_metric_export ────────────────────────────────────────────
+# Tests: counter==3 visible via real Prometheus scrape on :9464 AND via a mock
+# OTLP push exporter in one ForceFlush cycle (FR-017 / SC-005).
+if(TARGET opentelemetry-cpp::api)
+  add_executable(test_dual_metric_export test_dual_metric_export.cpp)
+  target_link_libraries(test_dual_metric_export PRIVATE
+    fixpp_otel
+    opentelemetry-cpp::metrics
+    GTest::gtest
+    GTest::gtest_main
+  )
+  add_test(NAME ts11_dual_metric_export COMMAND test_dual_metric_export)
+endif()
+
 # ── otel_smoke_test ───────────────────────────────────────────────────────────
 add_executable(otel_smoke_test otel_smoke_test.cpp)
 target_link_libraries(otel_smoke_test PRIVATE

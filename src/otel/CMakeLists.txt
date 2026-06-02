@@ -8,6 +8,7 @@
 add_library(fixpp_otel STATIC
   providers.cpp
   session_spans.cpp
+  exporters.cpp
 )
 add_library(fixpp::otel ALIAS fixpp_otel)
 
@@ -39,6 +40,7 @@ if(TARGET opentelemetry-cpp::api)
     opentelemetry-cpp::metrics
     opentelemetry-cpp::logs
     opentelemetry-cpp::exporter_otlp_http
+    opentelemetry-cpp::exporter_otlp_http_metric
     opentelemetry-cpp::exporter_prometheus
   )
 endif()
