@@ -1,6 +1,6 @@
-# tests/otel/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
+# ── otel_smoke_test ───────────────────────────────────────────────────────────
 add_executable(otel_smoke_test otel_smoke_test.cpp)
 target_link_libraries(otel_smoke_test PRIVATE
   fixpp_otel
@@ -8,3 +8,31 @@ target_link_libraries(otel_smoke_test PRIVATE
   GTest::gtest_main
 )
 add_test(NAME otel_smoke COMMAND otel_smoke_test)
+
+# ── TS-12: test_session_spans ─────────────────────────────────────────────────
+# Tests: SessionSpans / ParseSpan parent-child linkage (explicit SpanContext,
+# no Scope), cross-thread parenting, E3 no-op fallback (FR-019).
+#
+# The opentelemetry-cpp::exporter_in_memory Conan target has an empty LIBS_DEBUG
+# list (header-only in the Conan cmake config) even though the static lib exists.
+# We link libopentelemetry_exporter_in_memory.a directly via the conan -L dir.
+if(TARGET opentelemetry-cpp::api)
+  add_executable(test_session_spans test_session_spans.cpp)
+  target_link_libraries(test_session_spans PRIVATE
+    fixpp_otel
+    opentelemetry-cpp::exporter_in_memory  # may be header-only in Conan config
+    opentelemetry-cpp::trace               # SimpleSpanProcessorFactory etc.
+    GTest::gtest
+    GTest::gtest_main
+  )
+  # Direct link of the in-memory exporter static lib (Conan LIBS list is empty
+  # even though the .a exists; link it explicitly to resolve the Factory symbol).
+  find_library(OTEL_EXPORTER_IN_MEMORY_LIB
+    NAMES opentelemetry_exporter_in_memory
+    HINTS ${opentelemetry-cpp_LIB_DIRS_DEBUG} ${opentelemetry-cpp_LIB_DIRS}
+  )
+  if(OTEL_EXPORTER_IN_MEMORY_LIB)
+    target_link_libraries(test_session_spans PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB})
+  endif()
+  add_test(NAME ts12_session_spans COMMAND test_session_spans)
+endif()
