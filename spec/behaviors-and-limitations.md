@@ -130,3 +130,96 @@ Scope and conventions:
   counterparty server cert (`one_way_ca`). App-layer client-cert ↔ CompID mutual mTLS
   (`mtls_ca`) is `deferred:v1.1-mtls`. **Status: wontfix for v1.0** (intentional scope
   bound). *(FR-025; `tests/interop/happy/MATRIX.md`.)*
+
+---
+
+## Async Logger + OTel Observability (017-log-otel)
+
+### Feature Catalogue Rows (done)
+
+| Row | Title | Status | /specify | PR | Tests |
+|---|---|---|---|---|---|
+| LOG-001 | Zero-alloc async MPSC logger — producer/consumer ring, `Level`/`Category` filtering, drain thread, `Logger::enqueue()` | **done** | `017-log-otel` | (pending merge) | `tests/log/test_compile_cutoff_zero_alloc.cpp` (TS-1: dual-gate zero-alloc, fill 10/50/95%), `tests/log/test_overflow_drop_newest.cpp` (TS-2: drop_newest + TSan), `tests/log/test_block_overflow_raw_thread.cpp` (TS-3: block mode raw thread), `bench/log/log_enqueue.cpp` (TS-9: mean ≤ 50 ns gate + p99/p999) |
+| LOG-002 | `Sink` interface (4 pure-virtual: `open`/`emit`/`flush`/`close`) + `FileSink` (rotation+fsync) + `SyslogSink` | **done** | `017-log-otel` | (pending merge) | `tests/log/test_file_sink_rotation.cpp` (TS-4: rotation + archived-only keep-count + TSan), `tests/log/test_file_sink_async_fsync.cpp` (TS-5: fsync on drain thread) |
+| LOG-003 | Trace-correlated log records — `trace_id`/`span_id` carried per `Record`; `FIXPP_SLOG`/`FIXPP_ELOG`/`FIXPP_LOG0` macros (no `thread_local`) | **done** | `017-log-otel` | (pending merge) | `tests/log/test_trace_correlation.cpp` (TS-6: SLOG/ELOG/LOG0 macro tier verification), `tests/log/test_clock_injection.cpp` (TS-7: effective-clock timestamp routing) |
+| LOG-004 | Compile-time level cutoff (`FIXPP_LOG_MIN_LEVEL` + `if constexpr`) + runtime category bitmask filter | **done** | `017-log-otel` | (pending merge) | `tests/log/test_level_and_category_filter.cpp` (TS-8: combined compile+runtime filter → `filter_count()==1`, `drop_count()==0`) |
+| OBS-001 | `SessionSpans` RAII helper — lifecycle span + `ParseSpan`/`StoreSpan`/`DispatchSpan` children with explicit-parent OTel context (no `Scope`/`thread_local`) | **done** | `017-log-otel` | (pending merge) | `tests/otel/test_session_spans.cpp` (TS-12: session+parse spans, explicit parenting, cross-thread span_id) |
+| OBS-002 | `TracerProvider`/`MeterProvider` RAII wrappers + `PrometheusExporter`/`OtlpMetricExporter` dual-reader | **done** | `017-log-otel` | (pending merge) | `tests/otel/test_otel_provider_init.cpp` (TS-10: provider init/shutdown/no-op fallback), `tests/otel/test_dual_metric_export.cpp` (TS-11: counter readable via `:9464` + OTLP push) |
+| OBS-003 | `OtlpLogSink` — `Sink` impl translating `Record → opentelemetry::logs::LogRecord` via `BatchLogRecordProcessor` (non-blocking; no double-write; capped retries) | **done** | `017-log-otel` | (pending merge) | `tests/otel/test_otlp_log_export.cpp` (TS-10 overlapping: single-write path, severity/trace/body match) |
+
+### Behaviors
+
+- **B-017-1 — `overflow_policy::drop_newest` preserves the oldest in-flight record.**
+  When the MPSC ring is full, the producer detects the full ring and drops the record it
+  is *about to enqueue* (newest = just-arriving), not an older in-flight slot. This means
+  the oldest records are always preserved with an exact `drop_count()`. The stale-read
+  of `read_sequence_` under `relaxed` ordering can only cause an *early* drop — safe for
+  `drop_newest`. *(FR-003/FR-004; data-model §overflow_policy; TS-2.)*
+
+- **B-017-2 — `block` overflow mode is prohibited from session-strand coroutines.**
+  `overflow_policy::block` makes the producer spin-yield until a ring slot is available.
+  This pins the executor OS thread at the enqueue site, which is equivalent to holding
+  `std::mutex` inside a coroutine — explicitly prohibited by `[const §XI.3]`. A debug
+  `FIXPP_ASSERT` fires if `block` is used from a detected session-executor thread.
+  `block` is safe only from dedicated non-coroutine producer threads (e.g. background
+  control-plane threads not sharing the session executor). *(FR-004; contracts/log-core.md;
+  data-model §overflow_policy.)*
+
+### Limitations
+
+- **L-017-1 — The three log macros (`FIXPP_SLOG`/`FIXPP_ELOG`/`FIXPP_LOG0`) take an
+  explicit `logger_ptr` first argument — a deliberate deviation from FR-013's no-logger
+  signature.** FR-013 specifies the three context-tier macros with no explicit logger
+  parameter; the implementation instead requires an explicit `Logger*` first arg because
+  loggers are per-engine (there is no global logger per `[const §XIII.1]`), and a
+  no-arg form would require a `thread_local` or implicit injection mechanism that violates
+  `[const §XIII.3]`. The explicit-logger form is the public API for v1.0; operators must
+  hold and pass the logger pointer from their engine/session context.
+  **Status: wontfix for v1.0** (deliberate; `thread_local` banned). *(FR-013; [const §XIII.3];
+  data-model §Trace-correlation-macros.)*
+
+- **L-017-2 — The MPSC ring advances `read_sequence_` AFTER the drain copies the record
+  out of the slot, not before.** This means a slot is held for the full duration of the
+  drain's `Sink::emit()` fan-out, costing at most 1 of 65,536 slots per in-flight drain
+  iteration. The record is fully copied before the slot is released, so there is no
+  use-after-free risk. The alternative (Disruptor copy-then-free) advances the sequence
+  before fan-out; our variant is simpler and the 1/65,536 overhead is negligible.
+  **Status: wontfix** (defensible design choice; single-consumer ring). *(logger.cpp drain
+  loop; data-model §Logger ring invariants.)*
+
+- **L-017-3 — `OtlpLogSink` lives in a separate `fixpp_log_otlp` target so the base
+  `fixpp_log` library stays OTel-free.** Users who only need file/syslog logging do not
+  pull in the OpenTelemetry C++ SDK. `fixpp_log_otlp` is an opt-in link target.
+  **Status: wontfix for v1.0** (intentional layering). *(FR-018; CMakeLists.txt; [arch §4.7].)*
+
+- **L-017-4 — TS-13 backend-selection disposition is PROVISIONAL; the quill comparison
+  is deferred behind `FIXPP_LOG_SPIKE_QUILL=ON`.** The own lock-free MPSC ring is the
+  v1.0 shipping candidate (`[arch §9.3]`; `[2k §1.2]`). TS-13 was executed and recorded:
+  on WSL2 debug (Clang debug build) at 50% fill with 4 producers over 10M records, the
+  own-ring p99 is ~1,062 ns and p999 is ~1,793 ns; Criterion A (zero-alloc under
+  mallocnesia, 10% and 50% fill) passes (exit 0). The Criterion-B comparison (p99 ≤ 50 ns
+  vs quill 11.x at 50% fill on reference CI hardware) is deferred — it is a **recorded,
+  non-blocking metric** that does NOT gate v1.0 delivery. The backend is swappable behind
+  the identical `Logger` facade without any public-API change.
+  **Status: deferred** (Criterion B comparison, non-blocking). *(FR-021; [2k §1.2]; [arch §9.3];
+  `.specify/decisions/017-log-otel-verify.md` TS-13 record; `bench/log/log_spike.cpp`.)*
+
+- **L-017-5 — `SessionSpans` is a standalone helper; live session-FSM wiring is deferred
+  to the future session-module feature.** 017 ships `SessionSpans` + parse/store/dispatch
+  child-span types in the `otel` module, verified by TS-12 against a test/mock session.
+  Constructing `SessionSpans` in the real session-FSM open path and emitting spans from
+  the live message-processing coroutine is **out of scope for 017** (clarified boundary,
+  scope question 1). The hand-off point is anchor §11 of `.specify/2k-log-otel.md`.
+  **Status: deferred** (future session-module feature). *(FR-016; spec.md Clarification 1;
+  [2k §11]; `tests/otel/test_session_spans.cpp`.)*
+
+- **L-017-6 — `overflow_policy::drop_newest` is the only supported overflow mode for
+  session-strand producers; `block` mode is prohibited from coroutine contexts.** The
+  `block` policy spins until a ring slot opens, which pins the executor thread. This
+  violates `[const §XI.3]` (no mutex/spin in coroutine context) and is equivalent to
+  holding a `std::mutex` inside a `co_await` chain. A debug `FIXPP_ASSERT` fires if
+  `block` is used from a detected session-executor thread. Operators who need guaranteed
+  delivery (no drops) from a non-coroutine thread may use `block` on a dedicated
+  non-session OS thread.
+  **Status: wontfix** (constitutional constraint `[const §XI.3]`). *(FR-004;
+  data-model §overflow_policy; B-017-2 is the positive-behavior counterpart.)*
