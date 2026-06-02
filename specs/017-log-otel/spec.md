@@ -46,6 +46,8 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 
 **Why this priority**: Production observability (OBS-001/002/003) is high-value but layered on the logging core and the trace fields; an operator with only file/syslog logging still has a working engine.
 
+**Scope boundary**: 017 delivers the `SessionSpans` helper and its parse/store/dispatch child-span types as standalone `otel`-module components, verified against a test/mock session (TS-12). Constructing `SessionSpans` in the live session-FSM open path and emitting these spans from the real message-processing coroutine is **deferred to the future session-module feature** (anchor §11 hand-off) — 017 does not edit the session FSM.
+
 **Independent Test**: With mock OTel exporters, run a session lifecycle and assert (a) a session-lifecycle span with child parse/store/dispatch spans correctly parented, (b) a counter metric is simultaneously readable via the Prometheus scrape endpoint and received by the OTLP push exporter, and (c) a log record is exported as an OTLP `LogRecord` with matching severity/trace/body.
 
 **Acceptance Scenarios**:
@@ -63,6 +65,14 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 - **OTLP export failure** → bounded retries (cap), then drop with an export-failure counter; no retry storm; engine continues with a no-op provider on provider-init failure.
 - **Context-free log site** → all-zero trace/span, treated as uncorrelated.
 - **Clock injection** → record timestamps come from the effective clock, so a mock clock makes time-sensitive log output deterministic in tests.
+
+## Clarifications
+
+### Session 2026-06-02
+
+- Q: Does 017 wire SessionSpans into the real session FSM, or only deliver the helper type tested standalone? → A: Helper only — 017 builds `SessionSpans` + the parse/store/dispatch child-span types in the `otel` module, verified by TS-12 against a test/mock session; the real session-FSM open-path + message-coroutine wiring is deferred to the future session-module feature (anchor §11 hand-off).
+- Q: Does 017 own adding the OpenTelemetry C++ SDK build dependency (Conan + CMake + the two CMake options), or assume the scaffold already exists? → A: 017 owns its build wiring — pin OTel C++ SDK ≥ 1.12 in `conanfile.py`, add CMake link targets and the `FIXPP_LOG_MIN_LEVEL` / `FIXPP_LOG_SPIKE_QUILL` options (quill recipe optional/spike-only); 017 must be independently buildable and testable.
+- Q: Is the shippable v1.0 backend the own MPSC ring now (spike validates), or does 017 gate the backend on the spike outcome? → A: Own ring now — implement the own Vyukov lock-free MPSC ring as the v1.0 backend (anchor §1.2 provisional rec + §D.2); TS-13 is a non-blocking validation/benchmark harness that records the decision and could justify a later swap behind the identical `Logger` facade.
 
 ## Requirements *(mandatory)*
 
@@ -100,7 +110,7 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 
 **OTel observability (OBS-001/002/003)**
 
-- **FR-016**: `SessionSpans` MUST provide a session-lifecycle span with `ParseSpan`/`StoreSpan`/`DispatchSpan` children parented by **explicit** context (no thread-local scope), carrying CompID/latency/msg-type/status attributes.
+- **FR-016**: `SessionSpans` MUST provide a session-lifecycle span with `ParseSpan`/`StoreSpan`/`DispatchSpan` children parented by **explicit** context (no thread-local scope), carrying CompID/latency/msg-type/status attributes. 017 ships `SessionSpans` as a standalone `otel`-module helper verified against a test/mock session (TS-12); wiring it into the live session FSM open path and message coroutine is deferred to the future session-module feature (anchor §11) and is OUT OF SCOPE here.
 - **FR-017**: Metrics MUST dual-export from one `MeterProvider`: a `PrometheusExporter` pull reader (embedded server, port 9464) **and** an `OtlpMetricExporter` push reader, registered via two `AddMetricReader()` calls.
 - **FR-018**: `OtlpLogSink` MUST be the LOG-002 `Sink` combined with an OTel batch log processor over a single write path (no double-write), satisfying `[const §XIII.4]`.
 - **FR-019**: OTel wrappers MUST wrap the official OpenTelemetry C++ SDK (no re-implementation); on provider-init failure the engine substitutes a no-op provider and continues; OTLP export retries MUST be capped.
@@ -108,8 +118,12 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 **Boundaries / deferrals (keep as placeholders; DO NOT implement)**
 
 - **FR-020**: v1.0 MUST expose log/OTel access via the C++ API only; `c_api/log.h` and `c_api/otel.h` contain version-macro/include-guard placeholders with **no** `extern "C"` symbols.
-- **FR-021**: `GrpcStreamSink` MUST remain deferred (anchor §10 Q1; AGPL boundary), and the quill-vs-own backend disposition MUST stay PROVISIONAL pending the TS-13 benchmark spike — the public `Logger` facade contract is identical regardless of backend.
+- **FR-021**: `GrpcStreamSink` MUST remain deferred (anchor §10 Q1; AGPL boundary). The v1.0 shippable backend MUST be the **own** Vyukov lock-free MPSC ring (anchor §1.2 provisional recommendation + §D.2); the quill-vs-own disposition stays PROVISIONAL but TS-13 is a **non-blocking** validation/benchmark harness — it records the decision and could justify a later swap, but MUST NOT gate delivery of the own-ring `Logger`. The public `Logger` facade contract is identical regardless of backend.
 - **FR-022**: The following are explicit non-goals and MUST NOT be built: synchronous logging shim, log aggregation/routing/sampling, custom OTel SDK, W3C TraceContext injection into outbound FIX messages, structured-logging query language, `dlopen` sink discovery.
+
+**Build integration (this feature owns its scaffold)**
+
+- **FR-023**: 017 MUST be independently buildable and testable on its own branch: it MUST add the OpenTelemetry C++ SDK (pinned ≥ 1.12, the first stable logs API; exact version pinned in `conanfile.py` per `[const §XV.17]`) as a build dependency with the CMake link wiring for the `otel`/`log` targets and tests, and MUST introduce the `FIXPP_LOG_MIN_LEVEL` and `FIXPP_LOG_SPIKE_QUILL` CMake options. The `quill` Conan recipe is OPTIONAL and gated behind `FIXPP_LOG_SPIKE_QUILL=ON` (spike-only); a default build (`FIXPP_LOG_SPIKE_QUILL=OFF`) MUST NOT require quill.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -138,7 +152,7 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 ## Assumptions
 
 - The "reference CI hardware" and latency baselines are those defined in `bench/baselines/` (TS-9 baseline `bench/baselines/log_enqueue.json`); SC-001's 50 ns is relative to that baseline.
-- The OpenTelemetry C++ SDK is available at ≥ 1.12 (first stable logs API); the exact pin is set at the build-scaffold step (anchor §10 Q3/Q5).
+- The OpenTelemetry C++ SDK is available at ≥ 1.12 (first stable logs API); 017 owns adding and pinning it (FR-023) rather than depending on an external build-scaffold step — the anchor's "Phase 3 build scaffold" label (§10 Q3/Q5, §11) predates the current phasing.
 - This feature **consumes** (does not own) `Session::get_trace_context()` / `session_local<trace_context>` and the clock from 2d (`[2d §4.6]`/`[2d §7.9]`); the `EngineConfig`/`SessionConfig` observability fields follow the 2d engine-anchor + session-override pattern (anchor App D §D.1).
-- The backend (quill vs own ring) is an implementation detail behind the `Logger` facade; the spec's contract holds for either, and TS-13 resolves the PROVISIONAL disposition.
+- The v1.0 backend is the own lock-free MPSC ring (FR-021); the backend is an implementation detail behind the `Logger` facade, the spec's contract holds for either, and TS-13 validates (does not gate) the PROVISIONAL disposition.
 - C-ABI log/OTel exposure and `StreamLogs` log-stream integration are v1.x cross-doc amendment targets (anchor §10 Q1), not part of this feature.
