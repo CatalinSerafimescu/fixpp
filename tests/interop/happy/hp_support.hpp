@@ -8,9 +8,15 @@
 // drive a registered session to Active.
 //
 // All-TLS baseline (FR-025, reconciled 2026-06-01): fixpp ships TLS-only, so every
-// live cell runs over TLS. The baseline uses the server-auth `one_way_ca` profile
-// (the legacy-interop path: the counterparty presents a server cert fixpp's CA
-// trusts; fixpp-as-acceptor presents its leaf and requires no client cert).
+// live cell runs over TLS. The baseline uses the `one_way_ca` profile (the
+// legacy-interop path: the counterparty presents a server cert fixpp's CA trusts,
+// and fixpp-as-acceptor presents its leaf). NOTE: `one_way_ca` does NOT mean "no
+// client cert" — fixpp's transport requires a peer cert under ALL profiles
+// (asio_tls_transport.cpp SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT). The
+// profile relaxes how the peer cert is VALIDATED (CA-chain only, no CompID↔cert
+// IDENTITY binding — permissive authz), not WHETHER one is presented. So an
+// fixpp-acceptor interop cell's counterparty-initiator must still offer a
+// CA-signed client cert (the parent harness does; see phase-9-harness configs).
 // App-layer client-cert IDENTITY binding (013/014 fail-closed CompID↔cert,
 // session profile mtls_ca) is the v1.1 mTLS reach — NOT exercised here; the
 // session authz profile is kept `one_way_ca` (permissive Logon-ack gate, the
@@ -99,12 +105,13 @@ inline std::shared_ptr<fixpp::transport::TransportFactory> make_interop_tls_fact
     }
 
     fixpp::tls::SslCtxConfig ssl;
-    // Server-auth baseline. `one_way_ca` is [[deprecated]] as a NEW-deployment
-    // posture (fixpp prefers mutual TLS), but it is precisely the legacy-interop
-    // path an interop gate exists to exercise (counterparty presents a server
-    // cert; no client cert required). Suppress the deprecation locally — using it
-    // here is intentional and spec-faithful (server-auth v1.0 baseline; mutual
-    // client-cert mTLS is the v1.1 reach, FR-025).
+    // `one_way_ca` baseline. It is [[deprecated]] as a NEW-deployment posture
+    // (fixpp prefers mutual TLS), but it is precisely the legacy-interop path an
+    // interop gate exists to exercise. one_way_ca = CA-chain validation WITHOUT
+    // CompID↔cert IDENTITY binding (permissive Logon-ack gate); it still requires
+    // the peer to present a CA-valid cert (a peer cert is mandatory under every
+    // profile). The v1.1 reach is mTLS with identity binding (mtls_ca / pinned),
+    // FR-025. Suppress the deprecation locally — using it here is intentional.
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
