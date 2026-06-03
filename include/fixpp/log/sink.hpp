@@ -58,13 +58,20 @@ public:
 
     // emit() — receive one log record on the drain thread.
     // Must not throw; must return fast; I/O sinks must buffer internally.
-    // Exceptions must NOT propagate (drain wraps each call in try/catch).
+    // Exceptions must NOT propagate — this override is `noexcept`.
+    // NOTE: The drain-thread try/catch around emit/flush calls is DEFENSIVE-ONLY
+    // for this noexcept virtual path (a throw through noexcept = std::terminate).
+    // Conforming sinks self-swallow errors internally and increment their own
+    // failure counters. Error slots 124/125 (`log_sink_write_failed` /
+    // `log_sink_flush_failed`) are reachable via self-counting sinks and the
+    // open()-failure path — they remain valid C-ABI codes. (RC#4 / contracts note.)
     virtual void emit(Record const& rec) noexcept = 0;
 
     // flush() — bulk drain buffered records within the given deadline.
     // Mandatory deadline escape: must NOT stall indefinitely.
     // Called on the drain thread by Logger::shutdown / async_flush.
-    // Must not throw (drain wraps in try/catch; failure → log_sink_flush_failed).
+    // Must not throw — this override is `noexcept` (same defensive-catch note
+    // as emit() above; see contracts/log-sinks.md §Drain-thread fan-out).
     virtual void flush(std::chrono::milliseconds deadline) noexcept = 0;
 
     // close() — teardown after flush; release resources.
