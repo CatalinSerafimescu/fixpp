@@ -97,11 +97,7 @@ TEST_P(HappyLogonHbLogout, LogonHeartbeatLogout) {
         << "outbound seqnum did not advance past the Logon";
 
     // ── Logout: graceful stop emits Logout + closes; bounded (FR-004) ────────
-    const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
-    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+    hp::expect_graceful_stop(fx);
     // Counterparty terminal behavior (received Logout(35=5) / orderly close) is
     // asserted by the parent gate from the proxy capture (FR-007), not probed here.
 }

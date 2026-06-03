@@ -115,3 +115,62 @@ TEST(InteropSupportSmoke, IdleEngineStopsPromptly) {
     EXPECT_TRUE(fx.stopped());
     EXPECT_LT(took, std::chrono::seconds{2});
 }
+
+// ---------------------------------------------------------------------------
+// RC#2 (Gate-B/r1) — validate_admin_descriptor negative tests (counterparty-free).
+// ---------------------------------------------------------------------------
+//
+// These run without any live peer (no INTEROP_REQUIRE_COUNTERPARTY) and
+// exercise the two new checks added to validate_admin_descriptor:
+//   (a) T029 identity invariant: golden_ref == "happy/golden/" + cell_id + ".fix"
+//   (b) FR-010 / rule 4: self_deadline_ms > 0
+//
+// [feedback_fail_placeholder_red_test]: real error-string assertions, no SUCCEED().
+
+// Helper: build a minimal valid AdminScenarioDescriptor for testrequest_echo.
+static AdminScenarioDescriptor make_valid_descriptor()
+{
+    AdminScenarioDescriptor d;
+    d.cell_id        = "HP-QFj-init-fix44-testrequest-echo";
+    d.scenario_group = AdminScenarioGroup::testrequest_echo;
+    d.role           = Role::fixpp_initiator;
+    d.counterparty   = Counterparty::quickfix_j;
+    d.spec_ref       = "[FIX-SL §4.5.5]";
+    d.golden_ref     = "happy/golden/" + d.cell_id + ".fix";
+    d.induction      = AdminInduction::inbound_silence;
+    d.self_deadline_ms = std::chrono::milliseconds{10000};
+    d.round_trips    = {
+        {"US1-1", "[FIX-SL §4.5.5]"},
+        {"US1-2", "[FIX-SL §4.5.1]"},
+        {"US1-3", "[FIX-SL §4.5.5]"},
+    };
+    d.acceptance_ids = {"US1-1", "US1-2", "US1-3"};
+    return d;
+}
+
+TEST(AdminDescriptorValidation, ValidDescriptorPasses) {
+    // Confirm the helper builds a descriptor that passes all checks.
+    auto d = make_valid_descriptor();
+    EXPECT_TRUE(validate_admin_descriptor(d).empty())
+        << "expected valid descriptor to pass; error: " << validate_admin_descriptor(d);
+}
+
+TEST(AdminDescriptorValidation, WrongGoldenRefFailsValidation) {
+    // T029 identity invariant: golden_ref must equal "happy/golden/" + cell_id + ".fix".
+    // A copy/paste drift (wrong suffix) must produce a non-empty error.
+    auto d = make_valid_descriptor();
+    d.golden_ref = "happy/golden/HP-QFj-init-fix44-WRONG.fix";  // mutated cell_id portion
+    const std::string err = validate_admin_descriptor(d);
+    EXPECT_FALSE(err.empty())
+        << "validate_admin_descriptor should reject a golden_ref that does not match cell_id";
+}
+
+TEST(AdminDescriptorValidation, ZeroSelfDeadlineFailsValidation) {
+    // FR-010 / rule 4: self_deadline_ms must be > 0. A zero deadline must produce
+    // a non-empty error.
+    auto d = make_valid_descriptor();
+    d.self_deadline_ms = std::chrono::milliseconds{0};
+    const std::string err = validate_admin_descriptor(d);
+    EXPECT_FALSE(err.empty())
+        << "validate_admin_descriptor should reject self_deadline_ms == 0";
+}

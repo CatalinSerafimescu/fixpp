@@ -149,6 +149,12 @@ EXPECTED_IDS = frozenset({
     "HP-QFj-acc-fix44-seqnum-recovery",
     "HP-QFcpp-init-fix44-disconnect-reconnect-noreset",
     "HP-QFj-init-fix44-disconnect-reconnect-noreset",
+    # G1 (018-interop-live-admin) NEW admin cells (4) — recovery_outbound + idle_cadence
+    # (the other three G1 groups reuse-and-enrich existing QFj ids above).
+    "HP-QFj-init-fix44-recovery-outbound",
+    "HP-QFj-acc-fix44-recovery-outbound",
+    "HP-QFj-init-fix44-idle-cadence",
+    "HP-QFj-acc-fix44-idle-cadence",
     # Regression cell (runs green locally)
     "HP-down-peer-stop-watchdog",
     # Deferred rows (4)

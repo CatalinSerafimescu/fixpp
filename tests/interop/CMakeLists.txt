@@ -158,8 +158,22 @@ fixpp_add_interop_test(
 fixpp_add_interop_test(
     NAME interop_hp_fix44_seqnum_recovery_test
     GROUP happy
-    LABEL "interop;016;interop-happy;us1"
+    LABEL "interop;016;interop-happy;us1;us3"
     SOURCES happy/hp_fix44_seqnum_recovery_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_recovery_outbound_answer_test
+    GROUP happy
+    LABEL "interop;018;interop-happy;us3"
+    SOURCES happy/hp_fix44_recovery_outbound_answer_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_hp_fix44_idle_heartbeat_cadence_test
+    GROUP happy
+    LABEL "interop;018;interop-happy;us2"
+    SOURCES happy/hp_fix44_idle_heartbeat_cadence_test.cpp
     TLS
 )
 fixpp_add_interop_test(

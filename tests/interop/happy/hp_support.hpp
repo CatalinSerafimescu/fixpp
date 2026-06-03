@@ -40,10 +40,12 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -59,6 +61,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 
 #include "support/counterparty_probe.hpp"
+#include "support/golden_diff.hpp"
 #include "support/interop_fixture.hpp"
 #include "support/minimal_dictionary.hpp"  // tests/support/ (via tests/ include dir)
 #include "support/scenario_descriptor.hpp"
@@ -217,6 +220,136 @@ inline std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterpa
     std::string n = (cp == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     n += (role == Role::fixpp_initiator) ? "_init" : "_acc";
     return n;
+}
+
+// ---------------------------------------------------------------------------
+// admin_golden_path — resolve the golden file path for a G1 cell.
+//
+// Returns "<tests_root>/interop/happy/golden/<cell_id>.fix".
+// The tests root is derived by stripping "/tls/fixtures" from tls_fixture_dir().
+// Returns an empty string when tls_fixture_dir() is unset or empty.
+// The cell_id is already computed by each TEST_P body (e.g.
+//   "HP-QFj-init-fix44-testrequest-echo").
+// ---------------------------------------------------------------------------
+inline std::string admin_golden_path(const std::string& cell_id)
+{
+    const char* tls_dir = tls_fixture_dir();
+    if (tls_dir == nullptr || tls_dir[0] == '\0') {
+        return {};
+    }
+    std::string base{tls_dir};
+    const std::string suffix = "/tls/fixtures";
+    if (base.size() > suffix.size() &&
+        base.substr(base.size() - suffix.size()) == suffix) {
+        base.resize(base.size() - suffix.size());
+    }
+    return base + "/interop/happy/golden/" + cell_id + ".fix";
+}
+
+// ---------------------------------------------------------------------------
+// diff_golden_or_skip — open the golden + capture sidecar, parse both, run
+// diff_transcripts(expected, actual, admin_profile_excluded_tags()), and
+// EXPECT_TRUE the result.  Skips with the canonical reason strings when either
+// file is absent or empty.  The admin normalization profile is {52, 10}.
+//
+// Call site (inside a TEST_P after the live-path section):
+//   hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+//
+// Skip reason strings (verbatim — do NOT alter):
+//   "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)"
+//   "skip:golden-not-yet-captured (file absent: <gpath>)"
+//   "skip:golden-not-yet-captured (file empty: <gpath>)"
+//   "skip:golden-not-yet-captured (capture sidecar absent: <capture_path>)"
+//   "skip:golden-not-yet-captured (capture sidecar empty)"
+// ---------------------------------------------------------------------------
+inline void diff_golden_or_skip(const std::string& cell_id, const std::string& gpath)
+{
+    if (gpath.empty()) {
+        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
+    }
+    std::ifstream gfile{gpath};
+    if (!gfile.is_open()) {
+        GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
+    }
+    std::ostringstream oss;
+    oss << gfile.rdbuf();
+    const std::string golden_text = oss.str();
+    if (golden_text.empty()) {
+        GTEST_SKIP() << "skip:golden-not-yet-captured (file empty: " << gpath << ")";
+    }
+
+    const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
+    std::ifstream cfile{capture_path};
+    if (!cfile.is_open()) {
+        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
+                     << capture_path << ")";
+    }
+    std::ostringstream css;
+    css << cfile.rdbuf();
+    const std::string capture_text = css.str();
+    if (capture_text.empty()) {
+        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
+    }
+
+    const auto expected_frames = fixpp::interop::parse_golden(golden_text);
+    const auto actual_frames   = fixpp::interop::parse_golden(capture_text);
+
+    const fixpp::interop::DiffResult diff = fixpp::interop::diff_transcripts(
+        expected_frames, actual_frames, fixpp::interop::admin_profile_excluded_tags());
+    EXPECT_TRUE(static_cast<bool>(diff))
+        << "Golden transcript mismatch for " << cell_id
+        << " (admin profile {52,10}): " << diff.detail
+        << "\n  expected golden: " << gpath
+        << "\n  actual capture:  " << capture_path;
+}
+
+// ---------------------------------------------------------------------------
+// expect_graceful_stop — assert Engine::stop() completes within 3 s.
+//
+// Encapsulates the stop tail every G1 live cell ends with:
+//   const auto stop_elapsed = fx.stop_within(3s);
+//   EXPECT_LT(stop_elapsed, 3s) << "Engine::stop() ...";
+//   EXPECT_TRUE(fx.stopped())   << "engine did not reach stopped() after Logout";
+// ---------------------------------------------------------------------------
+inline void expect_graceful_stop(InteropEngineFixture& fx)
+{
+    const auto stop_elapsed = fx.stop_within(3s);
+    EXPECT_LT(stop_elapsed, 3s)
+        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
+        << stop_elapsed.count() << " ms";
+    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+}
+
+// ---------------------------------------------------------------------------
+// expect_gate_bite_on_tag — SC-004 positive gate-bite assertion helper.
+//
+// Parses `expected_text` and `actual_text` as golden transcripts, asserts
+// their frame counts are equal, runs diff_transcripts with admin_profile
+// {52,10}, and asserts the result is a mismatch mentioning `tag`.
+//
+// Usage (one call per positive gate-bite TEST):
+//   hp::expect_gate_bite_on_tag(expected_text, actual_text, "112");
+// ---------------------------------------------------------------------------
+inline void expect_gate_bite_on_tag(std::string_view expected_text,
+                                    std::string_view actual_text,
+                                    std::string_view tag)
+{
+    const auto expected_frames = fixpp::interop::parse_golden(expected_text);
+    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+
+    ASSERT_EQ(expected_frames.size(), actual_frames.size());
+
+    const fixpp::interop::DiffResult result = fixpp::interop::diff_transcripts(
+        expected_frames, actual_frames, fixpp::interop::admin_profile_excluded_tags());
+
+    EXPECT_FALSE(static_cast<bool>(result))
+        << "gate-bite FAILED: diff_transcripts() reported match when tag "
+        << tag << " differs; detail=" << result.detail;
+    EXPECT_EQ(result.status, fixpp::interop::DiffStatus::mismatch)
+        << "Expected DiffStatus::mismatch when tag " << tag << " is mutated";
+    EXPECT_NE(result.detail.find(std::string(tag)), std::string::npos)
+        << "detail should mention tag " << tag
+        << " as the differing field; got: " << result.detail;
 }
 
 }  // namespace fixpp::interop::hp

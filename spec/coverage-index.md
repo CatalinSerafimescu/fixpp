@@ -415,7 +415,7 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ---
 
-## 017-log-otel — Active feature (PR #98 open; /speckit-verify YELLOW; Gate B in progress)
+## 017-log-otel — MERGED (PR #98 squash `09a9ae1`, 2026-06-03; /speckit-verify YELLOW, gate-b-waived)
 
 > Phase-4 observability feature carved from anchor `.specify/2k-log-otel.md` v0.5. Two new modules — `fixpp::log` (zero-alloc MPSC `Logger`, 256-B `Record` / 24-B `ArgValue`, 3-tier trace macros, 4-method `Sink` + File/Otlp/Syslog) and `fixpp::otel` (Tracer/Meter SDK wrappers, `SessionSpans`, Prometheus + OTLP dual export). Owns catalogue rows **LOG-001..004 + OBS-001..003** (`spec/feature-catalogue.md` → Logging & Observability; all `done`). Layering `log→{core}`, `otel→{core,log}`, `otel↛transport` (check_layers GREEN).
 >
@@ -448,6 +448,18 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 | Production touch | Spec section / requirement | Catalogue row(s) | Evidence / disposition |
 |---|---|---|---|
 | `SessionConfig::reconnect_policy` field (`include/fixpp/session/session_config.hpp`), `resolve_reconnect_policy()` in `src/session/session.cpp` around line 93, and bounded/cancellable connect/stop behavior in `src/session/engine.cpp` | `[FIX-SL §4.4]` reconnection / `ResetSeqNumFlag=N` continuity; 016 FR-004 and FR-028 | S-014 (session recovery / reconnect flow), S-032 (ResetSeqNumFlag policy, once row is populated) | `tests/session/reconnect_policy_witness_test.cpp` and `tests/interop/happy/hp_down_peer_stop_watchdog_test.cpp` prove finite reconnect policy and bounded `Engine::stop()` for the down-peer regression. Article IX §1 95/85 assessment is seeded for `/speckit-verify`; sanitizer full-matrix execution remains a 016 SC-004 parent/verify obligation. |
+
+## 018-interop-live-admin — production-touch ledger
+
+> Tests-only feature, **ZERO production touch** (gap-fill G1). No `src/`/`include`
+> change — the engine send path, liveness loop, recovery sub-protocol, and Reject
+> path already shipped (005/013/S-023). This ledger records that G1 adds live-QFJ
+> interop **witnesses** (not new behaviour) for existing rows, and does not claim
+> the live QuickFIX matrix has run (cells skip-with-reason absent the parent harness).
+
+| Production touch | Spec section / requirement | Catalogue row(s) | Evidence / disposition |
+|---|---|---|---|
+| **NONE** (R-prod escape hatch did not fire) | `[FIX-SL §4.5.1/§4.5.5/§4.5.4/§4.5.3/§4.8.2/§4.8.5/§4.8.6]` admin/recovery; 018 FR-001..FR-011 | S-003/S-004/S-005/S-006/S-007/S-014/S-023 (live-QFJ interop witnesses) | `tests/interop/happy/hp_fix44_{testrequest_echo,idle_heartbeat_cadence,seqnum_recovery,recovery_outbound_answer,reject_invalid_admin}_test.cpp` — 10 G1 cells (5 groups × both roles) skip-with-reason without QFJ; each carries an SC-004 gate-bite (self-contained, passes). Goldens captured at first paired run (parent). Sanitizer full-matrix (ASan/UBSan/TSan) on the interop ctest is the `/speckit-verify` step (T024) — discharges the orthogonal 016 verify-YELLOW waiver. |
 
 ---
 
