@@ -172,6 +172,14 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // ── Counterparty-required: skip if absent (FR-009) ─────────────────────
     INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty).c_str());
 
+    // recovery_inbound admin round-trip is QFj-only at G1: the withhold_frame
+    // induction is only configured in the QFJ parent harness (T013 [PARENT]).
+    // Skip for non-QFj counterparties.
+    if (counterparty != Counterparty::quickfix_j) {
+        GTEST_SKIP() << "skip:not-applicable (recovery_inbound admin round-trip is QFj-only at G1; "
+                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+    }
+
     const char* dir = hp::tls_fixture_dir();
     if (dir == nullptr || dir[0] == '\0') {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";

@@ -159,6 +159,14 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     // ── Counterparty-required: skip if absent (FR-009) ─────────────────────
     INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty).c_str());
 
+    // session_reject admin round-trip is QFj-only at G1: the proxy_corrupt
+    // induction is only configured in the QFJ parent harness (T020 [PARENT]).
+    // Skip for non-QFj counterparties.
+    if (counterparty != Counterparty::quickfix_j) {
+        GTEST_SKIP() << "skip:not-applicable (session_reject admin round-trip is QFj-only at G1; "
+                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+    }
+
     const char* dir = hp::tls_fixture_dir();
     if (dir == nullptr || dir[0] == '\0') {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";

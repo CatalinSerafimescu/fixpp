@@ -163,6 +163,14 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     // ── Counterparty-required: skip if absent (FR-009) ────────────────────
     INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty).c_str());
 
+    // testrequest_echo admin round-trip is QFj-only at G1: the inbound_silence
+    // induction with 3s heartbeat_interval is only configured in the QFJ parent
+    // harness (T008 [PARENT]). Skip for non-QFj counterparties.
+    if (counterparty != Counterparty::quickfix_j) {
+        GTEST_SKIP() << "skip:not-applicable (testrequest_echo admin round-trip is QFj-only at G1; "
+                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+    }
+
     const char* dir = hp::tls_fixture_dir();
     if (dir == nullptr || dir[0] == '\0') {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
