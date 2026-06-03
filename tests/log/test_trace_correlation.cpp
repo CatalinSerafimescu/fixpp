@@ -229,6 +229,52 @@ TEST(TraceCorrelation, Log0AllZeros) {
         << "FIXPP_LOG0 must produce zero span_id";
 }
 
+// ── (d-slog) [RC#3] SLOG timestamp is wall-clock (system_clock::now()) ───────
+//
+// FR-006 effective-clock scope clarification (option b): FIXPP_SLOG uses
+// system_clock::now() for its timestamp because trace_context carries no clock.
+// This test asserts the DOCUMENTED behavior: SLOG produces a wall-clock timestamp
+// reasonably close to system_clock::now(), NOT a zero or mock-clock timestamp.
+// See contracts/log-core.md LOG-003 macro contract + L-017-6.
+
+TEST(TraceCorrelation, SlogTimestampIsWallClock) {
+    auto [sink_ptr, logger] = make_logger();
+
+    // Record wall-clock bounds before and after the SLOG call.
+    auto before = fixpp::core::utc_time_point{
+        std::chrono::system_clock::now().time_since_epoch()};
+
+    fixpp::otel::trace_context tc{};
+    tc.trace_id.fill(std::byte{0x11});
+    tc.span_id.fill(std::byte{0x22});
+
+    FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session,
+               "test message");
+
+    auto after = fixpp::core::utc_time_point{
+        std::chrono::system_clock::now().time_since_epoch()};
+
+    ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
+
+    auto records = sink_ptr->drain();
+    ASSERT_EQ(records.size(), 1u);
+
+    // SLOG timestamp must be a real wall-clock time (between before and after),
+    // not zero and not a future/past sentinel.
+    // This asserts the documented behavior: SLOG is wall-clock, not mock-clock.
+    EXPECT_GE(records[0].timestamp.time_since_epoch().count(),
+              before.time_since_epoch().count())
+        << "SLOG timestamp must be >= system_clock::now() captured before the call";
+
+    EXPECT_LE(records[0].timestamp.time_since_epoch().count(),
+              after.time_since_epoch().count())
+        << "SLOG timestamp must be <= system_clock::now() captured after the call";
+
+    // Confirm the timestamp is non-zero (it is a real wall-clock sample).
+    EXPECT_NE(records[0].timestamp.time_since_epoch().count(), 0)
+        << "SLOG timestamp must not be zero (must be a real system_clock sample)";
+}
+
 // ── (d) [E1 remediation] Mock clock timestamp via FIXPP_ELOG ─────────────────
 //
 // Inject a mock clock via EngineConfig::clock. Call FIXPP_ELOG.

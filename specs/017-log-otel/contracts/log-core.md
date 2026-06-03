@@ -22,14 +22,18 @@
 - `read_sequence_` / `write_sequence_` are `std::atomic<uint64_t>`, each `alignas(64)`; producer loads `read_sequence_` `relaxed` (R5; TSan).
 - `set_category_enabled` lock-free; disabled category dropped before enqueue, counted in `filter_count()`, NOT `drop_count()` (FR-011 / TS-8).
 - Three counters are **separate** atomics: `drop_count()` (overflow), `timeout_drop_count()` (drain timeout), `filter_count()` (category).
-- `Record::timestamp` from the effective clock (`SessionConfig::clock_override ?: EngineConfig::clock`); a mock clock makes timestamps deterministic (FR-006 / R8).
+- `Record::timestamp` source varies by macro tier (FR-006 scope clarification, RC#3):
+  - `FIXPP_ELOG`: reads `engine.clock()->now()` (effective clock injected via `EngineConfig::clock`); a mock clock makes ELOG timestamps deterministic. This is the **only** tier where effective-clock determinism is guaranteed. TS-7 (`ElogTimestampFromMockClock` in `test_trace_correlation.cpp`) covers this path.
+  - `FIXPP_SLOG`: reads `std::chrono::system_clock::now()` — the session's effective_clock is not carried in `trace_context`; wall-clock is used and is sufficient for log-record ordering. **Deterministic mock-clock control does NOT apply to SLOG.** TS-7s (`SlogTimestampIsWallClock` in `test_trace_correlation.cpp`) asserts this documented behavior.
+  - `FIXPP_LOG0` (Tier 3, zero context): reads `std::chrono::system_clock::now()` — wall-clock by design; used in dtors/static-init/shutdown where no clock is in scope. Wall-clock is intentional.
+  - See `spec/behaviors-and-limitations.md` L-017-6 for the documented deferral of effective-clock threading into SLOG.
 - `[[nodiscard]] shutdown(drain_timeout)`: drains + flushes each sink; on timeout returns `unexpected(log_drain_timeout)` (core slot 126; C-ABI map 1004) + bumps `timeout_drop_count()` (FR-014 / SC-007).
 - `async_flush()` posts completion to the caller's executor (one alloc, off hot path). **`async_flush()` and `shutdown()` are off-hot-path control/shutdown operations, explicitly EXCLUDED from the FR-001 zero-alloc producer gate** — their bounded allocation (e.g. the `std::function` completion handler, the flush sentinel enqueue) is not an FR-001 violation (New 4).
 
 ## LOG-003 macro contract (FR-012/FR-013, TS-6/TS-7)
-- `FIXPP_SLOG(lvl, tc, cat, fmt, ...)`: caller passes explicit `tc` from `session.get_trace_context()`; record carries `tc.trace_id`/`tc.span_id`. No `co_await`, no `thread_local`.
-- `FIXPP_ELOG(lvl, engine, cat, fmt, ...)`: reads `engine.engine_trace_context()` atomic snapshot.
-- `FIXPP_LOG0(lvl, cat, fmt, ...)`: zeroed trace_id/span_id (uncorrelated; not a bug).
+- `FIXPP_SLOG(logger_ptr, lvl, tc, cat, fmt, ...)`: caller passes explicit `tc` from `session.get_trace_context()`; record carries `tc.trace_id`/`tc.span_id`. Timestamp = `system_clock::now()` (wall-clock; session effective_clock not carried in `tc` — see L-017-6). No `co_await`, no `thread_local`.
+- `FIXPP_ELOG(logger_ptr, lvl, engine, cat, fmt, ...)`: reads `engine.engine_trace_context()` atomic snapshot. Timestamp = `engine.clock()->now()` (effective clock; mock-clock determinism guaranteed for ELOG only).
+- `FIXPP_LOG0(logger_ptr, lvl, cat, fmt, ...)`: zeroed trace_id/span_id (uncorrelated; not a bug). Timestamp = `system_clock::now()` (wall-clock by design; Tier-3 no-context path).
 - **No path may use `thread_local`** (`[const §XIII.3]`; grep-gate in verify).
 
 ## Test seams owned here
