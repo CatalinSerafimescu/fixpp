@@ -17,7 +17,13 @@ Unlike `016`/`018` (tests-only), this feature **adds public production surface**
 
 ## Clarifications
 
-<!-- Populated by /speckit-clarify (reference-engine sweep: QuickFIX-cpp / QuickFIX-J / Fix8 Application). -->
+### Session 2026-06-03
+
+- Q: How should `fromApp`/`fromAdmin` reject and `toApp` veto (DoNotSend) be signaled? → A: **fixpp-native return value** — callbacks return a typed result (error-code / `expected` / DoNotSend sentinel); rejection/veto is a normal return, never an exception (deliberate divergence from QuickFIX's exception API to fit fixpp's no-throw house style).
+- Q: At what granularity is the `Application` registered? → A: **Single per-engine** — one `Application` registered with the `Engine`, invoked for all its sessions, session identity passed per call (QuickFIX-C++/J + Fix8 model). Per-session override stays out of this slice.
+- Q: From which thread may the public application-send entry point be called? → A: **Any thread** — `send()` posts onto the session's serialized executor internally (preserving the strand invariant + `[L-015-4]` keepalive); a re-entrant send from inside an on-strand callback is handled without deadlock.
+- Q: When are `fromApp`/`fromAdmin` invoked relative to the engine's own session-FSM processing? → A: **After engine session processing** — callbacks fire only after seqnum/FSM validation accepts the message; a message failing session-level checks never reaches the user (QuickFIX semantics).
+- Q: What happens when a user callback unexpectedly throws (given return-value rejection)? → A: **Fail-safe terminal disconnect** — catch at the dispatch boundary, log, clear the re-entrancy guard, terminate the session (terminal close); a throw is a fatal user-contract violation, never propagated into engine internals.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -73,11 +79,10 @@ A library user is notified when a session is created and when it becomes / cease
 
 ### Edge Cases
 
-- **Callback throws (inbound)**: a user `fromApp`/`fromAdmin` that throws MUST NOT corrupt session state or leave the re-entrancy guard set; the engine must define and apply a deterministic disposition (treat as a reject vs. propagate-and-disconnect) consistent across admin and app.
-- **Callback throws (outbound/lifecycle)**: a user `toApp`/`toAdmin`/`onCreate`/`onLogon`/`onLogout` that throws MUST leave the session in a defined state (the re-entrancy guard cleared, the session not silently wedged).
+- **Callback throws (any site)**: a user `fromApp`/`fromAdmin`/`toApp`/`toAdmin`/`onCreate`/`onLogon`/`onLogout` that throws is a fatal user-contract violation (rejection/veto is return-value-based, not exception-based) → the engine catches at the dispatch boundary, logs, clears the re-entrancy guard, and **terminates the session (terminal close)**; the exception never reaches engine internals (FR-011).
 - **Send before logon / after logout**: originating an application message on a non-established session is refused with a defined error (no partial/queued transmission unless an explicit store-and-forward behavior is specified).
 - **Session torn down with callback work in flight**: the engine MUST drain all dispatched callback work (and any detached outbound write) before a session is destroyed — the `[L-015-4]` lifetime contract — so no callback ever runs against a freed session (no use-after-scope / data race under sanitizers).
-- **Re-entrant send from within a callback**: a user calling the application-send entry point from inside an inbound callback (already on the session executor) MUST be handled without deadlock or violating the single-in-flight-callback serialization invariant.
+- **Re-entrant send from within a callback**: because `send()` is any-thread-safe and posts onto the session executor (FR-006), a user calling it from inside an on-strand inbound callback is enqueued behind the current dispatch rather than recursing — no deadlock, and the single-in-flight-callback serialization invariant is preserved.
 - **No `Application` registered**: a session driven with no registered `Application` behaves exactly as the pre-019 engine (callbacks are simply not invoked; no behavioral regression).
 
 ## Requirements *(mandatory)*
@@ -85,19 +90,20 @@ A library user is notified when a session is created and when it becomes / cease
 ### Functional Requirements
 
 - **FR-001**: The library MUST expose a public `Application` interface comprising the callbacks `onCreate`, `onLogon`, `onLogout`, `fromAdmin`, `fromApp`, `toAdmin`, `toApp`, each receiving the session/peer identity.
-- **FR-002**: A user MUST be able to register an `Application` with the engine such that its callbacks are invoked for the engine's sessions; a session with no registered `Application` MUST behave exactly as the pre-019 engine (no callback invocation, no behavioral change).
-- **FR-003**: For each inbound application message on an established session, the engine MUST invoke `fromApp` exactly once with the message and session identity.
-- **FR-004**: For each inbound session-administrative message on an established session, the engine MUST invoke `fromAdmin` exactly once with the message and session identity.
-- **FR-005**: A `fromApp` rejection MUST cause the engine to emit the appropriate business-level reject response to the peer and not treat the message as accepted; a `fromAdmin` rejection MUST cause the engine to emit a session-level `Reject`.
-- **FR-006**: The library MUST expose a public entry point for a user to originate an outbound **application** message on an established session.
-- **FR-007**: Before transmitting an outbound application message, the engine MUST invoke `toApp`, allowing the user to inspect/modify the message or **veto** it (`DoNotSend`); a vetoed message MUST NOT be transmitted.
+- **FR-002**: A user MUST be able to register a **single** `Application` with the **engine**, whose callbacks are invoked for **all** of that engine's sessions (the QuickFIX-C++/J + Fix8 model), with the session identity passed per call; a session with no registered `Application` MUST behave exactly as the pre-019 engine (no callback invocation, no behavioral change). Per-session `Application` override is out of scope for this slice.
+- **FR-003**: For each inbound application message on an established session — **after** the engine's own session-FSM processing (seqnum/FSM validation) has accepted it — the engine MUST invoke `fromApp` exactly once with the message and session identity. A message that fails session-level checks MUST NOT reach `fromApp`.
+- **FR-004**: For each inbound session-administrative message on an established session — **after** the engine's own session-FSM processing has acted on it — the engine MUST invoke `fromAdmin` exactly once with the message and session identity. A message that fails session-level checks MUST NOT reach `fromAdmin`.
+- **FR-005**: Rejection MUST be signaled by the callback's **return value** (a typed result / error-code), never by a thrown exception. A `fromApp` rejection MUST cause the engine to emit the appropriate business-level reject response to the peer and not treat the message as accepted; a `fromAdmin` rejection MUST cause the engine to emit a session-level `Reject`.
+- **FR-006**: The library MUST expose a public entry point for a user to originate an outbound **application** message on an established session. This entry point MUST be callable from **any thread**: it posts the work onto the session's serialized executor internally, preserving the single-in-flight-callback strand invariant and the `[L-015-4]` keepalive; a re-entrant call from inside an on-strand callback MUST NOT deadlock.
+- **FR-007**: Before transmitting an outbound application message, the engine MUST invoke `toApp`, allowing the user to inspect/modify the message or **veto** it (`DoNotSend`); the veto MUST be signaled by **return value** (not an exception), and a vetoed message MUST NOT be transmitted.
 - **FR-008**: Before transmitting an engine-originated administrative message, the engine MUST invoke `toAdmin`, allowing inspection/modification; admin messages MUST still be transmitted (not vetoable).
 - **FR-009**: The engine MUST invoke `onCreate` once when a session is created (before logon), `onLogon` once when a session becomes established, and `onLogout` once when a session leaves the established state.
 - **FR-010**: All `Application` callbacks for a given session MUST execute on that session's serialized executor; the engine MUST NOT invoke two callbacks for the same session concurrently (the strand invariant the `dispatch_app_callback` seam asserts in debug builds).
-- **FR-011**: A user callback that throws MUST NOT corrupt session state or leave the re-entrancy guard set; the engine MUST apply a defined, deterministic disposition for a throwing callback at each callback site (inbound, outbound, lifecycle).
+- **FR-011**: Because rejection/veto is return-value-based (FR-005/FR-007), a thrown exception from a user callback is an **unexpected fatal user-contract violation**: at every callback site (inbound, outbound, lifecycle) the engine MUST catch it at the dispatch boundary, log it, clear the re-entrancy guard, and **terminate the session via terminal close** — never propagating the exception into engine internals and never corrupting session state.
 - **FR-012**: The engine MUST drain all dispatched `Application` callback work — and any detached outbound write originated by a callback — before destroying a session, satisfying the `[L-015-4]` lifetime/drain contract (`stop()` → `close(terminal)` + join-before-registry-clear; detached writes hold a shared keepalive per the 014 fix). No callback may run against a destroyed session.
 - **FR-013**: Originating an application message on a session that is not established MUST be refused with a defined error, transmitting nothing.
 - **FR-014**: The feature MUST NOT regress any existing session/engine behavior when no `Application` is registered, and MUST NOT alter the wire behavior of the session-administrative paths shipped in 005/013/015 beyond surfacing them to `fromAdmin`/`toAdmin`.
+- **FR-015**: The `Application` callback contract is **return-value / non-throwing**: the library MUST NOT require user callbacks to throw to signal any normal outcome (accept, reject, or veto), and MUST define every callback's outcome as an explicit return value.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -118,9 +124,9 @@ A library user is notified when a session is created and when it becomes / cease
 
 ## Assumptions
 
-- **Registration granularity**: a single `Application` is registered with the engine and invoked for all of that engine's sessions (the QuickFIX/QuickFIX-J/Fix8 model), with the session identity passed as a parameter. Per-session `Application` override is **not** included in this slice (revisit in `/speckit-clarify` if the reference-engine sweep argues otherwise).
+- **Registration granularity** *(resolved — Clarifications 2026-06-03; FR-002)*: a single `Application` is registered with the engine and invoked for all of that engine's sessions (the QuickFIX/QuickFIX-J/Fix8 model), with the session identity passed as a parameter. Per-session `Application` override is **not** included in this slice.
 - **Admin vetoability**: `toAdmin` is inspect/modify-only and cannot veto (admin messages are always sent); only `toApp` supports `DoNotSend`. (Matches QuickFIX semantics.)
-- **Rejection mechanism**: callbacks signal rejection through a defined contract (the precise mechanism — thrown exception vs. return value — is a design decision for `/speckit-plan`); the spec fixes only the observable behavior (which reject response the peer sees).
+- **Rejection/veto mechanism** *(resolved — Clarifications 2026-06-03; FR-005/FR-007/FR-011/FR-015)*: callbacks signal accept/reject/veto by **return value** (typed result / error-code / DoNotSend sentinel), never by a thrown exception; an unexpected throw is a fatal user-contract violation handled by terminal session close. (Deliberate divergence from QuickFIX's exception-based API to fit fixpp's no-throw house style.)
 - **Message representation**: the concrete type surfaced to callbacks (and accepted by the send entry point) is a design decision for `/speckit-plan`; the spec fixes only that an admin-vs-application FIX message is surfaced/accepted with its session identity.
 - **Wiring point**: callbacks are delivered through the existing internal `Session::dispatch_app_callback` seam onto the session's serialized executor; this feature adds the public `Application` surface and its engine wiring, it does not introduce a second executor or change the session threading model.
 - **Reuse of shipped paths**: the session-admin FSM, liveness, and recovery behaviors (005/013/015) are reused as-is; this feature surfaces them to `fromAdmin`/`toAdmin` and adds the application-message origination/delivery path, rather than re-implementing session behavior.
