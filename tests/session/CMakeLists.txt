@@ -1075,6 +1075,51 @@ add_test(NAME application_019_compile_smoke COMMAND application_019_compile_smok
 set_tests_properties(application_019_compile_smoke PROPERTIES
   LABELS "019;foundational;compile_smoke;application")
 
+# ── 019-app-callbacks T008 — Application inbound delivery tests ──────────────
+# fromApp/fromAdmin fire exactly once on exec_ with correct MessageView+SessionId;
+# INV-6 FSM-rejected messages don't reach callbacks; SC-001 ordering;
+# application==nullptr → no callbacks (FR-014 byte-identity); fromAdmin reject
+# → session Reject(35=3).
+# US1 AC1/AC2/AC4; FR-002/003/004/005/014; INV-1/4/6; SC-001/003/006.
+add_executable(application_inbound_019_test
+  test_application_inbound.cpp
+)
+target_link_libraries(application_inbound_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_inbound_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_inbound_019 COMMAND application_inbound_019_test)
+set_tests_properties(application_inbound_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us1;inbound;application")
+
+# ── 019-app-callbacks T009 — BusinessMessageReject(35=j) tests ───────────────
+# MANDATORY named test (Gate A RC#3): fromApp reject → BusinessMessageReject(35=j)
+# with RefMsgType(372)/RefSeqNum(45)/BusinessRejectReason(380) present; NOT
+# session Reject(35=3). fromApp accept → no reject on wire. US1 AC3; FR-005;
+# SC-003; research D4; [FIX50SP2] Infrastructure / Business Rejects (A-014).
+add_executable(application_business_reject_019_test
+  test_application_business_reject.cpp
+)
+target_link_libraries(application_business_reject_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_business_reject_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_business_reject_019 COMMAND application_business_reject_019_test)
+set_tests_properties(application_business_reject_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us1;business_reject;application")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

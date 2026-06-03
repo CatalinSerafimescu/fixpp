@@ -57,6 +57,12 @@
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
+// 019 T011: Application callback dispatch (inbound). Include here (session.cpp
+// only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
+// session → wire is ALLOWED per [arch §5.3] / check_layers.py.
+#include <fixpp/session/application.hpp>  // Application::fromAdmin / fromApp
+#include <fixpp/wire/parser.hpp>          // wire::Parser<Index>, wire::MessageView<Index>
+#include <fixpp/session/engine.hpp>       // SessionId::from_config
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -1679,6 +1685,74 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     last_inbound_steady_ = effective_clock_->steady_now();
                 }
 
+                // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
+                // Called here (top of Active-only handling) for ALL admin MsgTypes
+                // that reach this point after FSM + seqnum validation.
+                // Note: Logout(35=5) and SequenceReset(35=4) return early ABOVE
+                // this block; they are NOT dispatched to fromAdmin in this slice
+                // (deferred to US3/US2 wiring). Heartbeat/TestRequest/ResendRequest/
+                // Reject are dispatched here.
+                // [research D3/D4; FR-004; INV-6]
+                if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
+                    // Parse the frame into MessageView<Index> for the callback.
+                    std::array<std::byte, 16384> pa_buf{};
+                    std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+                                                              std::pmr::null_memory_resource()};
+                    std::array<std::byte, 512> carry_store{};
+                    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(),
+                                                                  carry_store.size(),
+                                                                  std::pmr::null_memory_resource()};
+                    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+                    fixpp::wire::Framer adm_framer;
+                    std::array<fixpp::wire::frame_view, 1> adm_out{};
+                    auto adm_feed = adm_framer.feed(
+                        frame, carry, std::span<fixpp::wire::frame_view>{adm_out});
+                    if (adm_feed && !adm_feed->empty()) {
+                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> adm_parser;
+                        auto adm_mv = adm_parser.parse((*adm_feed)[0], &pa_mr);
+                        if (adm_mv) {
+                            const SessionId adm_sid = SessionId::from_config(cfg_);
+                            callback_dispatch_scope cs{*this};
+                            auto cb_r = invoke_callback_safe([&]() {
+                                return engine_.application->fromAdmin(*adm_mv, adm_sid);
+                            });
+                            (void)cs;
+                            if (!cb_r) {
+                                if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                    co_await close(close_mode::terminal);
+                                    co_return std::unexpected(cb_r.error());
+                                }
+                                // fromAdmin reject → session Reject(35=3). (INV-4; D4)
+                                std::array<std::byte, 512> rj_buf{};
+                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                                const auto rj_st52 = effective_clock_
+                                                         ? stamp_sending_time(*effective_clock_)
+                                                         : SendingTimeStamp{};
+                                const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                                auto rj_r = fixpp::session::build_reject(
+                                    std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                                    rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                    rj_ref, 0, hdr.msg_type, 3,
+                                    cfg_.begin_string, rj_st52.value);
+                                if (rj_r) {
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (!assign_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(assign_r.error());
+                                    }
+                                    auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                                    if (!emit_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(emit_r.error());
+                                    }
+                                }
+                                // After reject emit, remain in Active (session-level reject).
+                                co_return fixpp::core::expected_t<void>{};
+                            }
+                        }
+                    }
+                }
+
                 // T041 US3 / T018-D: Active row — inbound Heartbeat → liveness.
                 // If we had an outstanding TestRequest:
                 //   - inbound Heartbeat TestReqID matches ours → clear (TR answered)
@@ -1921,38 +1995,123 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // 019 T006: use the shared classifier (single source of truth).
                     // "A" (dup-Logon-in-Active) is deliberately EXCLUDED from
                     // is_admin_msgtype — it falls through to Reject per 005
-                    // data-model row 22 / FR-017. No behaviour change here.
+                    // data-model row 22 / FR-017.
+                    //
+                    // 019 T011: app-accept branch.
+                    // When engine_.application is registered, a non-admin MsgType
+                    // in Active is an application message → route to fromApp instead
+                    // of emitting the default Reject(35=3). This SUPPRESSES the
+                    // default Reject for known app types when an Application exists.
+                    // FR-014 byte-identity preserved: when application==nullptr the
+                    // existing Reject path is unchanged. (research D8)
                     if (!detail::is_admin_msgtype(hdr.msg_type)) {
-                        // Unknown / app-type MsgType in Active →
-                        // Reject(reason=session_msg_type_invalid_for_state=3).
-                        // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
-                        std::array<std::byte, 512> rj_buf{};
-                        const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
-                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                           : SendingTimeStamp{};
-                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-                        auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-                            0,             // RefTagID: n/a for MsgType rejection
-                            hdr.msg_type,  // RefMsgType: the offending MsgType
-                            3,             // SessionRejectReason = 3 (invalid MsgType)
-                            cfg_.begin_string, st52.value);
-                        if (rj_result) {
-                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            if (!assign_r) {
-                                // Overflow or closed: session-fatal per data-model.md:30 E3.
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(assign_r.error());
+                        if (engine_.application == nullptr) {
+                            // No Application registered — pre-019 behaviour: Reject.
+                            // Unknown / app-type MsgType in Active →
+                            // Reject(reason=session_msg_type_invalid_for_state=3).
+                            // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
+                            std::array<std::byte, 512> rj_buf{};
+                            const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                            const auto st52 = effective_clock_
+                                                  ? stamp_sending_time(*effective_clock_)
+                                                  : SendingTimeStamp{};
+                            const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                            auto rj_result = fixpp::session::build_reject(
+                                std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                                0,             // RefTagID: n/a for MsgType rejection
+                                hdr.msg_type,  // RefMsgType: the offending MsgType
+                                3,             // SessionRejectReason = 3 (invalid MsgType)
+                                cfg_.begin_string, st52.value);
+                            if (rj_result) {
+                                auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                if (!assign_r) {
+                                    record_state_transition_(fsm_state::Disconnected);
+                                    co_return std::unexpected(assign_r.error());
+                                }
+                                auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+                                if (!emit_r) {
+                                    record_state_transition_(fsm_state::Disconnected);
+                                    co_return std::unexpected(emit_r.error());
+                                }
                             }
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-                            if (!emit_r) {
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(emit_r.error());
+                            // Remain in Active — session stays after sending Reject.
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+                        // else: Application registered → falls through to fromApp dispatch below.
+                    }
+                }
+
+                // ── 019 T011: fromApp dispatch for app-typed messages ─────────
+                // Reached ONLY when engine_.application != nullptr (guard above
+                // lets app messages fall through only if Application is registered).
+                // Admin messages are dispatched via fromAdmin at the top of the
+                // Active block and return early; they never reach here.
+                // FR-003; research D3/D4/D8; [const §VIII.5] (stack parse arena).
+                if (engine_.application != nullptr) {
+                    // Parse the frame into a MessageView<Index> for the callback.
+                    std::array<std::byte, 16384> parse_arena_buf{};
+                    std::pmr::monotonic_buffer_resource parse_arena{
+                        parse_arena_buf.data(), parse_arena_buf.size(),
+                        std::pmr::null_memory_resource()};
+
+                    std::array<std::byte, 512> carry_store{};
+                    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(),
+                                                                  carry_store.size(),
+                                                                  std::pmr::null_memory_resource()};
+                    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+                    fixpp::wire::Framer framer;
+                    std::array<fixpp::wire::frame_view, 1> out_views{};
+                    auto feed_r =
+                        framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{out_views});
+
+                    if (feed_r && !feed_r->empty()) {
+                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser;
+                        auto mv_r = parser.parse((*feed_r)[0], &parse_arena);
+
+                        if (mv_r) {
+                            const SessionId sid = SessionId::from_config(cfg_);
+
+                            // fromApp dispatch (FR-003).
+                            callback_dispatch_scope cs{*this};
+                            auto cb_r = invoke_callback_safe([&]() {
+                                return engine_.application->fromApp(*mv_r, sid);
+                            });
+                            (void)cs;
+                            if (!cb_r) {
+                                if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                    co_await close(close_mode::terminal);
+                                    co_return std::unexpected(cb_r.error());
+                                }
+                                // fromApp reject → BusinessMessageReject(35=j). (D4; FR-005)
+                                std::array<std::byte, 512> bmr_buf{};
+                                const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                                const auto st52 = effective_clock_
+                                                      ? stamp_sending_time(*effective_clock_)
+                                                      : SendingTimeStamp{};
+                                const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
+                                auto bmr_r = fixpp::session::build_business_message_reject(
+                                    std::span<std::byte>{bmr_buf.data(), bmr_buf.size()},
+                                    bmr_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                    ref_seq,
+                                    hdr.msg_type,  // RefMsgType(372)
+                                    0,             // BusinessRejectReason(380) = Other
+                                    cfg_.begin_string, st52.value);
+                                if (bmr_r) {
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (!assign_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(assign_r.error());
+                                    }
+                                    auto emit_r = co_await store_then_emit(bmr_seq, *bmr_r);
+                                    if (!emit_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(emit_r.error());
+                                    }
+                                }
                             }
                         }
-                        // Remain in Active — session stays after sending Reject.
-                        co_return fixpp::core::expected_t<void>{};
+                        // If parse fails: frame accepted for seqnum; session stays Active.
                     }
                 }
             }

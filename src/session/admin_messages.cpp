@@ -643,6 +643,103 @@ namespace {
     return out.subspan(0, *committed);
 }
 
+// ── BusinessMessageReject (35=j) ─────────────────────────────────────────────
+// 019-app-callbacks T010; research D4; [FIX50SP2] Infrastructure / Business
+// Rejects (catalogue A-014). Emitted when fromApp() returns an error.
+// Fields: 8=begin_string, 35=j, 34=seq, 49=SenderCompID, 52=sending_time,
+//         56=TargetCompID, 45=RefSeqNum, 372=RefMsgType, 380=BusinessRejectReason.
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
+// before the Ref* group; begin_string / sending_time last).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_business_message_reject(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, std::string_view ref_msg_type,
+    int business_reject_reason, std::string_view begin_string,
+    std::string_view sending_time) noexcept {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
+    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+
+    // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
+    if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 35=j (MsgType: BusinessMessageReject)
+    {
+        std::byte val[] = {static_cast<std::byte>('j')};
+        if (auto r = w.append_raw(35, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 34=seq (MsgSeqNum)
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(seq), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(34, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 49=SenderCompID
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 52=SendingTime — from effective_clock.now() (FR-003/RC#4).
+    if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 56=TargetCompID
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) {
+        return std::unexpected(r.error());
+    }
+
+    // 45=RefSeqNum — the MsgSeqNum of the rejected app message.
+    {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(ref_seq_num), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(45, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 372=RefMsgType — the MsgType of the rejected app message.
+    if (!ref_msg_type.empty()) {
+        if (auto r = w.append_raw(372, sv_to_bytes(ref_msg_type)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 380=BusinessRejectReason — reason code (0 = Other for slice 1).
+    {
+        char nbuf[12];
+        auto sv = render_u32(
+            static_cast<std::uint32_t>(business_reject_reason < 0 ? 0 : business_reject_reason),
+            nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(380, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // Commit: backpatch BodyLength(9=) and append CheckSum(10=).
+    auto committed = std::move(w).commit();
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
+    return out.subspan(0, *committed);
+}
+
 // ── ResendRequest (35=2) ───────────────────────────────────────────────────────
 // FR-009, [FIX-SL §4.3.2]. 013 recovery sub-protocol.
 // Fields: 8=begin_string, 35=2, 34=seq, 49=SenderCompID, 52=sending_time,

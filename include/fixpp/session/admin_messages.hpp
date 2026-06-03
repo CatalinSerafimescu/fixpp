@@ -112,6 +112,25 @@ namespace fixpp::session {
     std::string_view target_comp_id, seqnum_t begin_seqno, seqnum_t end_seqno,
     std::string_view begin_string, std::string_view sending_time) noexcept;
 
+// ── BusinessMessageReject (35=j) ─────────────────────────────────────────────
+// 019-app-callbacks T010; research D4; [FIX50SP2] Infrastructure / Business
+// Rejects (catalogue A-014). Emitted when fromApp() returns an error.
+//
+// Required fields per FIX spec:
+//   RefSeqNum(45)            — MsgSeqNum of the rejected app message
+//   RefMsgType(372)          — MsgType of the rejected app message
+//   BusinessRejectReason(380)— reason code (fixed/default for slice 1)
+//
+// Same stack-buffer discipline as build_reject: zero-alloc per [const §VIII.5].
+// begin_string: negotiated FIX version string for tag 8 (FR-002/RC#4).
+// sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
+// business_reject_reason: default 0 (Other) for slice 1; per-error-code reasons deferred.
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_business_message_reject(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, std::string_view ref_msg_type,
+    int business_reject_reason, std::string_view begin_string,
+    std::string_view sending_time) noexcept;
+
 // ── SequenceReset (35=4) — GapFill mode ──────────────────────────────────────
 // FR-009, [FIX-SL §4.4]. 013 recovery sub-protocol (reply to inbound ResendRequest).
 //
