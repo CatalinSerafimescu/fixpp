@@ -43,7 +43,7 @@ All decisions below are grounded in the **verified public surface** (`include/fi
 - **US3.ii (outbound answer, FR-004a)**: when QFJ issues a ResendRequest, fixpp stays `Active` and the outbound replay/GapFill is the parent golden's job.
 - **US4 (Reject)**: fixpp stays `Active` (no disconnect) after the malformed input; the `Reject(35=3)` + reference fields is the parent golden's job.
 
-**Rationale**: Plays only to the verified public observation surface; keeps in-process assertions deterministic (no flake). Every live-I/O wait uses `InteropEngineFixture::run_until(pred, deadline)` with an internal self-deadline (FR-010, `[[feedback_fail_placeholder_red_test]]`).
+**Rationale**: Plays to the public observation surface (`state()`/`fsm_visit_history()`/`recent_events()`) plus **one pre-existing tests-only seam** — the outbound-seqnum delta is read via `seqnum_mgr_test_access().peek_outbound()` (the 016 `hp_fix44_testrequest_echo_test.cpp` already uses it), NOT public API and NOT a new seam introduced by G1. No new test-access seam is created; the design depends on no private-state friend hook beyond this established one. Keeps in-process assertions deterministic (no flake). Every live-I/O wait uses `InteropEngineFixture::run_until(pred, deadline)` with an internal self-deadline (FR-010, `[[feedback_fail_placeholder_red_test]]`).
 
 **Alternatives considered**: assert echoed `112`/seqnum-range in-process — not possible without an inbound observer (R1). Deferred to golden.
 
@@ -51,10 +51,10 @@ All decisions below are grounded in the **verified public surface** (`include/fi
 
 ## R3 — Gap induction + malformed-frame injection mechanism (parent harness)
 
-**Decision**: Both are **parent-harness capabilities** in `phase-9-harness/`, not in-repo:
-- **Inbound gap (US3.i)**: drop/withhold a QFJ→fixpp frame at the passthrough layer (or drive QFJ to skip a sequence) so fixpp observes `MsgSeqNum > expected`.
-- **Outbound answer (US3.ii)**: drive QFJ to issue a `ResendRequest` against fixpp — preferred mechanism = QFJ restart/reconnect expecting a lower inbound sequence (QFJ's standard resend-on-logon behaviour), which is achievable from the QFJ launcher without bespoke code.
-- **Malformed admin (US4)**: inject a controlled-invalid admin frame toward fixpp at the proxy layer (e.g. a known-bad tag value the session rejects per `[FIX-SL §4.5.4]`).
+**Decision**: All three are **parent-harness capabilities** in `phase-9-harness/`, not in-repo, with **one induction mechanism pinned per cell** (no mixing — New-3):
+- **Inbound gap (`recovery_inbound`, US3.i)**: **pinned** to drop/withhold a single QFJ→fixpp frame at the passthrough layer so fixpp observes `MsgSeqNum > expected` → too-high → `ResendRequest`. The "drive QFJ to skip a sequence" alternative is NOT used in this cell: a QFJ send-seqnum skip without a stored message answers the subsequent resend with `SequenceReset-GapFill(123=Y)`, yielding a *different* golden frame set than the withhold-a-frame mechanism; the cell's capture-once golden would otherwise be non-deterministic.
+- **Outbound answer (`recovery_outbound`, US3.ii)**: **pinned** to driving QFJ to issue a `ResendRequest` against fixpp = QFJ restart/reconnect expecting a lower inbound sequence (QFJ's standard resend-on-logon behaviour), achievable from the QFJ launcher without bespoke code. See R8 + the parent contract `recovery_outbound` table for the full choreography (store state, `ResetOnLogon=N`, expected `7/16`, per-role).
+- **Malformed admin (US4, both directions)**: the parent **corrupts an admin frame in flight at the proxy layer** (a known-bad tag value the receiver rejects per `[FIX-SL §4.5.4]`); fixpp never originates malformed bytes (New-2). For the fixpp-rejects direction the parent corrupts a QFJ→fixpp frame; for the peer-rejects direction it corrupts a fixpp→QFJ frame.
 
 **Rationale**: fixpp cannot force its own inbound to gap, originate a malformed frame, or compel QFJ to resend from the in-process side (R1). The parent passthrough proxy + QFJ launcher (already present per ROADMAP P1/P2) are the natural injection points.
 
@@ -84,11 +84,11 @@ All decisions below are grounded in the **verified public surface** (`include/fi
 
 ## R6 — Golden enrichment + normalizer
 
-**Decision**: Add enriched goldens `happy/golden/HP-*-admin-*.fix` capturing the new admin frames; **reuse the 016 P4 normalizer unchanged** (canonicalize only `52=` SendingTime and `10=` CheckSum; a deliberate-mutation negative test must still bite). Goldens are captured at **first paired run**, never hand-fabricated (016 T009 rule).
+**Decision**: Add enriched goldens `happy/golden/HP-*-admin-*.fix` capturing the new admin frames; reuse the 016 `diff_transcripts(...)` utility but pass an **explicit G1 admin normalization profile** that excludes **only `{52, 10}`** (SendingTime + CheckSum) via the function's existing `excluded_tags` parameter (`golden_diff.hpp:44-46`). The **default** 016 tag set is `{9, 10, 34, 52, 60, 112, 122}` (`golden_diff.hpp:36-40`) — it drops `112`/`34`/`122`, exactly the tags G1 asserts (echo correlation, seqnum, OrigSendingTime/replay evidence), and MUST NOT be used for G1. This needs **no library change** — the parameter already exists; G1 is a caller-supplied tag set. A deliberate-mutation negative test on a *compared* tag (`112`/`34`/`7`/`16`/`122`/`123`) must bite. Goldens are captured at **first paired run**, never hand-fabricated (016 T009 rule).
 
-**Rationale**: the admin frames (`112` values, seqnum ranges) are deterministic enough to golden once `52=`/`10=` are canonicalized; reusing the normalizer keeps the drift gate semantics identical.
+**Rationale**: the admin frames (`112` values, seqnum ranges, `122` replay evidence) are the very subject of G1's assertions; the default 016 profile would mask them. Supplying `{52,10}` explicitly canonicalizes only the genuinely-volatile fields while keeping `diff_transcripts`' semantics identical.
 
-**Alternatives considered**: a richer normalizer (canonicalize seqnums) — rejected (would mask the very seqnum behaviour US3 asserts).
+**Alternatives considered**: reuse the 016 *default* tag set unchanged — rejected (it canonicalizes `112`/`34`/`122`, masking FR-001's echo, FR-003's seqnum, and FR-004/004a's `122` replay evidence — the assertions G1 exists to make). A richer normalizer (canonicalize seqnums) — also rejected (same masking).
 
 ---
 
@@ -106,7 +106,7 @@ All decisions below are grounded in the **verified public surface** (`include/fi
 
 **Decision**: Pin QuickFIX-J's expected admin behaviour so assertions reconcile to spec, not to one engine:
 - **TestRequest→Heartbeat**: QFJ echoes the `TestReqID(112)` in the Heartbeat — standard, no divergence.
-- **ResendRequest reply**: QFJ replays application messages with `PossDup(43=Y)`/`OrigSendingTime(122=)` and collapses admin-message gaps into `SequenceReset-GapFill(35=4,123=Y)`. Since G1 exchanges no app messages before the gap, the withheld frames are admin → QFJ predominantly answers with **GapFill**. The spec already **accepts either** reply shape (FR-004) — no divergence to resolve.
+- **ResendRequest reply**: QFJ replays application messages with `PossDup(43=Y)`/`OrigSendingTime(122=)` and collapses admin-message gaps into `SequenceReset-GapFill(35=4,123=Y)`. Since G1 exchanges no app messages before the gap, the withheld/missing frames are admin → QFJ answers **predominantly (often exclusively) with GapFill**, so the `(43=Y,122=)` replay arm may **never fire** in a pure-admin G1 gap. The spec **accepts either** reply shape (FR-004/FR-004a), so this is not a divergence — but the `recovery_outbound` golden + contract table (parent contract §4) MUST be written to the GapFill-only outcome as the expected baseline, with the replay arm flagged as the conditional/optional shape (not a required assertion). For the **outbound** half specifically, the precondition that makes a QFJ-issued `ResendRequest` deterministic (preserved store, `ResetOnLogon=N`, expected `7/16`) is pinned in the parent contract `recovery_outbound` table.
 - **Reject-vs-disconnect**: some malformed inputs may make a peer disconnect rather than `Reject`. Per spec (`§4.5.4`) a session-level reject is non-fatal; if QFJ disconnects for a given input, that is recorded as a **KNOWN-LIMITATION** (peer divergence), and the cell selects a malformed input that elicits a `Reject` (not a disconnect) for the positive assertion.
 
 **Rationale**: the engine-drift rule (`[const §VI]` reconcile-to-spec) + the thorny-corpus precedent (Fix8-vs-QFC GapFill divergence is corpus-only; Fix8 not live in G1). No new blocking divergence surfaced.

@@ -47,12 +47,12 @@ done
 ## Capture / verify goldens (first paired run)
 
 - Goldens are captured at first paired run from the QFJ engine-log seam; do **not** hand-fabricate.
-- Verify the drift gate bites: mutate one tag (e.g. an echoed `112`) in a golden and confirm the cell FAILs, then revert (SC-004).
+- Verify the drift gate bites: mutate one **compared** tag (`112`/`34`/`7`/`16`/`122`/`123` — NOT a canonicalized `52`/`10`, which the `{52,10}` admin profile ignores) in a golden and confirm the cell FAILs, then revert (SC-004).
 
 ## Definition of done (per SC)
 
 - All four admin scenario groups GREEN, both fixpp roles, vs live QFJ over `one_way_ca` TLS (SC-001).
-- 100% of G1 cells resolve to `pass`/`skip`/`n-a`; schema-check zero errors (SC-002).
+- 100% of G1 cells resolve to `pass`/`skip:<reason>`/`n/a`; schema-check zero errors (SC-002).
 - Recovery cells: fixpp back to `Active`, expected inbound seqnum, no prefix loss (SC-003).
 - Every cell has a gate-biting golden or a recorded known-limitation (SC-004).
 - Matrix run deterministic, no hangs/flakes across the configured repeat count (SC-005).

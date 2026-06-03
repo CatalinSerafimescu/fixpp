@@ -30,14 +30,14 @@ G1 extends the **already-minted** session-layer interop badge (016 P0–P6, 2026
 **Target Platform**: Linux (WSL2 dev; CI is the gate). Full live matrix + sanitizers at release-prep (two-tier, not per-PR — clarify-decision-2 of 016 ROADMAP).
 **Project Type**: single C++ library (fixpp) — this feature is interop test-scaffolding + enriched goldens, **not** a production module.
 **Performance Goals**: N/A (no perf change; the QuickFIX throughput-parity target is the separate bench tier, out of scope).
-**Constraints**: every scenario reconciles to the FIX spec, not to an engine (engine-drift rule); only fixpp is instrumented for sanitizers; live cells degrade gracefully when QFJ is absent (never silent-pass); no research/sweep content in-repo (`[const §XV.18]`); golden normalizer canonicalizes only `52=`/`10=` (reuse 016 P4 normalizer); session-admin scope only — the `[const §VII.6]` business-message clause stays the open v1.0-GA residual (G2), NOT touched here.
+**Constraints**: every scenario reconciles to the FIX spec, not to an engine (engine-drift rule); only fixpp is instrumented for sanitizers; live cells degrade gracefully when QFJ is absent (never silent-pass); no research/sweep content in-repo (`[const §XV.18]`); golden diff uses the existing 016 `diff_transcripts` utility with an **explicit `{52,10}` admin profile** passed into its `excluded_tags` parameter (the 016 *default* set `{9,10,34,52,60,112,122}` is wrong for G1 — it drops `112`/`34`/`122`/`123`; no library change needed); session-admin scope only — the `[const §VII.6]` business-message clause stays the open v1.0-GA residual (G2), NOT touched here.
 **Scale/Scope**: 11 FRs (+ FR-004a, FR-005a) / 6 SCs / 4 user stories. Admin matrix ≈ 4 scenario groups × **both roles** × FIX 4.4 (LIVE) vs QuickFIX-J, over `one_way_ca` TLS. Bounded extension of the existing `happy/` cells + new goldens; **zero production surface** expected.
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design. Articles validated against `.specify/constitution.md`.*
 
-- **Article VI / VI.5 (Spec Coverage; Normative References)**: ✓ — the spec carries exact `[FIX-SL]` anchors for each scenario (admin `§4.5.1`/`§4.5.5`/`§4.5.4`; recovery `§4.8.2`/`§4.8.5`/`§4.8.6`; seqnum/gap `§4.5.3`/`§4.8.1`; liveness `§4.5`). A `## Normative References` section is added at `/speckit-tasks` time if Gate A flags a gap (016 precedent). No NEW spec rows — G1 exercises existing S-003/S-004/S-005/S-006/S-007/S-014/S-023 behaviours live.
+- **Article VI / VI.5 (Spec Coverage; Normative References)**: ✓ (satisfied, Gate-A round 1) — the spec carries a `## Normative References` section enumerating the exact coverage-index entries (admin `§4.5.1`/`§4.5.5`/`§4.5.4`; recovery `§4.8.2`/`§4.8.5`/`§4.8.6`; seqnum/gap `§4.5.3`; the `[const §VI]`/`§VI.5`/`§IX.2`/`§XV.18`/`§XVII.1` clauses relied on). The earlier "added at `/speckit-tasks` if flagged" deferral misread VI.5 (the obligation attaches to the `/specify` artifact now, not conditionally) and was corrected during Gate A. No NEW spec rows — G1 exercises existing S-003/S-004/S-005/S-006/S-007/S-014/S-023 behaviours live.
 - **Article VII.1/VII.5 (TDD; conformance corpus)**: ✓ — golden-diff + FSM/seqnum witnesses are red-first executable tests under ctest; the harness extends (does not replace) the 016 `tests/interop/` corpus; goldens are captured at first paired run, never hand-fabricated (016 T009 rule).
 - **Article VIII (perf/bench)**: ✓ by exclusion — no perf change; no `bench/` baseline touched.
 - **Article IX.1 (coverage 95/85 touched modules)**: ✓ — **N/A by construction**: zero production surface expected (tests + goldens only). If R-prod fires (a scenario needs production code), the touched lines fall under 95/85 with a `verify.md` assessment + coverage-index entry — but the default is no production touch. The witnesses *raise* coverage on existing `session/` admin/recovery paths against live traffic.
@@ -80,7 +80,7 @@ tests/interop/                          # EXTENDS the 016 deliverable (no new to
 ├── support/
 │   ├── interop_fixture.{hpp,cpp}        # REUSED as-is (run_until / stop_within); no change expected
 │   ├── scenario_descriptor.hpp          # EXTENDED — admin round-trip descriptor fields (R1/contracts)
-│   ├── golden_diff.{hpp,cpp}            # REUSED — same 52=/10= normalizer; assert new admin frames
+│   ├── golden_diff.{hpp,cpp}            # REUSED as-is; G1 passes an explicit {52,10} excluded_tags profile (NOT the 016 default); assert new admin frames
 │   └── counterparty_probe.hpp           # REUSED — skip-with-reason when QFJ absent
 ├── happy/
 │   ├── hp_fix44_testrequest_echo_test.cpp     # EXTENDED — bidirectional 112 echo, both roles (US1)
@@ -101,3 +101,8 @@ tests/interop/                          # EXTENDS the 016 deliverable (no new to
 ## Complexity Tracking
 
 > No Constitution Check violations requiring justification. The one structural decision (Architecture A: golden-based wire assertion + parent-driven manipulation, vs the rejected in-process-seam Architecture B) is recorded in the Summary + research R1 and is the headline Gate-A review item; it reduces rather than adds complexity (zero production surface, no new interface).
+
+## Gate A
+
+- Round 1 applied 2026-06-03: Codex P1=3 P2=2 P3=0; Opus post-judging P1=4 P2=5 P3=2; rewrite addresses RC#1 (spec authored against non-existent admin-originate/inbound-observe capability) + RC#2 (false normalizer premise) + VI.5 normative refs + FR-004a contract + AC-level coverage. Reviews: research/reviews/codex_018-interop-live-admin_gate_a_review.md, research/reviews/opus_018-interop-live-admin_gate_a_adversarial_review.md.
+- Round 2 applied 2026-06-03: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=2; rewrite fixes the round-1-introduced descriptor regressions — scenario-specific `induction` (covers inbound_silence/idle), per-(scenario_group,role) AC exact-set coverage, and verbatim alignment of CellResultRow.status + disposition to the 016 cell_results_schema_check enum {pass,fail,skip:<reason>,known-limitation,n/a}. Reviews: research/reviews/codex_018-interop-live-admin_gate_a_2_review.md, research/reviews/opus_018-interop-live-admin_gate_a_2_adversarial_review.md.
