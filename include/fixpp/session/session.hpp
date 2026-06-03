@@ -586,6 +586,16 @@ private:
     // declaration here satisfies Phase 2 (link-green via session.cpp stub).
     void emit_event(SessionEvent ev) noexcept;
 
+    // 019 T014 — fire toAdmin for an engine-originated admin emit (FR-008/010).
+    // Called BEFORE store_then_emit at every admin message build site (Logon/
+    // Logout/Heartbeat/TestRequest/ResendRequest/SequenceReset). Inspect-only —
+    // admin is NOT vetoable. On throw: terminal-close + records app_callback_threw
+    // (throw→terminal-close is handled by the caller after this returns false).
+    // Returns true if toAdmin completed normally (or no Application registered);
+    // returns false if the callback threw (caller must terminal-close + return error).
+    // Called directly on the session strand ([research D3; FR-008/010]).
+    [[nodiscard]] bool fire_to_admin_(std::span<const std::byte> frame) noexcept;
+
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
     // session_ back-pointer. ReconnectFsm is a value member of Session

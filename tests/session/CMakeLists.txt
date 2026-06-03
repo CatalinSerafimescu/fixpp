@@ -1120,6 +1120,26 @@ set_tests_properties(application_business_reject_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us1;business_reject;application")
 
+# ── 019-app-callbacks T012 — outbound origination + interception tests ───────
+# US2: Engine::send crosses wire after toApp; toApp veto drops transmit; toAdmin
+# fires on admin emits; non-established session → state error; unknown id → 119.
+add_executable(application_outbound_019_test
+  test_application_outbound.cpp
+)
+target_link_libraries(application_outbound_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_outbound_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_outbound_019 COMMAND application_outbound_019_test)
+set_tests_properties(application_outbound_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us2;outbound;application")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

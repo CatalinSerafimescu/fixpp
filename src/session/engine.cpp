@@ -547,7 +547,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // (E-1 / Gate A New-3 / data-model C1 step 6 / FQ-2)
         // open() is awaitable — must run inside the loop, not in start().
         // On open() failure, close the transport and exit the loop (fatal).
-        entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+        entry.session = std::make_shared<Session>(engine_cfg, entry.config);
         {
             auto res = co_await entry.session->open();
             if (!res.has_value()) {
@@ -617,7 +617,7 @@ static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& e
 
     // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
     entry.config.engine_managed = true;
-    entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+    entry.session = std::make_shared<Session>(engine_cfg, entry.config);
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await entry.session->open();
@@ -760,6 +760,69 @@ asio::awaitable<void> Engine::stop() {
     if (engine_cfg_.meter) {
         engine_cfg_.meter->shutdown();
     }
+}
+
+// ── Engine::send — T013 (019-app-callbacks US2) ───────────────────────────────
+//
+// Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
+//
+// Design:
+//   1. Registry lookup: if id not found → session_invalid_argument (119).
+//   2. Strong keepalive: capture entry.session (shared_ptr<Session>) so the
+//      Session outlives the posted closure even if stop() races and clears the
+//      registry (UAF class from [[feedback_detached_cospawn_write_not_in_join_counter]]).
+//   3. Check session != null AND state == Active: if not → session_invalid_state_for_send (77).
+//   4. Post onto the session's strand (executor().underlying()), co_await the result.
+//   5. Session::send_impl calls toApp (via callback_dispatch_scope + invoke_callback_safe):
+//      veto (app_do_not_send) → return that error; other error → return it; accept → transmit.
+//   6. Backpressure = the awaited result ([const §XV.15]). No silent-drop queue.
+//   7. Re-entrant call from within an on-strand callback enqueues behind the current
+//      dispatch (asio::post is non-blocking → no deadlock).
+//
+// The toApp callback runs inside Session::send_impl on the session strand. Engine::send
+// is the any-thread posting wrapper that moves work onto the strand. The session keepalive
+// (shared_ptr<Session> kl) is captured in the lambda and held for the full duration.
+asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
+                                                     std::span<const std::byte> app_payload) {
+    // Step 1: registry lookup.
+    auto it = registry_.find(id);
+    if (it == registry_.end()) {
+        co_return std::unexpected(core::error::session_invalid_argument);
+    }
+
+    // Step 2: capture strong keepalive BEFORE posting (UAF guard).
+    std::shared_ptr<Session> kl = it->second.session;
+
+    // Step 3: session null (loop not yet started) or not Active → reject early.
+    if (!kl || kl->state() != fsm_state::Active) {
+        co_return std::unexpected(core::error::session_invalid_state_for_send);
+    }
+
+    // Copy payload bytes into a local buffer owned by this coroutine frame so the
+    // span remains valid across the post boundary (caller's span may be stack-allocated
+    // and would dangle after co_await returns control to the caller).
+    std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
+
+    // Step 4: post onto the session's strand and await the result.
+    // asio::co_spawn with use_awaitable runs the lambda on the target executor
+    // and co_awaits it — the co_await here suspends Engine::send until the
+    // Session::send completes on the session strand.
+    auto exec = kl->executor().underlying();
+    core::expected_t<void> result =
+        co_await asio::co_spawn(exec,
+                                [kl, payload_copy = std::move(payload_copy)]()
+                                    -> asio::awaitable<core::expected_t<void>> {
+                                    // Re-check state on the strand (may have changed).
+                                    if (kl->state() != fsm_state::Active) {
+                                        co_return std::unexpected(
+                                            core::error::session_invalid_state_for_send);
+                                    }
+                                    co_return co_await kl->send(std::span<const std::byte>(
+                                        payload_copy.data(), payload_copy.size()));
+                                },
+                                asio::use_awaitable);
+
+    co_return result;
 }
 
 // ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────

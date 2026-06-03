@@ -172,6 +172,49 @@ void Session::emit_event(SessionEvent ev) noexcept {
     }
 }
 
+// ── 019 T014 — fire_to_admin_ ─────────────────────────────────────────────────
+//
+// Called before store_then_emit at every engine-originated admin emit site.
+// Parses the built frame and invokes engine_.application->toAdmin() if Application
+// is registered. Admin is inspect-only (not vetoable). Returns false only if the
+// callback threw (caller must terminal-close + return an error).
+//
+// Stack-local parse arena ([const §VIII.5] — no heap).
+// Called directly on the session strand (research D3; FR-008/010).
+// [019-app-callbacks T014; FR-008/010; research D3]
+bool Session::fire_to_admin_(std::span<const std::byte> frame) noexcept {
+    if (engine_.application == nullptr) return true;
+
+    std::array<std::byte, 8192> pa_buf{};
+    std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    std::array<std::byte, 512> carry_store{};
+    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
+                                                 std::pmr::null_memory_resource()};
+    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+    fixpp::wire::Framer ta_framer;
+    std::array<fixpp::wire::frame_view, 1> ta_out{};
+    auto feed_r = ta_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{ta_out});
+    if (!feed_r || feed_r->empty()) return true;  // parse error — skip callback, not fatal
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser;
+    auto mv_r = parser.parse((*feed_r)[0], &pa_mr);
+    if (!mv_r) return true;  // parse error — skip callback, not fatal
+
+    const SessionId sid = SessionId::from_config(cfg_);
+    callback_dispatch_scope cs{*this};
+    auto cb_r = invoke_callback_safe([&]() {
+        engine_.application->toAdmin(*mv_r, sid);
+    });
+    (void)cs;
+    if (!cb_r) {
+        // Only possible error: app_callback_threw (FR-011).
+        // Caller must terminal-close + return error.
+        return false;
+    }
+    return true;
+}
+
 // recent_events: membership-witness view over the last ≤16 emitted SessionEvents
 // (physical-buffer order; NOT chronologically meaningful). [data-model §E-6]
 std::span<const SessionEvent> Session::recent_events() const noexcept {
@@ -430,6 +473,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // [W3.4 / /simplify B-8 fix]
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(assign_r.error());  // overflow (I-8)
+    }
+    // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
+    if (!fire_to_admin_(*logon_result)) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(fixpp::core::error::app_callback_threw);
     }
     auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
     if (!emit_r) {
@@ -1411,6 +1459,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(assign_r.error());
                 }
+                // 019 T014: toAdmin before transmitting the acceptor reply Logon. [FR-008/010]
+                if (!fire_to_admin_(*reply_logon)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                }
                 auto emit_r = co_await store_then_emit(reply_seq, *reply_logon);
                 if (!emit_r) {
                     // Emit failed (transport error). RC#B: Disconnected, not Active.
@@ -1518,6 +1571,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
                             st52.value);
                         if (lo_result) {
+                            // 019 T014: toAdmin before transmitting Logout. [FR-008/010]
+                            (void)fire_to_admin_(*lo_result);
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -1578,6 +1633,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, next_expected, 0U,
                         cfg_.begin_string, st52.value);
                     if (rr_result) {
+                        // 019 T014: toAdmin before transmitting ResendRequest. [FR-008/010]
+                        (void)fire_to_admin_(*rr_result);
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -1650,6 +1707,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
                         st52.value);
                     if (logout_result) {
+                        // 019 T014: toAdmin before confirming Logout. [FR-008/010]
+                        (void)fire_to_admin_(*logout_result);
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -1789,6 +1848,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
                             cfg_.begin_string, st52.value);
                         if (hb_result) {
+                            // 019 T014: toAdmin before Heartbeat echo. [FR-008/010]
+                            (void)fire_to_admin_(*hb_result);
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -1817,6 +1878,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
                         cfg_.begin_string, st52.value);
                     if (hb_result) {
+                        // 019 T014: toAdmin before Heartbeat reply. [FR-008/010]
+                        (void)fire_to_admin_(*hb_result);
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -1888,6 +1951,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!gf) {
                             co_return true;
                         }  // build failure treated as no-op
+                        // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
+                        (void)fire_to_admin_(*gf);
                         co_return co_await transmit_async(*gf);
                     };
 
@@ -2468,18 +2533,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // (1) Stamp SendingTime(52) from effective_clock.now().
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
 
-    // (2) Assign outbound MsgSeqNum(34) via SeqnumManager::assign_outbound() per
-    // spec.md FR-001(a). Peek the current value; advance on success of emit.
-    // F3 (Round-A drift): switched from bare next_outbound_seq_++ to
-    // seqnum_mgr_.assign_outbound() so both counters stay in sync.
-    // [spec.md FR-001(a); data-model.md §E1; F3 drift fix]
-    auto assign_r = co_await seqnum_mgr_.assign_outbound();
-    if (!assign_r) {
-        co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
-    }
-    const seqnum_t seq = *assign_r;
-    // RC#A (gate-b/r1-green): next_outbound_seq_ removed — no sync needed.
-    // The manager is now the single source of truth for outbound seqnums.
+    // (2) Peek outbound MsgSeqNum(34) — used in frame build below.
+    // The seqnum is NOT yet advanced (assign_outbound is called AFTER toApp check).
+    // Mirrors the admin-builder pattern (peek + build + assign) used by build_heartbeat
+    // et al. in the liveness loop. [spec.md FR-001(a); data-model.md §E1]
+    const seqnum_t seq = seqnum_mgr_.peek_outbound();
 
     // (3) Build the frame into a 4096-byte stack buffer.
     std::array<std::byte, 4096> buf{};
@@ -2596,6 +2654,68 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         if (!wfield("10=", std::string_view{cs_buf, 3})) {
             co_return std::unexpected(error::wire_frame_too_large);
         }
+    }
+
+    // ── 019 T013: toApp inspection/veto (FR-006/007; US2 AC1/AC2; research D6) ──
+    // Called AFTER the complete frame is built so the MessageView passed to toApp
+    // contains all FIX fields (8=, 34=, 49=, 52=, 56=, etc.) — NOT the raw
+    // app_payload (which is a partial body without session headers).
+    // Run BEFORE store_then_emit so a vetoed/aborted send is not stored or transmitted.
+    // A veto does NOT consume the seqnum — the seqnum was already assigned above;
+    // however a vetoed frame is simply not emitted (the seqnum hole is acceptable
+    // per spec — the next successful send will use the NEXT seqnum). This matches
+    // the QuickFIX behavior where a vetoed outgoing message leaves a gap.
+    //
+    // Uses callback_dispatch_scope (INV-2 debug guard) + invoke_callback_safe
+    // (throw → terminal-close, FR-011). Session stays Active on veto (INV-5/SC-004).
+    // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
+    if (engine_.application != nullptr) {
+        std::span<const std::byte> built_frame{buf.data(), pos};
+        std::array<std::byte, 16384> pa_buf{};
+        std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+                                                  std::pmr::null_memory_resource()};
+        std::array<std::byte, 512> carry_store{};
+        std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
+                                                     std::pmr::null_memory_resource()};
+        fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+        fixpp::wire::Framer toapp_framer;
+        std::array<fixpp::wire::frame_view, 1> toapp_out{};
+        auto feed_r =
+            toapp_framer.feed(built_frame, carry, std::span<fixpp::wire::frame_view>{toapp_out});
+        if (feed_r && !feed_r->empty()) {
+            fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser;
+            auto mv_r = parser.parse((*feed_r)[0], &pa_mr);
+            if (mv_r) {
+                const SessionId sid = SessionId::from_config(cfg_);
+                callback_dispatch_scope cs{*this};
+                auto cb_r = invoke_callback_safe([&]() {
+                    return engine_.application->toApp(*mv_r, sid);
+                });
+                (void)cs;
+                if (!cb_r) {
+                    if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                        co_await close(close_mode::terminal);
+                        co_return std::unexpected(cb_r.error());
+                    }
+                    // toApp veto (app_do_not_send) or other error → drop, return error.
+                    // Session stays Active (INV-5/SC-004).
+                    co_return std::unexpected(cb_r.error());
+                }
+            }
+        }
+        // If parse fails: frame accepted (treat as no-op on toApp — cannot inspect).
+    }
+
+    // (3b) Advance outbound seqnum counter via assign_outbound() — AFTER toApp check
+    // so a vetoed send does NOT consume a seqnum. [FR-001(a); T013 ordering]
+    {
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
+        }
+        // The assigned value must equal the peeked seq (single-strand, no race).
+        // Discard the returned value — we already embedded seq in the frame above.
+        (void)assign_r;
     }
 
     // (4) store(outbound) BEFORE transport ([2e §4.1]).
@@ -2715,6 +2835,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq, cfg_.sender_comp_id,
                     cfg_.target_comp_id, {}, cfg_.begin_string, st52_hb.value);
                 if (hb_result) {
+                    // 019 T014: toAdmin before liveness Heartbeat. [FR-008/010]
+                    (void)fire_to_admin_(*hb_result);
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         record_state_transition_(fsm_state::Disconnected);
@@ -2763,6 +2885,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
                     cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
                 if (tr_result) {
+                    // 019 T014: toAdmin before TestRequest. [FR-008/010]
+                    (void)fire_to_admin_(*tr_result);
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -2995,6 +3119,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // The session still transitions to LogoutSent and times out.
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
+        // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
+        (void)fire_to_admin_(*logout_result);
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
             // Overflow or closed: session-fatal per data-model.md:30 E3.
