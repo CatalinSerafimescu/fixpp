@@ -2,7 +2,7 @@
 
 **Feature**: 019-app-callbacks | **Date**: 2026-06-03 | Status: design contract (not yet implemented)
 
-The public callback interface a library user implements to observe/intercept FIX message flow. This is the **only** new public type the slice adds (plus the `EngineConfig::application` registration field and the `Engine::send(SessionId, …)` origination entry point). Header placement proposed: `include/fixpp/session/application.hpp` (cross-check `decisions/architecture.md` layering at /implement).
+The public callback interface a library user implements to observe/intercept FIX message flow. This is the **only** new public type the slice adds (plus the `EngineConfig::application` registration field and the `Engine::send(SessionId, …)` origination entry point). Header placement proposed: `include/fixpp/session/application.hpp` (cross-check `.specify/architecture.md` §4.4 layering at /implement — `fixpp::session::Application` is reserved there in the `session/` module, so the placement is ALLOWED with no `check_layers.py` map change).
 
 ## Interface sketch (illustrative — exact spelling finalised in TDD)
 
@@ -47,20 +47,20 @@ public:
 ```
 
 `EngineConfig` gains: `std::shared_ptr<Application> application{nullptr};`
-`Engine` gains: `expected_t<void> send(const SessionId&, std::span<const std::byte> app_payload);` (any-thread — FR-006).
+`Engine` gains: `asio::awaitable<fixpp::core::expected_t<void>> send(const SessionId&, std::span<const std::byte> app_payload);` (any-thread — FR-006; the caller awaits it — the await carries the post-completion veto/store/write outcome and is the outbound backpressure, no silent-drop queue).
 
 ## Method contracts
 
 | Method | Pre | Post / effect | Threading | Failure |
 |--------|-----|---------------|-----------|---------|
-| `onCreate` | session object constructed, before logon | user may init per-session resources | session strand | throw ⇒ terminal close (FR-011) |
+| `onCreate` | session object constructed + `open()` initialized `exec_`, before first Logon | user may init per-session resources | session strand (post-`open()`) | throw ⇒ terminal close (FR-011) |
 | `onLogon` | session reached `Active` | user may begin originating sends | session strand | throw ⇒ terminal close |
 | `onLogout` | session leaving established | user may release per-session resources | session strand | throw ⇒ terminal close |
 | `fromAdmin` | inbound admin msg accepted by FSM | accept ⇒ normal; error ⇒ `Reject(35=3)` emitted | session strand | throw ⇒ terminal close |
 | `fromApp` | inbound app msg accepted by FSM | accept ⇒ delivered; error ⇒ `BusinessMessageReject(35=j)` | session strand | throw ⇒ terminal close |
 | `toAdmin` | engine about to emit admin msg | inspect; msg still sent | session strand | throw ⇒ terminal close |
 | `toApp` | user/engine about to emit app msg | send / veto(`app_do_not_send`) / abort(other error) | session strand | throw ⇒ terminal close |
-| `Engine::send` | — (any thread) | posts to session strand → `toApp` → emit; returns result | any thread (FR-006) | unknown id ⇒ `session_invalid_argument`; not established ⇒ `session_invalid_state_for_send` (FR-013); veto ⇒ `app_do_not_send` |
+| `Engine::send` | — (any thread) | posts to session strand → `toApp` → emit; **awaitable** result resumes after post completes (natural backpressure); registry lookup holds a strong/owning session keepalive that outlives the post (014 class) | any thread (FR-006); returns `asio::awaitable<expected_t<void>>` | unknown id ⇒ `session_invalid_argument` (119); not established ⇒ `session_invalid_state_for_send` (77, FR-013); veto ⇒ `app_do_not_send` (129) |
 
 ## Guarantees
 
@@ -77,3 +77,7 @@ public:
 - Per-session `Application` override (single per-engine — Clarifications Q2).
 - `RejectLogon`-style logon veto from `fromAdmin` (lifecycle/admin reject of Logon is a follow-up).
 - Config-file parsing, store/log factories, C ABI (spec Out of Scope).
+
+## Normative References
+
+Per `[const §VI.5]`: `[const §VIII.5]` (zero-alloc, G6), `[const §XI.4]` (strand serialization, G1), `[const §XIV.2]` (interface cap — 7 methods / 0 pure-virtual), `[arch §4.4]` (`Application` placement in `session/`), `[L-015-4]` (drain/keepalive, G2), `[FIX-SL §4.5.4]` (`Reject(35=3)`), `[FIX50SP2] Infrastructure / Business Rejects` (catalogue row A-014; `BusinessMessageReject(35=j)`).

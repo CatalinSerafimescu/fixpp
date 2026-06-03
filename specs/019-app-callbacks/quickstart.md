@@ -44,7 +44,7 @@ fixpp::core::EngineConfig cfg = /* … */;
 cfg.application = std::make_shared<MyApp>();   // outlives the engine; nullptr ⇒ no callbacks
 
 fixpp::session::Engine engine(io_exec, cfg);
-engine.register_session(session_cfg);          // onCreate fires when the session is built
+engine.register_session(session_cfg);          // only records config; onCreate fires after the engine opens the session (post-open(), before Logon)
 engine.start();
 ```
 
@@ -52,11 +52,14 @@ engine.start();
 
 ```cpp
 std::array<std::byte, N> payload = build_new_order_single(/* … */);  // app fields only
-auto r = engine.send(session_id, payload);     // any thread; posts onto the session strand
+// any thread; posts onto the session strand, then resumes with the outcome.
+// `Engine::send` returns asio::awaitable<expected_t<void>> — await it from a
+// coroutine context (the await is the backpressure; no silent-drop queue):
+auto r = co_await engine.send(session_id, payload);
 if (!r) { /* r.error(): not-established, unknown id, or DoNotSend */ }
 ```
 
-`send` runs `toApp` first (veto check), then the durable-before-transmit path (stamps `MsgSeqNum(34)`/`SendingTime(52)`, stores, writes). A re-entrant `send` from inside a callback is enqueued behind the current dispatch — no deadlock.
+`send` posts onto the session strand, runs `toApp` first (veto check), then the durable-before-transmit path (stamps `MsgSeqNum(34)`/`SendingTime(52)`, stores, writes); the awaitable resumes once that completes. A re-entrant `send` issued from inside an on-strand callback is enqueued **behind** the current dispatch — no deadlock — *provided* the callback does not synchronously block the strand waiting on the send's completion (the posted send cannot run until the current callback unwinds the strand).
 
 ## 4. Verify (acceptance ↔ spec)
 

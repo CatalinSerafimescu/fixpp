@@ -8,11 +8,11 @@ This feature is behavioural (a callback/observer surface), not data-storage; the
 
 ### `Application` (new — the public callback interface)
 
-The user-implemented observer/interceptor. Abstract base; **all methods are `virtual` with default no-op / default-accept bodies (0 pure-virtual** — [const §XIV.2]). A user subclasses and overrides only the callbacks they need.
+The user-implemented observer/interceptor. Abstract base; **all methods are `virtual` with default no-op / default-accept bodies (0 pure-virtual)** — [const §XIV.2]. A user subclasses and overrides only the callbacks they need.
 
 | Callback | Signature (conceptual) | Returns | Default | Semantics |
 |----------|------------------------|---------|---------|-----------|
-| `onCreate` | `(const SessionId&)` | `void` | no-op | Session object created (before logon). Per FR-009. |
+| `onCreate` | `(const SessionId&)` | `void` | no-op | Session object created and executor initialized by `open()`, **before** first Logon processing/emission (so it runs on the session strand — `executor()` is valid only post-`open()`). Per FR-009. |
 | `onLogon` | `(const SessionId&)` | `void` | no-op | Session reached established (`Active`). FR-009. |
 | `onLogout` | `(const SessionId&)` | `void` | no-op | Session left established (graceful or terminal). FR-009. |
 | `fromAdmin` | `(const MessageView&, const SessionId&)` | `expected_t<void>` | accept | Inbound **admin** msg, **after** FSM processing (FR-004). `error` ⇒ session `Reject(35=3)` (FR-005). |
@@ -42,14 +42,14 @@ Read-only, dict-backed parsed FIX message (`get<Tag>() → expected_t<field_view
 |-------------|---------------|--------------|
 | `fromApp` returns `error` | emit business reject | `BusinessMessageReject(35=j)`: `RefMsgType(372)`, `RefSeqNum(45)`, `BusinessRejectReason(380)` |
 | `fromAdmin` returns `error` | emit session reject | `Reject(35=3)`: `RefSeqNum(45)`, `SessionRejectReason(373)` |
-| `toApp` returns `app_do_not_send` | drop the outbound (no transmit) | `send()` returns `error::app_do_not_send` to caller |
-| `toApp` returns other `error` | abort the send | `send()` returns that `error` |
+| `toApp` returns `app_do_not_send` | drop the outbound (no transmit) | the awaited `Engine::send` result is `unexpected(error::app_do_not_send)` |
+| `toApp` returns other `error` | abort the send | the awaited `Engine::send` result is `unexpected(that error)` |
 | any callback throws | terminal-close session | `error::app_callback_threw` recorded |
 
-### New `error::` enumerators (mint at next free slot ≥122 — confirm at /tasks)
+### New `error::` enumerators (next free slot is 129; 017 minted 122–128)
 
-- `app_do_not_send` — `toApp` veto sentinel (FR-007).
-- `app_callback_threw` — session terminated by a throwing callback (FR-011).
+- `app_do_not_send = 129` — `toApp` veto sentinel (FR-007).
+- `app_callback_threw = 130` — session terminated by a throwing callback (FR-011).
 
 (Reused: `session_invalid_state_for_send=77` for send-before-logon FR-013; `session_invalid_argument=119` for unknown `SessionId`.)
 
@@ -73,9 +73,11 @@ register_session(cfg)
    │ engine admin emit         → toAdmin(view,id) → [emit]  │  FR-008
    └────────────────────────────────────────────────────────┘
         │
-   close(graceful|terminal)  OR  terminal disconnect  OR  callback-threw
+   close(graceful) │ close(terminal) │ terminal disconnect │ callback-threw
+        │  (all three exit paths converge on the SINGLE transition edge ↓)
+   Active → !Active  in record_state_transition_  (fire-once-per-session guard)
         │
-   onLogout(id)                         ← FR-009 (leaves established)
+   onLogout(id)                         ← FR-009 (exactly once; INV-7)
         │
    [Engine drains exec_ before Session dtor]   ← [L-015-4] / FR-012
 ```
@@ -83,8 +85,9 @@ register_session(cfg)
 ## Invariants (testable)
 
 - **INV-1**: with `application == nullptr`, the firing order above collapses to the pre-019 path — zero callback invocations, zero behavioural delta (FR-002/FR-014; SC-006).
-- **INV-2**: for one session, callbacks are totally ordered (never concurrent) — the `exec_` strand + `dispatch_guard` (FR-010; SC-005).
+- **INV-2**: for one session, callbacks are totally ordered (never concurrent). The serialization guarantee is the **`exec_` strand** (`make_strand`); `dispatch_guard` is a **debug-only (`#ifndef NDEBUG`) invariant check** that asserts no concurrent entry, not a release-build serialization mechanism (FR-010; SC-005).
 - **INV-3**: no callback executes after its session is destroyed — Engine drains `exec_` before dtor (FR-012; SC-005).
 - **INV-4**: a `fromApp`/`fromAdmin` reject produces exactly the mapped peer reject; an accept produces none (FR-005; SC-003).
 - **INV-5**: a `toApp` veto transmits nothing; a non-veto transmits exactly once (FR-007; SC-004).
 - **INV-6**: inbound callbacks never see a message that failed session-FSM validation (FR-003/FR-004).
+- **INV-7**: each lifecycle callback fires **exactly once per session** — `onCreate` once (post-`open()`, pre-first-Logon), `onLogon` once at established, `onLogout` once pinned to the single idempotent `Active → !Active` edge in `record_state_transition_` (fire-once-per-session guard), so the graceful-close / terminal-close / callback-threw exit paths cannot double-fire or miss it (FR-009; US3).

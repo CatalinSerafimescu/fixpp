@@ -236,7 +236,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 **Public surface:**
 
 - `fixpp::session::Session` — main user-facing handle. Coroutine-driven `[const §XI.1]`.
-- `fixpp::session::Application` — callback interface (`onLogon` / `onLogout` / `toAdmin` / `fromAdmin` / `toApp` / `fromApp`) `[SYN §1.3]`.
+- `fixpp::session::Application` — callback interface (`onCreate` / `onLogon` / `onLogout` / `toAdmin` / `fromAdmin` / `toApp` / `fromApp`) `[SYN §1.3]` (the 6 inbound/outbound/established-edge hooks; `onCreate` — session-object-created, pre-logon — completes the canonical 7-method Application set per the reference engines QuickFIX-C++/J + Fix8, added by `019-app-callbacks`). Lives in the existing `session/` module (`include/fixpp/session/application.hpp`); no `check_layers.py` ALLOWED-map change required.
 - `fixpp::session::MessageStore` — interface; writes return `asio::awaitable<void>` `[SYN §3.2 Q7]`.
 - `fixpp::session::MemoryStore`, `fixpp::session::FileStore` — default impls.
 - `fixpp::session::SessionConfig` — frozen config struct: `SecurityProfile`, dictionary, `MessageStore` factory, executor opt-out, lock policy, recovery thresholds, dialect overlay, tap consumer, log/otel hooks.
