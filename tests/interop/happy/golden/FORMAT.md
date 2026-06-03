@@ -36,3 +36,13 @@ parent-harness runtime step — tasks.md T009, deferred).
 
 Golden updates are deliberate, reviewed commits (golden-transcript-format.md
 "Update discipline"); silent churn is a Gate-B finding.
+
+## 018-interop-live-admin G1 admin frames (additive)
+
+`HP-QFj-{init,acc}-fix44-testrequest-echo.fix` carry additional admin frames
+beyond the Logon/Logout handshake: the `TestRequest(35=1, 112=ID)` and
+answering `Heartbeat(35=0, 112=ID)` in both directions. These files use the
+**G1 admin normalization profile** `{52, 10}` — NOT the 016 default
+`{9,10,34,52,60,112,122}` (which would drop the `112` echo correlation tag).
+See `specs/018-interop-live-admin/contracts/golden-admin-transcript-format.md`
+for the full frame-set and normalization contract.

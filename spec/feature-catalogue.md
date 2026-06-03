@@ -58,6 +58,25 @@ parent `phases/phase-9/unit-test-parity-matrix.md`. The `[const §VII.6]`
 business-message flow (`Logon -> NewOrderSingle -> ExecutionReport -> Logout`)
 remains OPEN as a v1.0-GA residual, forward-pointing to A-001/A-006.
 
+### 018-interop-live-admin (tests-only, gap-fill G1)
+
+No new behaviour rows are added by `018-interop-live-admin`. It is a bounded
+extension of the 016 `tests/interop/**` deliverable: the live QuickFIX-J cells
+now assert **real bidirectional FIX 4.4 session-admin round-trips** on the
+established session (TestRequest→Heartbeat `112` echo, idle Heartbeat cadence,
+ResendRequest/SequenceReset-GapFill recovery both directions, session-level
+`Reject(35=3)` survival) — both fixpp roles, over `one_way_ca` TLS — rather than
+only the Logon/Logout handshake. These are **live-QFJ interop witnesses for the
+already-shipped admin behaviours** **S-003 / S-004 / S-005 / S-006 / S-007 /
+S-014 / S-023** (engine send path + liveness + recovery + Reject shipped in
+005/013/S-023); **zero production surface**. Five `scenario_group`s × both roles
+= 10 G1 base cells, each with an SC-004 gate-bite negative test; goldens captured
+at first paired run in the parent `phase-9-harness/` (skip-with-reason locally).
+The `{52,10}` admin normalization profile (not the 016 default) keeps `112`/`34`/
+`122`/`123` assertable. Application-message interop (G2, `[const §VII.6]`) stays
+OUT of scope — an open v1.0-GA residual. Discharges the orthogonal 016
+verify-YELLOW sanitizer waiver (the interop ctest runs under ASan/UBSan/TSan).
+
 ## Wire / Encoding
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |

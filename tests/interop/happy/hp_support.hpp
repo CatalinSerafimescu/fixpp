@@ -219,4 +219,22 @@ inline std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterpa
     return n;
 }
 
+// 018-interop-live-admin T005 confirmation:
+// The existing TestWithParam<std::tuple<Counterparty, Role>> pattern already
+// enables every G1 admin cell to run as fixpp-initiator AND fixpp-acceptor
+// (FR-005a) without any new machinery:
+//   - cell_name()     — names each (counterparty, role) instantiation
+//   - cell_endpoint() — resolves initiator vs acceptor bind endpoint
+//   - make_session_config() — builds the correct SessionConfig per role
+// G1 admin drivers declare their test class as
+//   class MyAdminTest : public ::testing::TestWithParam<std::tuple<Counterparty, Role>>
+// and instantiate with:
+//   INSTANTIATE_TEST_SUITE_P(BothRoles, MyAdminTest,
+//       ::testing::Values(
+//           std::make_tuple(Counterparty::quickfix_j, Role::fixpp_initiator),
+//           std::make_tuple(Counterparty::quickfix_j, Role::fixpp_acceptor)),
+//       cell_name);
+// A thin alias for the parameter tuple is provided for readability:
+using AdminCellParam = std::tuple<Counterparty, Role>;
+
 }  // namespace fixpp::interop::hp

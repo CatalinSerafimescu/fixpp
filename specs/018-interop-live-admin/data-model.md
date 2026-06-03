@@ -71,12 +71,15 @@ The `cell_results.yaml` entry validated by the in-repo `interop_cell_results_sch
 
 | Field | Type | Notes |
 |---|---|---|
-| `cell_id` | string | matches E1 |
+| `id` | string | matches E1 cell id (the schema field is `id`, not `cell_id` — `cell_results_schema_check_test.py` `REQUIRED_FIELDS`) |
+| `config` | enum | `normal` \| `asan-ubsan` \| `tsan` — the in-repo declaration is `config: normal`; the parent re-emits per build config at release-prep (REQUIRED field) |
+| `kind` | enum | `happy` \| `thorny` \| `parity` — G1 admin cells are `happy` (REQUIRED field) |
 | `status` | enum | `pass` \| `fail` \| `skip:<reason>` \| `known-limitation:<tracking-issue>` \| `n/a` (aligned verbatim to the 016 `cell_results_schema_check` enum, `cell_results_schema_check_test.py:67`) |
 | `matrix_disposition` | enum | `live` (for `pass`/`fail`/`skip:<reason>`) \| `deferred:*` (closed tag set, for `status n/a`) — `status n/a ⇔ matrix_disposition deferred:*` (the schema-check core invariant, `:71-84`) |
-| `tier` | const | `release-prep` (G1 cells are not per-PR, R7) |
 | `spec_ref` | string | `[FIX-SL §…]` |
 | `deferred_reason` | string | required when `matrix_disposition` is `deferred:*` (i.e. `status n/a`); `skip:<reason>`/`known-limitation:<tracking>` carry their reason inline in the status |
+
+**Release-prep tier is NOT a row field.** The G1 cells run at release-prep (not per-PR, R7), but that is a parent-emit concept (`emit_matrix.py` tier selection), not a `cell_results.yaml` row field — the in-repo schema-check has no `tier` field. (Round-3 Gate-A residual fixed by T001.)
 
 **Validation**: round-trips through the **same** schema-check rules as the 016 matrix (no schema change); a live `skip:<reason>`/`fail` ⇒ cell badge-ineligible (FR-009). A by-design deferral is `status n/a` + `matrix_disposition deferred:*` (closed tag set) + a `deferred_reason` — never `skip` (`skip:<reason>` is strictly live counterparty-unavailable, `:87-97`).
 

@@ -20,6 +20,22 @@ The badge names exact `{name, version, commit}` (FR-024). In-repo we pin the
 Badge text shape: `Interop verified against QuickFIX-cpp v1.16.0 / QuickFIX-J 3.0.1`
 (+ archived-transcript link + this limitations list).
 
+## Badge scope — what is asserted (018 G1, SC-006)
+
+As of **018-interop-live-admin (gap-fill G1)**, the QuickFIX-J live cells assert
+**real bidirectional FIX 4.4 session-admin round-trips on the established
+session** — not merely the Logon/Logout handshake the original badge captured:
+TestRequest→Heartbeat `112` echo (both directions), idle Heartbeat cadence
+(`108=1`s, ≥3 beats/dir), ResendRequest / SequenceReset-GapFill recovery (both
+inbound-detect and outbound-answer), and session-level `Reject(35=3)` survival —
+each for **both fixpp roles** over `one_way_ca` TLS.
+
+**Scope boundary (do NOT overstate):** the badge covers **session-admin** interop
+only. **Application-message interop** (`NewOrderSingle → ExecutionReport`, the
+`[const §VII.6]` business flow / G2) is **still NOT asserted** and remains an open
+v1.0-GA residual. G1 enriches the session-layer badge; it does not extend it to
+business messages.
+
 ## Corpus known-limitations (FR-014 — deferred-by-design)
 
 From `thorny/CORPUS-INDEX.md`'s known-limitation table — upstream behaviors fixpp
@@ -59,6 +75,27 @@ intentionally scopes out at v1.0, each with its tracking ref:
   re-checks). The `016` down-peer watchdog cell (`HP-down-peer-stop-watchdog`)
   pins the bounded-stop contract on the policy-wired path (T008/FR-028); the
   unbounded mid-connect case is tracked in `spec/behaviors-and-limitations.md` (L2).
+
+## Session-reject vs peer-disconnect divergence (018 US4 / T021)
+
+When a malformed or invalid admin frame is received, the FIX specification
+(`[FIX-SL §4.5.4]`) requires the receiving engine to emit `Reject(35=3)` with
+`RefSeqNum(45)` and an appropriate `SessionRejectReason(373)`[/`RefTagID(371)`],
+and **continue the session** (non-fatal). fixpp follows this rule (S-007 path).
+
+In practice, some counterparties may **disconnect** instead of sending a
+`Reject(35=3)` in response to certain malformed inputs. This is a
+**counterparty divergence**, not a fixpp defect: the session-reject cell
+(`HP-QFj-{init,acc}-fix44-reject-invalid-admin`) asserts fixpp's own behaviour
+(the Reject is emitted, the session stays `Active`). If a counterparty
+disconnects on a given input, that input is not suitable as the proxy-corrupt
+induction for this cell; the parent harness must choose a malformed input that
+the counterparty tolerates with a `Reject` (not a `Logout`/disconnect).
+
+Counterparties confirmed to emit `Reject(35=3)` (and not disconnect) on the
+pinned malformed input: **QuickFIX-J 3.0.1** (paired at G1 release-prep tier).
+Any divergence observed on other inputs or counterparty versions should be
+recorded here with the specific triggering input and counterparty version.
 
 ## Inherited parent-harness obligation (FR-021)
 

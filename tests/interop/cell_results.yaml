@@ -39,6 +39,16 @@ cells:
   - { id: HP-QFcpp-init-fix44-disconnect-reconnect-noreset, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.4.2/§4.4.3/§4.8.6" }
   - { id: HP-QFj-init-fix44-disconnect-reconnect-noreset,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.4.2/§4.4.3/§4.8.6" }
 
+  # ── G1 (018-interop-live-admin) admin round-trip cells — NEW scenario groups ─
+  # recovery_outbound (fixpp answers a QFJ ResendRequest) + idle_cadence (108=1s
+  # unsolicited beats). The other three G1 groups (testrequest_echo,
+  # recovery_inbound == seqnum-recovery, session_reject == reject-invalid-admin)
+  # are reuse-and-enrich of the existing QFj rows above (no new id). QFj-only at G1.
+  - { id: HP-QFj-init-fix44-recovery-outbound, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.8.2/§4.8.5/§4.8.6" }
+  - { id: HP-QFj-acc-fix44-recovery-outbound,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.8.2/§4.8.5/§4.8.6" }
+  - { id: HP-QFj-init-fix44-idle-cadence,      config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1" }
+  - { id: HP-QFj-acc-fix44-idle-cadence,       config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1" }
+
   # ── Separate (non-matrix) regression cell — runs green locally, no counterparty
   - { id: HP-down-peer-stop-watchdog, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.4" }
 
