@@ -28,12 +28,15 @@
 #pragma once
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fixpp/log/sink.hpp>
 #include <functional>
+#include <mutex>
 #include <string>
+#include <thread>
 
 namespace fixpp::log {
 
@@ -126,12 +129,32 @@ private:
     // Returns them sorted oldest-first.
     [[nodiscard]] std::vector<std::filesystem::path> list_archived() const noexcept;
 
+    // Start/stop the owned fsync worker thread (called from open/close).
+    void start_worker() noexcept;
+    void stop_worker() noexcept;
+
     FileSinkConfig config_;
     int fd_{-1};                       // POSIX fd for the live file
     std::FILE* stream_{nullptr};       // buffered wrapper (for fprintf)
     std::filesystem::path live_path_;  // <dir>/<base_name>.log
     std::uint64_t bytes_written_{0};
     std::uint64_t rotation_count_{0};
+
+    // ── Owned fsync worker (async_fsync escape — [2k §4.5]) ──────────────────
+    //
+    // A SINGLE persistent worker thread per FileSink is started in open() and
+    // joined (before fclose) in close(). flush(deadline) posts a request to it
+    // and wait_for(deadline) on completion: at most one in-flight fsync at a
+    // time, zero thread growth on repeated timeouts. close() always joins
+    // before the underlying fd is closed — no fd-reuse race.
+    enum class WorkerCmd : uint8_t { idle, fsync_requested, stop };
+
+    std::mutex              worker_mu_;
+    std::condition_variable worker_cv_;       // drain→worker: new cmd or stop
+    std::condition_variable worker_done_cv_;  // worker→drain: fsync complete
+    WorkerCmd               worker_cmd_{WorkerCmd::idle};
+    bool                    worker_fsync_done_{false};
+    std::thread             fsync_worker_;
 };
 
 // ── FileSinkFactory ────────────────────────────────────────────────────────────

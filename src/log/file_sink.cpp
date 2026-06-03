@@ -110,6 +110,11 @@ fixpp::core::expected_t<void> FileSink::open() {
         bytes_written_ = static_cast<std::uint64_t>(st.st_size);
     }
 
+    // Start the owned fsync worker (async_fsync escape — [2k §4.5]).
+    if (config_.async_fsync) {
+        start_worker();
+    }
+
     return {};
 }
 
@@ -141,52 +146,39 @@ void FileSink::flush(std::chrono::milliseconds deadline) noexcept {
     if (!config_.async_fsync) return;
 
     // Deadline-bounded fsync: [2k §4.5] / contracts/log-sinks.md §FileSink.
-    // The fsync (or injected fsync_fn) runs on a helper thread; the drain
-    // thread waits at most `deadline` for it to finish.
     //
-    // All shared state lives in FsyncState (heap-allocated, shared_ptr-owned)
-    // so there is no SUAR if the helper thread outlives this flush() call
-    // (which happens on a deadline timeout).
+    // Dispatch an fsync request to the OWNED persistent worker thread and
+    // wait at most `deadline` for completion. On timeout, flush() returns
+    // bounded while the worker continues (bounded to ≤1 in-flight fsync —
+    // no per-flush thread growth). The worker is joined in close() BEFORE
+    // fclose(), so it never operates on a closed/reused fd.
     //
     // Called on the drain thread only (sole caller per Sink contract).
-    struct FsyncState {
-        std::mutex mu;
-        std::condition_variable cv;
-        bool done{false};
-    };
+    if (!fsync_worker_.joinable()) return;  // worker not started (open not called)
 
     try {
-        auto state = std::make_shared<FsyncState>();
+        std::unique_lock<std::mutex> lk(worker_mu_);
+        worker_fsync_done_ = false;
+        worker_cmd_        = WorkerCmd::fsync_requested;
+        lk.unlock();
+        worker_cv_.notify_one();
 
-        int fd = fd_;
-        auto fsync_fn = config_.fsync_fn;  // copy by value (captures thread-safe)
-
-        std::thread helper([fd, fsync_fn, state]() {
-            // Run fsync on the helper thread.
-            if (fsync_fn) {
-                fsync_fn(fd);
-            } else {
-                ::fdatasync(fd);
-            }
-            // Signal completion via the shared state (safe even if drain timed out).
-            std::lock_guard<std::mutex> lk(state->mu);
-            state->done = true;
-            state->cv.notify_one();
-        });
-        helper.detach();
-
-        // Wait at most `deadline` for the fsync helper.
-        std::unique_lock<std::mutex> lk(state->mu);
-        state->cv.wait_for(lk, deadline, [&state] { return state->done; });
-
-        // If timed out: the helper thread continues running in the background.
-        // `state` is kept alive by the helper's captured shared_ptr — no SUAR.
+        // Wait at most `deadline` for the worker to complete the fsync.
+        lk.lock();
+        worker_done_cv_.wait_for(lk, deadline, [this] { return worker_fsync_done_; });
+        // On timeout: worker continues; next flush() will post another request
+        // which the worker processes once the prior fsync completes.
     } catch (...) {
         // Must not propagate (Sink::flush is noexcept).
     }
 }
 
 void FileSink::close() noexcept {
+    // CRITICAL ordering: stop+join the fsync worker BEFORE closing the fd.
+    // The worker reads fd_ directly; joining guarantees no in-flight fsync
+    // can land on the fd after fclose()/::close() — no fd-reuse race.
+    stop_worker();
+
     if (stream_ != nullptr) {
         std::fflush(stream_);
         // fclose also closes the underlying fd.
@@ -200,6 +192,74 @@ void FileSink::close() noexcept {
     }
 }
 
+// ── Private: fsync worker lifecycle ──────────────────────────────────────────
+
+void FileSink::start_worker() noexcept {
+    try {
+        // Reset state before spawning.
+        {
+            std::lock_guard<std::mutex> lk(worker_mu_);
+            worker_cmd_         = WorkerCmd::idle;
+            worker_fsync_done_  = false;
+        }
+        fsync_worker_ = std::thread([this]() {
+            while (true) {
+                std::unique_lock<std::mutex> lk(worker_mu_);
+                // Wait until there is a command (fsync_requested or stop).
+                worker_cv_.wait(lk, [this] {
+                    return worker_cmd_ != WorkerCmd::idle;
+                });
+
+                if (worker_cmd_ == WorkerCmd::stop) {
+                    return;  // graceful exit
+                }
+
+                // Consume the request; release lock before doing I/O.
+                worker_cmd_ = WorkerCmd::idle;
+                int fd = fd_;
+                auto fsync_fn = config_.fsync_fn;  // value copy under lock
+                lk.unlock();
+
+                // Run fsync (may block for a long time — that's fine; flush()
+                // only wait_for(deadline) and returns early on timeout; we
+                // continue here and notify when done regardless).
+                if (fd >= 0) {
+                    if (fsync_fn) {
+                        fsync_fn(fd);
+                    } else {
+                        ::fdatasync(fd);
+                    }
+                }
+
+                // Signal completion.
+                {
+                    std::lock_guard<std::mutex> done_lk(worker_mu_);
+                    worker_fsync_done_ = true;
+                }
+                worker_done_cv_.notify_one();
+            }
+        });
+    } catch (...) {
+        // Thread construction failed — worker stays not-joinable; flush() is
+        // a no-op (already guarded by joinable() check).
+    }
+}
+
+void FileSink::stop_worker() noexcept {
+    if (!fsync_worker_.joinable()) return;
+    try {
+        {
+            std::lock_guard<std::mutex> lk(worker_mu_);
+            worker_cmd_ = WorkerCmd::stop;
+        }
+        worker_cv_.notify_one();
+        fsync_worker_.join();
+    } catch (...) {
+        // join() is noexcept in practice; std::system_error impossible here
+        // unless the thread is not joinable (checked above).
+    }
+}
+
 std::filesystem::path const& FileSink::current_path() const noexcept { return live_path_; }
 
 std::uint64_t FileSink::bytes_written() const noexcept { return bytes_written_; }
@@ -210,6 +270,14 @@ std::uint64_t FileSink::rotation_count() const noexcept { return rotation_count_
 
 void FileSink::rotate() noexcept {
     try {
+        // 0. Stop the fsync worker BEFORE closing the current fd.
+        //    rotate() may be called from emit() while a prior timed-out flush()
+        //    left the worker running an fsync on the current fd. Joining here
+        //    ensures no in-flight fsync can land on the fd after fclose().
+        if (config_.async_fsync) {
+            stop_worker();
+        }
+
         // 1. Flush and close the current live file.
         if (stream_ != nullptr) {
             std::fflush(stream_);
@@ -264,6 +332,11 @@ void FileSink::rotate() noexcept {
 
         bytes_written_ = 0;
         ++rotation_count_;
+
+        // Restart the worker on the new fd.
+        if (config_.async_fsync && stream_ != nullptr) {
+            start_worker();
+        }
 
     } catch (...) {
         // rotate() must not propagate exceptions (called from emit() noexcept).

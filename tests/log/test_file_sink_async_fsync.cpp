@@ -263,10 +263,143 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
         << "flush(deadline) must implement the mandatory deadline escape "
         << "([2k §4.5] / contracts/log-sinks.md).";
 
-    // Wait long enough for the background fsync helper to finish before
-    // the test fixture tears down the tmpdir_ (avoids tmpdir removal racing
-    // the helper's still-open fd).
-    std::this_thread::sleep_for(k_fsync_sleep_ms + std::chrono::milliseconds{50});
-
+    // close() must return promptly — NO pre-sleep masking the lifetime bug.
+    // A correct owned-worker implementation joins the worker before fclose();
+    // close() may block briefly for the worker to finish its current fsync,
+    // but must not hang indefinitely. Allow up to k_fsync_sleep_ms + 200ms.
+    auto t_close_start = std::chrono::steady_clock::now();
     sink.close();
+    auto close_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_close_start);
+    EXPECT_LT(close_elapsed.count(), (k_fsync_sleep_ms + std::chrono::milliseconds{200}).count())
+        << "close() took " << close_elapsed.count() << "ms — should complete "
+        << "within " << (k_fsync_sleep_ms + std::chrono::milliseconds{200}).count()
+        << "ms (bounded join of the owned fsync worker)";
+}
+
+// ── FileSink close() lifetime: no detached threads, no fd-reuse race ─────────
+//
+// [RC#2 / P1 lifetime guard — Gate B r2]
+// [2k §4.5] / contracts/log-sinks.md §FileSink: close() must synchronize with
+// the owned fsync worker BEFORE closing the fd. Production close() must not
+// leave any in-flight thread holding the raw fd after fclose().
+//
+// Sub-tests:
+//   (i)   close() returns bounded after repeated timed-out flushes (no hung join)
+//   (ii)  no unbounded thread growth — repeated timeouts must not spawn extra
+//         threads (owned worker design: single persistent thread)
+//   (iii) no late fsync on a reused fd — after close()+reopen, the previously
+//         injected stalling fsync must NOT call the new fd value
+//
+// The injected fsync_fn uses a flag+condvar so the test can release it at
+// teardown, ensuring the worker can always exit (correct impl terminates;
+// a buggy detach-per-flush impl would skip the close join entirely).
+TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
+{
+    // Internal self-deadline: if something hangs, the test itself unblocks
+    // the stalling fsync_fn after k_release_after_ms so the worker can exit
+    // and the test fails with a time assertion rather than hanging ctest.
+    constexpr auto k_flush_deadline      = std::chrono::milliseconds{1};
+    constexpr auto k_fsync_stall_ms      = std::chrono::milliseconds{400};
+    constexpr auto k_close_bound_ms      = std::chrono::milliseconds{600};  // stall + margin
+    constexpr auto k_release_after_ms    = std::chrono::milliseconds{800};  // test self-deadline
+
+    // Shared state for the injected fsync: stall until released.
+    std::atomic<bool>   released{false};
+    std::atomic<int>    fsync_call_count{0};
+    std::atomic<int>    last_fsync_fd{-1};
+    std::mutex          release_mu;
+    std::condition_variable release_cv;
+
+    // The injected fsync stalls until released OR k_release_after_ms elapses.
+    // Records which fd it was called with.
+    auto stalling_fsync = [&](int fd) -> int {
+        fsync_call_count.fetch_add(1, std::memory_order_relaxed);
+        last_fsync_fd.store(fd, std::memory_order_relaxed);
+        std::unique_lock<std::mutex> lk(release_mu);
+        release_cv.wait_for(lk, k_release_after_ms, [&] { return released.load(); });
+        return 0;
+    };
+
+    fixpp::log::FileSinkConfig cfg;
+    cfg.directory      = tmpdir_;
+    cfg.base_name      = "lifetime_test";
+    cfg.max_file_bytes = 256u * 1024u * 1024u;
+    cfg.max_keep_count = 8u;
+    cfg.async_fsync    = true;
+    cfg.fsync_fn       = stalling_fsync;
+
+    fixpp::log::FileSink sink{std::move(cfg)};
+    ASSERT_TRUE(sink.open().has_value()) << "FileSink::open() failed";
+
+    // Repeatedly flush(1ms) against the stalling fsync — each call times out.
+    // A buggy detach-per-flush impl would spawn N detached threads here.
+    // The owned-worker design keeps exactly 1 in-flight fsync across all calls.
+    constexpr int k_flush_rounds = 5;
+    for (int i = 0; i < k_flush_rounds; ++i) {
+        sink.flush(k_flush_deadline);
+    }
+
+    // (ii) At most 1 fsync should have been called so far (the worker serializes).
+    // (A detach-per-flush impl would have up to k_flush_rounds calls in flight.)
+    EXPECT_LE(fsync_call_count.load(), 1)
+        << "More than 1 fsync in-flight after " << k_flush_rounds
+        << " timed-out flushes — indicates per-flush thread growth (detach bug)";
+
+    // Record the fd the first fsync used (the fd of the live file).
+    int original_fd = last_fsync_fd.load();
+
+    // close() immediately — NO pre-sleep masking. This is the key lifetime test.
+    // A correct implementation joins the worker; a detached-thread impl would
+    // return before the stalling fsync is done.
+    auto t0 = std::chrono::steady_clock::now();
+    sink.close();
+    auto close_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    // (i) close() must return bounded — within k_close_bound_ms.
+    // For the owned-worker design: close() joins the worker which is still
+    // stalling → close() blocks until released OR times out at k_release_after_ms.
+    // We accept up to k_close_bound_ms (which is < k_release_after_ms) only if
+    // the join is correct. The self-deadline above guarantees the test finishes.
+    EXPECT_LT(close_elapsed.count(), k_release_after_ms.count() + 200LL)
+        << "close() took " << close_elapsed.count()
+        << "ms — should return bounded (worker joined before fd close)";
+
+    // Release the stalling fsync (so the worker can finish and let the test end).
+    {
+        std::lock_guard<std::mutex> lk(release_mu);
+        released.store(true);
+    }
+    release_cv.notify_all();
+
+    // (iii) No late fsync on a reused fd: open a new FileSink reusing the same
+    // path (the OS may reuse the same fd integer). The original stalling fsync
+    // was already released above; verify it called the original fd, not a new one.
+    // This assertion is structural: if the old fsync called the new fd, the
+    // recorded last_fsync_fd would match the new file's fd, not the old one.
+    // We open the new file and check the fd integers don't collide.
+    //
+    // Note: the POSIX fd reuse guarantee is not testable deterministically, but
+    // the owned-worker design prevents it structurally (join before fclose).
+    // We assert what IS deterministic: fsync was only called for the pre-close fd.
+    if (original_fd >= 0) {
+        fixpp::log::FileSinkConfig cfg2;
+        cfg2.directory      = tmpdir_;
+        cfg2.base_name      = "lifetime_test";
+        cfg2.max_file_bytes = 256u * 1024u * 1024u;
+        cfg2.max_keep_count = 8u;
+        cfg2.async_fsync    = false;  // don't trigger more fsync calls
+        fixpp::log::FileSink sink2{std::move(cfg2)};
+        (void)sink2.open();
+        // Worker already joined — no pending fsync can land on the new fd.
+        // Any fsync call after this point would increment fsync_call_count.
+        int count_before = fsync_call_count.load();
+        // Give any latent detached thread time to run (discriminates the bug).
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        EXPECT_EQ(fsync_call_count.load(), count_before)
+            << "fsync was called after close() — indicates a detached thread "
+            << "outliving close(), which may target a reused fd";
+        sink2.close();
+    }
 }

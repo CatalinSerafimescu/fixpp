@@ -50,6 +50,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <thread>
 
 namespace {
 
@@ -98,6 +99,24 @@ public:
 
 private:
     std::shared_ptr<std::atomic<int>> flush_counter_;
+};
+
+// ── SlowFlushSink — blocks flush() for a configurable duration ───────────────
+// Used to verify drain_timeout is observed (not a hardcoded longer value).
+class SlowFlushSink final : public fixpp::log::Sink {
+public:
+    explicit SlowFlushSink(std::chrono::milliseconds flush_delay)
+        : flush_delay_(flush_delay) {}
+
+    [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
+    void emit(fixpp::log::Record const&) noexcept override {}
+    void flush(std::chrono::milliseconds /*deadline*/) noexcept override {
+        std::this_thread::sleep_for(flush_delay_);
+    }
+    void close() noexcept override {}
+
+private:
+    std::chrono::milliseconds flush_delay_;
 };
 
 // ── Helper: build a mock clock ────────────────────────────────────────────────
@@ -220,34 +239,38 @@ TEST(EngineCloseTeardown, E2_LoggerShutdownFlushesSinks) {
 // Verifies that Engine::stop() uses the operator-configured drain_timeout from
 // LoggerConfig rather than a hardcoded 5 s literal. [2k §6.6].
 //
-// Strategy: configure Logger with a non-default drain_timeout (200 ms, far from
-// 5000ms). Wire the Logger into the Engine. Call stop() via the Engine path.
-// Assert the SpySink received a flush() call — proving the Engine-path shutdown
-// executed (not a direct logger.shutdown() call). If Engine still hardcoded
-// 5000ms, the test would pass vacuously on success but the timeout behavior
-// would differ; a separate assertion verifies the accessor reports the configured
-// value.
+// DISCRIMINATING strategy: configure Logger with drain_timeout = 50ms; wire a
+// SlowFlushSink that blocks flush() for 800ms. Call Engine::stop(). Assert:
+//   (a) stop() returns in well under 800ms (drain_timeout = 50ms was respected)
+//   (b) logger->timeout_drop_count() incremented (Logger::shutdown returned
+//       log_drain_timeout, proving the 50ms deadline was actually applied)
+//
+// Under the OLD hardcoded shutdown(5000ms): the 800ms flush would complete
+// within budget → no timeout → timeout_drop_count() == 0 → assertion (b) FAILS.
+// Under the correct path (uses LoggerConfig::drain_timeout = 50ms): the 800ms
+// flush trips the 50ms wait → shutdown returns log_drain_timeout →
+// timeout_drop_count() > 0 → both assertions pass.
 
 TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
-    auto flush_count = std::make_shared<std::atomic<int>>(0);
-    auto spy_sink    = std::make_unique<SpySink>(flush_count);
+    // drain_timeout = 50 ms; SlowFlushSink blocks for 800 ms.
+    // Under correct impl: flush times out at ~50ms → stop() is well under 800ms.
+    // Under old hardcode (5000ms): flush completes in 800ms → stop() takes ~800ms.
+    constexpr auto k_drain_timeout  = std::chrono::milliseconds{50};
+    constexpr auto k_flush_delay    = std::chrono::milliseconds{800};
+    // stop() must return well under k_flush_delay; allow 3× k_drain_timeout +
+    // generous OS scheduling margin.
+    constexpr auto k_max_stop_ms    = std::chrono::milliseconds{400};
 
-    // Non-default drain_timeout (200 ms — distinct from both default 5000 ms
-    // and the old hardcoded literal).
-    constexpr auto k_non_default_timeout = std::chrono::milliseconds{200};
+    auto slow_sink = std::make_unique<SlowFlushSink>(k_flush_delay);
 
     fixpp::log::LoggerConfig lcfg;
     lcfg.capacity      = 128u;
-    lcfg.drain_timeout = k_non_default_timeout;
+    lcfg.drain_timeout = k_drain_timeout;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
-    sinks.push_back(std::move(spy_sink));
+    sinks.push_back(std::move(slow_sink));
 
     auto logger = std::make_shared<fixpp::log::Logger>(lcfg, std::move(sinks));
-
-    // Verify the accessor reports the configured value (not the default or 5000ms).
-    EXPECT_EQ(logger->drain_timeout(), k_non_default_timeout)
-        << "Logger::drain_timeout() must return LoggerConfig::drain_timeout";
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -258,15 +281,28 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     engine.start();
 
-    // Drive stop() through the Engine path (not a direct logger.shutdown() call).
-    // This exercises the Engine::stop() → logger->shutdown() path (RC#2 fix).
+    // Time Engine::stop() — it must return bounded by drain_timeout, not
+    // blocked for the full k_flush_delay.
+    auto t0  = std::chrono::steady_clock::now();
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
     EXPECT_NO_THROW(fut.get());
+    auto stop_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
 
-    // SpySink must have received at least one flush() — proving the Engine-path
-    // logger shutdown executed and reached the sink fan-out.
-    EXPECT_GE(flush_count->load(), 1)
-        << "Engine::stop() must flush Logger sinks via logger->shutdown() "
-           "(Engine path, not a direct logger.shutdown() call)";
+    // (a) stop() must return well under k_flush_delay (bounded by drain_timeout).
+    EXPECT_LT(stop_elapsed.count(), k_max_stop_ms.count())
+        << "Engine::stop() took " << stop_elapsed.count()
+        << "ms — should return within ~" << k_max_stop_ms.count()
+        << "ms (drain_timeout=" << k_drain_timeout.count()
+        << "ms); a hardcoded 5000ms path would block for ~"
+        << k_flush_delay.count() << "ms";
+
+    // (b) drain timed out → timeout_drop_count() must have incremented.
+    // This fails under the old hardcoded shutdown(5000ms) which would NOT time out.
+    EXPECT_GT(logger->timeout_drop_count(), 0u)
+        << "Logger::timeout_drop_count() must be > 0 after a drain that timed out "
+        << "(drain_timeout=" << k_drain_timeout.count()
+        << "ms, flush took " << k_flush_delay.count()
+        << "ms); a hardcoded longer timeout would NOT trigger this";
 }
