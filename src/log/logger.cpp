@@ -46,14 +46,13 @@
 // - TSan-clean: all accesses to write_sequence_ and read_sequence_ are through
 //   std::atomic<uint64_t> with correct memory_order tags.
 
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/format_registry.hpp>
-
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <fixpp/log/format_registry.hpp>
+#include <fixpp/log/logger.hpp>
 #include <functional>
 #include <memory_resource>
 #include <mutex>
@@ -83,21 +82,21 @@ struct alignas(64) RingSlot {
     // sequence: producer writes (w+1, release); drain reads with acquire.
     // Initially = slot_index (meaning "empty, available for slot_index").
     std::atomic<std::uint64_t> sequence;
-    Record                      record;
+    Record record;
 };
 
 // ── Logger::Impl ───────────────────────────────────────────────────────────
 
 struct Logger::Impl {
     // ── Configuration ────────────────────────────────────────────────────
-    LoggerConfig                             config_;
-    std::pmr::vector<std::unique_ptr<Sink>>  sinks_;
+    LoggerConfig config_;
+    std::pmr::vector<std::unique_ptr<Sink>> sinks_;
 
     // ── Ring buffer ───────────────────────────────────────────────────────
     // Allocated from config_.ring_resource at construction.
     // capacity_ is a power-of-2 copy of config_.capacity (validated on ctor).
-    std::uint64_t               capacity_;
-    RingSlot*                   ring_;         // raw PMR-allocated array
+    std::uint64_t capacity_;
+    RingSlot* ring_ = nullptr;  // raw PMR-allocated array
 
     // ── Sequence counters — each on its own cache line ───────────────────
     // Producer: CAS acq_rel/relaxed.  Drain: reads relaxed for slot index.
@@ -116,42 +115,37 @@ struct Logger::Impl {
 
     // Per-sink error counter (indexed by sink position; sized at construction).
     // std::atomic is non-copyable/movable so we use a heap array.
-    std::size_t                              num_sinks_{0};
+    std::size_t num_sinks_{0};
     std::unique_ptr<std::atomic<std::uint64_t>[]> sink_error_counts_;
 
     // ── Flush-sentinel completion queue ──────────────────────────────────────
     // Protected by flush_mutex_. The drain thread pops under the lock, then
     // invokes the completion OUTSIDE the lock to avoid re-entrancy risk.
-    std::mutex                          flush_mutex_;
-    std::queue<std::function<void()>>   flush_queue_;
+    std::mutex flush_mutex_;
+    std::queue<std::function<void()>> flush_queue_;
 
     // ── Drain-done notification (for shutdown timeout) ────────────────────────
     // The drain thread sets drain_done_ = true and notifies drain_done_cv_
     // just before drain_loop() returns. shutdown() uses wait_for().
-    std::mutex               drain_done_mutex_;
-    std::condition_variable  drain_done_cv_;
-    bool                     drain_done_{false};
+    std::mutex drain_done_mutex_;
+    std::condition_variable drain_done_cv_;
+    bool drain_done_{false};
 
     // ── Drain thread lifecycle ─────────────────────────────────────────────
     std::atomic<bool> stop_flag_{false};
-    std::thread       drain_thread_;
+    std::thread drain_thread_;
 
     // ── Ctor / Dtor ───────────────────────────────────────────────────────
 
-    explicit Impl(LoggerConfig config,
-                  std::pmr::vector<std::unique_ptr<Sink>> sinks)
-        : config_{config}
-        , sinks_{std::move(sinks)}
-        , capacity_{config_.capacity}
-        , ring_{nullptr}
-    {
+    explicit Impl(LoggerConfig config, std::pmr::vector<std::unique_ptr<Sink>> sinks)
+        : config_{config}, sinks_{std::move(sinks)}, capacity_{config_.capacity} {
         // Validate power-of-2 capacity.
-        assert(capacity_ >= 1u && (capacity_ & (capacity_ - 1u)) == 0u &&
+        assert(capacity_ >= 1U && (capacity_ & (capacity_ - 1U)) == 0U &&
                "LoggerConfig::capacity must be a power of 2");
 
         // Allocate ring from PMR resource.
-        void* mem = config_.ring_resource->allocate(
-            capacity_ * sizeof(RingSlot), alignof(RingSlot));
+        void* mem =
+            config_.ring_resource->allocate(capacity_ * sizeof(RingSlot), alignof(RingSlot));
         ring_ = reinterpret_cast<RingSlot*>(mem);
 
         // Initialise each slot's sequence to its own index (= "empty").
@@ -183,7 +177,7 @@ struct Logger::Impl {
 
         // Spawn the dedicated drain OS thread.
         // The drain thread holds no session/engine references per [2k §4.3].
-        drain_thread_ = std::thread([this]{ drain_loop(); });
+        drain_thread_ = std::thread([this] { drain_loop(); });
 
         // Optional CPU affinity hint (Linux only).
 #ifdef __linux__
@@ -191,14 +185,12 @@ struct Logger::Impl {
             cpu_set_t cpuset;
             CPU_ZERO(&cpuset);
             CPU_SET(config_.drain_cpu_affinity, &cpuset);
-            pthread_setaffinity_np(
-                drain_thread_.native_handle(), sizeof(cpuset), &cpuset);
+            pthread_setaffinity_np(drain_thread_.native_handle(), sizeof(cpuset), &cpuset);
         }
 #endif
     }
 
-    ~Impl()
-    {
+    ~Impl() {
         // Signal the drain thread to stop after flushing remaining records.
         stop_flag_.store(true, std::memory_order_release);
         if (drain_thread_.joinable()) {
@@ -218,8 +210,8 @@ struct Logger::Impl {
             for (std::uint64_t i = 0; i < capacity_; ++i) {
                 ring_[i].~RingSlot();
             }
-            config_.ring_resource->deallocate(
-                ring_, capacity_ * sizeof(RingSlot), alignof(RingSlot));
+            config_.ring_resource->deallocate(ring_, capacity_ * sizeof(RingSlot),
+                                              alignof(RingSlot));
             ring_ = nullptr;
         }
     }
@@ -232,8 +224,7 @@ struct Logger::Impl {
     // applies its own overflow policy. After a true return the caller MUST
     // populate ring_[out_w % capacity_].record, then publish to the drain via
     // slot.sequence.store(out_w + 1, release).
-    [[nodiscard]] bool try_claim_slot(std::uint64_t& out_w) noexcept
-    {
+    [[nodiscard]] bool try_claim_slot(std::uint64_t& out_w) noexcept {
         for (;;) {
             // Step 1: load current write position (relaxed — we will CAS it).
             std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
@@ -249,10 +240,8 @@ struct Logger::Impl {
             }
 
             // Step 4: CAS write_sequence_ (w → w+1, acq_rel on success).
-            if (!write_sequence_.compare_exchange_weak(
-                    w, w + 1,
-                    std::memory_order_acq_rel,
-                    std::memory_order_relaxed)) {
+            if (!write_sequence_.compare_exchange_weak(w, w + 1, std::memory_order_acq_rel,
+                                                       std::memory_order_relaxed)) {
                 // Another producer won; retry.
                 continue;
             }
@@ -267,18 +256,14 @@ struct Logger::Impl {
     //
     // Load-check-CAS overflow protocol per §4.3 / R5.
     // noexcept — never throws; drops on overflow.
-    void enqueue(Level                                level,
-                 Category                             category,
-                 std::uint32_t                        format_id,
-                 std::array<std::uint8_t, 16> const&  trace_id,
-                 std::uint64_t                        span_id,
-                 fixpp::core::utc_time_point          timestamp,
-                 std::initializer_list<ArgValue>      args) noexcept
-    {
+    void enqueue(Level level, Category category, std::uint32_t format_id,
+                 std::array<std::uint8_t, 16> const& trace_id, std::uint64_t span_id,
+                 fixpp::core::utc_time_point timestamp,
+                 std::initializer_list<ArgValue> args) noexcept {
         // ── Runtime category filter ────────────────────────────────────────
         // Check BEFORE doing anything with the ring.
         // Bit index = category & 63u (no UB for any uint16 value).
-        auto const bit_index = static_cast<std::uint64_t>(category & 63u);
+        auto const bit_index = static_cast<std::uint64_t>(category & 63U);
         auto const mask = enabled_categories_mask_.load(std::memory_order_relaxed);
         if (!(mask & (std::uint64_t{1} << bit_index))) {
             filter_count_.fetch_add(1, std::memory_order_relaxed);
@@ -287,7 +272,7 @@ struct Logger::Impl {
 
         // ── MPSC ring load-check-CAS ───────────────────────────────────────
         for (;;) {
-            std::uint64_t w;
+            std::uint64_t w = 0;
             if (!try_claim_slot(w)) {
                 // Ring full (R5 overflow check).
                 if (config_.on_overflow == overflow_policy::block) {
@@ -311,13 +296,13 @@ struct Logger::Impl {
 
             // Build the record.
             Record& rec = slot.record;
-            rec.timestamp  = timestamp;
-            rec.trace_id   = trace_id;
-            rec.span_id    = span_id;
-            rec.level      = level;
-            rec.flags      = 0;
-            rec.category   = category;
-            rec.format_id  = format_id;
+            rec.timestamp = timestamp;
+            rec.trace_id = trace_id;
+            rec.span_id = span_id;
+            rec.level = level;
+            rec.flags = 0;
+            rec.category = category;
+            rec.format_id = format_id;
 
             // Copy at most k_max_args ArgValues by value (contracts/log-core.md New-3).
             // The initializer_list backing array is stack-allocated by the compiler;
@@ -349,8 +334,7 @@ struct Logger::Impl {
     //      flush_queue_ and invoke it (async_flush protocol).
     //   2. Otherwise: look up the format string via format_registry, fan-out
     //      to sinks (T026 FR-005).
-    void drain_loop()
-    {
+    void drain_loop() {
         std::uint64_t r = 0;  // local copy of read_sequence_ (drain owns it)
 
         while (true) {
@@ -376,7 +360,7 @@ struct Logger::Impl {
                     // Flush sentinel: pop and invoke the matching completion.
                     std::function<void()> completion;
                     {
-                        std::lock_guard<std::mutex> lock(flush_mutex_);
+                        std::scoped_lock lock(flush_mutex_);
                         if (!flush_queue_.empty()) {
                             completion = std::move(flush_queue_.front());
                             flush_queue_.pop();
@@ -428,7 +412,7 @@ struct Logger::Impl {
 
         // Signal that the drain is done (for shutdown timeout notification).
         {
-            std::lock_guard<std::mutex> lock(drain_done_mutex_);
+            std::scoped_lock lock(drain_done_mutex_);
             drain_done_ = true;
         }
         drain_done_cv_.notify_all();
@@ -437,8 +421,7 @@ struct Logger::Impl {
     // T026: fan-out catch-all.
     // Wrap each Sink::emit in try/catch; increment sink_error_count(i) on throw;
     // continue — one failing sink never stalls the drain or the others (FR-005).
-    void fan_out(Record const& rec) noexcept
-    {
+    void fan_out(Record const& rec) noexcept {
         for (std::size_t i = 0; i < sinks_.size(); ++i) {
             if (!sinks_[i]) continue;
             try {
@@ -456,27 +439,20 @@ struct Logger::Impl {
 
 // ── Logger public API ─────────────────────────────────────────────────────
 
-Logger::Logger(LoggerConfig config,
-               std::pmr::vector<std::unique_ptr<Sink>> sinks)
-    : impl_{std::make_unique<Impl>(std::move(config), std::move(sinks))}
-{}
+Logger::Logger(LoggerConfig config, std::pmr::vector<std::unique_ptr<Sink>> sinks)
+    : impl_{std::make_unique<Impl>(config, std::move(sinks))} {}
 
 Logger::~Logger() = default;
 
-void Logger::enqueue(Level                                level,
-                     Category                             category,
-                     std::uint32_t                        format_id,
-                     std::array<std::uint8_t, 16> const&  trace_id,
-                     std::uint64_t                        span_id,
-                     fixpp::core::utc_time_point          timestamp,
-                     std::initializer_list<ArgValue>      args) noexcept
-{
+void Logger::enqueue(Level level, Category category, std::uint32_t format_id,
+                     std::array<std::uint8_t, 16> const& trace_id, std::uint64_t span_id,
+                     fixpp::core::utc_time_point timestamp,
+                     std::initializer_list<ArgValue> args) noexcept {
     impl_->enqueue(level, category, format_id, trace_id, span_id, timestamp, args);
 }
 
-void Logger::set_category_enabled(Category cat, bool enabled) noexcept
-{
-    auto const bit = std::uint64_t{1} << (cat & 63u);
+void Logger::set_category_enabled(Category cat, bool enabled) noexcept {
+    auto const bit = std::uint64_t{1} << (cat & 63U);
     if (enabled) {
         impl_->enabled_categories_mask_.fetch_or(bit, std::memory_order_relaxed);
     } else {
@@ -484,45 +460,35 @@ void Logger::set_category_enabled(Category cat, bool enabled) noexcept
     }
 }
 
-bool Logger::is_category_enabled(Category cat) const noexcept
-{
-    auto const bit = std::uint64_t{1} << (cat & 63u);
+bool Logger::is_category_enabled(Category cat) const noexcept {
+    auto const bit = std::uint64_t{1} << (cat & 63U);
     return (impl_->enabled_categories_mask_.load(std::memory_order_relaxed) & bit) != 0;
 }
 
-std::uint64_t Logger::drop_count() const noexcept
-{
+std::uint64_t Logger::drop_count() const noexcept {
     return impl_->drop_count_.load(std::memory_order_relaxed);
 }
 
-std::uint64_t Logger::timeout_drop_count() const noexcept
-{
+std::uint64_t Logger::timeout_drop_count() const noexcept {
     return impl_->timeout_drop_count_.load(std::memory_order_relaxed);
 }
 
-std::uint64_t Logger::filter_count() const noexcept
-{
+std::uint64_t Logger::filter_count() const noexcept {
     return impl_->filter_count_.load(std::memory_order_relaxed);
 }
 
-void Logger::reset_drop_count() noexcept
-{
-    impl_->drop_count_.store(0, std::memory_order_relaxed);
-}
+void Logger::reset_drop_count() noexcept { impl_->drop_count_.store(0, std::memory_order_relaxed); }
 
-void Logger::reset_timeout_drop_count() noexcept
-{
+void Logger::reset_timeout_drop_count() noexcept {
     impl_->timeout_drop_count_.store(0, std::memory_order_relaxed);
 }
 
-void Logger::reset_filter_count() noexcept
-{
+void Logger::reset_filter_count() noexcept {
     impl_->filter_count_.store(0, std::memory_order_relaxed);
 }
 
-std::uint64_t Logger::sink_error_count(std::size_t sink_index) const noexcept
-{
-    if (sink_index >= impl_->num_sinks_) return 0u;
+std::uint64_t Logger::sink_error_count(std::size_t sink_index) const noexcept {
+    if (sink_index >= impl_->num_sinks_) return 0U;
     return impl_->sink_error_counts_[sink_index].load(std::memory_order_relaxed);
 }
 
@@ -541,9 +507,7 @@ std::uint64_t Logger::sink_error_count(std::size_t sink_index) const noexcept
 // The join() in 4b is still needed to reclaim the OS thread handle, but it
 // should be nearly instantaneous since drain_done_ is only set after the
 // thread is about to exit.
-fixpp::core::expected_t<void> Logger::shutdown(
-    std::chrono::milliseconds drain_timeout)
-{
+fixpp::core::expected_t<void> Logger::shutdown(std::chrono::milliseconds drain_timeout) {
     // Step 1: idempotent guard — if the drain already signalled done, just join.
     {
         std::unique_lock<std::mutex> lock(impl_->drain_done_mutex_);
@@ -562,8 +526,8 @@ fixpp::core::expected_t<void> Logger::shutdown(
     // Step 3: wait with deadline.
     {
         std::unique_lock<std::mutex> lock(impl_->drain_done_mutex_);
-        bool signalled = impl_->drain_done_cv_.wait_for(
-            lock, drain_timeout, [this] { return impl_->drain_done_; });
+        bool signalled = impl_->drain_done_cv_.wait_for(lock, drain_timeout,
+                                                        [this] { return impl_->drain_done_; });
 
         if (!signalled) {
             // Timeout: bump timeout_drop_count_ (SEPARATE from drop_count_).
@@ -584,14 +548,13 @@ fixpp::core::expected_t<void> Logger::shutdown(
 // Enqueues a flush sentinel into the ring. The drain thread, on consuming it,
 // invokes on_done() (off-hot-path; one allocation for the std::function).
 // [contracts/log-core.md New-4: excluded from FR-001 zero-alloc gate]
-void Logger::async_flush(std::function<void()> on_done)
-{
+void Logger::async_flush(std::function<void()> on_done) {
     if (!on_done) return;  // no-op for null completion
 
     // Register the completion in the queue BEFORE enqueuing the sentinel, so
     // the drain sees the queue entry before it processes the sentinel slot.
     {
-        std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
+        std::scoped_lock lock(impl_->flush_mutex_);
         impl_->flush_queue_.push(std::move(on_done));
     }
 
@@ -603,10 +566,10 @@ void Logger::async_flush(std::function<void()> on_done)
     // fire. Callers should ensure the ring is not perpetually full when calling
     // async_flush(). This is acceptable: async_flush is off-hot-path and
     // callers that care about delivery use shutdown() instead.
-    std::uint64_t w;
+    std::uint64_t w = 0;
     if (!impl_->try_claim_slot(w)) {
         // Ring full: drop the sentinel (pop the completion we just pushed).
-        std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
+        std::scoped_lock lock(impl_->flush_mutex_);
         if (!impl_->flush_queue_.empty()) {
             // Pop ours back out. If another thread pushed too, we might
             // pop the wrong one — but async_flush is documented as

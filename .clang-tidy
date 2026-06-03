@@ -12,6 +12,9 @@
 #   - Benign-in-context bug-class (each source-read; matches every /speckit-verify
 #     Step-1 triage): unused-return-value / unused-result / cert-err33-c / exception-
 #     escape = best-effort socket close()/cancel()/set_option() + noexcept-by-contract;
+#     empty-catch = the same noexcept-by-contract idiom in the 017 log sinks
+#     (FileSink::emit/rotate, Logger drain completion, OtlpLogSink export all
+#     `catch (...) {}` because emit/flush/drain are noexcept and MUST NOT propagate);
 #     implicit-widening = compile-time-small multiplicands; invalid-enum-default-init =
 #     value-init then immediately overwritten; incorrect-roundings = round-half-up on a
 #     guaranteed-non-negative; misplaced-widening-cast = seqnum_t->size_t in range.
@@ -82,6 +85,7 @@ Checks: >
   -clang-diagnostic-unused-result,
   -cert-err33-c,
   -bugprone-exception-escape,
+  -bugprone-empty-catch,
   -bugprone-easily-swappable-parameters,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-invalid-enum-default-initialization,

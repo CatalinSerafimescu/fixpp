@@ -18,10 +18,9 @@
 #pragma once
 
 #include <chrono>
-#include <memory_resource>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/log/record.hpp>
+#include <memory_resource>
 
 namespace fixpp::log {
 
@@ -85,9 +84,8 @@ public:
 struct SinkFactory {
     virtual ~SinkFactory() = default;
 
-    [[nodiscard]] virtual std::unique_ptr<Sink> make(
-        std::pmr::memory_resource* resource,
-        SinkConfig const&          config) = 0;
+    [[nodiscard]] virtual std::unique_ptr<Sink> make(std::pmr::memory_resource* resource,
+                                                     SinkConfig const& config) = 0;
 };
 
 // ── Forward declarations ──────────────────────────────────────────────────────

@@ -53,32 +53,32 @@ namespace fixpp::log {
 //     before the drain thread processes the record.
 struct ArgValue {
     enum class Kind : uint8_t {
-        empty      = 0,
-        u64        = 1,
-        i64        = 2,
-        f64        = 3,
-        bool_val   = 4,
-        inline_str = 5,   // up to 15 bytes inline; NOT null-terminated; use len
-        static_str = 6,   // const char* with caller-asserted stable lifetime
+        empty = 0,
+        u64 = 1,
+        i64 = 2,
+        f64 = 3,
+        bool_val = 4,
+        inline_str = 5,  // up to 15 bytes inline; NOT null-terminated; use len
+        static_str = 6,  // const char* with caller-asserted stable lifetime
     };
 
     // Inline string storage: 15 bytes of payload + 1 length byte = 16 bytes.
     // data[0..len-1] holds the string payload. NOT null-terminated.
     // `len` is in [0, 15].
     struct InlineStr {
-        char    data[15];
-        uint8_t len;   // actual byte count (≤ 15)
+        char data[15];
+        uint8_t len;  // actual byte count (≤ 15)
     };
 
     // Layout: 1 (kind) + 7 (_pad) + 16 (union) = 24 bytes
-    Kind    kind {};
-    uint8_t _pad[7] {};
+    Kind kind{};
+    uint8_t _pad[7]{};
     union {
-        uint64_t    u64;
-        int64_t     i64;
-        double      f64;
-        bool        b;
-        InlineStr   inl;         // 16 bytes (char[15] + uint8_t len)
+        uint64_t u64;
+        int64_t i64;
+        double f64;
+        bool b;
+        InlineStr inl;           // 16 bytes (char[15] + uint8_t len)
         const char* static_ptr;  // StaticStr: caller-asserted stable lifetime
     };
 
@@ -87,28 +87,28 @@ struct ArgValue {
     static ArgValue from_u64(uint64_t v) noexcept {
         ArgValue a;
         a.kind = Kind::u64;
-        a.u64  = v;
+        a.u64 = v;
         return a;
     }
 
     static ArgValue from_i64(int64_t v) noexcept {
         ArgValue a;
         a.kind = Kind::i64;
-        a.i64  = v;
+        a.i64 = v;
         return a;
     }
 
     static ArgValue from_f64(double v) noexcept {
         ArgValue a;
         a.kind = Kind::f64;
-        a.f64  = v;
+        a.f64 = v;
         return a;
     }
 
     static ArgValue from_bool(bool v) noexcept {
         ArgValue a;
         a.kind = Kind::bool_val;
-        a.b    = v;
+        a.b = v;
         return a;
     }
 
@@ -117,10 +117,10 @@ struct ArgValue {
     // The stored bytes are NOT null-terminated; the drain thread uses len.
     static ArgValue from_inline(std::string_view sv) noexcept {
         ArgValue a;
-        a.kind      = Kind::inline_str;
-        auto n      = std::min(sv.size(), std::size_t{15});
+        a.kind = Kind::inline_str;
+        auto n = std::min(sv.size(), std::size_t{15});
         std::memcpy(a.inl.data, sv.data(), n);
-        a.inl.len   = static_cast<uint8_t>(n);
+        a.inl.len = static_cast<uint8_t>(n);
         return a;
     }
 
@@ -128,7 +128,7 @@ struct ArgValue {
     // drain thread processing this record. Use FIXPP_SLIT for string literals.
     static ArgValue from_static(const char* p) noexcept {
         ArgValue a;
-        a.kind       = Kind::static_str;
+        a.kind = Kind::static_str;
         a.static_ptr = p;
         return a;
     }
@@ -175,36 +175,34 @@ inline constexpr std::size_t k_max_args = 6;
 //   Total: 256 bytes
 struct alignas(64) Record {
     // Wall-clock UTC timestamp from effective_clock.now() per [2d §7.9].
-    fixpp::core::utc_time_point  timestamp;           //  8 bytes  [offset  0]
+    fixpp::core::utc_time_point timestamp;  //  8 bytes  [offset  0]
 
     // OTel correlation (LOG-003). Zeroed when no session context is available
     // (FIXPP_LOG0 / context-free code paths — see [2k §6.4]; not a bug).
-    std::array<std::uint8_t, 16> trace_id {};         // 16 bytes  [offset  8]
-    std::uint64_t                span_id  {};         //  8 bytes  [offset 24]
+    std::array<std::uint8_t, 16> trace_id{};  // 16 bytes  [offset  8]
+    std::uint64_t span_id{};                  //  8 bytes  [offset 24]
 
-    Level         level;                              //  1 byte   [offset 32]
-    std::uint8_t  flags    {};                        //  1 byte   [offset 33]  reserved
-    Category      category;                           //  2 bytes  [offset 34]
-    std::uint32_t format_id;                          //  4 bytes  [offset 36]  CRC32 of fmt
-    std::uint8_t  arg_count;                          //  1 byte   [offset 40]
-    std::uint8_t  _pad[5]  {};                        //  5 bytes  [offset 41]
+    Level level;              //  1 byte   [offset 32]
+    std::uint8_t flags{};     //  1 byte   [offset 33]  reserved
+    Category category;        //  2 bytes  [offset 34]
+    std::uint32_t format_id;  //  4 bytes  [offset 36]  CRC32 of fmt
+    std::uint8_t arg_count;   //  1 byte   [offset 40]
+    std::uint8_t _pad[5]{};   //  5 bytes  [offset 41]
     // ── 48 bytes ──────────────────────────────────────────────────────────────
 
     // Captured args (up to k_max_args = 6 at exactly 24 bytes each).
-    std::array<ArgValue, k_max_args> args {};         // 144 bytes [offset 48]
+    std::array<ArgValue, k_max_args> args{};  // 144 bytes [offset 48]
 
     // Padding to 256 bytes (4 cache lines). Prevents false-sharing with the
     // ring slot sequence counter placed adjacent to the record in the ring.
-    std::uint8_t _cache_pad[64] {};                   //  64 bytes [offset 192]
+    std::uint8_t _cache_pad[64]{};  //  64 bytes [offset 192]
 };
 
 // Record must be exactly 256 bytes and trivially copyable.
 // The ring places it via a single CAS + 256-byte memcpy (zero alloc).
-static_assert(sizeof(Record) == 256,
-              "Record must be exactly 256 bytes (4 cache lines)");
+static_assert(sizeof(Record) == 256, "Record must be exactly 256 bytes (4 cache lines)");
 static_assert(std::is_trivially_copyable_v<Record>,
               "Record must be trivially copyable (placed on MPSC ring via memcpy)");
-static_assert(alignof(Record) == 64,
-              "Record must be aligned to 64 bytes (cache-line boundary)");
+static_assert(alignof(Record) == 64, "Record must be aligned to 64 bytes (cache-line boundary)");
 
 }  // namespace fixpp::log

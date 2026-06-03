@@ -22,10 +22,9 @@
 // share the same key. In release builds the first-registered entry wins (the
 // drain-thread lookup is read-only after startup; no dynamic allocation).
 
-#include <fixpp/log/format_registry.hpp>
-
 #include <cassert>
 #include <cstdint>
+#include <fixpp/log/format_registry.hpp>
 #include <format>
 #include <string>
 #include <string_view>
@@ -57,9 +56,7 @@ struct FormatEntry {
 // debug builds, the program aborts with an assertion failure naming the
 // collision pair.
 
-static const std::unordered_map<std::uint32_t, std::string_view>&
-get_registry() noexcept
-{
+static const std::unordered_map<std::uint32_t, std::string_view>& get_registry() noexcept {
     // Lazy-initialised on first call (thread-safe in C++11+).
     static const std::unordered_map<std::uint32_t, std::string_view> registry = []() {
         // ── Format string table (add new entries here) ────────────────────
@@ -68,20 +65,16 @@ get_registry() noexcept
         // Format strings follow std::format conventions (Python-style {}).
         static constexpr FormatEntry table[] = {
             // test / smoke entries
-            { static_cast<std::uint32_t>(crc32_str("test message")),
-              "test message" },
-            { static_cast<std::uint32_t>(crc32_str("overflow test {}")),
-              "overflow test {}" },
-            { static_cast<std::uint32_t>(crc32_str("level filter test")),
-              "level filter test" },
-            { static_cast<std::uint32_t>(crc32_str("category filter test")),
-              "category filter test" },
-            { static_cast<std::uint32_t>(crc32_str("drop test {}")),
-              "drop test {}" },
-            { static_cast<std::uint32_t>(crc32_str("record {}")),
-              "record {}" },
-            { static_cast<std::uint32_t>(crc32_str("msg {}")),
-              "msg {}" },
+            {.id = static_cast<std::uint32_t>(crc32_str("test message")), .fmt = "test message"},
+            {.id = static_cast<std::uint32_t>(crc32_str("overflow test {}")),
+             .fmt = "overflow test {}"},
+            {.id = static_cast<std::uint32_t>(crc32_str("level filter test")),
+             .fmt = "level filter test"},
+            {.id = static_cast<std::uint32_t>(crc32_str("category filter test")),
+             .fmt = "category filter test"},
+            {.id = static_cast<std::uint32_t>(crc32_str("drop test {}")), .fmt = "drop test {}"},
+            {.id = static_cast<std::uint32_t>(crc32_str("record {}")), .fmt = "record {}"},
+            {.id = static_cast<std::uint32_t>(crc32_str("msg {}")), .fmt = "msg {}"},
         };
 
         std::unordered_map<std::uint32_t, std::string_view> m;
@@ -96,8 +89,8 @@ get_registry() noexcept
                 // Collision detected — two entries share the same format_id.
                 // This is a build-time defect (must be fixed in the table).
                 assert(false &&
-                    "format_registry: duplicate format_id (CRC32 collision). "
-                    "Two format strings share the same CRC32; rename one.");
+                       "format_registry: duplicate format_id (CRC32 collision). "
+                       "Two format strings share the same CRC32; rename one.");
             }
 #endif
             m.emplace(entry.id, entry.fmt);
@@ -111,8 +104,7 @@ get_registry() noexcept
 
 // ── Public lookup ──────────────────────────────────────────────────────────
 
-std::string_view format_registry_lookup(std::uint32_t format_id) noexcept
-{
+std::string_view format_registry_lookup(std::uint32_t format_id) noexcept {
     auto const& reg = get_registry();
     auto it = reg.find(format_id);
     if (it == reg.end()) {
@@ -129,8 +121,7 @@ std::string_view format_registry_lookup(std::uint32_t format_id) noexcept
 // a Record. Internally it uses std::vformat with a dynamic args list built
 // from the ArgValue array.
 
-std::string format_record(Record const& rec)
-{
+std::string format_record(Record const& rec) {
     std::string_view fmt = format_registry_lookup(rec.format_id);
 
     // Build the std::format dynamic arg store from ArgValue array.
@@ -152,38 +143,38 @@ std::string format_record(Record const& rec)
     // corresponding ArgValue in order.
 
     std::string result;
-    result.reserve(fmt.size() + rec.arg_count * 8);
+    result.reserve(fmt.size() + (rec.arg_count * 8));
 
     std::size_t arg_idx = 0;
     std::size_t i = 0;
     while (i < fmt.size()) {
-        if (fmt[i] == '{' && i + 1 < fmt.size() && fmt[i+1] == '}') {
+        if (fmt[i] == '{' && i + 1 < fmt.size() && fmt[i + 1] == '}') {
             // Substitute the next arg.
             if (arg_idx < rec.arg_count && arg_idx < k_max_args) {
                 auto const& av = rec.args[arg_idx++];
                 switch (av.kind) {
-                case ArgValue::Kind::u64:
-                    result += std::to_string(av.u64);
-                    break;
-                case ArgValue::Kind::i64:
-                    result += std::to_string(av.i64);
-                    break;
-                case ArgValue::Kind::f64:
-                    result += std::to_string(av.f64);
-                    break;
-                case ArgValue::Kind::bool_val:
-                    result += av.b ? "true" : "false";
-                    break;
-                case ArgValue::Kind::inline_str:
-                    result.append(av.inl.data, av.inl.len);
-                    break;
-                case ArgValue::Kind::static_str:
-                    if (av.static_ptr) result += av.static_ptr;
-                    break;
-                case ArgValue::Kind::empty:
-                default:
-                    result += "<empty>";
-                    break;
+                    case ArgValue::Kind::u64:
+                        result += std::to_string(av.u64);
+                        break;
+                    case ArgValue::Kind::i64:
+                        result += std::to_string(av.i64);
+                        break;
+                    case ArgValue::Kind::f64:
+                        result += std::to_string(av.f64);
+                        break;
+                    case ArgValue::Kind::bool_val:
+                        result += av.b ? "true" : "false";
+                        break;
+                    case ArgValue::Kind::inline_str:
+                        result.append(av.inl.data, av.inl.len);
+                        break;
+                    case ArgValue::Kind::static_str:
+                        if (av.static_ptr) result += av.static_ptr;
+                        break;
+                    case ArgValue::Kind::empty:
+                    default:
+                        result += "<empty>";
+                        break;
                 }
             } else {
                 result += "{}";

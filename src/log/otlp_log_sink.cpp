@@ -18,27 +18,26 @@
 #include <fixpp/log/otlp_log_sink.hpp>
 
 // OTel SDK headers — direct, no fixpp::otel layer
+#include <opentelemetry/common/timestamp.h>
 #include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter.h>
-#include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter_options.h>
 #include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter_factory.h>
+#include <opentelemetry/exporters/otlp/otlp_http_log_record_exporter_options.h>
+#include <opentelemetry/logs/severity.h>
+#include <opentelemetry/nostd/span.h>
 #include <opentelemetry/sdk/logs/batch_log_record_processor.h>
 #include <opentelemetry/sdk/logs/batch_log_record_processor_factory.h>
 #include <opentelemetry/sdk/logs/batch_log_record_processor_options.h>
-#include <opentelemetry/sdk/logs/read_write_log_record.h>
 #include <opentelemetry/sdk/logs/exporter.h>
 #include <opentelemetry/sdk/logs/processor.h>
-#include <opentelemetry/logs/severity.h>
-#include <opentelemetry/trace/trace_id.h>
+#include <opentelemetry/sdk/logs/read_write_log_record.h>
 #include <opentelemetry/trace/span_id.h>
 #include <opentelemetry/trace/trace_flags.h>
-#include <opentelemetry/common/timestamp.h>
-#include <opentelemetry/nostd/span.h>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/log/record.hpp>
+#include <opentelemetry/trace/trace_id.h>
 
 #include <atomic>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
+#include <fixpp/log/record.hpp>
 #include <memory>
 #include <stdexcept>
 
@@ -50,12 +49,18 @@ namespace {
 
 opentelemetry::logs::Severity level_to_otel(Level lvl) noexcept {
     switch (lvl) {
-        case Level::trace: return opentelemetry::logs::Severity::kTrace;
-        case Level::debug: return opentelemetry::logs::Severity::kDebug;
-        case Level::info:  return opentelemetry::logs::Severity::kInfo;
-        case Level::warn:  return opentelemetry::logs::Severity::kWarn;
-        case Level::error: return opentelemetry::logs::Severity::kError;
-        case Level::fatal: return opentelemetry::logs::Severity::kFatal;
+        case Level::trace:
+            return opentelemetry::logs::Severity::kTrace;
+        case Level::debug:
+            return opentelemetry::logs::Severity::kDebug;
+        case Level::info:
+            return opentelemetry::logs::Severity::kInfo;
+        case Level::warn:
+            return opentelemetry::logs::Severity::kWarn;
+        case Level::error:
+            return opentelemetry::logs::Severity::kError;
+        case Level::fatal:
+            return opentelemetry::logs::Severity::kFatal;
     }
     return opentelemetry::logs::Severity::kInfo;
 }
@@ -72,14 +77,13 @@ public:
     explicit BorrowedExporter(opentelemetry::sdk::logs::LogRecordExporter* inner) noexcept
         : inner_(inner) {}
 
-    std::unique_ptr<opentelemetry::sdk::logs::Recordable>
-    MakeRecordable() noexcept override {
+    std::unique_ptr<opentelemetry::sdk::logs::Recordable> MakeRecordable() noexcept override {
         return inner_->MakeRecordable();
     }
 
     opentelemetry::sdk::common::ExportResult Export(
-        const opentelemetry::nostd::span<
-            std::unique_ptr<opentelemetry::sdk::logs::Recordable>>& batch) noexcept override {
+        const opentelemetry::nostd::span<std::unique_ptr<opentelemetry::sdk::logs::Recordable>>&
+            batch) noexcept override {
         auto result = inner_->Export(batch);
         if (result != opentelemetry::sdk::common::ExportResult::kSuccess) {
             export_failures_.fetch_add(1, std::memory_order_relaxed);
@@ -87,9 +91,7 @@ public:
         return result;
     }
 
-    bool ForceFlush(std::chrono::microseconds t) noexcept override {
-        return inner_->ForceFlush(t);
-    }
+    bool ForceFlush(std::chrono::microseconds t) noexcept override { return inner_->ForceFlush(t); }
 
     bool Shutdown(std::chrono::microseconds t) noexcept override {
         // Do NOT forward Shutdown to the borrowed exporter — the test owns it.
@@ -132,12 +134,10 @@ struct OtlpLogSink::Impl {
 // ── ctor / dtor ───────────────────────────────────────────────────────────────
 
 OtlpLogSink::OtlpLogSink(OtlpLogSinkConfig cfg)
-    : impl_(std::make_unique<Impl>())
-    , cfg_(std::move(cfg))
-{
+    : impl_(std::make_unique<Impl>()), cfg_(std::move(cfg)) {
     impl_->max_export_retries = cfg_.max_export_retries;
-    impl_->max_export_batch   = cfg_.max_export_batch;
-    impl_->export_timeout     = cfg_.export_timeout;
+    impl_->max_export_batch = cfg_.max_export_batch;
+    impl_->export_timeout = cfg_.export_timeout;
 }
 
 OtlpLogSink::~OtlpLogSink() {
@@ -169,8 +169,8 @@ OtlpLogSink::~OtlpLogSink() {
             // a LogRecordExporter*-aliased shared_ptr.  We borrow the raw pointer
             // via a BorrowedExporter wrapper (non-owning; the test's shared_ptr
             // keeps the real exporter alive for the sink's entire lifetime).
-            auto* raw = static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(
-                cfg_.test_exporter.get());
+            auto* raw =
+                static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(cfg_.test_exporter.get());
             auto borrowed = std::make_unique<BorrowedExporter>(raw);
             // Keep a raw ptr so flush() can read failure counts (the processor
             // takes ownership of the unique_ptr below).
@@ -179,9 +179,7 @@ OtlpLogSink::~OtlpLogSink() {
         } else {
             // Production path: construct the real OTLP HTTP log exporter.
             opentelemetry::exporter::otlp::OtlpHttpLogRecordExporterOptions opts{nullptr};
-            opts.url = cfg_.endpoint.empty()
-                        ? "http://localhost:4318/v1/logs"
-                        : cfg_.endpoint;
+            opts.url = cfg_.endpoint.empty() ? "http://localhost:4318/v1/logs" : cfg_.endpoint;
             opts.timeout = cfg_.export_timeout;
             if (!cfg_.cert_source.empty()) {
                 opts.ssl_ca_cert_path = cfg_.cert_source;
@@ -198,9 +196,8 @@ OtlpLogSink::~OtlpLogSink() {
         // max_queue_size should be ≥ max_export_batch_size.
         batch_opts.max_queue_size = std::max(cfg_.max_export_batch * 4, std::size_t{2048});
 
-        impl_->processor =
-            opentelemetry::sdk::logs::BatchLogRecordProcessorFactory::Create(
-                std::move(exporter), batch_opts);
+        impl_->processor = opentelemetry::sdk::logs::BatchLogRecordProcessorFactory::Create(
+            std::move(exporter), batch_opts);
 
         return {};
     } catch (...) {
@@ -225,8 +222,8 @@ void OtlpLogSink::emit(Record const& rec) noexcept {
         auto recordable = impl_->processor->MakeRecordable();
         if (!recordable) return;
 
-        auto* log_rec = dynamic_cast<opentelemetry::sdk::logs::ReadWriteLogRecord*>(
-            recordable.get());
+        auto* log_rec =
+            dynamic_cast<opentelemetry::sdk::logs::ReadWriteLogRecord*>(recordable.get());
         if (!log_rec) {
             // Processor returned an unexpected recordable type; forward as-is.
             impl_->processor->OnEmit(std::move(recordable));
@@ -252,26 +249,24 @@ void OtlpLogSink::emit(Record const& rec) noexcept {
         std::array<uint8_t, 8> span_bytes{};
         auto sid = rec.span_id;
         for (int i = 7; i >= 0; --i) {
-            span_bytes[static_cast<std::size_t>(i)] = static_cast<uint8_t>(sid & 0xFFu);
-            sid >>= 8u;
+            span_bytes[static_cast<std::size_t>(i)] = static_cast<uint8_t>(sid & 0xFFU);
+            sid >>= 8U;
         }
         opentelemetry::trace::SpanId span_id{
             opentelemetry::nostd::span<const uint8_t, 8>{span_bytes.data(), 8}};
         log_rec->SetSpanId(span_id);
 
         // trace flags: sampled when span_id is non-zero
-        opentelemetry::trace::TraceFlags flags{
-            rec.span_id != 0u
-                ? opentelemetry::trace::TraceFlags::kIsSampled
-                : static_cast<uint8_t>(0u)};
+        opentelemetry::trace::TraceFlags flags{rec.span_id != 0U
+                                                   ? opentelemetry::trace::TraceFlags::kIsSampled
+                                                   : static_cast<uint8_t>(0U)};
         log_rec->SetTraceFlags(flags);
 
         // body: format_id as int64 (the drain-side format registry can map it back)
         log_rec->SetBody(static_cast<std::int64_t>(rec.format_id));
 
         // category → attribute "fixpp.log.category"
-        log_rec->SetAttribute("fixpp.log.category",
-                              static_cast<std::int64_t>(rec.category));
+        log_rec->SetAttribute("fixpp.log.category", static_cast<std::int64_t>(rec.category));
 
         // Single write path: OnEmit enqueues the recordable into the processor.
         impl_->processor->OnEmit(std::move(recordable));
@@ -293,13 +288,11 @@ void OtlpLogSink::flush(std::chrono::milliseconds deadline) noexcept {
     if (impl_->processor == nullptr) return;
 
     try {
-        auto timeout_us =
-            std::chrono::duration_cast<std::chrono::microseconds>(deadline);
+        auto timeout_us = std::chrono::duration_cast<std::chrono::microseconds>(deadline);
 
         // Snapshot failure count before flush so we can detect new failures.
-        std::uint64_t failures_before = impl_->borrowed_exporter
-            ? impl_->borrowed_exporter->export_failure_count()
-            : 0u;
+        std::uint64_t failures_before =
+            impl_->borrowed_exporter ? impl_->borrowed_exporter->export_failure_count() : 0U;
 
         for (std::size_t attempt = 0; attempt < impl_->max_export_retries; ++attempt) {
             bool ok = impl_->processor->ForceFlush(timeout_us);
@@ -308,8 +301,7 @@ void OtlpLogSink::flush(std::chrono::milliseconds deadline) noexcept {
             // BatchLogRecordProcessor::ForceFlush returns true even when Export()
             // returns kFailure — check at the exporter level for accurate detection.
             if (impl_->borrowed_exporter) {
-                std::uint64_t failures_after =
-                    impl_->borrowed_exporter->export_failure_count();
+                std::uint64_t failures_after = impl_->borrowed_exporter->export_failure_count();
                 if (failures_after > failures_before) {
                     // Export failed — count this as an otel_export_failed event
                     // and stop retrying (the failed batch is gone from the queue;
@@ -337,7 +329,8 @@ void OtlpLogSink::close() noexcept {
     if (impl_->processor == nullptr) return;
     try {
         impl_->processor->Shutdown();
-    } catch (...) {}
+    } catch (...) {
+    }
     impl_->processor.reset();
 }
 
@@ -349,10 +342,8 @@ std::uint64_t OtlpLogSink::export_failure_count() const noexcept {
 
 // ── OtlpLogSinkFactory ────────────────────────────────────────────────────────
 
-std::unique_ptr<Sink> OtlpLogSinkFactory::make(
-    std::pmr::memory_resource* /*resource*/,
-    SinkConfig const&          config)
-{
+std::unique_ptr<Sink> OtlpLogSinkFactory::make(std::pmr::memory_resource* /*resource*/,
+                                               SinkConfig const& config) {
     const auto& cfg = dynamic_cast<OtlpLogSinkConfig const&>(config);
     return std::make_unique<OtlpLogSink>(cfg);
 }

@@ -32,8 +32,8 @@
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h>
 
 // SDK MeterProvider (concrete type for AddMetricReader).
-#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
+#include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/metrics/metric_reader.h>
 #include <opentelemetry/sdk/metrics/view/view_registry.h>
 #include <opentelemetry/sdk/resource/resource.h>
@@ -49,29 +49,25 @@ struct PrometheusExporter::Impl {
 };
 
 PrometheusExporter::PrometheusExporter(const PrometheusConfig& cfg)
-    : impl_(std::make_unique<Impl>())
-{
+    : impl_(std::make_unique<Impl>()) {
     opentelemetry::exporter::metrics::PrometheusExporterOptions opts{nullptr};
     opts.url = cfg.host + ":" + std::to_string(cfg.port);
     // metrics_path is set via the options struct in older SDK versions;
     // in 1.26.0 the civetweb exposer always serves /metrics — no override needed.
-    auto reader_up =
-        opentelemetry::exporter::metrics::PrometheusExporterFactory::Create(opts);
-    impl_->reader = std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>(
-        reader_up.release());
+    auto reader_up = opentelemetry::exporter::metrics::PrometheusExporterFactory::Create(opts);
+    impl_->reader = std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>(reader_up.release());
 }
 
 PrometheusExporter::~PrometheusExporter() = default;
 PrometheusExporter::PrometheusExporter(PrometheusExporter&&) noexcept = default;
 PrometheusExporter& PrometheusExporter::operator=(PrometheusExporter&&) noexcept = default;
 
-opentelemetry::sdk::metrics::MetricReader*
-PrometheusExporter::sdk_reader() const noexcept {
+opentelemetry::sdk::metrics::MetricReader* PrometheusExporter::sdk_reader() const noexcept {
     return impl_->reader.get();
 }
 
-std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
-PrometheusExporter::sdk_reader_shared() const noexcept {
+std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> PrometheusExporter::sdk_reader_shared()
+    const noexcept {
     return impl_->reader;
 }
 
@@ -88,14 +84,12 @@ struct OtlpMetricExporter::Impl {
 };
 
 OtlpMetricExporter::OtlpMetricExporter(const OtlpMetricConfig& cfg)
-    : impl_(std::make_unique<Impl>())
-{
+    : impl_(std::make_unique<Impl>()) {
     opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions exporter_opts;
     exporter_opts.url = cfg.endpoint + "/v1/metrics";
 
     auto push_exporter =
-        opentelemetry::exporter::otlp::OtlpHttpMetricExporterFactory::Create(
-            exporter_opts);
+        opentelemetry::exporter::otlp::OtlpHttpMetricExporterFactory::Create(exporter_opts);
 
     opentelemetry::sdk::metrics::PeriodicExportingMetricReaderOptions reader_opts;
     reader_opts.export_interval_millis =
@@ -103,24 +97,21 @@ OtlpMetricExporter::OtlpMetricExporter(const OtlpMetricConfig& cfg)
     reader_opts.export_timeout_millis =
         std::chrono::duration_cast<std::chrono::milliseconds>(cfg.export_timeout);
 
-    auto reader_up =
-        opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
-            std::move(push_exporter), reader_opts);
-    impl_->reader = std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>(
-        reader_up.release());
+    auto reader_up = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
+        std::move(push_exporter), reader_opts);
+    impl_->reader = std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>(reader_up.release());
 }
 
 OtlpMetricExporter::~OtlpMetricExporter() = default;
 OtlpMetricExporter::OtlpMetricExporter(OtlpMetricExporter&&) noexcept = default;
 OtlpMetricExporter& OtlpMetricExporter::operator=(OtlpMetricExporter&&) noexcept = default;
 
-opentelemetry::sdk::metrics::MetricReader*
-OtlpMetricExporter::sdk_reader() const noexcept {
+opentelemetry::sdk::metrics::MetricReader* OtlpMetricExporter::sdk_reader() const noexcept {
     return impl_->reader.get();
 }
 
-std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
-OtlpMetricExporter::sdk_reader_shared() const noexcept {
+std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> OtlpMetricExporter::sdk_reader_shared()
+    const noexcept {
     return impl_->reader;
 }
 
@@ -134,8 +125,7 @@ void OtlpMetricExporter::shutdown() {
 
 OtlpMetricExporterFromReader::OtlpMetricExporterFromReader(
     std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader)
-    : reader_(std::move(reader))
-{}
+    : reader_(std::move(reader)) {}
 
 std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
 OtlpMetricExporterFromReader::sdk_reader_shared() const noexcept {
@@ -144,30 +134,25 @@ OtlpMetricExporterFromReader::sdk_reader_shared() const noexcept {
 
 // ── OtelDualExportBuilder ─────────────────────────────────────────────────────
 
-OtelDualExportBuilder&
-OtelDualExportBuilder::with_prometheus(const PrometheusConfig& cfg) {
+OtelDualExportBuilder& OtelDualExportBuilder::with_prometheus(const PrometheusConfig& cfg) {
     PrometheusExporter exp{cfg};
     prom_reader_ = exp.sdk_reader_shared();
     return *this;
 }
 
-OtelDualExportBuilder&
-OtelDualExportBuilder::with_otlp(const OtlpMetricConfig& cfg) {
+OtelDualExportBuilder& OtelDualExportBuilder::with_otlp(const OtlpMetricConfig& cfg) {
     OtlpMetricExporter exp{cfg};
     otlp_reader_ = exp.sdk_reader_shared();
     return *this;
 }
 
-OtelDualExportBuilder&
-OtelDualExportBuilder::with_otlp_reader(
-    std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader)
-{
+OtelDualExportBuilder& OtelDualExportBuilder::with_otlp_reader(
+    std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader) {
     otlp_reader_ = std::move(reader);
     return *this;
 }
 
-std::unique_ptr<opentelemetry::sdk::metrics::MeterProvider>
-OtelDualExportBuilder::build() {
+std::unique_ptr<opentelemetry::sdk::metrics::MeterProvider> OtelDualExportBuilder::build() {
     // Create an SDK MeterProvider with empty views + default resource.
     auto mp = opentelemetry::sdk::metrics::MeterProviderFactory::Create(
         std::make_unique<opentelemetry::sdk::metrics::ViewRegistry>());

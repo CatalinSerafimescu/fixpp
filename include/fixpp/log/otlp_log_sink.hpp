@@ -21,10 +21,9 @@
 #pragma once
 
 #include <chrono>
+#include <fixpp/log/sink.hpp>  // Sink, SinkConfig, SinkFactory
 #include <memory>
 #include <string>
-
-#include <fixpp/log/sink.hpp>   // Sink, SinkConfig, SinkFactory
 
 namespace fixpp::log {
 
@@ -90,10 +89,10 @@ public:
     explicit OtlpLogSink(OtlpLogSinkConfig cfg);
     ~OtlpLogSink() override;
 
-    OtlpLogSink(const OtlpLogSink&)            = delete;
+    OtlpLogSink(const OtlpLogSink&) = delete;
     OtlpLogSink& operator=(const OtlpLogSink&) = delete;
-    OtlpLogSink(OtlpLogSink&&)                 = delete;
-    OtlpLogSink& operator=(OtlpLogSink&&)      = delete;
+    OtlpLogSink(OtlpLogSink&&) = delete;
+    OtlpLogSink& operator=(OtlpLogSink&&) = delete;
 
     // ── Sink interface (4 pure-virtual) ───────────────────────────────────────
 
@@ -118,16 +117,15 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    OtlpLogSinkConfig     cfg_;
+    OtlpLogSinkConfig cfg_;
 };
 
 // ── OtlpLogSinkFactory ────────────────────────────────────────────────────────
 //
 // Creates OtlpLogSink from an OtlpLogSinkConfig (FR-007).
 struct OtlpLogSinkFactory final : SinkFactory {
-    [[nodiscard]] std::unique_ptr<Sink> make(
-        std::pmr::memory_resource* /*resource*/,
-        SinkConfig const&          config) override;
+    [[nodiscard]] std::unique_ptr<Sink> make(std::pmr::memory_resource* /*resource*/,
+                                             SinkConfig const& config) override;
 };
 
 }  // namespace fixpp::log

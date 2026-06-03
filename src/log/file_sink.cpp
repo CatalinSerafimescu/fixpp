@@ -10,20 +10,20 @@
 //   FR-008/FR-009       — file rotation bound + fdatasync obligation
 //   [arch §2.3]        — log → {core} only
 
-#include <fixpp/log/file_sink.hpp>
-#include <fixpp/log/format_registry.hpp>
-#include <fixpp/core/error.hpp>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
+#include <fixpp/core/error.hpp>
+#include <fixpp/log/file_sink.hpp>
+#include <fixpp/log/format_registry.hpp>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <vector>
 
 namespace fixpp::log {
@@ -32,11 +32,10 @@ namespace {
 
 // Format a Record into a single line string for writing to the file.
 // Delegates to the drain-side format_record() from format_registry.hpp.
-std::string format_line(Record const& rec)
-{
+std::string format_line(Record const& rec) {
     // Timestamp as seconds.microseconds since epoch
     auto ts_ns = rec.timestamp.time_since_epoch().count();
-    auto ts_s  = ts_ns / 1'000'000'000LL;
+    auto ts_s = ts_ns / 1'000'000'000LL;
     auto ts_us = (ts_ns % 1'000'000'000LL) / 1000LL;
 
     std::string_view level_str = to_string(rec.level);
@@ -51,27 +50,21 @@ std::string format_line(Record const& rec)
 
     // Build the full line: <timestamp_s>.<us> [LEVEL] cat=<cat> <body>
     char line[1024];
-    int n = std::snprintf(line, sizeof(line),
-                          "%lld.%06lld [%.*s] cat=%u %s\n",
-                          static_cast<long long>(ts_s),
-                          static_cast<long long>(ts_us),
-                          static_cast<int>(level_str.size()),
-                          level_str.data(),
-                          static_cast<unsigned>(rec.category),
-                          body.c_str());
+    int n = std::snprintf(line, sizeof(line), "%lld.%06lld [%.*s] cat=%u %s\n", ts_s, ts_us,
+                          static_cast<int>(level_str.size()), level_str.data(),
+                          static_cast<unsigned>(rec.category), body.c_str());
     if (n < 0 || static_cast<std::size_t>(n) >= sizeof(line)) {
         return "[line too long]\n";
     }
-    return std::string(line, static_cast<std::size_t>(n));
+    return {line, static_cast<std::size_t>(n)};
 }
 
 // Build the ISO-8601-style timestamp suffix used in archived file names.
 // Format: YYYYMMDDTHHMMSS (UTC), e.g. "20260602T153045"
-std::string make_iso8601_suffix() noexcept
-{
-    auto now  = std::chrono::system_clock::now();
-    auto tt   = std::chrono::system_clock::to_time_t(now);
-    std::tm   tm_buf{};
+std::string make_iso8601_suffix() noexcept {
+    auto now = std::chrono::system_clock::now();
+    auto tt = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf{};
 #ifdef _WIN32
     gmtime_s(&tm_buf, &tt);
 #else
@@ -86,23 +79,15 @@ std::string make_iso8601_suffix() noexcept
 
 // ── FileSink ──────────────────────────────────────────────────────────────────
 
-FileSink::FileSink(FileSinkConfig config)
-    : config_{std::move(config)}
-{
+FileSink::FileSink(FileSinkConfig config) : config_{std::move(config)} {
     live_path_ = config_.directory / (config_.base_name + ".log");
 }
 
-FileSink::~FileSink()
-{
-    close();
-}
+FileSink::~FileSink() { close(); }
 
-fixpp::core::expected_t<void> FileSink::open()
-{
+fixpp::core::expected_t<void> FileSink::open() {
     // Open (or create) the live log file for append.
-    fd_ = ::open(live_path_.c_str(),
-                 O_WRONLY | O_CREAT | O_APPEND,
-                 0644);
+    fd_ = ::open(live_path_.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd_ < 0) {
         return std::unexpected(fixpp::core::error::log_sink_open_failed);
     }
@@ -125,8 +110,7 @@ fixpp::core::expected_t<void> FileSink::open()
     return {};
 }
 
-void FileSink::emit(Record const& rec) noexcept
-{
+void FileSink::emit(Record const& rec) noexcept {
     if (stream_ == nullptr) return;
 
     try {
@@ -145,8 +129,7 @@ void FileSink::emit(Record const& rec) noexcept
     }
 }
 
-void FileSink::flush(std::chrono::milliseconds /*deadline*/) noexcept
-{
+void FileSink::flush(std::chrono::milliseconds /*deadline*/) noexcept {
     if (stream_ == nullptr) return;
 
     // Flush the stdio buffer first.
@@ -162,61 +145,50 @@ void FileSink::flush(std::chrono::milliseconds /*deadline*/) noexcept
     }
 }
 
-void FileSink::close() noexcept
-{
+void FileSink::close() noexcept {
     if (stream_ != nullptr) {
         std::fflush(stream_);
         // fclose also closes the underlying fd.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) — raw FILE* RAII; gsl not adopted
         std::fclose(stream_);
         stream_ = nullptr;
-        fd_     = -1;
+        fd_ = -1;
     } else if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
     }
 }
 
-std::filesystem::path const& FileSink::current_path() const noexcept
-{
-    return live_path_;
-}
+std::filesystem::path const& FileSink::current_path() const noexcept { return live_path_; }
 
-std::uint64_t FileSink::bytes_written() const noexcept
-{
-    return bytes_written_;
-}
+std::uint64_t FileSink::bytes_written() const noexcept { return bytes_written_; }
 
-std::uint64_t FileSink::rotation_count() const noexcept
-{
-    return rotation_count_;
-}
+std::uint64_t FileSink::rotation_count() const noexcept { return rotation_count_; }
 
 // ── Private: rotate ───────────────────────────────────────────────────────────
 
-void FileSink::rotate() noexcept
-{
+void FileSink::rotate() noexcept {
     try {
         // 1. Flush and close the current live file.
         if (stream_ != nullptr) {
             std::fflush(stream_);
+            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) — raw FILE* RAII; gsl not adopted
             std::fclose(stream_);
             stream_ = nullptr;
-            fd_     = -1;
+            fd_ = -1;
         }
 
         // 2. Rename live → archived: <base>.<iso8601>.log
-        std::string suffix    = make_iso8601_suffix();
-        auto        archived  = config_.directory /
-                                (config_.base_name + "." + suffix + ".log");
+        std::string suffix = make_iso8601_suffix();
+        auto archived = config_.directory / (config_.base_name + "." + suffix + ".log");
 
         // If a file with this name already exists (same-second rotation),
         // append a counter suffix.
         if (std::filesystem::exists(archived)) {
             int counter = 1;
             while (true) {
-                auto candidate = config_.directory /
-                                 (config_.base_name + "." + suffix + "_" +
-                                  std::to_string(counter) + ".log");
+                auto candidate = config_.directory / (config_.base_name + "." + suffix + "_" +
+                                                      std::to_string(counter) + ".log");
                 if (!std::filesystem::exists(candidate)) {
                     archived = candidate;
                     break;
@@ -240,9 +212,7 @@ void FileSink::rotate() noexcept
         }
 
         // 4. Open a fresh live file.
-        fd_ = ::open(live_path_.c_str(),
-                     O_WRONLY | O_CREAT | O_TRUNC,
-                     0644);
+        fd_ = ::open(live_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd_ >= 0) {
             stream_ = ::fdopen(fd_, "a");
             if (!stream_) {
@@ -261,31 +231,26 @@ void FileSink::rotate() noexcept
 
 // ── Private: list_archived ────────────────────────────────────────────────────
 
-std::vector<std::filesystem::path> FileSink::list_archived() const noexcept
-{
+std::vector<std::filesystem::path> FileSink::list_archived() const noexcept {
     std::vector<std::filesystem::path> result;
     std::error_code ec;
 
-    for (auto const& entry :
-         std::filesystem::directory_iterator(config_.directory, ec))
-    {
+    for (auto const& entry : std::filesystem::directory_iterator(config_.directory, ec)) {
         if (ec) break;
         auto const& p = entry.path();
         // Match: <base_name>.<something>.log  (not the plain live file)
         auto fname = p.filename().string();
         std::string prefix = config_.base_name + ".";
         std::string suffix = ".log";
-        if (fname.size() > prefix.size() + suffix.size() &&
-            fname.substr(0, prefix.size()) == prefix &&
+        if (fname.size() > prefix.size() + suffix.size() && fname.starts_with(prefix) &&
             fname.substr(fname.size() - suffix.size()) == suffix &&
-            fname != config_.base_name + ".log")
-        {
+            fname != config_.base_name + ".log") {
             result.push_back(p);
         }
     }
 
     // Sort lexicographically (ISO-8601 names sort chronologically).
-    std::sort(result.begin(), result.end());
+    std::ranges::sort(result);
     return result;
 }
 

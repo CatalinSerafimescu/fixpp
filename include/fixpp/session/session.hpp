@@ -171,8 +171,7 @@ public:
     // [[clang::lifetimebound]] on the implicit *this: the returned reference is
     // bound to the Session object lifetime.
     [[nodiscard]]
-    const fixpp::otel::trace_context& get_trace_context() const noexcept
-            [[clang::lifetimebound]] {
+    const fixpp::otel::trace_context& get_trace_context() const noexcept [[clang::lifetimebound]] {
         return trace_slot_.load();
     }
 

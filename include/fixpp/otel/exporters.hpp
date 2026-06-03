@@ -40,8 +40,8 @@ namespace fixpp::otel {
 // `host:port` and exposes `metrics_path` — no asio involvement.
 
 struct PrometheusConfig {
-    std::string host         = "0.0.0.0";
-    uint16_t    port         = 9464;
+    std::string host = "0.0.0.0";
+    uint16_t port = 9464;
     std::string metrics_path = "/metrics";
     // cert_source is intentionally omitted in v1.0 (TLS on prom endpoint deferred).
 };
@@ -49,9 +49,9 @@ struct PrometheusConfig {
 // ── OtlpMetricConfig ──────────────────────────────────────────────────────────
 
 struct OtlpMetricConfig {
-    std::string              endpoint          = "http://localhost:4318";
-    std::chrono::milliseconds export_interval  = std::chrono::milliseconds{60000};
-    std::chrono::milliseconds export_timeout   = std::chrono::milliseconds{30000};
+    std::string endpoint = "http://localhost:4318";
+    std::chrono::milliseconds export_interval = std::chrono::milliseconds{60000};
+    std::chrono::milliseconds export_timeout = std::chrono::milliseconds{30000};
 };
 
 // ── PrometheusExporter ────────────────────────────────────────────────────────
@@ -70,18 +70,18 @@ public:
     explicit PrometheusExporter(const PrometheusConfig& cfg);
     ~PrometheusExporter();
 
-    PrometheusExporter(const PrometheusExporter&)            = delete;
+    PrometheusExporter(const PrometheusExporter&) = delete;
     PrometheusExporter& operator=(const PrometheusExporter&) = delete;
     PrometheusExporter(PrometheusExporter&&) noexcept;
     PrometheusExporter& operator=(PrometheusExporter&&) noexcept;
 
     // Returns the underlying MetricReader.  Lifetime bound to *this.
-    [[nodiscard]] opentelemetry::sdk::metrics::MetricReader*
-    sdk_reader() const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] opentelemetry::sdk::metrics::MetricReader* sdk_reader() const noexcept
+        [[clang::lifetimebound]];
 
     // Returns shared ownership (safe to pass to AddMetricReader).
-    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
-    sdk_reader_shared() const noexcept;
+    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> sdk_reader_shared()
+        const noexcept;
 
     void shutdown();
 
@@ -102,16 +102,16 @@ public:
     explicit OtlpMetricExporter(const OtlpMetricConfig& cfg);
     ~OtlpMetricExporter();
 
-    OtlpMetricExporter(const OtlpMetricExporter&)            = delete;
+    OtlpMetricExporter(const OtlpMetricExporter&) = delete;
     OtlpMetricExporter& operator=(const OtlpMetricExporter&) = delete;
     OtlpMetricExporter(OtlpMetricExporter&&) noexcept;
     OtlpMetricExporter& operator=(OtlpMetricExporter&&) noexcept;
 
-    [[nodiscard]] opentelemetry::sdk::metrics::MetricReader*
-    sdk_reader() const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] opentelemetry::sdk::metrics::MetricReader* sdk_reader() const noexcept
+        [[clang::lifetimebound]];
 
-    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
-    sdk_reader_shared() const noexcept;
+    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> sdk_reader_shared()
+        const noexcept;
 
     void shutdown();
 
@@ -130,8 +130,8 @@ public:
     explicit OtlpMetricExporterFromReader(
         std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader);
 
-    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
-    sdk_reader_shared() const noexcept;
+    [[nodiscard]] std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> sdk_reader_shared()
+        const noexcept;
 
 private:
     std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader_;

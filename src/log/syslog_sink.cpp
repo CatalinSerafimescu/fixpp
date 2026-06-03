@@ -18,18 +18,11 @@
 
 namespace fixpp::log {
 
-SyslogSink::SyslogSink(SyslogSinkConfig config)
-    : config_{std::move(config)}
-{
-}
+SyslogSink::SyslogSink(SyslogSinkConfig config) : config_{std::move(config)} {}
 
-SyslogSink::~SyslogSink()
-{
-    close();
-}
+SyslogSink::~SyslogSink() { close(); }
 
-fixpp::core::expected_t<void> SyslogSink::open()
-{
+fixpp::core::expected_t<void> SyslogSink::open() {
     // openlog(3): sets up the syslog connection.
     // ident must be a stable C-string; SyslogSinkConfig::ident is a std::string
     // whose lifetime equals the SyslogSink (constructed before open(), alive
@@ -39,20 +32,34 @@ fixpp::core::expected_t<void> SyslogSink::open()
     return {};
 }
 
-void SyslogSink::emit(Record const& rec) noexcept
-{
+void SyslogSink::emit(Record const& rec) noexcept {
     if (!open_) return;
 
     // Map fixpp::log::Level → syslog priority.
+    // trace and debug both map to LOG_DEBUG by design (syslog has no TRACE level).
     int priority = LOG_DEBUG;
+    // NOLINTBEGIN(bugprone-branch-clone) — intentional identical trace/debug arms
     switch (rec.level) {
-        case Level::trace: priority = LOG_DEBUG;   break;
-        case Level::debug: priority = LOG_DEBUG;   break;
-        case Level::info:  priority = LOG_INFO;    break;
-        case Level::warn:  priority = LOG_WARNING; break;
-        case Level::error: priority = LOG_ERR;     break;
-        case Level::fatal: priority = LOG_CRIT;    break;
+        case Level::trace:
+            priority = LOG_DEBUG;
+            break;
+        case Level::debug:
+            priority = LOG_DEBUG;
+            break;
+        case Level::info:
+            priority = LOG_INFO;
+            break;
+        case Level::warn:
+            priority = LOG_WARNING;
+            break;
+        case Level::error:
+            priority = LOG_ERR;
+            break;
+        case Level::fatal:
+            priority = LOG_CRIT;
+            break;
     }
+    // NOLINTEND(bugprone-branch-clone)
 
     // Format the body on the drain thread using the registry.
     // Exceptions are swallowed: emit() must not propagate.
@@ -64,13 +71,11 @@ void SyslogSink::emit(Record const& rec) noexcept
     }
 }
 
-void SyslogSink::flush(std::chrono::milliseconds /*deadline*/) noexcept
-{
+void SyslogSink::flush(std::chrono::milliseconds /*deadline*/) noexcept {
     // syslog(3) is handled by the syslog daemon; no client-side flush needed.
 }
 
-void SyslogSink::close() noexcept
-{
+void SyslogSink::close() noexcept {
     if (open_) {
         ::closelog();
         open_ = false;

@@ -12,10 +12,9 @@
 #pragma once
 
 #include <cstdint>
+#include <fixpp/log/record.hpp>
 #include <string>
 #include <string_view>
-
-#include <fixpp/log/record.hpp>
 
 namespace fixpp::log::detail {
 

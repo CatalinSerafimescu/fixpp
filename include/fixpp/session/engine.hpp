@@ -25,9 +25,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <fixpp/core/engine_config.hpp>      // EngineConfig — held by value in Engine
-#include <fixpp/core/error.hpp>              // expected_t<T>, error enum (incl. slot 121)
-#include <fixpp/otel/trace_context.hpp>      // fixpp::otel::trace_context (for engine_trace_context())
+#include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
+#include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
+#include <fixpp/otel/trace_context.hpp>  // fixpp::otel::trace_context (for engine_trace_context())
 #include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
 #include <fixpp/transport/endpoint.hpp>      // Endpoint (for acceptor_bound_endpoint return type)
 #include <fixpp/transport/listener.hpp>      // abstract Listener (for listeners_ map)

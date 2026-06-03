@@ -15,21 +15,20 @@
 #pragma once
 
 #include <chrono>
+#include <fixpp/core/error.hpp>  // expected_t, error::otel_provider_init_failed
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <fixpp/core/error.hpp>  // expected_t, error::otel_provider_init_failed
-
 // Pull in the OTel API types for Tracer/Meter return values.
 // These are lightweight API-only headers (no SDK internals).
+#include <opentelemetry/metrics/meter.h>
+#include <opentelemetry/metrics/meter_provider.h>
 #include <opentelemetry/nostd/shared_ptr.h>
 #include <opentelemetry/trace/tracer.h>
 #include <opentelemetry/trace/tracer_provider.h>
-#include <opentelemetry/metrics/meter.h>
-#include <opentelemetry/metrics/meter_provider.h>
 
 namespace fixpp::otel {
 
@@ -46,10 +45,10 @@ struct OtelResourceAttributes {
 // ── Shared OTel config (provider endpoint + resource) ────────────────────────
 
 struct OtelConfig {
-    std::string endpoint;               // e.g. "http://localhost:4318"
-    bool        use_grpc{false};        // gRPC OTLP (deferred to Phase 5)
+    std::string endpoint;  // e.g. "http://localhost:4318"
+    bool use_grpc{false};  // gRPC OTLP (deferred to Phase 5)
     OtelResourceAttributes resource;
-    std::string cert_path;              // optional PEM; empty ⇒ plain HTTP
+    std::string cert_path;  // optional PEM; empty ⇒ plain HTTP
     std::chrono::seconds export_interval{60};
     std::chrono::seconds export_timeout{30};
 
@@ -59,10 +58,8 @@ struct OtelConfig {
     // factory that throws drives the identical catch(...)→Noop fallback path.
     // Zero-cost and zero-behavior-change when null (the default).
     // Usage: set to a lambda that throws to exercise the FR-019 fallback.
-    std::function<std::shared_ptr<opentelemetry::trace::TracerProvider>()>
-        tracer_factory_for_test;
-    std::function<std::shared_ptr<opentelemetry::metrics::MeterProvider>()>
-        meter_factory_for_test;
+    std::function<std::shared_ptr<opentelemetry::trace::TracerProvider>()> tracer_factory_for_test;
+    std::function<std::shared_ptr<opentelemetry::metrics::MeterProvider>()> meter_factory_for_test;
 };
 
 // ── TracerProvider ────────────────────────────────────────────────────────────
@@ -82,15 +79,15 @@ public:
     explicit TracerProvider(const OtelConfig& cfg);
     ~TracerProvider();
 
-    TracerProvider(const TracerProvider&)            = delete;
+    TracerProvider(const TracerProvider&) = delete;
     TracerProvider& operator=(const TracerProvider&) = delete;
     // Move constructor/assignment defined in .cpp (Impl is complete there).
     TracerProvider(TracerProvider&&) noexcept;
     TracerProvider& operator=(TracerProvider&&) noexcept;
 
     // Returns a borrowed tracer for `name`.  Lifetime is tied to *this.
-    [[nodiscard]] opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-    get_tracer(std::string_view name) const [[clang::lifetimebound]];
+    [[nodiscard]] opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> get_tracer(
+        std::string_view name) const [[clang::lifetimebound]];
 
     // Flush + shut down the underlying SDK provider.  Idempotent.
     void shutdown();
@@ -116,15 +113,15 @@ public:
     explicit MeterProvider(const OtelConfig& cfg);
     ~MeterProvider();
 
-    MeterProvider(const MeterProvider&)            = delete;
+    MeterProvider(const MeterProvider&) = delete;
     MeterProvider& operator=(const MeterProvider&) = delete;
     // Move constructor/assignment defined in .cpp (Impl is complete there).
     MeterProvider(MeterProvider&&) noexcept;
     MeterProvider& operator=(MeterProvider&&) noexcept;
 
     // Returns a borrowed meter for `name`.  Lifetime is tied to *this.
-    [[nodiscard]] opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Meter>
-    get_meter(std::string_view name) const [[clang::lifetimebound]];
+    [[nodiscard]] opentelemetry::nostd::shared_ptr<opentelemetry::metrics::Meter> get_meter(
+        std::string_view name) const [[clang::lifetimebound]];
 
     // Flush + shut down the underlying SDK provider.  Idempotent.
     void shutdown();

@@ -33,9 +33,9 @@
 #ifdef FIXPP_HAS_SYSLOG
 
 #include <syslog.h>
-#include <string>
 
 #include <fixpp/log/sink.hpp>
+#include <string>
 
 namespace fixpp::log {
 
@@ -60,10 +60,10 @@ public:
     ~SyslogSink() override;
 
     // Non-copyable, non-movable.
-    SyslogSink(SyslogSink const&)            = delete;
+    SyslogSink(SyslogSink const&) = delete;
     SyslogSink& operator=(SyslogSink const&) = delete;
-    SyslogSink(SyslogSink&&)                 = delete;
-    SyslogSink& operator=(SyslogSink&&)      = delete;
+    SyslogSink(SyslogSink&&) = delete;
+    SyslogSink& operator=(SyslogSink&&) = delete;
 
     // ── Sink interface ────────────────────────────────────────────────────────
 
@@ -82,18 +82,15 @@ public:
 
 private:
     SyslogSinkConfig config_;
-    bool             open_{false};
+    bool open_{false};
 };
 
 // ── SyslogSinkFactory ─────────────────────────────────────────────────────────
 
 struct SyslogSinkFactory final : SinkFactory {
-    [[nodiscard]] std::unique_ptr<Sink> make(
-        std::pmr::memory_resource* /*resource*/,
-        SinkConfig const&          config) override
-    {
-        return std::make_unique<SyslogSink>(
-            static_cast<SyslogSinkConfig const&>(config));
+    [[nodiscard]] std::unique_ptr<Sink> make(std::pmr::memory_resource* /*resource*/,
+                                             SinkConfig const& config) override {
+        return std::make_unique<SyslogSink>(static_cast<SyslogSinkConfig const&>(config));
     }
 };
 

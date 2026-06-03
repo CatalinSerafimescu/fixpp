@@ -31,10 +31,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fixpp/log/sink.hpp>
 #include <functional>
 #include <string>
-
-#include <fixpp/log/sink.hpp>
 
 namespace fixpp::log {
 
@@ -53,13 +52,13 @@ struct FileSinkConfig : SinkConfig {
     // Maximum bytes written to the live file before rotation is triggered.
     // Rotation happens when bytes_written() > max_file_bytes (strictly greater).
     // Default: 256 MiB.
-    std::uint64_t max_file_bytes{256u * 1024u * 1024u};
+    std::uint64_t max_file_bytes{256U * 1024U * 1024U};
 
     // Maximum number of ARCHIVED (rotated) files to keep.
     // When the count of archived files exceeds this limit, the oldest is deleted.
     // The live file is NOT counted toward this limit.
     // Default: 8.
-    std::uint32_t max_keep_count{8u};
+    std::uint32_t max_keep_count{8U};
 
     // Whether to call fdatasync after flush().
     // When true (default), flush(deadline) calls fdatasync on the open fd.
@@ -83,10 +82,10 @@ public:
     ~FileSink() override;
 
     // Non-copyable, non-movable.
-    FileSink(FileSink const&)            = delete;
+    FileSink(FileSink const&) = delete;
     FileSink& operator=(FileSink const&) = delete;
-    FileSink(FileSink&&)                 = delete;
-    FileSink& operator=(FileSink&&)      = delete;
+    FileSink(FileSink&&) = delete;
+    FileSink& operator=(FileSink&&) = delete;
 
     // ── Sink interface ────────────────────────────────────────────────────────
 
@@ -111,7 +110,7 @@ public:
 
     // Path to the currently open live log file.
     // Valid only after a successful open() and before close().
-    std::filesystem::path const& current_path() const noexcept;
+    [[nodiscard]] std::filesystem::path const& current_path() const noexcept;
 
     // Total bytes written to the current live file since it was opened/rotated.
     [[nodiscard]] std::uint64_t bytes_written() const noexcept;
@@ -125,25 +124,22 @@ private:
 
     // Scan config_.directory for archived files matching base_name pattern.
     // Returns them sorted oldest-first.
-    std::vector<std::filesystem::path> list_archived() const noexcept;
+    [[nodiscard]] std::vector<std::filesystem::path> list_archived() const noexcept;
 
-    FileSinkConfig          config_;
-    int                     fd_{-1};          // POSIX fd for the live file
-    std::FILE*              stream_{nullptr}; // buffered wrapper (for fprintf)
-    std::filesystem::path   live_path_;       // <dir>/<base_name>.log
-    std::uint64_t           bytes_written_{0};
-    std::uint64_t           rotation_count_{0};
+    FileSinkConfig config_;
+    int fd_{-1};                       // POSIX fd for the live file
+    std::FILE* stream_{nullptr};       // buffered wrapper (for fprintf)
+    std::filesystem::path live_path_;  // <dir>/<base_name>.log
+    std::uint64_t bytes_written_{0};
+    std::uint64_t rotation_count_{0};
 };
 
 // ── FileSinkFactory ────────────────────────────────────────────────────────────
 
 struct FileSinkFactory final : SinkFactory {
-    [[nodiscard]] std::unique_ptr<Sink> make(
-        std::pmr::memory_resource* /*resource*/,
-        SinkConfig const&          config) override
-    {
-        return std::make_unique<FileSink>(
-            static_cast<FileSinkConfig const&>(config));
+    [[nodiscard]] std::unique_ptr<Sink> make(std::pmr::memory_resource* /*resource*/,
+                                             SinkConfig const& config) override {
+        return std::make_unique<FileSink>(static_cast<FileSinkConfig const&>(config));
     }
 };
 
