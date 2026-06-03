@@ -229,6 +229,18 @@ inline std::string validate_admin_descriptor(const AdminScenarioDescriptor& d)
         return "acceptance_ids != expected_ac_ids for cell " + d.cell_id;
     }
 
+    // T029 identity invariant: golden_ref basename must equal cell_id.
+    // The actual golden is loaded via admin_golden_path(cell_id), not from this
+    // field; this check makes the recorded field consistency-checked.
+    if (d.golden_ref != "happy/golden/" + d.cell_id + ".fix") {
+        return "golden_ref basename != cell_id for cell " + d.cell_id;
+    }
+
+    // FR-010 / rule 4: per-cell self-deadline must be positive.
+    if (d.self_deadline_ms <= std::chrono::milliseconds{0}) {
+        return "self_deadline_ms must be > 0 for cell " + d.cell_id;
+    }
+
     return {};
 }
 
