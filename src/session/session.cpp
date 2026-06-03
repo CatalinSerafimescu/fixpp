@@ -147,11 +147,46 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 // always advances; the public count (fsm_visit_count_) saturates at UINT8_MAX
 // to signal "≥255 transitions" without freezing the ring rotation.
 void Session::record_state_transition_(fsm_state new_state) noexcept {
+    const bool was_active = (fsm_state_ == fsm_state::Active);
+
     fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;
     if (fsm_visit_count_ < std::numeric_limits<std::uint8_t>::max()) {
         ++fsm_visit_count_;
     }
     fsm_state_ = new_state;
+
+    // ── 019 T016: lifecycle callbacks pinned to the Active↔!Active edge ───────
+    // Fired here so ALL converging paths (graceful close / terminal close /
+    // callback-threw) share one guard, satisfying INV-7 exactly-once semantics.
+    // record_state_transition_ is noexcept; invoke_callback_safe catches any
+    // throw and stores it in lifecycle_cb_threw_. Callers that transition TO
+    // Active must check lifecycle_cb_threw_ and call close(terminal) if set.
+    // [019-app-callbacks T016; FR-009; data-model.md INV-7; research D3]
+    if (engine_.application == nullptr) return;
+
+    if (new_state == fsm_state::Active && !onLogon_fired_) {
+        onLogon_fired_ = true;
+        const SessionId sid = SessionId::from_config(cfg_);
+        callback_dispatch_scope cs{*this};
+        auto r = invoke_callback_safe([&]() { engine_.application->onLogon(sid); });
+        (void)cs;
+        if (!r) lifecycle_cb_threw_ = true;
+    } else if (was_active && new_state != fsm_state::Active && !onLogout_fired_) {
+        // Fire onLogout on ANY Active→!Active transition:
+        //   Active → LogoutSent  (graceful close phase-1 begin)
+        //   Active → Disconnected (terminal close or fatal)
+        // The fire-once guard (onLogout_fired_) prevents double-fire across all
+        // converging paths (graceful + terminal + callback-threw). [INV-7; FR-009]
+        onLogout_fired_ = true;
+        const SessionId sid = SessionId::from_config(cfg_);
+        callback_dispatch_scope cs{*this};
+        auto r = invoke_callback_safe([&]() { engine_.application->onLogout(sid); });
+        (void)cs;
+        // A throw from onLogout is absorbed: the session is already leaving Active.
+        // No additional close(terminal) needed. app_callback_threw is silently
+        // noted; the fire-once guard (onLogout_fired_) prevents re-entry.
+        (void)r;
+    }
 }
 
 // fsm_visit_history: membership-witness view over the last ≤16 recorded
@@ -699,6 +734,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     if (effective_clock_) {
         last_inbound_steady_ = effective_clock_->steady_now();
         last_outbound_steady_ = last_inbound_steady_;  // T018 Cell A: outbound idle tracking
+    }
+
+    // 019 T016: fire onCreate after open() has fully initialized exec_
+    // (executor is valid post-open() per research D3 / data-model.md INV-7).
+    // Invoked directly on the session strand (exec_ is the current executor here).
+    // On throw → terminal close + return error (FR-011; US3 AC1). [FR-009]
+    if (engine_.application != nullptr) {
+        const SessionId create_id = SessionId::from_config(cfg_);
+        callback_dispatch_scope cs{*this};
+        auto cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
+        (void)cs;
+        if (!cb_r) {
+            co_await close(fixpp::session::close_mode::terminal);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
     }
 
     co_return fixpp::core::expected_t<void>{};
@@ -1478,6 +1528,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 last_inbound_steady_ = effective_clock_->steady_now();
             }
             record_state_transition_(fsm_state::Active);
+            // 019 T016: if onLogon threw, terminal-close the session.
+            if (lifecycle_cb_threw_) {
+                lifecycle_cb_threw_ = false;
+                co_await close(fixpp::session::close_mode::terminal);
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
@@ -1595,6 +1651,66 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // GapFill mode (123=Y) is handled AFTER the gate (it IS subject to
             // ordering). [S-023; QuickFIX Session::nextSequenceReset]
             if (hdr.msg_type == "4" && hdr.gap_fill_flag != "Y") {
+                // 019 T016 — fromAdmin completeness fix (FR-004):
+                // Wire fromAdmin for inbound SequenceReset(Reset mode) AFTER the
+                // FSM acts on it (apply_inbound_sequence_reset below applies the
+                // new seqno). We fire BEFORE here since apply_inbound_sequence_reset
+                // may co_return early on Reject — the message was accepted by the
+                // FSM guards above and we fire consistent with US1 wiring (after
+                // seqnum/FSM validation accepts). A fromAdmin reject emits
+                // session Reject(35=3) per FR-005/D4.
+                // [019-app-callbacks T016; FR-004; research D3/D4]
+                if (engine_.application != nullptr) {
+                    std::array<std::byte, 16384> pa_buf{};
+                    std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+                                                              std::pmr::null_memory_resource()};
+                    std::array<std::byte, 512> carry_store{};
+                    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(),
+                                                                  carry_store.size(),
+                                                                  std::pmr::null_memory_resource()};
+                    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+                    fixpp::wire::Framer sr_framer;
+                    std::array<fixpp::wire::frame_view, 1> sr_out{};
+                    auto sr_feed = sr_framer.feed(
+                        frame, carry, std::span<fixpp::wire::frame_view>{sr_out});
+                    if (sr_feed && !sr_feed->empty()) {
+                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> sr_parser;
+                        auto sr_mv = sr_parser.parse((*sr_feed)[0], &pa_mr);
+                        if (sr_mv) {
+                            const SessionId sr_sid = SessionId::from_config(cfg_);
+                            callback_dispatch_scope cs{*this};
+                            auto cb_r = invoke_callback_safe([&]() {
+                                return engine_.application->fromAdmin(*sr_mv, sr_sid);
+                            });
+                            (void)cs;
+                            if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                co_await close(close_mode::terminal);
+                                co_return std::unexpected(cb_r.error());
+                            }
+                            if (!cb_r) {
+                                // fromAdmin reject → emit session Reject(35=3).
+                                std::array<std::byte, 512> rj_buf{};
+                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                                const auto rj_st52 = effective_clock_
+                                                         ? stamp_sending_time(*effective_clock_)
+                                                         : SendingTimeStamp{};
+                                const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                                auto rj_r = fixpp::session::build_reject(
+                                    std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                                    rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                    rj_ref, 0, hdr.msg_type, 3,
+                                    cfg_.begin_string, rj_st52.value);
+                                if (rj_r) {
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (assign_r) {
+                                        (void)co_await store_then_emit(rj_seq, *rj_r);
+                                    }
+                                }
+                                co_return fixpp::core::expected_t<void>{};
+                            }
+                        }
+                    }
+                }
                 co_return co_await apply_inbound_sequence_reset(
                     parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
             }
@@ -1723,7 +1839,66 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
                         .by_peer_request = false});
                 }
+                // 019 T016 — fromAdmin completeness fix (FR-004):
+                // Wire fromAdmin for inbound Logout (35=5) AFTER the FSM acts
+                // (confirming Logout emitted above). Fires on Active→Disconnected
+                // transition, while still Active, consistent with US1 wiring.
+                // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
+                // but the session still disconnects (Logout has been confirmed).
+                if (engine_.application != nullptr) {
+                    std::array<std::byte, 16384> pa_buf{};
+                    std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+                                                              std::pmr::null_memory_resource()};
+                    std::array<std::byte, 512> carry_store{};
+                    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(),
+                                                                  carry_store.size(),
+                                                                  std::pmr::null_memory_resource()};
+                    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+                    fixpp::wire::Framer lo_framer;
+                    std::array<fixpp::wire::frame_view, 1> lo_out{};
+                    auto lo_feed = lo_framer.feed(
+                        frame, carry, std::span<fixpp::wire::frame_view>{lo_out});
+                    if (lo_feed && !lo_feed->empty()) {
+                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> lo_parser;
+                        auto lo_mv = lo_parser.parse((*lo_feed)[0], &pa_mr);
+                        if (lo_mv) {
+                            const SessionId lo_sid = SessionId::from_config(cfg_);
+                            callback_dispatch_scope cs{*this};
+                            auto cb_r = invoke_callback_safe([&]() {
+                                return engine_.application->fromAdmin(*lo_mv, lo_sid);
+                            });
+                            (void)cs;
+                            if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                // throw from fromAdmin on Logout path: terminal close.
+                                // onLogout will still fire in record_state_transition_ below.
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(cb_r.error());
+                            }
+                            // fromAdmin reject on Logout: emit Reject(35=3) but still disconnect.
+                            if (!cb_r) {
+                                std::array<std::byte, 512> rj_buf{};
+                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                                const auto rj_st52 = effective_clock_
+                                                         ? stamp_sending_time(*effective_clock_)
+                                                         : SendingTimeStamp{};
+                                const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                                auto rj_r = fixpp::session::build_reject(
+                                    std::span<std::byte>{rj_buf.data(), rj_buf.size()},
+                                    rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
+                                    rj_ref, 0, hdr.msg_type, 3,
+                                    cfg_.begin_string, rj_st52.value);
+                                if (rj_r) {
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (assign_r) {
+                                        (void)co_await store_then_emit(rj_seq, *rj_r);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // Both Active and LogonReceived → Disconnected.
+                // onLogout fires inside record_state_transition_ (INV-7 guard).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -2429,6 +2604,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);
+            // 019 T016: if onLogon threw, terminal-close the session.
+            if (lifecycle_cb_threw_) {
+                lifecycle_cb_threw_ = false;
+                co_await close(fixpp::session::close_mode::terminal);
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
             if (effective_clock_) {

@@ -1140,6 +1140,27 @@ set_tests_properties(application_outbound_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us2;outbound;application")
 
+# ── 019-app-callbacks T015 — lifecycle notifications tests ───────────────────
+# US3: onCreate/onLogon/onLogout exactly-once, in order, on exec_; three onLogout
+# exit paths (graceful, terminal, callback-threw); fromAdmin completeness for
+# inbound Logout(35=5) and SequenceReset(35=4). FR-009; FR-004; INV-7.
+add_executable(application_lifecycle_019_test
+  test_application_lifecycle.cpp
+)
+target_link_libraries(application_lifecycle_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_lifecycle_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_lifecycle_019 COMMAND application_lifecycle_019_test)
+set_tests_properties(application_lifecycle_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us3;lifecycle;application")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

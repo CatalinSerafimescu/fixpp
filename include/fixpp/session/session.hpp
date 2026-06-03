@@ -572,6 +572,26 @@ private:
     // ring-buffer is always in sync with fsm_state_.
     void record_state_transition_(fsm_state new_state) noexcept;
 
+    // ── 019 T016 — lifecycle callback fire-once guards ────────────────────────
+    //
+    // onLogon_fired_ and onLogout_fired_ are set BEFORE the respective callback
+    // is invoked, providing the INV-7 once-per-session guarantee across all three
+    // converging onLogout exit paths:
+    //   graceful close → record_state_transition_(Disconnected)
+    //   terminal close → record_state_transition_(Disconnected)
+    //   callback-threw → close(terminal) → record_state_transition_(Disconnected)
+    // Both flags are checked inside record_state_transition_ so only ONE function
+    // must be updated when new paths reach Disconnected.
+    //
+    // lifecycle_cb_threw_: set to true if a lifecycle callback (onLogon) threw.
+    // record_state_transition_ is noexcept so it cannot propagate; callers that
+    // transition TO Active check this flag and call close(terminal) if set.
+    // (onLogout throws during a Disconnected transition — no further close needed.)
+    // [019-app-callbacks T016; FR-009; data-model.md INV-7; research D3]
+    bool onLogon_fired_ = false;
+    bool onLogout_fired_ = false;
+    bool lifecycle_cb_threw_ = false;
+
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().
     // Written exclusively from the per-session strand ([const §XI.4]).

@@ -89,11 +89,11 @@ description: "Task list — 019-app-callbacks (Application callback layer, Phase
 
 ### Tests for User Story 3 (write FIRST, confirm FAIL) ⚠️
 
-- [ ] T015 [P] [US3] `tests/session/test_application_lifecycle.cpp` — `onCreate` fires once **after `Session::open()` initializes `exec_`** and **before** first Logon (US3 AC1; FR-009); `onLogon` once at `Active` (AC2); `onLogout` once when the session leaves established — **one test per exit path: graceful close, terminal close, callback-threw** — asserting exactly-once across all three (AC3; FR-009; INV-7 lifecycle once-only). All on `exec_`, in order.
+- [X] T015 [P] [US3] `tests/session/test_application_lifecycle.cpp` — `onCreate` fires once **after `Session::open()` initializes `exec_`** and **before** first Logon (US3 AC1; FR-009); `onLogon` once at `Active` (AC2); `onLogout` once when the session leaves established — **one test per exit path: graceful close, terminal close, callback-threw** — asserting exactly-once across all three (AC3; FR-009; INV-7 lifecycle once-only). All on `exec_`, in order. Also: fromAdmin fires for inbound Logout(35=5) and inbound SequenceReset(35=4) [FR-004 completeness]; inbound Logout fires BOTH fromAdmin AND onLogout independently. DONE: 9/9 tests pass; all US3 AC1/AC2/AC3 + fromAdmin-completeness cells (Logout+SeqReset) green.
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Fire `onCreate` after `Session::open()` initializes `exec_` (pre first Logon) in `src/session/engine.cpp`; pin `onLogon`/`onLogout` to the **single idempotent `record_state_transition_` `Active`↔`!Active` edge** in `src/session/session.cpp` with a fire-once-per-session guard so the three converging `onLogout` exit paths cannot double-fire or miss (FR-009; INV-7). On-strand via the T007 scope + throw wrapper.
+- [X] T016 [US3] Fire `onCreate` after `Session::open()` initializes `exec_` (pre first Logon) in `src/session/session.cpp` (end of open(), after exec_ init, via invoke_callback_safe); pin `onLogon`/`onLogout` to `record_state_transition_` `Active↔!Active` edge with fire-once `onLogon_fired_`/`onLogout_fired_` guards; `onLogout` fires on ANY `Active→!Active` transition (Active→LogoutSent for graceful, Active→Disconnected for terminal); `lifecycle_cb_threw_` flag lets coroutine callers terminal-close after onLogon throws. fromAdmin completeness: wire fromAdmin for inbound Logout(35=5) and SequenceReset-Reset-mode(35=4) via inline parse+invoke_callback_safe before `record_state_transition_`. On-strand via T007 scope + invoke_callback_safe. (FR-009; INV-7; FR-004.) DONE: 9/9 lifecycle tests pass; full regression 40/40 pass; all 019 tests 7/7 pass.
 
 **Checkpoint**: full lifecycle observability layered cleanly on US1/US2.
 
