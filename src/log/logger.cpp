@@ -278,10 +278,15 @@ struct Logger::Impl {
                 if (config_.on_overflow == overflow_policy::block) {
                     // block mode: spin-yield until a slot becomes available.
                     // MUST NOT be called from a session-strand coroutine ([const §XI.3]).
-                    // TODO(T033/T034): Add session-strand thread detection here and
-                    // fire a debug assert if block is called from the session executor.
-                    // For now: unconditional spin-yield is correct for raw-thread
-                    // producer paths (FR-004 / TS-3).
+                    //
+                    // Session-strand detection is deliberately NOT implemented here.
+                    // Logger is intentionally session/engine-ref-free ([2k §4.3]):
+                    // it holds no session executor reference, so there is no cheap hook
+                    // to detect "am I on a session thread". The raw-thread path (the only
+                    // production use today) is correct. Block-on-session-strand is a
+                    // documented caller obligation (see spec/behaviors-and-limitations.md
+                    // L-017-6 + L-017-8). T033/T034 track an opt-in predicate approach
+                    // (e.g. a LoggerConfig flag injected by the caller) for a future PR.
                     std::this_thread::yield();
                     continue;
                 }
@@ -542,6 +547,20 @@ fixpp::core::expected_t<void> Logger::shutdown(std::chrono::milliseconds drain_t
         impl_->drain_thread_.join();
     }
     return {};
+}
+
+// shutdown() no-arg overload — uses the configured LoggerConfig::drain_timeout.
+// Convenience for Engine::stop() and other callers that should honor the
+// operator-configured timeout rather than a hardcoded literal.
+// [2k §6.6] / contracts/otel-surface.md shutdown / RC#2.
+fixpp::core::expected_t<void> Logger::shutdown() {
+    return shutdown(impl_->config_.drain_timeout);
+}
+
+// drain_timeout() accessor — returns the configured drain timeout.
+// Allows callers to read the configured value (e.g. for logging/metrics).
+std::chrono::milliseconds Logger::drain_timeout() const noexcept {
+    return impl_->config_.drain_timeout;
 }
 
 // async_flush() — T027.

@@ -749,8 +749,10 @@ asio::awaitable<void> Engine::stop() {
     // Provider shutdown: flush + stop the SDK exporter workers.
     // Lifecycle only — NO session-FSM transition edit ([2k §6.6] / T044).
     if (engine_cfg_.logger) {
-        using namespace std::chrono_literals;
-        (void)engine_cfg_.logger->shutdown(5000ms);
+        // Use the no-arg overload so the Engine honors LoggerConfig::drain_timeout
+        // (set by the operator) rather than a hardcoded 5s literal.
+        // [2k §6.6]: Engine::close() calls logger->shutdown(LoggerConfig::drain_timeout).
+        (void)engine_cfg_.logger->shutdown();
     }
     if (engine_cfg_.tracer) {
         engine_cfg_.tracer->shutdown();

@@ -17,13 +17,16 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <ctime>
 #include <fixpp/core/error.hpp>
 #include <fixpp/log/file_sink.hpp>
 #include <fixpp/log/format_registry.hpp>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace fixpp::log {
@@ -129,7 +132,7 @@ void FileSink::emit(Record const& rec) noexcept {
     }
 }
 
-void FileSink::flush(std::chrono::milliseconds /*deadline*/) noexcept {
+void FileSink::flush(std::chrono::milliseconds deadline) noexcept {
     if (stream_ == nullptr) return;
 
     // Flush the stdio buffer first.
@@ -137,11 +140,49 @@ void FileSink::flush(std::chrono::milliseconds /*deadline*/) noexcept {
 
     if (!config_.async_fsync) return;
 
-    // Call fsync (or the injected test hook) on the drain thread.
-    if (config_.fsync_fn) {
-        config_.fsync_fn(fd_);
-    } else {
-        ::fdatasync(fd_);
+    // Deadline-bounded fsync: [2k §4.5] / contracts/log-sinks.md §FileSink.
+    // The fsync (or injected fsync_fn) runs on a helper thread; the drain
+    // thread waits at most `deadline` for it to finish.
+    //
+    // All shared state lives in FsyncState (heap-allocated, shared_ptr-owned)
+    // so there is no SUAR if the helper thread outlives this flush() call
+    // (which happens on a deadline timeout).
+    //
+    // Called on the drain thread only (sole caller per Sink contract).
+    struct FsyncState {
+        std::mutex mu;
+        std::condition_variable cv;
+        bool done{false};
+    };
+
+    try {
+        auto state = std::make_shared<FsyncState>();
+
+        int fd = fd_;
+        auto fsync_fn = config_.fsync_fn;  // copy by value (captures thread-safe)
+
+        std::thread helper([fd, fsync_fn, state]() {
+            // Run fsync on the helper thread.
+            if (fsync_fn) {
+                fsync_fn(fd);
+            } else {
+                ::fdatasync(fd);
+            }
+            // Signal completion via the shared state (safe even if drain timed out).
+            std::lock_guard<std::mutex> lk(state->mu);
+            state->done = true;
+            state->cv.notify_one();
+        });
+        helper.detach();
+
+        // Wait at most `deadline` for the fsync helper.
+        std::unique_lock<std::mutex> lk(state->mu);
+        state->cv.wait_for(lk, deadline, [&state] { return state->done; });
+
+        // If timed out: the helper thread continues running in the background.
+        // `state` is kept alive by the helper's captured shared_ptr — no SUAR.
+    } catch (...) {
+        // Must not propagate (Sink::flush is noexcept).
     }
 }
 

@@ -216,3 +216,57 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync)
     // Drain with a generous deadline (flush triggers the slow fsync).
     (void)logger->shutdown(std::chrono::seconds{5});
 }
+
+// ── flush(deadline) returns bounded even when fsync stalls ────────────────────
+//
+// [RC#2 regression guard / LOG-002 coverage]
+// [2k §4.5] / contracts/log-sinks.md §FileSink: flush(deadline) is a
+// mandatory deadline escape — it MUST return within deadline even when the
+// injected fsync_fn blocks longer.
+//
+// Test: inject a fsync_fn that sleeps 500ms. Call flush(10ms).
+// Assert flush() returns well under 500ms. The test has an internal hard
+// deadline so a regression hangs for at most ~600ms before failing (not forever).
+TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
+{
+    constexpr auto k_fsync_sleep_ms = std::chrono::milliseconds{500};
+    constexpr auto k_flush_deadline = std::chrono::milliseconds{10};
+    // Allow 3× the flush_deadline for OS scheduling jitter before failing.
+    constexpr auto k_max_return_ms = std::chrono::milliseconds{100};
+
+    fixpp::log::FileSinkConfig cfg;
+    cfg.directory      = tmpdir_;
+    cfg.base_name      = "deadline_test";
+    cfg.max_file_bytes = 256u * 1024u * 1024u;
+    cfg.max_keep_count = 8u;
+    cfg.async_fsync    = true;
+    // Inject a very slow fsync (500ms) so any synchronous implementation hangs.
+    cfg.fsync_fn = [k_fsync_sleep_ms](int) -> int {
+        std::this_thread::sleep_for(k_fsync_sleep_ms);
+        return 0;
+    };
+
+    fixpp::log::FileSink sink{std::move(cfg)};
+    ASSERT_TRUE(sink.open().has_value()) << "FileSink::open() failed";
+
+    // Measure how long flush(10ms) takes under a 500ms stalling fsync.
+    auto t0 = std::chrono::steady_clock::now();
+    sink.flush(k_flush_deadline);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    // flush() must return well before the fsync sleep completes.
+    EXPECT_LT(elapsed.count(), k_max_return_ms.count())
+        << "flush(10ms) took " << elapsed.count()
+        << "ms — should return within " << k_max_return_ms.count()
+        << "ms even when fsync blocks for " << k_fsync_sleep_ms.count() << "ms. "
+        << "flush(deadline) must implement the mandatory deadline escape "
+        << "([2k §4.5] / contracts/log-sinks.md).";
+
+    // Wait long enough for the background fsync helper to finish before
+    // the test fixture tears down the tmpdir_ (avoids tmpdir removal racing
+    // the helper's still-open fd).
+    std::this_thread::sleep_for(k_fsync_sleep_ms + std::chrono::milliseconds{50});
+
+    sink.close();
+}

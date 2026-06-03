@@ -191,6 +191,16 @@ public:
     // [2k §4.3] / contracts/log-core.md FR-014 / SC-007.
     [[nodiscard]] fixpp::core::expected_t<void> shutdown(std::chrono::milliseconds drain_timeout);
 
+    // Shut down using the configured LoggerConfig::drain_timeout.
+    // Convenience overload for callers (e.g. Engine::stop()) that should
+    // honor the operator-configured drain_timeout rather than a hardcoded value.
+    // [2k §6.6] / contracts/otel-surface.md shutdown / RC#2.
+    [[nodiscard]] fixpp::core::expected_t<void> shutdown();
+
+    // Returns the configured drain_timeout (from LoggerConfig).
+    // Allows Engine::stop() and other callers to read the configured value.
+    [[nodiscard]] std::chrono::milliseconds drain_timeout() const noexcept;
+
     // Async flush — enqueues a flush sentinel into the ring; the drain thread
     // processes all pending records before this sentinel and then invokes
     // on_done() on the drain thread.
