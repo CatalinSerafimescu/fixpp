@@ -18,6 +18,7 @@
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/level.hpp>
 #include <fixpp/core/fix_time.hpp>
+#include <fixpp/log/logger.hpp>  // FIXPP_FORMAT_ID, detail::crc32_str
 
 // OTel SDK headers for the mock exporter
 #include <opentelemetry/sdk/logs/exporter.h>
@@ -36,6 +37,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -50,8 +52,8 @@ public:
         std::array<uint8_t, 16> trace_id_bytes{};
         // SpanId bytes (8)
         std::array<uint8_t, 8>  span_id_bytes{};
-        // Body stored as int64 (format_id)
-        int64_t body_i64{0};
+        // Body: resolved formatted string (RC#1 — [2k §4.6] "formatted body→Body")
+        std::string body_str;
         // Category attribute
         int64_t category{0};
     };
@@ -86,10 +88,12 @@ public:
             const auto& sid = lr->GetSpanId();
             std::copy_n(sid.Id().data(), 8, cap.span_id_bytes.begin());
 
-            // Body (int64)
+            // Body: resolved formatted string set by OtlpLogSink::emit()
+            // [RC#1 fix] — body is now std::string (stored as OwnedAttributeValue).
+            // SetBody(std::string) converts via OwnedAttributeConverter → std::string.
             const auto& body = lr->GetBody();
-            if (const auto* v = opentelemetry::nostd::get_if<int64_t>(&body)) {
-                cap.body_i64 = *v;
+            if (const auto* v = opentelemetry::nostd::get_if<std::string>(&body)) {
+                cap.body_str = *v;
             }
 
             // Category attribute
@@ -153,11 +157,16 @@ private:
 };
 
 // ── Helper: build a test Record ───────────────────────────────────────────────
+//
+// Uses the registered "msg {}" format with u64 arg 42 → resolves to "msg 42".
+// [RC#1]: format_id is a CRC32 of the format string (not an arbitrary integer);
+//         the drain-side format_record() returns the resolved body string.
 
 fixpp::log::Record make_record_42() {
     fixpp::log::Record rec{};
     rec.level     = fixpp::log::Level::info;
-    rec.format_id = 42u;
+    // CRC32 of "msg {}" — registered in format_registry.cpp
+    rec.format_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
     rec.category  = fixpp::log::cat::session;
 
     // Known trace_id (all 0xAA)
@@ -168,6 +177,10 @@ fixpp::log::Record make_record_42() {
 
     // Timestamp: 1_000_000_000 ns since epoch (1s)
     rec.timestamp = fixpp::core::utc_time_point{std::chrono::nanoseconds{1'000'000'000LL}};
+
+    // Arg: u64(42) — fills the {} placeholder → body resolves to "msg 42"
+    rec.arg_count = 1;
+    rec.args[0]   = fixpp::log::ArgValue::from_u64(42u);
 
     return rec;
 }
@@ -208,7 +221,7 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
     auto open_r = sink.open();
     ASSERT_TRUE(open_r.has_value()) << "open() failed";
 
-    // Emit one record ("msg 42" with known correlation fields).
+    // Emit one record: format "msg {}" with arg 42 → body resolves to "msg 42".
     auto rec = make_record_42();
     sink.emit(rec);
 
@@ -241,8 +254,9 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
         0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
     EXPECT_EQ(cap.span_id_bytes, expected_span);
 
-    // Body must carry format_id == 42.
-    EXPECT_EQ(cap.body_i64, int64_t{42});
+    // Body must be the resolved formatted string: "msg {}" + u64(42) → "msg 42".
+    // [RC#1]: OtlpLogSink::emit() calls format_record(rec) and SetBody(std::string).
+    EXPECT_EQ(cap.body_str, std::string{"msg 42"});
 
     // Category must be cat::session.
     EXPECT_EQ(cap.category, int64_t{fixpp::log::cat::session});

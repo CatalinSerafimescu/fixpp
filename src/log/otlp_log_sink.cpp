@@ -37,6 +37,7 @@
 #include <atomic>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/log/format_registry.hpp>
 #include <fixpp/log/record.hpp>
 #include <memory>
 #include <stdexcept>
@@ -262,8 +263,14 @@ void OtlpLogSink::emit(Record const& rec) noexcept {
                                                    : static_cast<uint8_t>(0U)};
         log_rec->SetTraceFlags(flags);
 
-        // body: format_id as int64 (the drain-side format registry can map it back)
-        log_rec->SetBody(static_cast<std::int64_t>(rec.format_id));
+        // body: resolved formatted string via the drain-side format registry.
+        // Mirrors FileSink's format_line() — the same one-oracle formatter.
+        // [2k §4.6] / contracts/log-sinks.md §OtlpLogSink ("formatted body→Body").
+        try {
+            log_rec->SetBody(detail::format_record(rec));
+        } catch (...) {
+            log_rec->SetBody("[format error]");
+        }
 
         // category → attribute "fixpp.log.category"
         log_rec->SetAttribute("fixpp.log.category", static_cast<std::int64_t>(rec.category));
@@ -279,8 +286,13 @@ void OtlpLogSink::emit(Record const& rec) noexcept {
 // ── flush() ───────────────────────────────────────────────────────────────────
 //
 // Calls ForceFlush on the processor within `deadline`.
-// Retries up to max_export_retries on failure; records otel_export_failed on
-// give-up (bounded retries, no storm).
+// "Retry" semantics: the loop iterates up to max_export_retries times, but a
+// failed batch is already gone from the BatchLogRecordProcessor's internal
+// queue — a second ForceFlush on a drained queue is vacuous. So this is
+// count-and-drop-once at the ForceFlush layer; per-call `export_timeout` is
+// the cap per ForceFlush attempt; SDK-internal batch retry is the SDK's own
+// concern (FR-019 "retries MUST be capped" = no storm, satisfied here).
+// Records otel_export_failed (core slot 127) on give-up.
 //
 // Called on the drain thread by Logger::shutdown / async_flush.
 
