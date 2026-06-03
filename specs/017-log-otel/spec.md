@@ -102,7 +102,7 @@ An operator configures OTel exporters so the engine emits session/parse/store/di
 - **FR-003**: The queue MUST be a bounded N-producer/1-consumer ring with a configurable capacity; records beyond capacity are handled by the overflow policy and never grow memory unboundedly.
 - **FR-004**: Overflow policy MUST default to `drop_newest` (preserving the oldest in-flight records), incrementing an atomic `drop_count()`. A `block` policy MUST exist but MUST be documented as prohibited from session-strand coroutines.
 - **FR-005**: A dedicated drain OS thread (NOT an ASIO strand thread, holding no session/engine references) MUST format records and fan them out to sinks; it MUST wrap each sink call in a catch-all, increment a per-sink error counter on exception, and continue.
-- **FR-006**: Record timestamps MUST be sourced from the effective clock (`SessionConfig::clock_override ?: EngineConfig::clock`), so a mock clock deterministically controls log timestamps in tests.
+- **FR-006**: `FIXPP_ELOG` (engine-tier) record timestamps MUST be sourced from the effective clock (`SessionConfig::clock_override ?: EngineConfig::clock`), so a mock clock deterministically controls ELOG timestamps in tests. `FIXPP_SLOG` (session-strand) and `FIXPP_LOG0` (context-free) use `system_clock::now()` (wall-clock) directly by design — they have no access to the session-effective clock at the call site. (Mirror: `contracts/log-core.md §25-29`.)
 
 **Sink interface + default sinks (LOG-002)**
 
