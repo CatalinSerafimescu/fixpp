@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 namespace fixpp::log {
 
@@ -32,6 +33,22 @@ enum class Level : std::uint8_t {
     error = 4,
     fatal = 5,
 };
+
+// Human-readable display name for a Level. Canonical owner of the
+// Level→string vocabulary so drain-side text sinks don't each re-derive it
+// (mirrors core::error's error_message/to_string). A new high-end level
+// surfaces here as a -Wswitch warning rather than silently mis-rendering.
+[[nodiscard]] constexpr std::string_view to_string(Level level) noexcept {
+    switch (level) {
+        case Level::trace: return "TRACE";
+        case Level::debug: return "DEBUG";
+        case Level::info:  return "INFO";
+        case Level::warn:  return "WARN";
+        case Level::error: return "ERROR";
+        case Level::fatal: return "FATAL";
+    }
+    return "TRACE";
+}
 
 // ── Category ──────────────────────────────────────────────────────────────────
 //

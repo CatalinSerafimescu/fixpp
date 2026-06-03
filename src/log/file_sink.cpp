@@ -21,6 +21,7 @@
 #include <ctime>
 #include <fcntl.h>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -38,15 +39,7 @@ std::string format_line(Record const& rec)
     auto ts_s  = ts_ns / 1'000'000'000LL;
     auto ts_us = (ts_ns % 1'000'000'000LL) / 1000LL;
 
-    const char* level_str = "TRACE";
-    switch (rec.level) {
-        case Level::trace: level_str = "TRACE"; break;
-        case Level::debug: level_str = "DEBUG"; break;
-        case Level::info:  level_str = "INFO";  break;
-        case Level::warn:  level_str = "WARN";  break;
-        case Level::error: level_str = "ERROR"; break;
-        case Level::fatal: level_str = "FATAL"; break;
-    }
+    std::string_view level_str = to_string(rec.level);
 
     // Resolve and format body using the drain-side registry.
     std::string body;
@@ -59,10 +52,11 @@ std::string format_line(Record const& rec)
     // Build the full line: <timestamp_s>.<us> [LEVEL] cat=<cat> <body>
     char line[1024];
     int n = std::snprintf(line, sizeof(line),
-                          "%lld.%06lld [%s] cat=%u %s\n",
+                          "%lld.%06lld [%.*s] cat=%u %s\n",
                           static_cast<long long>(ts_s),
                           static_cast<long long>(ts_us),
-                          level_str,
+                          static_cast<int>(level_str.size()),
+                          level_str.data(),
                           static_cast<unsigned>(rec.category),
                           body.c_str());
     if (n < 0 || static_cast<std::size_t>(n) >= sizeof(line)) {

@@ -224,6 +224,45 @@ struct Logger::Impl {
         }
     }
 
+    // ── Producer: claim the next ring slot ────────────────────────────────
+    //
+    // Shared load-check-CAS half of the §4.3 / R5 protocol, used by enqueue()
+    // and Logger::async_flush(). On success sets out_w to the claimed write
+    // index and returns true; on a full ring returns false and the caller
+    // applies its own overflow policy. After a true return the caller MUST
+    // populate ring_[out_w % capacity_].record, then publish to the drain via
+    // slot.sequence.store(out_w + 1, release).
+    [[nodiscard]] bool try_claim_slot(std::uint64_t& out_w) noexcept
+    {
+        for (;;) {
+            // Step 1: load current write position (relaxed — we will CAS it).
+            std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
+
+            // Step 2: load drain position with relaxed ordering.
+            // A stale (under-advanced) read makes the ring look fuller → early drop.
+            // Safe under drop_newest (contracts/log-core.md §Runtime obligations).
+            std::uint64_t r = read_sequence_.load(std::memory_order_relaxed);
+
+            // Step 3: overflow check BEFORE claiming a slot (R5).
+            if (w - r >= capacity_) {
+                return false;
+            }
+
+            // Step 4: CAS write_sequence_ (w → w+1, acq_rel on success).
+            if (!write_sequence_.compare_exchange_weak(
+                    w, w + 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) {
+                // Another producer won; retry.
+                continue;
+            }
+
+            // Step 5: CAS success — we own slot w.
+            out_w = w;
+            return true;
+        }
+    }
+
     // ── Producer: enqueue ─────────────────────────────────────────────────
     //
     // Load-check-CAS overflow protocol per §4.3 / R5.
@@ -248,16 +287,9 @@ struct Logger::Impl {
 
         // ── MPSC ring load-check-CAS ───────────────────────────────────────
         for (;;) {
-            // Step 1: load current write position (relaxed — we will CAS it).
-            std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
-
-            // Step 2: load drain position with relaxed ordering.
-            // A stale (under-advanced) read makes the ring look fuller → early drop.
-            // Safe under drop_newest (contracts/log-core.md §Runtime obligations).
-            std::uint64_t r = read_sequence_.load(std::memory_order_relaxed);
-
-            // Step 3: overflow check BEFORE claiming a slot (R5).
-            if (w - r >= capacity_) {
+            std::uint64_t w;
+            if (!try_claim_slot(w)) {
+                // Ring full (R5 overflow check).
                 if (config_.on_overflow == overflow_policy::block) {
                     // block mode: spin-yield until a slot becomes available.
                     // MUST NOT be called from a session-strand coroutine ([const §XI.3]).
@@ -273,17 +305,7 @@ struct Logger::Impl {
                 return;
             }
 
-            // Step 4: CAS write_sequence_ (w → w+1, acq_rel on success).
-            if (!write_sequence_.compare_exchange_weak(
-                    w, w + 1,
-                    std::memory_order_acq_rel,
-                    std::memory_order_relaxed)) {
-                // Another producer won; retry.
-                continue;
-            }
-
-            // Step 5: CAS success — we own slot w.
-            // Write the Record into ring_[w % capacity_].
+            // We own slot w. Write the Record into ring_[w % capacity_].
             // The drain will not read this slot until we store sequence = w+1.
             RingSlot& slot = ring_[w % capacity_];
 
@@ -581,38 +603,27 @@ void Logger::async_flush(std::function<void()> on_done)
     // fire. Callers should ensure the ring is not perpetually full when calling
     // async_flush(). This is acceptable: async_flush is off-hot-path and
     // callers that care about delivery use shutdown() instead.
-    for (;;) {
-        std::uint64_t w = impl_->write_sequence_.load(std::memory_order_relaxed);
-        std::uint64_t r = impl_->read_sequence_.load(std::memory_order_relaxed);
-        if (w - r >= impl_->capacity_) {
-            // Ring full: drop the sentinel (pop the completion we just pushed).
-            std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
-            if (!impl_->flush_queue_.empty()) {
-                // Pop ours back out. If another thread pushed too, we might
-                // pop the wrong one — but async_flush is documented as
-                // single-caller-at-a-time for simplicity.
-                impl_->flush_queue_.pop();
-            }
-            return;  // sentinel dropped; completion will not fire
+    std::uint64_t w;
+    if (!impl_->try_claim_slot(w)) {
+        // Ring full: drop the sentinel (pop the completion we just pushed).
+        std::lock_guard<std::mutex> lock(impl_->flush_mutex_);
+        if (!impl_->flush_queue_.empty()) {
+            // Pop ours back out. If another thread pushed too, we might
+            // pop the wrong one — but async_flush is documented as
+            // single-caller-at-a-time for simplicity.
+            impl_->flush_queue_.pop();
         }
-
-        if (!impl_->write_sequence_.compare_exchange_weak(
-                w, w + 1,
-                std::memory_order_acq_rel,
-                std::memory_order_relaxed)) {
-            continue;
-        }
-
-        // CAS success — write the sentinel record.
-        RingSlot& slot = impl_->ring_[w % impl_->capacity_];
-        Record& rec = slot.record;
-        // Zero-initialise the record, then set the sentinel flag.
-        rec = Record{};
-        rec.flags = k_flush_sentinel_flag;
-
-        slot.sequence.store(w + 1, std::memory_order_release);
-        return;
+        return;  // sentinel dropped; completion will not fire
     }
+
+    // Slot claimed — write the sentinel record.
+    RingSlot& slot = impl_->ring_[w % impl_->capacity_];
+    Record& rec = slot.record;
+    // Zero-initialise the record, then set the sentinel flag.
+    rec = Record{};
+    rec.flags = k_flush_sentinel_flag;
+
+    slot.sequence.store(w + 1, std::memory_order_release);
 }
 
 }  // namespace fixpp::log
