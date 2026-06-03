@@ -415,7 +415,7 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ---
 
-## 017-log-otel — Active feature (PR #98 open; /speckit-verify YELLOW; Gate B in progress)
+## 017-log-otel — MERGED (PR #98 squash `09a9ae1`, 2026-06-03; /speckit-verify YELLOW, gate-b-waived)
 
 > Phase-4 observability feature carved from anchor `.specify/2k-log-otel.md` v0.5. Two new modules — `fixpp::log` (zero-alloc MPSC `Logger`, 256-B `Record` / 24-B `ArgValue`, 3-tier trace macros, 4-method `Sink` + File/Otlp/Syslog) and `fixpp::otel` (Tracer/Meter SDK wrappers, `SessionSpans`, Prometheus + OTLP dual export). Owns catalogue rows **LOG-001..004 + OBS-001..003** (`spec/feature-catalogue.md` → Logging & Observability; all `done`). Layering `log→{core}`, `otel→{core,log}`, `otel↛transport` (check_layers GREEN).
 >
