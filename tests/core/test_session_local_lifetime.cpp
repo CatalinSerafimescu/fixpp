@@ -103,7 +103,7 @@ TEST(SeamSessionLocalLifetime, SlotValidUntilCloseCompletesThenCleared) {
     EXPECT_TRUE(finished.load());  // no hang
     // Slot was DRAINED at close completion (T045), not destroyed: a fresh
     // read of the Session-owned slot is the default, not a dangling access.
-    EXPECT_TRUE(eq(sess.trace_context_value(), fixpp::otel::trace_context{}));
+    EXPECT_TRUE(eq(sess.get_trace_context(), fixpp::otel::trace_context{}));  // 017 T034 migration
 }
 
 }  // namespace

@@ -23,6 +23,16 @@ preprocessorErrorDirective:*decimal_alias.hpp
 # pattern, 89 sites). unusedFunction is meaningless for a published library surface.
 unusedFunction
 
+# Same whole-program-view limitation as unusedFunction, applied to struct/class
+# members: cppcheck flags a member "never used" when its only readers/writers live
+# in a TU outside the analyzed set (config structs populated by callers — e.g.
+# FileSinkConfig/OtlpLogSinkConfig/SyslogSinkConfig/OtelConfig — and class members
+# used across separate .cpp from the header, e.g. FileSink::fd_/stream_,
+# SessionConfig public fields). First tripped by 017-log-otel's new sink/otel
+# config headers; source-read across all 38 sites, every one a published-surface or
+# cross-TU FP, none dead.
+unusedStructMember
+
 # House style deliberately uses explicit loops over <algorithm> calls; matches the
 # clang-tidy posture. Pure style, fires widely.
 useStlAlgorithm

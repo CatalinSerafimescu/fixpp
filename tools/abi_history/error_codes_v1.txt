@@ -1,0 +1,29 @@
+# tools/abi_history/error_codes_v1.txt
+#
+# C-ABI fixpp_error_t occupancy mapping — append-only per [const §X.4].
+# Managed by: 2i C-ABI audit infra (check_capi_occupancy.sh — not yet landed).
+# This file is a FORWARD RESERVATION for v1.x; no extern "C" symbols expose
+# these values in v1.0 (FR-020 — the log/OTel C-ABI surface is deferred).
+#
+# Format: <fixpp_error_t integer> <status> <fixpp::core::error enumerator> <notes>
+#
+# Status values:
+#   used     — occupied by a defined C++ enumerator; will map to this C-ABI value in v1.x
+#   reserved — placeholder for a future variant in the same feature block
+
+# ── [1000, 1099] block — owned by 017-log-otel / 2k ([2i §1.1] reserved-block layout)
+# Anchor: contracts/error-block.md + [2k §6.3]
+1000 used     log_queue_overflow        internal-only; maps to Logger::drop_count() counter; no C-ABI return path in v1.0
+1001 used     log_sink_open_failed
+1002 used     log_sink_write_failed
+1003 used     log_sink_flush_failed
+1004 used     log_drain_timeout         returned via expected_t<void> from Logger::shutdown()
+1005 reserved                           reserved for future log variants
+1006 reserved
+1007 reserved
+1008 reserved
+1009 reserved
+1010 used     otel_export_failed
+1011 used     otel_provider_init_failed returned via expected_t<void> on provider ctor failure
+1012 reserved                           reserved for future otel variants
+# 1013–1099: reserved for future log/otel C-ABI extensions

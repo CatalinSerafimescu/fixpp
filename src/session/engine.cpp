@@ -26,6 +26,11 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/engine.hpp>
+// T044: full definitions needed to call shutdown() on lifecycle teardown.
+// These headers are included only in the .cpp (not in engine.hpp) to keep
+// the awaitable-header include-edge clean ([const §XV.9]).
+#include <fixpp/log/logger.hpp>
+#include <fixpp/otel/providers.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
@@ -67,7 +72,11 @@ struct counter_guard {
 
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)},
-      engine_cfg_{std::move(cfg)}
+      engine_cfg_{std::move(cfg)},
+      // 017 owned amendment #2: seed the engine-level trace_context snapshot
+      // from EngineConfig::engine_trace_context at construction time.
+      // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
+      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context}
 // E-5: single-executor confinement — no strand, no mutex (015 scope).
 
 {}
@@ -732,6 +741,25 @@ asio::awaitable<void> Engine::stop() {
     listeners_.clear();
     listener_endpoints_.clear();
     registry_.clear();
+
+    // FR-014 / T044: flush sinks and shut down the OTel providers.
+    // Ordering: sessions are torn down BEFORE provider shutdown so no
+    // session-level span/metric emission races the provider Shutdown().
+    // Logger flush: drain in-flight log records before releasing the logger.
+    // Provider shutdown: flush + stop the SDK exporter workers.
+    // Lifecycle only — NO session-FSM transition edit ([2k §6.6] / T044).
+    if (engine_cfg_.logger) {
+        // Use the no-arg overload so the Engine honors LoggerConfig::drain_timeout
+        // (set by the operator) rather than a hardcoded 5s literal.
+        // [2k §6.6]: Engine::close() calls logger->shutdown(LoggerConfig::drain_timeout).
+        (void)engine_cfg_.logger->shutdown();
+    }
+    if (engine_cfg_.tracer) {
+        engine_cfg_.tracer->shutdown();
+    }
+    if (engine_cfg_.meter) {
+        engine_cfg_.meter->shutdown();
+    }
 }
 
 // ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────
@@ -745,6 +773,17 @@ fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(SessionId const& id) 
     auto it = listener_endpoints_.find(id);
     if (it == listener_endpoints_.end()) return fixpp::transport::Endpoint{};
     return it->second;
+}
+
+// ── 017 owned amendment #2: engine_trace_context() / clock() ─────────────────
+// contracts/adjacent-amendments.md §2 / [2k App D §D.2].
+
+fixpp::otel::trace_context Engine::engine_trace_context() const noexcept {
+    return engine_trace_ctx_snapshot_.load();
+}
+
+const std::shared_ptr<fixpp::core::Clock>& Engine::clock() const noexcept {
+    return engine_cfg_.clock;
 }
 
 }  // namespace fixpp::session

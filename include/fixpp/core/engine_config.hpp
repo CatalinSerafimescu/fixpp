@@ -30,9 +30,11 @@
 namespace fixpp::dict {
 class Dictionary;
 }
-namespace fixpp::core {
-class Logger;
-}
+// Logger alias (fixpp::core::Logger = fixpp::log::Logger) — keep the heavy
+// log headers off this include-edge; only the fwd-decl + alias is needed here.
+// [const §XV.9] — OTel SDK / std::mutex must NOT enter via this edge.
+#include <fixpp/core/logger_fwd.hpp>  // defines fixpp::core::Logger alias
+
 namespace fixpp::otel {
 class TracerProvider;
 class MeterProvider;

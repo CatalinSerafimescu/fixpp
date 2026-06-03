@@ -23,3 +23,4 @@ add_subdirectory(threading)  # 007-threading-clock bench (T005 scaffold; body T0
 add_subdirectory(session)    # 008-message-store bench (T049 — MemoryStore + FileStore latency rows)
 add_subdirectory(tls)        # 011-tls-policy bench (T021/T022 Pinset, T041 verify_peer)
 add_subdirectory(transport)  # 012-2h-transport bench (T021/T022/T023 — populated Phase 3)
+add_subdirectory(log)        # 017-log-otel bench (T030/TS-9 enqueue latency)

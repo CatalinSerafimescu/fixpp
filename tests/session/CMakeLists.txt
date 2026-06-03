@@ -1009,6 +1009,38 @@ set_tests_properties(reconnect_policy_witness PROPERTIES
   LABELS "016;us-foundational;reconnect;down-peer;watchdog"
   TIMEOUT 60)
 
+# ── 017-log-otel T013 — SessionConfig amendment regression ──────────────────
+# Asserts logger_override/tracer_override present + default-null, and that
+# log_sink_override is absent (compile-time static_asserts are the real gate).
+# Links fixpp_session (brings session_config.hpp).
+add_executable(session_config_017_amendment_test test_017_session_config_amendment.cpp)
+target_link_libraries(session_config_017_amendment_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME session_config_017_amendment COMMAND session_config_017_amendment_test)
+
+# ── 017-log-otel T036 — trace_context accessor regression ────────────────────
+# Verifies (1) Session::get_trace_context() returns initial_trace_context after
+# open(); (2) trace_context_value() is removed (compile-time static_assert);
+# (3) Engine::engine_trace_context() returns the seeded snapshot (TS-6b).
+# Links fixpp_session + fixpp_mock_clock (for deterministic Clock seeding).
+add_executable(session_trace_context_accessors_test
+  test_trace_context_accessors.cpp
+)
+target_link_libraries(session_trace_context_accessors_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_trace_context_accessors_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_trace_context_accessors
+  COMMAND session_trace_context_accessors_test)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

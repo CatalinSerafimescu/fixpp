@@ -77,7 +77,7 @@ fixpp::otel::trace_context session_trace_context_of(const session_executor& exec
                "the session_local<trace_context> slot");
         return fixpp::otel::trace_context{};
     }
-    return s->trace_context_value();  // hit → trace_slot_.load()
+    return s->get_trace_context();  // hit → trace_slot_.load() (017 owned amendment #1)
 }
 
 }  // namespace fixpp::core

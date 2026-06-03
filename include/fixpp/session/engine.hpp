@@ -25,8 +25,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <fixpp/core/engine_config.hpp>      // EngineConfig — held by value in Engine
-#include <fixpp/core/error.hpp>              // expected_t<T>, error enum (incl. slot 121)
+#include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
+#include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
+#include <fixpp/otel/trace_context.hpp>  // fixpp::otel::trace_context (for engine_trace_context())
 #include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
 #include <fixpp/transport/endpoint.hpp>      // Endpoint (for acceptor_bound_endpoint return type)
 #include <fixpp/transport/listener.hpp>      // abstract Listener (for listeners_ map)
@@ -219,6 +220,19 @@ public:
     /// [data-model "Listener acquisition"; tasks.md SC-010 delta #6]
     [[nodiscard]] fixpp::transport::Endpoint acceptor_bound_endpoint(SessionId const& id) const;
 
+    // 017 owned amendment #2 (contracts/adjacent-amendments.md §2 / [2k App D §D.2]).
+    // Returns the engine-level static lifecycle trace_context (an atomic snapshot).
+    // Used by FIXPP_ELOG callers:
+    //   FIXPP_ELOG(logger, info, engine, cat::control, "msg {}", ...);
+    // Backed by engine_trace_ctx_snapshot_ seeded at Engine construction from
+    // EngineConfig::engine_trace_context. Thread-safe (seqlock/atomic).
+    [[nodiscard]] fixpp::otel::trace_context engine_trace_context() const noexcept;
+
+    // Returns the engine-level clock (EngineConfig::clock).
+    // Used by FIXPP_ELOG to stamp record timestamps with the effective clock.
+    // Never null post-construction (validate_engine_config rejects null clocks).
+    [[nodiscard]] const std::shared_ptr<fixpp::core::Clock>& clock() const noexcept;
+
 private:
     // Injected executor; all loops co_spawn on this.
     asio::any_io_executor exec_;
@@ -226,6 +240,12 @@ private:
     // Engine-level shared config (dictionaries, clock, transport factory, …).
     // NO Application& (FR-013 / Gate A New-2).
     fixpp::core::EngineConfig engine_cfg_;
+
+    // 017 owned amendment #2: engine-held trace_context snapshot seeded at
+    // construction from EngineConfig::engine_trace_context ([2k App D §D.2]).
+    // The helper TYPE (core::detail::trace_context_snapshot — seqlock/atomic
+    // wrapper) is defined in engine_config.hpp:64.
+    fixpp::core::detail::trace_context_snapshot engine_trace_ctx_snapshot_;
 
     // Session registry — keyed on SessionId, owned here (join-before-clear E-7).
     std::unordered_map<SessionId, SessionEntry> registry_;
