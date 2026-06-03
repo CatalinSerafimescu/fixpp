@@ -52,7 +52,7 @@ Technical approach (from [research.md](./research.md)): an abstract `Application
 specs/019-app-callbacks/
 ├── plan.md              # this file
 ├── research.md          # Phase 0 (D1–D8)
-├── data-model.md        # Phase 1 (entities, firing order, INV-1..6)
+├── data-model.md        # Phase 1 (entities, firing order, INV-1..7)
 ├── quickstart.md        # Phase 1 (user-facing example)
 ├── contracts/
 │   └── application-interface.md   # Phase 1 (the Application contract)

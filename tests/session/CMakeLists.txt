@@ -1041,6 +1041,40 @@ target_include_directories(session_trace_context_accessors_test PRIVATE
 add_test(NAME session_trace_context_accessors
   COMMAND session_trace_context_accessors_test)
 
+# ── 019-app-callbacks T006 — MsgType classifier unit test ───────────────────
+# Pins the admin/app classifier truth table (all 6 admin MsgTypes + sample app
+# MsgTypes + edge cases). Links fixpp_session (brings src/ internal include path
+# for msgtype_classifier.hpp). src/ added as PRIVATE include dir.
+add_executable(msgtype_classifier_019_test
+  test_019_msgtype_classifier.cpp
+)
+target_link_libraries(msgtype_classifier_019_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(msgtype_classifier_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME msgtype_classifier_019 COMMAND msgtype_classifier_019_test)
+set_tests_properties(msgtype_classifier_019 PROPERTIES
+  LABELS "019;foundational;classifier")
+
+# ── 019-app-callbacks T003/T005/T007 — Application compile-smoke ─────────────
+# Proves application.hpp compiles + Application is subclassable + EngineConfig
+# gains the application field + callback_dispatch_scope + invoke_callback_safe.
+add_executable(application_019_compile_smoke_test
+  test_019_application_compile_smoke.cpp
+)
+target_link_libraries(application_019_compile_smoke_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME application_019_compile_smoke COMMAND application_019_compile_smoke_test)
+set_tests_properties(application_019_compile_smoke PROPERTIES
+  LABELS "019;foundational;compile_smoke;application")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

@@ -354,6 +354,87 @@ public:
         });
     }
 
+    // ── 019-app-callbacks T007 ────────────────────────────────────────────────
+    //
+    // callback_dispatch_scope — release-safe RAII guard for direct on-strand
+    // Application callback sites (research D3). Complements the existing
+    // `dispatch_guard` which is DEBUG-only and local to dispatch_app_callback.
+    //
+    // In DEBUG builds: asserts that no two callbacks enter concurrently for this
+    // session (strand invariant — INV-2), then clears the flag on scope exit
+    // (even if the callback throws, so the flag is never left set on unwind).
+    // In RELEASE builds: zero overhead (the guard body compiles out entirely).
+    //
+    // Usage at a direct on-strand call site (T011/T014/T016 sites):
+    //   callback_dispatch_scope cs{*this};
+    //   app->fromApp(view, id);           // guarded
+    //   // cs dtor fires on any exit path
+    //
+    // Does NOT itself suppress exceptions — the throw-wrapper invoke_callback_safe
+    // (below) wraps the call for the terminal-close disposition (FR-011; D5).
+    //
+    // Anchor: specs/019-app-callbacks/research.md D3/D5; data-model.md INV-2;
+    //         tasks.md T007. [const §XV.9] — no std::mutex, no exception paths.
+    struct callback_dispatch_scope {
+#ifndef NDEBUG
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::atomic<bool>& flag;
+        explicit callback_dispatch_scope(const Session& s) noexcept : flag(s.in_dispatch_) {
+            const bool prev = flag.exchange(true, std::memory_order_acq_rel);
+            assert(!prev &&
+                   "concurrent session callback entry: strand "
+                   "invariant violated (direct_executor attested "
+                   "over a non-serialised executor?)");
+        }
+        ~callback_dispatch_scope() noexcept { flag.store(false, std::memory_order_release); }
+        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
+        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
+#else
+        explicit callback_dispatch_scope(const Session& /*s*/) noexcept {}
+        // All special members are defaulted — the debug body is a no-op.
+        // No fields ⇒ EBO applies; the guard adds zero size/overhead in release.
+        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
+        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
+        ~callback_dispatch_scope() = default;
+#endif
+    };
+
+    // invoke_callback_safe — throw→terminal-close wrapper scaffold (FR-011; D5).
+    //
+    // Wraps a callable that invokes one Application method in a try/catch block.
+    // On catch: stores app_callback_threw as the pending error, then calls
+    // close(terminal) via the session's close method (which must be co_awaited
+    // by the caller). The US1/US2/US3 implementation tasks wire this at each
+    // callback site; this scaffold is the single shared shape they call.
+    //
+    // Returns: the callable's return value on success (expected_t<void>{} for
+    //   void callbacks); unexpected(error::app_callback_threw) on catch.
+    //
+    // NOTE: This is a scaffold — the caller is responsible for co_awaiting
+    // close(terminal) when the result is app_callback_threw. The US1-US3 tasks
+    // (T011/T014/T016) handle this; the scaffold itself only catches + records.
+    // [research D5; FR-011; data-model.md "Reject/veto value mapping"]
+    template <class F>
+    [[nodiscard]] static fixpp::core::expected_t<void> invoke_callback_safe(F&& f) noexcept {
+        try {
+            if constexpr (std::is_void_v<decltype(std::forward<F>(f)())>) {
+                std::forward<F>(f)();
+                return {};
+            } else {
+                return std::forward<F>(f)();
+            }
+        } catch (...) {
+            // A throw from a user callback is a fatal contract violation per
+            // FR-011. The caller must terminal-close the session. We record
+            // app_callback_threw here; the caller co_awaits close(terminal).
+            return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+    }
+
 #ifdef FIXPP_TEST_HOOKS
     // TEST-ONLY accessor: expose SeqnumManager for drain-contract tests
     // (009 T021 FR-011 — CloseWithHolderDoesNotTerminate). Allows tests to

@@ -56,6 +56,7 @@
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
+#include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -1917,19 +1918,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // The "A" (dup-Logon) cell stays Reject per 005's intentional
                 // defensive divergence from QuickFIX convention.
                 {
-                    // Known session admin MsgTypes (all others → Reject).
-                    // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
-                    // "2" = ResendRequest (handled above), "4" = SequenceReset (handled above).
-                    // "A" (dup-Logon-in-Active) deliberately EXCLUDED — falls through to Reject.
-                    const bool is_session_admin =
-                        (hdr.msg_type == "0" ||  // Heartbeat
-                         hdr.msg_type == "1" ||  // TestRequest
-                         hdr.msg_type == "2" ||  // ResendRequest (handled above)
-                         hdr.msg_type == "3" ||  // Reject (handled above)
-                         hdr.msg_type == "4" ||  // SequenceReset (handled above)
-                         hdr.msg_type == "5");   // Logout (handled above)
-
-                    if (!is_session_admin) {
+                    // 019 T006: use the shared classifier (single source of truth).
+                    // "A" (dup-Logon-in-Active) is deliberately EXCLUDED from
+                    // is_admin_msgtype — it falls through to Reject per 005
+                    // data-model row 22 / FR-017. No behaviour change here.
+                    if (!detail::is_admin_msgtype(hdr.msg_type)) {
                         // Unknown / app-type MsgType in Active →
                         // Reject(reason=session_msg_type_invalid_for_state=3).
                         // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].

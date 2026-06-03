@@ -113,3 +113,17 @@ target_link_libraries(error_017_completeness PRIVATE
   GTest::gtest_main
 )
 add_test(NAME error_017_completeness COMMAND error_017_completeness)
+
+# ── 019-app-callbacks T004 — error completeness gate ────────────────────────
+# Asserts exactly 2 new enumerators at slots 129–130 with exact-SET equality
+# and smoke-asserts error_message/to_string non-empty (FR-015; research D7).
+# Links fixpp_core only (no session/transport dependency).
+add_executable(error_019_completeness test_019_error_completeness.cpp)
+target_link_libraries(error_019_completeness PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_019_completeness COMMAND error_019_completeness)
+set_tests_properties(error_019_completeness PROPERTIES
+  LABELS "019;foundational;error_slots")

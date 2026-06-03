@@ -78,13 +78,16 @@ TEST(Error017Completeness, ExactSetEquality) {
     // enum value, and a message-less addition is indistinguishable at runtime —
     // verified by bite-test). The message-table boundary below is the closest
     // honest proxy: a properly-added variant MUST carry an error_message entry
-    // (T006 contract + ErrorMessageNonEmpty), so a message at slot 129 signals an
-    // out-of-block addition. Append-only growth is ultimately governed by
-    // [const §X.4] review + the abidiff gate, not this unit test.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(129u)),
+    // (T006 contract + ErrorMessageNonEmpty), so a message at slot 131 (post-019)
+    // signals an out-of-block addition.
+    // NOTE: Slots 129–130 were added by 019-app-callbacks (app_do_not_send=129,
+    // app_callback_threw=130) — the boundary moved from 128 to 130. The 019
+    // error-completeness test (tests/core/test_019_error_completeness.cpp) pins
+    // those slots exactly. [const §X.4] append-only review + abidiff gate govern.
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(131u)),
               std::string_view{"unknown error"})
-        << "slot 129 carries a message — a message-bearing enumerator was added "
-           "beyond the 017 [122,128] block (see [const §X.4] append-only review)";
+        << "slot 131 carries a message — a message-bearing enumerator was added "
+           "beyond the 019 [129,130] block (see [const §X.4] append-only review)";
 }
 
 // ── Slot values ─────────────────────────────────────────────────────────────
