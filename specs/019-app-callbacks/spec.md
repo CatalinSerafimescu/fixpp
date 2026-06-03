@@ -1,0 +1,136 @@
+# Feature Specification: Application Callback Layer (Phase-5, slice 1)
+
+**Feature Branch**: `019-app-callbacks`  
+**Created**: 2026-06-03  
+**Status**: Draft  
+**Input**: User description: "Phase-5 application callback layer — the public Application interface that lets library users observe and intercept FIX message flow on a Session, unblocking application-layer (business-message) interop (G2: NewOrderSingle→ExecutionReport, the const §VII.6 v1.0-GA residual). This is the FIRST Phase-5 slice: the callback/observer interface plus its production wiring ONLY. Public surface — the canonical FIX-engine application callback set (onCreate/onLogon/onLogout, fromAdmin/fromApp, toAdmin/toApp) plus a public application-send entry point. Integration constraint: callbacks dispatch on the session's serialized executor via the dispatch_app_callback seam and MUST inherit the L-015-4 lifetime/drain contract. Scope boundary — config-file parsing, pluggable store/log factories, and the C ABI are OUT."
+
+## Context
+
+After `015-runtime-engine`, fixpp has a public `Engine` (Initiator/Acceptor) that drives the full transport→FSM→session lifecycle for multiple sessions, and a session send path. But **the engine has no public application-callback surface**: there is no way for a library user to observe inbound messages, intercept outbound messages, or be notified of session lifecycle transitions. The only message-delivery hook that exists is the **internal `Session::dispatch_app_callback` seam** (`include/fixpp/session/session.hpp:319`), which today has **zero production callers** — it exists solely as the future wiring point for this feature (catalogue L-015-3 marks the `Application` path as Phase-5).
+
+This gap is the **direct blocker for G2 business-message interop** (`NewOrderSingle → ExecutionReport`, the `[const §VII.6]` v1.0-GA residual that `016`/`018` carried as an open item): you cannot assert an application-message round-trip against a reference engine when the library exposes no way to receive an inbound application message or originate an outbound one. This feature delivers exactly that surface — and nothing more.
+
+This is the **first slice of Phase-5**. Phase-5 as a whole (the QuickFIX-style service wrapper) also includes config-file parsing, pluggable `MessageStore`/`Log` factories, and a C ABI; those are **explicitly out of scope here** (see Out of Scope) and are deferred to later Phase-5 slices. This slice is the `Application` callback interface plus its wiring into the existing `Session`/`Engine` production path.
+
+Unlike `016`/`018` (tests-only), this feature **adds public production surface** (a new user-facing `Application` interface + an outbound application-send entry point + their engine wiring), so it carries a real Gate-A adjudication and a production-behavior Gate B.
+
+## Clarifications
+
+<!-- Populated by /speckit-clarify (reference-engine sweep: QuickFIX-cpp / QuickFIX-J / Fix8 Application). -->
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Receive inbound application & admin messages (Priority: P1)
+
+A library user supplies an `Application` implementation to the engine. When an established session receives a message from the peer, the engine surfaces it to the user's callbacks: **application** messages (e.g. `NewOrderSingle`) to `fromApp`, and **session-administrative** messages (e.g. `Heartbeat`, `TestRequest`) to `fromAdmin`. Each callback runs on the session's serialized executor and carries the session/peer identity so a multi-session user can route correctly. A user callback may **reject** an inbound message; the engine then emits the appropriate session-level reject response (`fromApp` rejection → a business-level reject such as `BusinessMessageReject`; `fromAdmin` rejection → a session-level `Reject`) instead of treating the message as accepted.
+
+**Why this priority**: Inbound delivery is the irreducible core of the callback layer and the half of G2 that lets a user observe a peer's business message at all. It is independently demonstrable (feed a frame, observe the callback) and is the foundation every other story builds on. A viable MVP on its own.
+
+**Independent Test**: Register an `Application` on an engine-driven session, drive the session to `Active`, feed it an inbound application frame and an inbound admin frame, and assert `fromApp` / `fromAdmin` each fire exactly once on the session executor with the correct message and session identity; then have the callback reject one inbound message and assert the engine emits the corresponding reject response on the wire.
+
+**Acceptance Scenarios**:
+
+1. **Given** an established session with a registered `Application`, **When** the peer sends an application message, **Then** `fromApp` is invoked exactly once with that message and the session identity, on the session's serialized executor.
+2. **Given** an established session with a registered `Application`, **When** the peer sends a session-administrative message, **Then** `fromAdmin` is invoked exactly once with that message and the session identity, on the session's serialized executor.
+3. **Given** a registered `Application` whose `fromApp` rejects a message, **When** that application message arrives, **Then** the engine emits the appropriate business-level reject response to the peer and does not treat the message as accepted.
+4. **Given** a registered `Application` whose `fromAdmin` rejects a message, **When** that admin message arrives, **Then** the engine emits a session-level `Reject` to the peer.
+
+---
+
+### User Story 2 - Originate and intercept outbound application messages (Priority: P2)
+
+A library user can **originate** an outbound application message on an established session through a public send entry point (today the post-`015` send path is internal/app-payload-only with no public `Application`-driven originate API). Before any outbound message leaves the engine, the user's interception callbacks fire: `toApp` for application messages — where the user may inspect, stamp, or **veto** the send (`DoNotSend` semantics) — and `toAdmin` for engine-originated administrative messages, where the user may inspect/stamp (but the message is still sent; admin messages are not vetoable). A vetoed application message is never transmitted.
+
+**Why this priority**: Outbound origination + interception is the second half of a business-message round-trip (e.g. an acceptor replying `ExecutionReport`), completing G2. It is independently testable (call send, inspect the produced wire bytes) but depends conceptually on the same wiring proven by US1, so it follows P1.
+
+**Independent Test**: On an established session, call the public application-send entry point with an application message and assert it crosses the wire after `toApp` fires; separately, register a `toApp` that vetoes and assert the message is not transmitted; drive an engine-originated admin message and assert `toAdmin` fires and the (possibly stamped) message is still sent.
+
+**Acceptance Scenarios**:
+
+1. **Given** an established session with a registered `Application`, **When** the user calls the application-send entry point with an application message, **Then** `toApp` is invoked before transmission and the message crosses the wire.
+2. **Given** a registered `Application` whose `toApp` vetoes (`DoNotSend`) a message, **When** the user attempts to send that application message, **Then** the message is not transmitted and the session remains `Active`.
+3. **Given** an established session, **When** the engine originates an administrative message, **Then** `toAdmin` is invoked before transmission and the message is still sent (admin messages are not vetoable).
+4. **Given** a session that is not established, **When** the user attempts to originate an application message, **Then** the send is refused with a defined error and nothing is transmitted.
+
+---
+
+### User Story 3 - Be notified of session lifecycle transitions (Priority: P3)
+
+A library user is notified when a session is created and when it becomes / ceases to be established: `onCreate` when the engine creates the session object (before logon), `onLogon` when the session reaches `Active`, and `onLogout` when it leaves the established state (graceful or terminal). These notifications let the user gate origination (send only after `onLogon`) and release per-session resources (on `onLogout`).
+
+**Why this priority**: Lifecycle notifications improve usability and correctness of the user's send timing but are not strictly required to demonstrate a single observed/originated message; they layer cleanly on top of US1/US2 wiring. Lowest urgency of the three.
+
+**Independent Test**: Drive a session through create → logon → logout under the engine and assert `onCreate`, `onLogon`, `onLogout` each fire exactly once, in order, on the session executor, with the correct session identity.
+
+**Acceptance Scenarios**:
+
+1. **Given** a registered `Application`, **When** the engine creates a session, **Then** `onCreate` fires once with the session identity before any logon.
+2. **Given** a registered `Application`, **When** a session reaches the established (`Active`) state, **Then** `onLogon` fires once with the session identity.
+3. **Given** an established session, **When** it leaves the established state (graceful logout or terminal disconnect), **Then** `onLogout` fires once with the session identity.
+
+---
+
+### Edge Cases
+
+- **Callback throws (inbound)**: a user `fromApp`/`fromAdmin` that throws MUST NOT corrupt session state or leave the re-entrancy guard set; the engine must define and apply a deterministic disposition (treat as a reject vs. propagate-and-disconnect) consistent across admin and app.
+- **Callback throws (outbound/lifecycle)**: a user `toApp`/`toAdmin`/`onCreate`/`onLogon`/`onLogout` that throws MUST leave the session in a defined state (the re-entrancy guard cleared, the session not silently wedged).
+- **Send before logon / after logout**: originating an application message on a non-established session is refused with a defined error (no partial/queued transmission unless an explicit store-and-forward behavior is specified).
+- **Session torn down with callback work in flight**: the engine MUST drain all dispatched callback work (and any detached outbound write) before a session is destroyed — the `[L-015-4]` lifetime contract — so no callback ever runs against a freed session (no use-after-scope / data race under sanitizers).
+- **Re-entrant send from within a callback**: a user calling the application-send entry point from inside an inbound callback (already on the session executor) MUST be handled without deadlock or violating the single-in-flight-callback serialization invariant.
+- **No `Application` registered**: a session driven with no registered `Application` behaves exactly as the pre-019 engine (callbacks are simply not invoked; no behavioral regression).
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: The library MUST expose a public `Application` interface comprising the callbacks `onCreate`, `onLogon`, `onLogout`, `fromAdmin`, `fromApp`, `toAdmin`, `toApp`, each receiving the session/peer identity.
+- **FR-002**: A user MUST be able to register an `Application` with the engine such that its callbacks are invoked for the engine's sessions; a session with no registered `Application` MUST behave exactly as the pre-019 engine (no callback invocation, no behavioral change).
+- **FR-003**: For each inbound application message on an established session, the engine MUST invoke `fromApp` exactly once with the message and session identity.
+- **FR-004**: For each inbound session-administrative message on an established session, the engine MUST invoke `fromAdmin` exactly once with the message and session identity.
+- **FR-005**: A `fromApp` rejection MUST cause the engine to emit the appropriate business-level reject response to the peer and not treat the message as accepted; a `fromAdmin` rejection MUST cause the engine to emit a session-level `Reject`.
+- **FR-006**: The library MUST expose a public entry point for a user to originate an outbound **application** message on an established session.
+- **FR-007**: Before transmitting an outbound application message, the engine MUST invoke `toApp`, allowing the user to inspect/modify the message or **veto** it (`DoNotSend`); a vetoed message MUST NOT be transmitted.
+- **FR-008**: Before transmitting an engine-originated administrative message, the engine MUST invoke `toAdmin`, allowing inspection/modification; admin messages MUST still be transmitted (not vetoable).
+- **FR-009**: The engine MUST invoke `onCreate` once when a session is created (before logon), `onLogon` once when a session becomes established, and `onLogout` once when a session leaves the established state.
+- **FR-010**: All `Application` callbacks for a given session MUST execute on that session's serialized executor; the engine MUST NOT invoke two callbacks for the same session concurrently (the strand invariant the `dispatch_app_callback` seam asserts in debug builds).
+- **FR-011**: A user callback that throws MUST NOT corrupt session state or leave the re-entrancy guard set; the engine MUST apply a defined, deterministic disposition for a throwing callback at each callback site (inbound, outbound, lifecycle).
+- **FR-012**: The engine MUST drain all dispatched `Application` callback work — and any detached outbound write originated by a callback — before destroying a session, satisfying the `[L-015-4]` lifetime/drain contract (`stop()` → `close(terminal)` + join-before-registry-clear; detached writes hold a shared keepalive per the 014 fix). No callback may run against a destroyed session.
+- **FR-013**: Originating an application message on a session that is not established MUST be refused with a defined error, transmitting nothing.
+- **FR-014**: The feature MUST NOT regress any existing session/engine behavior when no `Application` is registered, and MUST NOT alter the wire behavior of the session-administrative paths shipped in 005/013/015 beyond surfacing them to `fromAdmin`/`toAdmin`.
+
+### Key Entities *(include if feature involves data)*
+
+- **Application**: the user-implemented callback interface (lifecycle + inbound + outbound hooks). Registered with the engine; not owned by any single session.
+- **Session identity**: the per-session/peer key passed to every callback so a multi-session user can route (the existing CompID/peer-identity notion from 013/014/015).
+- **Message (admin vs application)**: the FIX message surfaced to or originated through the callbacks; the engine classifies each as administrative or application to route it to the correct callback pair.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: A user-registered `Application` receives **100% of inbound application messages** on an established session via `fromApp`, exactly once each and in arrival order.
+- **SC-002**: A full **`NewOrderSingle → ExecutionReport` application-message round-trip** can be driven through the public surface (one side originates via the send entry point, the other observes via `fromApp`) — i.e. G2 becomes implementable on top of this feature.
+- **SC-003**: A `fromApp`/`fromAdmin` rejection produces the correct peer-visible reject response in **100%** of rejection cases; an accepted message produces none.
+- **SC-004**: A `toApp` veto (`DoNotSend`) results in the message being transmitted **0%** of the time, while a non-vetoed message is transmitted 100% of the time.
+- **SC-005**: Across the full lifecycle, **no `Application` callback ever executes concurrently with another callback for the same session**, and **no callback ever executes against a destroyed session** — verified clean under ASan/UBSan/TSan.
+- **SC-006**: With no `Application` registered, **zero** observable behavioral difference versus the pre-019 engine (existing session/engine test suites pass unchanged).
+
+## Assumptions
+
+- **Registration granularity**: a single `Application` is registered with the engine and invoked for all of that engine's sessions (the QuickFIX/QuickFIX-J/Fix8 model), with the session identity passed as a parameter. Per-session `Application` override is **not** included in this slice (revisit in `/speckit-clarify` if the reference-engine sweep argues otherwise).
+- **Admin vetoability**: `toAdmin` is inspect/modify-only and cannot veto (admin messages are always sent); only `toApp` supports `DoNotSend`. (Matches QuickFIX semantics.)
+- **Rejection mechanism**: callbacks signal rejection through a defined contract (the precise mechanism — thrown exception vs. return value — is a design decision for `/speckit-plan`); the spec fixes only the observable behavior (which reject response the peer sees).
+- **Message representation**: the concrete type surfaced to callbacks (and accepted by the send entry point) is a design decision for `/speckit-plan`; the spec fixes only that an admin-vs-application FIX message is surfaced/accepted with its session identity.
+- **Wiring point**: callbacks are delivered through the existing internal `Session::dispatch_app_callback` seam onto the session's serialized executor; this feature adds the public `Application` surface and its engine wiring, it does not introduce a second executor or change the session threading model.
+- **Reuse of shipped paths**: the session-admin FSM, liveness, and recovery behaviors (005/013/015) are reused as-is; this feature surfaces them to `fromAdmin`/`toAdmin` and adds the application-message origination/delivery path, rather than re-implementing session behavior.
+
+## Out of Scope
+
+The following are part of Phase-5 overall but **explicitly deferred to later Phase-5 slices** and MUST NOT be implemented here:
+
+- **Config-file (`.cfg`) parsing** / session settings ingestion.
+- **Pluggable `MessageStore` / `Log` factory surface** (the user-supplied store/log plug-in model).
+- **C ABI** / foreign-language binding surface.
+- **Per-session `Application` override** (see Assumptions) unless `/speckit-clarify` pulls it in.
+- Any change to the session threading model, the transport layer, or the wire behavior of existing session-admin paths beyond surfacing them to callbacks.
