@@ -64,8 +64,10 @@ specs/019-app-callbacks/
 ```text
 include/fixpp/session/
 ├── application.hpp      # NEW — the public Application interface (all-default virtuals)
-├── engine.hpp           # EDIT — EngineConfig::application field; Engine::send(SessionId, payload) → asio::awaitable<expected_t<void>>
-└── session.hpp          # EDIT — on-strand callback invocation points (reuse dispatch_guard)
+├── engine.hpp           # EDIT — Engine::send(SessionId, payload) → asio::awaitable<expected_t<void>> decl ONLY
+└── session.hpp          # EDIT — on-strand callback invocation points (reusable callback_dispatch_scope, T007)
+
+include/fixpp/core/engine_config.hpp  # EDIT — EngineConfig::application field (shared_ptr<Application>{nullptr}); the field lives here, NOT in engine.hpp
 
 src/session/
 ├── engine.cpp           # EDIT — onCreate after Session::open() succeeds, before first Logon processing/emission; Engine::send post→toApp→Session::send
