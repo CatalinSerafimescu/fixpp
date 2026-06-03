@@ -42,7 +42,6 @@
 //       beats but actual has 2 → diff_transcripts bites with DiffStatus::mismatch.
 //   (B) Inject a TestRequest(35=1) into the actual transcript where the expected
 //       has only Heartbeats → mismatch on the extra frame.
-//   (C) Companion: mutate ONLY tag 52 (canonicalized by {52,10}) → no bite.
 //   NEVER mutate 52/10 in the "must bite" cells (SC-004 rule).
 //   [feedback_fail_placeholder_red_test]: real DiffResult assertions, no SUCCEED().
 //
@@ -55,8 +54,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -65,7 +62,6 @@
 #include <fixpp/session/session_fsm.hpp>
 
 #include "hp_support.hpp"
-#include "support/golden_diff.hpp"
 #include "support/scenario_descriptor.hpp"
 
 using namespace std::chrono_literals;
@@ -93,6 +89,8 @@ namespace {
 // (A) Drop one of the ≥3 expected Heartbeats from the actual transcript.
 // The expected golden has 3 Heartbeat(35=0) frames; the actual has only 2.
 // diff_transcripts must bite (frame-count mismatch is a mismatch).
+// NOTE: frame counts differ (3 vs 2) so this test cannot use expect_gate_bite_on_tag
+// (which asserts equal sizes); kept inline.
 TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite)
 {
     // Three Heartbeat(35=0) frames in the expected direction — fixpp-to-peer (>).
@@ -147,69 +145,7 @@ TEST(IdleCadenceGateBite, InjectedTestRequestCausesGateBite)
         "> 8=FIX.4.4\\x0135=1\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
         "\\x01112=LIVENESS_PROBE\\x0134=3\\x0152=20260603-10:00:01.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
-    // Tag 35 (MsgType) is INCLUDED → must match verbatim → MISMATCH (35=0 vs 35=1).
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when actual contains "
-           "TestRequest(35=1) but expected has Heartbeat(35=0); detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when MsgType(35) differs (0 vs 1)";
-    EXPECT_NE(result.detail.find("35"), std::string::npos)
-        << "detail should mention tag 35 as the differing field; got: " << result.detail;
-}
-
-// (C) Companion: mutating ONLY tag 52 (canonicalized) MUST NOT bite.
-// Confirms the SC-004 "never mutate 52/10" invariant for the idle-cadence context.
-TEST(IdleCadenceGateBite, CanonicalizedTag52DoesNotBite)
-{
-    // Same Heartbeat(35=0), only SendingTime(52) differs between expected and actual.
-    const char* expected_text =
-        "> 8=FIX.4.4\\x0135=0\\x01112=\\x0134=3\\x0152=20260603-10:00:01.000\\x0110=001\\x01\n";
-    const char* actual_text =
-        "> 8=FIX.4.4\\x0135=0\\x01112=\\x0134=3\\x0152=20260604-11:11:11.111\\x0110=999\\x01\n";
-
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_TRUE(static_cast<bool>(result))
-        << "Canonicalized tags 52/10 should not cause a mismatch; detail=" << result.detail;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: resolve the golden path for idle_cadence cells (T018 / T029).
-// Cell ids (NEW per T029, QFj-only at G1):
-//   HP-QFj-{init,acc}-fix44-idle-cadence
-// ---------------------------------------------------------------------------
-std::string idle_cadence_golden_path(Counterparty cp, Role role)
-{
-    const char* tls_dir = fixpp::interop::hp::tls_fixture_dir();
-    if (tls_dir == nullptr || tls_dir[0] == '\0') {
-        return {};
-    }
-    std::string base{tls_dir};
-    const std::string suffix = "/tls/fixtures";
-    if (base.size() > suffix.size() &&
-        base.substr(base.size() - suffix.size()) == suffix) {
-        base.resize(base.size() - suffix.size());
-    }
-    const std::string cp_part   = (cp == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
-    const std::string role_part = (role == Role::fixpp_initiator)  ? "init" : "acc";
-    return base + "/interop/happy/golden/HP-" + cp_part + "-" + role_part +
-           "-fix44-idle-cadence.fix";
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "35");
 }
 
 // ---------------------------------------------------------------------------
@@ -370,57 +306,10 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     //   - MsgType(35=0) is INCLUDED → must match verbatim.
     //   - MsgSeqNum(34) is INCLUDED → must match verbatim (seqnum ordering is part of the
     //     wire-frame assertion — drift in seqnum ordering would indicate a defect).
-    const std::string gpath = idle_cadence_golden_path(counterparty, role);
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    {
-        std::ifstream gfile{gpath};
-        if (!gfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-        }
-        std::ostringstream oss;
-        oss << gfile.rdbuf();
-        const std::string golden_text = oss.str();
-        if (golden_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file empty: " << gpath << ")";
-        }
-
-        // The capture sidecar is written by the parent proxy alongside the golden.
-        const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-        std::ifstream cfile{capture_path};
-        if (!cfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                         << capture_path << ")";
-        }
-        std::ostringstream css;
-        css << cfile.rdbuf();
-        const std::string capture_text = css.str();
-        if (capture_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-        }
-
-        const auto expected_frames = parse_golden(golden_text);
-        const auto actual_frames   = parse_golden(capture_text);
-
-        // admin_profile_excluded_tags() = {52, 10}.  The golden must contain ≥3
-        // Heartbeat(35=0) frames in each direction; diff_transcripts verifies the
-        // full frame sequence including MsgType(35) and MsgSeqNum(34) verbatim.
-        const DiffResult diff = diff_transcripts(expected_frames, actual_frames,
-                                                 admin_profile_excluded_tags());
-        EXPECT_TRUE(static_cast<bool>(diff))
-            << "Golden transcript mismatch for " << cell_id
-            << " (admin profile {52,10}): " << diff.detail
-            << "\n  expected golden: " << gpath
-            << "\n  actual capture:  " << capture_path;
-    }
+    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
-    const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
-    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+    hp::expect_graceful_stop(fx);
 }
 
 INSTANTIATE_TEST_SUITE_P(

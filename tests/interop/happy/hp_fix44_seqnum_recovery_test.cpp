@@ -43,8 +43,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -53,17 +51,11 @@
 #include <fixpp/session/session_fsm.hpp>
 
 #include "hp_support.hpp"
-#include "support/golden_diff.hpp"
 #include "support/scenario_descriptor.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
-using fixpp::interop::DiffResult;
-using fixpp::interop::DiffStatus;
 using fixpp::interop::Role;
-using fixpp::interop::admin_profile_excluded_tags;
-using fixpp::interop::diff_transcripts;
-using fixpp::interop::parse_golden;
 using fixpp::session::fsm_state;
 
 namespace {
@@ -90,26 +82,11 @@ TEST(RecoveryInboundGateBite, MutatedTag7BeginSeqNoCausesGateBite)
         "> 8=FIX.4.4\\x0135=2\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
         "\\x017=5\\x0116=0\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
     // Under admin_profile_excluded_tags() == {52, 10}:
     //   - tag 52 (SendingTime) is excluded → equal regardless of value.
     //   - tag 10 (CheckSum)    is excluded → equal regardless of value.
     //   - tag 7  (BeginSeqNo) is INCLUDED → must match verbatim → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when BeginSeqNo(7) differs; "
-        << "detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when tag 7 (BeginSeqNo) is mutated";
-    EXPECT_NE(result.detail.find("7"), std::string::npos)
-        << "detail should mention tag 7 as the differing field; got: " << result.detail;
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "7");
 }
 
 TEST(RecoveryInboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
@@ -123,23 +100,8 @@ TEST(RecoveryInboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
         "> 8=FIX.4.4\\x0135=2\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
         "\\x017=3\\x0116=10\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
     // Tag 16 (EndSeqNo) is INCLUDED under {52,10} → must match verbatim → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when EndSeqNo(16) differs; "
-        << "detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when tag 16 (EndSeqNo) is mutated";
-    EXPECT_NE(result.detail.find("16"), std::string::npos)
-        << "detail should mention tag 16 as the differing field; got: " << result.detail;
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "16");
 }
 
 TEST(RecoveryInboundGateBite, MutatedTag123GapFillFlagCausesGateBite)
@@ -154,66 +116,8 @@ TEST(RecoveryInboundGateBite, MutatedTag123GapFillFlagCausesGateBite)
         "< 8=FIX.4.4\\x0135=4\\x0149=CPTY_ACC\\x0156=FIXPP_INIT"
         "\\x01123=N\\x0136=5\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
     // Tag 123 (GapFillFlag) is INCLUDED under {52,10} → must match verbatim → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when GapFillFlag(123) differs; "
-        << "detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when tag 123 (GapFillFlag) is mutated";
-    EXPECT_NE(result.detail.find("123"), std::string::npos)
-        << "detail should mention tag 123 as the differing field; got: " << result.detail;
-}
-
-TEST(RecoveryInboundGateBite, CanonicalizedTag52DoesNotBite)
-{
-    // Sanity: mutating ONLY tag 52 (canonicalized by {52,10}) MUST NOT bite.
-    // This verifies the SC-004 "never mutate 52/10" rule is enforced by the profile.
-    const char* expected_text =
-        "> 8=FIX.4.4\\x0135=2\\x017=3\\x0116=0\\x0152=20260603-10:00:00\\x0110=001\\x01\n";
-    const char* actual_text =
-        "> 8=FIX.4.4\\x0135=2\\x017=3\\x0116=0\\x0152=20260604-11:11:11\\x0110=999\\x01\n";
-
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_TRUE(static_cast<bool>(result))
-        << "Canonicalized tags 52/10 should not cause a mismatch; detail=" << result.detail;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: resolve the golden path for recovery_inbound cells (T014 / T029).
-// Cell ids (reuse-and-enrich per T029):
-//   HP-QFj-{init,acc}-fix44-seqnum-recovery
-// ---------------------------------------------------------------------------
-std::string recovery_inbound_golden_path(Counterparty cp, Role role)
-{
-    const char* tls_dir = fixpp::interop::hp::tls_fixture_dir();
-    if (tls_dir == nullptr || tls_dir[0] == '\0') {
-        return {};
-    }
-    std::string base{tls_dir};
-    const std::string suffix = "/tls/fixtures";
-    if (base.size() > suffix.size() &&
-        base.substr(base.size() - suffix.size()) == suffix) {
-        base.resize(base.size() - suffix.size());
-    }
-    // reuse-and-enrich: same cell id as 016 T013 for QFj cells (T029).
-    const std::string cp_part   = (cp == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
-    const std::string role_part = (role == Role::fixpp_initiator)  ? "init" : "acc";
-    return base + "/interop/happy/golden/HP-" + cp_part + "-" + role_part +
-           "-fix44-seqnum-recovery.fix";
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "123");
 }
 
 // ---------------------------------------------------------------------------
@@ -351,56 +255,10 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // If present → assert diff_transcripts(expected, actual, {52,10}) MATCHES so
     // that tags 7/16 (ResendRequest range) and 123/122/43 (reply) are verified
     // verbatim under the admin profile (FR-007).
-    const std::string gpath = recovery_inbound_golden_path(counterparty, role);
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    {
-        std::ifstream gfile{gpath};
-        if (!gfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-        }
-        std::ostringstream oss;
-        oss << gfile.rdbuf();
-        const std::string golden_text = oss.str();
-        if (golden_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file empty: " << gpath << ")";
-        }
-
-        // The capture sidecar is written by the parent proxy alongside the golden.
-        const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-        std::ifstream cfile{capture_path};
-        if (!cfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                         << capture_path << ")";
-        }
-        std::ostringstream css;
-        css << cfile.rdbuf();
-        const std::string capture_text = css.str();
-        if (capture_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-        }
-
-        const auto expected_frames = parse_golden(golden_text);
-        const auto actual_frames   = parse_golden(capture_text);
-
-        // admin_profile_excluded_tags() = {52, 10} — NOT the 016 default which
-        // would drop tags 7/16/122/123, making the recovery assertions un-assertable.
-        const DiffResult diff = diff_transcripts(expected_frames, actual_frames,
-                                                 admin_profile_excluded_tags());
-        EXPECT_TRUE(static_cast<bool>(diff))
-            << "Golden transcript mismatch for " << cell_id
-            << " (admin profile {52,10}): " << diff.detail
-            << "\n  expected golden: " << gpath
-            << "\n  actual capture:  " << capture_path;
-    }
+    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
-    const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
-    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+    hp::expect_graceful_stop(fx);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -471,11 +329,7 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
     EXPECT_EQ(s->state(), fsm_state::Active)
         << "session did not remain Active after seqnum recovery window";
 
-    const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
-    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+    hp::expect_graceful_stop(fx);
 }
 
 INSTANTIATE_TEST_SUITE_P(

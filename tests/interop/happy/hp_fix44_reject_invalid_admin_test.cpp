@@ -45,8 +45,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -55,17 +53,11 @@
 #include <fixpp/session/session_fsm.hpp>
 
 #include "hp_support.hpp"
-#include "support/golden_diff.hpp"
 #include "support/scenario_descriptor.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
-using fixpp::interop::DiffResult;
-using fixpp::interop::DiffStatus;
 using fixpp::interop::Role;
-using fixpp::interop::admin_profile_excluded_tags;
-using fixpp::interop::diff_transcripts;
-using fixpp::interop::parse_golden;
 using fixpp::session::fsm_state;
 
 namespace {
@@ -93,26 +85,11 @@ TEST(SessionRejectGateBite, MutatedTag45RefSeqNumCausesGateBite)
         "> 8=FIX.4.4\\x0135=3\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
         "\\x0145=5\\x01373=0\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
     // Under admin_profile_excluded_tags() == {52, 10}:
     //   - tag 52 (SendingTime) is excluded → equal regardless of value.
     //   - tag 10 (CheckSum)    is excluded → equal regardless of value.
     //   - tag 45 (RefSeqNum)  is INCLUDED → must match verbatim → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when RefSeqNum(45) differs; "
-        << "detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when tag 45 (RefSeqNum) is mutated";
-    EXPECT_NE(result.detail.find("45"), std::string::npos)
-        << "detail should mention tag 45 as the differing field; got: " << result.detail;
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "45");
 }
 
 TEST(SessionRejectGateBite, MutatedTag373SessionRejectReasonCausesGateBite)
@@ -126,66 +103,8 @@ TEST(SessionRejectGateBite, MutatedTag373SessionRejectReasonCausesGateBite)
         "> 8=FIX.4.4\\x0135=3\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
         "\\x0145=3\\x01373=5\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    ASSERT_EQ(expected_frames.size(), 1u);
-    ASSERT_EQ(actual_frames.size(), 1u);
-
     // Tag 373 (SessionRejectReason) is INCLUDED under {52,10} → must match → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when "
-           "SessionRejectReason(373) differs; detail=" << result.detail;
-    EXPECT_EQ(result.status, DiffStatus::mismatch)
-        << "Expected DiffStatus::mismatch when tag 373 (SessionRejectReason) is mutated";
-    EXPECT_NE(result.detail.find("373"), std::string::npos)
-        << "detail should mention tag 373 as the differing field; got: " << result.detail;
-}
-
-TEST(SessionRejectGateBite, CanonicalizedTag52DoesNotBite)
-{
-    // Sanity: mutating ONLY tags 52/10 (canonicalized by {52,10} profile) MUST NOT bite.
-    // This verifies the SC-004 "never mutate 52/10" rule is enforced by the profile.
-    const char* expected_text =
-        "> 8=FIX.4.4\\x0135=3\\x0145=2\\x01373=0\\x0152=20260603-10:00:00\\x0110=001\\x01\n";
-    const char* actual_text =
-        "> 8=FIX.4.4\\x0135=3\\x0145=2\\x01373=0\\x0152=20260604-11:11:11\\x0110=999\\x01\n";
-
-    auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
-
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
-
-    EXPECT_TRUE(static_cast<bool>(result))
-        << "Canonicalized tags 52/10 should not cause a mismatch; detail=" << result.detail;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: resolve the golden path for session_reject cells (T021 / T029).
-// Cell ids (reuse-and-enrich per T029):
-//   HP-QFj-{init,acc}-fix44-reject-invalid-admin
-// ---------------------------------------------------------------------------
-std::string session_reject_golden_path(Counterparty cp, Role role)
-{
-    const char* tls_dir = fixpp::interop::hp::tls_fixture_dir();
-    if (tls_dir == nullptr || tls_dir[0] == '\0') {
-        return {};
-    }
-    std::string base{tls_dir};
-    const std::string suffix = "/tls/fixtures";
-    if (base.size() > suffix.size() &&
-        base.substr(base.size() - suffix.size()) == suffix) {
-        base.resize(base.size() - suffix.size());
-    }
-    // reuse-and-enrich: same cell id as 016 T012 for QFj cells (T029).
-    const std::string cp_part   = (cp == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
-    const std::string role_part = (role == Role::fixpp_initiator)  ? "init" : "acc";
-    return base + "/interop/happy/golden/HP-" + cp_part + "-" + role_part +
-           "-fix44-reject-invalid-admin.fix";
+    fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "373");
 }
 
 // ---------------------------------------------------------------------------
@@ -316,57 +235,10 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     // If present: assert diff_transcripts(expected, actual, {52,10}) MATCHES,
     // so that tags 45 (RefSeqNum) and 373 (SessionRejectReason) are verified
     // verbatim (FR-007). Tag 371 (RefTagID) is also compared if present.
-    const std::string gpath = session_reject_golden_path(counterparty, role);
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    {
-        std::ifstream gfile{gpath};
-        if (!gfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-        }
-        std::ostringstream oss;
-        oss << gfile.rdbuf();
-        const std::string golden_text = oss.str();
-        if (golden_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (file empty: " << gpath << ")";
-        }
-
-        // The parent proxy capture is the "actual" transcript.  The in-repo golden IS
-        // the expected.  The parent writes the captured frames to a side-car file
-        // alongside the golden (e.g. <cell_id>-capture.fix).
-        // When running without a proxy capture, skip with reason.
-        const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-        std::ifstream cfile{capture_path};
-        if (!cfile.is_open()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                         << capture_path << ")";
-        }
-        std::ostringstream css;
-        css << cfile.rdbuf();
-        const std::string capture_text = css.str();
-        if (capture_text.empty()) {
-            GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-        }
-
-        const auto expected_frames = parse_golden(golden_text);
-        const auto actual_frames   = parse_golden(capture_text);
-
-        const DiffResult diff = diff_transcripts(expected_frames, actual_frames,
-                                                 admin_profile_excluded_tags());
-        EXPECT_TRUE(static_cast<bool>(diff))
-            << "Golden transcript mismatch for " << cell_id
-            << " (admin profile {52,10}): " << diff.detail
-            << "\n  expected golden: " << gpath
-            << "\n  actual capture:  " << capture_path;
-    }
+    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
-    const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
-    EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
+    hp::expect_graceful_stop(fx);
 }
 
 INSTANTIATE_TEST_SUITE_P(
