@@ -223,3 +223,31 @@ Scope and conventions:
   non-session OS thread.
   **Status: wontfix** (constitutional constraint `[const §XI.3]`). *(FR-004;
   data-model §overflow_policy; B-017-2 is the positive-behavior counterpart.)*
+
+- **L-017-8 — The `overflow_policy::block` session-strand debug guard is not implemented
+  (T033/T034 deferral).** `contracts/log-core.md` and `logger.hpp` specify that a debug
+  `FIXPP_ASSERT` fires if `block` is used from a session-executor thread. This guard is
+  **not yet implemented** because `Logger` is intentionally session/engine-ref-free
+  (`[2k §4.3]`): it holds no session executor reference, so there is no cheap hook to
+  detect "am I on a session-executor thread". The raw-thread path (the only production
+  use today) is correct. Session-strand misuse of `block` is a documented **caller
+  obligation**, not a runtime-enforced invariant in v1.0. T033/T034 track a follow-up
+  approach (e.g. a `LoggerConfig` flag or an injected `is_session_thread` predicate from
+  the caller) that keeps Logger ref-free while enabling the guard.
+  **Status: deferred** (T033/T034). *(FR-004; `[2k §4.3]`; `src/log/logger.cpp` block
+  path comment; L-017-6 is the caller-obligation counterpart.)*
+
+- **L-017-7 — `FIXPP_SLOG` uses `system_clock::now()` (wall-clock) for its timestamp;
+  deterministic mock-clock control applies only to `FIXPP_ELOG`.** FR-006's "effective
+  clock" determinism is scoped to the Engine-tier macro `FIXPP_ELOG`, which reads
+  `engine.clock()->now()` (the injected `EngineConfig::clock`). `FIXPP_SLOG` carries
+  only the caller's `trace_context` (trace_id + span_id) — there is no clock field in
+  `trace_context` because adding one would widen the SLOG call-site API (`[2k §4.3]`
+  locked surface). `FIXPP_LOG0` (Tier 3, zero context) is wall-clock by design. In
+  practice, wall-clock timestamps are monotone-ish for log ordering; the gap only
+  matters for test determinism, not production correctness. Threading the effective
+  clock into SLOG is a future extension (see T033/T034).
+  **Status: deferred** (T033/T034; would require macro-signature change and a clock
+  field in `trace_context`; non-blocking for v1.0). *(FR-006; `[2k §4.3]`;
+  `contracts/log-core.md` LOG-003 macro contract; `logger.hpp` FIXPP_SLOG comment;
+  `tests/log/test_trace_correlation.cpp` `SlogTimestampIsWallClock`.)*
