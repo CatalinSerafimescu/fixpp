@@ -40,6 +40,27 @@
 // Counts allocations routed through global operator new (not PMR). This is the
 // honest gate for [const §VIII.5] on builders that take no memory_resource param.
 // mallocnesia LD_PRELOAD is the CI-tier complement (intercepts malloc from any path).
+//
+// ASan and TSan ship their own strong operator new/delete: ASan trips a runtime
+// alloc-dealloc-mismatch and TSan multiply-defines operator new at link if we
+// replace them. Under those sanitizers we compile out the replacement and skip
+// the alloc witness below (mallocnesia is the CI-tier cross-check); the builder
+// correctness tests still run. UBSan is unaffected and keeps the full witness.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#endif
+#if !defined(FIXPP_SANITIZER_REPLACES_NEW) && \
+    (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#ifndef FIXPP_SANITIZER_REPLACES_NEW
+#define FIXPP_SANITIZER_REPLACES_NEW 0
+#endif
+
+#if !FIXPP_SANITIZER_REPLACES_NEW
 namespace {
 
 std::atomic<long> g_alloc_count{0};
@@ -68,6 +89,7 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {
 
@@ -449,6 +471,12 @@ TEST(BusinessMessagesBuild, Builder_FR008_TransactTime_ShapeRejection) {
 //
 // We only zero-assert the BUILDER CALLS themselves, not make_decimal().
 TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
+#if FIXPP_SANITIZER_REPLACES_NEW
+    GTEST_SKIP() << "global operator new replacement is incompatible with ASan "
+                    "(alloc-dealloc-mismatch) and TSan (multiple-definition of operator new); "
+                    "the zero-alloc witness runs in debug/release/ubsan, with mallocnesia "
+                    "LD_PRELOAD as the CI-tier cross-check";
+#else
     std::pmr::monotonic_buffer_resource arena{4096};
 
     // Construct decimals BEFORE the zero-alloc window
@@ -482,4 +510,5 @@ TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
         << "build_new_order_single + build_execution_report must not call global operator new "
            "(alloc delta = " << (after - before) << "); "
            "mallocnesia LD_PRELOAD is the CI-tier cross-check";
+#endif  // FIXPP_SANITIZER_REPLACES_NEW
 }
