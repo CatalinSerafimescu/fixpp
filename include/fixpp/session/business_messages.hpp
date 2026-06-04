@@ -14,7 +14,8 @@
 // WRITE surface (the codegen emits no writer; owning_<Msg> is read-only).
 //
 // House build-shape (shared with admin_messages.hpp): span-in / noexcept /
-// expected_t / wire::Writer / stack-scratch-then-copy atomicity. BUT — unlike the
+// expected_t / hand-written body-only field append (not wire::Writer) /
+// stack-scratch-then-copy atomicity. BUT — unlike the
 // admin builders, which emit COMPLETE self-contained frames (8/9/34/35/…) — these
 // emit the app BODY ONLY: they lead with 35=MsgType then business fields, and emit
 // NO session header tags (8/9/34/49/52/56) and NO 10= trailer. The engine stamps

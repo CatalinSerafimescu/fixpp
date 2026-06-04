@@ -21,7 +21,7 @@ Builds directly on **019** (`Application` `fromApp`/`toApp`, any-thread `Engine:
 **Testing**: GoogleTest + GoogleMock; sanitizers ASan/UBSan/TSan; coverage llvm-cov; live interop ctest cells (skip-without-counterparty) — [const §VII, §IX]
 **Target Platform**: Linux/Clang (Tier 1); Windows/MSVC (Tier 2)
 **Project Type**: single C++ library (`fixpp`) + tests-only interop harness extension (parent `phase-9-harness/`)
-**Performance Goals**: build/parse on the app send/recv path stays allocation-disciplined — the **builder write path** writes into a caller stack buffer via `wire::Writer` (no heap; `counting_resource` witness); the **read path** is NOT zero-copy — numeric accessors (`order_qty(mr)`/`price(mr)`/…) materialize a `decimal_t` via `decimal_t::parse(bytes, mr)`, allocating from the **caller-supplied PMR arena** (no global `new`) — [const §VIII.5]
+**Performance Goals**: build/parse on the app send/recv path stays allocation-disciplined — the **builder write path** writes into a caller stack buffer via hand-written body-only `tag=value\x01` field append (no `wire::Writer` body-only mode) (no heap; `counting_resource` witness); the **read path** is NOT zero-copy — numeric accessors (`order_qty(mr)`/`price(mr)`/…) materialize a `decimal_t` via `decimal_t::parse(bytes, mr)`, allocating from the **caller-supplied PMR arena** (no global `new`) — [const §VIII.5]
 **Constraints**: builder is `noexcept` + `expected_t` (house style); numeric fields serialize via `decimal_t::format(span)` canonical locale-independent form (FR-007); the builder emits the app **body** only (no session header tags `8/9/34/49/52/56`, no `10=` trailer — those are engine-stamped), leading with `35=`; the send path must place MsgType at field-3 + emit digit-only BodyLength + validate the opaque payload (D1/FR-004a/FR-016); no `std::mutex` in awaitable headers ([const §XV.9])
 **Scale/Scope**: 2 typed builders (NOS + ExecRpt, minimal fields) + 1 send-path MsgType-ordering fix + read-side consumption of generated v44 flyweights + live interop cells (QFJ + QFcpp, both roles) + a responding counterparty `Application` per engine; bounded — no codegen-emitter change, no new message types, no full-field coverage
 
@@ -35,7 +35,7 @@ Builds directly on **019** (`Application` `fromApp`/`toApp`, any-thread `Engine:
 | **VI** Spec coverage | A-001/A-006 are codegen-owned **all-version (4.0–5.0SP2) official** rows; this minimal-FIX-4.4 hand-written slice does NOT close them. Catalogue update = A-001/A-006 stay `backlog` + **gap-note** (partial G2 interop evidence, cite 020) + coverage-index **partial-evidence note** (NOT a closure) at Polish (FR-014) | ⚠ RESOLVED (no row flip — partial-evidence note only; exact coverage-index delta below) |
 | **VII** Testing/TDD | builder build/round-trip, missing-required, decimal/timestamp fidelity, live cells land red-first; GoogleTest | ✅ planned |
 | **VII.6** Interop | **this feature DISCHARGES the open v1.0-GA business-message interop clause** (`Logon→NOS→ExecRpt→Logout` vs QFJ/QFcpp both roles) | ✅ discharging |
-| **VIII.5** Allocator | builder **write** path writes into caller buffer via `wire::Writer` (no heap — `counting_resource` witness); **read** path is NOT zero-copy — `decimal_t::parse(mr)` materializes decimals into the **caller-supplied PMR arena** (no global `new`); both arms have an alloc-discipline witness | ✅ by design (write=no-heap, read=caller-arena) |
+| **VIII.5** Allocator | builder **write** path writes into caller buffer via hand-written body-only `tag=value\x01` field append (no `wire::Writer` body-only mode) (no heap — `counting_resource` witness); **read** path is NOT zero-copy — `decimal_t::parse(mr)` materializes decimals into the **caller-supplied PMR arena** (no global `new`); both arms have an alloc-discipline witness | ✅ by design (write=no-heap, read=caller-arena) |
 | **IX.1** Coverage | ≥95/85 on the new builder TU + touched send path; missing-required + decimal-edge are genuine error paths ⇒ tested | ✅ planned |
 | **IX.2** Sanitizers | ASan/UBSan/TSan on the send-path MsgType-ordering change + interop ctest (per 018 discipline) | ✅ planned |
 | **X** ABI | C ABI for typed messages explicitly **out of scope** (Phase-5 later) ⇒ abidiff does not bind new typed surface; the send-path change is internal | ✅ N/A |
@@ -72,13 +72,13 @@ specs/020-g2-business-messages/
 include/fixpp/session/
 ├── business_messages.hpp   # NEW — minimal typed builders: build_new_order_single(...), build_execution_report(...)
 │                           #       span-in, noexcept, expected_t<span<byte>> out; same house build-shape as admin_messages.hpp
-│                           #       (span-in/noexcept/expected_t/wire::Writer) — but emits app BODY (not a complete frame);
+│                           #       (span-in/noexcept/expected_t; hand-written body-only append — not `wire::Writer`) — but emits app BODY (not a complete frame);
 │                           #       leads with 35=D/35=8, NO 8/9/34/49/52/56/10; decimal_t fields via decimal_t::format(span)
 └── session.hpp / session.cpp  # EDIT — app-send path: hoist MsgType(35) to field-3 + digit-only BodyLength + opaque-payload
                                 #        validation (error::app_payload_malformed slot 131) (D1/FR-004a/FR-016)
 
 src/session/
-└── business_messages.cpp   # NEW — builder bodies over wire::Writer + fixpp::decimal_t::format
+└── business_messages.cpp   # NEW — builder bodies via hand-written body-only field append + fixpp::decimal_t::format
 
 include/fixpp/core/
 └── error.hpp               # EDIT — new enumerator app_payload_malformed = 131 (next free after 019's 129/130)
