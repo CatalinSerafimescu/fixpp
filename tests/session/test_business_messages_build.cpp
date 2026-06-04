@@ -34,6 +34,7 @@
 #include <fixpp/session/business_messages.hpp>
 #include <memory_resource>
 #include <span>
+#include <string>
 #include <string_view>
 
 // ── Global operator new counter ────────────────────────────────────────────────
@@ -511,4 +512,42 @@ TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
            "(alloc delta = " << (after - before) << "); "
            "mallocnesia LD_PRELOAD is the CI-tier cross-check";
 #endif  // FIXPP_SANITIZER_REPLACES_NEW
+}
+
+// ── INV-4 coverage: per-field scratch-overflow guards ──────────────────────────
+// Each builder serializes fields into a fixed 1024-byte scratch before copying to
+// `out`; every field write is overflow-guarded (wire_frame_too_large; decimal
+// fields surface as decimal_invalid_input because wdecimal cannot distinguish
+// overflow from format failure). The builders do not cap input field length, so
+// an oversized leading string field drives scratch overflow. Sweeping its length
+// walks the overflow point backward through the field sequence, exercising every
+// per-field guard. `out` is larger than scratch so the internal scratch guard
+// fires (not the out-size check). All cases must fail-closed (no value). (INV-4.)
+TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    const auto qty = make_decimal("1", &arena);
+    const auto px = make_decimal("1", &arena);
+    const auto zero = make_decimal("0", &arena);
+
+    std::array<std::byte, 2048> out{};
+
+    // NOS scratch usage ≈ cl_ord_id_len + 55; overflow when > 1024 (len ≥ 970).
+    // Sweep walks the overflow point 60 → 44 → 40 → 38 → 54 → 55 → 11.
+    for (std::size_t len = 970; len <= 1020; ++len) {
+        const std::string big(len, 'A');
+        const auto r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, big, "S",
+                                                              '1', qty, px, "20240101-10:00:00");
+        EXPECT_FALSE(r.has_value())
+            << "NOS cl_ord_id len=" << len << " must overflow scratch and fail-closed";
+    }
+
+    // ExecRpt scratch usage ≈ order_id_len + 50; overflow when > 1024 (len ≥ 975).
+    // Sweep walks the overflow point 6 → 14 → 151 → 54 → 55 → 39 → 150 → 17 → 37.
+    for (std::size_t len = 975; len <= 1020; ++len) {
+        const std::string big(len, 'A');
+        const auto r = fixpp::session::build_execution_report(std::span<std::byte>{out}, big, "E",
+                                                              'F', '2', "S", '1', zero, qty, px);
+        EXPECT_FALSE(r.has_value())
+            << "ExecRpt order_id len=" << len << " must overflow scratch and fail-closed";
+    }
 }
