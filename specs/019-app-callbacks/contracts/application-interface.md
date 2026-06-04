@@ -9,10 +9,10 @@ The public callback interface a library user implements to observe/intercept FIX
 ```cpp
 namespace fixpp::session {
 
-// All callbacks run on the target session's serialized executor (FR-010),
-// invoked directly at on-strand sites. Return-value contract — NEVER throw to
-// signal a normal outcome (FR-015). A thrown exception ⇒ the engine terminal-
-// closes the session (FR-011).
+// Engine-driven callbacks run on the engine's exec_ under single-thread
+// executor confinement (015 E-5, INV-2). Return-value contract — NEVER throw
+// to signal a normal outcome (FR-015). A thrown exception ⇒ the engine
+// terminal-closes the session (FR-011).
 class Application {
 public:
     virtual ~Application() = default;
@@ -53,13 +53,13 @@ public:
 
 | Method | Pre | Post / effect | Threading | Failure |
 |--------|-----|---------------|-----------|---------|
-| `onCreate` | session object constructed + `open()` initialized `exec_`, before first Logon | user may init per-session resources | session strand (post-`open()`) | throw ⇒ terminal close (FR-011) |
-| `onLogon` | session reached `Active` | user may begin originating sends | session strand | throw ⇒ terminal close |
-| `onLogout` | session leaving established | user may release per-session resources | session strand | throw ⇒ terminal close |
-| `fromAdmin` | inbound admin msg accepted by FSM | accept ⇒ normal; error ⇒ `Reject(35=3)` emitted | session strand | throw ⇒ terminal close |
-| `fromApp` | inbound app msg accepted by FSM | accept ⇒ delivered; error ⇒ `BusinessMessageReject(35=j)` | session strand | throw ⇒ terminal close |
-| `toAdmin` | engine about to emit admin msg | inspect; msg still sent | session strand | throw ⇒ terminal close |
-| `toApp` | user/engine about to emit app msg | send / veto(`app_do_not_send`) / abort(other error) | session strand | throw ⇒ terminal close |
+| `onCreate` | session object constructed + `open()` initialized `exec_`, before first Logon | user may init per-session resources | engine `exec_` (single-thread confinement, INV-2) | throw ⇒ terminal close (FR-011) |
+| `onLogon` | session reached `Active` | user may begin originating sends | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
+| `onLogout` | session leaving established | user may release per-session resources | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
+| `fromAdmin` | inbound admin msg accepted by FSM | accept ⇒ normal; error ⇒ `Reject(35=3)` emitted | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
+| `fromApp` | inbound app msg accepted by FSM | accept ⇒ delivered; error ⇒ `BusinessMessageReject(35=j)` | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
+| `toAdmin` | engine about to emit admin msg | inspect; msg still sent | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
+| `toApp` | user/engine about to emit app msg | send / veto(`app_do_not_send`) / abort(other error) | engine `exec_` (single-thread confinement) | throw ⇒ terminal close |
 | `Engine::send` | — (any thread) | posts to session strand → `toApp` → emit; **awaitable** result resumes after post completes (natural backpressure); registry lookup holds a strong/owning session keepalive that outlives the post (014 class) | any thread (FR-006); returns `asio::awaitable<expected_t<void>>` | unknown id ⇒ `session_invalid_argument` (119); not established ⇒ `session_invalid_state_for_send` (77, FR-013); veto ⇒ `app_do_not_send` (129) |
 
 ## Guarantees

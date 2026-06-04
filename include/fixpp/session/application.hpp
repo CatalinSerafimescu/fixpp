@@ -5,10 +5,12 @@
 // fixpp::session::Application — the public user-implemented callback interface
 // for the FIX application layer (019-app-callbacks, Phase-5 slice 1).
 //
-// All callbacks run on the target session's serialized executor (`exec_`),
-// invoked directly at on-strand sites (research D3). Return-value contract —
-// NEVER throw to signal a normal outcome (FR-015). A thrown exception ⇒ the
-// engine terminal-closes the session (FR-011).
+// Engine-driven callbacks (onCreate/onLogon/onLogout, fromAdmin/fromApp,
+// toAdmin/toApp) run on the engine's `exec_` under single-thread executor
+// confinement (015 E-5); serialization derives from that confinement, NOT from
+// a per-session strand (INV-2, L-019-3). Return-value contract — NEVER throw
+// to signal a normal outcome (FR-015). A thrown exception ⇒ the engine
+// terminal-closes the session (FR-011).
 //
 // Anchor: specs/019-app-callbacks/{research.md D2, data-model.md, contracts/
 //         application-interface.md}; [const §XIV.2] (7 methods, 0 pure-virtual);
@@ -46,7 +48,7 @@ public:
     virtual ~Application() = default;
 
     // ── Lifecycle callbacks (notifications; no reject) ────────────────────────
-    // All three run on the target session's strand; a throw ⇒ terminal close.
+    // All three run on the engine's exec_ (single-thread confinement); a throw ⇒ terminal close.
 
     // onCreate: session object constructed and exec_ initialized by open(),
     //   BEFORE the first Logon is sent or received (FR-009). Use for per-session
@@ -63,7 +65,7 @@ public:
     virtual void onLogout(const SessionId& /*id*/) {}  // FR-009
 
     // ── Inbound delivery callbacks (after engine FSM processing) ─────────────
-    // Both run on the session strand after the FSM accepts the frame (INV-6).
+    // Both run on the engine's exec_ after the FSM accepts the frame (INV-6).
 
     // fromAdmin: inbound admin message (MsgType 0/1/2/3/4/5), after FSM
     //   processing (FR-004). Default: accept.

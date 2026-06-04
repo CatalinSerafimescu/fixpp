@@ -15,7 +15,8 @@
 //      does not deadlock. (FR-006 re-entrant edge; fromApp edge.)
 //   4. SendDrainRaceNoUAF: engine.send() is parked (toApp triggers stop()),
 //      stop() must wait on send_counter_ > 0 before completing, then
-//      ~Engine() is UAF-safe. FAILS without FIX-A RAII guard. (FIX-2/FIX-A)
+//      ~Engine() is UAF-safe under ASan. (FIX-2/FIX-A; post-fix exercise
+//      coverage — see NOTE in the test body for witnessing limitation.)
 //
 // All tests use real loopback TLS; they GTEST_SKIP when
 // FIXPP_TLS_FIXTURE_DIR is not set (same as engine_lifecycle_test.cpp).
@@ -557,10 +558,10 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     ASSERT_TRUE(hooked) << "toApp hook did not fire within 3s";
 
     // Now drive ioc until stop() completes.
-    // WITHOUT FIX-A: send_counter_ stuck at 1 → drain loop spins →
-    //   stop_fut never ready → deadline (5s) fires → ASSERT below fails.
-    // WITH FIX-A (counter_guard): guard dtor fires on cancel-unwind →
+    // Post-FIX-A: counter_guard dtor fires on cancel-unwind →
     //   send_counter_ = 0 → stop() exits drain loop and completes.
+    // (A deterministic pre-FIX-A red witness would require an engine-internal
+    //  park seam — see NOTE above; this assertion exercises the correct behavior.)
     bool stop_done = wait_until(ioc,
         [&] {
             return stop_fut.valid() &&
