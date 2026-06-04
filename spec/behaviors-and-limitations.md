@@ -349,7 +349,11 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   the payload BEFORE stamping SendingTime, peeking/assigning a seqnum, or storing/transmitting:
   it must lead with exactly one `35=` MsgType field and carry no embedded session header/trailer
   tag (`8/9/34/49/52/56/10`); empty, no-leading-`35=`, duplicate-`35=`, or embedded-tag payloads
-  are rejected with `error::app_payload_malformed` (131) and consume NO seqnum. *(FR-016;
+  are rejected with `error::app_payload_malformed` (131) and consume NO seqnum. Two additional
+  defensive floors are enforced (gate-b/r1 RC#2): (a) the payload must **end with SOH**
+  (`pv.back() == '\x01'`) so the final field is terminated before checksum append; (b) the
+  MsgType value must be **non-empty** (`first_soh > 3`, i.e. at least one byte between `35=`
+  and the first SOH). Both return `app_payload_malformed` with no seqnum consumed. *(FR-016;
   data-model.md INV-8; research.md D1 opaque-payload validation.)*
 
 - **B-020-3 — Typed minimal builders for NewOrderSingle / ExecutionReport.**
@@ -376,3 +380,12 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   over 4.2 / 5.0SP2 / FIXT.1.1 (interop roadmap G4 axis) are not covered. **Status: deferred**
   (FR-015b — scheduled post-v1.0). *(FR-015b; research.md D8 + "Forward obligations";
   Deferred-work registry in CLAUDE.md.)*
+
+- **L-020-3 — ExecType/OrdStatus enum values are not validated against the FIX 4.4 enum set;
+  only printable, non-control ASCII (0x20–0x7E) is enforced.** The builders accept any
+  printable char for `exec_type`/`ord_status` (e.g. `'Z'` succeeds). Caller-supplied chars
+  are printable-floor-checked only; full FIX 4.4 enum-set validation (e.g. restricting
+  `exec_type` to `'0'/'1'/'2'/'3'/'4'/'5'/'6'/'7'/'8'/'B'/'C'/'D'/'E'/'F'/'G'/'H'/'I'/'J'`)
+  is deferred (FR-015a). The `exec_type='F'` / `ord_status='2'` (fully-filled) contract is a
+  caller/harness obligation (data-model.md E2/E3), not a builder precondition.
+  **Status: deferred** (FR-015a). *(gate-b/r1 RC#4; contracts/business-messages.md §Conventions.)*

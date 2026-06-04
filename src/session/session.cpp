@@ -2764,6 +2764,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             co_return std::unexpected(error::app_payload_malformed);
         }
 
+        // (2a) Payload must end with SOH so the last field is terminated before
+        //      checksum append. A trailing-SOH-less payload would cause the checksum
+        //      field to be appended without a field boundary. [RC#2: gate-b/r1]
+        if (pv.back() != '\x01') {
+            co_return std::unexpected(error::app_payload_malformed);
+        }
+
+        // (2b) MsgType value must be non-empty: the first SOH must be at offset > 3
+        //      (i.e. at least one byte between "35=" and the SOH terminator).
+        //      "35=\x01" has first_soh==3 → empty MsgType → malformed. [RC#2: gate-b/r1]
+        {
+            const std::size_t fst = pv.find('\x01');
+            // fst != npos is guaranteed because pv.back() == '\x01' was verified above.
+            if (fst <= 3U) {
+                co_return std::unexpected(error::app_payload_malformed);
+            }
+        }
+
         // (3) Duplicate 35=: a second 35= at a field boundary (after the leading one).
         // The leading "35=" is at offset 0; look for any further SOH+"35=".
         bool has_dup_35 = false;

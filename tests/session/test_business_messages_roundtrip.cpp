@@ -52,8 +52,8 @@
 #include <charconv>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -76,20 +76,20 @@
 #include "support/minimal_security_profile.hpp"
 
 // Live TLS headers — only needed for INV-7.
+#include <asio/ip/tcp.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport_factory.hpp>
-#include <asio/ip/tcp.hpp>
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -139,11 +139,10 @@ static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
 
 // Build a raw inbound FIX frame (for INV-5 inbound path).
 static std::vector<std::byte> make_inbound_app_frame(std::string_view msg_type,
-                                                      std::string_view sender,
-                                                      std::string_view target,
-                                                      uint32_t seq,
-                                                      std::string_view begin_string = "FIX.4.2",
-                                                      std::string extra_body = {}) {
+                                                     std::string_view sender,
+                                                     std::string_view target, uint32_t seq,
+                                                     std::string_view begin_string = "FIX.4.2",
+                                                     std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -171,11 +170,11 @@ static std::vector<std::byte> make_inbound_app_frame(std::string_view msg_type,
 
 // Build a Logon frame (for advancing sessions to Active in OutboundFixture).
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               uint32_t seq = 1,
-                                               std::string_view sender = "TW",
+                                               uint32_t seq = 1, std::string_view sender = "TW",
                                                std::string_view target = "ISLD") {
     return make_inbound_app_frame("A", sender, target, seq, begin_string,
-                                  "98=0\x01""108=30\x01");
+                                  "98=0\x01"
+                                  "108=30\x01");
 }
 
 // ── Parse helpers for frame byte inspection ───────────────────────────────────
@@ -219,9 +218,9 @@ static unsigned int compute_checksum(std::span<const std::byte> frame) {
     // Find "10=" at start-of-message or after SOH.
     std::size_t trailer_pos = std::string_view::npos;
     for (std::size_t i = 0; i + 3 <= sv.size(); ++i) {
-        if (sv[i] == '1' && sv[i+1] == '0' && sv[i+2] == '=') {
+        if (sv[i] == '1' && sv[i + 1] == '0' && sv[i + 2] == '=') {
             // Must be at start or after SOH.
-            if (i == 0 || sv[i-1] == '\x01') {
+            if (i == 0 || sv[i - 1] == '\x01') {
                 trailer_pos = i;
             }
         }
@@ -303,7 +302,8 @@ struct OutboundFixture {
 //
 // Anchors: data-model.md INV-1; research.md D1; tasks.md T009.
 
-TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyLength_ValidChecksum) {
+TEST(BusinessMessagesRoundtrip,
+     SendPath_StoredFrame_Field3MsgType_UnpaddedBodyLength_ValidChecksum) {
     OutboundFixture f;
 
     auto cfg = f.make_cfg(/*capturing=*/true);
@@ -315,16 +315,21 @@ TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyL
 
     // A 35=D-leading payload (NewOrderSingle body).
     static const char kNos[] =
-        "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.00\x01";
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "40=2\x01"
+        "44=100.00\x01";
     std::vector<std::byte> payload;
     for (const char* p = kNos; *p; ++p) payload.push_back(static_cast<std::byte>(*p));
 
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)),
-                               asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     f.drain();
     auto result = fut.get();
-    ASSERT_TRUE(result.has_value()) << "send() must succeed; error="
-                                    << static_cast<int>(result.error());
+    ASSERT_TRUE(result.has_value())
+        << "send() must succeed; error=" << static_cast<int>(result.error());
 
     // Must have captured exactly one new frame.
     ASSERT_GT(f.captured_frames.size(), frames_before) << "app frame must be captured";
@@ -369,8 +374,8 @@ TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyL
         // Find "9=" at start or after SOH.
         std::size_t bl_field_end = std::string_view::npos;
         for (std::size_t i = 0; i + 2 <= sv.size(); ++i) {
-            if (sv[i] == '9' && sv[i+1] == '=') {
-                if (i == 0 || sv[i-1] == '\x01') {
+            if (sv[i] == '9' && sv[i + 1] == '=') {
+                if (i == 0 || sv[i - 1] == '\x01') {
                     // Skip past "9=<digits>\x01".
                     std::size_t j = i + 2;
                     while (j < sv.size() && sv[j] != '\x01') ++j;
@@ -382,12 +387,15 @@ TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyL
         // Find "10=" at SOH boundary.
         std::size_t ten_start = std::string_view::npos;
         for (std::size_t i = 0; i + 3 <= sv.size(); ++i) {
-            if (sv[i] == '1' && sv[i+1] == '0' && sv[i+2] == '=') {
-                if (i == 0 || sv[i-1] == '\x01') { ten_start = i; break; }
+            if (sv[i] == '1' && sv[i + 1] == '0' && sv[i + 2] == '=') {
+                if (i == 0 || sv[i - 1] == '\x01') {
+                    ten_start = i;
+                    break;
+                }
             }
         }
-        if (bl_field_end != std::string_view::npos && ten_start != std::string_view::npos
-            && ten_start > bl_field_end) {
+        if (bl_field_end != std::string_view::npos && ten_start != std::string_view::npos &&
+            ten_start > bl_field_end) {
             std::size_t actual_body_len = ten_start - bl_field_end;
             int stated_bl = std::stoi(bl_str);
             EXPECT_EQ(static_cast<int>(actual_body_len), stated_bl)
@@ -399,7 +407,10 @@ TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyL
     // Find the 10= field in parsed fields.
     std::string stored_checksum;
     for (const auto& f2 : fields) {
-        if (f2.tag == 10) { stored_checksum = f2.value; break; }
+        if (f2.tag == 10) {
+            stored_checksum = f2.value;
+            break;
+        }
     }
     ASSERT_FALSE(stored_checksum.empty()) << "10= checksum field must be present";
 
@@ -407,8 +418,8 @@ TEST(BusinessMessagesRoundtrip, SendPath_StoredFrame_Field3MsgType_UnpaddedBodyL
     char expected_cs_str[4];
     snprintf(expected_cs_str, sizeof(expected_cs_str), "%03u", expected_cs);
     EXPECT_EQ(stored_checksum, std::string(expected_cs_str))
-        << "10= checksum mismatch: stored='" << stored_checksum
-        << "' computed='" << expected_cs_str << "'";
+        << "10= checksum mismatch: stored='" << stored_checksum << "' computed='" << expected_cs_str
+        << "'";
 }
 
 // ── INV-8: Opaque payload validation — reject malformed, no seqnum consumed ──
@@ -443,14 +454,13 @@ TEST(BusinessMessagesRoundtrip, OpaquePayload_Malformed_RejectedNoSeqnumConsumed
         const std::size_t frames_before = f.captured_frames.size();
 
         auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(malformed)),
-                                   asio::use_future);
+                                  asio::use_future);
         f.drain();
         auto result = fut.get();
 
         EXPECT_FALSE(result.has_value()) << "malformed payload must be rejected";
         EXPECT_EQ(result.error(), error::app_payload_malformed)
-            << "must return app_payload_malformed(131); got "
-            << static_cast<int>(result.error());
+            << "must return app_payload_malformed(131); got " << static_cast<int>(result.error());
         EXPECT_EQ(f.captured_frames.size(), frames_before) << "no new frame on malformed send";
     };
 
@@ -465,40 +475,69 @@ TEST(BusinessMessagesRoundtrip, OpaquePayload_Malformed_RejectedNoSeqnumConsumed
     assert_malformed({}, "empty_payload");
 
     // (2) No leading 35=.
-    assert_malformed(to_bytes("11=ORD001\x01""54=1\x01""55=AAPL\x01"),
+    assert_malformed(to_bytes("11=ORD001\x01"
+                              "54=1\x01"
+                              "55=AAPL\x01"),
                      "no_leading_35");
 
     // (3) Duplicate 35=.
-    assert_malformed(to_bytes("35=D\x01""11=ORD001\x01""35=D\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "11=ORD001\x01"
+                              "35=D\x01"),
                      "duplicate_35");
 
     // (4a) Embedded session tag: 8=.
-    assert_malformed(to_bytes("35=D\x01""8=FIX.4.2\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "8=FIX.4.2\x01"),
                      "embedded_8");
 
     // (4b) Embedded session tag: 9=.
-    assert_malformed(to_bytes("35=D\x01""9=45\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "9=45\x01"),
                      "embedded_9");
 
     // (4c) Embedded session tag: 34=.
-    assert_malformed(to_bytes("35=D\x01""34=999\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "34=999\x01"),
                      "embedded_34");
 
     // (4d) Embedded session tag: 49=.
-    assert_malformed(to_bytes("35=D\x01""49=EVIL\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "49=EVIL\x01"),
                      "embedded_49");
 
     // (4e) Embedded session tag: 52=.
-    assert_malformed(to_bytes("35=D\x01""52=20240101-00:00:00.000\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "52=20240101-00:00:00.000\x01"),
                      "embedded_52");
 
     // (4f) Embedded session tag: 56=.
-    assert_malformed(to_bytes("35=D\x01""56=EVIL\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "56=EVIL\x01"),
                      "embedded_56");
 
     // (4g) Embedded trailer tag: 10=.
-    assert_malformed(to_bytes("35=D\x01""10=123\x01"),
+    assert_malformed(to_bytes("35=D\x01"
+                              "10=123\x01"),
                      "embedded_10");
+
+    // ── RC#2 additions (gate-b/r1): two cheap robustness floors ─────────────────
+    // (5) Empty MsgType value: "35=\x01" has first_soh==3, so MsgType is empty.
+    //     Must be rejected. [RC#2: non-empty-MsgType floor]
+    assert_malformed(to_bytes("35=\x01"), "empty_msgtype");
+
+    // (6) No trailing SOH: "35=D\x0111=ORD001" lacks a terminal SOH on the last
+    //     field; appending checksum directly would break the field boundary.
+    //     Must be rejected. [RC#2: final-SOH floor]
+    //     Note: to_bytes stops at C-string NUL; the payload has no SOH at end.
+    assert_malformed(to_bytes("35=D\x01"
+                              "11=ORD001"),
+                     "no_trailing_soh");
+
+    // (7) Regression: no SOH at all — caught by the existing first_soh==npos guard
+    //     (now also covered by the new final-SOH check since there is no SOH to
+    //     be the back() byte). [RC#2 regression]
+    assert_malformed(to_bytes("35=D"), "no_soh_at_all");
 
     // Verify no seqnum was consumed: the NEXT successful send must use seqnum 2
     // (seqnum 1 was used by the outbound Logon reply).
@@ -507,12 +546,16 @@ TEST(BusinessMessagesRoundtrip, OpaquePayload_Malformed_RejectedNoSeqnumConsumed
     ASSERT_EQ(frames_before_good, frames_after_logon)
         << "no frames should have been captured for malformed sends";
 
-    static const char kGoodNos[] = "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01";
+    static const char kGoodNos[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> good_payload;
     for (const char* p = kGoodNos; *p; ++p) good_payload.push_back(static_cast<std::byte>(*p));
 
     auto fut_good = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(good_payload)),
-                                    asio::use_future);
+                                   asio::use_future);
     f.drain();
     auto good_result = fut_good.get();
     ASSERT_TRUE(good_result.has_value())
@@ -554,7 +597,7 @@ TEST(BusinessMessagesRoundtrip, InboundReject_EmitsBusinessMessageReject_Session
         bool do_reject = true;
 
         expected_t<void> fromApp(const MessageView<access_mode::Index>& /*msg*/,
-                                  const SessionId& /*id*/) override {
+                                 const SessionId& /*id*/) override {
             ++from_app_calls;
             if (do_reject) {
                 return std::unexpected(error::app_do_not_send);
@@ -577,14 +620,16 @@ TEST(BusinessMessagesRoundtrip, InboundReject_EmitsBusinessMessageReject_Session
     // Inject a well-formed 35=D frame as inbound. The session is acceptor
     // (sender=ISLD, target=TW), so inbound comes FROM TW TO ISLD.
     // The inbound frame: sender=TW, target=ISLD, seq=2 (peer seqnum).
-    auto inbound_nos = make_inbound_app_frame(
-        "D",                       // MsgType
-        "TW",                      // sender (peer)
-        "ISLD",                    // target (us)
-        2,                         // seq (peer's seqnum 2, after Logon at 1)
-        "FIX.4.2",
-        "11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.00\x01"
-    );
+    auto inbound_nos = make_inbound_app_frame("D",     // MsgType
+                                              "TW",    // sender (peer)
+                                              "ISLD",  // target (us)
+                                              2,       // seq (peer's seqnum 2, after Logon at 1)
+                                              "FIX.4.2",
+                                              "11=ORD001\x01"
+                                              "54=1\x01"
+                                              "55=AAPL\x01"
+                                              "40=2\x01"
+                                              "44=100.00\x01");
 
     auto fut_inbound = asio::co_spawn(f.ioc, sess.on_inbound_frame(inbound_nos), asio::use_future);
     f.drain(400);
@@ -615,8 +660,7 @@ TEST(BusinessMessagesRoundtrip, InboundReject_EmitsBusinessMessageReject_Session
             }
             if (found_j) break;
         }
-        EXPECT_TRUE(found_j)
-            << "BusinessMessageReject(35=j) must be emitted when fromApp rejects";
+        EXPECT_TRUE(found_j) << "BusinessMessageReject(35=j) must be emitted when fromApp rejects";
     }
     // Whether or not fromApp fired, session must be Active.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -669,12 +713,10 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
         std::atomic<int> logon_count{0};
         asio::any_io_executor exec;
 
-        void onLogon(const SessionId& /*id*/) override {
-            ++logon_count;
-        }
+        void onLogon(const SessionId& /*id*/) override { ++logon_count; }
 
         expected_t<void> fromApp(const MessageView<access_mode::Index>& /*msg*/,
-                                  const SessionId& /*id*/) override {
+                                 const SessionId& /*id*/) override {
             ++from_app_count;
             if (from_app_count.load() == 1 && engine_ptr) {
                 auto& eng = *engine_ptr;
@@ -682,17 +724,14 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
                 auto sid = send_to_id;
                 auto* done = &reentrant_done;
                 auto ex = exec;
-                asio::post(exec,
-                    [&eng, sid, pl = std::move(pl), done, ex]() mutable {
-                        asio::co_spawn(
-                            ex,
-                            eng.send(sid, std::span<const std::byte>(pl)),
-                            [done](std::exception_ptr ep, expected_t<void> r) {
-                                if (!ep && r.has_value()) {
-                                    done->store(true, std::memory_order_release);
-                                }
-                            });
-                    });
+                asio::post(exec, [&eng, sid, pl = std::move(pl), done, ex]() mutable {
+                    asio::co_spawn(ex, eng.send(sid, std::span<const std::byte>(pl)),
+                                   [done](std::exception_ptr ep, expected_t<void> r) {
+                                       if (!ep && r.has_value()) {
+                                           done->store(true, std::memory_order_release);
+                                       }
+                                   });
+                });
             }
             return {};
         }
@@ -706,8 +745,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    auto make_cfg = [&](const char* sender, const char* target,
-                        fixpp::session::session_role role,
+    auto make_cfg = [&](const char* sender, const char* target, fixpp::session::session_role role,
                         const char* peer_compid) {
         fixpp::session::SessionConfig c;
         c.sender_comp_id = sender;
@@ -728,10 +766,10 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
         return c;
     };
 
-    auto acc_cfg = make_cfg("ACCEPTOR", "INITIATOR",
-                             fixpp::session::session_role::acceptor, "INITIATOR");
-    auto ini_cfg = make_cfg("INITIATOR", "ACCEPTOR",
-                             fixpp::session::session_role::initiator, "ACCEPTOR");
+    auto acc_cfg =
+        make_cfg("ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR");
+    auto ini_cfg =
+        make_cfg("INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR");
     const auto acc_id = SessionId::from_config(acc_cfg);
     const auto ini_id = SessionId::from_config(ini_cfg);
 
@@ -755,7 +793,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     // Phase 1: Establish sessions using single-thread driving (proven working).
     // This is the same pattern as the 019 engine tests (wait_until ioc.run_for).
     bool both_logon = wait_for_pred(
-        [&app]{ return app->logon_count.load(std::memory_order_acquire) >= 2; }, 5000ms);
+        [&app] { return app->logon_count.load(std::memory_order_acquire) >= 2; }, 5000ms);
     ASSERT_TRUE(both_logon) << "Sessions did not complete Logon within 5s";
 
     // Phase 2: Re-entrant fromApp test under genuinely multi-threaded executor.
@@ -774,7 +812,12 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     // Wire up the re-entrant application (safe: sessions are Active, app is set).
     static const char kPayload[] =
-        "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.00\x01";
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "40=2\x01"
+        "44=100.00\x01";
     std::vector<std::byte> payload;
     for (const char* p = kPayload; *p; ++p) payload.push_back(static_cast<std::byte>(*p));
 
@@ -785,13 +828,12 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     // Send from initiator → acceptor's fromApp fires → re-entrant send back.
     {
-        auto send_fut = asio::co_spawn(
-            ioc.get_executor(),
-            engine.send(ini_id, std::span<const std::byte>(payload)),
-            asio::use_future);
+        auto send_fut = asio::co_spawn(ioc.get_executor(),
+                                       engine.send(ini_id, std::span<const std::byte>(payload)),
+                                       asio::use_future);
 
         bool send_done = wait_for_pred(
-            [&send_fut]{ return send_fut.wait_for(0ms) == std::future_status::ready; }, 3000ms);
+            [&send_fut] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3000ms);
         ASSERT_TRUE(send_done) << "engine.send(ini→acc) did not complete within 3s";
         auto result = send_fut.get();
         EXPECT_TRUE(result.has_value())
@@ -800,12 +842,12 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     // Wait for fromApp to fire on the acceptor.
     bool fa_fired = wait_for_pred(
-        [&app]{ return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 3000ms);
+        [&app] { return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 3000ms);
     ASSERT_TRUE(fa_fired) << "fromApp must fire on the acceptor after initiator send";
 
     // Wait for the re-entrant send to complete.
     bool re_done = wait_for_pred(
-        [&app]{ return app->reentrant_done.load(std::memory_order_acquire); }, 3000ms);
+        [&app] { return app->reentrant_done.load(std::memory_order_acquire); }, 3000ms);
     EXPECT_TRUE(re_done)
         << "re-entrant Engine::send (from inside fromApp) must complete without deadlock/UAF";
 
@@ -813,7 +855,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     {
         auto stop_fut = asio::co_spawn(ioc.get_executor(), engine.stop(), asio::use_future);
         bool stop_done = wait_for_pred(
-            [&stop_fut]{ return stop_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
+            [&stop_fut] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
         EXPECT_TRUE(stop_done) << "engine.stop() did not complete within 5s";
         stop_fut.get();
     }
