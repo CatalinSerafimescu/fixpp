@@ -4,11 +4,11 @@ Public, `noexcept`, allocation-free builders that turn typed minimal fields into
 
 ## Conventions (shared with `admin_messages.hpp`)
 
-- Output is written into the caller-supplied `std::span<std::byte> out` via `wire::Writer`; returns `expected_t<std::span<std::byte>>` covering the written body. No heap allocation (builder write path is stack/no-heap; an alloc-discipline witness — `counting_resource` over the builder — confirms it).
+- Output is written into the caller-supplied `std::span<std::byte> out` via hand-written body-only field append (no `wire::Writer` body-only mode exists — `wire::Writer` always injects `8=BeginString`/`9=`/`10=`; the builders write raw `tag=value\x01` fields directly, sanctioned by `.specify/architecture.md §4.4`); returns `expected_t<std::span<std::byte>>` covering the written body. No heap allocation (builder write path is stack/no-heap; an alloc-discipline witness — `counting_resource` over the builder — confirms it).
 - **Atomicity**: the builder builds into a **local stack scratch buffer** and copies into the caller `out` only on full success. On any failure the returned span is **absent** (`std::unexpected`) and `out`'s contents are **unspecified** — the caller MUST NOT inspect `out`.
 - The builder emits the **app body only**: leads with `35=MsgType`, then business fields. It emits **no** `8/9/34/49/52/56` (engine-stamped) and **no** `10=` trailer. (INV-2; named test scans the body for these tags and asserts absence.)
 - Numeric fields are `const fixpp::decimal_t&` (`= core::decimal<FIXPP_DECIMAL_T>`), serialized with `decimal_t::format(std::span<std::byte>)` (canonical, locale-independent). There is no `parse(string-literal)`; a `decimal_t` is constructed via `decimal_t::parse(std::span<const std::byte>, std::pmr::memory_resource*)`.
-- All required fields must be supplied with a **valid value**; a build with an empty required string, an out-of-range enum char, an invalid/unformattable decimal, an ill-formed UTCTimestamp, or a too-small `out` returns `std::unexpected(error::…)` and writes nothing usable. (Omission is impossible — positional signatures make it a compile error.)
+- All required fields must be supplied with a **valid value**; a build with an empty required string, a printable-floor-failed or control-byte enum char (FIX-4.4 enum-set validation deferred, FR-015a), an invalid/unformattable decimal, an ill-formed UTCTimestamp, or a too-small `out` returns `std::unexpected(error::…)` and writes nothing usable. (Omission is impossible — positional signatures make it a compile error.)
 
 ## `build_new_order_single`
 
@@ -51,7 +51,7 @@ Public, `noexcept`, allocation-free builders that turn typed minimal fields into
     const fixpp::decimal_t& avg_px) noexcept;
 ```
 
-- Same error/required/atomicity contract (empty `order_id`/`exec_id`/`symbol`, out-of-range `exec_type`/`ord_status`/`side`, unformattable decimal, or too-small `out` → typed error, no emission).
+- Same error/required/atomicity contract (empty `order_id`/`exec_id`/`symbol`, control-byte/non-printable `exec_type`/`ord_status` (printable, non-control; FIX-4.4 enum-set validation deferred, FR-015a), out-of-range `side`, unformattable decimal, or too-small `out` → typed error, no emission).
 
 ## Send-path obligation (D1 / INV-1 / INV-8 / FR-004a / FR-016)
 
