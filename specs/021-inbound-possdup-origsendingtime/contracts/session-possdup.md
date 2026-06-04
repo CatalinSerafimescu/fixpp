@@ -16,7 +16,7 @@ Validation (Arms C/D) is **seqnum-independent** — it fires for any `43=Y` non-
 | `34<N`, `43=Y`, `122` present & valid, **app**, `redeliver_poss_dup=false` | nothing (dropped) | stays `Active`; expected stays `N` |
 | `34<N`, `43=Y`, `122` present & valid, **app**, `redeliver_poss_dup=true` | delivers to `Application::fromApp` (flagged possible-duplicate) | stays `Active`; expected stays `N` |
 | `34<N`, **no** `43=Y` | **nothing** (NO Logout wire frame — `→Disconnected` only) | → `Disconnected` |
-| `43=Y`, `122` **missing** (non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=1` (RequiredTagMissing) | stays `Active` |
+| `43=Y`, `122` **missing** (non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=1` (RequiredTagMissing) | stays `Active`; expected stays `N` (no advance — verify-returns-false, QFJ `Session.java:1843`) |
 | `43=Y`, `122` **>** `52` (strict, non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=10` (SendingTimeAccuracyProblem) + `Logout` | → `Disconnected` |
 | `35=4` (SequenceReset) + `43=Y` | existing gap-fill/reset disposition (exempt from `122` check) | per S-023 |
 

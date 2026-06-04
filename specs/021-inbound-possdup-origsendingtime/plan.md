@@ -98,7 +98,8 @@ src/session/
 └── admin_messages.{hpp,cpp}  # REUSE build_reject (371=RefTagID/373=SessionRejectReason; reasons 1 + 10 already used) — no change expected
 
 tests/session/
-├── test_inbound_poss_dup.cpp        # NEW: arms A(admin/app×knob)/B/C/D/E unit witnesses (RED-first)
+├── test_inbound_poss_dup_tolerance.cpp    # NEW (US1): arms A(admin/app×knob)/B unit witnesses (RED-first)
+├── test_inbound_poss_dup_validation.cpp   # NEW (US2): arms C/D/E + at-expected unit witnesses (RED-first)
 └── (existing seqnum/reject tests)   # arm-B regression pin (no-PossDup too-low still fatal)
 
 tests/interop/                        # extend 018 admin fixture with PossDup replay cells

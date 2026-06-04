@@ -6,7 +6,7 @@ How to exercise and verify the feature. All commands run with cwd in the library
 
 ## 1. Unit witnesses (RED-first, per arm)
 
-`tests/session/test_inbound_poss_dup.cpp` — one test per disposition row (data-model §1):
+Two files per the tasks.md split — `tests/session/test_inbound_poss_dup_tolerance.cpp` (US1, Arms A/B) and `tests/session/test_inbound_poss_dup_validation.cpp` (US2, Arms C/D/E) — one test per disposition row (data-model §1):
 
 - **Arm A admin-ignore**: feed a too-low admin frame with `43=Y` + valid `122`; assert state stays `Active`, `seqnum_mgr_` expected unchanged, no Logout/Reject emitted (this tolerated arm is intentionally silent — assert *absence* of any wire/event emission, no positive event expected per FR-009).
 - **Arm A app-drop (default)**: too-low app frame, `redeliver_poss_dup=false`; assert no `Application::fromApp` call, no advance, `Active` (tolerated arm, silent).
@@ -56,7 +56,7 @@ done
 ```
 
 ## 4. Success-criteria mapping
-- **SC-001** ← Arm A live replay-survives cell.
-- **SC-002** ← Arm C live malformed-dup cell (both engines).
+- **SC-001** ← Arm A live replay-survives cell (full gate); the Arm-A unit witnesses (`_tolerance.cpp`) locally smoke the behavior when no counterparty is present.
+- **SC-002** ← Arm C live malformed-dup cell, both engines (full gate); the Arm-C/D unit witnesses (`_validation.cpp`) locally smoke the reject behavior.
 - **SC-003** ← Arm B unit regression pin + existing seqnum-too-low tests still green.
 - **SC-004** ← both-role QFJ + QFcpp live cells green under normal + sanitizer builds.
