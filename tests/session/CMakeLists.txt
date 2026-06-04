@@ -1204,6 +1204,37 @@ set_tests_properties(application_throw_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;phase6;throw;application")
 
+# ── gate-b/r1 FIX-5 — real Engine::send tests (replace substituted tests) ─────
+# Exercises Engine::send public API: (a) send from foreign thread crosses wire,
+# (b) re-entrant send from inside toApp does not deadlock, (c) send_counter_
+# drain race (stop() + ~Engine() UAF-safe). All use real loopback TLS;
+# GTEST_SKIP when FIXPP_TLS_FIXTURE_DIR absent. [FR-006/012; FIX-1/FIX-2/FIX-5]
+add_executable(application_engine_send_019_test
+  test_application_engine_send.cpp
+)
+target_link_libraries(application_engine_send_019_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_engine_send_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(application_engine_send_019_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME application_engine_send_019 COMMAND application_engine_send_019_test)
+set_tests_properties(application_engine_send_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;gate_b;engine_send;application;live_tls"
+  TIMEOUT 30)
+
 # ── 019-app-callbacks T020 — G2 enablement witness ───────────────────────────
 # SC-002: opaque NewOrderSingle (35=D) → ExecutionReport (35=8) round-trip via
 # Engine::send + fromApp callbacks. Real loopback-TLS (mirrors engine_lifecycle
