@@ -389,3 +389,41 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   is deferred (FR-015a). The `exec_type='F'` / `ord_status='2'` (fully-filled) contract is a
   caller/harness obligation (data-model.md E2/E3), not a builder precondition.
   **Status: deferred** (FR-015a). *(gate-b/r1 RC#4; contracts/business-messages.md §Conventions.)*
+
+<!-- 021-inbound-possdup-origsendingtime -->
+
+- **B-021-1 — Inbound possible-duplicate (`PossDupFlag(43)=Y`) handling is tolerant and
+  wire-conformant.** A too-low inbound message (`MsgSeqNum < expected`) bearing `43=Y` and a
+  valid `OrigSendingTime(122)` is TOLERATED: the session stays `Active`, the expected inbound
+  seqnum is NOT advanced, and the message is not re-applied (Arm A). Independently, any `43=Y`
+  non-`SequenceReset(35=4)` inbound (any seqnum, including at-expected) is VALIDATED for
+  OrigSendingTime: missing `122` → session `Reject(35=3)` with `RefTagID(371)=122`,
+  `SessionRejectReason(373)=1` (RequiredTagMissing), session survives (Arm C); `122 > 52`
+  strict → `Reject(35=3)` `371=122`, `373=10` (SendingTimeAccuracyProblem) + `Logout` +
+  `Disconnected` (Arm D). `122 == 52` is accepted. Validation runs AFTER the too-high arm
+  (a forward-gap `43=Y` still issues `ResendRequest`, matching QuickFIX-cpp v1.16.0 +
+  QuickFIX-J 3.0.1) and BEFORE the too-low/at-expected disposition. `SequenceReset(35=4)+43=Y`
+  is exempt from the `122` requirement (Arm E — routed to the existing reset/gap-fill path).
+  **Status: shipped** (021). *(FR-001..FR-007; data-model.md §1 INV-1/3/4; research.md D1/D4/D5/D6;
+  engine-parity placement = user decision 2026-06-04.)*
+
+- **L-021-1 — App possible-duplicate disposition is configurable (default DROP); admin
+  duplicates are ALWAYS ignored.** For a validated too-low possible-duplicate APPLICATION
+  message, `SessionConfig::redeliver_poss_dup` (default `false`) governs disposition: `false`
+  drops it (no `Application::fromApp`); `true` redelivers it to `fromApp` (the replayed frame
+  carries `43=Y`, so the callback sees it flagged possible-duplicate). ADMINISTRATIVE duplicates
+  are ignored unconditionally, even when the knob is `true` — this asymmetry is operator-visible.
+  Neither disposition advances the seqnum or disconnects. This is a PROTOCOL duplicate-discard
+  (the message was already processed once; `MsgSeqNum < expected` proves it) — NOT a
+  `[const §XV.15]` backpressure/queue drop; the sequence contract is exactly preserved.
+  **Status: shipped** (021, FR-010). *(data-model.md §2; research.md D2; distinguish from
+  [const §XV.15].)*
+
+- **L-021-2 — The send-path `AllowPossDup` strip knob (FR-008) is DEFERRED.** This slice is
+  INBOUND-ONLY. Stripping caller-supplied `43`/`122` on a plain `send` is NOT a toggle of an
+  existing seam: the opaque `send_impl` copies the business body verbatim, so it requires a NEW
+  boundary-anchored `43`/`122` excision parser with a delimiter-injection hostile witness
+  (same hazard class as 020 RC#1) before it can ship. Intended default = STRIP, auto-resend
+  always re-adds. The `allow_poss_dup` `SessionConfig` field is NOT added in this slice (only
+  `redeliver_poss_dup` is). **Status: deferred** (FR-008 / research.md D7 — own future
+  opaque-send-hardening slice).

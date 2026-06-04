@@ -178,6 +178,15 @@ EXPECTED_IDS = frozenset({
     "PARITY-qfj646-resend-abort-on-failing-write",
     "PARITY-replay-subsumes-reorder-queue",
     "PARITY-inbound-sequencereset-arms",
+    # G3 021-inbound-possdup-origsendingtime live PossDup cells (8)
+    "PD-QFcpp-init-fix44-poss-dup-replay-survives",
+    "PD-QFcpp-acc-fix44-poss-dup-replay-survives",
+    "PD-QFj-init-fix44-poss-dup-replay-survives",
+    "PD-QFj-acc-fix44-poss-dup-replay-survives",
+    "PD-QFcpp-init-fix44-malformed-dup-rejected",
+    "PD-QFcpp-acc-fix44-malformed-dup-rejected",
+    "PD-QFj-init-fix44-malformed-dup-rejected",
+    "PD-QFj-acc-fix44-malformed-dup-rejected",
 })
 
 

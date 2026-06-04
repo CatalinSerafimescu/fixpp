@@ -279,6 +279,18 @@ struct SessionConfig {
     // connect→send(generate_logon)). DEFAULT false preserves the 013/014
     // per-session-direct model where open() emits the Logon at open.
     bool engine_managed = false;
+
+    // 021 FR-010 / data-model §2 — inbound validated too-low possible-duplicate
+    // APPLICATION-message disposition. When false (default, QFJ-parity), a
+    // tolerated too-low app duplicate is dropped (no Application::fromApp call);
+    // when true (QuickFIX-cpp parity), it is redelivered to fromApp (the replayed
+    // frame carries 43=Y, so the callback sees it flagged possible-duplicate).
+    // ADMINISTRATIVE duplicates are ALWAYS ignored regardless of this knob.
+    // Neither setting advances the inbound seqnum or disconnects. This is a
+    // protocol duplicate-discard (the message was already processed once;
+    // MsgSeqNum < expected proves it) — NOT a [const §XV.15] backpressure drop.
+    // Additive, default-valued public-header field ⇒ no ABI/behavior break.
+    bool redeliver_poss_dup = false;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

@@ -1349,6 +1349,52 @@ set_tests_properties(business_messages_roundtrip PROPERTIES
   LABELS "020;us1;roundtrip;send_path;inv1;inv5;inv7;inv8"
   TIMEOUT 60)
 
+# ── 021-inbound-possdup-origsendingtime T004/T005 — Arm A/B tolerance tests ───
+# Stage-2 too-low possdup disposition (Arm A tolerate / Arm B fatal).
+# data-model.md §1 Stage 2; contracts/session-possdup.md C1/C3; research.md D1/D2/D3.
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access().next_inbound_unsafe() for INV-1.
+add_executable(session_inbound_poss_dup_tolerance
+  test_inbound_poss_dup_tolerance.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
+)
+target_link_libraries(session_inbound_poss_dup_tolerance PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_inbound_poss_dup_tolerance PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_inbound_poss_dup_tolerance PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_inbound_poss_dup_tolerance
+  COMMAND session_inbound_poss_dup_tolerance)
+set_tests_properties(session_inbound_poss_dup_tolerance PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "021;us1;possdup;tolerance;inv1;inv2;inv5")
+
+# 021 T007 Stage-1 PossDup validation tests (Arms C/D/E + at-expected + engine-parity pin).
+# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access().next_inbound_unsafe() for AS4 no-advance.
+add_executable(session_inbound_poss_dup_validation
+  test_inbound_poss_dup_validation.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
+)
+target_link_libraries(session_inbound_poss_dup_validation PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_inbound_poss_dup_validation PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_inbound_poss_dup_validation PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_inbound_poss_dup_validation
+  COMMAND session_inbound_poss_dup_validation)
+set_tests_properties(session_inbound_poss_dup_validation PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "021;us2;possdup;validation;armc;armd;arme")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

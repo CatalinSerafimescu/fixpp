@@ -1034,6 +1034,7 @@ struct FrameHeader {
     std::string_view end_seqno;          // tag 16 (EndSeqNo in ResendRequest)
     std::string_view new_seqno;          // tag 36 (NewSeqNo in SequenceReset)
     std::string_view poss_dup_flag;      // tag 43 (PossDupFlag "Y"/"N")
+    std::string_view orig_sending_time;  // tag 122 (OrigSendingTime) — 021 PossDup
     std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
     std::string_view reset_seqnum_flag;  // tag 141 (ResetSeqNumFlag in Logon)
 };
@@ -1115,6 +1116,9 @@ struct FrameHeader {
             case 112:
                 h.test_req_id = val;
                 break;  // T041 US3
+            case 122:
+                h.orig_sending_time = val;
+                break;  // 021 PossDup OrigSendingTime
             case 123:
                 h.gap_fill_flag = val;
                 break;  // T026 SequenceReset GapFillFlag
@@ -1846,6 +1850,111 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
+                // 021 T008 Stage-1 — PossDup OrigSendingTime validation (Arms C/D/E).
+                // Runs for any 43=Y non-SequenceReset frame, AFTER the too-high arm
+                // (forward gaps still ResendRequest per engine parity — user decision
+                // 2026-06-04) and BEFORE check_inbound, so at-expected/too-low malformed
+                // dups are rejected without advancing the sequence number.
+                // data-model.md §1 Stage 1 rows 0–4; contracts/session-possdup.md C1.
+                // Arm E (row 0): 35=4 (SequenceReset) is exempt — guard below.
+                if (hdr.poss_dup_flag == "Y" && hdr.msg_type != "4") {
+                    if (hdr.orig_sending_time.empty()) {
+                        // Arm C (row 2): OrigSendingTime(122) absent → Reject(35=3),
+                        // 371=122 (RefTagID=OrigSendingTime), 373=1 (RequiredTagMissing).
+                        // Session survives (no disconnect). data-model INV-3; research D4.
+                        const auto st52_c = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                             : SendingTimeStamp{};
+                        const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
+                        const seqnum_t rj_seq_c = seqnum_mgr_.peek_outbound();
+                        std::array<std::byte, 512> rj_buf_c{};
+                        auto rj_r_c = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf_c.data(), rj_buf_c.size()}, rj_seq_c,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref_c,
+                            122,  // RefTagID = 122 (OrigSendingTime)
+                            hdr.msg_type,
+                            1,  // SessionRejectReason = 1 (RequiredTagMissing)
+                            cfg_.begin_string, st52_c.value);
+                        if (rj_r_c) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (!assign_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(assign_r.error());
+                            }
+                            auto emit_r = co_await store_then_emit(rj_seq_c, *rj_r_c);
+                            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                        }
+                        // Arm C: survive — do NOT disconnect, do NOT advance seqnum.
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Arm D (row 3): parse 122 and 52; if BOTH parse and t122 > t52 (strict)
+                    // → Reject(371=122, 373=10) + Logout + Disconnect.
+                    // 122 == 52 (INV-4: equality) and 122 < 52 → validated, fall through.
+                    // Parse failure of either → fall through (cannot determine ordering).
+                    // data-model INV-4; research D5; reuses §1685-1737 pattern (RefTagID 52→122).
+                    {
+                        auto parse_122 = fixpp::core::fix_string_to_utc_time(std::span<const char>{
+                            hdr.orig_sending_time.data(), hdr.orig_sending_time.size()});
+                        auto parse_52 = fixpp::core::fix_string_to_utc_time(std::span<const char>{
+                            hdr.sending_time.data(), hdr.sending_time.size()});
+                        if (parse_122 && parse_52 && *parse_122 > *parse_52) {
+                            // Arm D — strict 122 > 52.
+                            const auto st52_d = effective_clock_
+                                                    ? stamp_sending_time(*effective_clock_)
+                                                    : SendingTimeStamp{};
+                            // Step 1: emit Reject(35=3, 371=122, 373=10).
+                            {
+                                std::array<std::byte, 512> rj_buf{};
+                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                                const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                                auto rj_result = fixpp::session::build_reject(
+                                    std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                    cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
+                                    122,  // RefTagID = 122 (OrigSendingTime — research D5)
+                                    hdr.msg_type,
+                                    10,  // SessionRejectReason = 10 (SendingTimeAccuracyProblem)
+                                    cfg_.begin_string, st52_d.value);
+                                if (rj_result) {
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (!assign_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(assign_r.error());
+                                    }
+                                    auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+                                    (void)emit_r;
+                                }
+                            }
+                            // Step 2: emit Logout(35=5).
+                            {
+                                std::array<std::byte, 256> lo_buf{};
+                                const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+                                auto lo_result = fixpp::session::build_logout(
+                                    std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                                    cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
+                                    st52_d.value);
+                                if (lo_result) {
+                                    if (!fire_to_admin_(*lo_result)) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(
+                                            fixpp::core::error::app_callback_threw);
+                                    }
+                                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                    if (!assign_r) {
+                                        record_state_transition_(fsm_state::Disconnected);
+                                        co_return std::unexpected(assign_r.error());
+                                    }
+                                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                    (void)emit_r;
+                                }
+                            }
+                            // Step 3: Disconnect.
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+                        // else: equal, 122 < 52, or parse failure → validated, fall through.
+                    }
+                }
+                // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.
+
                 // Too-low → session-fatal (not recoverable per I-4).
                 // Exception: Heartbeat(0) with too-low seqnum is silently dropped
                 // (no echo, no disconnect) to allow liveness-warmup passes to
@@ -1857,7 +1966,43 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Too-low Heartbeat: silently ignore (preserve Active, no echo).
                         co_return fixpp::core::expected_t<void>{};
                     }
-                    // too-low non-Heartbeat (session_seqnum_too_low=69) — fatal.
+                    // 021 T005 Stage-2 — Arm A: too-low possible-duplicate tolerance.
+                    // data-model.md §1 Stage 2 rows 6/7/8; contracts/session-possdup.md C1.
+                    // Guard: poss_dup_flag == "Y" (Stage-1 validation Arms C/D runs AFTER
+                    // the too-high arm and BEFORE check_inbound; by the time we reach here
+                    // the 122 value is already validated, so we do NOT re-validate it here).
+                    if (hdr.poss_dup_flag == "Y") {
+                        // Admin possdup: always silently ignore (row 6). No seqnum advance
+                        // (check_inbound already returned false so no increment happened;
+                        // INV-1). Session stays Active.
+                        if (detail::is_admin_msgtype(hdr.msg_type)) {
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+                        // App possdup (rows 7/8): disposition governed by redeliver_poss_dup.
+                        if (cfg_.redeliver_poss_dup && engine_.application != nullptr) {
+                            // Row 8: redeliver opt-in — call fromApp with the original
+                            // frame (which carries 43=Y, so fromApp sees it flagged possdup).
+                            // Same invocation pattern as the in-sequence fromApp dispatch
+                            // at ~session.cpp:2332-2338. No seqnum advance (INV-1).
+                            auto cb_r = parse_and_dispatch_(
+                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                    return engine_.application->fromApp(mv, sid);
+                                });
+                            if (!cb_r) {
+                                if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                    co_await close(close_mode::terminal);
+                                    co_return std::unexpected(cb_r.error());
+                                }
+                                // fromApp reject on redeliver: drop (no BusinessMessageReject
+                                // — a too-low frame has no live seqnum slot to assign for the
+                                // reply and the session spec does not mandate a reject here).
+                            }
+                        }
+                        // Row 7 (redeliver=false) or post-redeliver: stay Active, no advance.
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                    // Arm B: too-low non-Heartbeat without 43=Y — fatal (row 5).
+                    // UNCHANGED, byte-identical to pre-feature (INV-2).
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
