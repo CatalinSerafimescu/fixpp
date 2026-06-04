@@ -40,7 +40,7 @@ namespace fixpp::session {
 namespace {
 
 // SOH byte used as FIX field delimiter.
-inline constexpr std::byte kSOH{0x01u};
+inline constexpr std::byte kSOH{0x01U};
 
 // Stack scratch buffer size. Must be large enough for the largest possible
 // NOS/ExecRpt body. The maximum body is bounded by the sum of all field widths:
@@ -51,8 +51,8 @@ inline constexpr std::size_t kScratchSize = 1024;
 
 // Append "tag=value\x01" into buf[pos..pos+needed-1].
 // Returns false if there is insufficient space. Does NOT write on overflow.
-[[nodiscard]] bool wfield(std::byte* buf, std::size_t buf_size, std::size_t& pos,
-                          std::uint16_t tag, std::string_view value) noexcept {
+[[nodiscard]] bool wfield(std::byte* buf, std::size_t buf_size, std::size_t& pos, std::uint16_t tag,
+                          std::string_view value) noexcept {
     // Compute "tag=value\x01" byte count.
     // tag digits: at most 3 chars for tags <= 999 (all FIX tags are <=1000).
     char tag_str[8];
@@ -65,12 +65,14 @@ inline constexpr std::size_t kScratchSize = 1024;
             tmp[tl++] = '0';
         } else {
             while (t > 0) {
-                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10u));
-                t /= 10u;
+                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10U));
+                t /= 10U;
             }
             // Reverse
             for (std::size_t i = 0; i < tl / 2; ++i) {
-                char c = tmp[i]; tmp[i] = tmp[tl - 1 - i]; tmp[tl - 1 - i] = c;
+                char c = tmp[i];
+                tmp[i] = tmp[tl - 1 - i];
+                tmp[tl - 1 - i] = c;
             }
         }
         tag_len = tl;
@@ -97,21 +99,19 @@ inline constexpr std::size_t kScratchSize = 1024;
 }
 
 // Append a single-char field "tag=C\x01".
-[[nodiscard]] bool wchar(std::byte* buf, std::size_t buf_size, std::size_t& pos,
-                         std::uint16_t tag, char ch) noexcept {
+[[nodiscard]] bool wchar(std::byte* buf, std::size_t buf_size, std::size_t& pos, std::uint16_t tag,
+                         char ch) noexcept {
     return wfield(buf, buf_size, pos, tag, std::string_view{&ch, 1});
 }
 
 // Validate that a char is a printable non-control ASCII character (0x20..0x7E).
 // Used for exec_type and ord_status to reject NUL/control bytes.
 [[nodiscard]] bool is_printable(char c) noexcept {
-    return static_cast<unsigned char>(c) >= 0x20u && static_cast<unsigned char>(c) <= 0x7Eu;
+    return static_cast<unsigned char>(c) >= 0x20U && static_cast<unsigned char>(c) <= 0x7EU;
 }
 
 // Validate side: only '1' (Buy) or '2' (Sell) are accepted.
-[[nodiscard]] bool is_valid_side(char c) noexcept {
-    return c == '1' || c == '2';
-}
+[[nodiscard]] bool is_valid_side(char c) noexcept { return c == '1' || c == '2'; }
 
 // Validate UTCTimestamp shape (FR-008).
 // Accepts exactly 17 chars ("YYYYMMDD-HH:MM:SS") or 21 chars
@@ -130,7 +130,7 @@ inline constexpr std::size_t kScratchSize = 1024;
 
     // Digits at positions 0..7, 9..10, 12..13, 15..16
     auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
-    for (int i : {0,1,2,3,4,5,6,7, 9,10, 12,13, 15,16}) {
+    for (int i : {0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 12, 13, 15, 16}) {
         if (!is_digit(sv[static_cast<std::size_t>(i)])) return false;
     }
 
@@ -147,7 +147,7 @@ inline constexpr std::size_t kScratchSize = 1024;
 // Uses decimal_t::format(span) for canonical serialization (FR-007).
 // Returns false on overflow or format failure.
 [[nodiscard]] bool wdecimal(std::byte* buf, std::size_t buf_size, std::size_t& pos,
-                             std::uint16_t tag, const fixpp::decimal_t& val) noexcept {
+                            std::uint16_t tag, const fixpp::decimal_t& val) noexcept {
     // Write tag + '=' first, leaving room for the value.
     // Strategy: write tag= into scratch, format decimal into a small local buffer,
     // then write the formatted bytes + SOH.
@@ -161,11 +161,13 @@ inline constexpr std::size_t kScratchSize = 1024;
             tmp[tl++] = '0';
         } else {
             while (t > 0) {
-                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10u));
-                t /= 10u;
+                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10U));
+                t /= 10U;
             }
             for (std::size_t i = 0; i < tl / 2; ++i) {
-                char c = tmp[i]; tmp[i] = tmp[tl - 1 - i]; tmp[tl - 1 - i] = c;
+                char c = tmp[i];
+                tmp[i] = tmp[tl - 1 - i];
+                tmp[tl - 1 - i] = c;
             }
         }
         tag_len = tl;
@@ -199,19 +201,16 @@ inline constexpr std::size_t kScratchSize = 1024;
 // INV-2: NO 8/9/34/49/52/56 and NO 10= (those are engine-stamped).
 // INV-4: build into scratch; copy to `out` only on full success.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_new_order_single(
-    std::span<std::byte> out,
-    std::string_view cl_ord_id,
-    std::string_view symbol,
-    char side,
-    const fixpp::decimal_t& order_qty,
-    const fixpp::decimal_t& price,
+    std::span<std::byte> out, std::string_view cl_ord_id, std::string_view symbol, char side,
+    const fixpp::decimal_t& order_qty, const fixpp::decimal_t& price,
     std::string_view transact_time) noexcept {
     // Validate required string fields.
     if (cl_ord_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
-    if (symbol.empty())    return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (symbol.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
 
     // Validate side.
-    if (!is_valid_side(side)) return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_valid_side(side))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
 
     // Validate transact_time shape (FR-008).
     if (!is_valid_utc_timestamp(transact_time))
@@ -222,13 +221,17 @@ inline constexpr std::size_t kScratchSize = 1024;
     std::size_t pos = 0;
 
     // 35=D
-    if (!wfield(scratch, kScratchSize, pos, 35, "D")) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 35, "D"))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 11=<cl_ord_id>
-    if (!wfield(scratch, kScratchSize, pos, 11, cl_ord_id)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 11, cl_ord_id))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 55=<symbol>
-    if (!wfield(scratch, kScratchSize, pos, 55, symbol)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 55, symbol))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 54=<side>
-    if (!wchar(scratch, kScratchSize, pos, 54, side)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wchar(scratch, kScratchSize, pos, 54, side))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 38=<order_qty>
     if (!wdecimal(scratch, kScratchSize, pos, 38, order_qty)) {
         // wdecimal returns false on both format failure and overflow.
@@ -238,13 +241,15 @@ inline constexpr std::size_t kScratchSize = 1024;
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
     }
     // 40=2 (OrdType fixed Limit)
-    if (!wfield(scratch, kScratchSize, pos, 40, "2")) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 40, "2"))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 44=<price>
     if (!wdecimal(scratch, kScratchSize, pos, 44, price)) {
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
     }
     // 60=<transact_time>
-    if (!wfield(scratch, kScratchSize, pos, 60, transact_time)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 60, transact_time))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
 
     // Check that caller-supplied `out` is large enough.
     if (out.size() < pos) return std::unexpected(fixpp::core::error::wire_frame_too_large);
@@ -259,46 +264,49 @@ inline constexpr std::size_t kScratchSize = 1024;
 //   35=8 37=<order_id> 17=<exec_id> 150=<exec_type> 39=<ord_status>
 //   55=<symbol> 54=<side> 151=<leaves_qty> 14=<cum_qty> 6=<avg_px>
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_execution_report(
-    std::span<std::byte> out,
-    std::string_view order_id,
-    std::string_view exec_id,
-    char exec_type,
-    char ord_status,
-    std::string_view symbol,
-    char side,
-    const fixpp::decimal_t& leaves_qty,
-    const fixpp::decimal_t& cum_qty,
-    const fixpp::decimal_t& avg_px) noexcept {
+    std::span<std::byte> out, std::string_view order_id, std::string_view exec_id, char exec_type,
+    char ord_status, std::string_view symbol, char side, const fixpp::decimal_t& leaves_qty,
+    const fixpp::decimal_t& cum_qty, const fixpp::decimal_t& avg_px) noexcept {
     // Validate required string fields.
     if (order_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
-    if (exec_id.empty())  return std::unexpected(fixpp::core::error::wire_required_field_missing);
-    if (symbol.empty())   return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (exec_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (symbol.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
 
     // Validate enum chars: reject NUL and non-printable/control bytes.
-    if (!is_printable(exec_type))  return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
-    if (!is_printable(ord_status)) return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_printable(exec_type))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_printable(ord_status))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
 
     // Validate side.
-    if (!is_valid_side(side)) return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_valid_side(side))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
 
     // Build into local stack scratch buffer (INV-4 atomicity).
     std::byte scratch[kScratchSize];
     std::size_t pos = 0;
 
     // 35=8
-    if (!wfield(scratch, kScratchSize, pos, 35, "8")) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 35, "8"))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 37=<order_id>
-    if (!wfield(scratch, kScratchSize, pos, 37, order_id)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 37, order_id))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 17=<exec_id>
-    if (!wfield(scratch, kScratchSize, pos, 17, exec_id)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 17, exec_id))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 150=<exec_type>
-    if (!wchar(scratch, kScratchSize, pos, 150, exec_type)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wchar(scratch, kScratchSize, pos, 150, exec_type))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 39=<ord_status>
-    if (!wchar(scratch, kScratchSize, pos, 39, ord_status)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wchar(scratch, kScratchSize, pos, 39, ord_status))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 55=<symbol>
-    if (!wfield(scratch, kScratchSize, pos, 55, symbol)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wfield(scratch, kScratchSize, pos, 55, symbol))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 54=<side>
-    if (!wchar(scratch, kScratchSize, pos, 54, side)) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (!wchar(scratch, kScratchSize, pos, 54, side))
+        return std::unexpected(fixpp::core::error::wire_frame_too_large);
     // 151=<leaves_qty>
     if (!wdecimal(scratch, kScratchSize, pos, 151, leaves_qty)) {
         return std::unexpected(fixpp::core::error::decimal_invalid_input);

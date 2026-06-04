@@ -56,12 +56,8 @@ namespace fixpp::session {
 //
 // FR-001/002/003/004/005/007/008; INV-2/3/4; [const §VIII.5] (no heap).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_new_order_single(
-    std::span<std::byte> out,
-    std::string_view cl_ord_id,
-    std::string_view symbol,
-    char side,
-    const fixpp::decimal_t& order_qty,
-    const fixpp::decimal_t& price,
+    std::span<std::byte> out, std::string_view cl_ord_id, std::string_view symbol, char side,
+    const fixpp::decimal_t& order_qty, const fixpp::decimal_t& price,
     std::string_view transact_time) noexcept;
 
 // ── ExecutionReport (35=8), catalogue A-006 ──────────────────────────────────
@@ -75,15 +71,8 @@ namespace fixpp::session {
 //
 // FR-001/002/003/004/005/007/008; INV-2/3/4; [const §VIII.5] (no heap).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_execution_report(
-    std::span<std::byte> out,
-    std::string_view order_id,
-    std::string_view exec_id,
-    char exec_type,
-    char ord_status,
-    std::string_view symbol,
-    char side,
-    const fixpp::decimal_t& leaves_qty,
-    const fixpp::decimal_t& cum_qty,
-    const fixpp::decimal_t& avg_px) noexcept;
+    std::span<std::byte> out, std::string_view order_id, std::string_view exec_id, char exec_type,
+    char ord_status, std::string_view symbol, char side, const fixpp::decimal_t& leaves_qty,
+    const fixpp::decimal_t& cum_qty, const fixpp::decimal_t& avg_px) noexcept;
 
 }  // namespace fixpp::session

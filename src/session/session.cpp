@@ -1721,8 +1721,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
                             if (!fire_to_admin_(*lo_result)) {
                                 record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(
-                                    fixpp::core::error::app_callback_threw);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
@@ -2199,8 +2198,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                          new_seq_no)) {
                             record_state_transition_(fsm_state::Disconnected);
                             if (gapfill_callback_threw) {
-                                co_return std::unexpected(
-                                    fixpp::core::error::app_callback_threw);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
                         }
                         co_return fixpp::core::expected_t<void>{};
@@ -2266,8 +2264,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
                             record_state_transition_(fsm_state::Disconnected);
                             if (gapfill_callback_threw) {
-                                co_return std::unexpected(
-                                    fixpp::core::error::app_callback_threw);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
                         }
                     }
@@ -2739,7 +2736,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
 static bool has_boundary_token(std::string_view sv, std::string_view tok) noexcept {
     if (tok.size() > sv.size()) return false;
     // Check at offset 0 (start of payload is a field boundary).
-    if (sv.substr(0, tok.size()) == tok) return true;
+    if (sv.starts_with(tok)) return true;
     // Scan for \x01 followed by tok.
     for (std::size_t i = 1; i + tok.size() <= sv.size(); ++i) {
         if (sv[i - 1] == '\x01' && sv.substr(i, tok.size()) == tok) return true;
@@ -2755,8 +2752,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // [020-g2 research.md D1; data-model.md INV-8; FR-016]
     {
         // Cast to string_view for boundary-token scanning. No allocation.
-        std::string_view pv{reinterpret_cast<const char*>(app_payload.data()),
-                            app_payload.size()};
+        std::string_view pv{reinterpret_cast<const char*>(app_payload.data()), app_payload.size()};
 
         // (1) Empty payload is malformed.
         if (pv.empty()) {
@@ -2772,7 +2768,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         // The leading "35=" is at offset 0; look for any further SOH+"35=".
         bool has_dup_35 = false;
         for (std::size_t i = 1; i + 3 <= pv.size(); ++i) {
-            if (pv[i-1] == '\x01' && pv[i] == '3' && pv[i+1] == '5' && pv[i+2] == '=') {
+            if (pv[i - 1] == '\x01' && pv[i] == '3' && pv[i + 1] == '5' && pv[i + 2] == '=') {
                 has_dup_35 = true;
                 break;
             }
@@ -2786,12 +2782,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         // Use has_boundary_token; the leading "35=" is allowed and already verified.
         // Note: "8=" must match only as a complete field tag (not e.g. inside "38=").
         // has_boundary_token ensures boundary-context.
-        if (has_boundary_token(pv, "8=")  ||
-            has_boundary_token(pv, "9=")  ||
-            has_boundary_token(pv, "34=") ||
-            has_boundary_token(pv, "49=") ||
-            has_boundary_token(pv, "52=") ||
-            has_boundary_token(pv, "56=") ||
+        if (has_boundary_token(pv, "8=") || has_boundary_token(pv, "9=") ||
+            has_boundary_token(pv, "34=") || has_boundary_token(pv, "49=") ||
+            has_boundary_token(pv, "52=") || has_boundary_token(pv, "56=") ||
             has_boundary_token(pv, "10=")) {
             co_return std::unexpected(error::app_payload_malformed);
         }
@@ -2825,8 +2818,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // (3) Split the leading 35=<value>\x01 field off the payload.
     // Payload is guaranteed to start with "35="; find the first SOH.
-    std::string_view pv{reinterpret_cast<const char*>(app_payload.data()),
-                        app_payload.size()};
+    std::string_view pv{reinterpret_cast<const char*>(app_payload.data()), app_payload.size()};
     std::size_t first_soh = pv.find('\x01');
     // first_soh must exist (a well-formed field ends with SOH). If not, treat as
     // truncated — the payload has no SOH terminator, which is a well-formed
@@ -2835,7 +2827,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         co_return std::unexpected(error::app_payload_malformed);
     }
     std::string_view msgtype_field = pv.substr(0, first_soh + 1);  // "35=D\x01"
-    std::string_view rest_payload  = pv.substr(first_soh + 1);     // remaining fields
+    std::string_view rest_payload = pv.substr(first_soh + 1);      // remaining fields
 
     // (4) Build BODY into a second stack buffer.
     // Body layout: 35=<value>\x01  34=<seq>\x01  49=<sender>\x01  52=<time>\x01
@@ -2846,8 +2838,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     const auto wb_body = [&](const char* s, std::size_t n) -> bool {
         if (bpos + n > body_buf.size()) return false;
-        for (std::size_t i = 0; i < n; ++i)
-            body_buf[bpos++] = static_cast<std::byte>(s[i]);
+        for (std::size_t i = 0; i < n; ++i) body_buf[bpos++] = static_cast<std::byte>(s[i]);
         return true;
     };
     const auto wsv_body = [&](std::string_view sv) -> bool {
@@ -2903,8 +2894,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     const auto wb = [&](const char* s, std::size_t n) -> bool {
         if (pos + n > buf.size()) return false;
-        for (std::size_t i = 0; i < n; ++i)
-            buf[pos++] = static_cast<std::byte>(s[i]);
+        for (std::size_t i = 0; i < n; ++i) buf[pos++] = static_cast<std::byte>(s[i]);
         return true;
     };
     const auto wsv = [&](std::string_view sv) -> bool { return wb(sv.data(), sv.size()); };
