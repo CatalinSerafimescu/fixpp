@@ -496,5 +496,143 @@ TEST(ApplicationThrow, OnLogoutThrowHandledCleanly) {
     f.verify_second_session_works(std::make_shared<OkApplication>());
 }
 
+// ── Tests 8–10: gate-b/r1 FIX-3 counter-cells — toAdmin throw at non-Logon ────
+//
+// These cells prove FR-011: a toAdmin throw at admin-emit sites that are NOT the
+// initiator/acceptor Logon must also terminal-close the session and record
+// app_callback_threw. Before FIX-3 these sites discarded fire_to_admin_() return
+// and continued the emit — throw went unnoticed. After FIX-3 they branch on
+// false → terminal close + error. [[gate-b/r1 FIX-3]]
+//
+// ThrowingToAdminAtN throws on the N-th toAdmin call. This skips the Logon-path
+// throw (call 1 is the acceptor reply Logon) and targets a subsequent admin emit.
+
+class ThrowingToAdminAtN : public Application {
+public:
+    explicit ThrowingToAdminAtN(int n) : throw_at_(n) {}
+    mutable int call_count = 0;
+    const int throw_at_;
+    void toAdmin(const MessageView<access_mode::Index>&, const SessionId&) override {
+        ++call_count;
+        if (call_count == throw_at_) {
+            throw std::runtime_error("toAdmin throw at call " + std::to_string(throw_at_));
+        }
+    }
+};
+
+// Helper: open an acceptor session to Active.
+// The acceptor reply Logon triggers toAdmin call #1.
+static void open_acceptor_to_active(ThrowFixture& f, Session& sess) {
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    f.run();
+    ASSERT_TRUE(fut.get().has_value());
+    auto logon = make_logon_frame();
+    auto fut2 = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
+    f.run();
+    ASSERT_TRUE(fut2.get().has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+}
+
+// Helper: build a Logout frame for feed-to-session.
+static std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2,
+                                                std::string_view sender = "TW",
+                                                std::string_view target = "ISLD") {
+    return make_raw_frame("FIX.4.2", "5", seq, sender, target);
+}
+
+// ── Test 8: toAdmin throw on confirming Logout → terminal-close ───────────────
+//
+// When an inbound Logout(35=5) is received while Active, the session emits a
+// confirming Logout before disconnecting. That outbound confirming Logout fires
+// toAdmin (call #2 — call #1 was the acceptor reply Logon). With ThrowingToAdminAtN(2),
+// fire_to_admin_() returns false → terminal close + app_callback_threw (FIX-3).
+// Pre-fix: the (void)fire_to_admin_() discarded the result; session continued
+// seqnum assignment and emit instead of terminal-closing.
+
+TEST(ApplicationThrow, ToAdminConfirmingLogoutThrowTerminatesSession) {
+    auto app = std::make_shared<ThrowingToAdminAtN>(2);
+    ThrowFixture f;
+    f.engine_cfg.application = app;
+
+    auto cfg = f.make_cfg();
+    Session sess(f.engine_cfg, cfg);
+    open_acceptor_to_active(f, sess);
+    // toAdmin call #1 happened for the Logon reply.
+    ASSERT_EQ(app->call_count, 1);
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    // Feed inbound Logout → session tries to emit confirming Logout → toAdmin call #2 throws.
+    auto logout_frame = make_logout_frame(2);
+    auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logout_frame), asio::use_future);
+    f.run();
+    (void)fut.get();
+    f.run(300);
+
+    // toAdmin must have been called exactly twice (Logon + confirming Logout).
+    EXPECT_EQ(app->call_count, 2) << "toAdmin must be called exactly twice (Logon + confirming Logout)";
+
+    // Session must be terminal-closed (not Active) — FIX-3 ensured this.
+    ThrowFixture::verify_terminal_closed(sess);
+
+    f.verify_second_session_works(std::make_shared<OkApplication>());
+}
+
+// ── Test 9: toAdmin throw on graceful-close Logout → terminal-close ───────────
+//
+// Session::close(graceful) emits an outbound Logout before transitioning to
+// LogoutSent. That outbound Logout fires toAdmin (call #2 for the acceptor role).
+// With ThrowingToAdminAtN(2), fire_to_admin_() returns false → terminal close +
+// app_callback_threw (FIX-3). Pre-fix: continued to LogoutSent with a throw.
+
+TEST(ApplicationThrow, ToAdminGracefulCloseLogoutThrowTerminatesSession) {
+    auto app = std::make_shared<ThrowingToAdminAtN>(2);
+    ThrowFixture f;
+    f.engine_cfg.application = app;
+
+    auto cfg = f.make_cfg();
+    Session sess(f.engine_cfg, cfg);
+    open_acceptor_to_active(f, sess);
+    ASSERT_EQ(app->call_count, 1);
+
+    // close(graceful) emits Logout → toAdmin call #2 throws.
+    auto fut = asio::co_spawn(f.ioc, sess.close(close_mode::graceful), asio::use_future);
+    f.run();
+    (void)fut.get();
+    f.run(300);
+
+    EXPECT_EQ(app->call_count, 2) << "toAdmin must be called exactly twice";
+    ThrowFixture::verify_terminal_closed(sess);
+    f.verify_second_session_works(std::make_shared<OkApplication>());
+}
+
+// ── Test 10: toAdmin throw on liveness Heartbeat → terminal-close ─────────────
+//
+// When an inbound Heartbeat(35=0) is received while Active, the session echoes
+// a Heartbeat reply → toAdmin fires. With ThrowingToAdminAtN(2) and the acceptor
+// path (call #1 = Logon reply), the Heartbeat echo fires toAdmin call #2 → throw.
+// FIX-3: terminal-close + app_callback_threw. Pre-fix: continued with (void)discard.
+
+TEST(ApplicationThrow, ToAdminHeartbeatEchoThrowTerminatesSession) {
+    auto app = std::make_shared<ThrowingToAdminAtN>(2);
+    ThrowFixture f;
+    f.engine_cfg.application = app;
+
+    auto cfg = f.make_cfg();
+    Session sess(f.engine_cfg, cfg);
+    open_acceptor_to_active(f, sess);
+    ASSERT_EQ(app->call_count, 1);
+
+    // Feed inbound Heartbeat → session echoes back → toAdmin call #2 throws.
+    auto hb_frame = make_heartbeat_frame(2);
+    auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(hb_frame), asio::use_future);
+    f.run();
+    (void)fut.get();
+    f.run(300);
+
+    EXPECT_EQ(app->call_count, 2) << "toAdmin must be called exactly twice";
+    ThrowFixture::verify_terminal_closed(sess);
+    f.verify_second_session_works(std::make_shared<OkApplication>());
+}
+
 }  // namespace
 }  // namespace fixpp::session::test
