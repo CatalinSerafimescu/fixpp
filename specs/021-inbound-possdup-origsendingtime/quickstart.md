@@ -39,6 +39,8 @@ Extend the 018 admin-interop fixture + parent harness with PossDup-replay cells 
 - **PossDup replay survives**: drive a real ResendRequest→replay so the counterparty re-sends an already-seen message with `43=Y`; assert the fixpp session stays `Active` and does not Logout (SC-001).
 - **Malformed dup rejected, survives**: feed `43=Y` without `122`; assert a session-level Reject crosses the wire and the session survives, matching QFJ + QFcpp (SC-002).
 
+**Golden normalization profile**: extend the 018 `{52, 10}` admin canonicalization profile with `{52, 122, 10}` for PossDup replay cells — `SendingTime(52)` and `OrigSendingTime(122)` are live wall-clock timestamps (non-deterministic across runs) and `CheckSum(10)` is recomputed from the frame body; these three fields are replaced with a canonical sentinel before golden diff. Structural fields (`34=MsgSeqNum`, `43=PossDupFlag`, `371=RefTagID`, `373=SessionRejectReason`, `35=MsgType`) are **compared verbatim** — mutation of any compared tag must cause the golden diff to FAIL (gate-biting property, per 018 verify contract). Capture goldens at first paired run; do not hand-fabricate them.
+
 ```bash
 # parent harness (with counterparties available)
 cd ../phase-9-harness
