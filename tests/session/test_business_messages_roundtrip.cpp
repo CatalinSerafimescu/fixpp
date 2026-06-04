@@ -634,37 +634,45 @@ TEST(BusinessMessagesRoundtrip, InboundReject_EmitsBusinessMessageReject_Session
     auto fut_inbound = asio::co_spawn(f.ioc, sess.on_inbound_frame(inbound_nos), asio::use_future);
     f.drain(400);
     auto inbound_result = fut_inbound.get();
-    // on_inbound_frame may return unexpected on some validation failures (e.g.
-    // wrong direction/CompID). If it passes to the app layer, fromApp fires.
-    // We proceed regardless and check the state.
+    (void)inbound_result;
 
-    // (a) Session must stay Active after fromApp reject.
+    // (a) fromApp MUST have fired — inbound dispatch is mandatory for a well-formed
+    //     app frame with correct CompIDs and seq=2.  If this fails the inbound
+    //     routing is broken and the 35=j assertion below is meaningless.
+    ASSERT_GE(app->from_app_calls.load(), 1) << "inbound NOS must reach fromApp";
+
+    // (b) The engine MUST have emitted BusinessMessageReject(35=j) after the
+    //     fromApp veto.  Find it in captured frames and verify content:
+    //       35=j  (MsgType = BusinessMessageReject)
+    //       372=D (RefMsgType = the inbound NewOrderSingle)
+    //       45=2  (RefSeqNum = the inbound peer seqnum)
+    bool found_j = false;
+    std::string ref_msg_type;
+    std::string ref_seq_num;
+    for (std::size_t i = frames_after_logon; i < f.captured_frames.size(); ++i) {
+        auto flds = parse_fix_frame(f.captured_frames[i]);
+        bool this_is_j = false;
+        std::string this_ref_msg_type;
+        std::string this_ref_seq_num;
+        for (const auto& fld : flds) {
+            if (fld.tag == 35 && fld.value == "j") this_is_j = true;
+            if (fld.tag == 372) this_ref_msg_type = fld.value;
+            if (fld.tag == 45) this_ref_seq_num = fld.value;
+        }
+        if (this_is_j) {
+            found_j = true;
+            ref_msg_type = this_ref_msg_type;
+            ref_seq_num = this_ref_seq_num;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_j) << "BusinessMessageReject(35=j) must be emitted when fromApp rejects";
+    EXPECT_EQ(ref_msg_type, "D") << "35=j must carry RefMsgType(372)=D (inbound NOS)";
+    EXPECT_EQ(ref_seq_num, "2") << "35=j must carry RefSeqNum(45)=2 (inbound peer seqnum)";
+
+    // (c) Session must stay Active after fromApp reject.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "session must stay Active after fromApp reject";
-
-    // (b) fromApp must have fired (if the inbound was dispatched).
-    // Note: if on_inbound_frame rejected it for non-app reasons (e.g. session
-    // tag validation), fromApp may not have fired. We accept either outcome
-    // but verify Active is preserved in both cases.
-    if (app->from_app_calls.load() > 0) {
-        // If fromApp fired and rejected, the engine should have emitted 35=j.
-        // Find a BusinessMessageReject (35=j) in captured frames after logon.
-        bool found_j = false;
-        for (std::size_t i = frames_after_logon; i < f.captured_frames.size(); ++i) {
-            auto flds = parse_fix_frame(f.captured_frames[i]);
-            for (const auto& fld : flds) {
-                if (fld.tag == 35 && fld.value == "j") {
-                    found_j = true;
-                    break;
-                }
-            }
-            if (found_j) break;
-        }
-        EXPECT_TRUE(found_j) << "BusinessMessageReject(35=j) must be emitted when fromApp rejects";
-    }
-    // Whether or not fromApp fired, session must be Active.
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
-        << "session must remain Active regardless of fromApp disposition";
 }
 
 // ── INV-7: Re-entrant Engine::send from inside fromApp — multi-threaded ───────
