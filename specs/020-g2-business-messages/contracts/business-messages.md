@@ -57,7 +57,7 @@ Public, `noexcept`, allocation-free builders that turn typed minimal fields into
 
 The send path (`Session::send_impl` via `Engine::send`) MUST, for application messages:
 1. Place the body's leading `35=MsgType` field at **wire field-3** position (after `9=BodyLength`), ahead of the engine-stamped `49/56/34/52`. The builders rely on this: they emit `35=` first in the body and the send path hoists it.
-2. Emit **digit-only / unpadded** `9=BodyLength` (no leading zeros — `.specify/2b-wire.md`; the current `send_impl` emits `9=000045`, a contract violation). Recommended `/implement`: route app sends through `wire::Writer` (whose `commit()` already produces field-3 MsgType + digit-only `9=` + checksum) or correct the manual framer.
+2. Emit **digit-only / unpadded** `9=BodyLength` (no leading zeros — `.specify/2b-wire.md`; pre-020 `send_impl` emitted `9=000045`; 020 writes digit-only `9=` directly in the manual framer).
 3. Emit a valid `10=CheckSum`.
 4. **Validate the opaque payload fail-closed BEFORE seqnum assignment/store** (this applies to all 019 opaque callers, not just these builders): exactly **one** leading `35=`; reject empty payload, duplicate `35=`, or any embedded session header/trailer tag (`8/9/34/49/52/56/10`) with `std::unexpected(error::app_payload_malformed)` (slot **131**) — **no transmit, no seqnum consumption**.
 
