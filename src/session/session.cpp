@@ -273,7 +273,9 @@ template <class CB>
 // callback threw (caller must terminal-close + return an error).
 //
 // Stack-local parse arena ([const §VIII.5] — no heap).
-// Called directly on the session strand (research D3; FR-008/010).
+// Called on the engine executor (exec_) under single-thread confinement
+// (015 E-5), NOT on an engaged per-session strand — see L-019-3 + INV-2.
+// [FR-008/010]
 // [019-app-callbacks T014; FR-008/010; research D3]
 bool Session::fire_to_admin_(std::span<const std::byte> frame) noexcept {
     if (engine_.application == nullptr) return true;

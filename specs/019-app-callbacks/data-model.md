@@ -12,7 +12,7 @@ The user-implemented observer/interceptor. Abstract base; **all methods are `vir
 
 | Callback | Signature (conceptual) | Returns | Default | Semantics |
 |----------|------------------------|---------|---------|-----------|
-| `onCreate` | `(const SessionId&)` | `void` | no-op | Session object created and executor initialized by `open()`, **before** first Logon processing/emission (so it runs on the session strand — `executor()` is valid only post-`open()`). Per FR-009. |
+| `onCreate` | `(const SessionId&)` | `void` | no-op | Session object created and executor initialized by `open()`, **before** first Logon processing/emission (runs on the engine executor under single-thread confinement, not on an engaged per-session strand — L-019-3/INV-2; `executor()` is valid only post-`open()`). Per FR-009. |
 | `onLogon` | `(const SessionId&)` | `void` | no-op | Session reached established (`Active`). FR-009. |
 | `onLogout` | `(const SessionId&)` | `void` | no-op | Session left established (graceful or terminal). FR-009. |
 | `fromAdmin` | `(const MessageView&, const SessionId&)` | `expected_t<void>` | accept | Inbound **admin** msg, **after** FSM processing (FR-004). `error` ⇒ session `Reject(35=3)` (FR-005). |
@@ -21,7 +21,7 @@ The user-implemented observer/interceptor. Abstract base; **all methods are `vir
 | `toApp` | `(const MessageView&, const SessionId&)` | `expected_t<void>` | send | Outbound **app** msg before send; `error == app_do_not_send` ⇒ veto (FR-007); other `error` aborts send. |
 
 - **Lifetime**: held by the `Engine` via `std::shared_ptr<Application>`; MUST outlive every session the engine drives. The engine drains all in-flight callback work before destroying a session ([L-015-4], FR-012).
-- **Invocation domain**: every callback runs on the target session's serialized executor (`exec_`), invoked **directly** at on-strand sites (research D3). No two callbacks for one session run concurrently (FR-010).
+- **Invocation domain**: every engine-driven callback runs on the engine executor (`exec_`) under single-thread confinement (015 E-5); serialization derives from confinement, NOT from an engaged per-session strand (L-019-3 / INV-2). Only the any-thread `Engine::send` path hops through the send machinery. No two callbacks for one session run concurrently (FR-010).
 - **Throw contract**: a callback that throws ⇒ engine catches at the boundary, logs, terminal-closes the session (FR-011); never propagates inward.
 
 ### `SessionId` (existing — `engine.hpp:62`)
