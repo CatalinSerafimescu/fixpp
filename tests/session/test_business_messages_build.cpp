@@ -738,8 +738,9 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
                                                               '1', qty, px, "20240101-10:00:00");
         EXPECT_FALSE(r.has_value())
             << "NOS cl_ord_id len=" << len << " must overflow scratch and fail-closed";
-        // RC#3: out must not have been touched by the failed builder call.
-        EXPECT_EQ(out[0], std::byte{0xCDU})
+        // RC#3 (r2): full-buffer check — every byte of out must be unchanged.
+        EXPECT_TRUE(
+            std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "NOS overflow must not write to out (INV-4 atomicity), len=" << len;
     }
 
@@ -752,8 +753,9 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
                                                               'F', '2', "S", '1', zero, qty, px);
         EXPECT_FALSE(r.has_value())
             << "ExecRpt order_id len=" << len << " must overflow scratch and fail-closed";
-        // RC#3: out must not have been touched by the failed builder call.
-        EXPECT_EQ(out[0], std::byte{0xCDU})
+        // RC#3 (r2): full-buffer check — every byte of out must be unchanged.
+        EXPECT_TRUE(
+            std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "ExecRpt overflow must not write to out (INV-4 atomicity), len=" << len;
     }
 }
