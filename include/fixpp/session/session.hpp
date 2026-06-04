@@ -40,6 +40,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 // (the unique_ptr<MessageStore> member's
 // nested type alias flush_hook_fn requires it).
@@ -354,6 +355,87 @@ public:
         });
     }
 
+    // ── 019-app-callbacks T007 ────────────────────────────────────────────────
+    //
+    // callback_dispatch_scope — release-safe RAII guard for direct on-strand
+    // Application callback sites (research D3). Complements the existing
+    // `dispatch_guard` which is DEBUG-only and local to dispatch_app_callback.
+    //
+    // In DEBUG builds: asserts that no two callbacks enter concurrently for this
+    // session (strand invariant — INV-2), then clears the flag on scope exit
+    // (even if the callback throws, so the flag is never left set on unwind).
+    // In RELEASE builds: zero overhead (the guard body compiles out entirely).
+    //
+    // Usage at a direct on-strand call site (T011/T014/T016 sites):
+    //   callback_dispatch_scope cs{*this};
+    //   app->fromApp(view, id);           // guarded
+    //   // cs dtor fires on any exit path
+    //
+    // Does NOT itself suppress exceptions — the throw-wrapper invoke_callback_safe
+    // (below) wraps the call for the terminal-close disposition (FR-011; D5).
+    //
+    // Anchor: specs/019-app-callbacks/research.md D3/D5; data-model.md INV-2;
+    //         tasks.md T007. [const §XV.9] — no std::mutex, no exception paths.
+    struct callback_dispatch_scope {
+#ifndef NDEBUG
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::atomic<bool>& flag;
+        explicit callback_dispatch_scope(const Session& s) noexcept : flag(s.in_dispatch_) {
+            const bool prev = flag.exchange(true, std::memory_order_acq_rel);
+            assert(!prev &&
+                   "concurrent session callback entry: strand "
+                   "invariant violated (direct_executor attested "
+                   "over a non-serialised executor?)");
+        }
+        ~callback_dispatch_scope() noexcept { flag.store(false, std::memory_order_release); }
+        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
+        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
+#else
+        explicit callback_dispatch_scope(const Session& /*s*/) noexcept {}
+        // All special members are defaulted — the debug body is a no-op.
+        // No fields ⇒ EBO applies; the guard adds zero size/overhead in release.
+        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
+        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
+        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
+        ~callback_dispatch_scope() = default;
+#endif
+    };
+
+    // invoke_callback_safe — throw→terminal-close wrapper scaffold (FR-011; D5).
+    //
+    // Wraps a callable that invokes one Application method in a try/catch block.
+    // On catch: stores app_callback_threw as the pending error, then calls
+    // close(terminal) via the session's close method (which must be co_awaited
+    // by the caller). The US1/US2/US3 implementation tasks wire this at each
+    // callback site; this scaffold is the single shared shape they call.
+    //
+    // Returns: the callable's return value on success (expected_t<void>{} for
+    //   void callbacks); unexpected(error::app_callback_threw) on catch.
+    //
+    // NOTE: This is a scaffold — the caller is responsible for co_awaiting
+    // close(terminal) when the result is app_callback_threw. The US1-US3 tasks
+    // (T011/T014/T016) handle this; the scaffold itself only catches + records.
+    // [research D5; FR-011; data-model.md "Reject/veto value mapping"]
+    template <class F>
+    [[nodiscard]] static fixpp::core::expected_t<void> invoke_callback_safe(F&& f) noexcept {
+        try {
+            if constexpr (std::is_void_v<decltype(std::forward<F>(f)())>) {
+                std::forward<F>(f)();
+                return {};
+            } else {
+                return std::forward<F>(f)();
+            }
+        } catch (...) {
+            // A throw from a user callback is a fatal contract violation per
+            // FR-011. The caller must terminal-close the session. We record
+            // app_callback_threw here; the caller co_awaits close(terminal).
+            return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+    }
+
 #ifdef FIXPP_TEST_HOOKS
     // TEST-ONLY accessor: expose SeqnumManager for drain-contract tests
     // (009 T021 FR-011 — CloseWithHolderDoesNotTerminate). Allows tests to
@@ -491,6 +573,26 @@ private:
     // ring-buffer is always in sync with fsm_state_.
     void record_state_transition_(fsm_state new_state) noexcept;
 
+    // ── 019 T016 — lifecycle callback fire-once guards ────────────────────────
+    //
+    // onLogon_fired_ and onLogout_fired_ are set BEFORE the respective callback
+    // is invoked, providing the INV-7 once-per-session guarantee across all three
+    // converging onLogout exit paths:
+    //   graceful close → record_state_transition_(Disconnected)
+    //   terminal close → record_state_transition_(Disconnected)
+    //   callback-threw → close(terminal) → record_state_transition_(Disconnected)
+    // Both flags are checked inside record_state_transition_ so only ONE function
+    // must be updated when new paths reach Disconnected.
+    //
+    // lifecycle_cb_threw_: set to true if a lifecycle callback (onLogon) threw.
+    // record_state_transition_ is noexcept so it cannot propagate; callers that
+    // transition TO Active check this flag and call close(terminal) if set.
+    // (onLogout throws during a Disconnected transition — no further close needed.)
+    // [019-app-callbacks T016; FR-009; data-model.md INV-7; research D3]
+    bool onLogon_fired_ = false;
+    bool onLogout_fired_ = false;
+    bool lifecycle_cb_threw_ = false;
+
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().
     // Written exclusively from the per-session strand ([const §XI.4]).
@@ -504,6 +606,37 @@ private:
     // per-session strand only ([const §XI.4]). Body wired in Phase 5 T040;
     // declaration here satisfies Phase 2 (link-green via session.cpp stub).
     void emit_event(SessionEvent ev) noexcept;
+
+    // 019 T014 — fire toAdmin for an engine-originated admin emit (FR-008/010).
+    // Called BEFORE store_then_emit at every admin message build site (Logon/
+    // Logout/Heartbeat/TestRequest/ResendRequest/SequenceReset). Inspect-only —
+    // admin is NOT vetoable. On throw: terminal-close + records app_callback_threw
+    // (throw→terminal-close is handled by the caller after this returns false).
+    // Returns true if toAdmin completed normally (or no Application registered);
+    // returns false if the callback threw (caller must terminal-close + return error).
+    // Called directly on the session strand ([research D3; FR-008/010]).
+    [[nodiscard]] bool fire_to_admin_(std::span<const std::byte> frame) noexcept;
+
+    // parse_and_dispatch_ — dedup helper: build a stack parse arena, re-frame +
+    // parse `frame` into a MessageView<Index>, build the SessionId, open a
+    // callback_dispatch_scope, and return invoke_callback_safe(cb(view, sid)).
+    // On parse failure (Framer or Parser): returns expected_t<void>{} (skip callback,
+    // not fatal — same disposition as every call site today).
+    // `arena_bytes` is explicit so each call site documents its sizing choice.
+    // [const §VIII.5] (stack-only, no heap); [019-app-callbacks T014/T011/T013/T016]
+    template <class CB>
+    [[nodiscard]] fixpp::core::expected_t<void> parse_and_dispatch_(
+        std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept;
+
+    // emit_session_reject_ — dedup helper: build + emit a session Reject(35=3) with
+    // RefTagID=0, SessionRejectReason=3, and Disconnected-on-failure error handling
+    // for both assign_outbound and store_then_emit.  ref_seq is the MsgSeqNum of the
+    // offending inbound message; ref_msg_type is its MsgType tag.
+    // Returns expected_t<void>{} on success (or build failure); returns unexpected on
+    // assign_outbound / store_then_emit failure (caller should propagate).
+    // [019-app-callbacks T011/T016; FR-005; D4; INV-4]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
+        seqnum_t ref_seq, std::string_view ref_msg_type) noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the

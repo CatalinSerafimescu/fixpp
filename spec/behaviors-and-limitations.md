@@ -251,3 +251,73 @@ Scope and conventions:
   field in `trace_context`; non-blocking for v1.0). *(FR-006; `[2k §4.3]`;
   `contracts/log-core.md` LOG-003 macro contract; `logger.hpp` FIXPP_SLOG comment;
   `tests/log/test_trace_correlation.cpp` `SlogTimestampIsWallClock`.)*
+
+## Application callback layer (019-app-callbacks)
+
+### Feature Catalogue Rows (done)
+
+| Row | Title | Status | /specify | PR | Tests |
+|---|---|---|---|---|---|
+| APP-001 | Application callback interface (`onCreate`/`onLogon`/`onLogout`, `fromAdmin`/`fromApp`, `toAdmin`/`toApp`) + any-thread `Engine::send` | **done** | `019-app-callbacks` | (Gate B pending) | `tests/session/test_application_{inbound,business_reject,outbound,lifecycle,strand,throw}.cpp` + `test_019_g2_enablement_witness.cpp` |
+| OSS-005 | QuickFIX-style Application callback interface (return-value reject/veto divergence) | **done** | `019-app-callbacks` | (Gate B pending) | see APP-001 |
+| A-014 | `BusinessMessageReject(35=j)` builder (`build_business_message_reject`, emitted on `fromApp`-reject) | **done** | `019-app-callbacks` | (Gate B pending) | `tests/session/test_application_business_reject.cpp` |
+
+### Behaviors
+
+- **B-019-1 — Reject/veto is signalled by return value, never by an exception.** A
+  `fromApp`/`fromAdmin` callback returns `unexpected(error)` to reject (→
+  `BusinessMessageReject(35=j)` / session `Reject(35=3)` respectively); a `toApp` callback
+  returns `unexpected(error::app_do_not_send)` to veto an outbound app message (DoNotSend),
+  or another `error` to abort the send with that error surfaced to the `Engine::send`
+  caller. `toAdmin` is inspect-only (admin messages are always sent). This is a deliberate
+  divergence from QuickFIX's exception-based callback API to fit the fixpp no-throw house
+  style (`[const §XV.9]`). *(FR-005/007/008/015; data-model reject/veto table; research D1/D2.)*
+
+- **B-019-2 — A throwing user callback is a fatal user-contract violation → terminal
+  session close.** Because every normal outcome (accept/reject/veto) is a return value, an
+  exception escaping any of the 7 callbacks is unexpected: the engine catches it at the
+  dispatch boundary, clears the re-entrancy guard, terminal-closes the session, and records
+  `error::app_callback_threw`. The exception never reaches engine internals. *(FR-011;
+  research D5; `tests/session/test_application_throw.cpp`.)*
+
+- **B-019-3 — `Engine::send` is any-thread-safe and posts onto the per-session strand.**
+  `co_await engine.send(id, payload)` looks the session up (capturing a `shared_ptr<Session>`
+  keepalive that outlives the post — the 014 detached-write UAF class), posts onto the
+  session's `exec_`, runs `toApp`, then the durable-before-transmit `Session::send` path.
+  The awaited result carries the veto/store/write outcome (natural backpressure — no
+  silent-drop queue, `[const §XV.15]`). A re-entrant `send` from inside an on-strand
+  callback is enqueued behind the current dispatch (no deadlock). *(FR-006; research D3/D6;
+  `tests/session/test_application_strand.cpp`.)*
+
+### Limitations
+
+- **L-019-1 — Outbound interception is inspect + veto only; in-place outbound message
+  MODIFICATION is deferred to a later Phase-5 slice.** `toApp` may inspect the outbound
+  `MessageView` and veto it (`app_do_not_send`); `toAdmin` may inspect it. Neither can
+  MODIFY/stamp the outbound message in place this slice — a mutable outbound builder/view
+  is a large, separable design (it would expose the `Writer`/builder mid-emit) and is not
+  required for the G2 round-trip (the originator builds the full payload passed to
+  `Engine::send`). The user stamps fields by constructing the payload before `send`.
+  **Status: deferred** (mutable outbound interception, a later Phase-5 slice). *(FR-007/008;
+  research D1; spec.md §FR-007/008 forward-pointer; contracts/application-interface.md
+  §Out of contract.)*
+
+- **L-019-2 — A single `Application` is registered per `Engine` (no per-session override).**
+  `EngineConfig::application` holds one `Application` invoked for all of the engine's
+  sessions, with the `SessionId` passed per call (the QuickFIX-C++/J + Fix8 model). A
+  per-session `Application` override is out of scope for this slice.
+  **Status: deferred** (per-session override, a later Phase-5 slice). *(FR-002;
+  Clarifications 2026-06-03 Q2; data-model §EngineConfig::application.)*
+
+- **L-019-3 — Callbacks are serialized by single-thread engine-executor confinement; a
+  multi-threaded `io_context` is NOT supported this slice.** Engine-driven session entry
+  points (`on_inbound_frame`, `open()`, `close()`, the admin-emit sites) are NOT hopped
+  onto the per-session strand before invoking callbacks — `Session::open()` sets
+  `this->exec_ = make_strand(...)` but the running engine coroutine is not dispatched
+  onto it. The no-concurrent-callback invariant (FR-010 / INV-2) holds because the 015
+  engine is single-executor-confined: the injected `exec_` is always a single-threaded
+  `io_context` (consistent with 015 E-5 / `engine.hpp:156–160`). Promoting engine-driven
+  entry points to true per-session strand-confinement (hopping each entry point onto
+  `Session::executor()`) is a future Phase-5 slice; it would re-trigger Gate A.
+  **Status: deferred** (true strand-confinement on engine-driven paths). *(INV-2 correction;
+  gate-b/r1 FIX-4; research.md D3 clarification; data-model.md INV-2.)*

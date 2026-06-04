@@ -731,6 +731,27 @@ enum class error : std::uint8_t {
                                       //   expected_t<void>; no-op provider
                                       //   substituted.
                                       //   → C-ABI 1011
+
+    // ── 019-app-callbacks: 2 app_* variants per specs/019-app-callbacks/
+    //    {research.md D7, data-model.md §"New error:: enumerators"}.
+    //    Non-renumbering append at unused slots 129–130, next contiguous range
+    //    after 017's otel_provider_init_failed = 128 per [const §X.4].
+    //    Slot 70 remains a PERMANENT NUMERIC HOLE; never renumber.
+    app_do_not_send = 129,     // FR-007 — toApp veto sentinel: the Application
+                               //   returned unexpected(app_do_not_send) from
+                               //   toApp(), signalling DoNotSend. The Engine
+                               //   does NOT transmit the outbound message and
+                               //   surfaces this code as the Engine::send()
+                               //   awaitable result to the caller (INV-5).
+                               //   → C-ABI reserved (future mapping)
+    app_callback_threw = 130,  // FR-011 — session terminated by a throwing
+                               //   callback: the Application threw an exception
+                               //   from any callback site (fromApp/fromAdmin/
+                               //   toApp/toAdmin/onCreate/onLogon/onLogout).
+                               //   The engine caught at the dispatch boundary,
+                               //   logged, terminal-closed the session, and
+                               //   recorded this code. Never propagated inward.
+                               //   → C-ABI reserved (future mapping)
 };
 
 template <class T>
@@ -970,6 +991,11 @@ using expected_t = std::expected<T, error>;
             return "otel: export failed";
         case error::otel_provider_init_failed:
             return "otel: provider init failed";
+        // ── 019-app-callbacks (slots 129–130) ─────────────────────────────
+        case error::app_do_not_send:
+            return "app: do not send (toApp veto)";
+        case error::app_callback_threw:
+            return "app: callback threw (session terminated)";
     }
     return "unknown error";
 }

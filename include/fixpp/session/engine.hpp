@@ -120,7 +120,10 @@ struct SessionEntry {
     enum class role : std::uint8_t { initiator = 0, acceptor = 1 };
 
     /// Owned session object; null until the accept/connect loop constructs it.
-    std::unique_ptr<Session> session;
+    /// shared_ptr (not unique_ptr) so Engine::send can capture a keepalive that
+    /// outlives a posted closure on the session strand (prevents UAF when stop()
+    /// races the post — T013 / [[feedback_detached_cospawn_write_not_in_join_counter]]).
+    std::shared_ptr<Session> session;
 
     role session_role = role::initiator;
 
@@ -188,6 +191,29 @@ public:
     /// Duplicate SessionId::from_config(cfg) → session_invalid_argument (119).
     /// Must be called before start() in 015.  NO Application& parameter (FR-013).
     [[nodiscard]] fixpp::core::expected_t<void> register_session(SessionConfig cfg);
+
+    /// FR-006/007/013 (019-app-callbacks T013): any-thread outbound send.
+    ///
+    /// Looks up `id` in the registry; if found and the session is established
+    /// (Active), posts onto the session's strand, runs `toApp` (from
+    /// EngineConfig::application) to inspect/veto, then delegates to
+    /// Session::send (durable-before-transmit path).
+    ///
+    /// Returns:
+    ///   {}                              — sent successfully (AC1)
+    ///   unexpected(app_do_not_send=129) — toApp veto (AC2/FR-007)
+    ///   unexpected(app_callback_threw)  — toApp threw (FR-011)
+    ///   unexpected(session_invalid_state_for_send=77)
+    ///                                   — id registered but session not Active (AC4/FR-013)
+    ///   unexpected(session_invalid_argument=119) — id not registered (FR-013)
+    ///
+    /// Any-thread safe: captures a shared_ptr keepalive from the registry
+    /// that outlives the posted work (prevents UAF when stop() races the post).
+    /// Re-entrant calls from on-strand callbacks are enqueued behind the
+    /// current dispatch (asio::post is non-blocking → no deadlock).
+    /// Backpressure = the awaited result ([const §XV.15]).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
+        SessionId const& id, std::span<const std::byte> app_payload);
 
     /// FR-001/FR-003: non-blocking.  co_spawns one connect loop per initiator
     /// and one accept loop per acceptor on exec.  Legal to call once.
@@ -293,6 +319,14 @@ private:
     // if Engine::stop() is executing concurrently.
     // Strictly required by the join-before-clear invariant — private only.
     std::shared_ptr<std::atomic<int>> outstanding_counter_;
+
+    // FIX-2 (gate-b/r1): in-flight send counter. Engine::send bumps this
+    // at entry (on exec_, after the stopping_ check) and decrements on
+    // co_return. stop() drains this BEFORE registry_.clear() so no send
+    // coroutine can dereference engine_ (via session's engine_ ref) after
+    // Engine::~Engine() runs. Separate from outstanding_counter_ (loop
+    // counter) so the two domains can be drained independently.
+    std::shared_ptr<std::atomic<int>> send_counter_;
 };
 
 }  // namespace fixpp::session

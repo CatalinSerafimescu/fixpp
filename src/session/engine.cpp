@@ -76,7 +76,12 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // 017 owned amendment #2: seed the engine-level trace_context snapshot
       // from EngineConfig::engine_trace_context at construction time.
       // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
-      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context}
+      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
+      // FIX-2 (gate-b/r1): initialize the in-flight send counter. Starts at
+      // zero; Engine::send bumps/decrements it; stop() drains it before
+      // registry_.clear() to prevent send coroutines from dereferencing engine_
+      // after Engine::~Engine() runs.
+      send_counter_{std::make_shared<std::atomic<int>>(0)}
 // E-5: single-executor confinement — no strand, no mutex (015 scope).
 
 {}
@@ -547,7 +552,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // (E-1 / Gate A New-3 / data-model C1 step 6 / FQ-2)
         // open() is awaitable — must run inside the loop, not in start().
         // On open() failure, close the transport and exit the loop (fatal).
-        entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+        entry.session = std::make_shared<Session>(engine_cfg, entry.config);
         {
             auto res = co_await entry.session->open();
             if (!res.has_value()) {
@@ -617,7 +622,7 @@ static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& e
 
     // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
     entry.config.engine_managed = true;
-    entry.session = std::make_unique<Session>(engine_cfg, entry.config);
+    entry.session = std::make_shared<Session>(engine_cfg, entry.config);
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await entry.session->open();
@@ -718,6 +723,21 @@ asio::awaitable<void> Engine::stop() {
         outstanding_counter_.reset();
     }
 
+    // FIX-2 (gate-b/r1): drain in-flight Engine::send coroutines BEFORE
+    // registry_.clear(). A send coroutine holds a shared_ptr<Session> keepalive
+    // (so the Session object is alive) but the Session stores a const EngineConfig&
+    // engine_ ref — if Engine::~Engine() runs while a send is suspended on the
+    // session strand, dereferencing engine_.application / clock / store is a UAF.
+    // stopped_ is already true, so no new sends can enter; we just wait for
+    // the currently-bumped ones to decrement. [spec.md FR-012]
+    {
+        asio::steady_timer t2{co_await asio::this_coro::executor};
+        while (send_counter_->load(std::memory_order_acquire) > 0) {
+            t2.expires_after(std::chrono::milliseconds{0});
+            co_await t2.async_wait(asio::use_awaitable);
+        }
+    }
+
     // F2: drive each surviving session through its own close() to drain the
     // per-session liveness loop. The role loops (run_read_pump) DO call
     // session.close(terminal) on read EOF/error, but when Engine::stop() total-
@@ -760,6 +780,110 @@ asio::awaitable<void> Engine::stop() {
     if (engine_cfg_.meter) {
         engine_cfg_.meter->shutdown();
     }
+}
+
+// ── Engine::send — T013 (019-app-callbacks US2) ───────────────────────────────
+//
+// Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
+//
+// FIX-1+FIX-2 (gate-b/r1) + FIX-A (gate-b/r2) design:
+//   Step A: hop onto exec_ (the engine executor) so registry reads + stopped_
+//           check + send_counter_ bump are serialized with stop()'s mutations.
+//           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
+//   Step B: on exec_ — registry lookup, keepalive capture, Active check,
+//           stopping check. If stopped_ → fail-fast (no send may outlive stop()).
+//           Bump send_counter_ + RAII counter_guard to enroll in the send-drain
+//           domain. The guard fires on co_return AND exception/cancel unwind so
+//           a total-cancel from stop() cannot leave the counter positive. [FIX-2/A]
+//   Step C: hop to session strand for toApp + Session::send. counter_guard dtor
+//           decrements after the strand hop completes (or unwinds). [FIX-2/A]
+//
+//   stop() drains send_counter_ BEFORE registry_.clear() so no send coroutine
+//   can dereference engine_ after Engine::~Engine() runs.
+//   Backpressure = the awaited result ([const §XV.15]).
+//   Re-entrant call from within an on-strand callback: asio::post is
+//   non-blocking → no deadlock (FR-006 edge case).
+asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
+                                                     std::span<const std::byte> app_payload) {
+    // Copy payload into a coroutine-frame-local buffer so the caller's span
+    // (potentially stack-allocated) stays valid across all co_await suspensions.
+    std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
+
+    // Step A: first-hop onto exec_ so registry reads are serialized with
+    // stop()'s registry_.clear(). [FIX-1: gate-b/r1]
+    core::expected_t<void> result =
+        co_await asio::co_spawn(
+            exec_,
+            [this, id, payload_copy = std::move(payload_copy)]()
+                -> asio::awaitable<core::expected_t<void>> {
+                // ── Step B: on exec_ — safe to read registry + stopped_ ──
+
+                // FIX-2: fail-fast if stop() has begun (stopped_ set on exec_).
+                if (stopped_) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+
+                // Registry lookup (serialized with registry_.clear() by exec_).
+                auto it = registry_.find(id);
+                if (it == registry_.end()) {
+                    co_return std::unexpected(core::error::session_invalid_argument);
+                }
+
+                // Capture strong keepalive before any co_await (UAF guard).
+                std::shared_ptr<Session> kl = it->second.session;
+
+                // Session null (loop not yet started) or not Active → reject.
+                if (!kl || kl->state() != fsm_state::Active) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+
+                // FIX-2 / gate-b/r2 FIX-A: enroll this in-flight send in the
+                // send-drain domain with an RAII guard so the decrement fires on
+                // co_return AND on exception/total-cancel unwind.
+                // The manual ++/-- pair was not exception-safe: if the inner
+                // co_spawn(strand_exec) was total-cancelled (stop()'s teardown
+                // path), operation_aborted propagated out and skipped the manual
+                // --, leaving send_counter_ permanently positive and wedging
+                // stop()'s drain loop. counter_guard (engine.cpp:61-69) is the
+                // existing RAII pattern used by the accept/connect loops —
+                // reusing it here closes the gap. [spec.md FR-012]
+                ++(*send_counter_);
+                counter_guard send_guard{send_counter_};
+
+                // Also reset cancellation state on the outer exec_ frame so
+                // total cancellation has a defined policy for the bump→guard
+                // window (belt-and-suspenders; the guard is the load-bearing fix).
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+
+                // ── Step C: hop to session strand for toApp + Session::send ──
+                auto strand_exec = kl->executor().underlying();
+                core::expected_t<void> send_result =
+                    co_await asio::co_spawn(
+                        strand_exec,
+                        [kl, payload_copy = std::move(payload_copy)]()
+                            -> asio::awaitable<core::expected_t<void>> {
+                            // Enable total cancellation so stop()'s
+                            // cancellation_type::total reaches Session::send.
+                            // [[feedback_asio_cospawn_total_cancellation_default]]
+                            co_await asio::this_coro::reset_cancellation_state(
+                                asio::enable_total_cancellation());
+                            // Re-check state on the strand (may have changed
+                            // since the exec_ check above).
+                            if (kl->state() != fsm_state::Active) {
+                                co_return std::unexpected(
+                                    core::error::session_invalid_state_for_send);
+                            }
+                            co_return co_await kl->send(std::span<const std::byte>(
+                                payload_copy.data(), payload_copy.size()));
+                        },
+                        asio::use_awaitable);
+
+                co_return send_result;
+            },
+            asio::use_awaitable);
+
+    co_return result;
 }
 
 // ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────

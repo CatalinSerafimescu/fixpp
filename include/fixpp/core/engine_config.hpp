@@ -40,6 +40,11 @@ class TracerProvider;
 class MeterProvider;
 }  // namespace fixpp::otel
 namespace fixpp::session {
+class Application;  // 019-app-callbacks T005 — fwd-decl to avoid pulling
+                    // application.hpp (wire/parser.hpp) into this header
+                    // (awaitable-corpus include-edge, [const §XV.9] /
+                    // [[feedback_awaitable_header_mutex_include_edge]]).
+                    // shared_ptr<incomplete type> is valid at declaration.
 class MessageStoreFactory;
 }  // namespace fixpp::session
 namespace fixpp::tls {
@@ -159,6 +164,19 @@ struct EngineConfig {
     fixpp::otel::trace_context engine_trace_context{};
 
     std::unique_ptr<fixpp::service::ControlPlaneFactory> control_plane_factory;  // null permitted
+
+    // ── 019-app-callbacks T005 ────────────────────────────────────────────────
+    // Single per-engine Application callback receiver. null ⇒ no callbacks are
+    // invoked, behaviour identical to the pre-019 engine (FR-002 / INV-1 / SC-006).
+    // Lifetime: the Application MUST outlive the Engine (and every session it
+    // drives); the Engine drains all in-flight callback work before destroying a
+    // session ([L-015-4] / FR-012). Forward-declared above to avoid the include
+    // edge from engine_config.hpp (awaitable corpus) → application.hpp →
+    // wire/parser.hpp, which carries std::mutex-bearing headers ([const §XV.9] /
+    // [[feedback_awaitable_header_mutex_include_edge]]). shared_ptr<incomplete>
+    // is valid; the concrete type is visible at all Engine/Session call sites
+    // where callbacks are actually invoked (they #include application.hpp).
+    std::shared_ptr<fixpp::session::Application> application{nullptr};
 };
 
 // The Engine::open() clock_not_set precondition (FR-006 / I-03 / root cause

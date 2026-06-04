@@ -1041,6 +1041,230 @@ target_include_directories(session_trace_context_accessors_test PRIVATE
 add_test(NAME session_trace_context_accessors
   COMMAND session_trace_context_accessors_test)
 
+# ── 019-app-callbacks T006 — MsgType classifier unit test ───────────────────
+# Pins the admin/app classifier truth table (all 6 admin MsgTypes + sample app
+# MsgTypes + edge cases). Links fixpp_session (brings src/ internal include path
+# for msgtype_classifier.hpp). src/ added as PRIVATE include dir.
+add_executable(msgtype_classifier_019_test
+  test_019_msgtype_classifier.cpp
+)
+target_link_libraries(msgtype_classifier_019_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(msgtype_classifier_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME msgtype_classifier_019 COMMAND msgtype_classifier_019_test)
+set_tests_properties(msgtype_classifier_019 PROPERTIES
+  LABELS "019;foundational;classifier")
+
+# ── 019-app-callbacks T003/T005/T007 — Application compile-smoke ─────────────
+# Proves application.hpp compiles + Application is subclassable + EngineConfig
+# gains the application field + callback_dispatch_scope + invoke_callback_safe.
+add_executable(application_019_compile_smoke_test
+  test_019_application_compile_smoke.cpp
+)
+target_link_libraries(application_019_compile_smoke_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME application_019_compile_smoke COMMAND application_019_compile_smoke_test)
+set_tests_properties(application_019_compile_smoke PROPERTIES
+  LABELS "019;foundational;compile_smoke;application")
+
+# ── 019-app-callbacks T008 — Application inbound delivery tests ──────────────
+# fromApp/fromAdmin fire exactly once on exec_ with correct MessageView+SessionId;
+# INV-6 FSM-rejected messages don't reach callbacks; SC-001 ordering;
+# application==nullptr → no callbacks (FR-014 byte-identity); fromAdmin reject
+# → session Reject(35=3).
+# US1 AC1/AC2/AC4; FR-002/003/004/005/014; INV-1/4/6; SC-001/003/006.
+add_executable(application_inbound_019_test
+  test_application_inbound.cpp
+)
+target_link_libraries(application_inbound_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_inbound_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_inbound_019 COMMAND application_inbound_019_test)
+set_tests_properties(application_inbound_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us1;inbound;application")
+
+# ── 019-app-callbacks T009 — BusinessMessageReject(35=j) tests ───────────────
+# MANDATORY named test (Gate A RC#3): fromApp reject → BusinessMessageReject(35=j)
+# with RefMsgType(372)/RefSeqNum(45)/BusinessRejectReason(380) present; NOT
+# session Reject(35=3). fromApp accept → no reject on wire. US1 AC3; FR-005;
+# SC-003; research D4; [FIX50SP2] Infrastructure / Business Rejects (A-014).
+add_executable(application_business_reject_019_test
+  test_application_business_reject.cpp
+)
+target_link_libraries(application_business_reject_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_business_reject_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_business_reject_019 COMMAND application_business_reject_019_test)
+set_tests_properties(application_business_reject_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us1;business_reject;application")
+
+# ── 019-app-callbacks T012 — outbound origination + interception tests ───────
+# US2: Engine::send crosses wire after toApp; toApp veto drops transmit; toAdmin
+# fires on admin emits; non-established session → state error; unknown id → 119.
+add_executable(application_outbound_019_test
+  test_application_outbound.cpp
+)
+target_link_libraries(application_outbound_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_outbound_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_outbound_019 COMMAND application_outbound_019_test)
+set_tests_properties(application_outbound_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us2;outbound;application")
+
+# ── 019-app-callbacks T015 — lifecycle notifications tests ───────────────────
+# US3: onCreate/onLogon/onLogout exactly-once, in order, on exec_; three onLogout
+# exit paths (graceful, terminal, callback-threw); fromAdmin completeness for
+# inbound Logout(35=5) and SequenceReset(35=4). FR-009; FR-004; INV-7.
+add_executable(application_lifecycle_019_test
+  test_application_lifecycle.cpp
+)
+target_link_libraries(application_lifecycle_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_lifecycle_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_lifecycle_019 COMMAND application_lifecycle_019_test)
+set_tests_properties(application_lifecycle_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;us3;lifecycle;application")
+
+# ── 019-app-callbacks T017 — strand serialization, drain, keepalive tests ────
+# FR-010/012; INV-2/INV-3; SC-005; research D3.
+# TSan-gated: NoConcurrentCallbacksForOneSession proves no data race on session
+# members under concurrent inbound. ASan-gated: DrainBeforeDestroy + keepalive.
+# All tests have internal self-deadlines (ioc.run_for → no hang).
+add_executable(application_strand_019_test
+  test_application_strand.cpp
+)
+target_link_libraries(application_strand_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_strand_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_strand_019 COMMAND application_strand_019_test)
+set_tests_properties(application_strand_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase6;strand;drain;application")
+
+# ── 019-app-callbacks T018 — throw-from-callback disposal at every site ───────
+# FR-011; 7 cells: fromApp/fromAdmin/toApp/toAdmin/onCreate/onLogon/onLogout.
+# Each cell: engine catches throw, terminal-closes session, re-entrancy guard
+# cleared, engine not corrupted (second session works). All self-deadlined.
+add_executable(application_throw_019_test
+  test_application_throw.cpp
+)
+target_link_libraries(application_throw_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_throw_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_throw_019 COMMAND application_throw_019_test)
+set_tests_properties(application_throw_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase6;throw;application")
+
+# ── gate-b/r1 FIX-5 — real Engine::send tests (replace substituted tests) ─────
+# Exercises Engine::send public API: (a) send from foreign thread crosses wire,
+# (b) re-entrant send from inside toApp does not deadlock, (c) send_counter_
+# drain race (stop() + ~Engine() UAF-safe). All use real loopback TLS;
+# GTEST_SKIP when FIXPP_TLS_FIXTURE_DIR absent. [FR-006/012; FIX-1/FIX-2/FIX-5]
+add_executable(application_engine_send_019_test
+  test_application_engine_send.cpp
+)
+target_link_libraries(application_engine_send_019_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_engine_send_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(application_engine_send_019_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME application_engine_send_019 COMMAND application_engine_send_019_test)
+set_tests_properties(application_engine_send_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;gate_b;engine_send;application;live_tls"
+  TIMEOUT 30)
+
+# ── 019-app-callbacks T020 — G2 enablement witness ───────────────────────────
+# SC-002: opaque NewOrderSingle (35=D) → ExecutionReport (35=8) round-trip via
+# Engine::send + fromApp callbacks. Real loopback-TLS (mirrors engine_lifecycle
+# pattern); GTEST_SKIP when FIXPP_TLS_FIXTURE_DIR absent. Proves G2 is
+# implementable on the 019 public surface.
+add_executable(g2_enablement_witness_019_test
+  test_019_g2_enablement_witness.cpp
+)
+target_link_libraries(g2_enablement_witness_019_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(g2_enablement_witness_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(g2_enablement_witness_019_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME g2_enablement_witness_019 COMMAND g2_enablement_witness_019_test)
+set_tests_properties(g2_enablement_witness_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase7;g2;witness;live_tls"
+  TIMEOUT 30)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

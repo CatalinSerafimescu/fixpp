@@ -56,6 +56,14 @@
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
+
+#include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
+// 019 T011: Application callback dispatch (inbound). Include here (session.cpp
+// only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
+// session → wire is ALLOWED per [arch §5.3] / check_layers.py.
+#include <fixpp/session/application.hpp>  // Application::fromAdmin / fromApp
+#include <fixpp/session/engine.hpp>       // SessionId::from_config
+#include <fixpp/wire/parser.hpp>          // wire::Parser<Index>, wire::MessageView<Index>
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -140,11 +148,46 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 // always advances; the public count (fsm_visit_count_) saturates at UINT8_MAX
 // to signal "≥255 transitions" without freezing the ring rotation.
 void Session::record_state_transition_(fsm_state new_state) noexcept {
+    const bool was_active = (fsm_state_ == fsm_state::Active);
+
     fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;
     if (fsm_visit_count_ < std::numeric_limits<std::uint8_t>::max()) {
         ++fsm_visit_count_;
     }
     fsm_state_ = new_state;
+
+    // ── 019 T016: lifecycle callbacks pinned to the Active↔!Active edge ───────
+    // Fired here so ALL converging paths (graceful close / terminal close /
+    // callback-threw) share one guard, satisfying INV-7 exactly-once semantics.
+    // record_state_transition_ is noexcept; invoke_callback_safe catches any
+    // throw and stores it in lifecycle_cb_threw_. Callers that transition TO
+    // Active must check lifecycle_cb_threw_ and call close(terminal) if set.
+    // [019-app-callbacks T016; FR-009; data-model.md INV-7; research D3]
+    if (engine_.application == nullptr) return;
+
+    if (new_state == fsm_state::Active && !onLogon_fired_) {
+        onLogon_fired_ = true;
+        const SessionId sid = SessionId::from_config(cfg_);
+        callback_dispatch_scope cs{*this};
+        auto r = invoke_callback_safe([&]() { engine_.application->onLogon(sid); });
+        (void)cs;
+        if (!r) lifecycle_cb_threw_ = true;
+    } else if (was_active && new_state != fsm_state::Active && !onLogout_fired_) {
+        // Fire onLogout on ANY Active→!Active transition:
+        //   Active → LogoutSent  (graceful close phase-1 begin)
+        //   Active → Disconnected (terminal close or fatal)
+        // The fire-once guard (onLogout_fired_) prevents double-fire across all
+        // converging paths (graceful + terminal + callback-threw). [INV-7; FR-009]
+        onLogout_fired_ = true;
+        const SessionId sid = SessionId::from_config(cfg_);
+        callback_dispatch_scope cs{*this};
+        auto r = invoke_callback_safe([&]() { engine_.application->onLogout(sid); });
+        (void)cs;
+        // A throw from onLogout is absorbed: the session is already leaving Active.
+        // No additional close(terminal) needed. app_callback_threw is silently
+        // noted; the fire-once guard (onLogout_fired_) prevents re-entry.
+        (void)r;
+    }
 }
 
 // fsm_visit_history: membership-witness view over the last ≤16 recorded
@@ -163,6 +206,87 @@ void Session::emit_event(SessionEvent ev) noexcept {
     if (events_count_ < kSessionEventRingCapacity) {
         ++events_count_;
     }
+}
+
+// ── parse_and_dispatch_ ───────────────────────────────────────────────────────
+//
+// Shared parse-and-callback ritual extracted from 5 inbound + 1 outbound sites:
+//   - fire_to_admin_           (toAdmin; 8192-byte arena — admin frames are small)
+//   - fromAdmin SequenceReset  (16384-byte arena — inbound frames may be larger)
+//   - fromAdmin Logout         (16384-byte arena)
+//   - fromAdmin generic        (16384-byte arena)
+//   - fromApp                  (16384-byte arena — app payloads can be large)
+//   - toApp in send_impl       (16384-byte arena)
+//
+// Arena sizing: two named constants document the intentional difference.
+//   kAdminParseArena  = 8192: admin messages (Heartbeat/Logon/TestRequest/…) have a
+//     bounded small field-set; 8 KiB is always sufficient.
+//   kInboundParseArena = 16384: inbound/app frames may carry arbitrary payload; 16 KiB
+//     provides headroom for larger messages without heap fallback.
+//
+// On parse failure (Framer or Parser): returns expected_t<void>{} — skip callback,
+// not fatal.  This matches every call site's existing disposition.
+// [const §VIII.5] (stack-only — no heap between parse and callback)
+// [019-app-callbacks T011/T013/T014/T016]
+
+namespace {
+constexpr std::size_t kAdminParseArena = 8192;     // admin frames: bounded small
+constexpr std::size_t kInboundParseArena = 16384;  // inbound/app: larger payloads
+}  // namespace
+
+template <class CB>
+[[nodiscard]] fixpp::core::expected_t<void> Session::parse_and_dispatch_(
+    std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept {
+    // Stack parse arena ([const §VIII.5] — no heap).
+    // arena_bytes is caller-supplied so the size choice is explicit at each site.
+    std::array<std::byte, kInboundParseArena> pa_buf_storage{};
+    // We always allocate the max stack size but hand the requested slice to the MBR.
+    // Both constants fit; static_assert guards this.
+    static_assert(kAdminParseArena <= kInboundParseArena);
+    std::pmr::monotonic_buffer_resource pa_mr{pa_buf_storage.data(), arena_bytes,
+                                              std::pmr::null_memory_resource()};
+    std::array<std::byte, 512> carry_store{};
+    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
+                                                 std::pmr::null_memory_resource()};
+    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+    fixpp::wire::Framer pd_framer;
+    std::array<fixpp::wire::frame_view, 1> pd_out{};
+    auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
+    if (!feed_r || feed_r->empty()) return fixpp::core::expected_t<void>{};  // parse error — skip
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser;
+    auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
+    if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
+
+    const SessionId sid = SessionId::from_config(cfg_);
+    callback_dispatch_scope cs{*this};
+    auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
+    (void)cs;
+    return result;
+}
+
+// ── 019 T014 — fire_to_admin_ ─────────────────────────────────────────────────
+//
+// Called before store_then_emit at every engine-originated admin emit site.
+// Parses the built frame and invokes engine_.application->toAdmin() if Application
+// is registered. Admin is inspect-only (not vetoable). Returns false only if the
+// callback threw (caller must terminal-close + return an error).
+//
+// Stack-local parse arena ([const §VIII.5] — no heap).
+// Called on the engine executor (exec_) under single-thread confinement
+// (015 E-5), NOT on an engaged per-session strand — see L-019-3 + INV-2.
+// [FR-008/010]
+// [019-app-callbacks T014; FR-008/010; research D3]
+bool Session::fire_to_admin_(std::span<const std::byte> frame) noexcept {
+    if (engine_.application == nullptr) return true;
+    // kAdminParseArena: admin frames (Heartbeat/Logon/TestRequest/…) have a
+    // bounded small field-set; 8 KiB is always sufficient.
+    auto cb_r = parse_and_dispatch_(frame, kAdminParseArena, [&](auto& mv, auto& sid) {
+        engine_.application->toAdmin(mv, sid);
+    });
+    // Only possible error: app_callback_threw (FR-011).
+    // Caller must terminal-close + return error.
+    return cb_r.has_value();
 }
 
 // recent_events: membership-witness view over the last ≤16 emitted SessionEvents
@@ -424,6 +548,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(assign_r.error());  // overflow (I-8)
     }
+    // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
+    if (!fire_to_admin_(*logon_result)) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(fixpp::core::error::app_callback_threw);
+    }
     auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
     if (!emit_r) {
         // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
@@ -644,6 +773,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     if (effective_clock_) {
         last_inbound_steady_ = effective_clock_->steady_now();
         last_outbound_steady_ = last_inbound_steady_;  // T018 Cell A: outbound idle tracking
+    }
+
+    // 019 T016: fire onCreate after open() has fully initialized exec_
+    // (executor is valid post-open() per research D3 / data-model.md INV-7).
+    // Invoked directly on the engine executor (exec_); serialization derives from
+    // single-thread confinement (015 E-5), NOT from an engaged per-session strand.
+    // See data-model.md INV-2 + spec/behaviors-and-limitations.md L-019-3.
+    // On throw → terminal close + return error (FR-011; US3 AC1). [FR-009]
+    if (engine_.application != nullptr) {
+        const SessionId create_id = SessionId::from_config(cfg_);
+        fixpp::core::expected_t<void> cb_r{};
+        {
+            // T019: scope the guard BEFORE close(terminal) so onLogout (fired
+            // inside close → record_state_transition_) can acquire its own
+            // callback_dispatch_scope without hitting the re-entrancy assert.
+            callback_dispatch_scope cs{*this};
+            cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
+        }  // cs drops here — in_dispatch_ = false
+        if (!cb_r) {
+            co_await close(fixpp::session::close_mode::terminal);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
     }
 
     co_return fixpp::core::expected_t<void>{};
@@ -1114,6 +1265,50 @@ public:
 
 }  // namespace
 
+// ── emit_session_reject_ ─────────────────────────────────────────────────────
+//
+// Builds and emits a session Reject(35=3, RefTagID=0, reason=3) for an inbound
+// message that was rejected by a fromAdmin() veto (not-threw path),
+// OR for an inbound app-typed message when no Application is registered (unknown
+// MsgType in Active → reason=3 per [FIX-SL §4.5.4]).
+//
+// Error handling: Disconnected-on-failure for both assign_outbound and
+// store_then_emit. Callers that require "best-effort" emit (e.g. the Logout and
+// SequenceReset paths where the session disconnects or acts regardless) keep the
+// inline form — only the two sites with identical Disconnected-on-fail handling
+// are extracted here.
+//
+// Returns expected_t<void>{} on success or build-failure (not fatal if build fails).
+// Returns unexpected(error) on assign_outbound / store_then_emit failure, after
+// recording Disconnected. Caller should propagate with co_return std::unexpected(…).
+// [019-app-callbacks T011/T016; FR-005; D4; INV-4]
+asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
+    seqnum_t ref_seq, std::string_view ref_msg_type) noexcept {
+    std::array<std::byte, 512> rj_buf{};
+    const auto rj_st52 =
+        effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+    const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+    auto rj_r =
+        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                                     0,                // RefTagID: n/a for MsgType/veto rejection
+                                     ref_msg_type, 3,  // SessionRejectReason = 3
+                                     cfg_.begin_string, rj_st52.value);
+    if (rj_r) {
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(assign_r.error());
+        }
+        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+        if (!emit_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(emit_r.error());
+        }
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
 //
 // parse_cn_from_dn_local: extract the first "CN=" value from an OpenSSL
@@ -1404,6 +1599,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(assign_r.error());
                 }
+                // 019 T014: toAdmin before transmitting the acceptor reply Logon. [FR-008/010]
+                if (!fire_to_admin_(*reply_logon)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                }
                 auto emit_r = co_await store_then_emit(reply_seq, *reply_logon);
                 if (!emit_r) {
                     // Emit failed (transport error). RC#B: Disconnected, not Active.
@@ -1418,6 +1618,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 last_inbound_steady_ = effective_clock_->steady_now();
             }
             record_state_transition_(fsm_state::Active);
+            // 019 T016: if onLogon threw, terminal-close the session.
+            if (lifecycle_cb_threw_) {
+                lifecycle_cb_threw_ = false;
+                co_await close(fixpp::session::close_mode::terminal);
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
@@ -1511,6 +1717,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
                             st52.value);
                         if (lo_result) {
+                            // 019 T014: toAdmin before transmitting Logout. [FR-008/010]
+                            // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                            if (!fire_to_admin_(*lo_result)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -1533,8 +1746,50 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // GapFill mode (123=Y) is handled AFTER the gate (it IS subject to
             // ordering). [S-023; QuickFIX Session::nextSequenceReset]
             if (hdr.msg_type == "4" && hdr.gap_fill_flag != "Y") {
-                co_return co_await apply_inbound_sequence_reset(
-                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
+                // 019 T016 — fromAdmin completeness fix (FR-004):
+                // Wire fromAdmin for inbound SequenceReset(Reset mode) AFTER the
+                // FSM acts on it (apply_inbound_sequence_reset below applies the
+                // new seqno). We fire BEFORE here since apply_inbound_sequence_reset
+                // may co_return early on Reject — the message was accepted by the
+                // FSM guards above and we fire consistent with US1 wiring (after
+                // seqnum/FSM validation accepts). A fromAdmin reject emits
+                // session Reject(35=3) per FR-005/D4.
+                // [019-app-callbacks T016; FR-004; research D3/D4]
+                if (engine_.application != nullptr) {
+                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                            return engine_.application->fromAdmin(mv, sid);
+                        });
+                    if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                        co_await close(close_mode::terminal);
+                        co_return std::unexpected(cb_r.error());
+                    }
+                    if (!cb_r) {
+                        // fromAdmin reject → emit session Reject(35=3).
+                        // Best-effort: proceed even if assign or emit fails
+                        // (session still applies the SequenceReset below — co_return ok).
+                        const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                        const auto rj_st52 = effective_clock_
+                                                 ? stamp_sending_time(*effective_clock_)
+                                                 : SendingTimeStamp{};
+                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                        std::array<std::byte, 512> rj_buf{};
+                        auto rj_r = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref, 0, hdr.msg_type, 3,
+                            cfg_.begin_string, rj_st52.value);
+                        if (rj_r) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                (void)co_await store_then_emit(rj_seq, *rj_r);
+                            }
+                        }
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                }
+                co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
+                                                                parse_seqnum(hdr.msg_seq_num));
             }
 
             // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
@@ -1571,6 +1826,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, next_expected, 0U,
                         cfg_.begin_string, st52.value);
                     if (rr_result) {
+                        // 019 T014: toAdmin before transmitting ResendRequest. [FR-008/010]
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*rr_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -1618,8 +1879,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
             // Reset mode was handled before Guard 4. [S-023]
             if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
-                co_return co_await apply_inbound_sequence_reset(
-                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
+                co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
+                                                                parse_seqnum(hdr.msg_seq_num));
             }
 
             // T046 (US4): inbound Logout in Active/LogonReceived state.
@@ -1643,6 +1904,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, {}, cfg_.begin_string,
                         st52.value);
                     if (logout_result) {
+                        // 019 T014: toAdmin before confirming Logout. [FR-008/010]
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*logout_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -1657,7 +1924,51 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
                         .by_peer_request = false});
                 }
+                // 019 T016 — fromAdmin completeness fix (FR-004):
+                // Wire fromAdmin for inbound Logout (35=5) AFTER the FSM acts
+                // (confirming Logout emitted above). Fires on Active→Disconnected
+                // transition, while still Active, consistent with US1 wiring.
+                // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
+                // but the session still disconnects (Logout has been confirmed).
+                if (engine_.application != nullptr) {
+                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
+                    // before returning, so onLogout in record_state_transition_ below
+                    // can acquire its own scope.
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                            return engine_.application->fromAdmin(mv, sid);
+                        });
+                    if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                        // throw from fromAdmin on Logout path: terminal close.
+                        // onLogout will still fire in record_state_transition_ below.
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(cb_r.error());
+                    }
+                    // fromAdmin reject on Logout: emit Reject(35=3) but still disconnect.
+                    // Best-effort: proceed even if assign or emit fails (session disconnects
+                    // regardless).
+                    if (!cb_r) {
+                        const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                        const auto rj_st52 = effective_clock_
+                                                 ? stamp_sending_time(*effective_clock_)
+                                                 : SendingTimeStamp{};
+                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                        std::array<std::byte, 512> rj_buf{};
+                        auto rj_r = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref, 0, hdr.msg_type, 3,
+                            cfg_.begin_string, rj_st52.value);
+                        if (rj_r) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                (void)co_await store_then_emit(rj_seq, *rj_r);
+                            }
+                        }
+                    }
+                }
                 // Both Active and LogonReceived → Disconnected.
+                // onLogout fires inside record_state_transition_ (INV-7 guard).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -1676,6 +1987,35 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // detect inbound silence windows.
                 if (effective_clock_) {
                     last_inbound_steady_ = effective_clock_->steady_now();
+                }
+
+                // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
+                // Called here (top of Active-only handling) for ALL admin MsgTypes
+                // that reach this point after FSM + seqnum validation.
+                // Note: Logout(35=5) and SequenceReset(35=4) return early ABOVE
+                // this block; they are NOT dispatched to fromAdmin in this slice
+                // (deferred to US3/US2 wiring). Heartbeat/TestRequest/ResendRequest/
+                // Reject are dispatched here.
+                // [research D3/D4; FR-004; INV-6]
+                if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
+                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
+                    // before returning, so onLogout in record_state_transition_ below
+                    // can acquire its own scope.
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                            return engine_.application->fromAdmin(mv, sid);
+                        });
+                    if (!cb_r) {
+                        if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            co_await close(close_mode::terminal);
+                            co_return std::unexpected(cb_r.error());
+                        }
+                        // fromAdmin reject → session Reject(35=3). (INV-4; D4)
+                        // Disconnected-on-failure for assign_outbound + store_then_emit.
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type);
+                    }
                 }
 
                 // T041 US3 / T018-D: Active row — inbound Heartbeat → liveness.
@@ -1714,6 +2054,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
                             cfg_.begin_string, st52.value);
                         if (hb_result) {
+                            // 019 T014: toAdmin before Heartbeat echo. [FR-008/010]
+                            // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                            if (!fire_to_admin_(*hb_result)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                            }
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -1742,6 +2088,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
                         cfg_.begin_string, st52.value);
                     if (hb_result) {
+                        // 019 T014: toAdmin before Heartbeat reply. [FR-008/010]
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*hb_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -1803,6 +2155,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
                                mt == "5" || mt == "A";
                     };
+                    // FIX-3 (gate-b/r1): flag set by emit_gapfill_async when
+                    // fire_to_admin_ returns false (toAdmin threw). Callers check
+                    // this flag to distinguish transport-error false from
+                    // callback-threw false and return app_callback_threw.
+                    bool gapfill_callback_threw = false;
                     const auto emit_gapfill_async =
                         [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
                         std::array<std::byte, 256> gf_buf{};
@@ -1813,6 +2170,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!gf) {
                             co_return true;
                         }  // build failure treated as no-op
+                        // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*gf)) {
+                            gapfill_callback_threw = true;
+                            co_return false;
+                        }
                         co_return co_await transmit_async(*gf);
                     };
 
@@ -1835,6 +2198,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U,
                                                          new_seq_no)) {
                             record_state_transition_(fsm_state::Disconnected);
+                            if (gapfill_callback_threw) {
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                         }
                         co_return fixpp::core::expected_t<void>{};
                     }
@@ -1871,6 +2238,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             if (gap_open) {
                                 if (!co_await emit_gapfill_async(gap_start, k)) {
                                     record_state_transition_(fsm_state::Disconnected);
+                                    if (gapfill_callback_threw) {
+                                        co_return std::unexpected(
+                                            fixpp::core::error::app_callback_threw);
+                                    }
                                     co_return fixpp::core::expected_t<void>{};
                                 }
                                 gap_open = false;
@@ -1894,6 +2265,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (gap_open) {
                         if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
                             record_state_transition_(fsm_state::Disconnected);
+                            if (gapfill_callback_threw) {
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                         }
                     }
                     // Remain in Active after responding to ResendRequest.
@@ -1917,50 +2292,78 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // The "A" (dup-Logon) cell stays Reject per 005's intentional
                 // defensive divergence from QuickFIX convention.
                 {
-                    // Known session admin MsgTypes (all others → Reject).
-                    // "0" = Heartbeat, "1" = TestRequest, "3" = Reject, "5" = Logout.
-                    // "2" = ResendRequest (handled above), "4" = SequenceReset (handled above).
-                    // "A" (dup-Logon-in-Active) deliberately EXCLUDED — falls through to Reject.
-                    const bool is_session_admin =
-                        (hdr.msg_type == "0" ||  // Heartbeat
-                         hdr.msg_type == "1" ||  // TestRequest
-                         hdr.msg_type == "2" ||  // ResendRequest (handled above)
-                         hdr.msg_type == "3" ||  // Reject (handled above)
-                         hdr.msg_type == "4" ||  // SequenceReset (handled above)
-                         hdr.msg_type == "5");   // Logout (handled above)
+                    // 019 T006: use the shared classifier (single source of truth).
+                    // "A" (dup-Logon-in-Active) is deliberately EXCLUDED from
+                    // is_admin_msgtype — it falls through to Reject per 005
+                    // data-model row 22 / FR-017.
+                    //
+                    // 019 T011: app-accept branch.
+                    // When engine_.application is registered, a non-admin MsgType
+                    // in Active is an application message → route to fromApp instead
+                    // of emitting the default Reject(35=3). This SUPPRESSES the
+                    // default Reject for known app types when an Application exists.
+                    // FR-014 byte-identity preserved: when application==nullptr the
+                    // existing Reject path is unchanged. (research D8)
+                    if (!detail::is_admin_msgtype(hdr.msg_type)) {
+                        if (engine_.application == nullptr) {
+                            // No Application registered — pre-019 behaviour: Reject.
+                            // Unknown / app-type MsgType in Active →
+                            // Reject(reason=session_msg_type_invalid_for_state=3).
+                            // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
+                            // Disconnected-on-failure for assign_outbound + store_then_emit.
+                            co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                    hdr.msg_type);
+                        }
+                        // else: Application registered → falls through to fromApp dispatch below.
+                    }
+                }
 
-                    if (!is_session_admin) {
-                        // Unknown / app-type MsgType in Active →
-                        // Reject(reason=session_msg_type_invalid_for_state=3).
-                        // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
-                        std::array<std::byte, 512> rj_buf{};
+                // ── 019 T011: fromApp dispatch for app-typed messages ─────────
+                // Reached ONLY when engine_.application != nullptr (guard above
+                // lets app messages fall through only if Application is registered).
+                // Admin messages are dispatched via fromAdmin at the top of the
+                // Active block and return early; they never reach here.
+                // FR-003; research D3/D4/D8; [const §VIII.5] (stack parse arena).
+                if (engine_.application != nullptr) {
+                    // kInboundParseArena: app frames may carry arbitrary payload.
+                    // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
+                    // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
+                    auto cb_r = parse_and_dispatch_(
+                        frame, kInboundParseArena,
+                        [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
+                    if (!cb_r) {
+                        if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            co_await close(close_mode::terminal);
+                            co_return std::unexpected(cb_r.error());
+                        }
+                        // fromApp reject → BusinessMessageReject(35=j). (D4; FR-005)
+                        // NOT merged with the 35=3 Reject helper — different builder/fields.
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
                                                            : SendingTimeStamp{};
-                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-                        auto rj_result = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                        const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
+                        std::array<std::byte, 512> bmr_buf{};
+                        auto bmr_r = fixpp::session::build_business_message_reject(
+                            std::span<std::byte>{bmr_buf.data(), bmr_buf.size()}, bmr_seq,
                             cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-                            0,             // RefTagID: n/a for MsgType rejection
-                            hdr.msg_type,  // RefMsgType: the offending MsgType
-                            3,             // SessionRejectReason = 3 (invalid MsgType)
+                            hdr.msg_type,  // RefMsgType(372)
+                            0,             // BusinessRejectReason(380) = Other
                             cfg_.begin_string, st52.value);
-                        if (rj_result) {
+                        if (bmr_r) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
-                                // Overflow or closed: session-fatal per data-model.md:30 E3.
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
+                            auto emit_r = co_await store_then_emit(bmr_seq, *bmr_r);
                             if (!emit_r) {
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(emit_r.error());
                             }
                         }
-                        // Remain in Active — session stays after sending Reject.
-                        co_return fixpp::core::expected_t<void>{};
                     }
+                    // If parse fails (cb_r == ok from parse_and_dispatch_):
+                    // frame accepted for seqnum; session stays Active.
                 }
             }
 
@@ -2212,6 +2615,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);
+            // 019 T016: if onLogon threw, terminal-close the session.
+            if (lifecycle_cb_threw_) {
+                lifecycle_cb_threw_ = false;
+                co_await close(fixpp::session::close_mode::terminal);
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
             if (effective_clock_) {
@@ -2316,18 +2725,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // (1) Stamp SendingTime(52) from effective_clock.now().
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
 
-    // (2) Assign outbound MsgSeqNum(34) via SeqnumManager::assign_outbound() per
-    // spec.md FR-001(a). Peek the current value; advance on success of emit.
-    // F3 (Round-A drift): switched from bare next_outbound_seq_++ to
-    // seqnum_mgr_.assign_outbound() so both counters stay in sync.
-    // [spec.md FR-001(a); data-model.md §E1; F3 drift fix]
-    auto assign_r = co_await seqnum_mgr_.assign_outbound();
-    if (!assign_r) {
-        co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
-    }
-    const seqnum_t seq = *assign_r;
-    // RC#A (gate-b/r1-green): next_outbound_seq_ removed — no sync needed.
-    // The manager is now the single source of truth for outbound seqnums.
+    // (2) Peek outbound MsgSeqNum(34) — used in frame build below.
+    // The seqnum is NOT yet advanced (assign_outbound is called AFTER toApp check).
+    // Mirrors the admin-builder pattern (peek + build + assign) used by build_heartbeat
+    // et al. in the liveness loop. [spec.md FR-001(a); data-model.md §E1]
+    const seqnum_t seq = seqnum_mgr_.peek_outbound();
 
     // (3) Build the frame into a 4096-byte stack buffer.
     std::array<std::byte, 4096> buf{};
@@ -2444,6 +2846,51 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         if (!wfield("10=", std::string_view{cs_buf, 3})) {
             co_return std::unexpected(error::wire_frame_too_large);
         }
+    }
+
+    // ── 019 T013: toApp inspection/veto (FR-006/007; US2 AC1/AC2; research D6) ──
+    // Called AFTER the complete frame is built so the MessageView passed to toApp
+    // contains all FIX fields (8=, 34=, 49=, 52=, 56=, etc.) — NOT the raw
+    // app_payload (which is a partial body without session headers).
+    // Run BEFORE store_then_emit so a vetoed/aborted send is not stored or transmitted.
+    // A veto does NOT consume the seqnum — the seqnum was already assigned above;
+    // however a vetoed frame is simply not emitted (the seqnum hole is acceptable
+    // per spec — the next successful send will use the NEXT seqnum). This matches
+    // the QuickFIX behavior where a vetoed outgoing message leaves a gap.
+    //
+    // Uses callback_dispatch_scope (INV-2 debug guard) + invoke_callback_safe
+    // (throw → terminal-close, FR-011). Session stays Active on veto (INV-5/SC-004).
+    // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
+    if (engine_.application != nullptr) {
+        std::span<const std::byte> built_frame{buf.data(), pos};
+        // kInboundParseArena: built app frame may carry an arbitrary-size payload.
+        // T019 note: parse_and_dispatch_ drops callback_dispatch_scope before returning.
+        // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
+        auto cb_r = parse_and_dispatch_(built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+            return engine_.application->toApp(mv, sid);
+        });
+        if (!cb_r) {
+            if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                co_await close(close_mode::terminal);
+                co_return std::unexpected(cb_r.error());
+            }
+            // toApp veto (app_do_not_send) or other error → drop, return error.
+            // Session stays Active (INV-5/SC-004).
+            co_return std::unexpected(cb_r.error());
+        }
+        // If parse fails (cb_r == ok): frame accepted (no-op on toApp — cannot inspect).
+    }
+
+    // (3b) Advance outbound seqnum counter via assign_outbound() — AFTER toApp check
+    // so a vetoed send does NOT consume a seqnum. [FR-001(a); T013 ordering]
+    {
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
+        }
+        // The assigned value must equal the peeked seq (single-strand, no race).
+        // Discard the returned value — we already embedded seq in the frame above.
+        (void)assign_r;
     }
 
     // (4) store(outbound) BEFORE transport ([2e §4.1]).
@@ -2563,6 +3010,12 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq, cfg_.sender_comp_id,
                     cfg_.target_comp_id, {}, cfg_.begin_string, st52_hb.value);
                 if (hb_result) {
+                    // 019 T014: toAdmin before liveness Heartbeat. [FR-008/010]
+                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                    if (!fire_to_admin_(*hb_result)) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         record_state_transition_(fsm_state::Disconnected);
@@ -2611,6 +3064,12 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
                     cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
                 if (tr_result) {
+                    // 019 T014: toAdmin before TestRequest. [FR-008/010]
+                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                    if (!fire_to_admin_(*tr_result)) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -2784,13 +3243,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         const auto st52 =
             effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-        auto rj_result = fixpp::session::build_reject(
-            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-            cfg_.target_comp_id, ref_seq,
-            36,   // RefTagID = 36 (NewSeqNo)
-            "4",  // RefMsgType = SequenceReset
-            5,    // SessionRejectReason = 5 (ValueIsIncorrect)
-            cfg_.begin_string, st52.value);
+        auto rj_result =
+            fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                         cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                                         36,   // RefTagID = 36 (NewSeqNo)
+                                         "4",  // RefMsgType = SequenceReset
+                                         5,    // SessionRejectReason = 5 (ValueIsIncorrect)
+                                         cfg_.begin_string, st52.value);
         if (rj_result) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {
@@ -2843,6 +3302,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // The session still transitions to LogoutSent and times out.
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
+        // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
+        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+        if (!fire_to_admin_(*logout_result)) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
             // Overflow or closed: session-fatal per data-model.md:30 E3.
