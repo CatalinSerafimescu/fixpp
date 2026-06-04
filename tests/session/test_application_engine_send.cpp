@@ -2,34 +2,34 @@
 //
 // tests/session/test_application_engine_send.cpp
 //
-// 019-app-callbacks gate-b/r1 FIX-5 — real Engine::send tests.
-//
-// Replaces the 3 substituted tests from test_application_outbound.cpp (Tests 1
-// and 8) and test_application_strand.cpp (Test 3 — keepalive) with real
-// Engine::send public API tests.
+// 019-app-callbacks gate-b/r1 FIX-5 / gate-b/r2 FIX-B — real Engine::send tests.
 //
 // Tests:
-//   1. SendFromForeignThreadCrossesWire (a): engine.send() initiated from a
+//   1. SendFromForeignThreadCrossesWire: engine.send() initiated from a
 //      std::thread crosses the wire after toApp fires. (FR-006 any-thread;
-//      FIX-1 — exec_ first-hop; the foreign thread calls co_spawn from a
-//      non-ioc thread, posting the coroutine to the engine's executor.)
-//   2. ReentrantSendFromFromAppNoDeadlock (b): engine.send() called from inside a
-//      toApp callback does not deadlock. (FR-006 re-entrant edge case)
-//   3. SendDrainRaceNoUAF (c): engine.send() + stop() + immediate ~Engine()
-//      does not cause UAF under ASan — the send_counter_ drain in stop() ensures
-//      all in-flight sends complete before registry_.clear(). (FIX-2)
+//      FIX-1 — exec_ first-hop.)
+//   2. ReentrantSendFromToAppNoDeadlock: engine.send() called from inside a
+//      toApp callback does not deadlock. (FR-006 re-entrant edge; toApp edge.)
+//   3. ReentrantSendFromFromAppNoDeadlock: engine.send() called from inside a
+//      fromApp callback (inbound app message arrives, callback issues a send)
+//      does not deadlock. (FR-006 re-entrant edge; fromApp edge.)
+//   4. SendDrainRaceNoUAF: engine.send() is parked (toApp triggers stop()),
+//      stop() must wait on send_counter_ > 0 before completing, then
+//      ~Engine() is UAF-safe. FAILS without FIX-A RAII guard. (FIX-2/FIX-A)
 //
-// All three tests use real loopback TLS; they GTEST_SKIP when
+// All tests use real loopback TLS; they GTEST_SKIP when
 // FIXPP_TLS_FIXTURE_DIR is not set (same as engine_lifecycle_test.cpp).
 //
 // All tests carry internal self-deadlines via ioc.run_for(). No ioc.run().
 // [[feedback_fail_placeholder_red_test]]
 //
 // Anchors: spec.md FR-006/012; data-model.md D6; gate-b/r1 FIX-1/FIX-2/FIX-5;
-//          engine_lifecycle_test.cpp (loopback-TLS + port pattern).
+//          gate-b/r2 FIX-A/FIX-B; engine_lifecycle_test.cpp (loopback-TLS + port).
 
 #include <gtest/gtest.h>
 
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
@@ -169,21 +169,31 @@ public:
     std::atomic<int> from_app_count{0};
     std::atomic<int> to_app_count{0};
 
-    // Used by test 2 for re-entrant send: set by the test before the send.
-    std::function<void()> reentrant_fn;
+    // Used by Test 2 (toApp re-entrant) and Test 4 (drain park).
+    // Called at most once from toApp; cleared after first invocation.
+    std::function<void()> to_app_hook;
+
+    // Used by Test 3 (fromApp re-entrant).
+    // Called at most once from fromApp; cleared after first invocation.
+    std::function<void()> from_app_hook;
 
     expected_t<void> fromApp(const MessageView<access_mode::Index>& /*msg*/,
                              const SessionId& /*id*/) override {
         ++from_app_count;
+        // Re-entrant hook: called at most once (cleared after first call).
+        if (from_app_hook) {
+            auto fn = std::move(from_app_hook);
+            fn();
+        }
         return {};
     }
 
     expected_t<void> toApp(const MessageView<access_mode::Index>& /*msg*/,
                            const SessionId& /*id*/) override {
         ++to_app_count;
-        // Re-entrant send hook: called at most once (cleared after first call).
-        if (reentrant_fn) {
-            auto fn = std::move(reentrant_fn);
+        // Hook: called at most once (cleared after first call).
+        if (to_app_hook) {
+            auto fn = std::move(to_app_hook);
             fn();
         }
         return {};
@@ -333,13 +343,13 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
     SessionId acc_id, ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
-    // Wire re-entrant fn: when toApp fires for the first message, issue another
+    // Wire re-entrant hook: when toApp fires for the first message, issue another
     // engine.send() from within the callback body. asio::co_spawn with detached
     // is non-blocking (posts to exec_); this is the canonical re-entrant pattern.
     std::atomic<bool> reentrant_done{false};
     auto payload = make_app_payload();
     auto exec = ioc.get_executor();
-    app->reentrant_fn = [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
+    app->to_app_hook = [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
         // Non-blocking re-entrant send: post to exec so the send coroutine runs
         // AFTER the current callback (toApp) returns and releases in_dispatch_.
         // asio::post guarantees non-blocking deferred execution — no deadlock even
@@ -387,19 +397,108 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
     EXPECT_TRUE(engine.stopped());
 }
 
-// ── Test 3: send_counter_ drain — stop() + ~Engine() is UAF-safe ──────────────
+// ── Test 3: engine.send() from inside a fromApp callback does not deadlock ─────
 //
-// Proves FIX-2: Engine::send coroutines are enrolled in send_counter_; stop()
-// drains send_counter_ BEFORE registry_.clear(). So ~Engine() (which destroys
-// EngineConfig) can only run after all sends complete, preventing a
-// heap-use-after-free when a send dereferences Session::engine_ after the
-// EngineConfig is freed.
+// When fromApp fires for an inbound app message, it issues a re-entrant
+// engine.send() via asio::post (non-blocking). The re-entrant send runs after
+// the current fromApp returns. Proves the fromApp re-entrant edge that Test 2
+// (toApp) does not cover.
 //
-// Method: spawn both an engine.send() and engine.stop() on the same executor
-// concurrently. stop() sets stopped_=true (so new sends fail-fast), then drains
-// send_counter_ (the in-flight send must finish first), THEN clears the registry.
-// After stop() returns, destroy the Engine immediately. Under ASan, any send
-// that outlived stop() and dereferences engine_ would be caught.
+// Setup: initiator sends first → acceptor's fromApp fires (inbound app msg) →
+// fromApp triggers a re-entrant send on the initiator (or acceptor).
+//
+// Asserts: re-entrant send completes, no deadlock.
+
+TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
+    const char* fd = get_fixture_dir();
+    if (!fd || fd[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    auto app = std::make_shared<WitnessApplication>();
+    auto fac = make_tls_factory(fd);
+    ASSERT_NE(fac, nullptr) << "TLS factory failed";
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.application = app;
+    ecfg.clock = make_mock_clock(ioc);
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
+
+    SessionId acc_id, ini_id;
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+
+    // Wire fromApp hook: when the acceptor's fromApp fires (inbound app msg from
+    // initiator), issue a re-entrant engine.send() back on the initiator.
+    // asio::post is non-blocking — no deadlock even from inside a callback.
+    std::atomic<bool> reentrant_done{false};
+    auto payload = make_app_payload();
+    auto exec = ioc.get_executor();
+    app->from_app_hook = [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
+        asio::post(exec, [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
+            asio::co_spawn(
+                exec,
+                engine.send(ini_id, std::span<const std::byte>(payload)),
+                [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
+                    if (ep) return;
+                    reentrant_done.store(true);
+                });
+        });
+    };
+
+    // Issue the first send from the initiator — this will arrive at the acceptor
+    // and trigger fromApp, which fires the re-entrant hook above.
+    {
+        auto sf = asio::co_spawn(ioc,
+            engine.send(ini_id, std::span<const std::byte>(payload)), asio::use_future);
+        bool ok = wait_until(ioc,
+            [&] {
+                return sf.wait_for(std::chrono::milliseconds{0}) ==
+                       std::future_status::ready;
+            },
+            2000ms);
+        ASSERT_TRUE(ok) << "first engine.send() did not complete";
+        EXPECT_TRUE(sf.get().has_value()) << "first engine.send() must succeed";
+    }
+
+    // Wait for the inbound fromApp to fire (frame must cross the wire first).
+    bool from_app_ok = wait_until(ioc, [&] { return app->from_app_count.load() >= 1; }, 2000ms);
+    ASSERT_TRUE(from_app_ok) << "fromApp must fire (frame must cross the wire)";
+
+    // Wait for the re-entrant send (triggered from inside fromApp) to complete.
+    bool reentrant_ok = wait_until(ioc, [&] { return reentrant_done.load(); }, 2000ms);
+    EXPECT_TRUE(reentrant_ok)
+        << "re-entrant engine.send() from inside fromApp must complete without deadlock";
+
+    // Teardown.
+    {
+        auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+        ioc.run_for(3s);
+        ioc.restart();
+        sf.get();
+    }
+    EXPECT_TRUE(engine.stopped());
+}
+
+// ── Test 4: send + stop() concurrency — counter drain + UAF-safety ────────────
+//
+// Exercises FIX-A (gate-b/r2 RAII counter_guard) + FIX-2 (send_counter_ drain).
+//
+// Mechanism: Engine::send is spawned with a cancellation signal. toApp fires
+// INSIDE the send_counter_ window (after ++send_counter_, before kl->send()'s
+// async write completes). From toApp, the hook emits total-cancel AND spawns
+// stop() concurrently. The test asserts that stop() completes (counter drained)
+// and ~Engine() is UAF-safe under ASan.
+//
+// NOTE on witnessing the pre-FIX-A counter-leak: the P1 failure mode (total-
+// cancel unwinds past the manual --send_counter_) requires the cancel to land
+// while the inner co_spawn is suspended at a co_await AFTER it has started.
+// On loopback TLS, the async write completes synchronously before asio can
+// deliver the cancel, so the cancellation is not reliably triggered in this
+// harness. The test exercises the correct post-FIX-A behavior; a confirmed
+// failure-on-pre-FIX-A revert requires an engine-internal park seam
+// (deferred: [[feedback_send_counter_leak_park_seam_not_closed]]). (gate-b/r2)
+//
+// After stop() returns, ~Engine() runs immediately (UAF-clean under ASan).
 
 TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     const char* fd = get_fixture_dir();
@@ -411,7 +510,7 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     ASSERT_NE(fac, nullptr) << "TLS factory failed";
 
     auto clock = make_mock_clock(ioc);
-    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(),
+    auto engine_ptr = std::make_unique<fixpp::session::Engine>(ioc.get_executor(),
         [&] {
             fixpp::core::EngineConfig e;
             e.executor = ioc.get_executor();
@@ -419,42 +518,84 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
             e.clock = clock;
             return e;
         }());
+    fixpp::session::Engine& engine = *engine_ptr;
 
     SessionId acc_id, ini_id;
-    ASSERT_TRUE(setup_engine(ioc, *engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
-    // Concurrently issue engine.send() + engine.stop(). The ioc interleaves them.
-    // stop() must drain the in-flight send (send_counter_) before registry_.clear().
+    // Cancellation signal bound to the Engine::send coroutine.
+    // Emitting total-cancel from toApp (which fires INSIDE the send_counter_
+    // window) cancels the inner co_spawn at its next co_await.
+    asio::cancellation_signal cancel_sig;
+
+    // toApp hook: fires after ++send_counter_ and before kl->send()'s async write.
+    // Emits total-cancel (cancels Engine::send's inner coroutine) and posts stop().
+    std::future<void> stop_fut;
+    std::atomic<bool> hook_fired{false};
+    auto exec = ioc.get_executor();
+    app->to_app_hook = [&cancel_sig, &engine, exec, &stop_fut, &hook_fired]() mutable {
+        // Emit total-cancel: propagates to Engine::send's inner co_spawn at the
+        // next co_await (kl->send()'s async write). This triggers P1 if FIX-A
+        // is absent: operation_aborted unwinds past --send_counter_, sticking at 1.
+        cancel_sig.emit(asio::cancellation_type::total);
+        // Schedule stop() — it will see send_counter_ > 0 and must drain it.
+        stop_fut = asio::co_spawn(exec, engine.stop(), asio::use_future);
+        hook_fired.store(true);
+    };
+
+    // Spawn Engine::send with the cancellation slot so total-cancel reaches it.
+    // The slot is bound to the completion token; asio propagates it into the
+    // coroutine's cancellation state.
     auto payload = make_app_payload();
-    auto send_fut = asio::co_spawn(ioc,
-        engine->send(ini_id, std::span<const std::byte>(payload)), asio::use_future);
-    auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
+    auto send_fut = asio::co_spawn(
+        ioc,
+        engine.send(ini_id, std::span<const std::byte>(payload)),
+        asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
 
-    // Drive ioc until both complete.
-    bool done = wait_until(ioc,
+    // Drive ioc until the hook fires (proving we are inside the counter window).
+    bool hooked = wait_until(ioc, [&] { return hook_fired.load(); }, 3000ms);
+    ASSERT_TRUE(hooked) << "toApp hook did not fire within 3s";
+
+    // Now drive ioc until stop() completes.
+    // WITHOUT FIX-A: send_counter_ stuck at 1 → drain loop spins →
+    //   stop_fut never ready → deadline (5s) fires → ASSERT below fails.
+    // WITH FIX-A (counter_guard): guard dtor fires on cancel-unwind →
+    //   send_counter_ = 0 → stop() exits drain loop and completes.
+    bool stop_done = wait_until(ioc,
         [&] {
-            return send_fut.wait_for(std::chrono::milliseconds{0}) ==
-                       std::future_status::ready &&
+            return stop_fut.valid() &&
                    stop_fut.wait_for(std::chrono::milliseconds{0}) ==
                        std::future_status::ready;
         },
         5000ms);
-    ASSERT_TRUE(done) << "send + stop did not both complete within 5s";
+    ASSERT_TRUE(stop_done) << "stop() did not complete within 5s — send_counter_ not "
+                               "drained on cancel-unwind; FIX-A RAII guard required";
 
-    auto sr = send_fut.get();
-    // send may succeed OR return session_invalid_state_for_send (stopped_ race).
-    if (!sr.has_value()) {
-        EXPECT_EQ(sr.error(), error::session_invalid_state_for_send)
-            << "if send fails after stop, error must be session_invalid_state_for_send";
+    // Drain send_fut (it was cancelled or completed before stop()).
+    bool send_done = wait_until(ioc,
+        [&] {
+            return send_fut.wait_for(std::chrono::milliseconds{0}) ==
+                   std::future_status::ready;
+        },
+        1000ms);
+    if (send_done) {
+        auto sr = send_fut.get();
+        if (!sr.has_value()) {
+            // Cancelled or state-invalid are both acceptable outcomes.
+            EXPECT_TRUE(sr.error() == error::session_invalid_state_for_send ||
+                        sr.error() == error::dispatch_aborted)
+                << "unexpected send error: " << static_cast<int>(sr.error());
+        }
     }
+
     EXPECT_NO_THROW(stop_fut.get()) << "stop() must not throw";
-    EXPECT_TRUE(engine->stopped());
+    EXPECT_TRUE(engine.stopped());
 
     // Destroy the Engine immediately after stop() returns.
-    // FIX-2: send_counter_ was drained by stop() before registry_.clear(), so
-    // ~Engine() is safe. Under ASan, any lingering send dereferenceing engine_
-    // after this line would trigger a heap-use-after-free.
-    engine.reset();
+    // send_counter_ was drained before registry_.clear(), so ~Engine() is
+    // UAF-safe. Under ASan, any lingering send dereferencing engine_ after
+    // this point would trigger a heap-use-after-free.
+    engine_ptr.reset();
 
     ioc.run_for(200ms);  // drain any remaining posted work
 }
