@@ -28,8 +28,10 @@ ctest --test-dir build/debug -R inbound_poss_dup --output-on-failure
 
 Alloc discipline (no heap on the inbound path):
 ```bash
-# counting_resource witness asserts 0 allocations on the new disposition arm
-ctest --test-dir build/debug -R inbound_poss_dup -V | grep -i alloc
+# Binding INV-5 no-heap gate: mallocnesia LD_PRELOAD run in /speckit-verify Step 6.
+# The unit tests above assert only real behavior (Active + no seqnum advance).
+# To run the alloc guard directly:
+ctest --test-dir build/debug -R test_session_alloc_guard --output-on-failure
 ```
 
 ## 2. Live interop cells (skip-without-counterparty)
