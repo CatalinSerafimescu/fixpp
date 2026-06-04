@@ -16,8 +16,8 @@
 // No std::mutex. No exception control-flow. [const §XV.9].
 #pragma once
 
-#include <fixpp/core/error.hpp>    // expected_t<void>
-#include <fixpp/wire/parser.hpp>   // wire::MessageView, wire::access_mode
+#include <fixpp/core/error.hpp>   // expected_t<void>
+#include <fixpp/wire/parser.hpp>  // wire::MessageView, wire::access_mode
 
 // SessionId is declared in engine.hpp — forward-declare to keep this header
 // lightweight (it is included by EngineConfig which is in the awaitable corpus).
@@ -55,7 +55,7 @@ public:
 
     // onLogon: session reached established (Active) state (FR-009).
     //   The user may begin originating sends.
-    virtual void onLogon(const SessionId& /*id*/) {}   // FR-009
+    virtual void onLogon(const SessionId& /*id*/) {}  // FR-009
 
     // onLogout: session leaving established state — fires on graceful close,
     //   terminal close, OR callback-threw exit (exactly once per session via
@@ -69,9 +69,9 @@ public:
     //   processing (FR-004). Default: accept.
     //   return {} (value) ⇒ accepted; return unexpected(e) ⇒ engine emits
     //   session Reject(35=3) to the peer (FR-005).
-    virtual fixpp::core::expected_t<void>
-    fromAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-              const SessionId& /*id*/) {
+    virtual fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) {
         return {};  // default accept (FR-002)
     }  // FR-003/FR-004/FR-005
 
@@ -79,9 +79,9 @@ public:
     //   FSM processing (FR-003). Default: accept.
     //   return {} (value) ⇒ accepted; return unexpected(e) ⇒ engine emits
     //   BusinessMessageReject(35=j) to the peer (FR-005).
-    virtual fixpp::core::expected_t<void>
-    fromApp(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-            const SessionId& /*id*/) {
+    virtual fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) {
         return {};  // default accept (FR-002)
     }  // FR-003/FR-005
 
@@ -90,18 +90,17 @@ public:
     // toAdmin: engine about to emit an admin message; inspect only — the
     //   message is ALWAYS sent regardless of the return (admin not vetoable,
     //   FR-008). Default: no-op.
-    virtual void
-    toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-            const SessionId& /*id*/) {}  // FR-008
+    virtual void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                         const SessionId& /*id*/) {}  // FR-008
 
     // toApp: engine or user about to emit an application message (FR-007).
     //   Default: send.
     //   return {} (value) ⇒ send; return unexpected(error::app_do_not_send) ⇒
     //   veto (DoNotSend — message not transmitted, Engine::send returns
     //   unexpected(app_do_not_send)); return unexpected(other_error) ⇒ abort.
-    virtual fixpp::core::expected_t<void>
-    toApp(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-          const SessionId& /*id*/) {
+    virtual fixpp::core::expected_t<void> toApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) {
         return {};  // default send (FR-002)
     }  // FR-007
 };

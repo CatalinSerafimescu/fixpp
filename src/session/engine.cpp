@@ -812,24 +812,25 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // into Session::send (which is awaited below). Without the reset, co_spawn
     // defaults to terminal-only and silently swallows total-cancel, leaving the
     // send running past stop(). [[feedback_asio_cospawn_total_cancellation_default]]
+    // cppcheck-suppress nullPointerRedundantCheck  // FP: the `!kl` guard at the
+    // Step-3 early-return (above) is NOT redundant (an acceptor's session is null
+    // before its loop starts), and it returns before this deref — so `kl` is
+    // non-null here. cppcheck cannot prove the early-return covers the deref.
     auto exec = kl->executor().underlying();
-    core::expected_t<void> result =
-        co_await asio::co_spawn(exec,
-                                [kl, payload_copy = std::move(payload_copy)]()
-                                    -> asio::awaitable<core::expected_t<void>> {
-                                    // Enable total cancellation so stop()'s
-                                    // cancellation_type::total reaches Session::send.
-                                    co_await asio::this_coro::reset_cancellation_state(
-                                        asio::enable_total_cancellation());
-                                    // Re-check state on the strand (may have changed).
-                                    if (kl->state() != fsm_state::Active) {
-                                        co_return std::unexpected(
-                                            core::error::session_invalid_state_for_send);
-                                    }
-                                    co_return co_await kl->send(std::span<const std::byte>(
-                                        payload_copy.data(), payload_copy.size()));
-                                },
-                                asio::use_awaitable);
+    core::expected_t<void> result = co_await asio::co_spawn(
+        exec,
+        [kl, payload_copy = std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
+            // Enable total cancellation so stop()'s
+            // cancellation_type::total reaches Session::send.
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            // Re-check state on the strand (may have changed).
+            if (kl->state() != fsm_state::Active) {
+                co_return std::unexpected(core::error::session_invalid_state_for_send);
+            }
+            co_return co_await kl->send(
+                std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
+        },
+        asio::use_awaitable);
 
     co_return result;
 }

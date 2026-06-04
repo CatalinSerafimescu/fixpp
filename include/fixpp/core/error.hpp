@@ -737,21 +737,21 @@ enum class error : std::uint8_t {
     //    Non-renumbering append at unused slots 129–130, next contiguous range
     //    after 017's otel_provider_init_failed = 128 per [const §X.4].
     //    Slot 70 remains a PERMANENT NUMERIC HOLE; never renumber.
-    app_do_not_send = 129,      // FR-007 — toApp veto sentinel: the Application
-                                //   returned unexpected(app_do_not_send) from
-                                //   toApp(), signalling DoNotSend. The Engine
-                                //   does NOT transmit the outbound message and
-                                //   surfaces this code as the Engine::send()
-                                //   awaitable result to the caller (INV-5).
-                                //   → C-ABI reserved (future mapping)
-    app_callback_threw = 130,   // FR-011 — session terminated by a throwing
-                                //   callback: the Application threw an exception
-                                //   from any callback site (fromApp/fromAdmin/
-                                //   toApp/toAdmin/onCreate/onLogon/onLogout).
-                                //   The engine caught at the dispatch boundary,
-                                //   logged, terminal-closed the session, and
-                                //   recorded this code. Never propagated inward.
-                                //   → C-ABI reserved (future mapping)
+    app_do_not_send = 129,     // FR-007 — toApp veto sentinel: the Application
+                               //   returned unexpected(app_do_not_send) from
+                               //   toApp(), signalling DoNotSend. The Engine
+                               //   does NOT transmit the outbound message and
+                               //   surfaces this code as the Engine::send()
+                               //   awaitable result to the caller (INV-5).
+                               //   → C-ABI reserved (future mapping)
+    app_callback_threw = 130,  // FR-011 — session terminated by a throwing
+                               //   callback: the Application threw an exception
+                               //   from any callback site (fromApp/fromAdmin/
+                               //   toApp/toAdmin/onCreate/onLogon/onLogout).
+                               //   The engine caught at the dispatch boundary,
+                               //   logged, terminal-closed the session, and
+                               //   recorded this code. Never propagated inward.
+                               //   → C-ABI reserved (future mapping)
 };
 
 template <class T>

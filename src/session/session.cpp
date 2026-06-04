@@ -56,13 +56,14 @@
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
+
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
 #include <fixpp/session/application.hpp>  // Application::fromAdmin / fromApp
-#include <fixpp/wire/parser.hpp>          // wire::Parser<Index>, wire::MessageView<Index>
 #include <fixpp/session/engine.hpp>       // SessionId::from_config
+#include <fixpp/wire/parser.hpp>          // wire::Parser<Index>, wire::MessageView<Index>
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -229,8 +230,8 @@ void Session::emit_event(SessionEvent ev) noexcept {
 // [019-app-callbacks T011/T013/T014/T016]
 
 namespace {
-constexpr std::size_t kAdminParseArena = 8192;   // admin frames: bounded small
-constexpr std::size_t kInboundParseArena = 16384; // inbound/app: larger payloads
+constexpr std::size_t kAdminParseArena = 8192;     // admin frames: bounded small
+constexpr std::size_t kInboundParseArena = 16384;  // inbound/app: larger payloads
 }  // namespace
 
 template <class CB>
@@ -1283,12 +1284,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     const auto rj_st52 =
         effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r = fixpp::session::build_reject(
-        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-        cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-        0,              // RefTagID: n/a for MsgType/veto rejection
-        ref_msg_type, 3,  // SessionRejectReason = 3
-        cfg_.begin_string, rj_st52.value);
+    auto rj_r =
+        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                                     0,                // RefTagID: n/a for MsgType/veto rejection
+                                     ref_msg_type, 3,  // SessionRejectReason = 3
+                                     cfg_.begin_string, rj_st52.value);
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -1747,8 +1748,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // [019-app-callbacks T016; FR-004; research D3/D4]
                 if (engine_.application != nullptr) {
                     // kInboundParseArena: inbound frames may carry arbitrary payload.
-                    auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
@@ -1766,9 +1767,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf{};
                         auto rj_r = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            rj_ref, 0, hdr.msg_type, 3,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref, 0, hdr.msg_type, 3,
                             cfg_.begin_string, rj_st52.value);
                         if (rj_r) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
@@ -1779,8 +1779,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return fixpp::core::expected_t<void>{};
                     }
                 }
-                co_return co_await apply_inbound_sequence_reset(
-                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
+                co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
+                                                                parse_seqnum(hdr.msg_seq_num));
             }
 
             // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
@@ -1866,8 +1866,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
             // Reset mode was handled before Guard 4. [S-023]
             if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
-                co_return co_await apply_inbound_sequence_reset(
-                    parse_seqnum(hdr.new_seqno), parse_seqnum(hdr.msg_seq_num));
+                co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
+                                                                parse_seqnum(hdr.msg_seq_num));
             }
 
             // T046 (US4): inbound Logout in Active/LogonReceived state.
@@ -1918,8 +1918,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
-                    auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
@@ -1929,7 +1929,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(cb_r.error());
                     }
                     // fromAdmin reject on Logout: emit Reject(35=3) but still disconnect.
-                    // Best-effort: proceed even if assign or emit fails (session disconnects regardless).
+                    // Best-effort: proceed even if assign or emit fails (session disconnects
+                    // regardless).
                     if (!cb_r) {
                         const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
                         const auto rj_st52 = effective_clock_
@@ -1938,9 +1939,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf{};
                         auto rj_r = fixpp::session::build_reject(
-                            std::span<std::byte>{rj_buf.data(), rj_buf.size()},
-                            rj_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            rj_ref, 0, hdr.msg_type, 3,
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref, 0, hdr.msg_type, 3,
                             cfg_.begin_string, rj_st52.value);
                         if (rj_r) {
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
@@ -1985,8 +1985,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
-                    auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                    auto cb_r =
+                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     if (!cb_r) {
@@ -1996,8 +1996,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                         // fromAdmin reject → session Reject(35=3). (INV-4; D4)
                         // Disconnected-on-failure for assign_outbound + store_then_emit.
-                        co_return co_await emit_session_reject_(
-                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type);
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type);
                     }
                 }
 
@@ -2265,8 +2265,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Reject(reason=session_msg_type_invalid_for_state=3).
                             // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
                             // Disconnected-on-failure for assign_outbound + store_then_emit.
-                            co_return co_await emit_session_reject_(
-                                parse_seqnum(hdr.msg_seq_num), hdr.msg_type);
+                            co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                    hdr.msg_type);
                         }
                         // else: Application registered → falls through to fromApp dispatch below.
                     }
@@ -2283,9 +2283,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
                     auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena, [&](auto& mv, auto& sid) {
-                            return engine_.application->fromApp(mv, sid);
-                        });
+                        frame, kInboundParseArena,
+                        [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
                     if (!cb_r) {
                         if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                             co_await close(close_mode::terminal);
@@ -2294,15 +2293,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // fromApp reject → BusinessMessageReject(35=j). (D4; FR-005)
                         // NOT merged with the 35=3 Reject helper — different builder/fields.
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
-                        const auto st52 =
-                            effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                             : SendingTimeStamp{};
+                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
+                                                           : SendingTimeStamp{};
                         const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> bmr_buf{};
                         auto bmr_r = fixpp::session::build_business_message_reject(
-                            std::span<std::byte>{bmr_buf.data(), bmr_buf.size()},
-                            bmr_seq, cfg_.sender_comp_id, cfg_.target_comp_id,
-                            ref_seq,
+                            std::span<std::byte>{bmr_buf.data(), bmr_buf.size()}, bmr_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
                             hdr.msg_type,  // RefMsgType(372)
                             0,             // BusinessRejectReason(380) = Other
                             cfg_.begin_string, st52.value);
@@ -2823,10 +2820,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         // kInboundParseArena: built app frame may carry an arbitrary-size payload.
         // T019 note: parse_and_dispatch_ drops callback_dispatch_scope before returning.
         // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
-        auto cb_r = parse_and_dispatch_(
-            built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
-                return engine_.application->toApp(mv, sid);
-            });
+        auto cb_r = parse_and_dispatch_(built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+            return engine_.application->toApp(mv, sid);
+        });
         if (!cb_r) {
             if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                 co_await close(close_mode::terminal);
@@ -3193,13 +3189,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         const auto st52 =
             effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-        auto rj_result = fixpp::session::build_reject(
-            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-            cfg_.target_comp_id, ref_seq,
-            36,   // RefTagID = 36 (NewSeqNo)
-            "4",  // RefMsgType = SequenceReset
-            5,    // SessionRejectReason = 5 (ValueIsIncorrect)
-            cfg_.begin_string, st52.value);
+        auto rj_result =
+            fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                         cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+                                         36,   // RefTagID = 36 (NewSeqNo)
+                                         "4",  // RefMsgType = SequenceReset
+                                         5,    // SessionRejectReason = 5 (ValueIsIncorrect)
+                                         cfg_.begin_string, st52.value);
         if (rj_result) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {

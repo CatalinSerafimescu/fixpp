@@ -40,11 +40,11 @@ class TracerProvider;
 class MeterProvider;
 }  // namespace fixpp::otel
 namespace fixpp::session {
-class Application;      // 019-app-callbacks T005 — fwd-decl to avoid pulling
-                        // application.hpp (wire/parser.hpp) into this header
-                        // (awaitable-corpus include-edge, [const §XV.9] /
-                        // [[feedback_awaitable_header_mutex_include_edge]]).
-                        // shared_ptr<incomplete type> is valid at declaration.
+class Application;  // 019-app-callbacks T005 — fwd-decl to avoid pulling
+                    // application.hpp (wire/parser.hpp) into this header
+                    // (awaitable-corpus include-edge, [const §XV.9] /
+                    // [[feedback_awaitable_header_mutex_include_edge]]).
+                    // shared_ptr<incomplete type> is valid at declaration.
 class MessageStoreFactory;
 }  // namespace fixpp::session
 namespace fixpp::tls {
