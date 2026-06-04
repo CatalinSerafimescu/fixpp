@@ -319,6 +319,14 @@ private:
     // if Engine::stop() is executing concurrently.
     // Strictly required by the join-before-clear invariant — private only.
     std::shared_ptr<std::atomic<int>> outstanding_counter_;
+
+    // FIX-2 (gate-b/r1): in-flight send counter. Engine::send bumps this
+    // at entry (on exec_, after the stopping_ check) and decrements on
+    // co_return. stop() drains this BEFORE registry_.clear() so no send
+    // coroutine can dereference engine_ (via session's engine_ ref) after
+    // Engine::~Engine() runs. Separate from outstanding_counter_ (loop
+    // counter) so the two domains can be drained independently.
+    std::shared_ptr<std::atomic<int>> send_counter_;
 };
 
 }  // namespace fixpp::session

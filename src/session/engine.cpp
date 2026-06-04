@@ -76,7 +76,12 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // 017 owned amendment #2: seed the engine-level trace_context snapshot
       // from EngineConfig::engine_trace_context at construction time.
       // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
-      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context}
+      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
+      // FIX-2 (gate-b/r1): initialize the in-flight send counter. Starts at
+      // zero; Engine::send bumps/decrements it; stop() drains it before
+      // registry_.clear() to prevent send coroutines from dereferencing engine_
+      // after Engine::~Engine() runs.
+      send_counter_{std::make_shared<std::atomic<int>>(0)}
 // E-5: single-executor confinement — no strand, no mutex (015 scope).
 
 {}
@@ -718,6 +723,21 @@ asio::awaitable<void> Engine::stop() {
         outstanding_counter_.reset();
     }
 
+    // FIX-2 (gate-b/r1): drain in-flight Engine::send coroutines BEFORE
+    // registry_.clear(). A send coroutine holds a shared_ptr<Session> keepalive
+    // (so the Session object is alive) but the Session stores a const EngineConfig&
+    // engine_ ref — if Engine::~Engine() runs while a send is suspended on the
+    // session strand, dereferencing engine_.application / clock / store is a UAF.
+    // stopped_ is already true, so no new sends can enter; we just wait for
+    // the currently-bumped ones to decrement. [spec.md FR-012]
+    {
+        asio::steady_timer t2{co_await asio::this_coro::executor};
+        while (send_counter_->load(std::memory_order_acquire) > 0) {
+            t2.expires_after(std::chrono::milliseconds{0});
+            co_await t2.async_wait(asio::use_awaitable);
+        }
+    }
+
     // F2: drive each surviving session through its own close() to drain the
     // per-session liveness loop. The role loops (run_read_pump) DO call
     // session.close(terminal) on read EOF/error, but when Engine::stop() total-
@@ -766,71 +786,89 @@ asio::awaitable<void> Engine::stop() {
 //
 // Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
 //
-// Design:
-//   1. Registry lookup: if id not found → session_invalid_argument (119).
-//   2. Strong keepalive: capture entry.session (shared_ptr<Session>) so the
-//      Session outlives the posted closure even if stop() races and clears the
-//      registry (UAF class from [[feedback_detached_cospawn_write_not_in_join_counter]]).
-//   3. Check session != null AND state == Active: if not → session_invalid_state_for_send (77).
-//   4. Post onto the session's strand (executor().underlying()), co_await the result.
-//   5. Session::send_impl calls toApp (via callback_dispatch_scope + invoke_callback_safe):
-//      veto (app_do_not_send) → return that error; other error → return it; accept → transmit.
-//   6. Backpressure = the awaited result ([const §XV.15]). No silent-drop queue.
-//   7. Re-entrant call from within an on-strand callback enqueues behind the current
-//      dispatch (asio::post is non-blocking → no deadlock).
+// FIX-1+FIX-2 (gate-b/r1) design:
+//   Step A: hop onto exec_ (the engine executor) so registry reads + stopped_
+//           check + send_counter_ bump are serialized with stop()'s mutations.
+//           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
+//   Step B: on exec_ — registry lookup, keepalive capture, Active check,
+//           stopping check. If stopped_ → fail-fast (no send may outlive stop()).
+//           Bump send_counter_ to enroll in the send-drain domain. [FIX-2]
+//   Step C: hop to session strand for toApp + Session::send. Decrement
+//           send_counter_ after completion. [FIX-2]
 //
-// The toApp callback runs inside Session::send_impl on the session strand. Engine::send
-// is the any-thread posting wrapper that moves work onto the strand. The session keepalive
-// (shared_ptr<Session> kl) is captured in the lambda and held for the full duration.
+//   stop() drains send_counter_ BEFORE registry_.clear() so no send coroutine
+//   can dereference engine_ after Engine::~Engine() runs.
+//   Backpressure = the awaited result ([const §XV.15]).
+//   Re-entrant call from within an on-strand callback: asio::post is
+//   non-blocking → no deadlock (FR-006 edge case).
 asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                                                      std::span<const std::byte> app_payload) {
-    // Step 1: registry lookup.
-    auto it = registry_.find(id);
-    if (it == registry_.end()) {
-        co_return std::unexpected(core::error::session_invalid_argument);
-    }
-
-    // Step 2: capture strong keepalive BEFORE posting (UAF guard).
-    std::shared_ptr<Session> kl = it->second.session;
-
-    // Step 3: session null (loop not yet started) or not Active → reject early.
-    if (!kl || kl->state() != fsm_state::Active) {
-        co_return std::unexpected(core::error::session_invalid_state_for_send);
-    }
-
-    // Copy payload bytes into a local buffer owned by this coroutine frame so the
-    // span remains valid across the post boundary (caller's span may be stack-allocated
-    // and would dangle after co_await returns control to the caller).
+    // Copy payload into a coroutine-frame-local buffer so the caller's span
+    // (potentially stack-allocated) stays valid across all co_await suspensions.
     std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
 
-    // Step 4: post onto the session's strand and await the result.
-    // asio::co_spawn with use_awaitable runs the lambda on the target executor
-    // and co_awaits it — the co_await here suspends Engine::send until the
-    // Session::send completes on the session strand.
-    //
-    // T019: reset total-cancel so stop()'s cancellation_type::total propagates
-    // into Session::send (which is awaited below). Without the reset, co_spawn
-    // defaults to terminal-only and silently swallows total-cancel, leaving the
-    // send running past stop(). [[feedback_asio_cospawn_total_cancellation_default]]
-    // cppcheck-suppress nullPointerRedundantCheck  // FP: the `!kl` guard at the
-    // Step-3 early-return (above) is NOT redundant (an acceptor's session is null
-    // before its loop starts), and it returns before this deref — so `kl` is
-    // non-null here. cppcheck cannot prove the early-return covers the deref.
-    auto exec = kl->executor().underlying();
-    core::expected_t<void> result = co_await asio::co_spawn(
-        exec,
-        [kl, payload_copy = std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
-            // Enable total cancellation so stop()'s
-            // cancellation_type::total reaches Session::send.
-            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-            // Re-check state on the strand (may have changed).
-            if (kl->state() != fsm_state::Active) {
-                co_return std::unexpected(core::error::session_invalid_state_for_send);
-            }
-            co_return co_await kl->send(
-                std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
-        },
-        asio::use_awaitable);
+    // Step A: first-hop onto exec_ so registry reads are serialized with
+    // stop()'s registry_.clear(). [FIX-1: gate-b/r1]
+    core::expected_t<void> result =
+        co_await asio::co_spawn(
+            exec_,
+            [this, id, payload_copy = std::move(payload_copy)]()
+                -> asio::awaitable<core::expected_t<void>> {
+                // ── Step B: on exec_ — safe to read registry + stopped_ ──
+
+                // FIX-2: fail-fast if stop() has begun (stopped_ set on exec_).
+                if (stopped_) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+
+                // Registry lookup (serialized with registry_.clear() by exec_).
+                auto it = registry_.find(id);
+                if (it == registry_.end()) {
+                    co_return std::unexpected(core::error::session_invalid_argument);
+                }
+
+                // Capture strong keepalive before any co_await (UAF guard).
+                std::shared_ptr<Session> kl = it->second.session;
+
+                // Session null (loop not yet started) or not Active → reject.
+                if (!kl || kl->state() != fsm_state::Active) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+
+                // FIX-2: enroll this in-flight send in the send-drain domain.
+                ++(*send_counter_);
+
+                // ── Step C: hop to session strand for toApp + Session::send ──
+                auto strand_exec = kl->executor().underlying();
+                core::expected_t<void> send_result =
+                    co_await asio::co_spawn(
+                        strand_exec,
+                        [kl, payload_copy = std::move(payload_copy)]()
+                            -> asio::awaitable<core::expected_t<void>> {
+                            // Enable total cancellation so stop()'s
+                            // cancellation_type::total reaches Session::send.
+                            // [[feedback_asio_cospawn_total_cancellation_default]]
+                            co_await asio::this_coro::reset_cancellation_state(
+                                asio::enable_total_cancellation());
+                            // Re-check state on the strand (may have changed
+                            // since the exec_ check above).
+                            if (kl->state() != fsm_state::Active) {
+                                co_return std::unexpected(
+                                    core::error::session_invalid_state_for_send);
+                            }
+                            co_return co_await kl->send(std::span<const std::byte>(
+                                payload_copy.data(), payload_copy.size()));
+                        },
+                        asio::use_awaitable);
+
+                // FIX-2: decrement after session-strand work completes.
+                // send_counter_ is a shared_ptr so this is safe even if Engine
+                // starts destruction concurrently (stop() has already drained
+                // this by the time ~Engine() runs).
+                --(*send_counter_);
+                co_return send_result;
+            },
+            asio::use_awaitable);
 
     co_return result;
 }
