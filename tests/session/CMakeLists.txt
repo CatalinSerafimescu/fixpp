@@ -1204,6 +1204,36 @@ set_tests_properties(application_throw_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;phase6;throw;application")
 
+# ── 019-app-callbacks T020 — G2 enablement witness ───────────────────────────
+# SC-002: opaque NewOrderSingle (35=D) → ExecutionReport (35=8) round-trip via
+# Engine::send + fromApp callbacks. Real loopback-TLS (mirrors engine_lifecycle
+# pattern); GTEST_SKIP when FIXPP_TLS_FIXTURE_DIR absent. Proves G2 is
+# implementable on the 019 public surface.
+add_executable(g2_enablement_witness_019_test
+  test_019_g2_enablement_witness.cpp
+)
+target_link_libraries(g2_enablement_witness_019_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(g2_enablement_witness_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(g2_enablement_witness_019_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME g2_enablement_witness_019 COMMAND g2_enablement_witness_019_test)
+set_tests_properties(g2_enablement_witness_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase7;g2;witness;live_tls"
+  TIMEOUT 30)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

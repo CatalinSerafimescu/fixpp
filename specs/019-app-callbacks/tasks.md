@@ -118,7 +118,7 @@ description: "Task list — 019-app-callbacks (Application callback layer, Phase
 
 ## Phase 7: G2 enablement witness
 
-- [ ] T020 [P] `tests/interop/` — a minimal `NewOrderSingle → ExecutionReport` **opaque-payload** round-trip witness driven through the public surface (one side `co_await engine.send(...)` an opaque app payload, the other observes via `fromApp`), proving G2 is **implementable** on top of this slice (SC-002). NOT the full typed QuickFIX interop cell (that — with A-001/A-006 typed messages — is the downstream feature).
+- [X] T020 [P] `tests/session/test_019_g2_enablement_witness.cpp` — opaque NOS→ER round-trip via `engine.send(ini_id, nos)` → acceptor `fromApp` ("D") → `engine.send(acc_id, er)` → initiator `fromApp` ("8"), over real loopback-TLS (mirrors engine_lifecycle_test pattern), proving G2 is **implementable** on top of this slice (SC-002). NOT the full typed QuickFIX interop cell. DONE: 1/1 GREEN (306 ms).
 
 ---
 
