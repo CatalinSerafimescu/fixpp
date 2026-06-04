@@ -78,3 +78,16 @@ cells:
   - { id: PARITY-qfj646-resend-abort-on-failing-write, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.3.5" }
   - { id: PARITY-replay-subsumes-reorder-queue, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.1/§4.8.5" }
   - { id: PARITY-inbound-sequencereset-arms, config: normal, kind: parity, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.8.6/§4.5.4" }
+
+  # ── G3 (021-inbound-possdup-origsendingtime) live PossDup cells (8) ──────────
+  # T006 replay-survives (US1/FR-007/SC-001/SC-004): both engines × both roles.
+  # T009 malformed-dup-rejected (US2/FR-007/SC-002/SC-004): both engines × both roles.
+  # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
+  - { id: PD-QFcpp-init-fix44-poss-dup-replay-survives, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFcpp-acc-fix44-poss-dup-replay-survives,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFj-init-fix44-poss-dup-replay-survives,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFj-acc-fix44-poss-dup-replay-survives,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFcpp-init-fix44-malformed-dup-rejected,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFcpp-acc-fix44-malformed-dup-rejected,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFj-init-fix44-malformed-dup-rejected,     config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFj-acc-fix44-malformed-dup-rejected,      config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }

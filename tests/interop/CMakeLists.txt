@@ -260,6 +260,26 @@ fixpp_add_interop_test(
     EXTRA_LIBS fixpp_mock_clock
 )
 
+# ── 021 live PossDup interop cells (T006 + T009) — both roles × both engines ──
+# Live cells: skip-with-reason when no counterparty (FR-023); gate-bite negative
+# tests run green locally (no counterparty required — standalone golden diff).
+# Normalization profile: {52,122,10} per quickstart §2 (poss_dup_profile_excluded_tags()).
+# Anchors: tasks.md T006/T009; contracts/session-possdup.md C1; quickstart.md §2.
+fixpp_add_interop_test(
+    NAME interop_021_poss_dup_replay_survives_test
+    GROUP thorny
+    LABEL "interop;021;interop-thorny;us1;recovery;poss-dup"
+    SOURCES thorny/recovery/021-poss-dup-replay-survives_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_021_poss_dup_malformed_dup_rejected_test
+    GROUP thorny
+    LABEL "interop;021;interop-thorny;us2;recovery;poss-dup"
+    SOURCES thorny/recovery/021-poss-dup-malformed-dup-rejected_test.cpp
+    TLS
+)
+
 # ── US2/US3 live business-message interop (020 T012/T014/T016) ───────────────
 # Both-role NOS→ExecRpt round-trip vs QuickFIX-J and QuickFIX-cpp.
 # All 4 cells skip-with-reason when no counterparty (FR-023); CI always green.

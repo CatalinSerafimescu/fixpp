@@ -79,6 +79,17 @@ each a triggering sequence distinct from the US3 witnesses.
 | C-102 | quickfix-j#557 | reject | GenerateReject advances target seqnum over a run — fixpp advances `next_inbound_unsafe()` past each invalid message that triggers a Reject | `pass` — `thorny/reject/qfj-557-generatereject-advances-seqnum_test.cpp` (gate-b/r1): feeds two invalid 35=D at seq=2+3 in Active state, asserts two Reject(35=3) emitted AND next_inbound==4 (advanced past both) |
 | C-103 | quickfix-j#751 | SequenceReset/GapFill | Configurable `ResendRequestChunkSize` splitting — fixpp resend walks the full range (no chunk knob) | `known-limitation:S-backlog-chunked-resend` (P3) |
 
+## G3 (021-inbound-possdup-origsendingtime) live PossDup cells
+
+Live cells requiring a counterparty (both engines × both roles). Skip cleanly when no counterparty is present (FR-023). Golden capture deferred to first paired live run.
+
+| # | Cell ID prefix | Category | Scenario | Normalization profile | Disposition |
+|---|---|---|---|---|---|
+| **T006** | `PD-*-fix44-poss-dup-replay-survives` | recovery/possdup | ResendRequest→replay; counterparty re-sends 43=Y frame; fixpp stays Active, no Logout | `{52,122,10}` | `live` — `thorny/recovery/021-poss-dup-replay-survives_test.cpp` |
+| **T009** | `PD-*-fix44-malformed-dup-rejected` | recovery/possdup | 43=Y missing 122; fixpp emits Reject(35=3,371=122,373=1), stays Active | `{52,122,10}` | `live` — `thorny/recovery/021-poss-dup-malformed-dup-rejected_test.cpp` |
+
+---
+
 ## known-limitation — deferred-by-design (open tracking, NOT executed at v1.0)
 
 These are upstream behaviors fixpp **intentionally scopes out**; each is a

@@ -64,7 +64,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.5.1 | FIX connection keep-alive (heartbeat) | Y | S-003, S-004 | — |
 | §4.5.2 | Garbled message processing | Y | TC-003, S-009 | — |
 | §4.5.3 | Missing sequence number (gap detection → ResendRequest) | Y | S-005, S-014 | — |
-| §4.5.4 | Rejecting invalid messages (Reject 35=3) | Y | S-007, S-033, S-034 | — |
+| §4.5.4 | Rejecting invalid messages (Reject 35=3) | Y | S-007, S-033, S-034 | 021 Arm-C/D session-`Reject(35=3)` carry `371=122`/`373=1` (RequiredTagMissing) and `371=122`/`373=10` (SendingTimeAccuracyProblem) — closes S-033's inbound enforcement; S-034 exercised (carries 371), disposition unchanged. |
 | §4.5.5 | Test Request processing | Y | S-004, S-003 | — |
 | §4.6 | FIX connection termination | Y | S-002 | — |
 | §4.6.1 | Normal logout processing | Y | S-002 | — |
@@ -77,11 +77,11 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.8.1 | Ordered message processing | Y | S-009, S-014 | — |
 | §4.8.2 | Request retransmission of messages (ResendRequest) | Y | S-005, S-024 | — |
 | §4.8.3 | Responding to ResendRequest(35=2) | Y | S-005, S-014 | — |
-| §4.8.4 | Possible duplicates (PossDupFlag semantics) | Y | S-010, S-033 | — |
+| §4.8.4 | Possible duplicates (PossDupFlag semantics) | Y | S-010, S-033 | 021: S-033 → **done** (inbound OrigSendingTime-required enforcement, Arms C/D); S-010 → **partial** (inbound PossDup(43) too-low tolerance Arm A/B). PossResend(97) + AllowPossDup send-knob (FR-008) DEFERRED. |
 | §4.8.5 | Gap fill process (SequenceReset-GapFill) | Y | S-006 | — |
 | §4.8.5.1 | Example using SequenceReset(35=4) | Y | S-006 | — |
 | §4.8.6 | Sequence reset (hard reset, GapFillFlag=N) | Y | S-006, S-023 | — |
-| §4.8.7 | Processing inbound possible duplicate messages | Y | S-010 | — |
+| §4.8.7 | Processing inbound possible duplicate messages | Y | S-010 | 021: inbound possible-duplicate processing delivered (tolerate too-low `43=Y` replay, no seqnum advance — Arm A; admin ignore / app drop(default)/redeliver(`redeliver_poss_dup`); too-low without `43=Y` stays fatal — Arm B). |
 | §4.8.8 | Processing gaps for session layer messages (admin msg gap-fill) | Y | S-014 | — |
 | §4.9 | Resending unacknowledged application message (PossResend 97) | Y | S-010 | — |
 | §4.9.1 | Difference between application resend and session retransmission | Y | S-010 | — |

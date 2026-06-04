@@ -262,7 +262,9 @@ inline std::string admin_golden_path(const std::string& cell_id)
 //   "skip:golden-not-yet-captured (capture sidecar absent: <capture_path>)"
 //   "skip:golden-not-yet-captured (capture sidecar empty)"
 // ---------------------------------------------------------------------------
-inline void diff_golden_or_skip(const std::string& cell_id, const std::string& gpath)
+inline void diff_golden_or_skip(
+    const std::string& cell_id, const std::string& gpath,
+    const std::set<int>& profile = fixpp::interop::admin_profile_excluded_tags())
 {
     if (gpath.empty()) {
         GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
@@ -294,11 +296,10 @@ inline void diff_golden_or_skip(const std::string& cell_id, const std::string& g
     const auto expected_frames = fixpp::interop::parse_golden(golden_text);
     const auto actual_frames   = fixpp::interop::parse_golden(capture_text);
 
-    const fixpp::interop::DiffResult diff = fixpp::interop::diff_transcripts(
-        expected_frames, actual_frames, fixpp::interop::admin_profile_excluded_tags());
+    const fixpp::interop::DiffResult diff =
+        fixpp::interop::diff_transcripts(expected_frames, actual_frames, profile);
     EXPECT_TRUE(static_cast<bool>(diff))
-        << "Golden transcript mismatch for " << cell_id
-        << " (admin profile {52,10}): " << diff.detail
+        << "Golden transcript mismatch for " << cell_id << ": " << diff.detail
         << "\n  expected golden: " << gpath
         << "\n  actual capture:  " << capture_path;
 }

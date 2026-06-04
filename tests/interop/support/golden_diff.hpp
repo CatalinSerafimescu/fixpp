@@ -55,6 +55,30 @@ inline const std::set<int>& admin_profile_excluded_tags()
     return tags;
 }
 
+// 021-inbound-possdup-origsendingtime: PossDup replay normalization profile.
+//
+// Extends the 018 admin profile {52,10} with tag 122 (OrigSendingTime):
+//   - 52  (SendingTime)      — live wall-clock, non-deterministic across runs
+//   - 122 (OrigSendingTime)  — original wall-clock timestamp in replayed frames
+//   - 10  (CheckSum)         — recomputed from frame body
+// All structural tags compared VERBATIM: 34 (MsgSeqNum), 43 (PossDupFlag),
+// 35 (MsgType), 371 (RefTagID), 373 (SessionRejectReason) — mutation of any
+// of these must FAIL the golden diff (gate-biting property).
+// Anchored to: specs/021-inbound-possdup-origsendingtime/quickstart.md §2.
+// Usage: diff_transcripts(expected, actual, poss_dup_profile_excluded_tags())
+inline const std::set<int>& poss_dup_profile_excluded_tags()
+{
+    // Compose from the admin profile ({52,10}) + OrigSendingTime(122) rather than
+    // re-declaring a parallel literal — keeps the two in sync if the admin set
+    // ever gains another time-variant tag (avoids silent golden-diff drift).
+    static const std::set<int> tags = [] {
+        std::set<int> s = admin_profile_excluded_tags();
+        s.insert(122);
+        return s;
+    }();
+    return tags;
+}
+
 std::vector<GoldenFrame> parse_golden(std::string_view text);
 
 DiffResult diff_transcripts(std::span<const GoldenFrame> expected,
