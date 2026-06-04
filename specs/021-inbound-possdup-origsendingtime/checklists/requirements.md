@@ -32,5 +32,5 @@
 ## Notes
 
 - Protocol field tags (43/122/52, MsgType 3/4) and FIX reject-reason names appear in the spec; these are domain vocabulary of the FIX wire protocol (the problem domain), not implementation/tech-stack details, so they do not violate the "no implementation details" item.
-- Two axes are intentionally left to `/speckit-clarify` (recorded in Assumptions, not as blocking [NEEDS CLARIFICATION] markers): (1) exact reference-engine reject-reason confirmation, (2) application-message duplicate redelivery vs. session-layer-only scope.
+- Two axes were **resolved** in `/speckit-clarify` Session 2026-06-04 (recorded in spec.md Clarifications): (1) inbound application-duplicate redelivery — configurable, default drop (`redeliver_poss_dup`); (2) the `AllowPossDup` send-path default — intended strip (now DEFERRED out of this slice per Gate A round 1). Gate A round 1 (Session 2026-06-04, spec.md Clarifications) further resolved: validate PossDup for ALL `43=Y` non-`SequenceReset` inbound (QFJ superset), and de-scoped FR-008/US3 (opaque-send hardening).
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`. None are incomplete.

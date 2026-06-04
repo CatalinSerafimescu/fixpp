@@ -8,14 +8,17 @@ How to exercise and verify the feature. All commands run with cwd in the library
 
 `tests/session/test_inbound_poss_dup.cpp` — one test per disposition row (data-model §1):
 
-- **Arm A admin-ignore**: feed a too-low admin frame with `43=Y` + valid `122`; assert state stays `Active`, `seqnum_mgr_` expected unchanged, no Logout/Reject emitted.
-- **Arm A app-drop (default)**: too-low app frame, `redeliver_poss_dup=false`; assert no `Application::fromApp` call, no advance, `Active`.
+- **Arm A admin-ignore**: feed a too-low admin frame with `43=Y` + valid `122`; assert state stays `Active`, `seqnum_mgr_` expected unchanged, no Logout/Reject emitted (this tolerated arm is intentionally silent — assert *absence* of any wire/event emission, no positive event expected per FR-009).
+- **Arm A app-drop (default)**: too-low app frame, `redeliver_poss_dup=false`; assert no `Application::fromApp` call, no advance, `Active` (tolerated arm, silent).
 - **Arm A app-redeliver (opt-in)**: same frame, `redeliver_poss_dup=true`; assert exactly one `fromApp` call flagged possible-duplicate, still no advance.
-- **Arm B regression pin**: too-low frame **without** `43=Y`; assert `Logout` + `Disconnected` (byte-identical to pre-feature behavior).
-- **Arm C**: `43=Y`, no `122`; assert `Reject(35=3)` with `380=1`, `373=122`, session `Active`.
-- **Arm D**: `43=Y`, `122 > 52`; assert `Reject(35=3)` `380=10` + `Logout` + `Disconnected`. Plus a boundary test `122 == 52` → **not** Arm D.
+- **Arm B regression pin**: too-low frame **without** `43=Y`; assert `→Disconnected` with **NO Logout wire frame** emitted (byte-identical to pre-feature `session.cpp:1860-1862` — `record_state_transition_` only). Pin the *absence* of a Logout frame.
+- **Arm C**: `43=Y`, no `122`; assert `Reject(35=3)` with `371=122`, `373=1`, session `Active`.
+- **Arm D**: `43=Y`, `122 > 52`; assert `Reject(35=3)` `371=122`, `373=10` + `Logout` + `Disconnected`. Plus a boundary test `122 == 52` → **not** Arm D.
+- **Arm C at-expected**: `34==expected`, `43=Y`, **no** `122`; assert the same Arm-C `Reject(35=3)` `371=122`, `373=1` fires (validation is seqnum-independent — at-expected is NOT exempt).
+- **Arm D at-expected**: `34==expected`, `43=Y`, `122 > 52`; assert the Arm-D `Reject(373=10)` + `Logout` + `Disconnected`.
 - **Arm E**: `35=4` + `43=Y` with no `122`; assert it is **not** rejected (routes to the existing reset path).
-- **FR-008 send**: plain `send` of a message carrying caller `43`/`122` → stripped by default, retained when `allow_poss_dup=true`; auto-resend path always emits `43`/`122` regardless (resend regression pin).
+
+> FR-008 send-path strip is **DEFERRED** out of this slice (opaque-send hardening — see spec Clarifications Gate A round 1); no send-path unit witness here.
 
 Run (debug):
 ```bash

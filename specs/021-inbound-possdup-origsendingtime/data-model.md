@@ -2,11 +2,11 @@
 
 **Feature**: 021-inbound-possdup-origsendingtime | **Date**: 2026-06-04
 
-No persistent entities are introduced. The "data model" here is (1) the inbound disposition decision function and (2) two additive `SessionConfig` fields.
+No persistent entities are introduced. The "data model" here is (1) the inbound disposition decision function and (2) one additive `SessionConfig` field.
 
 ## 1. Inbound possible-duplicate disposition (decision function)
 
-Pure classification over the already-parsed inbound `FrameHeader` + session state. Evaluated **only** on the inbound too-low path (`MsgSeqNum < expected`) — at/above-expected handling is unchanged.
+Pure classification over the already-parsed inbound `FrameHeader` + session state. The disposition is **two-stage**: Stage 1 (PossDup *validation*, Arms C/D) runs for **any** inbound `43=Y` non-`SequenceReset` message — including at-expected (`34 == expected`); Stage 2 (too-low *tolerance*, Arms A/B) runs only on the too-low path (`MsgSeqNum < expected`). Validation precedes the seqnum disposition (D2b — the at-expected divergence).
 
 Inputs:
 - `msg_seq_num (34)`, `msg_type (35)`, `poss_dup_flag (43)`, `sending_time (52)`, `orig_sending_time (122)` — from `FrameHeader` (122 newly captured).
@@ -14,33 +14,47 @@ Inputs:
 - `is_app_message` — whether `35` is an application message (vs admin).
 - `cfg_.redeliver_poss_dup` — the inbound app-dup knob.
 
-Decision table (first match wins; evaluated after the too-low Heartbeat(0) silent-ignore exception, before the fatal `session_seqnum_too_low`):
+### Stage 1 — PossDup validation (runs for ALL `43=Y`, non-`35=4`, any seqnum)
+
+First match wins:
+
+| # | Guard | Arm | State | Emits |
+|---|-------|-----|-------|-------|
+| 0 | `msg_type == "4"` (SequenceReset) | **Arm E** exempt — skip Stage 1, defer to existing reset/gap-fill path | unchanged | (reset path) |
+| 1 | `poss_dup_flag != "Y"` | not a PossDup — skip Stage 1, fall through to Stage 2 / normal dispatch | — | — |
+| 2 | `orig_sending_time` empty/absent | **Arm C** | stay `Active` | `Reject(35=3, 371=122, 373=1)` (RequiredTagMissing) |
+| 3 | `parse(122) > parse(52)` (strict) | **Arm D** | → `Disconnected` | `Reject(35=3, 371=122, 373=10)` (SendingTimeAccuracyProblem) + `Logout` |
+| 4 | else (`43=Y`, `122` present & valid) | validated — proceed to Stage 2 (if too-low) or normal at-expected dispatch | — | — |
+
+### Stage 2 — too-low tolerance (runs only when `MsgSeqNum < expected`, after Stage 1 validates)
+
+Evaluated after the too-low Heartbeat(0) silent-ignore exception, before the fatal `session_seqnum_too_low`:
 
 | # | Guard | Disposition | State | Emits |
 |---|-------|-------------|-------|-------|
-| 0 | `msg_type == "4"` (SequenceReset) | defer to existing reset/gap-fill path (Arm E exempt) | unchanged | (reset path) |
-| 1 | `poss_dup_flag != "Y"` | **Arm B** fatal too-low | → `Disconnected` | `Logout` (existing) |
-| 2 | `orig_sending_time` empty/absent | **Arm C** | stay `Active` | `Reject(35=3, reason=1, RefTagID=122)` |
-| 3 | `parse(122) > parse(52)` (strict) | **Arm D** | → `Disconnected` | `Reject(35=3, reason=10)` + `Logout` |
-| 4 | else, `!is_app_message` | **Arm A admin** ignore | stay `Active`, **no advance** | nothing |
-| 5 | else, `is_app_message && !redeliver_poss_dup` | **Arm A app-drop** (default) | stay `Active`, **no advance** | nothing |
-| 6 | else, `is_app_message && redeliver_poss_dup` | **Arm A app-redeliver** | stay `Active`, **no advance** | `Application::fromApp` (flagged possdup) |
+| 5 | `poss_dup_flag != "Y"` | **Arm B** fatal too-low (current behavior) | → `Disconnected` | **nothing** (NO Logout wire frame — `record_state_transition_` only) |
+| 6 | `43=Y`, validated, `!is_app_message` | **Arm A admin** ignore | stay `Active`, **no advance** | nothing |
+| 7 | `43=Y`, validated, `is_app_message && !redeliver_poss_dup` | **Arm A app-drop** (default) | stay `Active`, **no advance** | nothing |
+| 8 | `43=Y`, validated, `is_app_message && redeliver_poss_dup` | **Arm A app-redeliver** | stay `Active`, **no advance** | `Application::fromApp` (flagged possdup) |
+
+A validated `43=Y` **at** the expected seqnum (`34 == expected`) is not a Stage-2 case: it is processed once normally and advances the seqnum (the spec's own edge case "PossDup at expected → processed once").
 
 Invariants:
-- **INV-1**: rows 4/5/6 never advance `seqnum_mgr_` (no `check_inbound`-driven increment on the tolerated path).
-- **INV-2**: row 1 (Arm B) byte-identical to current `session.cpp:1860-1862` behavior — regression-pinned.
-- **INV-3**: row 0 (Arm E) never reaches rows 2/3 — SequenceReset is exempt from the `122` requirement.
+- **INV-1**: the **too-low tolerated** rows (6/7/8) never advance `seqnum_mgr_` (no `check_inbound`-driven increment). This scopes "no advance" to the too-low tolerated arm ONLY — a validated at-expected `43=Y` IS processed-once and DOES advance (per the spec edge case), so the no-advance rule does not apply to the at-expected path.
+- **INV-2**: Arm B (row 5) byte-identical to current `session.cpp:1860-1862` behavior — a bare `record_state_transition_(fsm_state::Disconnected)` with **NO Logout wire frame** emitted — regression-pinned.
+- **INV-3**: row 0 (Arm E) never reaches Stage-1 rows 2/3 — SequenceReset is exempt from the `122` requirement.
 - **INV-4**: `122 == 52` is **not** Arm D (strict `>` only).
 - **INV-5**: all emits use stack buffers via existing builders — no heap on the inbound path.
 
-## 2. SessionConfig additions (additive POD fields)
+## 2. SessionConfig addition (additive POD field)
 
-In `src/session/session_config.hpp` (same shape as the existing `reconnect_policy` knob; default-valued, no breaking change):
+In `include/fixpp/session/session_config.hpp` (the **public** header; same shape as the existing `reconnect_policy` knob; default-valued, no breaking change — additive default-valued field). The behavior site is `src/session/session.cpp`.
 
 | Field | Type | Default | Governs |
 |-------|------|---------|---------|
-| `allow_poss_dup` | `bool` | `false` | **Send path (FR-008/D7)**: when `false`, a plain `send` strips caller-supplied `PossDupFlag(43)`/`OrigSendingTime(122)`; when `true`, retains them. The automatic resend path is unaffected (always re-adds). |
 | `redeliver_poss_dup` | `bool` | `false` | **Inbound app dup (FR-010/D2)**: when `false`, a validated too-low possible-duplicate application message is dropped (no `fromApp`); when `true`, redelivered to `fromApp` flagged possdup. Admin dups always ignored regardless. |
+
+> `allow_poss_dup` (the FR-008 send-path knob) is **DEFERRED** out of this slice (D7) — not added here. The opaque `send_impl` path requires a new boundary-anchored `43`/`122` excision parser before that knob can ship.
 
 ## 3. FrameHeader addition
 
