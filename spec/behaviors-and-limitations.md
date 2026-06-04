@@ -308,3 +308,16 @@ Scope and conventions:
   per-session `Application` override is out of scope for this slice.
   **Status: deferred** (per-session override, a later Phase-5 slice). *(FR-002;
   Clarifications 2026-06-03 Q2; data-model §EngineConfig::application.)*
+
+- **L-019-3 — Callbacks are serialized by single-thread engine-executor confinement; a
+  multi-threaded `io_context` is NOT supported this slice.** Engine-driven session entry
+  points (`on_inbound_frame`, `open()`, `close()`, the admin-emit sites) are NOT hopped
+  onto the per-session strand before invoking callbacks — `Session::open()` sets
+  `this->exec_ = make_strand(...)` but the running engine coroutine is not dispatched
+  onto it. The no-concurrent-callback invariant (FR-010 / INV-2) holds because the 015
+  engine is single-executor-confined: the injected `exec_` is always a single-threaded
+  `io_context` (consistent with 015 E-5 / `engine.hpp:156–160`). Promoting engine-driven
+  entry points to true per-session strand-confinement (hopping each entry point onto
+  `Session::executor()`) is a future Phase-5 slice; it would re-trigger Gate A.
+  **Status: deferred** (true strand-confinement on engine-driven paths). *(INV-2 correction;
+  gate-b/r1 FIX-4; research.md D3 clarification; data-model.md INV-2.)*

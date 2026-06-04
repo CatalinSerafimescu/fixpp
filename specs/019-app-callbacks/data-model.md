@@ -85,7 +85,7 @@ register_session(cfg)
 ## Invariants (testable)
 
 - **INV-1**: with `application == nullptr`, the firing order above collapses to the pre-019 path — zero callback invocations, zero behavioural delta (FR-002/FR-014; SC-006).
-- **INV-2**: for one session, callbacks are totally ordered (never concurrent). The serialization guarantee is the **`exec_` strand** (`make_strand`); `dispatch_guard` is a **debug-only (`#ifndef NDEBUG`) invariant check** that asserts no concurrent entry, not a release-build serialization mechanism (FR-010; SC-005).
+- **INV-2**: for one session, callbacks are totally ordered (never concurrent). The serialization guarantee for engine-driven entry points (inbound, lifecycle, admin-emit) is **single-thread executor confinement** (015 E-5 — the engine's `exec_` is injected as a single-threaded `io_context`; multi-threaded `io_context` is NOT supported this slice). The per-session `exec_` strand object exists but is NOT the engaged serialization mechanism on engine-driven paths — see `spec/behaviors-and-limitations.md` L-019-3. `dispatch_guard` is a **debug-only (`#ifndef NDEBUG`) invariant check** that asserts no concurrent entry, not a release-build serialization mechanism (FR-010; SC-005).
 - **INV-3**: no callback executes after its session is destroyed — Engine drains `exec_` before dtor (FR-012; SC-005).
 - **INV-4**: a `fromApp`/`fromAdmin` reject produces exactly the mapped peer reject; an accept produces none (FR-005; SC-003).
 - **INV-5**: a `toApp` veto transmits nothing; a non-veto transmits exactly once (FR-007; SC-004).
