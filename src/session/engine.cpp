@@ -786,15 +786,17 @@ asio::awaitable<void> Engine::stop() {
 //
 // Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
 //
-// FIX-1+FIX-2 (gate-b/r1) design:
+// FIX-1+FIX-2 (gate-b/r1) + FIX-A (gate-b/r2) design:
 //   Step A: hop onto exec_ (the engine executor) so registry reads + stopped_
 //           check + send_counter_ bump are serialized with stop()'s mutations.
 //           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
 //   Step B: on exec_ — registry lookup, keepalive capture, Active check,
 //           stopping check. If stopped_ → fail-fast (no send may outlive stop()).
-//           Bump send_counter_ to enroll in the send-drain domain. [FIX-2]
-//   Step C: hop to session strand for toApp + Session::send. Decrement
-//           send_counter_ after completion. [FIX-2]
+//           Bump send_counter_ + RAII counter_guard to enroll in the send-drain
+//           domain. The guard fires on co_return AND exception/cancel unwind so
+//           a total-cancel from stop() cannot leave the counter positive. [FIX-2/A]
+//   Step C: hop to session strand for toApp + Session::send. counter_guard dtor
+//           decrements after the strand hop completes (or unwinds). [FIX-2/A]
 //
 //   stop() drains send_counter_ BEFORE registry_.clear() so no send coroutine
 //   can dereference engine_ after Engine::~Engine() runs.
@@ -835,8 +837,24 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                     co_return std::unexpected(core::error::session_invalid_state_for_send);
                 }
 
-                // FIX-2: enroll this in-flight send in the send-drain domain.
+                // FIX-2 / gate-b/r2 FIX-A: enroll this in-flight send in the
+                // send-drain domain with an RAII guard so the decrement fires on
+                // co_return AND on exception/total-cancel unwind.
+                // The manual ++/-- pair was not exception-safe: if the inner
+                // co_spawn(strand_exec) was total-cancelled (stop()'s teardown
+                // path), operation_aborted propagated out and skipped the manual
+                // --, leaving send_counter_ permanently positive and wedging
+                // stop()'s drain loop. counter_guard (engine.cpp:61-69) is the
+                // existing RAII pattern used by the accept/connect loops —
+                // reusing it here closes the gap. [spec.md FR-012]
                 ++(*send_counter_);
+                counter_guard send_guard{send_counter_};
+
+                // Also reset cancellation state on the outer exec_ frame so
+                // total cancellation has a defined policy for the bump→guard
+                // window (belt-and-suspenders; the guard is the load-bearing fix).
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
 
                 // ── Step C: hop to session strand for toApp + Session::send ──
                 auto strand_exec = kl->executor().underlying();
@@ -861,11 +879,6 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                         },
                         asio::use_awaitable);
 
-                // FIX-2: decrement after session-strand work completes.
-                // send_counter_ is a shared_ptr so this is safe even if Engine
-                // starts destruction concurrently (stop() has already drained
-                // this by the time ~Engine() runs).
-                --(*send_counter_);
                 co_return send_result;
             },
             asio::use_awaitable);
