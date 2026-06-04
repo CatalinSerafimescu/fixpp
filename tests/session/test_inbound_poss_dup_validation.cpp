@@ -417,5 +417,61 @@ TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
     EXPECT_TRUE(any_logout()) << "RC#3: Guard-3 must emit Logout before disconnecting";
 }
 
+// ── Test 10: FQ-2 — at-expected VALID 43=Y, 122==52 → processed once + advances ──
+//
+// spec.md:67 Edge Cases: "43=Y with MsgSeqNum == expected is processed once
+// normally (it is not below expected; tolerance/ignore does not apply) and not
+// double-applied."
+// Stage-1 validation passes (122==52, not > 52 → not Arm C/D). Stage-2 tolerance
+// does NOT apply (seq==expected, not too-low). The message falls through to normal
+// dispatch: one fromApp delivery and expected inbound advances N→N+1.
+//
+// Coverage pin: this is the only test that asserts the *accept-and-advance* outcome
+// for an at-expected valid possdup. If the implementation were to double-apply or
+// silently drop this path, every other test would remain green.
+//
+// Expected to pass on current HEAD (no RED phase — behavior already exists; this
+// test pins the positive branch against regression per triage FQ-2).
+
+TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
+    auto app = std::make_shared<CountingApplication>();
+    engine.application = app;
+
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    // After Logon(seq=1), next_expected = 2. Feed seq=2 (at-expected) with
+    // 43=Y and 122==52 (valid: not missing, not strictly after 52 → Stage-1 passes).
+    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
+
+    // 122 == 52 == "20240101-00:00:00.000" (make_frame's fixed timestamp).
+    auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=20240101-00:00:00.000\x01");
+    feed(sess, frame);
+
+    // Session must stay Active (valid at-expected possdup is processed normally).
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "FQ-2: valid at-expected possdup must leave session Active";
+
+    // Exactly one fromApp delivery (processed once, not double-applied).
+    EXPECT_EQ(app->from_app_calls, 1)
+        << "FQ-2: valid at-expected possdup must deliver to fromApp exactly once";
+
+    // Expected inbound seqnum must advance N→N+1 (this is NOT a too-low frame).
+    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(expected_after, static_cast<fixpp::session::seqnum_t>(3))
+        << "FQ-2: expected inbound seqnum must advance 2→3 after valid at-expected possdup "
+        << "(was " << expected_before << ", got " << expected_after << ")";
+
+    // No Reject and no Logout (valid possdup at-expected is not an error).
+    EXPECT_FALSE(any_reject())
+        << "FQ-2: valid at-expected possdup must NOT emit a Reject";
+    EXPECT_FALSE(any_logout())
+        << "FQ-2: valid at-expected possdup must NOT emit a Logout";
+}
+
 }  // namespace
 }  // namespace fixpp::session::test
