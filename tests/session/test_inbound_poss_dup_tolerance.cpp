@@ -8,12 +8,15 @@
 // rows 5–8; contracts/session-possdup.md C1/C3; research.md D1/D2/D3).
 //
 // Six test cases:
-//   1. ArmA_Admin_Ignored        — too-low 43=Y admin frame → Active, no advance, no wire
-//   2. ArmA_App_Dropped          — too-low 43=Y app frame, redeliver=false → no fromApp
-//   3. ArmA_App_Redelivered      — too-low 43=Y app frame, redeliver=true → exactly 1 fromApp
-//   4. ArmA_Admin_Idempotent     — replayed possdup admin → no second side-effect
-//   5. ArmB_Regression_Pin       — too-low no-43Y → Disconnected, NO Logout wire frame
-//   6. ArmA_NoHeap               — Arm A disposition wraps in counting_resource: 0 new allocs
+//   1. ArmA_Admin_Ignored         — too-low 43=Y admin frame → Active, no advance, no wire
+//   2. ArmA_App_Dropped           — too-low 43=Y app frame, redeliver=false → no fromApp
+//   3. ArmA_App_Redelivered       — too-low 43=Y app frame, redeliver=true → exactly 1 fromApp
+//   4. ArmA_Admin_Idempotent      — replayed possdup admin → no second side-effect
+//   5. ArmB_Regression_Pin        — too-low no-43Y → Disconnected, NO Logout wire frame
+//   6. ArmA_Admin_NoSideEffects   — renamed from ArmA_NoHeap_Witness (gate-b/r1 RC#2):
+//                                   bogus counting_resource assertion removed; real seqnum
+//                                   no-advance assertion retained. Binding no-heap gate is
+//                                   mallocnesia LD_PRELOAD (test_session_alloc_guard).
 //
 // TDD: this file is written RED-first (T004); T005 impl makes it GREEN.
 // Shared fixture + frame builders live in support/possdup_test_support.hpp.
@@ -184,43 +187,38 @@ TEST_F(PossDupToleranceTest, ArmB_Regression_Pin_NoLogout) {
         << "INV-2: Arm B must NOT emit a Logout wire frame (record_state_transition_ only)";
 }
 
-// ── Test 6: No-heap witness (INV-5) ───────────────────────────────────────────
+// ── Test 6: Arm A admin-ignore — no side effects (gate-b/r1 RC#2 rename) ────
 //
-// Arm A admin-ignore dispatch wraps in a counting_resource and asserts ZERO
-// heap allocations. NOTE: the counting_resource is NOT plumbed into Session's
-// internal arena (Session uses its own stack-based inbound arena), so this is
-// a PARTIAL witness — the admin-ignore path is allocation-free by construction
-// (it co_returns with no builder/parse). The binding no-heap gate is the
-// mallocnesia LD_PRELOAD run in /speckit-verify (dual-gate per
-// feedback_tracking_pmr_resource_false_pass).
+// The previous name "ArmA_NoHeap_Witness" carried a counting_resource assertion
+// that measured nothing (the resource was never plumbed into Session's internal
+// inbound arena, so its counter was permanently zero — a false-pass witness per
+// [[feedback_tracking_pmr_resource_false_pass]]).
+//
+// The binding INV-5 no-heap gate is the mallocnesia LD_PRELOAD run in
+// /speckit-verify Step 6 (test_session_alloc_guard, zero intercepted global
+// allocs); an in-process counting_resource cannot reach Session's internal
+// inbound arena without a new ctor seam (out of scope / gold-plating).
+//
+// This test retains the real behavioral assertions: session stays Active and
+// seqnum is not advanced — the no-advance assertion IS the meaningful check.
 
-TEST_F(PossDupToleranceTest, ArmA_NoHeap_Witness) {
-    counting_resource mr;
-
+TEST_F(PossDupToleranceTest, ArmA_Admin_NoSideEffects) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     drive_to_active(sess);
-
-    // Baseline after session construction + Logon.
-    mr.reset_count();
-    const long long baseline = mr.allocate_count();  // 0
 
     // Feed a too-low admin possdup frame. This is the Arm A admin-ignore path.
     auto frame = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
                                     "45=1\x01" "373=0\x01");
     feed(sess, frame);
 
-    // Session stays Active.
+    // Session stays Active (Arm A admin-ignore survives).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    const long long after = mr.allocate_count();
-    EXPECT_EQ(after, baseline)
-        << "INV-5: Arm A admin-ignore path must not allocate via pmr::new_delete_resource; "
-        << "saw " << (after - baseline) << " allocation(s)";
-
-    // Seqnum unchanged confirms no work happened.
+    // Seqnum unchanged: the tolerated too-low possdup must not advance expected inbound.
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
-              static_cast<fixpp::session::seqnum_t>(2));
+              static_cast<fixpp::session::seqnum_t>(2))
+        << "INV-1: expected inbound seqnum must not advance on Arm A admin-ignore";
 }
 
 }  // namespace
