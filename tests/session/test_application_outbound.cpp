@@ -110,10 +110,10 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "
 
 // Minimal app payload (35=D, NewOrderSingle-like opaque bytes).
 static std::vector<std::byte> make_app_payload() {
-    // Opaque application bytes — not a fully valid FIX frame.
-    // Engine::send wraps these with seqnum/SendingTime from Session::send.
-    // For the test we just need something non-empty to pass as app_payload.
-    static const char kPayload[] = "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    // 020-g2 T010: the send path now validates that the payload leads with 35=.
+    // Updated to include 35=D so existing 019 tests continue to pass after
+    // the opaque-payload validation lands.
+    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
     std::vector<std::byte> v;
     for (char c : kPayload) {
         if (c == '\0') break;

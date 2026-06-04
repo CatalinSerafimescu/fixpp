@@ -263,6 +263,17 @@ private:
 // Shared session-builder helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Minimal VALID application payload for Session::send. The 020 send path
+// validates the opaque payload fail-closed (FR-016): it must lead with a single
+// 35= MsgType field and carry no session header/trailer tags. These outbound-
+// serialization tests only need the send to reach the (blocked) write path.
+static std::vector<std::byte> make_min_app_payload() {
+    static const char kP[] = "35=D\x01";
+    std::vector<std::byte> v;
+    for (const char* p = kP; *p; ++p) v.push_back(static_cast<std::byte>(*p));
+    return v;
+}
+
 // Build a valid FIX Logon frame for an inbound peer.
 static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
                                               std::string_view sender, std::string_view target) {
@@ -687,7 +698,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 
     raw_ptr->arm_block();
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
@@ -746,7 +757,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 
     raw_ptr->arm_block();
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);

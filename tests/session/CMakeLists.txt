@@ -1265,6 +1265,90 @@ set_tests_properties(g2_enablement_witness_019 PROPERTIES
   LABELS "019;phase7;g2;witness;live_tls"
   TIMEOUT 30)
 
+# ── 020-g2-business-messages US1 ─────────────────────────────────────────────
+
+# T005 — builder unit tests: INV-2/3/4, FR-008, alloc witness.
+# Links fixpp_session only (no generated v44 headers needed — builder is pure).
+add_executable(business_messages_build_test
+  test_business_messages_build.cpp
+)
+target_link_libraries(business_messages_build_test PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(business_messages_build_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME business_messages_build COMMAND business_messages_build_test)
+set_tests_properties(business_messages_build PROPERTIES
+  LABELS "020;us1;build;builder")
+
+# T006 — typed read flyweight tests (AS4; FR-006).
+# Needs the generated fixpp::v44 headers + parser. Link fixpp_dictionary which
+# carries the generated include dir (same pattern as dictionary reify tests).
+if(TARGET fixpp_codegen_generate)
+  set(_BM_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+
+  add_executable(business_messages_read_test
+    test_business_messages_read.cpp
+  )
+  add_dependencies(business_messages_read_test fixpp_codegen_generate)
+  target_link_libraries(business_messages_read_test PRIVATE
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(business_messages_read_test PRIVATE
+    "${_BM_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  add_test(NAME business_messages_read COMMAND business_messages_read_test)
+  set_tests_properties(business_messages_read PROPERTIES
+    LABELS "020;us1;read;flyweight")
+else()
+  message(STATUS
+    "tests/session: fixpp_codegen_generate not available; skipping business_messages_read_test")
+endif()
+
+# ── 020-g2-business-messages US1 send-path ──────────────────────────────────
+#
+# T007 — send-path + round-trip RED suite (INV-1/5/7/8; FR-004a/009/016).
+#   INV-1: wire field order (MsgType field-3) + digit-only BodyLength + checksum.
+#   INV-8: opaque-payload validation, no seqnum consumed on rejection.
+#   INV-5: inbound-reject → BusinessMessageReject(35=j) + session stays Active.
+#   INV-7: re-entrant Engine::send from fromApp under multi-threaded executor
+#          (asio::thread_pool 2+; GTEST_SKIP when FIXPP_TLS_FIXTURE_DIR absent).
+#   INV-1 + INV-8 + INV-5 are TLS-FIXTURE-FREE and always run.
+#   INV-7 needs live TLS (same skip contract as engine_send/g2_enablement_witness).
+#
+# Links fixpp_session + transport/TLS (for INV-7 live engine path) + fixpp_mock_clock.
+add_executable(business_messages_roundtrip_test
+  test_business_messages_roundtrip.cpp
+)
+target_link_libraries(business_messages_roundtrip_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(business_messages_roundtrip_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(business_messages_roundtrip_test PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME business_messages_roundtrip COMMAND business_messages_roundtrip_test)
+set_tests_properties(business_messages_roundtrip PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "020;us1;roundtrip;send_path;inv1;inv5;inv7;inv8"
+  TIMEOUT 60)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

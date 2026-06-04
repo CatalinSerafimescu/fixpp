@@ -268,12 +268,12 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| D | NewOrderSingle | A-001 | — |
+| D | NewOrderSingle | A-001 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed NOS builder + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
 | E | NewOrderList | A-002 | — |
 | F | OrderCancelRequest | A-003 | — |
 | G | OrderCancelReplaceRequest | A-004 | — |
 | H | OrderStatusRequest | A-005 | — |
-| 8 | ExecutionReport | A-006 | — |
+| 8 | ExecutionReport | A-006 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed ExecRpt builder (fully-filled) + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
 | 9 | OrderCancelReject | A-007 | — |
 | K | ListCancelRequest | A-019 | — |
 | L | ListExecute | A-019 | — |

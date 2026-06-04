@@ -1,0 +1,485 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// tests/session/test_business_messages_build.cpp
+//
+// 020-g2-business-messages T005 — builder unit tests (RED first, GREEN at T008).
+//
+// Named tests (data-model.md INV-2/3/4 + tasks.md T005):
+//   AS1_NOS_HappyPath_ParseBack           — build NOS, parse fields back, check fidelity
+//   AS2_ExecRpt_HappyPath_ParseBack        — build ExecRpt, parse fields back, check fidelity
+//   Builder_Output_ContainsNoEngineTags    — INV-2: body has no 8=/9=/34=/49=/52=/56=/10=
+//   Builder_NumericFidelity_DecimalValueEquality — INV-3: trailing-zero form equivalence
+//   Builder_InvalidField_NoUsableOutput    — INV-4: invalid inputs return unexpected
+//   Builder_FR008_TransactTime_ShapeRejection — FR-008 UTCTimestamp validation
+//   Builder_NoHeap_CountingResource        — [const §VIII.5] zero global allocations
+//
+// Alloc witness strategy: override global operator new/new[] to count allocations,
+// assert counter is UNCHANGED across both build_* calls.
+// (A counting_resource PMR alone would be a false-pass: the builders take no mr param,
+// so nothing routes through it. Only global new interception is honest here.
+// mallocnesia LD_PRELOAD is the CI-tier cross-check per [feedback_tracking_pmr_resource_false_pass].)
+//
+// decimal_t is constructed via decimal_t::parse(bytes, mr) — no string-literal ctor.
+//
+// Anchors: contracts/business-messages.md; data-model.md E1/E2; INV-2/3/4; FR-008.
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdlib>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/session/business_messages.hpp>
+#include <memory_resource>
+#include <span>
+#include <string_view>
+
+// ── Global operator new counter ────────────────────────────────────────────────
+// Counts allocations routed through global operator new (not PMR). This is the
+// honest gate for [const §VIII.5] on builders that take no memory_resource param.
+// mallocnesia LD_PRELOAD is the CI-tier complement (intercepts malloc from any path).
+namespace {
+
+std::atomic<long> g_alloc_count{0};
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+    ++g_alloc_count;
+    void* p = std::malloc(size);
+    if (!p) {
+        throw std::bad_alloc{};
+    }
+    return p;
+}
+
+void* operator new[](std::size_t size) {
+    ++g_alloc_count;
+    void* p = std::malloc(size);
+    if (!p) {
+        throw std::bad_alloc{};
+    }
+    return p;
+}
+
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+
+namespace {
+
+using fixpp::decimal_t;
+
+// Helper: parse a decimal_t from an ASCII string literal.
+// Caller supplies an arena. This allocates via mr (not via global new).
+decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
+    auto bytes = std::span<const std::byte>{
+        reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
+    auto r = decimal_t::parse(bytes, mr);
+    EXPECT_TRUE(r.has_value()) << "make_decimal failed for: " << sv;
+    return r.value_or(decimal_t{});
+}
+
+// Helper: search the body bytes for a tag token "TAG=" at a field boundary.
+// Fields in FIX are separated by SOH (0x01). A tag token must appear either at
+// the very start of the buffer OR immediately after a SOH byte.
+// Returns true if found (presence check).
+bool body_contains_tag(std::span<const std::byte> body, std::string_view tag_str) {
+    // Build the token we're looking for as bytes: "tag="
+    std::string token{tag_str};
+    token += '=';
+    if (body.size() < token.size()) return false;
+
+    for (std::size_t i = 0; i + token.size() <= body.size(); ++i) {
+        // Must be at start or after SOH
+        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01u);
+        if (!at_boundary) continue;
+        bool match = true;
+        for (std::size_t j = 0; j < token.size(); ++j) {
+            if (static_cast<char>(body[i + j]) != token[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+// Helper: extract the value bytes for the first occurrence of tag in the body.
+// Returns empty span if not found.
+std::string_view extract_field_value(std::span<const std::byte> body, std::string_view tag_str) {
+    std::string token{tag_str};
+    token += '=';
+    for (std::size_t i = 0; i + token.size() <= body.size(); ++i) {
+        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01u);
+        if (!at_boundary) continue;
+        bool match = true;
+        for (std::size_t j = 0; j < token.size(); ++j) {
+            if (static_cast<char>(body[i + j]) != token[j]) { match = false; break; }
+        }
+        if (match) {
+            std::size_t val_start = i + token.size();
+            std::size_t val_end = val_start;
+            while (val_end < body.size() && static_cast<unsigned char>(body[val_end]) != 0x01u) {
+                ++val_end;
+            }
+            return std::string_view{
+                reinterpret_cast<const char*>(body.data() + val_start),
+                val_end - val_start};
+        }
+    }
+    return {};
+}
+
+constexpr std::size_t kBufSize = 1024;
+
+}  // namespace
+
+// ── AS1: NOS happy-path parse-back ─────────────────────────────────────────────
+TEST(BusinessMessagesBuild, AS1_NOS_HappyPath_ParseBack) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    auto order_qty = make_decimal("100", &arena);
+    auto price     = make_decimal("190.5", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+    auto result = fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf},
+        "ORD-001", "MSFT", '1', order_qty, price, "20240101-10:00:00");
+
+    ASSERT_TRUE(result.has_value()) << "build_new_order_single failed unexpectedly";
+    std::span<std::byte> body = *result;
+    ASSERT_FALSE(body.empty());
+
+    // Check MsgType is 35=D as first field
+    EXPECT_TRUE(body_contains_tag(body, "35"));
+    EXPECT_EQ(extract_field_value(body, "35"), "D");
+
+    // Check all required fields are present
+    EXPECT_EQ(extract_field_value(body, "11"), "ORD-001");
+    EXPECT_EQ(extract_field_value(body, "55"), "MSFT");
+    EXPECT_EQ(extract_field_value(body, "54"), "1");
+    EXPECT_EQ(extract_field_value(body, "40"), "2");  // OrdType fixed Limit
+    EXPECT_EQ(extract_field_value(body, "60"), "20240101-10:00:00");
+
+    // Numeric fidelity: parse back OrderQty and Price
+    auto qty_sv   = extract_field_value(body, "38");
+    auto price_sv = extract_field_value(body, "44");
+    ASSERT_FALSE(qty_sv.empty());
+    ASSERT_FALSE(price_sv.empty());
+
+    auto qty_bytes   = std::span<const std::byte>{reinterpret_cast<const std::byte*>(qty_sv.data()), qty_sv.size()};
+    auto price_bytes = std::span<const std::byte>{reinterpret_cast<const std::byte*>(price_sv.data()), price_sv.size()};
+
+    auto parsed_qty   = decimal_t::parse(qty_bytes, &arena);
+    auto parsed_price = decimal_t::parse(price_bytes, &arena);
+    ASSERT_TRUE(parsed_qty.has_value());
+    ASSERT_TRUE(parsed_price.has_value());
+    EXPECT_EQ(order_qty, *parsed_qty);
+    EXPECT_EQ(price, *parsed_price);
+}
+
+// ── AS2: ExecRpt happy-path parse-back ─────────────────────────────────────────
+TEST(BusinessMessagesBuild, AS2_ExecRpt_HappyPath_ParseBack) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    auto leaves_qty = make_decimal("0", &arena);
+    auto cum_qty    = make_decimal("100", &arena);
+    auto avg_px     = make_decimal("190.5", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+    auto result = fixpp::session::build_execution_report(
+        std::span<std::byte>{buf},
+        "ORD-XCH-001", "EXEC-001", 'F', '2',
+        "MSFT", '1', leaves_qty, cum_qty, avg_px);
+
+    ASSERT_TRUE(result.has_value()) << "build_execution_report failed unexpectedly";
+    std::span<std::byte> body = *result;
+    ASSERT_FALSE(body.empty());
+
+    // MsgType must be 35=8
+    EXPECT_EQ(extract_field_value(body, "35"), "8");
+
+    // Check all required fields
+    EXPECT_EQ(extract_field_value(body, "37"), "ORD-XCH-001");
+    EXPECT_EQ(extract_field_value(body, "17"), "EXEC-001");
+    EXPECT_EQ(extract_field_value(body, "150"), "F");
+    EXPECT_EQ(extract_field_value(body, "39"), "2");
+    EXPECT_EQ(extract_field_value(body, "55"), "MSFT");
+    EXPECT_EQ(extract_field_value(body, "54"), "1");
+
+    // Numeric fidelity
+    auto lqty_sv = extract_field_value(body, "151");
+    auto cqty_sv = extract_field_value(body, "14");
+    auto apx_sv  = extract_field_value(body, "6");
+    ASSERT_FALSE(lqty_sv.empty());
+    ASSERT_FALSE(cqty_sv.empty());
+    ASSERT_FALSE(apx_sv.empty());
+
+    auto pl = decimal_t::parse(
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(lqty_sv.data()), lqty_sv.size()}, &arena);
+    auto pc = decimal_t::parse(
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(cqty_sv.data()), cqty_sv.size()}, &arena);
+    auto pa = decimal_t::parse(
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(apx_sv.data()), apx_sv.size()}, &arena);
+    ASSERT_TRUE(pl.has_value());
+    ASSERT_TRUE(pc.has_value());
+    ASSERT_TRUE(pa.has_value());
+    EXPECT_EQ(leaves_qty, *pl);
+    EXPECT_EQ(cum_qty, *pc);
+    EXPECT_EQ(avg_px, *pa);
+}
+
+// ── INV-2: body must contain no engine-stamped tags ─────────────────────────────
+// Scans the produced body and asserts no "8=", "9=", "34=", "49=", "52=", "56=",
+// "10=" appear at a field-start boundary. These tags are engine-stamped; their
+// presence in the body is a defect (contracts/business-messages.md INV-2).
+TEST(BusinessMessagesBuild, Builder_Output_ContainsNoEngineTags) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    auto qty = make_decimal("50", &arena);
+    auto px  = make_decimal("100.25", &arena);
+
+    std::array<std::byte, kBufSize> nos_buf{};
+    auto nos_r = fixpp::session::build_new_order_single(
+        std::span<std::byte>{nos_buf},
+        "CLORD1", "AAPL", '2', qty, px, "20240601-09:30:00");
+    ASSERT_TRUE(nos_r.has_value());
+    std::span<std::byte> nos_body = *nos_r;
+
+    // Engine-stamped tags must NOT appear at any field-start boundary
+    EXPECT_FALSE(body_contains_tag(nos_body, "8"))   << "NOS body contains 8= (BeginString)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "9"))   << "NOS body contains 9= (BodyLength)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "34"))  << "NOS body contains 34= (MsgSeqNum)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "49"))  << "NOS body contains 49= (SenderCompID)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "52"))  << "NOS body contains 52= (SendingTime)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "56"))  << "NOS body contains 56= (TargetCompID)";
+    EXPECT_FALSE(body_contains_tag(nos_body, "10"))  << "NOS body contains 10= (CheckSum)";
+
+    // Same for ExecutionReport
+    auto lq = make_decimal("0", &arena);
+    auto cq = make_decimal("50", &arena);
+    auto ap = make_decimal("100.25", &arena);
+
+    std::array<std::byte, kBufSize> er_buf{};
+    auto er_r = fixpp::session::build_execution_report(
+        std::span<std::byte>{er_buf},
+        "ORD-001", "EXEC-001", 'F', '2', "AAPL", '2', lq, cq, ap);
+    ASSERT_TRUE(er_r.has_value());
+    std::span<std::byte> er_body = *er_r;
+
+    EXPECT_FALSE(body_contains_tag(er_body, "8"))   << "ExecRpt body contains 8=";
+    EXPECT_FALSE(body_contains_tag(er_body, "9"))   << "ExecRpt body contains 9=";
+    EXPECT_FALSE(body_contains_tag(er_body, "34"))  << "ExecRpt body contains 34=";
+    EXPECT_FALSE(body_contains_tag(er_body, "49"))  << "ExecRpt body contains 49=";
+    EXPECT_FALSE(body_contains_tag(er_body, "52"))  << "ExecRpt body contains 52=";
+    EXPECT_FALSE(body_contains_tag(er_body, "56"))  << "ExecRpt body contains 56=";
+    EXPECT_FALSE(body_contains_tag(er_body, "10"))  << "ExecRpt body contains 10=";
+}
+
+// ── INV-3: numeric fidelity — value-equality, trailing-zero tolerant ─────────
+// Build with "190.5" and verify the serialised form, when parsed back, equals
+// decimal_t{"190.50"} by value — confirming INV-3 tolerance of trailing-zero forms.
+TEST(BusinessMessagesBuild, Builder_NumericFidelity_DecimalValueEquality) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    // 190.5 and 190.50 must compare equal by decimal_t value
+    auto d_1905  = make_decimal("190.5", &arena);
+    auto d_19050 = make_decimal("190.50", &arena);
+    EXPECT_EQ(d_1905, d_19050) << "Pre-condition: 190.5 == 190.50 by decimal_t value";
+
+    auto qty = make_decimal("100", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+    auto r = fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf},
+        "CLORD2", "GOOG", '1', qty, d_1905, "20240601-12:00:00");
+    ASSERT_TRUE(r.has_value());
+
+    // Parse back the price field
+    auto px_sv = extract_field_value(*r, "44");
+    ASSERT_FALSE(px_sv.empty());
+    auto px_bytes = std::span<const std::byte>{reinterpret_cast<const std::byte*>(px_sv.data()), px_sv.size()};
+    auto parsed_px = decimal_t::parse(px_bytes, &arena);
+    ASSERT_TRUE(parsed_px.has_value());
+
+    // Must compare equal to both 190.5 and 190.50
+    EXPECT_EQ(*parsed_px, d_1905)  << "Parsed price must == 190.5";
+    EXPECT_EQ(*parsed_px, d_19050) << "Parsed price must == 190.50 (trailing-zero tolerance)";
+}
+
+// ── INV-4: fail-closed build atomicity ──────────────────────────────────────────
+// Each invalid-input case returns unexpected; the caller MUST NOT inspect `out`.
+// We verify only that the return is unexpected — we do not inspect the buffer.
+TEST(BusinessMessagesBuild, Builder_InvalidField_NoUsableOutput) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    auto qty = make_decimal("100", &arena);
+    auto px  = make_decimal("190.5", &arena);
+    auto zero = make_decimal("0", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+
+    // ── NOS invalid cases ──
+
+    // Empty cl_ord_id
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "", "MSFT", '1', qty, px, "20240101-10:00:00").has_value())
+        << "Empty cl_ord_id must fail";
+
+    // Empty symbol
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "ORD1", "", '1', qty, px, "20240101-10:00:00").has_value())
+        << "Empty symbol must fail";
+
+    // Out-of-range side (not '1' or '2')
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "ORD1", "MSFT", '3', qty, px, "20240101-10:00:00").has_value())
+        << "Side '3' must fail";
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "ORD1", "MSFT", '\0', qty, px, "20240101-10:00:00").has_value())
+        << "Side NUL must fail";
+
+    // Ill-formed transact_time (too short)
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "ORD1", "MSFT", '1', qty, px, "20240101").has_value())
+        << "Truncated transact_time must fail";
+
+    // Ill-formed transact_time (wrong length 18 chars — not 17 or 21)
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "ORD1", "MSFT", '1', qty, px, "20240101-10:00:000").has_value())
+        << "18-char transact_time must fail";
+
+    // Too-small output buffer
+    std::array<std::byte, 5> small_buf{};
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{small_buf}, "ORD1", "MSFT", '1', qty, px, "20240101-10:00:00").has_value())
+        << "Too-small buffer must fail with wire_frame_too_large";
+
+    // ── ExecRpt invalid cases ──
+
+    // Empty order_id
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "", "EXEC1", 'F', '2', "MSFT", '1', zero, qty, px).has_value())
+        << "Empty order_id must fail";
+
+    // Empty exec_id
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "ORD1", "", 'F', '2', "MSFT", '1', zero, qty, px).has_value())
+        << "Empty exec_id must fail";
+
+    // Empty symbol
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "ORD1", "EXEC1", 'F', '2', "", '1', zero, qty, px).has_value())
+        << "Empty symbol must fail";
+
+    // NUL exec_type (non-printable/control)
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "ORD1", "EXEC1", '\0', '2', "MSFT", '1', zero, qty, px).has_value())
+        << "NUL exec_type must fail";
+
+    // NUL ord_status
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "ORD1", "EXEC1", 'F', '\0', "MSFT", '1', zero, qty, px).has_value())
+        << "NUL ord_status must fail";
+
+    // Out-of-range side for ExecRpt
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{buf}, "ORD1", "EXEC1", 'F', '2', "MSFT", '9', zero, qty, px).has_value())
+        << "Side '9' must fail";
+
+    // Too-small output buffer
+    EXPECT_FALSE(fixpp::session::build_execution_report(
+        std::span<std::byte>{small_buf}, "ORD1", "EXEC1", 'F', '2', "MSFT", '1', zero, qty, px).has_value())
+        << "Too-small buffer must fail with wire_frame_too_large";
+}
+
+// ── FR-008: TransactTime length+shape validation ────────────────────────────────
+// Valid: 17-char "YYYYMMDD-HH:MM:SS" and 21-char "YYYYMMDD-HH:MM:SS.sss".
+// Invalid: wrong length, digits/separators in wrong positions.
+TEST(BusinessMessagesBuild, Builder_FR008_TransactTime_ShapeRejection) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    auto qty = make_decimal("10", &arena);
+    auto px  = make_decimal("50", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+
+    // Valid 17-char form
+    EXPECT_TRUE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "20240601-09:30:00").has_value())
+        << "17-char UTCTimestamp must succeed";
+
+    // Valid 21-char form (with milliseconds)
+    EXPECT_TRUE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "20240601-09:30:00.123").has_value())
+        << "21-char UTCTimestamp must succeed";
+
+    // Too short
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "20240601-09:30:0").has_value())
+        << "16-char timestamp must fail";
+
+    // Too long (not 17 or 21)
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "20240601-09:30:00.12345").has_value())
+        << "23-char timestamp must fail";
+
+    // Wrong separator position: dash not at position 8
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "20240601X09:30:00").has_value())
+        << "Non-dash at position 8 must fail";
+
+    // Empty string
+    EXPECT_FALSE(fixpp::session::build_new_order_single(
+        std::span<std::byte>{buf}, "O1", "X", '1', qty, px, "").has_value())
+        << "Empty transact_time must fail";
+}
+
+// ── [const §VIII.5] alloc witness: zero global-new allocations on the build path
+// Wraps both builder calls in a zero-alloc window. The global operator new
+// overrides above count every heap allocation. The decimal_t::parse calls in
+// THIS test allocate via mr (PMR arena) and do NOT go through global new, so
+// they must not increment the counter either (monotonic_buffer_resource uses
+// the arena, not global new for small allocations).
+//
+// We only zero-assert the BUILDER CALLS themselves, not make_decimal().
+TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+
+    // Construct decimals BEFORE the zero-alloc window
+    auto qty  = make_decimal("200", &arena);
+    auto px   = make_decimal("55.25", &arena);
+    auto lq   = make_decimal("0", &arena);
+    auto cq   = make_decimal("200", &arena);
+    auto ap   = make_decimal("55.25", &arena);
+
+    std::array<std::byte, kBufSize> nos_buf{};
+    std::array<std::byte, kBufSize> er_buf{};
+
+    // ── Zero-alloc window: only the builder calls ──
+    long before = g_alloc_count.load(std::memory_order_relaxed);
+
+    auto nos_r = fixpp::session::build_new_order_single(
+        std::span<std::byte>{nos_buf},
+        "CLORD-HEAP", "TSLA", '2', qty, px, "20240101-00:00:00");
+
+    auto er_r = fixpp::session::build_execution_report(
+        std::span<std::byte>{er_buf},
+        "ORD-HEAP", "EXEC-HEAP", 'F', '2', "TSLA", '2', lq, cq, ap);
+
+    long after = g_alloc_count.load(std::memory_order_relaxed);
+    // ── End zero-alloc window ──
+
+    EXPECT_TRUE(nos_r.has_value()) << "NOS builder must succeed for alloc witness";
+    EXPECT_TRUE(er_r.has_value())  << "ExecRpt builder must succeed for alloc witness";
+
+    EXPECT_EQ(after, before)
+        << "build_new_order_single + build_execution_report must not call global operator new "
+           "(alloc delta = " << (after - before) << "); "
+           "mallocnesia LD_PRELOAD is the CI-tier cross-check";
+}

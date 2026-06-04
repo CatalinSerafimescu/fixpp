@@ -2718,126 +2718,234 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
 // May throw asio::system_error on cancellation of the store awaitable.
 // Separated so the outer noexcept wrapper can catch and convert to expected_t.
 // [F5 Round-A drift fix: noexcept-throw trap separation]
+//
+// ── 020 T010: Opaque-payload validation (FR-016; INV-8; research.md D1) ──────
+// Validate app_payload BEFORE stamping SendingTime, peeking seqnum, or building
+// the frame. Any rejection returns app_payload_malformed (131) with NO seqnum
+// consumption, NO transmit.
+//
+// Validation rules (boundary-aware token matching):
+//   (1) payload must not be empty;
+//   (2) payload must begin with the bytes '3','5','=' (i.e. "35=" at offset 0);
+//   (3) no DUPLICATE 35= field (scan for SOH+"35=");
+//   (4) no embedded session header/trailer tag at a field boundary:
+//       tags 8, 9, 34, 49, 52, 56, 10 — matched as "<tag>=" ONLY at a
+//       field boundary (start of payload or right after SOH), so "54=" / "150="
+//       / "134=" do NOT false-match.
+//
+// Helper: returns true if the byte-string `sv` contains the token `tok` at any
+// field boundary (start of sv, or preceded by \x01).  noexcept, no allocation.
+// [020-g2-business-messages T010; research.md D1 "Opaque-payload validation"]
+static bool has_boundary_token(std::string_view sv, std::string_view tok) noexcept {
+    if (tok.size() > sv.size()) return false;
+    // Check at offset 0 (start of payload is a field boundary).
+    if (sv.substr(0, tok.size()) == tok) return true;
+    // Scan for \x01 followed by tok.
+    for (std::size_t i = 1; i + tok.size() <= sv.size(); ++i) {
+        if (sv[i - 1] == '\x01' && sv.substr(i, tok.size()) == tok) return true;
+    }
+    return false;
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     std::span<const std::byte> app_payload) {
     using fixpp::core::error;
 
+    // ── T010: Opaque-payload validation — BEFORE seqnum peek/assign/stamp ──────
+    // [020-g2 research.md D1; data-model.md INV-8; FR-016]
+    {
+        // Cast to string_view for boundary-token scanning. No allocation.
+        std::string_view pv{reinterpret_cast<const char*>(app_payload.data()),
+                            app_payload.size()};
+
+        // (1) Empty payload is malformed.
+        if (pv.empty()) {
+            co_return std::unexpected(error::app_payload_malformed);
+        }
+
+        // (2) Payload must lead with "35=".
+        if (pv.size() < 3 || pv[0] != '3' || pv[1] != '5' || pv[2] != '=') {
+            co_return std::unexpected(error::app_payload_malformed);
+        }
+
+        // (3) Duplicate 35=: a second 35= at a field boundary (after the leading one).
+        // The leading "35=" is at offset 0; look for any further SOH+"35=".
+        bool has_dup_35 = false;
+        for (std::size_t i = 1; i + 3 <= pv.size(); ++i) {
+            if (pv[i-1] == '\x01' && pv[i] == '3' && pv[i+1] == '5' && pv[i+2] == '=') {
+                has_dup_35 = true;
+                break;
+            }
+        }
+        if (has_dup_35) {
+            co_return std::unexpected(error::app_payload_malformed);
+        }
+
+        // (4) Embedded session header/trailer tags at field boundaries.
+        // Tags: 8=, 9=, 34=, 49=, 52=, 56=, 10=.
+        // Use has_boundary_token; the leading "35=" is allowed and already verified.
+        // Note: "8=" must match only as a complete field tag (not e.g. inside "38=").
+        // has_boundary_token ensures boundary-context.
+        if (has_boundary_token(pv, "8=")  ||
+            has_boundary_token(pv, "9=")  ||
+            has_boundary_token(pv, "34=") ||
+            has_boundary_token(pv, "49=") ||
+            has_boundary_token(pv, "52=") ||
+            has_boundary_token(pv, "56=") ||
+            has_boundary_token(pv, "10=")) {
+            co_return std::unexpected(error::app_payload_malformed);
+        }
+    }
+
+    // ── T009: Correct framing — MsgType(35) at wire field-3, digit-only BodyLength
+    // [020-g2 research.md D1; data-model.md INV-1; FR-004a]
+    //
+    // The payload is guaranteed (by validation above) to start with "35=<value>\x01"
+    // followed by the rest of the business fields.
+    //
+    // Strategy (avoids the placeholder + memmove):
+    //   1. Stamp SendingTime(52).
+    //   2. Peek seqnum.
+    //   3. Split the leading "35=<value>\x01" off app_payload.
+    //   4. Build the BODY into a local stack scratch buffer `body_buf`:
+    //        35=<value>\x01  34=<seq>\x01  49=<sender>\x01  52=<time>\x01
+    //        56=<target>\x01  <rest-of-payload>
+    //   5. Measure body length L.
+    //   6. Build the final wire frame into `buf`:
+    //        "8=<begin>\x01"  "9="  <L as digits, no padding>  "\x01"
+    //        <body_buf[0..L)>
+    //      Compute checksum over those bytes, append "10=<CCC>\x01".
+
     // (1) Stamp SendingTime(52) from effective_clock.now().
     const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
 
-    // (2) Peek outbound MsgSeqNum(34) — used in frame build below.
-    // The seqnum is NOT yet advanced (assign_outbound is called AFTER toApp check).
-    // Mirrors the admin-builder pattern (peek + build + assign) used by build_heartbeat
-    // et al. in the liveness loop. [spec.md FR-001(a); data-model.md §E1]
+    // (2) Peek outbound MsgSeqNum(34) — NOT yet advanced.
+    // assign_outbound() is called AFTER toApp check (same ordering as before).
     const seqnum_t seq = seqnum_mgr_.peek_outbound();
 
-    // (3) Build the frame into a 4096-byte stack buffer.
-    std::array<std::byte, 4096> buf{};
-    std::size_t pos = 0;
+    // (3) Split the leading 35=<value>\x01 field off the payload.
+    // Payload is guaranteed to start with "35="; find the first SOH.
+    std::string_view pv{reinterpret_cast<const char*>(app_payload.data()),
+                        app_payload.size()};
+    std::size_t first_soh = pv.find('\x01');
+    // first_soh must exist (a well-formed field ends with SOH). If not, treat as
+    // truncated — the payload has no SOH terminator, which is a well-formed
+    // frame requirement. Reject gracefully.
+    if (first_soh == std::string_view::npos) {
+        co_return std::unexpected(error::app_payload_malformed);
+    }
+    std::string_view msgtype_field = pv.substr(0, first_soh + 1);  // "35=D\x01"
+    std::string_view rest_payload  = pv.substr(first_soh + 1);     // remaining fields
+
+    // (4) Build BODY into a second stack buffer.
+    // Body layout: 35=<value>\x01  34=<seq>\x01  49=<sender>\x01  52=<time>\x01
+    //              56=<target>\x01  <rest_payload>
+    std::array<std::byte, 4096> body_buf{};
+    std::size_t bpos = 0;
     const std::byte SOH{0x01};
 
-    // Helper: write a C-string of n bytes.
-    const auto wb = [&](const char* s, std::size_t n) -> bool {
-        if (pos + n > buf.size()) {
-            return false;
-        }
-        for (std::size_t i = 0; i < n; ++i) {
-            buf[pos++] = static_cast<std::byte>(s[i]);
-        }
+    const auto wb_body = [&](const char* s, std::size_t n) -> bool {
+        if (bpos + n > body_buf.size()) return false;
+        for (std::size_t i = 0; i < n; ++i)
+            body_buf[bpos++] = static_cast<std::byte>(s[i]);
         return true;
     };
-    // Helper: write a string_view.
-    const auto wsv = [&](std::string_view sv) -> bool { return wb(sv.data(), sv.size()); };
-    // Helper: write "tag=value\x01" field.
-    const auto wfield = [&](std::string_view tag_eq, std::string_view val) -> bool {
-        if (!wsv(tag_eq) || !wsv(val)) {
-            return false;
-        }
-        if (pos >= buf.size()) {
-            return false;
-        }
-        buf[pos++] = SOH;
+    const auto wsv_body = [&](std::string_view sv) -> bool {
+        return wb_body(sv.data(), sv.size());
+    };
+    const auto wfield_body = [&](std::string_view tag_eq, std::string_view val) -> bool {
+        if (!wsv_body(tag_eq) || !wsv_body(val)) return false;
+        if (bpos >= body_buf.size()) return false;
+        body_buf[bpos++] = SOH;
         return true;
     };
 
-    // Write 8=BeginString.
-    if (!wfield("8=", cfg_.begin_string)) {
+    // 35=<value>\x01 (already includes SOH from the split above)
+    if (!wsv_body(msgtype_field)) {
         co_return std::unexpected(error::wire_frame_too_large);
     }
-
-    // Reserve "9=000000\x01" placeholder (6-digit body length, pad with leading zeros).
-    constexpr std::size_t kBLDigits = 6;
-    const std::size_t bl_digit_start = pos + 2;  // after "9="
-    {
-        constexpr std::string_view kBLPlaceholder = "9=000000";
-        if (!wsv(kBLPlaceholder)) {
-            co_return std::unexpected(error::wire_frame_too_large);
-        }
-        buf[pos++] = SOH;
-    }
-    const std::size_t body_start = pos;  // BodyLength counts from here
-
-    // Write 34=seq.
+    // 34=<seq>\x01
     {
         char nbuf[12];
         auto [end, ec] = std::to_chars(nbuf, nbuf + sizeof(nbuf), static_cast<std::uint32_t>(seq));
         (void)ec;
-        if (!wfield("34=", std::string_view{nbuf, static_cast<std::size_t>(end - nbuf)})) {
+        if (!wfield_body("34=", std::string_view{nbuf, static_cast<std::size_t>(end - nbuf)})) {
             co_return std::unexpected(error::wire_frame_too_large);
         }
     }
-
-    // Write 49=SenderCompID.
-    if (!wfield("49=", cfg_.sender_comp_id)) {
+    // 49=<sender>\x01
+    if (!wfield_body("49=", cfg_.sender_comp_id)) {
+        co_return std::unexpected(error::wire_frame_too_large);
+    }
+    // 52=<time>\x01
+    if (!wfield_body("52=", st52.value)) {
+        co_return std::unexpected(error::wire_frame_too_large);
+    }
+    // 56=<target>\x01
+    if (!wfield_body("56=", cfg_.target_comp_id)) {
+        co_return std::unexpected(error::wire_frame_too_large);
+    }
+    // rest of app_payload (business fields after the 35= field)
+    if (bpos + rest_payload.size() > body_buf.size()) {
+        co_return std::unexpected(error::wire_frame_too_large);
+    }
+    if (!wsv_body(rest_payload)) {
         co_return std::unexpected(error::wire_frame_too_large);
     }
 
-    // Write 52=SendingTime.
-    if (!wfield("52=", st52.value)) {
+    const std::size_t body_len = bpos;  // exact body length, no padding
+
+    // (5) Build the wire frame into `buf`.
+    // Frame: "8=<begin>\x01" "9=" <body_len digits> "\x01" <body_buf[0..body_len)>
+    //        "10=" <CCC> "\x01"
+    std::array<std::byte, 4096> buf{};
+    std::size_t pos = 0;
+
+    const auto wb = [&](const char* s, std::size_t n) -> bool {
+        if (pos + n > buf.size()) return false;
+        for (std::size_t i = 0; i < n; ++i)
+            buf[pos++] = static_cast<std::byte>(s[i]);
+        return true;
+    };
+    const auto wsv = [&](std::string_view sv) -> bool { return wb(sv.data(), sv.size()); };
+    const auto wfield = [&](std::string_view tag_eq, std::string_view val) -> bool {
+        if (!wsv(tag_eq) || !wsv(val)) return false;
+        if (pos >= buf.size()) return false;
+        buf[pos++] = SOH;
+        return true;
+    };
+
+    // 8=<BeginString>\x01
+    if (!wfield("8=", cfg_.begin_string)) {
         co_return std::unexpected(error::wire_frame_too_large);
     }
 
-    // Write 56=TargetCompID.
-    if (!wfield("56=", cfg_.target_comp_id)) {
-        co_return std::unexpected(error::wire_frame_too_large);
-    }
-
-    // Append app_payload bytes (caller-encoded FIX body fields).
-    if (pos + app_payload.size() > buf.size()) {
-        co_return std::unexpected(error::wire_frame_too_large);
-    }
-    for (auto b : app_payload) {
-        buf[pos++] = b;
-    }
-
-    // Backpatch 9= BodyLength: bytes from body_start to here.
-    const std::size_t body_len = pos - body_start;
+    // 9=<body_len digits (no padding)>\x01
     {
-        char bl_buf[7];
+        char bl_buf[12];
         auto [bl_end, bl_ec] = std::to_chars(bl_buf, bl_buf + sizeof(bl_buf), body_len);
         (void)bl_ec;
-        const std::size_t bl_len = static_cast<std::size_t>(bl_end - bl_buf);
-        if (bl_len > kBLDigits) {
+        if (!wfield("9=", std::string_view{bl_buf, static_cast<std::size_t>(bl_end - bl_buf)})) {
             co_return std::unexpected(error::wire_frame_too_large);
-        }
-        // Right-align: fill zeros then digits within the 6-digit placeholder.
-        const std::size_t zero_count = kBLDigits - bl_len;
-        for (std::size_t i = 0; i < zero_count; ++i) {
-            buf[bl_digit_start + i] = static_cast<std::byte>('0');
-        }
-        for (std::size_t i = 0; i < bl_len; ++i) {
-            buf[bl_digit_start + zero_count + i] = static_cast<std::byte>(bl_buf[i]);
         }
     }
 
-    // Compute checksum over all bytes written so far (before 10= field).
+    // Append the pre-built body (35=…34=…49=…52=…56=…rest).
+    if (pos + body_len > buf.size()) {
+        co_return std::unexpected(error::wire_frame_too_large);
+    }
+    for (std::size_t i = 0; i < body_len; ++i) {
+        buf[pos++] = body_buf[i];
+    }
+
+    // Compute checksum over all bytes so far (8=…body, before 10=).
     unsigned int csum = 0;
     for (std::size_t i = 0; i < pos; ++i) {
         csum += static_cast<unsigned int>(static_cast<unsigned char>(buf[i]));
     }
     csum &= 0xFFU;
 
-    // Write 10=CCC checksum.
+    // 10=<CCC>\x01
     {
         char cs_buf[4];
         cs_buf[0] = static_cast<char>('0' + (csum / 100U));
@@ -2850,22 +2958,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // ── 019 T013: toApp inspection/veto (FR-006/007; US2 AC1/AC2; research D6) ──
     // Called AFTER the complete frame is built so the MessageView passed to toApp
-    // contains all FIX fields (8=, 34=, 49=, 52=, 56=, etc.) — NOT the raw
-    // app_payload (which is a partial body without session headers).
+    // contains all FIX fields including MsgType (now correctly at field-3).
     // Run BEFORE store_then_emit so a vetoed/aborted send is not stored or transmitted.
-    // A veto does NOT consume the seqnum — the seqnum was already assigned above;
-    // however a vetoed frame is simply not emitted (the seqnum hole is acceptable
-    // per spec — the next successful send will use the NEXT seqnum). This matches
-    // the QuickFIX behavior where a vetoed outgoing message leaves a gap.
-    //
-    // Uses callback_dispatch_scope (INV-2 debug guard) + invoke_callback_safe
-    // (throw → terminal-close, FR-011). Session stays Active on veto (INV-5/SC-004).
+    // A veto does NOT consume the seqnum (assign_outbound called below, after this check).
     // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
     if (engine_.application != nullptr) {
         std::span<const std::byte> built_frame{buf.data(), pos};
-        // kInboundParseArena: built app frame may carry an arbitrary-size payload.
-        // T019 note: parse_and_dispatch_ drops callback_dispatch_scope before returning.
-        // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
         auto cb_r = parse_and_dispatch_(built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
             return engine_.application->toApp(mv, sid);
         });
@@ -2878,7 +2976,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             // Session stays Active (INV-5/SC-004).
             co_return std::unexpected(cb_r.error());
         }
-        // If parse fails (cb_r == ok): frame accepted (no-op on toApp — cannot inspect).
+        // If parse fails (cb_r == ok): frame accepted (no-op on toApp).
     }
 
     // (3b) Advance outbound seqnum counter via assign_outbound() — AFTER toApp check
@@ -2889,7 +2987,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
         }
         // The assigned value must equal the peeked seq (single-strand, no race).
-        // Discard the returned value — we already embedded seq in the frame above.
         (void)assign_r;
     }
 

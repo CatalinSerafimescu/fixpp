@@ -133,6 +133,8 @@ verify-YELLOW sanitizer waiver (the interop ctest runs under ASan/UBSan/TSan).
 | A-012 | OFFICIAL | wire | CrossOrderCancelReplaceRequest (35=t) | 4.4–5.0SP2 | [FIX44] Cross Orders | backlog | — | — | — | — |
 | A-013 | OFFICIAL | wire | CrossOrderCancelRequest (35=u) | 4.4–5.0SP2 | [FIX44] Cross Orders | backlog | — | — | — | — |
 
+> **A-001 / A-006 — partial G2 interop evidence (020-g2-business-messages), NOT a closure.** 020 ships a *minimal* hand-written FIX-4.4 typed builder for NewOrderSingle (35=D) and ExecutionReport (35=8) — Limit-only NOS, fully-filled ExecRpt, minimal field set — driven live `Logon→NOS→ExecRpt→Logout` vs QuickFIX-J/cpp both roles (discharging `[const §VII.6]`). These rows **stay `backlog`**: A-001/A-006 are OFFICIAL all-version (4.0–5.0SP2) wire rows owned by codegen; full-field coverage is deferred (FR-015a, the codegen writer-emitter path) and all-protocol-version coverage (4.2/5.0SP2/FIXT.1.1) is scheduled post-v1.0 (FR-015b). See B&L `L-020-1`/`L-020-2` and `spec/coverage-index.md` A-001/A-006 gap-notes.
+
 ## Application Messages — Market Data
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |

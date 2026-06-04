@@ -121,8 +121,9 @@ static std::vector<std::byte> make_app_frame(std::uint32_t seq = 2,
 }
 
 static std::vector<std::byte> make_app_payload() {
-    // Opaque application bytes for Engine::send.
-    static const char kPayload[] = "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    // Opaque application bytes for Engine::send. Must lead with a 35= MsgType
+    // field (FR-016 / 020 send-path validation) and carry no session tags.
+    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
     std::vector<std::byte> v;
     for (const char* p = kPayload; *p; ++p)
         v.push_back(static_cast<std::byte>(*p));

@@ -7,11 +7,19 @@ End-to-end use of the G2 surface: build a typed order, send it via `Engine::send
 ```cpp
 #include <fixpp/session/business_messages.hpp>
 #include <fixpp/core/decimal_alias.hpp>   // fixpp::decimal_t
+#include <fixpp/v44/Messages.hpp>         // fixpp::v44::{NewOrderSingle,ExecutionReport} (read side)
+#include <array>
+#include <memory_resource>
+#include <span>
+#include <string_view>
 
 using fixpp::decimal_t;
 
 // A decimal_t is built by PARSING a byte span with a memory resource — there is
-// no parse(string-literal) overload. Helper unwrapping the expected_t:
+// no parse(string-literal) overload. Helper unwrapping the expected_t.
+// CAVEAT: the returned decimal_t's internal storage is owned by *mr*; the value
+// is only valid while that arena outlives every use of the decimal_t (and of any
+// frame built from it). Keep the arena alive across the build→send→read window.
 auto dec = [](std::string_view s, std::pmr::memory_resource* mr) -> decimal_t {
     auto bytes = std::as_bytes(std::span{s.data(), s.size()});
     return *decimal_t::parse(bytes, mr);   // production code must check the expected_t

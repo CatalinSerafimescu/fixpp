@@ -76,6 +76,8 @@ target_sources(fixpp_session PRIVATE
   compid_authorization_policy.cpp  # T008: Phase 2 shape; behavioral body Phase 3 T023/T024
   resend_state.cpp                 # T009: Phase 2 shape; behavioral body Phase 3 T025/T026
   reconnect_fsm.cpp                # T010: Phase 2 stubs; behavioral body Phase 3 T027–T031
+  # ── 020-g2-business-messages Phase 2 (T004) ───────────────────────────────
+  business_messages.cpp            # T004: Phase 2 stub; builder bodies Phase 3 T008
 )
 
 target_link_libraries(fixpp_session PRIVATE Crc32c::crc32c)

@@ -61,6 +61,18 @@ namespace fixpp::session::test {
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
+// Minimal VALID application payload for Session::send. The 020 send path
+// validates the opaque payload fail-closed (FR-016): it must lead with a single
+// 35= MsgType field and carry no session header/trailer tags. These framing /
+// seqnum tests assert on engine-stamped fields (8/34/52), not payload content,
+// so a minimal 35=D body suffices.
+static std::vector<std::byte> make_min_app_payload() {
+    static const char kP[] = "35=D\x01";
+    std::vector<std::byte> v;
+    for (const char* p = kP; *p; ++p) v.push_back(static_cast<std::byte>(*p));
+    return v;
+}
+
 // Build a minimal Logon frame for the peer (inbound to drive session Active).
 static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
                                               std::string_view sender, std::string_view target) {
@@ -250,7 +262,7 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
     const std::size_t transport_calls_before = transport_log.size();
 
     // Call Session::send with a dummy application payload.
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -316,7 +328,7 @@ TEST_F(SendPathTest, Fix42_Active_Send_CarriesNegotiatedBeginString) {
     Session sess(engine, cfg);
     drive_to_active(sess, "FIX.4.2");
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -372,7 +384,7 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
     const std::size_t store_out_count_before =
         static_cast<std::size_t>(std::count(call_log.begin(), call_log.end(), "store_out"));
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -495,7 +507,7 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
     const std::size_t store_calls_before = call_log.size();
 
     // Call send() while in LogonSent (not Active).
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -604,7 +616,7 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
     // Enable throwing AFTER reaching Active (so open() and peer Logon succeeded).
     *throw_flag = true;
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -638,7 +650,7 @@ TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
     // Enable throwing AFTER reaching Active.
     *throw_flag = true;
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);
@@ -681,7 +693,7 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     const seqnum_t mgr_before = sess.seqnum_mgr_test_access().next_outbound_unsafe();
 
     // First send.
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
@@ -763,7 +775,7 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     EXPECT_EQ(std::string(*logon_34), "1") << "Initiator Logon must have 34=1";
 
     // Call Session::send once.
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
@@ -800,7 +812,7 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     Session sess(engine, cfg);
     drive_to_active(sess, "FIX.4.4");
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     // First send.
     {
         auto fut =
@@ -870,7 +882,7 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
     // Enable transport throwing AFTER reaching Active.
     *transport_throw = true;
 
-    std::array<std::byte, 4> payload{};
+    auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     ioc.run_for(200ms);

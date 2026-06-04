@@ -321,3 +321,58 @@ Scope and conventions:
   `Session::executor()`) is a future Phase-5 slice; it would re-trigger Gate A.
   **Status: deferred** (true strand-confinement on engine-driven paths). *(INV-2 correction;
   gate-b/r1 FIX-4; research.md D3 clarification; data-model.md INV-2.)*
+
+## G2 Business Messages (020-g2-business-messages)
+
+### Feature Catalogue Rows
+
+No new catalogue rows. A-001 (NewOrderSingle 35=D) and A-006 (ExecutionReport 35=8)
+**stay `backlog`** with a partial-G2-interop-evidence gap-note (NOT a closure) — see the
+`## Application Messages — Order Management` blockquote in `spec/feature-catalogue.md` and
+the A-001/A-006 gap-notes in `spec/coverage-index.md`. Mints `fixpp::core::error`
+enumerator `app_payload_malformed = 131` (`tests/core/test_019_error_completeness.cpp`
+forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 completeness gate).
+
+### Behaviors
+
+- **B-020-1 — Application sends now place MsgType(35) at wire field-3 with a digit-only
+  BodyLength.** `Session::send_impl` (the path under `Engine::send` and `Session::send`)
+  re-frames the outbound application frame so the first three wire fields are
+  `8=BeginString`, `9=BodyLength`, `35=MsgType` in that order, and `9=` is digit-only /
+  unpadded (`.specify/2b-wire.md`). Previously MsgType landed 7th and `9=` was zero-padded
+  (`9=000045`) — accepted by fixpp's lenient parser but rejected by QuickFIX/J/cpp + Fix8.
+  This corrects 019's latent opaque-path framing for ALL app sends, not just the typed
+  builders. *(FR-004a; research.md D1; data-model.md INV-1; B-020 send-path framing.)*
+
+- **B-020-2 — Application send payloads are validated fail-closed before any seqnum/transmit.**
+  `Engine::send` / `Session::send` copy arbitrary opaque app bytes; `send_impl` now validates
+  the payload BEFORE stamping SendingTime, peeking/assigning a seqnum, or storing/transmitting:
+  it must lead with exactly one `35=` MsgType field and carry no embedded session header/trailer
+  tag (`8/9/34/49/52/56/10`); empty, no-leading-`35=`, duplicate-`35=`, or embedded-tag payloads
+  are rejected with `error::app_payload_malformed` (131) and consume NO seqnum. *(FR-016;
+  data-model.md INV-8; research.md D1 opaque-payload validation.)*
+
+- **B-020-3 — Typed minimal builders for NewOrderSingle / ExecutionReport.**
+  `build_new_order_single` (Limit-only, OrdType=2) and `build_execution_report` (fully-filled
+  reply: ExecType='F'/OrdStatus='2'/LeavesQty=0/CumQty=OrderQty/AvgPx=Price) are `noexcept`,
+  allocation-free (stack-scratch-then-copy, INV-4 atomicity), emit the app body only (no
+  session header/trailer tags), and serialize numerics via `decimal_t::format` (canonical,
+  locale-independent). The READ side consumes the already-generated `fixpp::v44` flyweights.
+  *(FR-001..008; data-model.md E1/E2; INV-2/3/4; `[const §VIII.5]`.)*
+
+### Limitations
+
+- **L-020-1 — Minimal field set only; full FIX 4.4 field/group coverage is deferred.**
+  The 020 builders emit only the minimal NOS/ExecRpt fields (NOS: 11/55/54/38/40/44/60;
+  ExecRpt: 37/17/150/39/55/54/151/14/6). NewOrderSingle is **Limit-only** (OrdType fixed to
+  `2`, Price always required); Market orders, optional fields, and repeating groups are not
+  supported. The full-coverage path is the codegen *writer-emitter* (which would emit writers
+  for the entire message set). **Status: deferred** (FR-015a — codegen writer-emitter).
+  *(FR-015a; research.md D3/D5 + "Forward obligations"; Deferred-work registry in CLAUDE.md.)*
+
+- **L-020-2 — FIX 4.4 only; all-protocol-version coverage (4.2 / 5.0SP2 / FIXT.1.1) is
+  scheduled post-v1.0.** The typed builders + live interop cells negotiate FIX 4.4 only
+  (matching 016/018 and the generated `fixpp::v44` flyweights). NewOrderSingle/ExecutionReport
+  over 4.2 / 5.0SP2 / FIXT.1.1 (interop roadmap G4 axis) are not covered. **Status: deferred**
+  (FR-015b — scheduled post-v1.0). *(FR-015b; research.md D8 + "Forward obligations";
+  Deferred-work registry in CLAUDE.md.)*
