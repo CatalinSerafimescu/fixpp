@@ -28,6 +28,7 @@
 // Anchors: contracts/business-messages.md; data-model.md E1/E2; research.md D3/D4;
 //          spec FR-001..008; INV-2/3/4.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
@@ -108,6 +109,16 @@ inline constexpr std::size_t kScratchSize = 1024;
 // Used for exec_type and ord_status to reject NUL/control bytes.
 [[nodiscard]] bool is_printable(char c) noexcept {
     return static_cast<unsigned char>(c) >= 0x20U && static_cast<unsigned char>(c) <= 0x7EU;
+}
+
+// Validate that every byte of a string field value is a printable non-control
+// ASCII character (0x20..0x7E). Rejects SOH (0x01), NUL (0x00), DEL (0x7F),
+// and all other control bytes. This prevents SOH injection via string fields
+// (INV-2 / FR-004): a value containing SOH would forge a field boundary inside
+// the body, allowing injection of arbitrary FIX tags after the SOH.
+// [RC#1: gate-b/r1 business_messages.cpp control-byte sanitization]
+[[nodiscard]] bool is_clean_field_value(std::string_view sv) noexcept {
+    return std::ranges::all_of(sv, is_printable);
 }
 
 // Validate side: only '1' (Buy) or '2' (Sell) are accepted.
@@ -208,6 +219,14 @@ inline constexpr std::size_t kScratchSize = 1024;
     if (cl_ord_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
     if (symbol.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
 
+    // Reject control bytes (incl. SOH) in string fields to prevent SOH injection
+    // (INV-2 / FR-004): a SOH inside cl_ord_id or symbol would forge a field
+    // boundary inside the body. [RC#1: gate-b/r1]
+    if (!is_clean_field_value(cl_ord_id))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_clean_field_value(symbol))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+
     // Validate side.
     if (!is_valid_side(side))
         return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
@@ -271,6 +290,15 @@ inline constexpr std::size_t kScratchSize = 1024;
     if (order_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
     if (exec_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
     if (symbol.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
+
+    // Reject control bytes (incl. SOH) in string fields to prevent SOH injection
+    // (INV-2 / FR-004). [RC#1: gate-b/r1]
+    if (!is_clean_field_value(order_id))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_clean_field_value(exec_id))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (!is_clean_field_value(symbol))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
 
     // Validate enum chars: reject NUL and non-printable/control bytes.
     if (!is_printable(exec_type))
