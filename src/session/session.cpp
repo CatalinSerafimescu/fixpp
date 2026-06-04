@@ -775,7 +775,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 
     // 019 T016: fire onCreate after open() has fully initialized exec_
     // (executor is valid post-open() per research D3 / data-model.md INV-7).
-    // Invoked directly on the session strand (exec_ is the current executor here).
+    // Invoked directly on the engine executor (exec_); serialization derives from
+    // single-thread confinement (015 E-5), NOT from an engaged per-session strand.
+    // See data-model.md INV-2 + spec/behaviors-and-limitations.md L-019-3.
     // On throw → terminal close + return error (FR-011; US3 AC1). [FR-009]
     if (engine_.application != nullptr) {
         const SessionId create_id = SessionId::from_config(cfg_);
@@ -1714,7 +1716,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             st52.value);
                         if (lo_result) {
                             // 019 T014: toAdmin before transmitting Logout. [FR-008/010]
-                            (void)fire_to_admin_(*lo_result);
+                            // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                            if (!fire_to_admin_(*lo_result)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -1818,7 +1825,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.begin_string, st52.value);
                     if (rr_result) {
                         // 019 T014: toAdmin before transmitting ResendRequest. [FR-008/010]
-                        (void)fire_to_admin_(*rr_result);
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*rr_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -1892,7 +1903,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         st52.value);
                     if (logout_result) {
                         // 019 T014: toAdmin before confirming Logout. [FR-008/010]
-                        (void)fire_to_admin_(*logout_result);
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*logout_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
@@ -2038,7 +2053,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             cfg_.begin_string, st52.value);
                         if (hb_result) {
                             // 019 T014: toAdmin before Heartbeat echo. [FR-008/010]
-                            (void)fire_to_admin_(*hb_result);
+                            // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                            if (!fire_to_admin_(*hb_result)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                            }
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (!assign_r) {
                                 record_state_transition_(fsm_state::Disconnected);
@@ -2068,7 +2087,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.begin_string, st52.value);
                     if (hb_result) {
                         // 019 T014: toAdmin before Heartbeat reply. [FR-008/010]
-                        (void)fire_to_admin_(*hb_result);
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*hb_result)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -2130,6 +2153,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
                                mt == "5" || mt == "A";
                     };
+                    // FIX-3 (gate-b/r1): flag set by emit_gapfill_async when
+                    // fire_to_admin_ returns false (toAdmin threw). Callers check
+                    // this flag to distinguish transport-error false from
+                    // callback-threw false and return app_callback_threw.
+                    bool gapfill_callback_threw = false;
                     const auto emit_gapfill_async =
                         [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
                         std::array<std::byte, 256> gf_buf{};
@@ -2141,7 +2169,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             co_return true;
                         }  // build failure treated as no-op
                         // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
-                        (void)fire_to_admin_(*gf);
+                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+                        if (!fire_to_admin_(*gf)) {
+                            gapfill_callback_threw = true;
+                            co_return false;
+                        }
                         co_return co_await transmit_async(*gf);
                     };
 
@@ -2164,6 +2196,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U,
                                                          new_seq_no)) {
                             record_state_transition_(fsm_state::Disconnected);
+                            if (gapfill_callback_threw) {
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                         }
                         co_return fixpp::core::expected_t<void>{};
                     }
@@ -2200,6 +2236,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             if (gap_open) {
                                 if (!co_await emit_gapfill_async(gap_start, k)) {
                                     record_state_transition_(fsm_state::Disconnected);
+                                    if (gapfill_callback_threw) {
+                                        co_return std::unexpected(
+                                            fixpp::core::error::app_callback_threw);
+                                    }
                                     co_return fixpp::core::expected_t<void>{};
                                 }
                                 gap_open = false;
@@ -2223,6 +2263,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (gap_open) {
                         if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
                             record_state_transition_(fsm_state::Disconnected);
+                            if (gapfill_callback_threw) {
+                                co_return std::unexpected(
+                                    fixpp::core::error::app_callback_threw);
+                            }
                         }
                     }
                     // Remain in Active after responding to ResendRequest.
@@ -2965,7 +3009,11 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     cfg_.target_comp_id, {}, cfg_.begin_string, st52_hb.value);
                 if (hb_result) {
                     // 019 T014: toAdmin before liveness Heartbeat. [FR-008/010]
-                    (void)fire_to_admin_(*hb_result);
+                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                    if (!fire_to_admin_(*hb_result)) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         record_state_transition_(fsm_state::Disconnected);
@@ -3015,7 +3063,11 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
                 if (tr_result) {
                     // 019 T014: toAdmin before TestRequest. [FR-008/010]
-                    (void)fire_to_admin_(*tr_result);
+                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                    if (!fire_to_admin_(*tr_result)) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return;
+                    }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
                         // Overflow or closed: session-fatal per data-model.md:30 E3.
@@ -3249,7 +3301,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
         // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
-        (void)fire_to_admin_(*logout_result);
+        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+        if (!fire_to_admin_(*logout_result)) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
             // Overflow or closed: session-fatal per data-model.md:30 E3.
