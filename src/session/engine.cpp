@@ -807,11 +807,20 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // asio::co_spawn with use_awaitable runs the lambda on the target executor
     // and co_awaits it — the co_await here suspends Engine::send until the
     // Session::send completes on the session strand.
+    //
+    // T019: reset total-cancel so stop()'s cancellation_type::total propagates
+    // into Session::send (which is awaited below). Without the reset, co_spawn
+    // defaults to terminal-only and silently swallows total-cancel, leaving the
+    // send running past stop(). [[feedback_asio_cospawn_total_cancellation_default]]
     auto exec = kl->executor().underlying();
     core::expected_t<void> result =
         co_await asio::co_spawn(exec,
                                 [kl, payload_copy = std::move(payload_copy)]()
                                     -> asio::awaitable<core::expected_t<void>> {
+                                    // Enable total cancellation so stop()'s
+                                    // cancellation_type::total reaches Session::send.
+                                    co_await asio::this_coro::reset_cancellation_state(
+                                        asio::enable_total_cancellation());
                                     // Re-check state on the strand (may have changed).
                                     if (kl->state() != fsm_state::Active) {
                                         co_return std::unexpected(

@@ -742,9 +742,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // On throw → terminal close + return error (FR-011; US3 AC1). [FR-009]
     if (engine_.application != nullptr) {
         const SessionId create_id = SessionId::from_config(cfg_);
-        callback_dispatch_scope cs{*this};
-        auto cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
-        (void)cs;
+        fixpp::core::expected_t<void> cb_r{};
+        {
+            // T019: scope the guard BEFORE close(terminal) so onLogout (fired
+            // inside close → record_state_transition_) can acquire its own
+            // callback_dispatch_scope without hitting the re-entrancy assert.
+            callback_dispatch_scope cs{*this};
+            cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
+        }  // cs drops here — in_dispatch_ = false
         if (!cb_r) {
             co_await close(fixpp::session::close_mode::terminal);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -1678,11 +1683,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto sr_mv = sr_parser.parse((*sr_feed)[0], &pa_mr);
                         if (sr_mv) {
                             const SessionId sr_sid = SessionId::from_config(cfg_);
-                            callback_dispatch_scope cs{*this};
-                            auto cb_r = invoke_callback_safe([&]() {
-                                return engine_.application->fromAdmin(*sr_mv, sr_sid);
-                            });
-                            (void)cs;
+                            fixpp::core::expected_t<void> cb_r{};
+                            {
+                                // T019: drop scope before close(terminal) so onLogout
+                                // in record_state_transition_ can acquire its own scope.
+                                callback_dispatch_scope cs{*this};
+                                cb_r = invoke_callback_safe([&]() {
+                                    return engine_.application->fromAdmin(*sr_mv, sr_sid);
+                                });
+                            }  // cs drops here
                             if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                                 co_await close(close_mode::terminal);
                                 co_return std::unexpected(cb_r.error());
@@ -1863,17 +1872,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto lo_mv = lo_parser.parse((*lo_feed)[0], &pa_mr);
                         if (lo_mv) {
                             const SessionId lo_sid = SessionId::from_config(cfg_);
-                            callback_dispatch_scope cs{*this};
-                            auto cb_r = invoke_callback_safe([&]() {
-                                return engine_.application->fromAdmin(*lo_mv, lo_sid);
-                            });
-                            (void)cs;
-                            if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            fixpp::core::expected_t<void> lo_cb_r{};
+                            {
+                                // T019: drop scope before record_state_transition_ so onLogout
+                                // callback can acquire its own callback_dispatch_scope.
+                                callback_dispatch_scope cs{*this};
+                                lo_cb_r = invoke_callback_safe([&]() {
+                                    return engine_.application->fromAdmin(*lo_mv, lo_sid);
+                                });
+                            }  // cs drops here — in_dispatch_ = false
+                            if (!lo_cb_r && lo_cb_r.error() == fixpp::core::error::app_callback_threw) {
                                 // throw from fromAdmin on Logout path: terminal close.
                                 // onLogout will still fire in record_state_transition_ below.
                                 record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(cb_r.error());
+                                co_return std::unexpected(lo_cb_r.error());
                             }
+                            // Re-alias for the reject check below.
+                            auto cb_r = lo_cb_r;
                             // fromAdmin reject on Logout: emit Reject(35=3) but still disconnect.
                             if (!cb_r) {
                                 std::array<std::byte, 512> rj_buf{};
@@ -1946,11 +1961,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto adm_mv = adm_parser.parse((*adm_feed)[0], &pa_mr);
                         if (adm_mv) {
                             const SessionId adm_sid = SessionId::from_config(cfg_);
-                            callback_dispatch_scope cs{*this};
-                            auto cb_r = invoke_callback_safe([&]() {
-                                return engine_.application->fromAdmin(*adm_mv, adm_sid);
-                            });
-                            (void)cs;
+                            fixpp::core::expected_t<void> cb_r{};
+                            {
+                                // T019: drop scope before close(terminal) so onLogout
+                                // in record_state_transition_ can acquire its own scope.
+                                callback_dispatch_scope cs{*this};
+                                cb_r = invoke_callback_safe([&]() {
+                                    return engine_.application->fromAdmin(*adm_mv, adm_sid);
+                                });
+                            }  // cs drops here — in_dispatch_ = false
                             if (!cb_r) {
                                 if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                                     co_await close(close_mode::terminal);
@@ -2313,11 +2332,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             const SessionId sid = SessionId::from_config(cfg_);
 
                             // fromApp dispatch (FR-003).
-                            callback_dispatch_scope cs{*this};
-                            auto cb_r = invoke_callback_safe([&]() {
-                                return engine_.application->fromApp(*mv_r, sid);
-                            });
-                            (void)cs;
+                            fixpp::core::expected_t<void> cb_r{};
+                            {
+                                // T019: drop scope before close(terminal) so onLogout
+                                // in record_state_transition_ can acquire its own scope.
+                                callback_dispatch_scope cs{*this};
+                                cb_r = invoke_callback_safe([&]() {
+                                    return engine_.application->fromApp(*mv_r, sid);
+                                });
+                            }  // cs drops here — in_dispatch_ = false
                             if (!cb_r) {
                                 if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                                     co_await close(close_mode::terminal);
@@ -2868,11 +2891,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             auto mv_r = parser.parse((*feed_r)[0], &pa_mr);
             if (mv_r) {
                 const SessionId sid = SessionId::from_config(cfg_);
-                callback_dispatch_scope cs{*this};
-                auto cb_r = invoke_callback_safe([&]() {
-                    return engine_.application->toApp(*mv_r, sid);
-                });
-                (void)cs;
+                fixpp::core::expected_t<void> cb_r{};
+                {
+                    // T019: drop scope before close(terminal) so onLogout
+                    // in record_state_transition_ can acquire its own scope.
+                    callback_dispatch_scope cs{*this};
+                    cb_r = invoke_callback_safe([&]() {
+                        return engine_.application->toApp(*mv_r, sid);
+                    });
+                }  // cs drops here — in_dispatch_ = false
                 if (!cb_r) {
                     if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                         co_await close(close_mode::terminal);

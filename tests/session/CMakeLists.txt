@@ -1161,6 +1161,49 @@ set_tests_properties(application_lifecycle_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us3;lifecycle;application")
 
+# ── 019-app-callbacks T017 — strand serialization, drain, keepalive tests ────
+# FR-010/012; INV-2/INV-3; SC-005; research D3.
+# TSan-gated: NoConcurrentCallbacksForOneSession proves no data race on session
+# members under concurrent inbound. ASan-gated: DrainBeforeDestroy + keepalive.
+# All tests have internal self-deadlines (ioc.run_for → no hang).
+add_executable(application_strand_019_test
+  test_application_strand.cpp
+)
+target_link_libraries(application_strand_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_strand_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_strand_019 COMMAND application_strand_019_test)
+set_tests_properties(application_strand_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase6;strand;drain;application")
+
+# ── 019-app-callbacks T018 — throw-from-callback disposal at every site ───────
+# FR-011; 7 cells: fromApp/fromAdmin/toApp/toAdmin/onCreate/onLogon/onLogout.
+# Each cell: engine catches throw, terminal-closes session, re-entrancy guard
+# cleared, engine not corrupted (second session works). All self-deadlined.
+add_executable(application_throw_019_test
+  test_application_throw.cpp
+)
+target_link_libraries(application_throw_019_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(application_throw_019_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME application_throw_019 COMMAND application_throw_019_test)
+set_tests_properties(application_throw_019 PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "019;phase6;throw;application")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
