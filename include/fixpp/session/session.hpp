@@ -40,6 +40,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 // (the unique_ptr<MessageStore> member's
 // nested type alias flush_hook_fn requires it).
@@ -615,6 +616,27 @@ private:
     // returns false if the callback threw (caller must terminal-close + return error).
     // Called directly on the session strand ([research D3; FR-008/010]).
     [[nodiscard]] bool fire_to_admin_(std::span<const std::byte> frame) noexcept;
+
+    // parse_and_dispatch_ — dedup helper: build a stack parse arena, re-frame +
+    // parse `frame` into a MessageView<Index>, build the SessionId, open a
+    // callback_dispatch_scope, and return invoke_callback_safe(cb(view, sid)).
+    // On parse failure (Framer or Parser): returns expected_t<void>{} (skip callback,
+    // not fatal — same disposition as every call site today).
+    // `arena_bytes` is explicit so each call site documents its sizing choice.
+    // [const §VIII.5] (stack-only, no heap); [019-app-callbacks T014/T011/T013/T016]
+    template <class CB>
+    [[nodiscard]] fixpp::core::expected_t<void> parse_and_dispatch_(
+        std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept;
+
+    // emit_session_reject_ — dedup helper: build + emit a session Reject(35=3) with
+    // RefTagID=0, SessionRejectReason=3, and Disconnected-on-failure error handling
+    // for both assign_outbound and store_then_emit.  ref_seq is the MsgSeqNum of the
+    // offending inbound message; ref_msg_type is its MsgType tag.
+    // Returns expected_t<void>{} on success (or build failure); returns unexpected on
+    // assign_outbound / store_then_emit failure (caller should propagate).
+    // [019-app-callbacks T011/T016; FR-005; D4; INV-4]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
+        seqnum_t ref_seq, std::string_view ref_msg_type) noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
