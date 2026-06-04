@@ -17,6 +17,7 @@ Validation (Arms C/D) is **seqnum-independent** — it fires for any `43=Y` non-
 | `34<N`, `43=Y`, `122` present & valid, **app**, `redeliver_poss_dup=true` | delivers to `Application::fromApp` (flagged possible-duplicate) | stays `Active`; expected stays `N` |
 | `34<N`, **no** `43=Y` | **nothing** (NO Logout wire frame — `→Disconnected` only) | → `Disconnected` |
 | `43=Y`, `122` **missing** (non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=1` (RequiredTagMissing) | stays `Active`; expected stays `N` (no advance — verify-returns-false, QFJ `Session.java:1843`) |
+| `43=Y`, `122` **present but unparseable** (non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=1` (RequiredTagMissing) — same as absent `122` | stays `Active`; expected stays `N` (gate-b/r1) |
 | `43=Y`, `122` **>** `52` (strict, non-`35=4`, any seqnum incl. `34==N`) | `Reject(35=3)`, `371=122`, `373=10` (SendingTimeAccuracyProblem) + `Logout` | → `Disconnected` |
 | `35=4` (SequenceReset) + `43=Y` | existing gap-fill/reset disposition (exempt from `122` check) | per S-023 |
 
@@ -44,3 +45,5 @@ Compatibility: defaults to `false` (the QFJ-parity behavior), so existing `Sessi
 - `122 == 52` is accepted (not Arm D).
 - `35=4` PossDup never triggers Arm C/D.
 - A `43=Y` message **at** the expected seqnum (`34==N`) with missing/late `122` still triggers Arm C/D (validation is seqnum-independent) — at-expected pin.
+- A `43=Y` message with a **present but unparseable `122`** triggers Arm C (RequiredTagMissing, survive) — not the fall-through "validated" path (gate-b/r1 fix).
+- Guard-3 `SendingTime(52)` MaxLatency validation precedes Stage-1 possdup: a `43=Y` replay with a **stale `52`** (outside the 120 s threshold) is killed by Guard-3 (`Reject 371=52/373=10` + Logout + Disconnect), not tolerated by Arm A. FR-001's survive-guarantee assumes a well-formed, recent `52` (gate-b/r1 ordering pin, matching QFJ `isGoodTime` before `validatePossDup`).

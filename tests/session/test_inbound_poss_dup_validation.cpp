@@ -300,5 +300,122 @@ TEST_F(PossDupValidationTest, TooHigh_EngineParity_Pin) {
         << "Engine-parity: Stage-1 Arm C must NOT fire before the too-high ResendRequest arm";
 }
 
+// ── Test 8: RC#1 — present-but-unparseable 122 → Arm C (RequiredTagMissing, survive) ──
+//
+// gate-b/r1 fix: a non-empty but malformed 122 must route to Arm C (Reject 371=122/373=1,
+// session stays Active, seqnum NOT advanced). Before the fix it fell through silently as
+// "validated". data-model §1 note (gate-b/r1); contracts C1 (gate-b/r1 addendum).
+// RED-proved before the session.cpp fix.
+
+TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
+
+    // 43=Y, 122 present but malformed — Arm C must fire (not fall-through-as-valid).
+    // seq=1 (too-low). Stage-1 fires before Stage-2.
+    auto frame = make_frame("D", /*seq=*/1, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=GARBAGE\x01");  // non-empty, unparseable
+    feed(sess, frame);
+
+    // Session must stay Active (Arm C survive disposition).
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "RC#1: malformed 122 must route to Arm C; session stays Active";
+
+    // A Reject(35=3) must be emitted.
+    ASSERT_TRUE(any_reject()) << "RC#1: malformed 122 must emit Reject(35=3)";
+
+    // Reject must carry 371=122 (OrigSendingTime is the offending field).
+    auto rj = find_last_reject();
+    EXPECT_EQ(rj.ref_tag_id, "122") << "RC#1: Reject must carry 371=122";
+
+    // Reject must carry 373=1 (RequiredTagMissing — unparseable = unusable = missing).
+    EXPECT_EQ(rj.reason, "1") << "RC#1: Reject must carry 373=1 (RequiredTagMissing)";
+
+    // No Logout (Arm C: survive, not disconnect).
+    EXPECT_FALSE(any_logout()) << "RC#1: malformed 122 Arm C must NOT emit Logout";
+
+    // Seqnum must NOT advance.
+    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(expected_after, expected_before)
+        << "RC#1: seqnum must NOT advance when Arm C fires (was " << expected_before
+        << ", got " << expected_after << ")";
+}
+
+// ── Test 9: RC#3 — stale 52 possdup killed by Guard-3 MaxLatency before Stage-1 ──
+//
+// gate-b/r1 RC#3 ordering pin: Guard-3 SendingTime(52) MaxLatency precedes Stage-1
+// possdup (matches QFJ isGoodTime@1821 before validatePossDup@1843).
+// A too-low 43=Y + valid 122 + stale 52 → Guard-3 fires (Reject 371=52/373=10 + Logout
+// + Disconnect), NOT Arm A.
+// spec/behaviors-and-limitations.md B-021-2.
+
+TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    // Mock clock is set to 2024-01-01T00:00:00 UTC (fixture SetUp: utc = 1704067200).
+    // Default MaxLatency threshold = 120 s. Use a 52 that is 300 s (5 min) in the past
+    // relative to the mock clock: 2023-12-31T23:55:00 = well outside the 120 s window.
+    // 122 is present and valid (equal to 52 → not Arm D by itself).
+    auto frame = make_frame("D", /*seq=*/1, "TW", "ISLD",
+                            "43=Y\x01"
+                            "52=20231231-23:55:00.000\x01"  // 300 s stale — overrides make_frame's 52
+                            "122=20231231-23:55:00.000\x01");  // 122 == stale 52 (not Arm D)
+    // Note: make_frame injects 52 BEFORE extra_fields so extra 52= overrides if the parser
+    // takes the last occurrence; if the parser takes the first, the stale 52 won't override.
+    // Use make_frame with a body that has the stale 52 as the ONLY 52 field instead.
+    // Re-build the frame manually to ensure the 52 field is stale.
+    (void)frame;  // discard the make_frame attempt above; build manually below.
+
+    {
+        std::string body;
+        body += "35=D\x01";
+        body += "34=1\x01";
+        body += "49=TW\x01";
+        // Stale SendingTime: 300 s before the mock clock's 2024-01-01T00:00:00.
+        body += "52=20231231-23:55:00.000\x01";
+        body += "56=ISLD\x01";
+        body += "43=Y\x01";
+        // 122 == stale 52: present and parseable, so Stage-1 row 3 (122 > 52) does NOT fire.
+        body += "122=20231231-23:55:00.000\x01";
+
+        std::string hdr;
+        hdr += "8=FIX.4.2\x01";
+        hdr += "9=" + std::to_string(body.size()) + "\x01";
+
+        std::string full = hdr + body;
+        unsigned int cs = 0;
+        for (unsigned char c : full) cs += c;
+        cs &= 0xFFU;
+        char csbuf[4];
+        snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+        full += "10=" + std::string(csbuf) + "\x01";
+
+        std::vector<std::byte> stale_frame;
+        stale_frame.reserve(full.size());
+        for (char c : full) stale_frame.push_back(static_cast<std::byte>(c));
+        feed(sess, stale_frame);
+    }
+
+    // Guard-3 fires: session → Disconnected (Reject 371=52/373=10 + Logout + Disconnect).
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
+        << "RC#3: stale-52 possdup must be killed by Guard-3 (Disconnected), not tolerated by Arm A";
+
+    // A Reject(35=3) must be emitted by Guard-3 with 371=52/373=10.
+    ASSERT_TRUE(any_reject()) << "RC#3: Guard-3 must emit Reject(35=3)";
+    auto rj = find_last_reject();
+    EXPECT_EQ(rj.ref_tag_id, "52") << "RC#3: Guard-3 Reject must carry 371=52 (SendingTime)";
+    EXPECT_EQ(rj.reason, "10") << "RC#3: Guard-3 Reject must carry 373=10 (SendingTimeAccuracyProblem)";
+
+    // A Logout must be emitted (Guard-3 is fatal).
+    EXPECT_TRUE(any_logout()) << "RC#3: Guard-3 must emit Logout before disconnecting";
+}
+
 }  // namespace
 }  // namespace fixpp::session::test

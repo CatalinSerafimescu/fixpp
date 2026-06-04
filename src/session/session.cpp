@@ -1889,11 +1889,45 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Arm D (row 3): parse 122 and 52; if BOTH parse and t122 > t52 (strict)
                     // → Reject(371=122, 373=10) + Logout + Disconnect.
                     // 122 == 52 (INV-4: equality) and 122 < 52 → validated, fall through.
-                    // Parse failure of either → fall through (cannot determine ordering).
+                    // gate-b/r1 RC#1: if 122 is present (non-empty) but fails to parse →
+                    // route to Arm C (Reject 371=122/373=1 RequiredTagMissing, session survives).
+                    // Rationale: an unparseable 122 is unusable — morally identical to absent 122;
+                    // Arm C (survive+reject) is consistent with SC-002 and the "present & valid"
+                    // contract prose. data-model §1 row 2 (gate-b/r1 addendum); contracts C1 gate-b/r1.
+                    // Note: unparseable 52 while 122 parses is only reachable for 35=3/5 (Guard-3
+                    // skips them); left as existing fall-through with a comment in that sub-case.
                     // data-model INV-4; research D5; reuses §1685-1737 pattern (RefTagID 52→122).
                     {
                         auto parse_122 = fixpp::core::fix_string_to_utc_time(std::span<const char>{
                             hdr.orig_sending_time.data(), hdr.orig_sending_time.size()});
+                        // RC#1: present-but-unparseable 122 → Arm C (RequiredTagMissing, survive).
+                        if (!parse_122) {
+                            // 122 is non-empty (Arm C's empty-check above already handled empty),
+                            // so it is present but malformed — treat as RequiredTagMissing.
+                            const auto st52_rc1 = effective_clock_
+                                                      ? stamp_sending_time(*effective_clock_)
+                                                      : SendingTimeStamp{};
+                            const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
+                            const seqnum_t rj_seq_rc1 = seqnum_mgr_.peek_outbound();
+                            std::array<std::byte, 512> rj_buf_rc1{};
+                            auto rj_r_rc1 = fixpp::session::build_reject(
+                                std::span<std::byte>{rj_buf_rc1.data(), rj_buf_rc1.size()},
+                                rj_seq_rc1, cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref_rc1,
+                                122,  // RefTagID = 122 (OrigSendingTime)
+                                hdr.msg_type,
+                                1,  // SessionRejectReason = 1 (RequiredTagMissing)
+                                cfg_.begin_string, st52_rc1.value);
+                            if (rj_r_rc1) {
+                                auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                                if (!assign_r) {
+                                    record_state_transition_(fsm_state::Disconnected);
+                                    co_return std::unexpected(assign_r.error());
+                                }
+                                auto emit_r = co_await store_then_emit(rj_seq_rc1, *rj_r_rc1);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                            co_return fixpp::core::expected_t<void>{};
+                        }
                         auto parse_52 = fixpp::core::fix_string_to_utc_time(std::span<const char>{
                             hdr.sending_time.data(), hdr.sending_time.size()});
                         if (parse_122 && parse_52 && *parse_122 > *parse_52) {
@@ -1950,7 +1984,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                             co_return fixpp::core::expected_t<void>{};
                         }
-                        // else: equal, 122 < 52, or parse failure → validated, fall through.
+                        // else: equal or 122 < 52 → validated, fall through.
+                        // (parse failure of 52 while 122 parsed: only 35=3/5 reach here since
+                        // Guard-3 kills malformed-52 for all other msg_types; leave as fall-through.)
                     }
                 }
                 // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.

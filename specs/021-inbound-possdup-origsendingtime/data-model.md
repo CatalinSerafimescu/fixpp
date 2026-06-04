@@ -22,9 +22,9 @@ First match wins:
 |---|-------|-----|-------|-------|
 | 0 | `msg_type == "4"` (SequenceReset) | **Arm E** exempt — skip Stage 1, defer to existing reset/gap-fill path | unchanged | (reset path) |
 | 1 | `poss_dup_flag != "Y"` | not a PossDup — skip Stage 1, fall through to Stage 2 / normal dispatch | — | — |
-| 2 | `orig_sending_time` empty/absent | **Arm C** | stay `Active` | `Reject(35=3, 371=122, 373=1)` (RequiredTagMissing) |
+| 2 | `orig_sending_time` empty/absent **OR present-but-unparseable** | **Arm C** | stay `Active` | `Reject(35=3, 371=122, 373=1)` (RequiredTagMissing) |
 | 3 | `parse(122) > parse(52)` (strict) | **Arm D** | → `Disconnected` | `Reject(35=3, 371=122, 373=10)` (SendingTimeAccuracyProblem) + `Logout` |
-| 4 | else (`43=Y`, `122` present & valid) | validated — proceed to Stage 2 (if too-low) or normal at-expected dispatch | — | — |
+| 4 | else (`43=Y`, `122` present & parseable, `122 ≤ 52`) | validated — proceed to Stage 2 (if too-low) or normal at-expected dispatch | — | — |
 
 ### Stage 2 — too-low tolerance (runs only when `MsgSeqNum < expected`, after Stage 1 validates)
 
@@ -45,6 +45,8 @@ Invariants:
 - **INV-3**: row 0 (Arm E) never reaches Stage-1 rows 2/3 — SequenceReset is exempt from the `122` requirement.
 - **INV-4**: `122 == 52` is **not** Arm D (strict `>` only).
 - **INV-5**: all emits use stack buffers via existing builders — no heap on the inbound path.
+- **INV-6** (gate-b/r1): Guard-3 `SendingTime(52)` MaxLatency validation runs BEFORE Stage-1 possdup (matches QFJ `isGoodTime`@1821 before `validatePossDup`@1843). A `43=Y` replay with a stale/unparseable `52` is killed by Guard-3 — FR-001's survive-guarantee assumes a well-formed, recent `52`. (Documented as B-021-2.)
+- **INV-7** (gate-b/r1): Row 2 (Arm C) covers both empty/absent `122` AND present-but-unparseable `122`. An unparseable `122` is unusable and treated as RequiredTagMissing, consistent with SC-002 (reject + survive). The implementation emits Arm-C disposition before attempting the `parse(122) > parse(52)` comparison. (Behavioral fix in `session.cpp` gate-b/r1.)
 
 ## 2. SessionConfig addition (additive POD field)
 
