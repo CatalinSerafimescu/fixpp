@@ -90,13 +90,17 @@ tests/session/
 ├── test_business_messages_build.cpp     # US1: build NOS/ExecRpt → wire-conformant body; parse-back fidelity (decimal_t value-equality);
 │                                         #      invalid-field (empty/enum/decimal/timestamp/too-small) → typed error + no usable output (INV-4);
 │                                         #      Builder_Output_ContainsNoEngineTags — body has no 8/9/34/49/52/56/10 (INV-2);
-│                                         #      Builder_InvalidField_NoUsableOutput — atomicity, out unspecified on failure (INV-4)
+│                                         #      Builder_InvalidField_NoUsableOutput — atomicity, out unspecified on failure (INV-4);
+│                                         #      Builder_NumericFidelity_DecimalValueEquality (INV-3); Builder_NoHeap_CountingResource (§VIII.5 witness)
+├── test_business_messages_read.cpp      # US1: read inbound 35=D/35=8 via generated fixpp::v44 accessors with field fidelity;
+│                                         #      missing/ill-typed required field → accessor expected_t error (INV-6 read; FR-006)
 ├── test_business_messages_roundtrip.cpp # US1: loopback engine send (typed) → fromApp → v44 flyweight read fidelity;
 │                                         #      SendPath_StoredFrame_Field3MsgType_UnpaddedBodyLength_ValidChecksum — assert CAPTURED
 │                                         #        transport_send/stored bytes: field-3==35, digit-only 9=, valid 10= (INV-1, RED before fix);
 │                                         #      OpaquePayload_Malformed_RejectedNoSeqnumConsumed — FR-016 fail-closed (INV-8);
 │                                         #      SendFromInsideFromApp_NoDeadlockNoUAF — re-entrant Engine::send under multi-threaded
-│                                         #        io_context, BEFORE live cells (INV-7, D9)
+│                                         #        io_context, BEFORE live cells (INV-7, D9);
+│                                         #      InboundReject_EmitsBusinessMessageReject_SessionSurvives — fromApp reject → 35=j, Active (INV-5, FR-009/SC-005)
 └── (interop cells below — tests/interop/)
 
 tests/interop/   (in-repo SUT side, per 016/018)
