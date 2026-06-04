@@ -752,6 +752,20 @@ enum class error : std::uint8_t {
                                //   logged, terminal-closed the session, and
                                //   recorded this code. Never propagated inward.
                                //   → C-ABI reserved (future mapping)
+    // ── 020-g2-business-messages (slot 131) ───────────────────────────────
+    //    Append-only at the next contiguous slot after 019's 130 per
+    //    [const §X.4]; the exact-SET completeness of this boundary (131
+    //    present, no ±N drift, no unexpected) is asserted at T020 per
+    //    [[feedback_completeness_gate_exact_set_not_subset]].
+    app_payload_malformed = 131,  // FR-016 — the opaque application payload
+                                  //   handed to Engine::send failed fail-closed
+                                  //   validation BEFORE seqnum assignment: it was
+                                  //   empty, did not begin with exactly one 35=
+                                  //   MsgType field, carried a duplicate 35=, or
+                                  //   embedded a session header/trailer tag
+                                  //   (8/9/34/49/52/56/10). No transmit, no
+                                  //   seqnum consumption (INV-8).
+                                  //   → C-ABI reserved (future mapping)
 };
 
 template <class T>
@@ -996,6 +1010,9 @@ using expected_t = std::expected<T, error>;
             return "app: do not send (toApp veto)";
         case error::app_callback_threw:
             return "app: callback threw (session terminated)";
+        // ── 020-g2-business-messages (slot 131) ───────────────────────────
+        case error::app_payload_malformed:
+            return "app: malformed opaque payload (rejected pre-seqnum)";
     }
     return "unknown error";
 }

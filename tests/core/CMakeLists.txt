@@ -127,3 +127,13 @@ target_link_libraries(error_019_completeness PRIVATE
 add_test(NAME error_019_completeness COMMAND error_019_completeness)
 set_tests_properties(error_019_completeness PROPERTIES
   LABELS "019;foundational;error_slots")
+
+add_executable(error_020_completeness test_020_error_completeness.cpp)
+target_link_libraries(error_020_completeness PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_020_completeness COMMAND error_020_completeness)
+set_tests_properties(error_020_completeness PROPERTIES
+  LABELS "020;foundational;error_slots")

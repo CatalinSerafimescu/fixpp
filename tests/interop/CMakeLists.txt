@@ -260,6 +260,33 @@ fixpp_add_interop_test(
     EXTRA_LIBS fixpp_mock_clock
 )
 
+# ── US2/US3 live business-message interop (020 T012/T014/T016) ───────────────
+# Both-role NOS→ExecRpt round-trip vs QuickFIX-J and QuickFIX-cpp.
+# All 4 cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Needs the generated fixpp::v44 Messages.hpp (codegen 003) for the typed read
+# flyweights + fixpp_dictionary for decode_field. Mirror the dictionary reify
+# test pattern (add_dependencies + codegen include dir).
+if(TARGET fixpp_codegen_generate)
+    fixpp_add_interop_test(
+        NAME interop_business_message_interop_test
+        GROUP happy
+        LABEL "interop;020;interop-happy;us2;us3;business-message"
+        SOURCES test_business_message_interop.cpp
+        TLS
+        EXTRA_LIBS fixpp_dictionary
+    )
+    set(_BM_INTEROP_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+    add_dependencies(interop_business_message_interop_test fixpp_codegen_generate)
+    target_include_directories(interop_business_message_interop_test PRIVATE
+        "${_BM_INTEROP_CODEGEN_INC}"
+    )
+    set_tests_properties(interop_business_message_interop_test PROPERTIES
+        TIMEOUT 30)
+else()
+    message(STATUS
+        "tests/interop: fixpp_codegen_generate not available; skipping business message interop test")
+endif()
+
 # ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
 # Validates cell_results.yaml against the parent gate-evaluator's result schema
 # (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs

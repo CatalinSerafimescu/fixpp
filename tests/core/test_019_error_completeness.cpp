@@ -55,12 +55,16 @@ TEST(Error019Completeness, ExactSetEquality) {
         << "the 2 named 019 enumerators must occupy exactly slots 129-130 "
            "(no alias, none outside the block)";
 
-    // Message-table boundary: slot 131 must return "unknown error" (no 019+1
-    // enumerator was added without a message entry). [const §X.4] append-only.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(131u)),
+    // Message-table boundary: slot 131 is now 020-g2-business-messages'
+    // app_payload_malformed (the next append-only enumerator after the 019
+    // [129,130] block). The forward "unknown" boundary therefore moves to slot
+    // 132. The 020 exact-SET completeness of slot 131 is owned by the 020
+    // completeness gate (test_020_*); here we only assert the 019 block did not
+    // grow and that nothing exists beyond 020's 131. [const §X.4] append-only.
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)),
               std::string_view{"unknown error"})
-        << "slot 131 carries a message — a message-bearing enumerator was added "
-           "beyond the 019 [129,130] block (see [const §X.4] append-only review)";
+        << "slot 132 carries a message — a message-bearing enumerator was added "
+           "beyond the 020 boundary (slot 131); see [const §X.4] append-only review";
 }
 
 // ── Slot values ─────────────────────────────────────────────────────────────

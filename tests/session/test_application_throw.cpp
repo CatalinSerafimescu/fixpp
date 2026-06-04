@@ -121,7 +121,8 @@ static std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2,
 }
 
 static std::vector<std::byte> make_app_payload() {
-    static const char kPayload[] = "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    // Must lead with a 35= MsgType field (FR-016 / 020 send-path validation).
+    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
     std::vector<std::byte> v;
     for (const char* p = kPayload; *p; ++p)
         v.push_back(static_cast<std::byte>(*p));
