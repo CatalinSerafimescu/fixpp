@@ -61,7 +61,7 @@ An operator wants fixpp to own the session-level duplicate flags. By default, wh
 - **`97=Y` at a too-low sequence number without `43=Y`**: this is a malformed/ambiguous combination (a true retransmission would carry `43=Y`); it follows the existing too-low disposition for a non-PossDup message (the 021 Arm-B fatal too-low path) — `97` alone does not grant too-low tolerance.
 - **`97=Y` on an administrative message**: PossResend is an application-level flag; an admin message bearing `97` is processed on the existing admin path and `97` has no effect.
 - **Strip when the field is absent**: a plain `send` with no `43`/`122` in the payload is emitted unchanged under either knob setting (no-op strip).
-- **Partial / repeated `43`/`122`**: the strip removes every well-formed occurrence of tags 43 and 122 in the application payload; a value containing an embedded `=` or no trailing `<SOH>` must not cause over- or under-excision (fail-closed on malformed framing).
+- **Embedded `43=`/`122=` inside a value vs. a true field boundary**: a literal `43=`/`122=` appearing **inside** another field's value (no preceding `<SOH>`) is preserved — it is not a field boundary and must not be excised. A genuine SOH-boundary `43=…`<SOH> / `122=…`<SOH> field is excised under default-strip. A malformed SOH-delimited interior field that passes the 020 floor — a missing `=` (`11BROKEN`), an empty tag (`=bad`), a non-digit tag (`4a=x`), or an empty (zero-length) field — fails the send **closed** via `app_payload_malformed=131` **before** any excision.
 - **Both roles**: both behaviors must hold whether fixpp is the initiator or the acceptor.
 
 ## Requirements *(mandatory)*
