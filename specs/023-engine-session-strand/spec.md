@@ -102,6 +102,28 @@ expand the design to a two-domain model and are folded into the requirements/pla
   the earlier "force close between eof-arrival and read completion" seam, which is
   not reachable from the transport interface.)
 
+### Session 2026-06-05 (Gate A round 2)
+
+Gate A round 2 (Codex + Opus adversarial) confirmed the rev-2 two-domain
+architecture sound and closed RC#2 fully; it surfaced one residual that required a
+**user decision** — the synchronous public readers `lookup()` /
+`acceptor_bound_endpoint()` read control-plane maps off any strand, which a
+synchronous accessor cannot route through an async strand without either an API
+change, a block (banned), or a published snapshot.
+
+- Q: How are the synchronous public readers made MT-safe — narrow them to
+  quiescent-only (preserves signatures, weakens the de-facto contract) or keep
+  them callable any-thread (needs a snapshot, and `lookup()`'s raw-pointer return
+  must become shared-ownership)? → A: **Full MT-safe (accept the API change).**
+  `acceptor_bound_endpoint()` returns its `Endpoint` value from an
+  **atomically-published immutable snapshot** (no signature change). `lookup()`
+  changes its return type from `Session*` to `std::shared_ptr<Session>` — a
+  deliberate, accepted, **safening-only** public API change so the handle is valid
+  across `stop()` / `registry_.clear()`. The control plane publishes an immutable
+  snapshot after each mutation (RCU-style); readers `atomic_load` it (lock-free, no
+  domain entry). FR-008 is amended to permit this one change; FR-011/FR-014
+  encode the read discipline; SC-004 records the intended `abidiff`/`nm` delta.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Run the engine on a multi-threaded executor safely (Priority: P1)
@@ -171,21 +193,26 @@ post-change engine.
 
 Applications that run the engine on a single-threaded executor (the only
 currently-supported mode) see no behavioral change: identical message handling,
-ordering, lifecycle, and public interface.
+ordering, and lifecycle, and a public interface unchanged apart from the single
+recorded `lookup()` return-type safening (FR-008/SC-004).
 
 **Why this priority**: Backward-compatibility guard. The fix must not regress
-the supported path or change the public surface.
+the supported path, and the only permitted public-surface change is the recorded
+`lookup()` safening (FR-008).
 
 **Independent Test**: The full existing test suite remains green with no
-single-threaded test rewrites, and the public interface is unchanged.
+single-threaded test rewrites, and the public interface is unchanged apart from
+the single recorded `lookup()` return-type safening (FR-008/SC-004).
 
 **Acceptance Scenarios**:
 
 1. **Given** the existing single-threaded test suite, **When** it is run against
    the changed engine, **Then** all tests pass unchanged.
 2. **Given** the published engine/session interface, **When** it is compared
-   before and after the change, **Then** there is no change to public types,
-   signatures, or required configuration.
+   before and after the change, **Then** the only difference is the single
+   recorded `lookup()` return-type safening (`Session*` → `shared_ptr<Session>`,
+   FR-008/SC-004); no other public type, signature, or required configuration
+   changes.
 
 ---
 
@@ -212,6 +239,12 @@ single-threaded test rewrites, and the public interface is unchanged.
   thread reads the registry while shutdown mutates/clears it. The send must
   resolve the registry inside the control-plane domain (and fail cleanly if
   shutdown has begun), never read a half-cleared registry.
+- **Synchronous public reader vs. shutdown**: a synchronous public introspection
+  call (`lookup()` / `acceptor_bound_endpoint()`) issued from an application
+  thread while shutdown clears the registry/endpoint tables on another. The reader
+  must observe a consistent immutable snapshot (never an in-place-mutating
+  structure), and a `lookup()` handle obtained just before `registry_.clear()`
+  must keep its session alive (shared ownership).
 
 ## Requirements *(mandatory)*
 
@@ -245,26 +278,41 @@ single-threaded test rewrites, and the public interface is unchanged.
 - **FR-007**: The behavior of an engine run on a single-threaded executor MUST
   be unchanged by this feature (message handling, ordering, and lifecycle
   identical to the prior behavior).
-- **FR-008**: The public engine and session interface MUST remain unchanged — no
-  new or altered public types, function signatures, or required configuration,
-  and no new mandatory step for applications to obtain safe multi-threaded
-  behavior under the default configuration.
+- **FR-008**: The public engine and session interface MUST be limited to a
+  **minimal, safening-only** change: the sole permitted signature change is
+  `Engine::lookup()` returning a **shared-ownership handle**
+  (`std::shared_ptr<Session>`, was a raw `Session*`) so the returned handle stays
+  valid across `stop()` / `registry_.clear()` under multi-threaded operation. No
+  other public signature change, no public type removal, no required-configuration
+  change, and no new mandatory step for applications to obtain safe multi-threaded
+  behavior under the default configuration. (This single change is the user-accepted
+  cost of making the synchronous public readers MT-safe at runtime — see FR-014/D-SNAP;
+  it is recorded, not silent — see SC-004.)
 - **FR-009**: The feature MUST reuse the engine's existing strand primitive (the
   same mechanism behind the default per-session strand mode) for both
   serialization domains rather than introducing a new serialization mechanism or
   any lock.
 - **FR-010**: The previously-documented limitation that a multi-threaded
   executor is unsupported MUST be lifted **only once both serialization domains
-  land and are witnessed** (the per-session domain AND the engine control-plane
-  domain). Lifting the limitation while either domain is still racy is
-  prohibited — the supported-mode documentation MUST NOT claim multi-threaded
-  safety until both are covered by passing thread-sanitizer witnesses.
+  land and the full set of witnesses passes** — the per-session
+  teardown/lifecycle witnesses (V-1, V-2), the transport-on-strand identity
+  witness (V-10), the control-plane race witness (V-8), the re-entrant-send
+  witness (V-9), and the snapshot-reader MT witness (V-11) — **and** a clean
+  address-, undefined-behavior-, and thread-sanitizer run. Lifting the limitation
+  while any of those is still racy or failing is prohibited: the supported-mode
+  documentation MUST NOT claim multi-threaded safety until **all** of V-1, V-2,
+  V-8, V-9, V-10, V-11 pass under a clean sanitizer matrix.
 - **FR-011**: All engine control-plane state — the session registry, the
   stopping flag, the listener and endpoint tables, the in-flight counters, and
   the publication of per-session handles that the shutdown path reads — MUST be
-  accessed only within a single engine control-plane serialization domain, so no
-  two threads ever read/mutate engine-global state concurrently when the executor
-  is serviced by multiple threads.
+  **mutated** only within a single engine control-plane serialization domain, so
+  no two threads ever mutate engine-global state concurrently, and no read
+  observes a partially-mutated structure, when the executor is serviced by
+  multiple threads. Engine-global state is **read** either (a) within the
+  control-plane domain, or (b) — for the synchronous public readers `lookup()` /
+  `acceptor_bound_endpoint()` — from an **atomically-published immutable
+  snapshot** of that state (FR-014). No read path observes a structure that the
+  control-plane domain is concurrently mutating in place.
 - **FR-012**: Every cross-thread engine entry point MUST enter through the
   control-plane domain before touching engine-global state: an any-thread
   outbound send MUST resolve the registry/stopping flag inside the control-plane
@@ -275,6 +323,17 @@ single-threaded test rewrites, and the public interface is unchanged.
   have a defined cross-thread access discipline (read within the control-plane
   domain, or via an atomic with acquire/release ordering) — it MUST NOT remain a
   plain non-atomic flag justified by single-thread confinement.
+- **FR-014**: The synchronous public readers `lookup()` and
+  `acceptor_bound_endpoint()` MUST be safe to call from any thread while the
+  engine runs concurrently. The control-plane domain MUST, after every
+  control-plane mutation, **atomically publish an immutable snapshot** of the
+  state these readers need (the registry's `SessionId → shared_ptr<Session>` map
+  and the bound-endpoint table); each reader **atomically loads** the current
+  snapshot (no domain entry, no lock, no blocking — consistent with the
+  no-`std::mutex` constraint) and returns a value / shared-ownership handle drawn
+  from it. `lookup()`'s returned `shared_ptr<Session>` keeps the session alive
+  past a concurrent `stop()` / `registry_.clear()` (FR-008). `stopped()` is
+  covered separately by the atomic stopping flag (FR-013).
 
 ### Key Entities
 
@@ -302,17 +361,26 @@ single-threaded test rewrites, and the public interface is unchanged.
   application message round-trip → shutdown) on an executor serviced by 3 or more
   threads with **zero** address-, undefined-behavior-, and thread-sanitizer
   findings and zero crashes across repeated runs.
-- **SC-002**: A regression witness that **deterministically** reproduces the
-  **engine control-plane data race** on the pre-change engine — a latch-controlled
-  interleave that runs shutdown concurrently with an accept-loop registry/listener
-  mutation (and an any-thread send) — is reported by the thread-sanitizer on
-  **every** pre-change run (reliable RED) and passes **100%** of runs on the
-  post-change engine. (The TLS-teardown crash is a downstream symptom covered by
-  the multi-threaded acceptance test of SC-001.)
+- **SC-002**: A regression witness reproduces the **engine control-plane data
+  race** on the pre-change engine via a **one-sided park** seam — a test-only
+  delay that parks one thread *inside / immediately adjacent to* an unsynchronized
+  listener/endpoint-table access (the publication point reachable before any peer
+  session exists) while shutdown clears those tables from another thread, with
+  **no happens-before edge** between the two racing accesses (a bidirectional
+  latch is forbidden — it would synchronize the accesses and suppress the very
+  race the thread-sanitizer must report). The park window is wide enough that the
+  conflicting access reliably lands inside it, so the thread-sanitizer reports the
+  race on **every** pre-change run (reliable RED) and the witness passes **100%**
+  of runs on the post-change engine. (The TLS-teardown crash is a downstream
+  symptom covered by the multi-threaded acceptance test of SC-001.)
 - **SC-003**: The complete existing test suite remains green with **no**
   single-threaded test rewrites required.
-- **SC-004**: The public engine/session interface is **unchanged** (no public
-  type, signature, or required-configuration differences before vs. after).
+- **SC-004**: The public engine/session interface has **no unintended** API/ABI
+  change: exactly one intended, recorded signature change — `Engine::lookup()`
+  returns `std::shared_ptr<Session>` instead of a raw `Session*` (FR-008) — and no
+  other. `abidiff` / `nm` WILL show this one change; it is expected and documented,
+  not a silent break. Every other public type, signature, and required
+  configuration is identical before vs. after.
 - **SC-005**: Operator-facing documentation no longer lists a multi-threaded
   executor as unsupported; multi-threaded operation is described as safe under
   the default configuration.
@@ -342,7 +410,9 @@ single-threaded test rewrites, and the public interface is unchanged.
 
 ## Out of Scope
 
-- Any change to the public engine or session API surface.
+- Any change to the public engine or session API surface beyond the single
+  recorded `lookup()` return-type safening (`Session*` → `shared_ptr<Session>`,
+  FR-008/SC-004).
 - Making the expert "direct executor" opt-out path safe under multiple threads.
 - Reconnect / multi-cycle session changes.
 - Cross-session ordering guarantees (only per-session serialization is in scope;

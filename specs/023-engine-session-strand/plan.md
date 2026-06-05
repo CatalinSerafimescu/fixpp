@@ -28,10 +28,14 @@ domain insufficient — see `## Gate A`):
 
 `send` = `caller → control strand → session strand`; `stop` = control-strand
 snapshot/cancel/clear with per-session closes dispatched to session strands. All
-hops are non-blocking posts (no deadlock). Public API unchanged; single-threaded
+hops are non-blocking posts (no deadlock). The synchronous public readers
+(`lookup`/`acceptor_bound_endpoint`) become MT-safe via an atomically-published
+immutable snapshot; the **only** public API change is `lookup()` returning
+`std::shared_ptr<Session>` (was raw `Session*`) — a deliberate, accepted,
+safening-only change (Gate A round-2 user decision; FR-008/SC-004). Single-threaded
 path behavior-identical (a strand over a single-threaded `io_context` dispatches
-inline). The L-019-3 lift is contingent on both domains landing with passing TSan
-witnesses.
+inline). The L-019-3 lift is contingent on the full witness set landing under a
+clean sanitizer matrix.
 
 ## Technical Context
 
@@ -42,7 +46,7 @@ witnesses.
 **Target Platform**: Linux/Clang (Tier 1, authoritative for sanitizers + coverage); Windows/MSVC (Tier 2)
 **Project Type**: Library (multi-session FIX engine) — internal concurrency wiring change
 **Performance Goals**: No regression > ±5% vs `bench/baselines/` on session throughput/latency (Article VIII §2). The change adds a strand hop on the read path AND a **second** hop on the **send** path (`caller → control strand → session strand`, vs today's one). The perf gate MUST therefore cover the send / send-from-callback path under MT and re-measure the baseline against the two-hop design (Gate A NEW-3). On a single-threaded `io_context` strand dispatch is inline.
-**Constraints**: No public Engine/Session API change (FR-008 / Article X); zero-alloc hot path preserved (Article VIII §5); **no `std::mutex` in any awaitable-including header** (Article XI §3 / Article XV; memory `feedback_awaitable_header_mutex_include_edge`) — this feature adds NO locks, only a strand; cancellation stays ASIO-native (Article XI §2)
+**Constraints**: One safening-only public Engine/Session API change — `lookup()`→`shared_ptr<Session>` (FR-008 / Article X / SC-004); no other public change; zero-alloc hot path preserved (Article VIII §5); **no `std::mutex` in any awaitable-including header** (Article XI §3 / Article XV; memory `feedback_awaitable_header_mutex_include_edge`) — this feature adds NO locks, only a strand; cancellation stays ASIO-native (Article XI §2)
 **Scale/Scope**: One control strand per engine + one strand per registered session; cross-session parallelism preserved (FR-004). Engine-internal change confined to `src/session/engine.cpp`, `include/fixpp/session/engine.hpp`, the session↔strand binding seam (`src/session/session_executor.cpp`), and `stopped_`'s type; no new module.
 
 ## Constitution Check
@@ -60,7 +64,7 @@ witnesses.
 | Sanitizers Tier-1 (ASan/UBSan/**TSan**) | Art. IX §2 | PASS (target) | The feature's pass criterion: MT lifecycle clean under all three (SC-001). |
 | Coverage ≥95/85 touched | Art. IX §1 | PASS (target) | Touched: `src/session/engine.cpp` + binding seam + `session_executor.cpp`. Uncovered defensive lines get a recorded risk assessment at verify. |
 | Perf ±5% | Art. VIII §2 | **GATE** | TWO strand hops added on the send path + one on the read path — must show session-throughput **and send/send-from-callback** bench within ±5% (or update baseline w/ rationale, same PR). Re-measured against the two-hop design (Gate A NEW-3). |
-| ABI / no public API change | Art. X / FR-008 | PASS | No `c_api.h` change; engine/session public surface unchanged. Verified via `nm` + `abidiff` (no-diff expected). |
+| ABI / one safening-only API change | Art. X / FR-008 | PASS (recorded) | No `c_api.h` change; the sole public-surface delta is `Engine::lookup()` return type `Session*` → `std::shared_ptr<Session>` (FR-008/SC-004 user decision) — `abidiff`/`nm` show exactly that one diff and no other. `acceptor_bound_endpoint()` keeps its signature (MT-safe via snapshot). |
 | Banned patterns | Art. XV | PASS | No blocking call on the strand; detached writes keep their keepalive; no synchronous logging added. |
 
 **Verdict**: No unjustified violations. Complexity Tracking is empty. Gate A is mandatory (concurrency trigger) and is the next pipeline step after this plan + user sign-off.
@@ -73,11 +77,11 @@ witnesses.
 specs/023-engine-session-strand/
 ├── plan.md              # This file (/speckit-plan output)
 ├── spec.md              # Feature spec (/speckit-specify + /speckit-clarify)
-├── research.md          # Phase 0 — design decisions D0 (control strand) + D1–D8 + D-PUB/D-STOP
-├── data-model.md        # Phase 1 — entities E-0 (control domain) … E-6 (stopped_)
+├── research.md          # Phase 0 — design decisions D0 (control strand) + D1–D8 + D-PUB/D-STOP/D-SNAP
+├── data-model.md        # Phase 1 — entities E-0 (control domain) … E-6 (stopped_) + E-7 (reader snapshot)
 ├── quickstart.md        # Phase 1 — run the engine multi-threaded + verify
 ├── contracts/
-│   └── engine-session-strand.md   # Phase 1 — internal contract C-0…C-7 (no public API change)
+│   └── engine-session-strand.md   # Phase 1 — internal contract C-0…C-8 (one safening-only lookup() API change)
 └── checklists/
     └── requirements.md  # Spec quality checklist (green)
 ```
@@ -86,8 +90,9 @@ specs/023-engine-session-strand/
 
 ```text
 include/fixpp/session/
-├── engine.hpp           # Engine: add control_strand_ (E-0); SessionEntry: add session_strand (E-1)
-│                        #   + publication discipline (E-2/INV-2); stopped_ → atomic<bool> (E-6)
+├── engine.hpp           # Engine: add control_strand_ (E-0) + reader_snapshot_ (E-7); SessionEntry: add
+│                        #   session_strand (E-1) + publication discipline (E-2/INV-2); stopped_ → atomic<bool> (E-6);
+│                        #   lookup() return type Session* → std::shared_ptr<Session> (D-SNAP/FR-008)
 └── session_config.hpp   # (read-only reference; threading_mode default already per_session_strand)
 
 src/session/
@@ -95,20 +100,25 @@ src/session/
 │                        #   start()  — on control strand: per-session make_strand(exec_); bind Session
 │                        #             via D3-B; spawn role loops ON the session strand
 │                        #   run_accept_loop / run_connect_loop — run on session strand; transport on
-│                        #             strand (E-5/INV-7); listeners_/endpoints_ writes + session/
-│                        #             live_transport publication VIA control strand (E-0/E-2)
+│                        #             strand (E-5/INV-7); listeners_/endpoints_ writes + AWAITED session/
+│                        #             live_transport publication VIA control strand BEFORE read-pump (E-0/E-2/D-PUB);
+│                        #             each control mutation republishes reader_snapshot_ (E-7)
+│                        #   lookup()/acceptor_bound_endpoint() — atomic_load(reader_snapshot_), lock-free (E-7/C-8)
 │                        #   send()   — caller → control strand (registry/stopped) → session strand
 │                        #   stop()   — control strand: snapshot/cancel/clear; per-session: transport
 │                        #             close() (before join) + Session::close() (after join) on strand
 └── session_executor.cpp # binding seam (D3-B) — adopt a pre-created strand under per_session_strand
-                         #   (store strand directly, strand_wrapped=true; no make_strand re-wrap)
+                         #   via an ENGINE-ONLY adopt tag (NOT the public already_serialized_executor flag);
+                         #   store strand directly, strand_wrapped=true; INV-3 identity assert; no make_strand re-wrap
 
 tests/session/
 ├── test_engine_session_strand.cpp        # NEW —
 │                                          #   V-8: control-plane race witness (latch interleave of
 │                                          #        stop() vs accept-loop registry/listener write) TSan RED→GREEN
 │                                          #   V-9: re-entrant send session→control→session under TSan ≥3 threads
+│                                          #        (+ clean fast-fail when issued after stop() has begun)
 │                                          #   V-10: assert transport.socket().get_executor()==session_strand
+│                                          #   V-11: lookup()/acceptor_bound_endpoint() any-thread vs concurrent stop() — TSan-clean + keepalive
 │                                          #   V-3: 2-session cross-parallelism cell
 └── test_business_messages_roundtrip.cpp  # existing MT (3-thread) harness — acceptance witness (V-2), now clean
 
@@ -155,4 +165,40 @@ binding seam (`session_executor.cpp`), and `stopped_`'s type — reusing 007's
     exception (P3).
   Reviews: `research/reviews/codex_023-engine-session-strand_gate_a_review.md`,
   `research/reviews/opus_023-engine-session-strand_gate_a_adversarial_review.md`.
-  Re-Gate-A pending on this rev-2 bundle.
+- **Round 2 (2026-06-05): Codex P1=2 P2=3 P3=1; Opus post-judging P1=1 P2=6 P3=3 →
+  architecture sound, surgical rev-3.** The rev-2 two-domain model is confirmed correct
+  (RC#2 fully closed; RC#1/#3/#4 substantially). Convergence applied in this rev-3 bundle.
+  **User decision** (authoritative): **Full MT-safe public readers — accept the `lookup()`
+  API change.** `acceptor_bound_endpoint()` is made MT-safe via an atomically-published
+  immutable snapshot (no signature change); `lookup()` returns `std::shared_ptr<Session>`
+  (was raw `Session*`) — a deliberate, accepted, safening-only public API change. Root
+  causes addressed:
+  - **RC#A** — D0/FR-011's "ALL engine-global state on the control strand" omitted the
+    synchronous public read path → added **D-SNAP** lock-free reader snapshot + entity **E-7**
+    + contract **C-8** + obligation **V-11**; **FR-008** amended (safening-only,
+    `lookup()`→`shared_ptr`) + new **FR-014**; **FR-011** reconciled (mutate on strand, read
+    via snapshot); **SC-004** reworded (no *unintended* change, one recorded `lookup()` diff);
+    `stopped()` confirmed already covered by D-STOP/E-6 (over-bundled by Codex).
+  - **RC#B** — publication described as "post," not pinned → **D-PUB** now requires the
+    **awaited** control-strand publish *before* the read pump (`co_await
+    co_spawn(control_strand, …, use_awaitable)`), unpublish on loop exit, publish jobs in the
+    stop join (E-2/INV-2, C-6); struck the incoherent atomic-`live_transport` alternative
+    (NEW-3); registry iterator-stability pinned (INV-6a, NEW-1).
+  - **RC#C** — adoption + witness seams described by outcome, not mechanism → **D3-B** adoption
+    via an **engine-only tag** (NOT the public `already_serialized_executor` flag) + INV-3
+    identity assert/test (E-3/INV-3a); **D6** witness committed as a **one-sided park** (not a
+    bidirectional latch that creates an HB edge suppressing the race), targeting the
+    listener-map write reachable pre-peer; **SC-002** reworded to the achievable
+    one-sided-park standard (V-8).
+  - **RC#D** — V-7 lift gate under-counted → **V-7** now gates on V-1 ∧ V-2 ∧ V-8 ∧ V-9 ∧ V-10
+    ∧ V-11 + clean sanitizer matrix (FR-010/SC-005, C-3/C-7); **V-9** extended to the
+    post-`stop()` re-entrant-send clean-fast-fail disposition (NEW-4); **V-6** notes the
+    per-establishment publish hop (NEW-2). Checklist Note reconciled with the sanitizer-name
+    exception (P3).
+  **One Opus disagreement with Codex recorded**: Codex rated the public-reader residual P1;
+  Opus de-escalated it to **P2 + a user decision** (`stopped()` already covered by E-6; the
+  flagship MT harness already confines `lookup()`/`acceptor_bound_endpoint()` to quiescent
+  windows; the fix is bounded) — the user then chose the full MT-safe path, so the change is
+  applied as a deliberate, accepted API delta rather than a doc-narrowing.
+  Reviews: `research/reviews/codex_023-engine-session-strand_gate_a_2_review.md`,
+  `research/reviews/opus_023-engine-session-strand_gate_a_2_adversarial_review.md`.

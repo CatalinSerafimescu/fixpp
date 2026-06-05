@@ -6,7 +6,9 @@
 No persisted data, no public types. The entities are engine-internal runtime
 serialization domains and bindings, documented so `/speckit-tasks` and Gate A can
 reason about ownership, publication, and ordering. **Two** domains exist (E-0
-control-plane, E-1 per-session); everything else hangs off them.
+control-plane, E-1 per-session); everything else hangs off them — including the
+public-reader immutable snapshot (E-7) that decouples the synchronous public readers
+from the control-plane mutation domain.
 
 ## E-0 — Engine control-plane domain (NEW)
 
@@ -42,10 +44,15 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   serialized executor used to spawn the loop, bind the `Session`, construct the transport,
   and post both teardown closes.
 - **Publication discipline (INV-2 / D-PUB)**: `session` (`shared_ptr<Session>`) and
-  `live_transport` (raw pointer) — the fields `stop()` reads — are **written on the control
-  strand** (the role loop posts the publish to the control strand) or held as atomics with
-  release/acquire. `stop()` reads them on the control strand. No bare-session-strand write
-  that the control strand later reads.
+  `live_transport` (raw pointer) — the fields `stop()` reads — are **published on the control
+  strand**, and the role loop **`co_await`s** that publication (`co_await
+  co_spawn(control_strand, publish, use_awaitable)`) **before** it enters the read pump, so
+  `stop()` can never observe a null `live_transport` and skip the close-to-wake. The publish
+  job is part of the **outstanding-loop join accounting** (stop's join does not complete while
+  a publish is pending). On loop exit the loop **unpublishes** (resets `session` /
+  `live_transport`) on the control strand before the entry can be cleared. The struck
+  atomic-`live_transport` alternative is NOT used (it gives read-definedness but not the
+  ordering — research D-PUB). No bare-session-strand write that the control strand later reads.
 - **Unchanged**: `session_role`, `config`, `session_cancel`. The `live_transport`
   close-to-wake contract is preserved; only the executor it runs on (the session strand)
   and the publication discipline change.
@@ -60,9 +67,17 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   `make_strand`. Preserves the mode, `is_strand_wrapped()==true`, and `lock_policy::spin`
   legality. (NOT the rejected D3-A `direct_executor` rewrite — that breaks spin-policy
   configs.)
+- **Adoption seam (D3-B / INV-3a)**: adoption is triggered by an **engine-only internal
+  parameter/overload** (an `adopt_strand` tag distinct from the public config), **NOT** by
+  inferring from the public `already_serialized_executor` flag — a user may set that flag
+  under `per_session_strand`, and inferring from it would silently adopt a bare (non-strand)
+  executor as a strand (research D3-B). The ordinary user `per_session_strand` path still
+  `make_strand`-wraps.
 - **Invariant (INV-3)**: `session->executor().underlying()` equals the `SessionEntry`
-  strand (E-1). `Engine::send`'s session-strand hop (`kl->executor().underlying()`,
-  engine.cpp:860) then lands on the same domain as the read-pump and both teardown closes.
+  strand (E-1) — a **debug assert AND a test**, not just prose. `Engine::send`'s
+  session-strand hop (`kl->executor().underlying()`, engine.cpp:860) then lands on the same
+  domain as the read-pump and both teardown closes. This catches the D1 anti-pattern (a
+  second distinct `make_strand`).
 
 ## E-4 — Teardown ordering (amended — BOTH closes)
 
@@ -86,6 +101,13 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   **after** join + send-drain + **before** registry clear; all registry/listener mutation
   on the control strand. Close-before-clear preserved (no Session/transport freed while its
   read-pump is in flight).
+- **Registry iterator-stability (INV-6a)**: the control strand iterates a **stable**
+  `registry_` across the per-entry `Session::close()` `co_await`s — `stopped_` is already true
+  (no new entries) and no other control-plane mutation (insert/erase) interleaves between
+  `stopped_=true` (step 1) and the `registry_.clear()` (step 5). Each per-entry close dispatch
+  is awaited-but-not-detached, and any pending D-PUB publish/unpublish job is part of the join
+  (step 3), so step 5's clear strictly follows all closes and all publication jobs. (Gate A
+  round-2 NEW-1.)
 
 ## E-5 — Per-session transport executor (mandatory + asserted)
 
@@ -106,6 +128,27 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   **reads** (accept-loop gate engine.cpp:478, send fast-fail engine.cpp:822) are atomic
   acquire — never a non-atomic cross-thread read.
 
+## E-7 — Public-reader immutable snapshot (NEW; D-SNAP)
+
+- **What**: an **atomically-published immutable snapshot** of the control-plane state the
+  synchronous public readers need — the registry's `SessionId → shared_ptr<Session>` map and
+  the bound-endpoint table. Held as a `shared_ptr<const …>` published via `atomic_store` /
+  read via `atomic_load` (the lock-free RCU idiom — Art. XV-consistent, NOT a `std::mutex`).
+  Exact primitive (`std::atomic<std::shared_ptr<T>>` vs the project `atomic_shared_ptr`)
+  deferred to `/tasks`.
+- **Owner**: the `Engine` (a new member; e.g. `reader_snapshot_`). Republished by the control
+  strand after **every** control-plane mutation (registry insert/erase, listener/endpoint
+  mutation, D-PUB publish/unpublish).
+- **Readers**: `lookup()` `atomic_load`s the snapshot and returns a
+  **`std::shared_ptr<Session>`** drawn from it (the accepted FR-008 signature change — the
+  handle outlives a concurrent `registry_.clear()`); `acceptor_bound_endpoint()` `atomic_load`s
+  the snapshot and returns its `Endpoint` **by value** (no signature change). Neither enters a
+  strand, takes a lock, or blocks.
+- **Invariant (INV-9 / FR-014)**: the synchronous public readers NEVER read a control-plane
+  structure the control strand is mutating in place — only the published immutable snapshot.
+  Mutation is control-strand-confined (FR-011); the snapshot decouples reads from it.
+- **Note**: `stopped()` is NOT in this snapshot — it reads the E-6 `atomic<bool>` directly.
+
 ## Lifetime / ordering summary (two domains)
 
 ```
@@ -113,9 +156,13 @@ start():  (on control strand)  for each registered session →
             session_strand = make_strand(exec_)              [E-1]
             bind Session to session_strand (D3-B)            [E-3 / INV-3]
             co_spawn(session_strand, role_loop)              [E-1/D2]
-              └─ accept/connect + handshake + read-pump + transport  on session_strand  [E-5/INV-7]
-              └─ publish entry.session / entry.live_transport  VIA control strand        [E-2/INV-2]
+              └─ accept/connect + handshake + transport         on session_strand          [E-5/INV-7]
+              └─ co_await publish entry.session/live_transport VIA control strand          [E-2/INV-2]  (awaited, BEFORE read-pump)
+              └─ read-pump                                       on session_strand          [E-1/D2]
               └─ listeners_/listener_endpoints_ writes         on control strand          [E-0/INV-0]
+              (each control-strand mutation republishes the E-7 reader snapshot)          [E-7/INV-9]
+
+lookup()/acceptor_bound_endpoint():  atomic_load(reader_snapshot_) → handle/value   [E-7]  (any thread, lock-free, no strand)
 
 send():   caller → control_strand (registry/stopped read, counter bump)   [E-0]
                  → session_strand (toApp + Session::send)                  [E-1]   (both non-blocking posts)

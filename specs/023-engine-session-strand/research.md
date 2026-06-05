@@ -80,14 +80,44 @@ lock (see Reference grounding). This collapses Gate A Root cause #1 (Codex-1 + N
   design (a single control strand is simpler and correct; revisit only if the bench gate
   fails).
 
-### D-PUB — Publication discipline for `session` / `live_transport`
+### D-PUB — Publication discipline for `session` / `live_transport` (AWAITED, ordered, join-accounted)
 
-**Decision**: `entry.session` and `entry.live_transport` (the handles `stop()` reads)
-are written **on the control strand** (the role loop posts the publish to the control
-strand), or held as atomics with release/acquire. `stop()` reads them on the control
-strand. No bare-strand write that the control strand later reads.
+**Decision**: `entry.session` and `entry.live_transport` (the handles `stop()` reads) are
+published **on the control strand**, and the role loop **awaits** that publication
+**before** it enters the read pump:
 
-**Rationale**: closes Gate A NEW-2 (torn read of the published handles across domains).
+```
+co_await asio::co_spawn(control_strand, publish_handles, asio::use_awaitable);
+// ↑ suspends the session-strand role loop (does NOT block a thread); the control strand
+//   runs publish_handles, then resumes the loop. Two distinct strands over one context →
+//   deadlock-free. Only AFTER this resumes does the loop enter async_read_some.
+```
+
+This gives **ordering**, not just well-defined access: `entry.live_transport` is visible
+to any subsequent `stop()` on the control strand *before* the read pump starts, so `stop()`
+can never observe `live_transport == nullptr` (engine.cpp:713-714), skip the close-to-wake,
+and then have a later queued publish expose a live transport after the stop sequence began
+— the missed-close that reintroduces the BIO hang this feature exists to fix.
+
+- **Awaited, not fire-and-forget**: a detached publish is unsafe (the ordering hole above)
+  and a lifetime hazard (a detached job capturing `SessionEntry&` can run after the entry is
+  cleared). The publish job is **part of the outstanding-loop join accounting** (the stop
+  join must not complete while a publish job is pending).
+- **Unpublish on loop exit**: on role-loop exit the loop resets `entry.session` /
+  `entry.live_transport` (to null/expired) **on the control strand**, before the entry can
+  be cleared, so a concurrent `stop()` never reads a stale handle for a loop that has ended.
+- **Snapshot republish**: each publish/unpublish on the control strand also refreshes the
+  D-SNAP immutable reader snapshot, so the public readers see the new state.
+
+**The atomic-`live_transport` alternative is struck** (was offered in rev-2 as co-equal): an
+atomic `live_transport` makes the *read* well-defined but does **not** provide the *ordering*
+(`stop()` could still atomically acquire `nullptr` and skip the close). Presenting it as
+equivalent invites an implementer to pick the broken half. The awaited control-strand publish
+is mandatory; an atomic form is acceptable only for `stopped_` (D-STOP), where there is no
+ordering obligation beyond the flag itself.
+
+**Rationale**: closes Gate A round-2 Codex-#2 (P1) + NEW-3 / Root cause B (torn read AND
+missed-close ordering of the published handles across domains).
 
 ### D-STOP — `stopped_` memory model
 
@@ -101,6 +131,50 @@ control strand in `stop()`.
 
 **Rationale**: closes Gate A NEW-6; the plain-bool "safe under confinement" comment is
 exactly the invariant this feature removes.
+
+### D-SNAP — Lock-free snapshot for the synchronous public readers (NEW; Gate A round-2 user decision)
+
+**Decision**: the synchronous public readers `lookup()` (engine.cpp:117-119) and
+`acceptor_bound_endpoint()` (engine.cpp:896-899) read control-plane `unordered_map`s
+**off any strand**, racing `stop()`'s `registry_.clear()` / `listener_endpoints_.clear()`
+(engine.cpp:761-763) under MT — the exact `unordered_map` concurrent-read/clear +
+rehash-UAF class D0 exists to kill, reappearing on the public read path. A synchronous
+accessor cannot enter the async control strand without an API change, a block (banned,
+Art. XV), or a published snapshot. The user chose **Full MT-safe (accept the API change)**:
+
+- After **every** control-plane mutation, the control strand **atomically publishes**
+  an **immutable snapshot** (RCU-style) of the state the readers need: the registry's
+  `SessionId → shared_ptr<Session>` map and the bound-endpoint table. Publish = build
+  a fresh immutable structure, then `atomic_store` a `shared_ptr<const …>` to it.
+- Public readers **`atomic_load`** the current snapshot (no strand entry, no lock, no
+  block) and return a value (`acceptor_bound_endpoint()` → `Endpoint` by value — no
+  signature change) or a shared-ownership handle (`lookup()` → `std::shared_ptr<Session>`,
+  drawn from the snapshot's `shared_ptr<Session>` map, so the handle outlives a concurrent
+  `registry_.clear()`).
+- **`lookup()`'s return type changes** from raw `Session*` to `std::shared_ptr<Session>`
+  — the single deliberate, accepted, safening-only public API change (FR-008/SC-004).
+  `acceptor_bound_endpoint()` keeps its `Endpoint`-by-value signature.
+
+**Consistency with Art. XV (no `std::mutex`)**: an `atomic_load` of a `shared_ptr<const>`
+is the lock-free RCU idiom — not a mutex. The project's isolated `atomic_shared_ptr`
+follow-up (`[[project_libcxx_atomic_shared_ptr_followup]]`) is the eventual primitive; at
+the design level this decision commits the **lock-free reader-snapshot intent** and leaves
+the exact primitive (`std::atomic<std::shared_ptr<T>>` vs the project `atomic_shared_ptr`
+vs a `seqlock`-free generational pointer) to `/tasks`.
+
+**Rationale**: closes Gate A round-2 Codex-#1 / Root cause A; reconciles FR-011's "ALL …
+on the control strand" to **mutate on the strand, read via the published snapshot**. The
+flagship MT harness already confined these to quiescent windows, but the quickstart invites
+any-thread calls — the snapshot makes that safe rather than a documented foot-gun.
+
+**`stopped()` is NOT part of this snapshot** — it is covered by D-STOP's `atomic<bool>`
+(an atomic-acquire load is MT-safe with no API change). Over-bundling it here is wrong.
+
+**Alternative considered**: *document-narrow* `lookup()`/`acceptor_bound_endpoint()` to
+pre-`start()`/post-`stop()`/quiescent-only (preserves all signatures). Rejected by the
+user in favor of full MT-safe readers — the narrowing would weaken the de-facto contract
+of two shipped methods, and the snapshot cost is once-per-control-mutation (cold path),
+not per-read.
 
 ### D1 — One strand per engine-managed session, engine-owned
 
@@ -149,6 +223,18 @@ engine-supplied already-strand executor, store it directly with `strand_wrapped=
 (truthful) instead of re-wrapping. Preserves mode, `is_strand_wrapped()==true`,
 spin-policy legality, and FR-009.
 
+**The adoption seam is an engine-only tag/path, NOT inference from the public
+`already_serialized_executor` flag** (D3-B, Gate A round-2 Codex-#3). The public
+`already_serialized_executor` flag is consulted **only** on the `direct_executor` arm
+(session_executor.cpp:40); under `per_session_strand` the factory still
+`make_strand`-wraps unconditionally (session_executor.cpp:35). A user may legitimately set
+`already_serialized_executor` under `per_session_strand` today — so reusing that public flag
+to trigger adoption would be a trap that silently adopts a **bare** (non-strand) executor as
+if it were a strand, bypassing serialization. Instead, the engine passes the pre-made strand
+through an **engine-only internal adoption parameter/overload** (e.g. an internal
+`adopt_strand` tag distinct from the public config), so only the engine-created strand is
+adopted; the ordinary user `per_session_strand` path is untouched and still `make_strand`-wraps.
+
 **Why NOT D3-A** (rev-1 recommendation, **verified broken** at Gate A): D3-A
 (`executor_override` + `direct_executor` + attested) would internally rewrite a user's
 config to `direct_executor`, and `Session::open()` rejects `direct_executor +
@@ -180,15 +266,37 @@ one no thread is blocked.
 ### D6 — Deterministic witness: target the CONTROL-PLANE race (feasible)
 
 **Decision (re-targeted from rev-1's transport-level seam, which Gate A proved infeasible)**:
-the deterministic RED witness targets the **engine control-plane data race** (Root cause
-#1), not the BIO crash. A test-only **latch** in the accept-loop publication path (compiled
-under a `FIXPP_TEST_SEAMS`-style debug seam, zero release cost) lets the test hold an
-accept-loop registry/listener write open while it drives `Engine::stop()` (and an
-any-thread `send`) on other threads — so the thread-sanitizer reports the
-`registry_`/`listeners_` data race on **every** pre-change run, and reports **nothing**
-post-change (the control strand serializes them). The TLS-teardown BIO crash is a
-**downstream symptom** covered by the multi-threaded acceptance test (SC-001 / the reused
-`business_messages_roundtrip` 3-thread harness).
+the RED witness targets the **engine control-plane data race** (Root cause #1), not the BIO
+crash, via a **one-sided park** seam — **never a bidirectional latch** (Gate A round-2
+Codex-#4 / Root cause C):
+
+- **Why a latch is self-defeating**: a *data race* is by definition two conflicting accesses
+  with **no** happens-before edge between them. A two-sided latch (the writer signals,
+  `stop()` waits) **creates** an HB edge across the two accesses → TSan sees synchronization
+  → **no race is reported**. The naive "park the write, signal a latch, stop waits on it"
+  seam suppresses the very race it must witness. (Fire the latch *before* the write and you
+  instead get an ordering bug, not a concurrent race.)
+- **The one-sided park that works**: a test-only seam (compiled under a `FIXPP_TEST_SEAMS`-style
+  debug flag, zero release cost) parks **one** thread *inside / immediately adjacent to* an
+  unsynchronized listener/endpoint-table access — e.g. a `std::this_thread::sleep`/spin
+  **after** the map write begins but **before** it releases — while another thread drives
+  `Engine::stop()`'s `clear()`, **with no shared synchronization object between them**. The
+  window is wide enough that the conflicting access always lands inside it, so TSan flags the
+  two unsynchronized accesses deterministically, **and there is no HB edge** (a one-sided
+  delay, not a two-sided latch). This is the `feedback_stack_use_after_return_local_vs_ci_flake`
+  "widen the window" technique applied to a map race.
+- **Publication point — the listener/endpoint table, not `entry.session`**: the
+  `listener_endpoints_` / `listeners_` write is reachable **before any peer connects** (so the
+  witness needs no live peer), whereas an `entry.session` publication requires an established
+  session. The witness targets the **listener-map write** for reachability.
+- **SC-002 standard**: this is deterministic in the sense that matters — **every** pre-change
+  run is RED — and is *not* the rejected flaky/probabilistic stress reproducer. SC-002 is
+  worded as "a controlled one-sided-park interleave that reliably yields a TSan data-race
+  report pre-change and is clean post-change," which is exactly what the seam can deliver
+  (it does NOT claim a two-sided-latch guarantee the seam cannot provide).
+
+The TLS-teardown BIO crash is a **downstream symptom** covered by the multi-threaded
+acceptance test (SC-001 / the reused `business_messages_roundtrip` 3-thread harness).
 
 **Why this is feasible where the rev-1 seam was not**: Gate A showed that a `Transport`-level
 wrapper gates **after** the ssl `io_op` BIO touch (too late to witness the BIO race
@@ -213,14 +321,21 @@ snapshot for `send`) is the fallback — but as a measured decision, not a guess
 **Rationale**: closes Gate A NEW-3 (rev 1 undercounted the cost as "one strand dispatch
 per read").
 
-### D8 — No public API change; L-019-3 lift is CONTINGENT
+### D8 — One safening-only API change; L-019-3 lift is CONTINGENT
 
 **Decision**: all changes remain engine-internal (two strands, binding, stop ordering,
-`stopped_` atomic). No `c_api.h`, no public `Engine`/`Session` signature change. **The
-L-019-3 lift is gated on BOTH domains landing with passing TSan witnesses** (the
-per-session domain AND the control-plane domain) — lifting it while either is racy would
-publish a false safety claim (Gate A NEW-5). Verified via `nm` (no new exports) + `abidiff`
-(no-diff).
+`stopped_` atomic, D-SNAP reader snapshot) **except** the single deliberate, accepted,
+safening-only public signature change `Engine::lookup() : Session* → std::shared_ptr<Session>`
+(D-SNAP / FR-008 / SC-004). No `c_api.h` change; `acceptor_bound_endpoint()` keeps its
+`Endpoint`-by-value signature; no other public `Engine`/`Session` signature changes.
+
+**The L-019-3 lift is gated on the FULL witness set** — V-1, V-2 (per-session
+teardown/lifecycle), V-10 (transport-on-strand identity), V-8 (control-plane race), V-9
+(re-entrant send), **V-11** (snapshot-reader MT) — **and** a clean ASan/UBSan/TSan run.
+Lifting it while any of those is still racy or failing publishes a false safety claim (Gate A
+round-1 NEW-5 + round-2 Codex-#5; the `feedback_completeness_gate_exact_set_not_subset` class).
+Verified via `nm` + `abidiff` — which **will** show the one intended `lookup()` return-type
+change (expected and recorded, not a silent break — SC-004), and no other diff.
 
 ## Reference-engine grounding (corrected)
 
@@ -241,5 +356,13 @@ bare shared executor (the rev-1 bug).
 - **R3 — control-strand hop on the hot send path costs > ±5%** (D7) → bench gate; fallback
   is the lock-free registry-snapshot alternative.
 - **R4 — half-restructure risk** (the reason Gate A ruled structural) → D0 enumerates ALL
-  control-plane state + publication points (D-PUB) + `stopped_` (D-STOP); the data-model
-  E-0 and contract C-0 make the control domain a first-class modeled entity, not a bolt-on.
+  control-plane state + publication points (D-PUB) + `stopped_` (D-STOP) + the synchronous
+  public readers (D-SNAP); the data-model E-0 and contract C-0 make the control domain a
+  first-class modeled entity, not a bolt-on.
+- **R5 — a public-reader snapshot grows stale or races its own publish** (D-SNAP) → the
+  control strand republishes the immutable snapshot after **every** control-plane mutation
+  (including D-PUB publish/unpublish); readers `atomic_load` it. Witnessed by V-11 (concurrent
+  `lookup()`/`acceptor_bound_endpoint()` from a thread while the engine runs → TSan-clean).
+- **R6 — an awaited publish deadlocks the role loop** (D-PUB) → the publish runs on a
+  **distinct** strand over the same context and the loop **suspends** (does not block a
+  thread); witnessed by V-2 lifecycle + the absence of any thread held across the hop.
