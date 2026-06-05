@@ -49,8 +49,9 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   co_spawn(control_strand, publish, use_awaitable)`) **before** it enters the read pump, so
   `stop()` can never observe a null `live_transport` and skip the close-to-wake. The publish
   job is part of the **outstanding-loop join accounting** (stop's join does not complete while
-  a publish is pending). On loop exit the loop **unpublishes** (resets `session` /
-  `live_transport`) on the control strand before the entry can be cleared. The struck
+  a publish is pending). On **every** loop-exit path — normal return, cancellation, AND
+  error — the loop **unpublishes** (resets `session` / `live_transport`) on the control
+  strand before the entry can be cleared (FR-011). The struck
   atomic-`live_transport` alternative is NOT used (it gives read-definedness but not the
   ordering — research D-PUB). No bare-session-strand write that the control strand later reads.
 - **Stopped-before-publish disposition (INV-2a / D-PUB / V-12)**: the publish coroutine checks

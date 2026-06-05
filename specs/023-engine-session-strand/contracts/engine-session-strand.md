@@ -95,7 +95,7 @@ per-entry close `co_await`s (no insert/erase between `stopped_=true` and `clear(
 Publication is **awaited**: the role loop `co_await`s its control-strand publish of
 `entry.session` / `entry.live_transport` **before** entering the read pump, so `stop()`
 cannot observe a null `live_transport` and skip the close-to-wake; the loop unpublishes on
-exit; pending publish/unpublish jobs are part of the stop join. (The struck atomic
+**every** exit path (normal return, cancellation, AND error — FR-011); pending publish/unpublish jobs are part of the stop join. (The struck atomic
 alternative for `live_transport` is not used — it gives read-definedness but not ordering.)
 
 **Stop-before-publish (symmetric ordering — V-12).** The publish coroutine MUST check
