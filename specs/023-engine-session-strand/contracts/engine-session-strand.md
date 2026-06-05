@@ -106,6 +106,22 @@ the session-strand role loop **closes/returns before initiating any read**. This
 case where `stop()` already saw `live_transport == nullptr` and a later queued publish would
 otherwise expose a live transport after the stop sequence began.
 
+## C-7 — Verification obligations (consumed by /speckit-tasks)
+
+| ID | Obligation | Evidence |
+|----|------------|----------|
+| V-1 | Per-session teardown: transport close serialized with the in-flight read | session-strand close ordering; MT acceptance test under ASan/UBSan/TSan |
+| V-2 | Full lifecycle on a ≥3-thread executor is clean | `business_messages_roundtrip` (MT) + new MT lifecycle cells, ASan/UBSan/TSan |
+| V-3 | Cross-session parallelism preserved | a 2-session MT cell shows independent progress; no engine-global serialization of unrelated sessions |
+| V-4 | Single-threaded behavior unchanged | existing single-threaded suite green, no rewrites |
+| V-5 | **One** intended API/ABI change only (`lookup() : Session* → shared_ptr<Session>`), no other | `abidiff`/`nm` show exactly the recorded `lookup()` diff and no other (SC-004/C-4) |
+| V-6 | Perf within ±5% — **two-hop** send path (and acknowledge the per-establishment publish hop) **and the D-SNAP snapshot read/publish cost** (the `std::atomic<std::shared_ptr<const Snapshot>>` read — measure its real cost since "lock-free" is not guaranteed on every STL — and the per-control-mutation snapshot republish) | session-throughput (establish-churn, not just warm steady-state) **and send / send-from-callback** bench vs re-measured baseline (Art. VIII); record `is_lock_free()` of the snapshot atomic on the supported STL matrix |
+| V-7 | L-019-3 lifted **only after** V-1 ∧ V-2 ∧ V-8 ∧ V-9 ∧ V-10 ∧ V-11 ∧ V-12 pass **and** a clean ASan/UBSan/TSan run | behaviors-and-limitations + concurrency doc edits, gated on the full set (FR-010/SC-005) |
+| **V-8** | **Control-plane race deterministically witnessed via a ONE-SIDED PARK** (no bidirectional latch — an HB edge would suppress the race) | one-sided park on the **listener/endpoint-table** write (reachable pre-peer) while `stop()` clears from another thread, no shared sync object → TSan RED **every** pre-change run, GREEN post-change |
+| **V-9** | **Re-entrant send across both domains has no deadlock under MT AND fails cleanly post-`stop()`** | `session→control→session` send-from-callback cell under TSan, ≥3 threads (no deadlock); a re-entrant send issued after `stop()` has begun fast-fails cleanly (stopped/`session_invalid_state_for_send`), never races a half-cleared registry |
+| **V-10** | **Transport socket executor == session strand** | debug assert + a test over the four construction sites (engine listener-build, reconnect_fsm make, the two transport ctors) |
+| **V-11** | **Snapshot public readers are MT-safe; `lookup()` is a bounded handle** (D-SNAP/C-8) | a TSan cell calling `lookup()` / `acceptor_bound_endpoint()` from a thread while the engine runs (and `stop()` clears) concurrently → TSan-clean; the `lookup()` handle obtained before `clear()` keeps its session alive **while the engine is alive**; `~Engine` debug-asserts no outstanding `lookup()`/snapshot handle remains |
+| **V-12** | **Stop racing exactly between transport creation and the awaited publish takes the stopped disposition** (D-PUB/C-6/INV-2a) | a witness that drives `stop()` to set `stopped_` while a role loop sits between transport creation and its awaited control-strand publish → the publish observes `stopped_`, records the stopped disposition (no live publish), and the loop closes/returns **without** initiating a read; TSan-clean, no pumped transport exposed behind the in-progress `stop()` |
 ## C-8 — Synchronous public readers read an immutable snapshot (D-SNAP)
 
 `lookup()` and `acceptor_bound_endpoint()` MUST be safe to call from any thread while the
@@ -136,19 +152,3 @@ and whose dtor (last copy destroyed) decrements it, asserted zero at `~Engine` (
 `use_count()` cannot observe a handle copied out then detached from the snapshot). Release builds
 carry no lease/counter. It is NOT a general keepalive past `~Engine`.
 
-## C-7 — Verification obligations (consumed by /speckit-tasks)
-
-| ID | Obligation | Evidence |
-|----|------------|----------|
-| V-1 | Per-session teardown: transport close serialized with the in-flight read | session-strand close ordering; MT acceptance test under ASan/UBSan/TSan |
-| V-2 | Full lifecycle on a ≥3-thread executor is clean | `business_messages_roundtrip` (MT) + new MT lifecycle cells, ASan/UBSan/TSan |
-| V-3 | Cross-session parallelism preserved | a 2-session MT cell shows independent progress; no engine-global serialization of unrelated sessions |
-| V-4 | Single-threaded behavior unchanged | existing single-threaded suite green, no rewrites |
-| V-5 | **One** intended API/ABI change only (`lookup() : Session* → shared_ptr<Session>`), no other | `abidiff`/`nm` show exactly the recorded `lookup()` diff and no other (SC-004/C-4) |
-| V-6 | Perf within ±5% — **two-hop** send path (and acknowledge the per-establishment publish hop) **and the D-SNAP snapshot read/publish cost** (the `std::atomic<std::shared_ptr<const Snapshot>>` read — measure its real cost since "lock-free" is not guaranteed on every STL — and the per-control-mutation snapshot republish) | session-throughput (establish-churn, not just warm steady-state) **and send / send-from-callback** bench vs re-measured baseline (Art. VIII); record `is_lock_free()` of the snapshot atomic on the supported STL matrix |
-| V-7 | L-019-3 lifted **only after** V-1 ∧ V-2 ∧ V-8 ∧ V-9 ∧ V-10 ∧ V-11 ∧ V-12 pass **and** a clean ASan/UBSan/TSan run | behaviors-and-limitations + concurrency doc edits, gated on the full set (FR-010/SC-005) |
-| **V-8** | **Control-plane race deterministically witnessed via a ONE-SIDED PARK** (no bidirectional latch — an HB edge would suppress the race) | one-sided park on the **listener/endpoint-table** write (reachable pre-peer) while `stop()` clears from another thread, no shared sync object → TSan RED **every** pre-change run, GREEN post-change |
-| **V-9** | **Re-entrant send across both domains has no deadlock under MT AND fails cleanly post-`stop()`** | `session→control→session` send-from-callback cell under TSan, ≥3 threads (no deadlock); a re-entrant send issued after `stop()` has begun fast-fails cleanly (stopped/`session_invalid_state_for_send`), never races a half-cleared registry |
-| **V-10** | **Transport socket executor == session strand** | debug assert + a test over the four construction sites (engine listener-build, reconnect_fsm make, the two transport ctors) |
-| **V-11** | **Snapshot public readers are MT-safe; `lookup()` is a bounded handle** (D-SNAP/C-8) | a TSan cell calling `lookup()` / `acceptor_bound_endpoint()` from a thread while the engine runs (and `stop()` clears) concurrently → TSan-clean; the `lookup()` handle obtained before `clear()` keeps its session alive **while the engine is alive**; `~Engine` debug-asserts no outstanding `lookup()`/snapshot handle remains |
-| **V-12** | **Stop racing exactly between transport creation and the awaited publish takes the stopped disposition** (D-PUB/C-6/INV-2a) | a witness that drives `stop()` to set `stopped_` while a role loop sits between transport creation and its awaited control-strand publish → the publish observes `stopped_`, records the stopped disposition (no live publish), and the loop closes/returns **without** initiating a read; TSan-clean, no pumped transport exposed behind the in-progress `stop()` |
