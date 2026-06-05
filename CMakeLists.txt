@@ -69,6 +69,15 @@ endif()
 # conanfile option -o fixpp/*:spike_quill=True so the quill dependency resolves.
 option(FIXPP_LOG_SPIKE_QUILL "Build the TS-13 quill spike backend" OFF)
 
+# FIXPP_TEST_SEAMS — 023-engine-session-strand T002: compile the one-sided-park
+# seam hooks in engine.cpp (the #ifdef FIXPP_TEST_SEAMS blocks that park a
+# thread inside the listeners_/listener_endpoints_ write for the V-8 TSan
+# witness).  OFF by default — ZERO cost in any release build.  The test target
+# engine_session_strand_test sets this ON unconditionally; any sanitizer preset
+# running that witness may also pass -DFIXPP_TEST_SEAMS=ON at configure time.
+# The seam body itself lands in T016; here only the option is declared.
+option(FIXPP_TEST_SEAMS "Enable test-only seam hooks in engine.cpp (023 V-8 witness)" OFF)
+
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
