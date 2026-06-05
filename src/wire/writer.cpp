@@ -126,6 +126,12 @@ bool Writer::write_span(std::span<const std::byte> s) noexcept {
         overflow_ = true;
         return false;
     }
+    // An empty value span (e.g. an empty FIX field value "58=\x01") has a null
+    // data() pointer; memcpy(dst, nullptr, 0) is UB (src is declared nonnull).
+    // Nothing to copy — early-out.
+    if (s.empty()) {
+        return true;
+    }
     std::memcpy(dst_.data() + pos_, s.data(), s.size());
     pos_ += s.size();
     return true;
