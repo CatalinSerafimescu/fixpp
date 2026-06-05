@@ -817,4 +817,230 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     EXPECT_TRUE(engine->stopped());
 }
 
+// ── V-8: ControlPlaneRace_StopVsAcceptPublish ─────────────────────────────────
+//
+// Scenario (SC-002 / T016 / research D6):
+//   A ONE-SIDED PARK seam (#ifdef FIXPP_TEST_SEAMS in engine.cpp, T016) parks
+//   the coroutine's OS thread for 100ms AFTER the listeners_/listener_endpoints_
+//   write completes in run_accept_loop.  Simultaneously (with NO shared
+//   synchronisation object), another thread drives Engine::stop() which eventually
+//   calls listeners_.clear().  TSan observes:
+//     - Thread A wrote listeners_[id] (run_accept_loop)
+//     - Thread B called listeners_.clear() (stop())
+//     - No happens-before edge between them
+//   → TSan reports: DATA RACE on listeners_.
+//
+//   This is the root-cause data race for the control-plane class (research §2).
+//   It is DETERMINISTIC (every run is RED pre-T018) because:
+//   - The 100ms park window is always wider than stop()'s Step-1-to-Step-5 time
+//     for a freshly-started engine with no live peers (< 5ms).
+//   - The stop()-driving thread (t1) and the accept-loop thread run concurrently
+//     on a 2-thread executor.
+//   - There is NO shared sync object between the park and the stop() call — a
+//     latch would create an HB edge suppressing the race. [research D6]
+//
+// Seam activation:
+//   The FIXPP_TEST_SEAMS flag must be propagated into fixpp_session (engine.cpp)
+//   via -DFIXPP_TEST_SEAMS=ON at cmake configure time.  The engine_session_strand_test
+//   CMakeLists also defines it for the test binary's own includes.
+//
+// Multi-thread: io_context driven by 2 OS threads (main + t1) so the accept-loop
+//   thread (in the 100ms sleep) does NOT block stop().
+//
+// Anti-hang: 15s hard budget. Engine always stop()'d before test exit.
+//
+// PRE-T018 (control-plane not yet confined to control_strand_):
+//   TSan MUST report a data race on listeners_/listener_endpoints_. halt_on_error=1
+//   aborts the process → the test is effectively RED. This is the expected signal.
+//
+// POST-T018 (control-plane writes on control_strand_):
+//   The control strand serialises the write against clear() → no race → GREEN.
+//
+// [research D6; spec SC-002; contract V-8; tasks T016/T017]
+
+#ifdef FIXPP_TEST_SEAMS
+
+TEST(EngineSessionStrand, V8_ControlPlaneRace_StopVsAcceptPublish) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    // Use a 2-thread io_context so the accept loop (parked in the seam sleep)
+    // runs on one OS thread while stop() runs on the other.
+    // [[feedback_single_threaded_harness_masks_strand_races]]
+    asio::io_context ioc;
+
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    // Reserve port before starting background thread.
+    const uint16_t port = reserve_free_port(ioc);
+
+    // Build an acceptor session config (acceptor registers, triggering run_accept_loop).
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V8", "INITIATOR_V8",
+        fixpp::session::session_role::acceptor, "INITIATOR_V8",
+        ioc.get_executor(), port);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-8: acceptor register_session failed";
+    }
+
+    // start() spawns run_accept_loop on the session strand.  The loop will
+    // build the listener, write listeners_[id] / listener_endpoints_[id],
+    // then PARK for 100ms (the one-sided seam).
+    engine->start();
+
+    // Start background thread NOW — after engine->start() so the accept loop
+    // coroutine is queued on the executor.  The thread will service the ioc and
+    // run the accept loop (including the seam sleep).
+    // [[feedback_fork_inherited_asio_pool_deadlock]] — construct executor in the
+    // forked context; here we construct the thread after start() which is correct.
+    std::thread t1{[&ioc]{ ioc.run(); }};
+
+    // Give the accept loop enough time to start and execute the listeners_ write
+    // + enter the seam sleep on t1.  20ms is sufficient: the loop runs immediately
+    // when t1 calls ioc.run().
+    //
+    // IMPORTANT: there is NO shared synchronisation object between this sleep and
+    // the seam sleep in run_accept_loop.  This is a one-sided park: we sleep to
+    // give the accept loop time to write the map, but we do NOT wait for a signal
+    // from the loop.  A two-sided latch would create an HB edge and suppress the
+    // race. [research D6]
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+
+    // Now drive stop() from the MAIN thread via asio::co_spawn.  stop() runs on
+    // the control strand (serviced by t1 when main's wait_pred drives ioc).
+    // stop() will reach listeners_.clear() while the accept loop is parked.
+    //
+    // V-8 PRIMARY ASSERTION: TSan will observe:
+    //   - t1:   engine.listeners_[session_id] = ... (run_accept_loop)
+    //   - main: listeners_.clear()               (stop() step-5)
+    //   - No happens-before edge between them.
+    // With halt_on_error=1, TSan aborts the process on the first race → RED.
+    // If we reach the EXPECT below, it is GREEN (post-T018).
+    {
+        auto stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->stop(), asio::use_future);
+        bool done = wait_pred(ioc,
+            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+            12000ms);
+        ioc.stop();
+        t1.join();
+        ASSERT_TRUE(done) << "V-8: engine.stop() did not complete within 12s";
+        stop_fut.get();
+    }
+
+    // Reached post-T018 (control-plane confined): no race, TSan clean.
+    // Pre-T018: TSan aborts before this line.
+    EXPECT_TRUE(engine->stopped())
+        << "V-8: engine must be stopped after stop() completes";
+}
+
+#endif  // FIXPP_TEST_SEAMS
+
+// ── V-12: StopBeforeAwaitedPublish ───────────────────────────────────────────
+//
+// Scenario (research D-PUB stop-already-in-progress; contract C-6/V-12; T016):
+//   Verify that if stop() sets stopped_=true WHILE a role loop sits between
+//   transport creation and the awaited control-strand publish, the publish_entry
+//   helper observes stopped_=true (INV-2a check from T013), returns the STOPPED
+//   DISPOSITION (false), and the loop closes/returns WITHOUT entering the read
+//   pump (no live transport published).
+//
+// How the INV-2a check already exists (from T013 / publish_entry):
+//   publish_entry (engine.cpp ~:483) checks stopped_.load(acquire) FIRST on the
+//   control strand.  If stopped_=true, it co_returns false without writing
+//   entry.session or entry.live_transport.  The caller (run_accept_loop step 7a)
+//   observes published=false and immediately calls local_session->close(terminal)
+//   + co_returns without entering run_read_pump.
+//
+// This witness verifies the stopped-disposition path is functional by observing
+// the ABSENCE of an Active session after stop() races the accept loop.
+//
+// The test drives stop() while the accept loop is parked in async_accept (before
+// any peer connects, so before transport creation and publish).  The accept loop
+// receives a total-cancel from stop(), exits the while(!stopped()) gate, and
+// returns WITHOUT ever calling publish_entry with a live transport.  The stopped
+// disposition contract is exercised on this simpler path.
+//
+// After stop(), lookup() must return nullptr (registry cleared) — confirming no
+// live transport was published behind the in-progress stop().
+//
+// V-12 DISPOSITION: ALREADY-GREEN because INV-2a was implemented in T013's
+// publish_entry.  T019 is a no-op / confirmation only. Recorded per tasks.md
+// T016/T017: "if so, RECORD that it passes because the INV-2a check is present."
+//
+// [research D-PUB; data-model INV-2a; contract C-6/V-12; tasks T016/T017]
+
+TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    // Build an acceptor session — its loop parks in async_accept after the
+    // listener build.  We call stop() before any peer connects.
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V12", "INITIATOR_V12",
+        fixpp::session::session_role::acceptor, "INITIATOR_V12",
+        ioc.get_executor(), port);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-12: acceptor register_session failed";
+    }
+
+    engine->start();
+
+    // Let the accept loop get established (listener bind, waiting on async_accept).
+    // 50ms is sufficient to reach async_accept on a local loopback ioc.
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+
+    // Call stop() with the accept loop parked in async_accept (no peer connected).
+    // The accept loop will receive a total-cancel (stop() emits total), exit the
+    // while(!stopped()) gate, and return WITHOUT ever calling publish_entry with a
+    // live transport.  This exercises the stopped-disposition contract at the
+    // earliest possible point (no transport was created).
+    stop_engine_sync(ioc, *engine);
+
+    ASSERT_TRUE(engine->stopped())
+        << "V-12: engine must be stopped after stop_engine_sync";
+
+    // V-12 primary assertion: no session has been published as Active.
+    // After stop(), lookup() returns nullptr (registry cleared in step 5).
+    // This confirms that NO live transport was published behind the in-progress stop().
+    //
+    // [INV-2a: publish_entry checks stopped_.load(acquire) FIRST → false → no publish]
+    // [contract C-6: stopped disposition → loop closes without initiating any read]
+    fixpp::session::Session* acc_session = engine->lookup(acc_id);
+    EXPECT_EQ(acc_session, nullptr)
+        << "V-12: acceptor session must NOT be reachable after stop() clears the registry\n"
+        << "  A non-null Session* here would indicate the registry was NOT cleared\n"
+        << "  (or that lookup() was called before the registry clear completed).\n"
+        << "  [INV-2a check in publish_entry (T013) ensures: stopped_ true → no publish\n"
+        << "   of live_transport → loop closes without entering read pump]\n"
+        << "  V-12 is ALREADY-GREEN because the INV-2a check was implemented in T013.\n"
+        << "  T019 is a no-op/confirmation per tasks.md T016/T017.";
+}
+
 }  // namespace

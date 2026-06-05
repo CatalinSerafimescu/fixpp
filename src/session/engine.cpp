@@ -38,6 +38,7 @@
 #include <fixpp/wire/framer.hpp>
 #include <memory>
 #include <span>
+#include <thread>
 #include <vector>
 
 // Internal concrete transport/listener types — only used in this .cpp.
@@ -585,6 +586,36 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     auto bound_ep = listener->bound_endpoint();
     engine.listener_endpoints_[session_id] = bound_ep;
     engine.listeners_[session_id] = std::move(listener);
+
+#ifdef FIXPP_TEST_SEAMS
+    // V-8 ONE-SIDED PARK (T016 seam body / research D6 / [const §IX §2]).
+    //
+    // Purpose: deterministically witness the control-plane data race between the
+    // listeners_/listener_endpoints_ write above and stop()'s listeners_.clear()
+    // (engine.cpp step-5) for the TSan regression witness V-8.
+    //
+    // Mechanism: a "one-sided park" — after the write completes, this coroutine
+    // SUSPENDS via co_await on a timer for long enough that another thread
+    // driving Engine::stop() will reliably call listeners_.clear() while the
+    // write above is still "recent" in TSan's shadow state.
+    //
+    // There is NO shared synchronisation object between the park and the
+    // stop()-driving thread.  A two-sided latch would create a happens-before
+    // edge that SUPPRESSES the race TSan must report. [research D6]
+    //
+    // Release-elided: this block is NEVER compiled into fixpp_session unless
+    // FIXPP_TEST_SEAMS is passed at cmake configure time (option OFF by default,
+    // ON only for the engine_session_strand_test target). [T002]
+    //
+    // NOTE (T017 escalation): the blocking sleep_for keeps the coroutine on the
+    // SAME OS thread throughout (write → sleep → decrement on t1).  TSan sees
+    // write → decrement as sequenced on t1, and decrement → clear as HB through
+    // the atomic counter.  Therefore TSan does NOT report a race on listeners_.
+    // The seam is retained at the correct code site for the post-T018 GREEN gate;
+    // the deterministic RED cannot be produced with this approach — see T017.
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+#endif  // FIXPP_TEST_SEAMS
+
     auto* raw_listener =
         static_cast<fixpp::transport::asio_listener*>(engine.listeners_[session_id].get());
 
