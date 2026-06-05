@@ -335,6 +335,13 @@ private:
                                                  asio::cancellation_signal&,
                                                  std::shared_ptr<std::atomic<int>>);
 
+    // T013 friend: run_connect_loop (engine.cpp, namespace fixpp::session)
+    // T013 added Engine& parameter for control_strand_ + stopped_ access (D-PUB).
+    // Declared in fixpp::session namespace (not anonymous, not static) per [dcl.friend].
+    friend asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const&, Engine&,
+                                                  SessionEntry&,
+                                                  std::shared_ptr<std::atomic<int>>);
+
     // (015 /simplify R-3: the rebindable outbound send-slot lives entirely inside
     // each Session — transport_send_ is rebound by attach_accepted_transport /
     // install_reconnected_transport to the live Transport::async_write. The engine
