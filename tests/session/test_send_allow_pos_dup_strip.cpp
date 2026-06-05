@@ -534,6 +534,26 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
             << "W5: no 43 in retain-knob frame when payload has none; [C2.5]";
         EXPECT_FALSE(frame_has_boundary_tag(frame_retain, 122))
             << "W5: no 122 in retain-knob frame when payload has none; [C2.5]";
+
+        // Positive byte-identity assertions: all surviving application fields must be
+        // present verbatim under BOTH knob settings. Without these, a strip path that
+        // dropped/reordered/corrupted 11/54/55 would still pass the four absence checks
+        // above. [C2.5; data-model §2 transform table row 2 (absent → no-op)]
+        const std::span<const std::byte> df_span(frame_default);
+        EXPECT_EQ(extract_field(df_span, 11), "ORD003")
+            << "W5: default-knob frame must preserve 11=ORD003 verbatim; [C2.5]";
+        EXPECT_EQ(extract_field(df_span, 54), "1")
+            << "W5: default-knob frame must preserve 54=1 verbatim; [C2.5]";
+        EXPECT_EQ(extract_field(df_span, 55), "AAPL")
+            << "W5: default-knob frame must preserve 55=AAPL verbatim; [C2.5]";
+
+        const std::span<const std::byte> rt_span(frame_retain);
+        EXPECT_EQ(extract_field(rt_span, 11), "ORD003")
+            << "W5: retain-knob frame must preserve 11=ORD003 verbatim; [C2.5]";
+        EXPECT_EQ(extract_field(rt_span, 54), "1")
+            << "W5: retain-knob frame must preserve 54=1 verbatim; [C2.5]";
+        EXPECT_EQ(extract_field(rt_span, 55), "AAPL")
+            << "W5: retain-knob frame must preserve 55=AAPL verbatim; [C2.5]";
     }
 }
 
@@ -755,6 +775,15 @@ TEST_F(AllowPosDupStripTest, W7_ResendIndependence_ReplayAlwaysAdds43And122) {
     const auto tag34_opt = extract_field(std::span<const std::byte>(app_frame), 34);
     ASSERT_TRUE(tag34_opt.has_value()) << "Outbound frame must carry tag 34 (MsgSeqNum)";
     const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+
+    // C3: the plain-send strip MUST have removed 43 and 122 from the stored frame
+    // BEFORE build_replay_frame re-adds them on replay. Without these assertions the
+    // test would pass even if the strip were disabled (both send and replay would carry
+    // 43/122 and the replay-side found_replayed check would still succeed).
+    EXPECT_FALSE(frame_has_boundary_tag(app_frame, 43))
+        << "W7: plain send must strip 43 BEFORE replay re-adds it [contract C3]";
+    EXPECT_FALSE(frame_has_boundary_tag(app_frame, 122))
+        << "W7: plain send must strip 122 BEFORE replay re-adds it [contract C3]";
 
     // Clear captured frames so we only see the replay frame.
     captured_frames.clear();

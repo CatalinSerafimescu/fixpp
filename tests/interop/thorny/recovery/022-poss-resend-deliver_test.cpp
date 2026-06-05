@@ -224,21 +224,25 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
            "must stay Active (SC-001/SC-005 — PossResend is an application-layer flag)";
 
     // ── In-process witnesses (a)+(b): fromApp + seqnum advance ───────────────
-    // Only assert fromApp delivery and seqnum advance if the counterparty actually
-    // sent the 97=Y message (fromApp counter incremented). If the parent harness
-    // was not present or did not send, these witnesses are skipped-at-runtime.
-    if (tracking_app->from_app_calls.load(std::memory_order_acquire) >= 1) {
-        EXPECT_TRUE(tracking_app->tag97_present.load(std::memory_order_acquire))
-            << "fromApp was called but tag 97 (PossResend) was not present in the "
-               "delivered MessageView; the full frame including tag 97 must be "
-               "delivered to fromApp (C4.1/SC-001)";
-
-        const auto inbound_after = s2->seqnum_mgr_test_access().next_inbound_unsafe();
-        EXPECT_GT(inbound_after, inbound_at_logon)
-            << "inbound seqnum did not advance after receiving the 97=Y message; "
-               "an in-sequence PossResend must advance the expected inbound seqnum "
-               "(C4.1 — not a dup/replay, just a business-layer resend flag)";
-    }
+    // INTEROP_REQUIRE_COUNTERPARTY passed — a live counterparty IS present and
+    // the parent harness advertises it will send a 97=Y application message.
+    // After the run_until window expires, from_app_calls >= 1 is MANDATORY: if
+    // the advertised 97=Y stimulus never arrived the cell must FAIL (not silently
+    // pass on the FSM-Active check alone). Mirror the 020 RC#1-r2 fix shape.
+    // [F1 gate-b/r1; 020 RC#1-r2 anti-pattern; contracts/session-send-possdup.md §C5]
+    EXPECT_GE(tracking_app->from_app_calls.load(std::memory_order_acquire), 1)
+        << "live counterparty present but advertised 97=Y stimulus never arrived; "
+           "fromApp must be called at least once after the PossResend delivery window "
+           "(C5/FR-010 — counterparty was confirmed reachable by INTEROP_REQUIRE_COUNTERPARTY)";
+    EXPECT_TRUE(tracking_app->tag97_present.load(std::memory_order_acquire))
+        << "fromApp was called but tag 97 (PossResend) was not present in the "
+           "delivered MessageView; the full frame including tag 97 must be "
+           "delivered to fromApp (C4.1/SC-001)";
+    const auto inbound_after = s2->seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_GT(inbound_after, inbound_at_logon)
+        << "inbound seqnum did not advance after receiving the 97=Y message; "
+           "an in-sequence PossResend must advance the expected inbound seqnum "
+           "(C4.1 — not a dup/replay, just a business-layer resend flag)";
 
     // ── Golden assertion: admin profile {52,10} ────────────────────────────────
     // Tags 34/35/97 compared verbatim (gate-biting per SC-004/SC-005). Golden
