@@ -233,3 +233,17 @@ binding seam (`session_executor.cpp`), and `stopped_`'s type — reusing 007's
     schema, or C-ABI surface; one changed C++ public signature (`lookup()`)".
   - **F5 (P3)** — bumped research/data-model/contract rev-2 headers to rev-3.
   Reviews: `research/reviews/codex_023-engine-session-strand_gate_a_3_review.md`.
+
+- **Round 4 (2026-06-05): Codex P1=0 P2=2 P3=2 → convergence touch-ups (rev-5).** No
+  architecture/design decision; two mechanical closures + nits:
+  - **P2-a** — the `~Engine` keepalive assertion was unrealizable as worded (a snapshot
+    `use_count()` can't see a `Session` handle copied out then detached). Replaced with a
+    **realizable debug mechanism**: `lookup()` returns a debug-only **aliasing
+    `shared_ptr<Session>`** whose control block inc/decrements an engine-owned
+    outstanding-handle counter, asserted **zero at `~Engine`** (release: plain handle, no
+    overhead). Spec FR-014, data-model E-7, contract C-8.
+  - **P2-b** — added **V-12** to every L-019-3 lift list (research D8, quickstart, checklist,
+    spec FR-010); it was only in contract C-3/V-7 + the plan test list after round 3.
+  - **P3** — rev headers → rev-4; de-claimed residual absolute "lock-free" phrasing.
+  Review: `research/reviews/codex_023-engine-session-strand_gate_a_4_review.md`. Final
+  convergence confirmation pending (round 5).

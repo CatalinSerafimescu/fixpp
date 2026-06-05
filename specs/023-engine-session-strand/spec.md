@@ -367,9 +367,15 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   (FR-008, bounded handle) — it is NOT valid past `~Engine`, because `Session`
   borrows the engine's runtime config; the caller MUST NOT let a `lookup()`/snapshot
   handle outlive the `Engine`. This precondition MUST be **debug-asserted at
-  `~Engine`** (no outstanding `lookup()`/snapshot handle remains — exact accounting
-  where practical, otherwise a debug `use_count()` check on the published snapshot).
-  `stopped()` is covered separately by the atomic stopping flag (FR-013).
+  `~Engine`** via a realizable mechanism: in debug builds `lookup()` returns an
+  **aliasing** `std::shared_ptr<Session>` whose control block increments an
+  engine-owned outstanding-handle counter on construction/copy and decrements it
+  on destruction, and `~Engine` asserts that counter is **zero**. (A bare
+  `use_count()` on the published snapshot is insufficient — a caller can copy the
+  `Session` handle out and drop the snapshot, so the snapshot's count would never
+  observe it.) In release builds the handle is a plain `std::shared_ptr<Session>`
+  with no counter overhead; the bounded-handle contract then holds by caller
+  obligation. `stopped()` is covered separately by the atomic stopping flag (FR-013).
 
 ### Key Entities
 

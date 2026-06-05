@@ -131,5 +131,5 @@ nm -D --defined-only build/linux-clang-release/lib/libfixpp_capi.so \
 - Single-threaded suite green, no rewrites; perf within ±5% on the two-hop send path.
 - `nm`/`abidiff` show **exactly one** intended diff (`lookup()` return type) and no other.
 - behaviors-and-limitations **L-019-3 lifted** — only after the FULL witness set
-  (V-1, V-2, V-8, V-9, V-10, V-11) passes under a clean sanitizer matrix; multi-threaded
+  (V-1, V-2, V-8, V-9, V-10, V-11, V-12) passes under a clean sanitizer matrix; multi-threaded
   operation documented as supported.

@@ -1,7 +1,7 @@
 # Research: Per-Session + Control-Plane Strand Binding for the Engine
 
 **Feature**: 023-engine-session-strand
-**Date**: 2026-06-05 (rev 3 — D-SNAP public-reader decision + Gate A round-3 lifetime/primitive fixes)
+**Date**: 2026-06-05 (rev 4 — Gate A round-3 D-SNAP fixes: bounded handle + pinned primitive + stop-before-publish)
 **Inputs**: spec.md (clarified + Gate A round-1 session); constitution Art. XI; the
 `BIO_ctrl` crash analysis; feature 007 (`fixpp::core::session_executor`); the engine
 role-loop + `stop()` + `Engine::send` code; the Gate A round-1 reviews
@@ -59,7 +59,7 @@ publication/clear ordering, and the publication of `entry.session` /
   control strand later reads).
 
 **Rationale**: per-session strands cannot serialize engine-global state by construction.
-A second strand is the asio-idiomatic, lock-free way to serialize the control plane,
+A second strand is the asio-idiomatic, mutex-free way to serialize the control plane,
 mirroring how QuickFIX-cpp/J/Fix8 serialize their global session dictionaries under a
 lock (see Reference grounding). This collapses Gate A Root cause #1 (Codex-1 + NEW-2/4/5/6/7).
 
@@ -344,7 +344,7 @@ right gate.
 **Decision**: the send path is now `caller → control strand → session strand` (two hops vs
 today's one). The Article VIII ±5% bench MUST include a **send path** and ideally a
 **send-from-callback** bench under MT, and the baseline re-measured against the two-hop
-design. If the control-strand hop proves hot, the D0-alternative (lock-free registry
+design. If the control-strand hop proves hot, the D0-alternative (a registry
 snapshot for `send`) is the fallback — but as a measured decision, not a guess.
 
 **Rationale**: closes Gate A NEW-3 (rev 1 undercounted the cost as "one strand dispatch
@@ -360,7 +360,7 @@ safening-only public signature change `Engine::lookup() : Session* → std::shar
 
 **The L-019-3 lift is gated on the FULL witness set** — V-1, V-2 (per-session
 teardown/lifecycle), V-10 (transport-on-strand identity), V-8 (control-plane race), V-9
-(re-entrant send), **V-11** (snapshot-reader MT) — **and** a clean ASan/UBSan/TSan run.
+(re-entrant send), **V-11** (snapshot-reader MT), **V-12** (publish-vs-stop ordering) — **and** a clean ASan/UBSan/TSan run.
 Lifting it while any of those is still racy or failing publishes a false safety claim (Gate A
 round-1 NEW-5 + round-2 Codex-#5; the `feedback_completeness_gate_exact_set_not_subset` class).
 Verified via `nm` + `abidiff` — which **will** show the one intended `lookup()` return-type
@@ -383,7 +383,7 @@ bare shared executor (the rev-1 bug).
 - **R2 — a transport ctor silently samples bare `exec_`** (D5) → debug assert
   `socket().get_executor() == session_strand` + the four-site audit (V-…).
 - **R3 — control-strand hop on the hot send path costs > ±5%** (D7) → bench gate; fallback
-  is the lock-free registry-snapshot alternative.
+  is the registry-snapshot alternative.
 - **R4 — half-restructure risk** (the reason Gate A ruled structural) → D0 enumerates ALL
   control-plane state + publication points (D-PUB) + `stopped_` (D-STOP) + the synchronous
   public readers (D-SNAP); the data-model E-0 and contract C-0 make the control domain a

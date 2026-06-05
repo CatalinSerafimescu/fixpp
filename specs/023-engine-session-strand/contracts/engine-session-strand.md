@@ -3,7 +3,7 @@
 **Feature**: 023-engine-session-strand
 **Type**: Engine-internal contract — ONE safening-only public change (`Engine::lookup()`
 return type `Session*` → `std::shared_ptr<Session>`, FR-008/SC-004); no other public change.
-**Date**: 2026-06-05 (rev 3 — D-SNAP public-reader decision + Gate A round-3 lifetime/primitive fixes)
+**Date**: 2026-06-05 (rev 4 — Gate A round-3 D-SNAP fixes: bounded handle + pinned primitive + stop-before-publish)
 
 No new public type, command schema, or C-ABI surface; **one changed C++ public signature**
 (`Engine::lookup()` return type `Session*` → `std::shared_ptr<Session>`, FR-008/SC-004/C-4).
@@ -129,8 +129,10 @@ across a concurrent `stop()` / `registry_.clear()` **only while the `Engine` is 
 after `~Engine` is a UAF (same hazard as the send path at engine.cpp:726-730). The caller
 MUST NOT let a `lookup()`/snapshot handle outlive the `Engine` (documented hard precondition,
 NOT a `Session` dependency-model refactor); `~Engine` MUST **debug-assert** no outstanding
-`lookup()`/snapshot handle remains (exact accounting where practical, otherwise a debug
-`use_count()` check on the published snapshot). It is NOT a general keepalive past `~Engine`.
+`lookup()`/snapshot handle remains — via a debug-only aliasing `shared_ptr<Session>` whose
+control block inc/decrements an engine-owned outstanding-handle counter, asserted zero at
+`~Engine` (a bare snapshot `use_count()` cannot observe a handle copied out then detached
+from the snapshot). Release builds carry no counter. It is NOT a general keepalive past `~Engine`.
 
 ## C-7 — Verification obligations (consumed by /speckit-tasks)
 

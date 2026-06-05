@@ -66,5 +66,5 @@
   **safening-only** change — `lookup()` returns `std::shared_ptr<Session>` (the one
   accepted, recorded API/ABI change; SC-004 reworded to "no *unintended* change").
   FR-011 reconciled to "mutate on the strand, read via the snapshot." V-7/FR-010
-  lift now gated on the full witness set (V-1/V-2/V-8/V-9/V-10/V-11) + sanitizer-clean;
+  lift now gated on the full witness set (V-1/V-2/V-8/V-9/V-10/V-11/V-12) + sanitizer-clean;
   SC-002/D6 witness committed as a **one-sided park** (not a bidirectional latch).
