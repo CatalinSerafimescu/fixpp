@@ -1395,6 +1395,52 @@ set_tests_properties(session_inbound_poss_dup_validation PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "021;us2;possdup;validation;armc;armd;arme")
 
+# ── 022-possresend-allowpossdup-send T001 — US1 PossResend + US2 AllowPosDup ──
+# US1 (witness-only): inbound PossResend(97) parity/characterization witnesses.
+# data-model §3 disposition table; contracts §C4. Mirrors the 021 possdup target.
+add_executable(session_inbound_poss_resend
+  test_inbound_poss_resend.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
+)
+target_link_libraries(session_inbound_poss_resend PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_inbound_poss_resend PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_inbound_poss_resend PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_inbound_poss_resend
+  COMMAND session_inbound_poss_resend)
+set_tests_properties(session_inbound_poss_resend PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "022;us1;possresend")
+
+# US2 (production): AllowPosDup send-path strip — scanner + boundary-anchored
+# excision witnesses (strip/retain/embedded/boundary/malformed-131/no-op/
+# resend-independence/no-heap). data-model §2; contracts §C2/§C3.
+add_executable(session_send_allow_pos_dup_strip
+  test_send_allow_pos_dup_strip.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
+)
+target_link_libraries(session_send_allow_pos_dup_strip PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_send_allow_pos_dup_strip PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_send_allow_pos_dup_strip PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_send_allow_pos_dup_strip
+  COMMAND session_send_allow_pos_dup_strip)
+set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "022;us2;allowposdup;strip")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

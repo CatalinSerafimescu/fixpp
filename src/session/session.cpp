@@ -2989,6 +2989,135 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         }
     }
 
+    // ── 022 T008+T009: Per-field scanner + AllowPosDup excision ─────────────────
+    // Anchors: research.md D2/D5/D6; data-model.md §2 (INV-1..5); contracts §C2.1–C2.6.
+    //
+    // T008 — Scanner: walk every post-35= field and validate it is
+    //   <non-empty digit-only tag>=<value>\x01
+    // On the FIRST malformed field → return app_payload_malformed=131, no seqnum,
+    // no transmit. The 020 floor guarantees trailing SOH so every interior field IS
+    // SOH-terminated; there is no run-off-the-end case.
+    //
+    // T009 — Excision (only over a fully-validated payload):
+    //   allow_pos_dup==false (default): copy the leading 35= field + all surviving
+    //     post-35= fields (those whose tag is NOT 43 or 122) into strip_buf in
+    //     original order; rebind app_payload to that buffer.
+    //   allow_pos_dup==true: passthrough verbatim (scanner runs but no copy made).
+    //   INV-1: 35= (field 0) never touched.
+    //   INV-2: only complete, boundary-anchored 43=..\x01 / 122=..\x01 removed.
+    //   INV-3: stripped payload remains 35=-leading SOH-delimited.
+    //   INV-4: no heap — ONE stack scratch strip_buf (sized same as body_buf).
+    //   INV-5: build_replay_frame is NOT on this path.
+
+    // strip_buf declared at this scope so it outlives the scanner+excision block
+    // and remains valid when the framing block below reads app_payload (which may
+    // be rebound to point into it). [research.md D6; INV-4]
+    std::array<std::byte, 4096> strip_buf{};
+    std::size_t strip_len = 0;
+
+    {
+        std::string_view pv{reinterpret_cast<const char*>(app_payload.data()), app_payload.size()};
+
+        // Skip the leading 35=<value>\x01 field (field 0 — never modified).
+        // pv.back()=='\x01' is guaranteed by the 020 floor; find('\x01') always succeeds.
+        const std::size_t lead_soh = pv.find('\x01');
+        // lead_soh != npos: guaranteed (020 floor ensures trailing SOH → at least one SOH).
+
+        // --- T008: Scanner pass ---------------------------------------------
+        // Walk each field starting at lead_soh+1 (first byte after the 35= field).
+        // Each field is: everything up to (and including) the next '\x01'.
+        // Validate: non-zero-length content, contains '=', tag (bytes before '=')
+        // is non-empty and all ASCII digits, and value (bytes after '=') is non-empty.
+        {
+            std::size_t pos = lead_soh + 1;
+            while (pos < pv.size()) {
+                // Find the terminating SOH for this field.
+                const std::size_t soh = pv.find('\x01', pos);
+                // soh != npos is guaranteed: the 020 floor ensures pv ends with '\x01',
+                // so the last field IS SOH-terminated; pos is always inside pv.
+
+                // (a) Empty field (stray doubled SOH): soh == pos.
+                if (soh == pos) {
+                    co_return std::unexpected(error::app_payload_malformed);
+                }
+
+                // (b) Must contain '='.
+                std::string_view field_sv = pv.substr(pos, soh - pos);
+                const std::size_t eq = field_sv.find('=');
+                if (eq == std::string_view::npos) {
+                    co_return std::unexpected(error::app_payload_malformed);
+                }
+
+                // (c) Tag (before '=') must be non-empty and all ASCII digits.
+                if (eq == 0) {
+                    co_return std::unexpected(error::app_payload_malformed);
+                }
+                for (std::size_t i = 0; i < eq; ++i) {
+                    if (field_sv[i] < '0' || field_sv[i] > '9') {
+                        co_return std::unexpected(error::app_payload_malformed);
+                    }
+                }
+
+                // (d) Value (after '=', before SOH) must be non-empty.
+                if (eq + 1 >= field_sv.size()) {
+                    co_return std::unexpected(error::app_payload_malformed);
+                }
+
+                pos = soh + 1;
+            }
+        }
+
+        // --- T009: Excision pass --------------------------------------------
+        // Only when allow_pos_dup==false; only over a scanner-validated payload.
+        if (!cfg_.allow_pos_dup) {
+            // Lambda: append bytes into strip_buf; returns false on overflow.
+            const auto wstrip = [&](std::string_view sv) -> bool {
+                if (strip_len + sv.size() > strip_buf.size()) return false;
+                for (char c : sv) strip_buf[strip_len++] = static_cast<std::byte>(c);
+                return true;
+            };
+
+            // INV-1: always copy the leading 35=<value>\x01 field verbatim.
+            if (!wstrip(pv.substr(0, lead_soh + 1))) {
+                co_return std::unexpected(error::wire_frame_too_large);
+            }
+
+            // Copy each subsequent field, skipping tag 43 and tag 122.
+            std::size_t pos = lead_soh + 1;
+            while (pos < pv.size()) {
+                const std::size_t soh = pv.find('\x01', pos);
+                // soh guaranteed to exist (scanner validated entire payload above).
+                std::string_view field_sv = pv.substr(pos, soh - pos);
+
+                // Identify tag number (bytes before '=').
+                const std::size_t eq = field_sv.find('=');
+                // eq != npos and eq > 0 are guaranteed by the scanner pass above.
+                std::string_view tag_sv = field_sv.substr(0, eq);
+
+                // INV-2: excise ONLY complete boundary-anchored 43 or 122 fields.
+                // A literal "43=" inside another field's value never reaches this
+                // branch because the scanner identified ONLY true tag-delimited fields.
+                const bool is_43 = (tag_sv == "43");
+                const bool is_122 = (tag_sv == "122");
+
+                if (!is_43 && !is_122) {
+                    // Copy surviving field (including its terminating SOH).
+                    if (!wstrip(pv.substr(pos, soh - pos + 1))) {
+                        co_return std::unexpected(error::wire_frame_too_large);
+                    }
+                }
+
+                pos = soh + 1;
+            }
+
+            // Rebind app_payload to the stripped buffer — the existing framing below
+            // consumes it unchanged (INV-3; contracts §C2.6).
+            // strip_buf is alive at send_impl scope until co_return.
+            app_payload = std::span<const std::byte>(strip_buf.data(), strip_len);
+        }
+        // allow_pos_dup==true: app_payload unchanged (passthrough verbatim).
+    }
+
     // ── T009: Correct framing — MsgType(35) at wire field-3, digit-only BodyLength
     // [020-g2 research.md D1; data-model.md INV-1; FR-004a]
     //
