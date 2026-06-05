@@ -536,10 +536,39 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
             << "W5: no 122 in retain-knob frame when payload has none; [C2.5]";
 
         // Positive byte-identity assertions: all surviving application fields must be
-        // present verbatim under BOTH knob settings. Without these, a strip path that
-        // dropped/reordered/corrupted 11/54/55 would still pass the four absence checks
-        // above. [C2.5; data-model §2 transform table row 2 (absent → no-op)]
+        // present verbatim AND in their original contiguous order under BOTH knob
+        // settings.  extract_field() is position-independent (tag-name search), so a
+        // broken path that reordered the surviving fields would still pass a per-field
+        // EQ check.  The contiguous-subsequence assertion below catches reorder,
+        // interleave, drop, and corruption in one check.  Per-field EQ asserts are kept
+        // as complementary diagnostics.  [C2.5; data-model §2 transform table row 2
+        // (absent → no-op)]
+        auto contains_subseq = [](std::span<const std::byte> hay, std::string_view needle) {
+            if (needle.size() > hay.size()) return false;
+            for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+                bool match = true;
+                for (size_t j = 0; j < needle.size(); ++j) {
+                    if (static_cast<char>(hay[i + j]) != needle[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return true;
+            }
+            return false;
+        };
+        // kAppTail is the expected contiguous app-field run in original order.
+        // String-literal concatenation is used across SOH (\x01) boundaries to avoid
+        // the \x015 hex-escape ambiguity.
+        static constexpr std::string_view kAppTail =
+            "11=ORD003\x01"
+            "54=1\x01"
+            "55=AAPL\x01";
+
         const std::span<const std::byte> df_span(frame_default);
+        EXPECT_TRUE(contains_subseq(df_span, kAppTail))
+            << "W5: default-knob frame must emit surviving app fields contiguously & "
+               "in original order (no-op reorder-check) [C2.5]";
         EXPECT_EQ(extract_field(df_span, 11), "ORD003")
             << "W5: default-knob frame must preserve 11=ORD003 verbatim; [C2.5]";
         EXPECT_EQ(extract_field(df_span, 54), "1")
@@ -548,6 +577,9 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
             << "W5: default-knob frame must preserve 55=AAPL verbatim; [C2.5]";
 
         const std::span<const std::byte> rt_span(frame_retain);
+        EXPECT_TRUE(contains_subseq(rt_span, kAppTail))
+            << "W5: retain-knob frame must emit surviving app fields contiguously & "
+               "in original order (no-op reorder-check) [C2.5]";
         EXPECT_EQ(extract_field(rt_span, 11), "ORD003")
             << "W5: retain-knob frame must preserve 11=ORD003 verbatim; [C2.5]";
         EXPECT_EQ(extract_field(rt_span, 54), "1")
