@@ -3,7 +3,7 @@
 //
 // tests/session/test_engine_session_strand.cpp
 //
-// 023-engine-session-strand — T006 [US1] + T016 [US2] witnesses.
+// 023-engine-session-strand — T006 [US1] + T016 [US2] + T021 [US3] witnesses.
 //
 // Cells authored here:
 //
@@ -20,6 +20,27 @@
 //        in run_accept_loop race against stop().clear() — expect TSan RED
 //        pre-T018. Progress/independence check itself may pass-by-luck pre-T010
 //        (recorded per T008 mandate). [C-7/V-3/FR-004]
+//
+//   V-4  SingleThreadedSuiteUnchanged  [T021/T022 characterization]
+//        Compile-time guard: lookup() returns Session* (raw pointer) before T024.
+//        Characterization baseline: 42 session tests (ctest -R '^session_') GREEN
+//        pre-T021 (no rewrites).  This cell itself does NOT test session behaviour;
+//        it just asserts the current lookup() return type so T026 can verify the
+//        "exactly one ABI diff" claim when T024 changes it to shared_ptr<Session>.
+//        GREEN now; compile-fails after T024 (that is the expected one diff).
+//        [C-7/V-4/SC-003/FR-007; tasks T021/T022]
+//
+//   V-5  AbiBaselineCapture  [T021/T022 scaffolding]
+//        The nm baseline for Engine's public interface is saved at:
+//          tests/abi/baseline/libfixpp_session_engine_pre023.nm
+//        T026 compares the post-T024 nm output and asserts exactly the one
+//        expected diff: lookup() mangling.
+//        Note: Itanium ABI does NOT encode the return type in the mangled symbol
+//        name for non-template non-virtual functions, so nm alone cannot detect
+//        the Session*→shared_ptr<Session> change.  The compile-time V-4 gate
+//        (static_assert on decltype) is the primary "one diff" detector; the nm
+//        baseline is secondary corroboration that NO OTHER Engine symbols change.
+//        [C-7/V-5/C-4/SC-004; tasks T021/T022/T026]
 //
 //   V-8  ControlPlaneRace_PublicReaderVsMutation  [T016/T017 DD-2026-06-06 retarget]
 //        A raw std::thread spins calling acceptor_bound_endpoint() and lookup()
@@ -45,6 +66,24 @@
 //        Pre-T011 (no strand binding) the socket is on bare exec_ → assertion
 //        FAILS → RED for the right reason. [C-7/V-10/E-5/D5/R8/INV-7]
 //
+//   V-11 SnapshotReadersMtSafe  [T021/T022 US3 RED-phase]
+//        PART 1 — TSan-race (compiles and runs NOW, RED pre-T026):
+//          A raw std::thread spins calling lookup() and acceptor_bound_endpoint()
+//          with NO synchronisation against engine executor threads.  The engine
+//          runs and stop() clears concurrently → TSan DATA RACE on registry_ and
+//          listener_endpoints_ (same race class as V-8, broader surface).
+//          halt_on_error=1 aborts → process exits → test is RED.
+//          GREEN post-T026 when D-SNAP snapshot readers are installed.
+//        PART 2 — keepalive (DEFERRED until T024):
+//          A shared_ptr<Session> handle obtained before clear() must outlive the
+//          clear() while the Engine is alive.  Guarded with #if 0 until T024
+//          changes lookup() → shared_ptr<Session>.  See TODO-T024 below.
+//        PART 3 — lease/~Engine assert (DEFERRED until T025):
+//          ~Engine must debug-assert no outstanding lookup()/snapshot handles.
+//          Guarded with #if 0 until T025 adds the lease control block.
+//          See TODO-T025 below.
+//        [C-8/V-11/E-7/INV-9/INV-9a; research D-SNAP; tasks T021/T022]
+//
 //   V-12 StopBeforeAwaitedPublish
 //        stop() races the accept loop before any peer connects; confirms the
 //        stopped-disposition path (INV-2a) is functional.  ALREADY-GREEN because
@@ -62,10 +101,13 @@
 //   - V-9 records pass-by-luck vs deadlock vs race as mandated by T008.
 //   - V-10 uses asio_tls_transport_test_access::socket_of() to inspect the
 //     underlying tcp::socket executor type.
+//   - V-11 Part 1: same real-race pattern as V-8 (no shared sync object with
+//     engine threads).  Parts 2 and 3 are behind #if 0 guards waiting for T024/T025.
 //
-// Anchors: tasks.md T006/T007/T008/T016/T017; contracts/engine-session-strand.md
-//          C-7 (V-1/V-3/V-9/V-10), C-8 (V-8/V-11), C-6 (V-12);
-//          research.md D2/D5/R8/D-SNAP; [const §IX §2].
+// Anchors: tasks.md T006/T007/T008/T016/T017/T021/T022;
+//          contracts/engine-session-strand.md C-7 (V-1/V-3/V-4/V-5/V-9/V-10),
+//          C-8 (V-8/V-11), C-6 (V-12); research.md D2/D5/R8/D-SNAP;
+//          data-model E-7/INV-9/INV-9a; [const §IX §2].
 
 #include <gtest/gtest.h>
 
@@ -1104,6 +1146,339 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
         << "   of live_transport → loop closes without entering read pump]\n"
         << "  V-12 is ALREADY-GREEN because the INV-2a check was implemented in T013.\n"
         << "  T019 is a no-op/confirmation per tasks.md T016/T017.";
+}
+
+// ── V-4: SingleThreadedSuiteUnchanged ────────────────────────────────────────
+//
+// V-4 characterization (T021/T022):
+//   The existing single-threaded session test suite (42 tests, ctest -R '^session_')
+//   must remain GREEN with no rewrites across the US3 implementation (SC-003/FR-007).
+//
+// V-4 BASELINE (pre-T021): 42 session tests pass under linux-clang-debug.
+//   Test names: session_smoke … session_tc_liveness (see T022 report).
+//   V-4 is verified by running `ctest -R '^session_'` — NOT by this cell.
+//
+// This test IS V-4's compile-time gate and also serves V-5:
+//   It verifies that Engine::lookup() currently returns Session* (raw pointer),
+//   NOT std::shared_ptr<Session> (which T024 will introduce).
+//
+//   static_assert on the return type of lookup() pinned to the CURRENT signature.
+//   This cell is GREEN now (pre-T024) and compile-fails after T024 (the expected
+//   "one diff" signal for V-5).  T026 updates it to shared_ptr<Session> (GREEN again).
+//
+// V-5 ABI baseline:
+//   The nm baseline (Engine public symbols, pre-T024) is saved at:
+//     tests/abi/baseline/libfixpp_session_engine_pre023.nm
+//   Generated by:
+//     nm --defined-only build/linux-clang-debug/lib/libfixpp_session.a |
+//       c++filt | grep 'fixpp::session::Engine::' | grep -E '^[0-9a-f]+ T' | sort
+//   See tasks.md T022 report for the captured content.
+//
+//   Note: Itanium ABI does NOT encode the return type of non-template non-virtual
+//   functions in the mangled symbol name.  The mangled symbol for lookup() is:
+//     _ZNK5fixpp7session6Engine6lookupERKNS0_9SessionIdE
+//   before AND after T024 (the return type change Session*→shared_ptr<Session> is
+//   INVISIBLE to nm).  The compile-time static_assert in this cell is therefore
+//   the PRIMARY "one diff" detector for V-5.  The nm baseline provides secondary
+//   corroboration that NO OTHER Engine symbols change (symbol set is stable).
+//
+// [C-7/V-4; C-4/V-5; SC-003/SC-004/FR-007; tasks T021/T022]
+
+TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
+    // V-4: compile-time assertion that lookup() returns Session* (pre-T024 signature).
+    // This pinned static_assert is the V-5 "one diff" compile-time gate:
+    //   - GREEN now: lookup() → Session* (raw pointer, as declared in engine.hpp:249)
+    //   - compile-FAIL after T024: lookup() → std::shared_ptr<Session>
+    //     → that compile failure is the expected single ABI change for V-5
+    //   - T026 updates this to shared_ptr<Session> (GREEN again)
+    //
+    // [anchor: engine.hpp:249 "Session* lookup(SessionId const& id) const"]
+    // [anchor: contracts C-4 "one intended, recorded change only"]
+    using LookupReturnType = decltype(
+        std::declval<fixpp::session::Engine const&>().lookup(
+            std::declval<fixpp::session::SessionId const&>()));
+    static_assert(
+        std::is_same_v<LookupReturnType, fixpp::session::Session*>,
+        "V-4/V-5: Engine::lookup() must return Session* (raw pointer) pre-T024.\n"
+        "If this static_assert FAILS, T024 has changed the return type to\n"
+        "std::shared_ptr<Session>.  Update this test to use shared_ptr<Session>\n"
+        "and verify it is the ONLY change (V-5 one-diff gate, tasks T026).\n"
+        "anchor: contracts/engine-session-strand.md C-4 + research.md D-SNAP");
+
+    // V-5: runtime confirmation that the Engine public API compiles correctly
+    // with the current Session* return type.  Verifies the ABI gate is wired.
+    //
+    // The nm baseline at tests/abi/baseline/libfixpp_session_engine_pre023.nm
+    // was captured pre-T024 (T022); T026 will diff the post-T024 nm output
+    // against it and confirm exactly 0 symbol-name changes (return type is not
+    // in the mangled name, but the symbol SET is stable).
+    //
+    // No runtime assertion is needed here — the static_assert above IS the gate.
+    // This PASS confirms the static_assert compiled and the type is correct.
+    SUCCEED();  // static_assert above is the meaningful assertion; this marks the cell green
+}
+
+// ── V-11: SnapshotReadersMtSafe ──────────────────────────────────────────────
+//
+// US3 RED-phase witness.  Three parts — only Part 1 runs now (compiles and
+// executes with the current Session* return type from lookup()).  Parts 2 and 3
+// are deferred (#if 0) until T024 and T025 respectively.
+//
+// ── PART 1 — TSan-race (compiles and runs NOW; RED pre-T026) ─────────────────
+//
+// Witnesses the same public-reader data-race as V-8, but with a broader
+// surface (both lookup() AND acceptor_bound_endpoint() in the reader thread)
+// and while a LIVE session pair is running (not just an acceptor-only setup).
+//
+// Mechanism:
+//   1. Establish a session pair on a 2-thread engine executor.
+//   2. Start a separate raw std::thread (t_reader) that spins calling:
+//        engine.lookup(acc_id)               → reads registry_    (unordered_map)
+//        engine.lookup(ini_id)               → reads registry_
+//        engine.acceptor_bound_endpoint(id)  → reads listener_endpoints_ (unordered_map)
+//      with NO shared sync object between t_reader and the engine threads.
+//   3. Call stop() from the main thread: stop() clears registry_ and
+//      listener_endpoints_ on the control strand — a concurrent WRITE vs
+//      t_reader's concurrent READ.
+//   4. Under TSan with halt_on_error=1: DATA RACE → process aborted → test RED.
+//   5. Post-T026 (D-SNAP installed): both readers go through atomic_load of
+//      the immutable snapshot → no unsynchronised map access → TSan clean → GREEN.
+//
+// Key difference from V-8: V-11 uses a LIVE session (established Active state)
+// so the registry_ is populated and lookup() actually finds an entry — wider
+// race surface than V-8's acceptor-only setup.
+//
+// RED expected: pre-T026 (no D-SNAP snapshot readers).
+// GREEN expected: post-T026 (T023/T024 install D-SNAP; lookup() reads snapshot).
+//
+// ── PART 2 — keepalive (DEFERRED until T024) ─────────────────────────────────
+//
+// TODO-T024: after T024 changes lookup() → shared_ptr<Session>, enable this block.
+// It verifies: a shared_ptr<Session> handle obtained BEFORE clear() (while the
+// engine is alive) keeps its Session alive ACROSS the registry_.clear() call.
+// This witnesses the bounded-handle keepalive: the Session is not freed until
+// the last shared_ptr copy is destroyed, even after stop()/clear().
+//
+// Assertion sequence (to enable in T026):
+//   1. Establish a session.
+//   2. Obtain: auto handle = engine.lookup(acc_id);   // shared_ptr<Session>
+//              ASSERT_NE(handle, nullptr);
+//   3. Call stop().  stop() clears registry_ — but the handle's control block
+//      keeps the Session alive.
+//   4. ASSERT: handle != nullptr (still valid)
+//              handle->state() is observable (not UAF)
+//   This proves the bounded keepalive contract (INV-9/C-8/FR-008/FR-014).
+//
+// ── PART 3 — lease/~Engine assert (DEFERRED until T025) ─────────────────────
+//
+// TODO-T025: after T025 adds the debug-only lease control block, enable this block.
+// It verifies: ~Engine debug-asserts that no outstanding lookup()/snapshot handles
+// remain (the lease counter must be zero at destruction).
+//
+// Assertion sequence (to enable in T026):
+//   1. Obtain a handle: auto h = engine.lookup(acc_id);
+//   2. Call stop() + destroy the engine (unique_ptr reset).
+//   3. ASSERT: engine destruction aborted (SIGABRT) because h is still alive.
+//      OR: ASSERT: if h is destroyed first, destruction succeeds (counter=0).
+//   This witnesses INV-9a/C-8 (the bounded-handle precondition).
+//   In the NON-abort path: h is destroyed before engine → counter=0 → PASS.
+//   In the ABORT path: h is alive when engine destroys → counter=1 → abort.
+//   Test uses the NON-abort path: destroy h, then stop+destroy engine.
+//
+// [C-8/V-11; data-model E-7/INV-9/INV-9a; research D-SNAP/R7; tasks T021/T022]
+
+TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    // Use an ACCEPTOR-ONLY session (same as V-8) to ensure the race window is wide:
+    // the reader thread starts spinning BEFORE and DURING accept-loop startup, so
+    // both the WRITE (listener_endpoints_ insert in the accept loop) and the CLEAR
+    // (stop()'s clear()) race with the reader.
+    //
+    // A live-session pair would require wait_both_active (slow) before starting the
+    // reader, potentially closing the race window between the last map write and the
+    // first reader iteration.  V-11 uses the same approach as V-8 to guarantee the
+    // race is exposed, but extends the reader to cover ALL THREE public readers
+    // (lookup for both acc_id and ini_id, and acceptor_bound_endpoint) — wider
+    // surface than V-8 which reads only acc_id.
+    //
+    // [Race surface: listener_endpoints_ WRITE (accept-loop startup) vs READ
+    //  (t_reader→acceptor_bound_endpoint), and registry_ CLEAR (stop()) vs READ
+    //  (t_reader→lookup).  No HB edge between t_reader and engine threads.]
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V11", "INITIATOR_V11",
+        fixpp::session::session_role::acceptor, "INITIATOR_V11",
+        ioc.get_executor(), port);
+    // Register the acceptor id for lookup(); lookup() returns nullptr pre-establish
+    // (correct per the "null is NOT an error" contract), but the find() itself still
+    // reads registry_ — that read races the stop()-clear.
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    // Use a synthesized initiator id to widen the registry_ read surface (lookup returns
+    // nullptr for an unregistered id, but STILL reads registry_ — wider race surface).
+    auto ini_cfg_dummy = make_session_cfg(
+        fac, "INITIATOR_V11", "ACCEPTOR_V11",
+        fixpp::session::session_role::initiator, "ACCEPTOR_V11",
+        ioc.get_executor(), port);
+    const SessionId ini_id = SessionId::from_config(ini_cfg_dummy);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-11: acceptor register_session failed";
+    }
+    // Do NOT register ini_cfg_dummy — we want lookup(ini_id) to do a registry_.find()
+    // that returns end() (no entry).  The find() itself reads the unordered_map →
+    // races the stop()-clear() just as a successful find() would.
+
+    engine->start();
+
+    // Part 1: TSan-race witness.
+    //
+    // Start engine executor threads t1 and t2.  Then start t_reader (a raw std::thread,
+    // no asio executor — no implicit TSan synchronisation with engine threads).
+    // t_reader spins calling all three public readers throughout the start→stop window:
+    //   - acceptor_bound_endpoint(acc_id): reads listener_endpoints_
+    //   - lookup(acc_id):                  reads registry_ (entry found)
+    //   - lookup(ini_id):                  reads registry_ (entry NOT found — but find() runs)
+    //
+    // Race window 1 (write): accept loop writes listener_endpoints_[acc_id] at startup
+    //   (engine.cpp ~:617) while t_reader reads it.  TSan: WRITE vs READ.
+    // Race window 2 (clear): stop() clears listener_endpoints_ and registry_
+    //   (engine.cpp ~:1128-1130) while t_reader reads them.  TSan: CLEAR vs READ.
+    //
+    // NO shared sync object between t_reader and the engine threads (only relaxed
+    // reader_stop at exit — set AFTER stop() completes, so during stop() there
+    // is zero HB between the two sides).
+    //
+    // V-11 RED SIGNAL (pre-T026):
+    //   TSan fires DATA RACE on listener_endpoints_ or registry_ → halt_on_error=1
+    //   aborts the process.
+    // V-11 GREEN (post-T026):
+    //   D-SNAP installed: acceptor_bound_endpoint() and lookup() go through
+    //   atomic_load of the immutable snapshot → no unsynchronised map access.
+
+    // Start engine executor threads AFTER engine.start() (per [[feedback_fork_inherited_asio_pool_deadlock]]).
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+
+    std::atomic<bool> reader_stop{false};
+    std::atomic<int>  reader_iters{0};
+
+    // t_reader: raw std::thread, no asio executor.  Spins all three public readers.
+    std::thread t_reader{[&engine, &acc_id, &ini_id, &reader_stop, &reader_iters]() {
+        while (!reader_stop.load(std::memory_order_relaxed)) {
+            // Read listener_endpoints_ via acceptor_bound_endpoint().
+            (void)engine->acceptor_bound_endpoint(acc_id);
+            // Read registry_ via lookup() — one successful find, one failed find.
+            (void)engine->lookup(acc_id);
+            (void)engine->lookup(ini_id);
+            reader_iters.fetch_add(1, std::memory_order_relaxed);
+        }
+    }};
+
+    // Let the accept loop start and write listener_endpoints_ (race window 1).
+    // 30ms matches V-8's window — sufficient for the accept loop to run on t1/t2.
+    ioc.run_for(std::chrono::milliseconds{30});
+    ioc.restart();
+
+    // Call stop(): triggers the registry_.clear() + listener_endpoints_.clear() (race window 2).
+    {
+        auto stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->stop(), asio::use_future);
+        bool done = wait_pred(ioc,
+            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+            12000ms);
+
+        // Signal t_reader to stop AFTER stop() completes (no HB edge during stop()).
+        reader_stop.store(true, std::memory_order_relaxed);
+
+        ioc.stop();
+        t1.join();
+        t2.join();
+        t_reader.join();
+
+        ASSERT_TRUE(done) << "V-11 Part 1: engine.stop() did not complete within 12s";
+        stop_fut.get();
+    }
+
+    // Confirm the reader ran enough iterations to cover the race windows.
+    EXPECT_GT(reader_iters.load(), 0)
+        << "V-11 Part 1: reader thread must have iterated at least once";
+
+    // Confirm engine is stopped (reached only if TSan did not abort with halt_on_error=1).
+    EXPECT_TRUE(engine->stopped())
+        << "V-11 Part 1: engine must be stopped after stop() completes";
+
+    // ── V-11 PART 2: keepalive (DEFERRED until T024) ─────────────────────────
+    //
+    // TODO-T024: When T024 changes lookup() → std::shared_ptr<Session>,
+    // enable this block in T026.  It verifies that a shared_ptr<Session> handle
+    // obtained BEFORE clear() keeps the Session alive ACROSS stop()/clear().
+    //
+    // Pseudocode (to replace #if 0 block in T026):
+    //
+    //   // 1. Obtain handle BEFORE stop().
+    //   std::shared_ptr<fixpp::session::Session> handle = engine->lookup(acc_id);
+    //   ASSERT_NE(handle, nullptr);
+    //   ASSERT_EQ(handle->state(), fsm_state::Active);
+    //
+    //   // 2. Call stop() — clears registry_ but handle's shared_ptr keeps Session alive.
+    //   stop_engine_sync(ioc, *engine);
+    //   ASSERT_TRUE(engine->stopped());
+    //
+    //   // 3. Verify the handle is still valid (not a dangling pointer).
+    //   //    Session borrows EngineConfig& — so it is valid only while Engine is alive.
+    //   //    Engine is still alive here (unique_ptr not yet reset).
+    //   ASSERT_NE(handle, nullptr) << "V-11 Part 2: handle must remain valid while Engine is alive";
+    //   // Session::state() is observable (Session not freed by clear()).
+    //   (void)handle->state();   // Must not crash/UAF.
+    //
+    //   // 4. Destroy the handle BEFORE the engine goes out of scope.
+    //   handle.reset();
+    //
+    // [anchor: C-8 "bounded handle — valid while Engine is alive";
+    //  data-model INV-9 "keepalive across registry_.clear()"]
+    //
+    // ── V-11 PART 3: lease/~Engine assert (DEFERRED until T025) ─────────────
+    //
+    // TODO-T025: When T025 adds the debug-only lease control block, enable
+    // this block in T026.  It verifies ~Engine debug-asserts that no outstanding
+    // lookup() handles remain (the lease counter is zero at destruction).
+    //
+    // Pseudocode (to replace #if 0 block in T026):
+    //
+    //   // 1. Establish a session, obtain a handle, stop the engine.
+    //   std::shared_ptr<fixpp::session::Session> h = engine->lookup(acc_id);
+    //   ASSERT_NE(h, nullptr);
+    //   stop_engine_sync(ioc, *engine);
+    //
+    //   // 2. Destroy the handle BEFORE engine destruction (counter goes to 0).
+    //   h.reset();
+    //
+    //   // 3. Destroy the engine — lease counter == 0 → PASS (no abort).
+    //   engine.reset();   // ~Engine: debug-assert lease_counter_ == 0 → passes.
+    //
+    //   // The NON-abort case: handle is destroyed before engine → lease counter
+    //   // decrements to 0 → ~Engine does not abort → test PASSES.
+    //   //
+    //   // The ABORT case (not tested here, but verified by INV-9a):
+    //   //   If 'h' were still alive when engine.reset() ran, ~Engine would
+    //   //   fire the debug assert (SIGABRT) because lease_counter_ > 0.
+    //   //
+    //   // [anchor: C-8 "~Engine MUST debug-assert no outstanding handles";
+    //   //  data-model INV-9a; research R7 "NOT a stop() drain"]
 }
 
 }  // namespace

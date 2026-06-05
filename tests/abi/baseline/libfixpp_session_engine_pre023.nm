@@ -1,0 +1,32 @@
+# Engine public interface baseline — pre-T024 (023-engine-session-strand US3 RED phase)
+# Captured: 2026-06-06 (T021/T022)
+# Build: linux-clang-debug, branch 023-engine-session-strand, commit d88ee05
+# Command:
+#   nm --defined-only build/linux-clang-debug/lib/libfixpp_session.a |
+#     c++filt | grep 'fixpp::session::Engine::' | grep -E '^[0-9a-f]+ T' | sort | uniq
+#
+# Purpose (V-5 scaffolding):
+#   T026 regenerates the nm output post-T024 and verifies EXACTLY these symbols
+#   are present.  The KEY POINT: Engine::lookup() appears with the SAME mangled
+#   symbol name pre- and post-T024 (Itanium ABI does not encode the return type
+#   of non-template non-virtual functions in the mangled name).  Therefore the nm
+#   baseline confirms NO OTHER Engine symbol is added/removed — the "one diff" is
+#   detected by the V4V5_SingleThreadedBaselineAndAbiGate static_assert (compile-time).
+#
+# Expected post-T024 nm output (T026 will verify):
+#   - Same symbol set (no additions, no removals)
+#   - The mangled name for lookup() is UNCHANGED (_ZNK5fixpp7session6Engine6lookupERKNS0_9SessionIdE)
+#   - The V4V5 static_assert FAILS to compile (that is the one expected diff)
+#
+# Symbols (addresses stripped — they vary per build; only the T/text-section entries matter):
+fixpp::session::Engine::Engine(asio::any_io_executor, fixpp::core::EngineConfig)
+fixpp::session::Engine::~Engine()
+fixpp::session::Engine::register_session(fixpp::session::SessionConfig)
+fixpp::session::Engine::lookup(fixpp::session::SessionId const&) const
+fixpp::session::Engine::stopped() const
+fixpp::session::Engine::start()
+fixpp::session::Engine::stop()
+fixpp::session::Engine::send(fixpp::session::SessionId const&, std::span<std::byte const, 18446744073709551615ul>)
+fixpp::session::Engine::acceptor_bound_endpoint(fixpp::session::SessionId const&) const
+fixpp::session::Engine::engine_trace_context() const
+fixpp::session::Engine::clock() const
