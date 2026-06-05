@@ -247,3 +247,28 @@ binding seam (`session_executor.cpp`), and `stopped_`'s type — reusing 007's
   - **P3** — rev headers → rev-4; de-claimed residual absolute "lock-free" phrasing.
   Review: `research/reviews/codex_023-engine-session-strand_gate_a_4_review.md`. Final
   convergence confirmation pending (round 5).
+
+- **Round 5 (2026-06-05): Codex P1=0 P2=2 P3=1 → lease-mechanism correctness (rev-6).** The
+  `~Engine` lease-counter wording was `shared_ptr`-incorrect (a control block runs no per-copy
+  logic, only a deleter at last-owner destruction). Reworded to a debug-only **lease control
+  block** (aliasing `shared_ptr<Session>` owns a lease; ctor bumps an engine-owned
+  `std::atomic<uint64_t>`, dtor at last-owner decrements; `~Engine` asserts zero). Removed the
+  stale `use_count()` fallback; quickstart gains the bounded-handle qualifier. Plus rev-7 P3
+  (contract C-7/C-8 section order).
+  Review: `research/reviews/codex_023-engine-session-strand_gate_a_5_review.md`.
+
+- **Round 6 (2026-06-05): Codex P1=0 P2=0 → CONVERGES.** One P3 (C-7/C-8 order, fixed rev-7).
+  Review: `research/reviews/codex_023-engine-session-strand_gate_a_6_review.md`.
+
+- **Final Opus adversarial (2026-06-05): P1=0 P2=0 → CONVERGES.** Independently validated the
+  rounds-3-6 surface (D-SNAP / bounded-handle lease / D-PUB+V-12 / D3-B) — incl. confirming
+  `std::atomic<std::shared_ptr>` is sound on the real Tier-1 (libstdc++11) + Tier-2 (MSVC-STL)
+  matrix (the libc++ probe-failure NFR-017 warns of is out-of-matrix); Art. XV satisfied.
+  Folded 2 non-blocking notes (quickstart release-unenforced warning; research R7/R8 implementer
+  watch). Review: `research/reviews/opus_023-engine-session-strand_gate_a_final_adversarial_review.md`.
+
+### Verdict: CONVERGED — **user-signed-off 2026-06-05.**
+Gate A passed: P1=0, P2=0 (Codex round 6 + final Opus adversarial). 6 Codex review rounds +
+3 Opus adversarial passes + 2 Opus rewriters; 8 bundle revisions; 3 user design decisions
+(two-domain re-plan; full-MT-safe readers; bounded handle). **Next: `/speckit-tasks`** (user
+will `/clear` first), then `/speckit-analyze` → `/speckit-implement`.
