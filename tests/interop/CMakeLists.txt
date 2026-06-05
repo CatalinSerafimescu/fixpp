@@ -280,6 +280,34 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 022 live AllowPosDup + PossResend interop cells (T011 + T012) ─────────────
+# Live cells: skip-with-reason when no counterparty (FR-023); gate-bite negative
+# tests run green locally (no counterparty required — standalone golden diff).
+# T011 (AllowPosDup wire-capture): default allow_pos_dup==false strips caller
+#   43/122; counterparty accepts the stripped frame; session stays Active.
+#   Normalization profile: {52,10} (admin profile).
+#   Category: thorny/framing (send-path strip is a framing-layer concern).
+# T012 (PossResend deliver): QF counterparty sends 97=Y business message;
+#   fixpp delivers it to fromApp; session stays Active (witness-only, D4).
+#   Normalization profile: {52,10} (admin profile).
+#   Category: thorny/recovery (in-sequence delivery, not a strip concern).
+# Anchors: tasks.md T011/T012; contracts/session-send-possdup.md §C5;
+#          quickstart.md "Live interop cells"; 022 FR-010/SC-005.
+fixpp_add_interop_test(
+    NAME interop_022_allow_pos_dup_strip_send_test
+    GROUP thorny
+    LABEL "interop;022;interop-thorny;polish;framing;allow-pos-dup"
+    SOURCES thorny/framing/022-allow-pos-dup-strip-send_test.cpp
+    TLS
+)
+fixpp_add_interop_test(
+    NAME interop_022_poss_resend_deliver_test
+    GROUP thorny
+    LABEL "interop;022;interop-thorny;polish;recovery;poss-resend"
+    SOURCES thorny/recovery/022-poss-resend-deliver_test.cpp
+    TLS
+)
+
 # ── US2/US3 live business-message interop (020 T012/T014/T016) ───────────────
 # Both-role NOS→ExecRpt round-trip vs QuickFIX-J and QuickFIX-cpp.
 # All 4 cells skip-with-reason when no counterparty (FR-023); CI always green.

@@ -291,6 +291,22 @@ struct SessionConfig {
     // MsgSeqNum < expected proves it) — NOT a [const §XV.15] backpressure drop.
     // Additive, default-valued public-header field ⇒ no ABI/behavior break.
     bool redeliver_poss_dup = false;
+
+    // 022 FR-006 / D1 — send-path AllowPosDup knob (QuickFIX-J
+    // SETTING_ALLOW_POS_DUP_MESSAGES parity, exact key spelling for 008
+    // cfg_loader translation). When false (DEFAULT, matches both QFcpp
+    // unconditional-strip and QFJ default), a plain Session::send STRIPS any
+    // caller-supplied PossDupFlag(43) and OrigSendingTime(122) from the opaque
+    // app payload before framing. When true, they are RETAINED verbatim (QFJ
+    // sendRaw-as-is) — operator opt-in for callers that manage their own
+    // duplicate flags. The automatic resend/retransmission path
+    // (build_replay_frame) always re-adds 43=Y+122 regardless of this knob
+    // (FR-007 — structurally independent; build_replay_frame never calls
+    // send_impl). No C-ABI surface or error-slot change; additive C++ config
+    // field ⇒ struct-layout change requiring a normal source rebuild;
+    // default-strip is an intentional default wire-behavior change for plain
+    // sends containing caller-supplied 43/122 (matching QF defaults).
+    bool allow_pos_dup = false;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

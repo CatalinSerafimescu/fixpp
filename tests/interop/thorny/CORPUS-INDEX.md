@@ -88,6 +88,15 @@ Live cells requiring a counterparty (both engines × both roles). Skip cleanly w
 | **T006** | `PD-*-fix44-poss-dup-replay-survives` | recovery/possdup | ResendRequest→replay; counterparty re-sends 43=Y frame; fixpp stays Active, no Logout | `{52,122,10}` | `live` — `thorny/recovery/021-poss-dup-replay-survives_test.cpp` |
 | **T009** | `PD-*-fix44-malformed-dup-rejected` | recovery/possdup | 43=Y missing 122; fixpp emits Reject(35=3,371=122,373=1), stays Active | `{52,122,10}` | `live` — `thorny/recovery/021-poss-dup-malformed-dup-rejected_test.cpp` |
 
+## G3 slice 2 (022-possresend-allowpossdup-send) live AllowPosDup + PossResend cells
+
+Live cells requiring a counterparty (both engines × both roles). Skip cleanly when no counterparty is present (FR-023). Golden capture deferred to first paired live run.
+
+| # | Cell ID prefix | Category | Scenario | Normalization profile | Disposition |
+|---|---|---|---|---|---|
+| **T011** | `APDS-*-fix44-allow-pos-dup-strip-send` | framing/allow-pos-dup | fixpp (default `allow_pos_dup=false`) sends app payload with caller `43=Y`+`122`; strip excises both; counterparty accepts stripped frame; session stays Active | `{52,10}` | `live` — `thorny/framing/022-allow-pos-dup-strip-send_test.cpp` |
+| **T012** | `PR-*-fix44-poss-resend-deliver` | recovery/poss-resend | counterparty sends in-sequence `97=Y` business message; fixpp delivers to `fromApp` (tag 97 readable, seqnum advances); session stays Active | `{52,10}` | `live` — `thorny/recovery/022-poss-resend-deliver_test.cpp` |
+
 ---
 
 ## known-limitation — deferred-by-design (open tracking, NOT executed at v1.0)

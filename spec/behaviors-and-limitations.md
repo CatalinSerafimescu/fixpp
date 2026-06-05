@@ -440,4 +440,36 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   (same hazard class as 020 RC#1) before it can ship. Intended default = STRIP, auto-resend
   always re-adds. The `allow_poss_dup` `SessionConfig` field is NOT added in this slice (only
   `redeliver_poss_dup` is). **Status: deferred** (FR-008 / research.md D7 — own future
-  opaque-send-hardening slice).
+  opaque-send-hardening slice). **SUPERSEDED by 022 (B-022-1): the knob + excision shipped.**
+
+## PossResend(97) inbound + AllowPosDup send-path strip (022-possresend-allowpossdup-send)
+
+<!-- 022-possresend-allowpossdup-send — completes catalogue row S-010 (backlog → done) -->
+
+- **B-022-1 — A plain `send` strips caller-supplied `PossDupFlag(43)` / `OrigSendingTime(122)`
+  by default; the auto-resend path always re-adds them independently.** `SessionConfig::allow_pos_dup`
+  (default `false`, QuickFIX-J `AllowPosDup` config-key parity) governs the plain `Session::send`
+  path: `false` (default) STRIPS any caller-supplied `43`/`122` from the opaque application payload
+  before framing; `true` RETAINS them verbatim (operator opt-in for callers that manage their own
+  duplicate flags). The strip is a no-heap, boundary-anchored field excision behind a 022-owned
+  per-field scanner that validates every post-`35=` field is `<non-empty digit-only tag>=<value>\x01`
+  and fails the send CLOSED (`app_payload_malformed=131`, no seqnum consumed, no transmit) on the
+  FIRST malformed field — a missing `=`, an empty/non-digit tag, or an empty field (cases the 020
+  denylist floor admits). Only complete, SOH-boundary-anchored `43=…\x01`/`122=…\x01` fields are
+  excised; a literal `43=` inside another field's value (no preceding SOH) is preserved (injection-safe,
+  INV-2). The automatic resend/retransmission path (`build_replay_frame`) ALWAYS re-adds `43=Y`+`122`
+  regardless of the knob — it never routes through `send_impl` (FR-007, structural). Default-strip is
+  an intentional default wire-behavior change matching QuickFIX-cpp (unconditional strip) and
+  QuickFIX-J (default strip). **Status: shipped** (022, supersedes L-021-2). *(FR-006..FR-009;
+  data-model.md §2 INV-1..5; research.md D1/D2/D5/D6; contracts §C2/§C3; one site in `send_impl`.)*
+
+- **L-022-1 — `PossResend(97)` carries NO session-level handling; it is delivered to the
+  application for business-level duplicate determination.** An in-sequence application message bearing
+  `PossResend(97)=Y` is processed normally (the expected inbound seqnum advances) and delivered to the
+  registered `Application::fromApp` with the full `MessageView` (tag 97 readable); the session never
+  rejects, drops, or disconnects it for `97`, and `97` does NOT trigger the `OrigSendingTime(122)`-required
+  rule (that keys on `43=Y` only). fixpp adds NO session-level PossResend logic — matching QuickFIX-cpp
+  v1.16.0 and QuickFIX-J 3.0.1, which define the field but never read it in their session layers. The
+  application must perform business-level de-duplication on its own keys (e.g. `ClOrdID`). **Status:
+  shipped as witness-only** (022, zero production code — clarify-confirmed). *(FR-001..FR-005;
+  data-model.md §3; research.md D4; contracts §C4.)*

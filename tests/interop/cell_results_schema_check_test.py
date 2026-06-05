@@ -187,6 +187,15 @@ EXPECTED_IDS = frozenset({
     "PD-QFcpp-acc-fix44-malformed-dup-rejected",
     "PD-QFj-init-fix44-malformed-dup-rejected",
     "PD-QFj-acc-fix44-malformed-dup-rejected",
+    # G3 slice 2 022-possresend-allowpossdup-send live cells (8)
+    "APDS-QFcpp-init-fix44-allow-pos-dup-strip-send",
+    "APDS-QFcpp-acc-fix44-allow-pos-dup-strip-send",
+    "APDS-QFj-init-fix44-allow-pos-dup-strip-send",
+    "APDS-QFj-acc-fix44-allow-pos-dup-strip-send",
+    "PR-QFcpp-init-fix44-poss-resend-deliver",
+    "PR-QFcpp-acc-fix44-poss-resend-deliver",
+    "PR-QFj-init-fix44-poss-resend-deliver",
+    "PR-QFj-acc-fix44-poss-resend-deliver",
 })
 
 
