@@ -683,9 +683,7 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
     Session sess(engine, cfg);
     drive_to_active(sess);
 
-    // Capture the current seqnum before the send attempt.
-    // Use the first post-logon send seqnum as a reference: we verify nothing was consumed
-    // by checking that no frame is emitted (seqnum is not advanced via transport).
+    const auto seq_before = sess.seqnum_mgr_test_access().peek_outbound();
     const std::size_t frames_before = captured_frames.size();
 
     auto payload = std::vector<std::byte>(tc.payload_len);
@@ -709,6 +707,10 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
         EXPECT_EQ(result.error(), fixpp::core::error::app_payload_malformed)
             << "W6 [" << tc.name << "]: error must be app_payload_malformed=131; [C2.4]";
     }
+
+    EXPECT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), seq_before)
+        << "W6: a malformed-field send must NOT consume an outbound seqnum (NoSeqnum) "
+           "[131 returns before assign_outbound]";
 
     // Seqnum NOT consumed: no new frame emitted to transport.
     EXPECT_EQ(captured_frames.size(), frames_before)
