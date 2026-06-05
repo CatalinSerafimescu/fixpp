@@ -681,7 +681,7 @@ void Engine::start() {
         // One strand per session — INV-1 (never shared across sessions).
         // Created-but-not-yet-bound here; US1 (T009/T010) binds the role loop,
         // Session, and transport to this strand. [E-1/E-2/D1]
-        entry.session_strand = asio::make_strand(exec_);
+        entry.session_strand.emplace(asio::make_strand(exec_));
 
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {

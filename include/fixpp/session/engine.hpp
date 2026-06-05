@@ -34,6 +34,7 @@
 #include <fixpp/transport/listener.hpp>      // abstract Listener (for listeners_ map)
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -150,8 +151,10 @@ struct SessionEntry {
     /// teardown closes) runs on this strand. NOT yet bound to the loop in this
     /// phase — US1 (T009/T010) binds the loop/Session/transport to it.
     /// INV-1: each session gets exactly one strand; never shared across sessions.
-    /// Default-constructed (null strand) until Engine::start() assigns it.
-    asio::strand<asio::any_io_executor> session_strand;
+    /// nullopt until Engine::start() assigns it via emplace(make_strand(exec_)).
+    /// Optional to allow default-construction of SessionEntry without a valid
+    /// executor (asio::strand<any_io_executor> throws bad_executor on default-ctor).
+    std::optional<asio::strand<asio::any_io_executor>> session_strand;
 };
 
 // ── Engine — public multi-session runtime engine (T005 / R1 / E-1) ───────────

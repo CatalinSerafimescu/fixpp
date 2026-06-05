@@ -1467,6 +1467,7 @@ target_link_libraries(engine_session_strand_test PRIVATE
 )
 target_include_directories(engine_session_strand_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_tls_transport.hpp" (V-10 socket-executor check)
 )
 target_compile_definitions(engine_session_strand_test PRIVATE
   FIXPP_TEST_HOOKS
