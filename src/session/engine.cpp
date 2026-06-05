@@ -77,12 +77,16 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // from EngineConfig::engine_trace_context at construction time.
       // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
       engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
+      // T003 (E-0/D0/INV-0): control strand — single serialization domain for all
+      // engine-global state. Constructed once over exec_. INV-0: distinct from
+      // every per-session strand (each SessionEntry::session_strand is separate).
+      // No routing through it yet; US1/US2 wire the routing.
+      control_strand_{asio::make_strand(exec_)},
       // FIX-2 (gate-b/r1): initialize the in-flight send counter. Starts at
       // zero; Engine::send bumps/decrements it; stop() drains it before
       // registry_.clear() to prevent send coroutines from dereferencing engine_
       // after Engine::~Engine() runs.
       send_counter_{std::make_shared<std::atomic<int>>(0)}
-// E-5: single-executor confinement — no strand, no mutex (015 scope).
 
 {}
 
@@ -91,7 +95,13 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
 // No synchronous best-effort teardown — synchronous dtor cannot drain
 // in-flight coroutines holding raw Session* → UAF (Gate A Codex-9 / E-7).
 
-Engine::~Engine() { assert(stopped_ && "Engine destroyed without calling co_await stop() first"); }
+Engine::~Engine() {
+    // T004/INV-8: stopped_ is std::atomic<bool>; load(acquire) pairs with
+    // stop()'s sequentially-consistent write, ensuring the assertion sees the
+    // final stop() write before the dtor proceeds.
+    assert(stopped_.load(std::memory_order_acquire)
+           && "Engine destroyed without calling co_await stop() first");
+}
 
 // ── register_session (FR-002 / E-1) ──────────────────────────────────────────
 // Records config + role only; does NOT construct a Session (lazy — Gate A New-3).
@@ -119,7 +129,10 @@ Session* Engine::lookup(SessionId const& id) const {
     return (it == registry_.end()) ? nullptr : it->second.session.get();
 }
 
-bool Engine::stopped() const noexcept { return stopped_; }
+bool Engine::stopped() const noexcept {
+    // T004/INV-8: acquire load — pairs with stop()'s write on the control strand.
+    return stopped_.load(std::memory_order_acquire);
+}
 
 // ── Loop stubs ────────────────────────────────────────────────────────────────
 // EVERY co_spawned loop MUST reset_cancellation_state(total) as its first step
@@ -664,6 +677,12 @@ void Engine::start() {
     auto counter = std::make_shared<std::atomic<int>>(0);
 
     for (auto& [id, entry] : registry_) {
+        // T005 (E-1/INV-1): create the per-session strand BEFORE the loop spawn.
+        // One strand per session — INV-1 (never shared across sessions).
+        // Created-but-not-yet-bound here; US1 (T009/T010) binds the role loop,
+        // Session, and transport to this strand. [E-1/E-2/D1]
+        entry.session_strand = asio::make_strand(exec_);
+
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {
             auto& scope_sig = accept_scope_signals_[id];  // default-constructs
@@ -696,9 +715,13 @@ asio::awaitable<void> Engine::stop() {
     // production callers spawn stop() under use_future (no slot); this is defensive
     // hardening so the contract holds regardless of how stop() is awaited. [Codex P2]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
-    if (stopped_) {
+    // T004/INV-8: idempotency guard — acquire to observe any prior stop() write.
+    if (stopped_.load(std::memory_order_acquire)) {
         co_return;
     }
+    // Authoritative write on this (currently exec_-serialized) call path.
+    // US2/T018 will move this onto control_strand_; sequentially-consistent
+    // default store pairs with the acquire reads at the two read sites.
     stopped_ = true;
 
     for (auto& [id, entry] : registry_) entry.session_cancel.emit(asio::cancellation_type::total);
@@ -818,8 +841,10 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                 -> asio::awaitable<core::expected_t<void>> {
                 // ── Step B: on exec_ — safe to read registry + stopped_ ──
 
-                // FIX-2: fail-fast if stop() has begun (stopped_ set on exec_).
-                if (stopped_) {
+                // FIX-2: fail-fast if stop() has begun.
+                // T004/INV-8: acquire load — pairs with stop()'s write so a
+                // multi-threaded executor observes the stopped_ write reliably.
+                if (stopped_.load(std::memory_order_acquire)) {
                     co_return std::unexpected(core::error::session_invalid_state_for_send);
                 }
 

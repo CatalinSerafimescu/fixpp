@@ -21,6 +21,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <asio/strand.hpp>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
@@ -142,6 +143,15 @@ struct SessionEntry {
     /// so stop() must close the socket (the "closes transports" step in stop()'s
     /// contract). Valid until the registry is cleared (after join-before-clear).
     fixpp::transport::Transport* live_transport = nullptr;
+
+    /// Per-session serialization domain (E-1/INV-1 — one strand per session).
+    /// Created on the control strand in Engine::start() before each loop spawn.
+    /// The whole role loop (establish/handshake/read-pump/callbacks/sends/both
+    /// teardown closes) runs on this strand. NOT yet bound to the loop in this
+    /// phase — US1 (T009/T010) binds the loop/Session/transport to it.
+    /// INV-1: each session gets exactly one strand; never shared across sessions.
+    /// Default-constructed (null strand) until Engine::start() assigns it.
+    asio::strand<asio::any_io_executor> session_strand;
 };
 
 // ── Engine — public multi-session runtime engine (T005 / R1 / E-1) ───────────
@@ -291,9 +301,26 @@ private:
     // Port 0 in the stored Endpoint means the listener is not yet built.
     std::unordered_map<SessionId, fixpp::transport::Endpoint> listener_endpoints_;
 
-    // Stopped flag — ensures stop() is idempotent and dtor assert fires
-    // correctly.  Safe under single-executor confinement (E-5).
-    bool stopped_ = false;
+    // Engine control strand (E-0/D0/INV-0) — single serialization domain for ALL
+    // engine-global state: registry_, listeners_, listener_endpoints_,
+    // accept_scope_signals_, stopped_, send_counter_, outstanding_counter_, and
+    // handle publication (D-PUB).
+    // INV-0: distinct from every session strand (each session has its own
+    //   SessionEntry::session_strand; the control strand is shared engine-global).
+    // Constructed once over exec_ in Engine::Engine(). No routing through it yet
+    // (that is US1 send / US2 control-plane confinement). [E-0/D0/C-0]
+    asio::strand<asio::any_io_executor> control_strand_;
+
+    // Stopped flag (E-6/D-STOP/FR-013) — ensures stop() is idempotent and dtor
+    // assert fires correctly.
+    // Memory-order discipline (INV-8):
+    //   Authoritative WRITE: on the control strand in stop() — sequenced after
+    //     all control-plane reads (registry, listeners, counters).
+    //   READs at two sites: accept-loop gate (run_accept_loop while-guard) and
+    //     send fast-fail (Engine::send Step B) — both use .load(acquire) so they
+    //     observe the stop() write reliably on a multi-threaded executor.
+    // Behavior-preserving on a single-threaded executor (015 scope). [E-6/D-STOP/C-5/FR-013]
+    std::atomic<bool> stopped_ = false;
 
     // T012 friend: run_accept_loop (engine.cpp, namespace fixpp::session)
     // accesses Engine's private members (listeners_, listener_endpoints_, etc.)
