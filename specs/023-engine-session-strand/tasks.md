@@ -1,0 +1,206 @@
+---
+description: "Task list for 023-engine-session-strand"
+---
+
+# Tasks: Per-Session + Control-Plane Strand Binding for Engine-Managed Sessions
+
+**Input**: Design documents from `specs/023-engine-session-strand/`
+**Prerequisites**: plan.md, spec.md (US1–US3), research.md (D0/D-PUB/D-STOP/D-SNAP/D1–D8), data-model.md (E-0…E-7 + INV-0…INV-9a), contracts/engine-session-strand.md (C-0…C-8 + V-1…V-12), quickstart.md
+**Repository root** = the library submodule (`research/G19-fix-fpml-iso20022/library/`). All paths below are submodule-relative.
+
+**Tests**: REQUIRED and RED-first — `[const §VII §3-4]` TDD is binding for this codebase, and concurrency correctness (`[const §IX §2]` TSan) is *the* pass criterion. Every witness V-1…V-12 lands as a failing/RED GoogleTest cell (or a documented characterization) before the production change it gates. TSan is the primary correctness gate (plan Technical Context).
+
+**Architecture reality** (plan Summary; research D0/R4 "half-restructure was why Gate A ruled structural"):
+- This is **one indivisible two-domain mechanism** verified through **three independent lenses** (US1/US2/US3). The production change is engine-internal (`src/session/engine.cpp`, `include/fixpp/session/engine.hpp`, `src/session/session_executor.cpp`, `stopped_`'s type) — **no new module, one public signature change** (`Engine::lookup() : Session* → std::shared_ptr<Session>`, FR-008/SC-004).
+- **Two serialization domains**: an engine **control strand** (E-0/D0 — registry/stopped/listeners/endpoints/counters/handle-publication) and a **per-session strand** (E-1 — whole role loop + transport + both teardown closes). `send` = caller→control→session; `stop` = control snapshot/cancel/clear + per-session closes; all non-blocking posts.
+- **Implementer-watch (research R7/R8 — Gate A final/Opus):** **R7 — keep the two lifetime mechanisms SEPARATE**: `Engine::send`'s `send_counter_` is a hard runtime barrier (drained before `registry_.clear()`); the `lookup()` bounded handle is **only** a debug assert + caller obligation (NO `stop()` drain). Do **not** unify them — draining on app-held leases would hang `stop()`; weakening the send barrier into an assert re-opens the send-path UAF. **R8 — the D5 "no ctor samples bare `exec_`" four-site audit is the silent V-10 lynchpin**: a single un-fixed transport/listener ctor re-opens the per-session race with NO compile-time signal.
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: Build-graph registration for the new witness suite + the test-seam compile flag the deterministic V-8 witness needs. No production behavior.
+
+- [ ] T001 Register the new GoogleTest executable `engine_session_strand_test` in `tests/session/CMakeLists.txt`, mirroring the `business_messages_roundtrip_test` block (`:1326-1350`): source `test_engine_session_strand.cpp`, link `fixpp_session` + `fixpp_transport` + `fixpp_tls` + `fixpp_mock_clock` + `${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}` + `${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}` + `${FIXPP_TRANSPORT_ZLIB_LIB}` + `GTest::gtest`/`gtest_main`, `target_include_directories … ${CMAKE_SOURCE_DIR}/tests`, compile-define `FIXPP_TEST_HOOKS` + `FIXPP_TLS_FIXTURE_DIR`, set the `TSAN_OPTIONS=halt_on_error=1 suppressions=…/tools/tsan/asio.supp` env, and tag `LABELS "023;session;control_strand;tsan"`. Create empty placeholder `tests/session/test_engine_session_strand.cpp` so the build graph configures. → verify: `cmake` configures clean; the target builds (empty).
+- [ ] T002 Add a `FIXPP_TEST_SEAMS` compile option (gated, **zero release cost**) to the engine build + the `engine_session_strand_test` target, guarding the **one-sided park** seam the V-8 witness drives (research D6: a test-only `sleep`/spin parked inside the `listeners_`/`listener_endpoints_` write, no shared sync object). Wire it as a CMake `option()` defaulting OFF, defined ON only for this test target (and any debug preset the witness runs under). Do NOT add the seam body yet (that is T018-adjacent / authored with the V-8 witness in T016). → verify: `cmake` configures; the flag is OFF in release presets, ON for the witness target; no `src/` behavior change.
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: The two-domain **data members + the `stopped_` memory model** every story compiles and reasons against. These are structural prerequisites (members exist / are constructed; one type change that is behavior-preserving) — no observable behavior is wired here, so they carry no RED witness of their own. The behavioral wiring lands in the stories, driven by their witnesses.
+
+**⚠️ CRITICAL**: No user story can be exercised until this phase lands.
+
+- [ ] T003 Add the engine **control strand** member (E-0/D0) to `include/fixpp/session/engine.hpp` — e.g. `asio::strand<asio::any_io_executor> control_strand_;` (the single serialization domain for ALL engine-global state), constructed once over `exec_` (`asio::make_strand(exec_)`) in the `Engine` constructor; document INV-0 (a distinct strand from every session strand). No routing through it yet (that is US1 `send` / US2 control-plane confinement). (research D0; data-model E-0; contract C-0) → verify: library builds; `control_strand_` exists and is constructed; single-threaded suite unchanged.
+- [ ] T004 Change `stopped_` from a plain `bool` to **`std::atomic<bool>`** (E-6/D-STOP) in `include/fixpp/session/engine.hpp:296`, replacing the "Safe under single-executor confinement (E-5)" comment with the acquire/release discipline (INV-8: authoritative **write** on the control strand in `stop()`; **reads** at the accept-loop gate `src/session/engine.cpp:478` and the `send` fast-fail `:822` become atomic-**acquire**). Behavior-preserving on a single-threaded executor. (research D-STOP; data-model E-6; contract C-5) → verify: builds; `stopped_` is `std::atomic<bool>`; the two read sites use `.load(acquire)`; single-threaded suite green.
+- [ ] T005 Add the per-session **strand handle** field to `struct SessionEntry` (`include/fixpp/session/engine.hpp:119`) — e.g. `session_strand` (the resolved serialized executor, E-1/INV-1) — and create it on the control strand in `Engine::start()` (`src/session/engine.cpp:663`) **before** each loop spawn (`make_strand(exec_)`, one per session). The field is created-but-not-yet-bound here (US1 T009/T010 bind the loop/Session/transport to it). (research D1; data-model E-1/E-2) → verify: builds; each registered session gets exactly one `session_strand`; no loop re-binding yet; suite unchanged.
+
+**Checkpoint**: Both domains exist as members; `stopped_` is MT-correct. Stories can now wire behavior onto them.
+
+---
+
+## Phase 3: User Story 1 — Run the engine on a multi-threaded executor safely (Priority: P1) 🎯 MVP
+
+**Goal**: Land the **per-session serialization domain** — the whole role loop (establish/handshake/read-pump/callbacks/sends/both teardown closes) runs on the session strand, the transport I/O object is bound to it, `send` traverses both domains without deadlock, and shutdown serializes teardown per session — so a ≥3-thread executor drives a full lifecycle with zero sanitizer findings.
+
+**Independent Test**: Drive establish → app-message round-trip → shutdown on a ≥3-thread executor under ASan/UBSan/TSan and observe zero findings/crashes across repeated runs (the reused `business_messages_roundtrip` MT harness + new per-session cells).
+
+### Tests for User Story 1 (RED-first)
+
+> Author the per-session witnesses in `tests/session/test_engine_session_strand.cpp`. V-2 reuses the existing `business_messages_roundtrip_test` (no new file). Same file ⇒ the authoring tasks are sequential, not `[P]`.
+
+- [ ] T006 [US1] Write the per-session-domain witnesses in `tests/session/test_engine_session_strand.cpp`: **V-1** transport `close()` is serialized with the in-flight read (session-strand close ordering — no concurrent access to a session's TLS state during teardown, SC-001 scenario 1); **V-3** a 2-session MT cell shows independent progress (cross-session parallelism preserved, no engine-global serialization of unrelated sessions, FR-004); **V-9** a re-entrant `send` from inside an application callback (`session→control→session`) completes with **no deadlock** under ≥3 threads, **and** a re-entrant `send` issued after `stop()` has begun **fast-fails cleanly** (stopped / `session_invalid_state_for_send`, never a half-cleared-registry race) (FR-006, contract V-9); **V-10** `transport.socket().get_executor() == session_strand` asserted across the **four** construction sites (engine listener-build `engine.cpp:459`, `reconnect_fsm` make `~:225`, the two `asio_tls_transport` ctors `~:542/560/579`) (E-5/D5/R8, contract V-10). Reuse the `engine_loopback_harness.hpp` / established-session fixtures. (contract C-7 V-1/V-3/V-9/V-10)
+- [ ] T007 [US1] Capture the **V-2 acceptance RED baseline**: run `business_messages_roundtrip_test --gtest_filter='*SendFromInsideFromApp_NoDeadlockNoUAF*'` under ASan/UBSan/TSan on the **pre-change** engine and record the current flaky/RED teardown failure mode (the `BIO_ctrl` SEGV/UAF — see `[[project_business_roundtrip_bio_ctrl_segv]]`) as the baseline this story must turn GREEN-and-stable. (contract C-7 V-2; SC-001) → verify: the pre-change RED is documented (crash/finding signature noted), not silently skipped.
+- [ ] T008 [US1] Build + run the V-1/V-3/V-9/V-10 cells; **confirm RED** — they fail on *behavior* (loops still on bare `exec_`; no strand binding/assert), not on compile errors. If a cell fails to compile, fix fixture wiring first, then assert the specific RED signal (e.g. V-10's executor-identity assert is absent / V-9 deadlocks or races). → verify: each cell RED for the right reason; no `src/`/`include/` change yet.
+
+### Implementation for User Story 1
+
+> Single production surface: `src/session/session_executor.cpp` (binding seam) + `src/session/engine.cpp` (loop spawn / transport audit / send / publication / teardown). Sequential where noted (shared files / data dependencies).
+
+- [ ] T009 [US1] Implement the **D3-B adoption seam** in `src/session/session_executor.cpp` (`make_session_executor`, `:25-37`): add an **engine-only internal `adopt_strand` tag/overload** that, under `threading_mode::per_session_strand`, stores an engine-supplied already-strand executor **directly** with `strand_wrapped=true` (truthful) instead of re-wrapping it in a second `make_strand` (the D1 anti-pattern). Do **NOT** infer adoption from the public `already_serialized_executor` flag (research D3-B: a user may set it under `per_session_strand`; inferring would silently adopt a bare executor as a strand). The ordinary user `per_session_strand` path (`:35`) still `make_strand`-wraps unconditionally; preserve `lock_policy::spin` legality (do NOT rewrite to `direct_executor` — D3-A is verified-broken). Add the **INV-3 identity assert** (`session->executor().underlying() == SessionEntry.session_strand`). (research D3-B; data-model E-3/INV-3a; contract C-1) → verify: builds; the adopt path yields `is_strand_wrapped()==true`; spin-policy config still legal; INV-3 assert present.
+- [ ] T010 [US1] Spawn the role loops **on the session strand** in `Engine::start()` (`src/session/engine.cpp:663-680`): replace the bare-`exec_` `co_spawn(exec_, run_accept_loop/run_connect_loop, …)` with `co_spawn(entry.session_strand, …)`, and bind the `Session` to `entry.session_strand` via the T009 `adopt_strand` tag (E-1/E-3/D2). The accept/connect + handshake + read-pump now all run on the one session strand (D2 — verified at Gate A against `ssl/detail/io.hpp`: the ssl `io_op`'s BIO processing dispatches on the awaiting coroutine's executor). (research D1/D2/D3; data-model E-1/INV-1) → verify: loops run on `session_strand`; the read-pump's completions are strand-confined.
+- [ ] T011 [US1] **Transport-on-strand audit (D5/E-5/V-10 — the R8 lynchpin)**: audit the **four** transport/listener construction sites — engine listener-build `src/session/engine.cpp:459`, `reconnect_fsm` make `src/session/reconnect_fsm.cpp:~225`, the two `asio_tls_transport` ctors (`src/transport/asio_tls_transport.cpp:~542/560/579`) — and confirm **none** samples the engine's bare `exec_`; the socket must inherit the loop-local strand (`co_await this_coro::executor`). Add the **debug assert** `transport.socket().get_executor() == session_strand` at each site (INV-7). Fix all four or the per-session race silently reopens with no compile signal (R8 / half-restructure precedent `[[feedback_half_restructure_symmetric_api]]`). (research D5/R8; data-model E-5/INV-7; contract V-10) → verify: T006 V-10 cell GREEN at every site; no bare-`exec_` leak.
+- [ ] T012 [US1] Route **`Engine::send` through both domains** (`src/session/engine.cpp:806-880`): hop **caller → `control_strand_`** (registry/`stopped_` read + `send_counter_` bump, first hop) **→ `session_strand`** (toApp + `Session::send`, second hop) — every handoff a **non-blocking `co_spawn(strand, …, use_awaitable)`** (post, never inline `dispatch`/blocking wait), so a callback-issued send cannot deadlock (FR-006/C-2). **Preserve the `send_counter_` hard-barrier drain** before `registry_.clear()` (R7 — do NOT fold it into the lookup lease of US3). (research D0/D4/R1/R7; data-model E-0; contract C-2) → verify: T006 V-9 cell GREEN (no deadlock, ≥3 threads); post-`stop()` re-entrant send fast-fails cleanly.
+- [ ] T013 [US1] Implement the **D-PUB awaited publication** core (E-2/INV-2) in the role loops (`src/session/engine.cpp` run_accept_loop `:555/578`, run_connect_loop `:625/649`): publish `entry.session` / `entry.live_transport` **on the control strand** and **`co_await`** that publish (`co_await co_spawn(control_strand_, publish, use_awaitable)`) **BEFORE** entering the read pump, so `stop()` can never observe a null `live_transport` and skip the close-to-wake; **unpublish** (reset the handles on the control strand) on loop exit before the entry can be cleared; the publish/unpublish job is part of the **outstanding-loop join accounting**. (The stopped-before-publish disposition / V-12 is US2.) (research D-PUB; data-model E-2/INV-2; contract C-6) → verify: a `stop()` after publish always sees a non-null `live_transport`; the awaited publish suspends (does not block) the loop.
+- [ ] T014 [US1] Implement **teardown ordering — BOTH closes on the session strand** in `Engine::stop()` (`src/session/engine.cpp:691-763`): (step 2) dispatch transport `close()` on `session_strand` **before** the join (wakes the idle in-flight read; serialized with its completion → fixes the BIO race, INV-4a); (step 4) dispatch terminal `Session::close()` on `session_strand` **after** the join + send-drain, **before** `registry_.clear()` (preserves the parked-`run_liveness_loop` drain at `:741-752`, INV-4b); the registry iteration/clear stays control-strand-confined over a **stable** `registry_` (INV-6/INV-6a). Every per-session dispatch is a non-blocking `co_spawn(session_strand, …, use_awaitable)` (INV-5). (research D4; data-model E-4/INV-4a/4b/5/6/6a; contract C-6) → verify: T006 V-1 cell GREEN; close-before-clear preserved; no Session/transport freed while its read-pump is in flight.
+- [ ] T015 [US1] Build + run the per-session story GREEN: the V-1/V-3/V-9/V-10 cells pass, and the **V-2 acceptance** (`business_messages_roundtrip_test … SendFromInsideFromApp_NoDeadlockNoUAF`) is clean and stable under **ASan, UBSan, AND TSan** (the T007 RED baseline turned GREEN). Run the `[const §XV.9]` awaitable-include watch (`[[feedback_awaitable_header_mutex_include_edge]]`): UNFILTERED Tier-1 (or `-L sync`) to confirm `engine.hpp`'s control-strand member added no `std::mutex` into the awaitable closure. (contract C-7 V-1/V-2/V-3/V-9/V-10) → verify: full US1 suite green ×3 sanitizers; no `sync`-corpus regression.
+
+**Checkpoint**: US1 complete — the per-session domain lands; a ≥3-thread lifecycle is sanitizer-clean (MVP). The control-plane race (US2) and the snapshot readers (US3) are still to come.
+
+---
+
+## Phase 4: User Story 2 — The teardown crash is eliminated and stays eliminated (Priority: P2)
+
+**Goal**: Confine **all engine-global control-plane mutation** to the control strand so the registry/listener-table data race (the class *worse* than the TLS crash) is gone by construction, close the symmetric **stop-before-publish** hole, and lock it down with a **deterministic** root-cause regression witness.
+
+**Independent Test**: A one-sided-park witness deterministically reproduces the control-plane data race (`stop()` clearing the listener/endpoint tables vs an accept-loop write) under TSan on the pre-change engine — RED every run — and passes 100% post-change (SC-002).
+
+### Tests for User Story 2 (RED-first)
+
+> Author in `tests/session/test_engine_session_strand.cpp`. The V-8 seam uses the `FIXPP_TEST_SEAMS` flag from T002.
+
+- [ ] T016 [US2] Write the control-plane witnesses: **V-8** `ControlPlaneRace_StopVsAcceptPublish` — a **one-sided park** (NOT a bidirectional latch: an HB edge would synchronize the accesses and *suppress* the race — research D6) parks **one** thread inside/immediately-adjacent-to the `listeners_`/`listener_endpoints_` write (reachable **before any peer connects**, so no live peer needed) while another thread drives `Engine::stop()`'s `clear()`, **with no shared synchronization object between them**; the park window is wide enough that the conflicting access always lands inside it (the "widen the window" technique, `[[feedback_stack_use_after_return_local_vs_ci_flake]]`). **V-12** `StopBeforeAwaitedPublish` — drive `stop()` to set `stopped_` while a role loop sits **between transport creation and its awaited control-strand publish**; assert the publish takes the **stopped disposition** (no live publish) and the loop **closes/returns before initiating any read**. Author the V-8 one-sided park seam body now (under `FIXPP_TEST_SEAMS`). (research D6/D-PUB; spec SC-002; contract V-8/V-12) 
+- [ ] T017 [US2] Build + run under TSan on the **pre-change** control plane (listener writes still on bare `exec_`, no stopped-before-publish check): **confirm V-8 reports the `listeners_`/`listener_endpoints_` data race on EVERY run** (reliable RED, SC-002) and V-12 is RED (a live transport is exposed behind the in-progress `stop()`). → verify: TSan flags the unsynchronized accesses deterministically; if V-8 is *flaky* RED (not every run), widen the park window before declaring the baseline.
+
+### Implementation for User Story 2
+
+- [ ] T018 [US2] **Control-plane confinement (D0/E-0/INV-0)**: move every engine-global **mutation** onto `control_strand_` — the `listeners_` / `listener_endpoints_` writes (`src/session/engine.cpp:467-468`), the `accept_scope_signals_` table, the `registry_` insert/erase, and the counters' reset/clear ordering (`:760-763`) — so the accept loop only **reads** handles while the control strand mutates. Every cross-thread entry point already routes through the strand (`send` T012, `stop` T014). (research D0; data-model E-0/INV-0; contract C-0) → verify: T016 V-8 cell turns **RED→GREEN** (the control strand serializes the writes against `clear()`); no engine-global structure is mutated off the control strand.
+- [ ] T019 [US2] **Stopped-before-publish disposition (INV-2a/D-PUB/V-12)**: in the T013 publish coroutine, **check `stopped_` first on the control strand**; if `stop()` is already in progress, do **NOT** publish a live `live_transport` for pumping — record a **stopped disposition** (leave `live_transport == nullptr` / close the freshly-created transport) and make the session-strand role loop **close/return before initiating any read** (never enter `async_read_some`). This closes the symmetric ordering hole where a transport created just before the awaited publish would be pumped after `stop()` began. (research D-PUB stop-already-in-progress; data-model E-2 INV-2a / E-4; contract C-6) → verify: T016 V-12 cell GREEN (no pumped transport exposed behind the in-progress `stop()`).
+- [ ] T020 [US2] Build + run the control-plane story GREEN under TSan: V-8 RED→GREEN (100% of post-change runs clean), V-12 GREEN; re-confirm the V-2 `business_messages_roundtrip` MT acceptance stays clean (no regression from the control-plane move). (contract V-8/V-12; SC-002) → verify: full US2 suite green under TSan; V-2 still clean ×3 sanitizers.
+
+**Checkpoint**: US1 + US2 — both serialization domains land; the root-cause race is deterministically witnessed and fixed.
+
+---
+
+## Phase 5: User Story 3 — Existing single-threaded users are unaffected + the one recorded API change (Priority: P3)
+
+**Goal**: Make the synchronous public readers MT-safe via the **D-SNAP** atomically-published immutable snapshot, land the single safening-only `lookup()` signature change with its **bounded-handle** lease guard, and prove single-threaded behavior is unchanged with **exactly one** intended ABI diff.
+
+**Independent Test**: The full existing single-threaded suite stays green with no rewrites; `lookup()` / `acceptor_bound_endpoint()` are TSan-clean called from any thread while the engine runs and `stop()` clears; `nm`/`abidiff` show exactly the one recorded `lookup()` return-type diff and no other.
+
+### Tests for User Story 3 (RED-first / characterization)
+
+> Author the snapshot/reader witnesses in `tests/session/test_engine_session_strand.cpp`.
+
+- [ ] T021 [US3] Write the public-reader witnesses: **V-11** `SnapshotReadersMtSafe` — call `lookup()` / `acceptor_bound_endpoint()` from a thread while the engine runs and `stop()` clears concurrently → **TSan-clean**; a `lookup()` handle obtained **before** `clear()` keeps its `Session` alive (bounded keepalive) **while the engine is alive**; assert `~Engine` debug-asserts **no outstanding** `lookup()`/snapshot handle remains (the lease-counter mechanism). **V-4** characterization — the existing single-threaded suite (`ctest -R '^session_'`) remains green with no rewrites. **V-5** scaffolding — the `nm`/`abidiff` check expecting **exactly one** diff (`lookup()` return type). (research D-SNAP; data-model E-7/INV-9/9a; contract C-8/V-4/V-5/V-11) 
+- [ ] T022 [US3] Build + run; **confirm RED/characterization baseline**: V-11 fails (no snapshot yet; `lookup()` still returns raw `Session*` and races `registry_.clear()`); V-4 single-threaded suite is green pre-change (the baseline US3 must preserve); V-5 records the current ABI. → verify: V-11 RED for the right reason (concurrent reader vs `clear()` races / no bounded handle); V-4 green baseline captured.
+
+### Implementation for User Story 3
+
+> Sequential — same files (`engine.hpp` / `engine.cpp`) and a data dependency (lease block ← snapshot ← reader change).
+
+- [ ] T023 [US3] Implement the **D-SNAP reader snapshot (E-7/INV-9)**: add the `reader_snapshot_` member to `include/fixpp/session/engine.hpp` as the pinned **`std::atomic<std::shared_ptr<const Snapshot>>`** (standard C++20, header-only, **no `std::mutex` in our headers** — Art. XV; NOT the unshipped `fixpp::sync::atomic_shared_ptr`/NFR-017) with a `Snapshot` holding the registry `SessionId → shared_ptr<Session>` map + the bound-endpoint table; **republish** (build immutable + `atomic_store`) on the control strand after **every** control-plane mutation — the T018 sites (registry/listener/endpoint) **and** the T013/T019 D-PUB publish/unpublish. (research D-SNAP; data-model E-7; contract C-8) → verify: builds; a fresh snapshot is published after each control-plane mutation; `engine.hpp` still mutex-free in the awaitable closure (`-L sync`).
+- [ ] T024 [US3] Land the **`lookup()` signature change + snapshot reads** (the one public API change, FR-008/SC-004): `Engine::lookup()` (`include/fixpp/session/engine.hpp:236`, `src/session/engine.cpp:117`) → `atomic_load(reader_snapshot_)` and return a **`std::shared_ptr<Session>`** drawn from it (was raw `Session*`); `acceptor_bound_endpoint()` (`engine.cpp:896`) → `atomic_load` the snapshot, return its `Endpoint` **by value** (no signature change); neither enters a strand, takes a lock, or blocks. Fix internal `lookup()` call sites for the new return type. (research D-SNAP/D8; data-model E-7; contract C-4/C-8) → verify: builds; both readers read only the immutable snapshot; `acceptor_bound_endpoint()` signature unchanged.
+- [ ] T025 [US3] Implement the **bounded-handle lease control block (FR-014/INV-9a/R7)**: in **debug** builds `lookup()` returns an **aliasing** `std::shared_ptr<Session>` whose owning control block holds a small **lease** — ctor increments an engine-owned `std::atomic<std::uint64_t>` outstanding-lease counter, dtor (run at **last**-copy destruction) decrements it; `~Engine` **asserts the counter is zero** (a bare snapshot `use_count()` cannot observe a handle copied out then detached). In **release** builds the handle is a plain `std::shared_ptr<Session>`, no lease/counter overhead. Keep this **strictly separate** from `Engine::send`'s `send_counter_` barrier (R7 — the lease is a debug assert + caller obligation only, NEVER a `stop()` drain). Document the bounded-handle precondition (not valid past `~Engine`; `Session` borrows `const EngineConfig&`). (research D-SNAP/R7; data-model E-7/INV-9a; contract C-8) → verify: T021 V-11 cell GREEN (bounded keepalive across `clear()` while engine alive; `~Engine` asserts zero outstanding); release build carries no counter.
+- [ ] T026 [US3] Build + run the backward-compat + ABI story GREEN: V-11 TSan-clean; **V-4** the complete single-threaded suite green with **no rewrites** (`ctest --test-dir build/linux-clang-debug -R '^session_'`, SC-003); **V-5** `nm -D` shows no leaked non-`fixpp_` symbols and `abidiff` shows **exactly one** diff — `Engine::lookup()` return type `Session* → std::shared_ptr<Session>` — and **no other** (`acceptor_bound_endpoint()` keeps its `Endpoint`-by-value signature; no `c_api.h` change; SC-004). (contract V-4/V-5/V-11) → verify: V-11 green; single-threaded suite green no rewrites; abidiff = exactly the one recorded `lookup()` diff.
+
+**Checkpoint**: All three lenses pass — MT-safe lifecycle (US1), deterministic race fix (US2), MT-safe readers + one recorded API change (US3).
+
+---
+
+## Phase 6: Polish & Cross-Cutting Concerns
+
+**Purpose**: The Article VIII perf gate (the two-hop send + snapshot cost), the **contingent** L-019-3 lift (only after the FULL witness set), and the catalogue/coverage/docs/verify close-out (applied at Polish per the 020/021/022 precedent).
+
+- [ ] T027 [P] **Perf gate (V-6 / Article VIII ±5%)**: bench the **two-hop** send path (`caller→control→session`) **and** the **send-from-callback** path under MT, the per-establishment publish hop, **and** the D-SNAP snapshot read/publish cost (record `is_lock_free()` of `std::atomic<std::shared_ptr<const Snapshot>>` on the supported STL matrix — "lock-free" is not guaranteed; measure the real read + per-control-mutation republish cost). Cover session throughput as **establish-churn**, not just warm steady-state; compare vs a **re-measured** two-hop baseline (`bench/baselines/`); update the baseline with rationale in the same PR if shifted. (research D7/D-SNAP; contract V-6) → verify: send + send-from-callback + snapshot within ±5% (or baseline updated w/ rationale); `is_lock_free()` recorded.
+- [ ] T028 **L-019-3 lift (V-7 / FR-010 / SC-005) — CONTINGENT**: lift the "multi-threaded executor unsupported" limitation **only after** V-1 ∧ V-2 ∧ V-8 ∧ V-9 ∧ V-10 ∧ V-11 ∧ V-12 all pass under a **clean** ASan/UBSan/TSan matrix (assert the **exact set**, not a subset — `[[feedback_completeness_gate_exact_set_not_subset]]`); edit `spec/behaviors-and-limitations.md` (L-019-3 → lifted) + the concurrency doc to describe multi-threaded operation as **safe under the default configuration** (SC-005). Lifting while any witness is racy/failing is prohibited (publishes a false safety claim). (research D8; contract V-7) → verify: the full witness set is green under all three sanitizers BEFORE the doc edit; the lift cites the exact set.
+- [ ] T029 [P] Update `spec/feature-catalogue.md` + `spec/behaviors-and-limitations.md`: record the two-domain serialization feature (L-019-3 lifted; the new B-023-* behavior rows — per-session strand binds the whole role loop + both teardown closes; control strand serializes engine-global state; bounded-handle `lookup()`), citing 023. (plan §VI; `[[project_behaviors_limitations_catalogue]]`)
+- [ ] T030 [P] Update `spec/coverage-index.md` for the touched surfaces (`engine.cpp` + `session_executor.cpp` binding seam), asserting an **exact-set** diff (not subset-presence). (`[[feedback_completeness_gate_exact_set_not_subset]]`)
+- [ ] T031 Update `library/CLAUDE.md` active-feature pointer for 023 (status → implemented; next = `/simplify` → `/speckit-verify` → Gate B) per the merge-bookkeeping convention (pipeline step 19).
+- [ ] T032 Run the full local Tier-1 verify mirror (`/speckit-verify`): ASan/UBSan/**TSan** on both domains + the snapshot readers, coverage ≥95/85 on the touched lines (`src/session/engine.cpp` + binding seam + `session_executor.cpp`; uncovered defensive lines get a recorded risk assessment), the §XV.9 awaitable-include watch (UNFILTERED Tier-1 / `-L sync`), `nm`/`abidiff` for the one-diff gate, and the V-6 bench. Produces `.specify/decisions/023-engine-session-strand-verify.md` — the required evidence for `/gate-b`. (plan Constitution Check IX.1/IX.2/VIII.2/X; pipeline step 17) → verify: verify doc written; all gates non-RED.
+
+---
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+
+- **Setup (T001–T002)**: no dependencies — start immediately.
+- **Foundational (T003–T005)**: after Setup. **BLOCKS all user stories** (the domain members + `stopped_` atomic every story compiles against).
+- **US1 (T006–T015)**: after Foundational. The MVP; lands the per-session domain. Internal order: T006 → T007 → T008 (RED) → T009 → T010 → T011 → T012 → T013 → T014 (impl, sequential — shared `engine.cpp`/`session_executor.cpp` + data deps) → T015 (GREEN ×3 sanitizers).
+- **US2 (T016–T020)**: after Foundational; in practice after **US1's T012/T013** (the `send`/publish routing through `control_strand_` that the control-plane confinement completes). Internal order: T016 → T017 (RED, deterministic) → T018 → T019 (impl) → T020 (GREEN under TSan).
+- **US3 (T021–T026)**: after Foundational; integrates with the **US2 control-plane mutation sites** (the snapshot republishes after each). Internal order: T021 → T022 (RED) → T023 → T024 → T025 (impl, sequential — shared `engine.hpp`/`engine.cpp` + lease←reader←snapshot dep) → T026 (GREEN; V-4/V-5/V-11).
+- **Polish (T027–T032)**: after all three stories. **T028 (L-019-3 lift) is hard-gated on the FULL witness set green** under a clean sanitizer matrix. T027/T029/T030 are `[P]` (distinct files); T031 sequential; T032 verify runs last.
+
+### User Story Independence
+
+- **US1 (P1)** = per-session domain (`engine.cpp` loop-spawn/transport/send/publish/teardown + `session_executor.cpp` binding). Independently testable via the MT lifecycle harness — the MVP, ships/validates alone.
+- **US2 (P2)** = control-plane mutation confinement + the deterministic V-8/V-12 witnesses. Targets the listener-map race (reachable pre-peer), independent of the per-session strand.
+- **US3 (P3)** = D-SNAP snapshot + `lookup()` API change + lease guard. Independent reader-safety + ABI lens; touches a disjoint code surface (the public readers).
+
+### Within Each Story
+
+- Tests written and RED (or characterized) before implementation (`[const §VII]`).
+- US1: binding seam (T009) before loop re-spawn (T010); transport audit (T011) gates V-10.
+- US2: control-plane confinement (T018) turns V-8 RED→GREEN; stopped-before-publish (T019) gates V-12.
+- US3: snapshot (T023) before reader change (T024) before lease block (T025).
+
+### Parallel Opportunities
+
+- Setup T001/T002 touch disjoint concerns but the seam flag (T002) references the target (T001) — keep ordered.
+- The **three stories touch overlapping `engine.cpp`/`engine.hpp` regions**, so their *implementation* tasks are **not** safely `[P]` across stories (genuine file/data coupling — this is one mechanism). Sequence US1 → US2 → US3.
+- Polish doc tasks **T027, T029, T030** are `[P]` (distinct files: bench, catalogue/B&L, coverage-index).
+
+---
+
+## Parallel Example
+
+```text
+# Setup → Foundational (members), then the three lenses in sequence (shared engine surface):
+T001 → T002 → T003 → T004 → T005
+  → US1: T006…T008 (RED) → T009…T014 (impl) → T015 (GREEN ×3 sanitizers)   ← MVP
+  → US2: T016…T017 (RED) → T018…T019 (impl) → T020 (GREEN TSan)
+  → US3: T021…T022 (RED) → T023…T025 (impl) → T026 (GREEN; V-4/V-5/V-11)
+
+# Polish docs in parallel once all three lenses land (L-019-3 lift gated on the full set):
+T027 | T029 | T030   (all [P], distinct files);  then T028 (lift) → T031 → T032 (verify)
+```
+
+---
+
+## Implementation Strategy
+
+### MVP First (User Story 1)
+
+1. Setup + Foundational → both domain members exist; `stopped_` MT-correct.
+2. US1 (RED → binding → loop-on-strand → transport audit → send two-hop → publish → teardown → GREEN) → a ≥3-thread lifecycle is sanitizer-clean; the flaky `BIO_ctrl` teardown crash is gone. **STOP and validate** the MT harness independently.
+
+### Incremental Delivery
+
+1. US1 → per-session domain (MVP, MT lifecycle clean).
+2. US2 → control-plane confinement + deterministic V-8/V-12 race guard.
+3. US3 → MT-safe snapshot readers + the one recorded `lookup()` API change + bounded-handle lease.
+4. Polish → perf gate, **L-019-3 lifted only after the full witness set passes**, catalogue/coverage/docs, `/speckit-verify` evidence for Gate B.
+
+---
+
+## Notes
+
+- `[P]` = different files, no dependencies. The cross-story `engine.cpp`/`engine.hpp` implementation tasks are deliberately **not** `[P]` — this is one indivisible two-domain mechanism (research R4: a half-restructure was *why* Gate A ruled the rev-1 design structural).
+- `[Story]` label maps each task to US1/US2/US3; Setup/Foundational/Polish carry no story label.
+- RED-first is binding; TSan is the primary correctness gate (plan Technical Context / `[const §IX §2]`).
+- **R7 (separate lifetime mechanisms)** and **R8 (four-ctor `exec_` audit)** are the two implementer lynchpins — see the header of this file and T011/T012/T025.
+- The only public surface change is `Engine::lookup() : Session* → std::shared_ptr<Session>` (FR-008/SC-004); no new module, error slot, command schema, or C-ABI; `acceptor_bound_endpoint()` keeps its signature.
+- Next pipeline steps after `/speckit-tasks`: `/speckit-analyze` → `/speckit-checklist` → `/speckit-checklist-audit` (MANDATORY gate before `/speckit-implement`) → `/speckit-implement` → `/simplify` → `/speckit-verify` → Gate B (per `.specify/pipeline.md`).
+```
