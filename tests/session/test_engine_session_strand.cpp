@@ -3,9 +3,9 @@
 //
 // tests/session/test_engine_session_strand.cpp
 //
-// 023-engine-session-strand — T006 [US1] per-session-domain witnesses.
+// 023-engine-session-strand — T006 [US1] + T016 [US2] witnesses.
 //
-// Cells authored here (TDD RED-first before US1 implementation):
+// Cells authored here:
 //
 //   V-1  PerSessionTeardown_TransportCloseSerializedWithRead
 //        MT lifecycle (≥3-thread ioc). Exercises the BIO_ctrl race: under
@@ -20,6 +20,15 @@
 //        in run_accept_loop race against stop().clear() — expect TSan RED
 //        pre-T018. Progress/independence check itself may pass-by-luck pre-T010
 //        (recorded per T008 mandate). [C-7/V-3/FR-004]
+//
+//   V-8  ControlPlaneRace_PublicReaderVsMutation  [T016/T017 DD-2026-06-06 retarget]
+//        A raw std::thread spins calling acceptor_bound_endpoint() and lookup()
+//        with NO synchronisation against the engine executor threads.  The engine
+//        accept loop WRITES listener_endpoints_[id] and stop() CLEARS both maps
+//        concurrently — a real TSan data race (HB-free: no mutex/atomic between
+//        reader thread and engine threads).  RED pre-T026 (no D-SNAP); GREEN
+//        post-T026 (snapshot readers replace direct map access). UNCONDITIONAL
+//        (no FIXPP_TEST_SEAMS needed). [SC-002/C-8/V-8/V-11; research D-SNAP]
 //
 //   V-9  ReentrantSend_FromCallback_NoDeadlock_AndPostStopFastFails
 //        a) Re-entrant Engine::send from inside fromApp (session→control→session)
@@ -36,6 +45,11 @@
 //        Pre-T011 (no strand binding) the socket is on bare exec_ → assertion
 //        FAILS → RED for the right reason. [C-7/V-10/E-5/D5/R8/INV-7]
 //
+//   V-12 StopBeforeAwaitedPublish
+//        stop() races the accept loop before any peer connects; confirms the
+//        stopped-disposition path (INV-2a) is functional.  ALREADY-GREEN because
+//        INV-2a was implemented in T013 publish_entry. [C-6/V-12; T016/T017]
+//
 // Anti-pattern notes:
 //   - Every cell uses a genuinely multi-threaded executor (io_context + std::thread
 //     background workers) per [[feedback_single_threaded_harness_masks_strand_races]].
@@ -43,12 +57,15 @@
 //   - No SUCCEED()/EXPECT_TRUE(true) placeholders — every assertion is behavioral.
 //   - Engine::stop() is ALWAYS called before the engine goes out of scope;
 //     stop_engine_sync() is called before any FAIL()/early-return path.
+//   - V-8 uses a raw std::thread (no asio executor) as the reader so there is
+//     no implicit synchronisation with the engine ioc threads — real data race.
 //   - V-9 records pass-by-luck vs deadlock vs race as mandated by T008.
 //   - V-10 uses asio_tls_transport_test_access::socket_of() to inspect the
 //     underlying tcp::socket executor type.
 //
-// Anchors: tasks.md T006/T007/T008; contracts/engine-session-strand.md C-7
-//          (V-1/V-3/V-9/V-10); research.md D2/D5/R8; [const §IX §2].
+// Anchors: tasks.md T006/T007/T008/T016/T017; contracts/engine-session-strand.md
+//          C-7 (V-1/V-3/V-9/V-10), C-8 (V-8/V-11), C-6 (V-12);
+//          research.md D2/D5/R8/D-SNAP; [const §IX §2].
 
 #include <gtest/gtest.h>
 
@@ -817,70 +834,83 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     EXPECT_TRUE(engine->stopped());
 }
 
-// ── V-8: ControlPlaneRace_StopVsAcceptPublish ─────────────────────────────────
+// ── V-8: ControlPlaneRace_PublicReaderVsMutation ─────────────────────────────
 //
-// Scenario (SC-002 / T016 / research D6):
-//   A ONE-SIDED PARK seam (#ifdef FIXPP_TEST_SEAMS in engine.cpp, T016) parks
-//   the coroutine's OS thread for 100ms AFTER the listeners_/listener_endpoints_
-//   write completes in run_accept_loop.  Simultaneously (with NO shared
-//   synchronisation object), another thread drives Engine::stop() which eventually
-//   calls listeners_.clear().  TSan observes:
-//     - Thread A wrote listeners_[id] (run_accept_loop)
-//     - Thread B called listeners_.clear() (stop())
-//     - No happens-before edge between them
-//   → TSan reports: DATA RACE on listeners_.
+// Scenario (SC-002 / T016 DD-2026-06-06 retarget / research D-SNAP):
 //
-//   This is the root-cause data race for the control-plane class (research §2).
-//   It is DETERMINISTIC (every run is RED pre-T018) because:
-//   - The 100ms park window is always wider than stop()'s Step-1-to-Step-5 time
-//     for a freshly-started engine with no live peers (< 5ms).
-//   - The stop()-driving thread (t1) and the accept-loop thread run concurrently
-//     on a 2-thread executor.
-//   - There is NO shared sync object between the park and the stop() call — a
-//     latch would create an HB edge suppressing the race. [research D6]
+//   The original V-8 (one-sided park on the listeners_ write vs stop().clear())
+//   was NOT honestly witnessable: the pre-existing join-before-clear
+//   (outstanding_counter_) makes the loop's listeners_ write happens-before
+//   stop()'s clear() by construction — the park merely delayed both sides, so
+//   TSan never fired.  [DD-2026-06-06 / codex_023-engine-session-strand_gate_a_v8_retarget.md]
 //
-// Seam activation:
-//   The FIXPP_TEST_SEAMS flag must be propagated into fixpp_session (engine.cpp)
-//   via -DFIXPP_TEST_SEAMS=ON at cmake configure time.  The engine_session_strand_test
-//   CMakeLists also defines it for the test binary's own includes.
+//   This retargeted V-8 witnesses the GENUINELY HB-free control-plane data race:
 //
-// Multi-thread: io_context driven by 2 OS threads (main + t1) so the accept-loop
-//   thread (in the 100ms sleep) does NOT block stop().
+//     PUBLIC READER vs MAP MUTATION (no live peer needed):
 //
-// Anti-hang: 15s hard budget. Engine always stop()'d before test exit.
+//       Thread-reader (raw std::thread): calls engine.acceptor_bound_endpoint(acc_id)
+//         and/or engine.lookup(acc_id) in a tight loop — these read listener_endpoints_
+//         and registry_ directly WITHOUT any synchronisation (no strand, no mutex,
+//         no atomic).  [engine.cpp:1227-1230, 134-136]
 //
-// PRE-T018 (control-plane not yet confined to control_strand_):
-//   TSan MUST report a data race on listeners_/listener_endpoints_. halt_on_error=1
-//   aborts the process → the test is effectively RED. This is the expected signal.
+//       Engine executor threads: the accept loop WRITES listener_endpoints_[id] at
+//         run_accept_loop startup [engine.cpp:586-588]; stop() CLEARS the maps at
+//         step-5 [engine.cpp:1084-1087].
 //
-// POST-T018 (control-plane writes on control_strand_):
-//   The control strand serialises the write against clear() → no race → GREEN.
+//       NO happens-before edge exists between the reader thread and the engine
+//       executor threads — the reader is a raw std::thread with no synchronisation.
+//       TSan observes: WRITE in engine-thread vs READ in reader-thread → DATA RACE.
 //
-// [research D6; spec SC-002; contract V-8; tasks T016/T017]
+// Mechanism:
+//   1. Register an acceptor session and call engine.start().
+//   2. Start 2 engine-executor threads (t1, t2) to drive the ioc multi-threaded.
+//   3. Start a SEPARATE reader thread (t_reader) that spins calling
+//      acceptor_bound_endpoint() and lookup() in a tight loop for the entire
+//      start→stop window.  No sync object between reader and the engine threads.
+//   4. Call stop() from the main thread (via wait_pred driving ioc).
+//   5. Join t_reader after stop() completes.
+//
+//   TSan observes the unsynchronised read (t_reader) vs the map write (t1/t2
+//   running the accept loop) or the map clear (stop()): DATA RACE → RED.
+//   halt_on_error=1 aborts the process.
+//
+// Widen the overlap window:
+//   The reader spins throughout the whole start→stop duration (not just a brief
+//   window) so even on a fast machine the read reliably overlaps the write or clear.
+//
+// RED expected: pre-T018 (public readers not yet protected by D-SNAP/T023-T024).
+// GREEN expected: post-T026 (D-SNAP snapshot readers installed).
+//
+// Anti-hang: 15s hard budget; engine always stop()'d before test exit; reader
+//   thread holds a stop flag set under engine teardown.
+//
+// No live peer needed: the listener binds before any peer connects; the write
+//   at listener_endpoints_[id] happens during accept-loop startup.
+//
+// [DD-2026-06-06; spec SC-002; contract V-8; tasks T016/T017; research D-SNAP]
 
-#ifdef FIXPP_TEST_SEAMS
-
-TEST(EngineSessionStrand, V8_ControlPlaneRace_StopVsAcceptPublish) {
+TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     const char* fixture_dir = get_fixture_dir();
     if (!fixture_dir || fixture_dir[0] == '\0')
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
-    // Use a 2-thread io_context so the accept loop (parked in the seam sleep)
-    // runs on one OS thread while stop() runs on the other.
+    // Use a multi-threaded io_context: main thread + t1 + t2 drive the engine.
+    // A separate t_reader thread calls the public readers with NO synchronisation.
     // [[feedback_single_threaded_harness_masks_strand_races]]
     asio::io_context ioc;
 
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    // Reserve port before starting background thread.
     const uint16_t port = reserve_free_port(ioc);
 
-    // Build an acceptor session config (acceptor registers, triggering run_accept_loop).
+    // Register an acceptor session: the accept loop writes listener_endpoints_[id]
+    // at startup (no peer needed to trigger that write).
     auto acc_cfg = make_session_cfg(
         fac, "ACCEPTOR_V8", "INITIATOR_V8",
         fixpp::session::session_role::acceptor, "INITIATOR_V8",
         ioc.get_executor(), port);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
 
     fixpp::core::EngineConfig ecfg;
     ecfg.executor = ioc.get_executor();
@@ -893,58 +923,91 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_StopVsAcceptPublish) {
         FAIL() << "V-8: acceptor register_session failed";
     }
 
-    // start() spawns run_accept_loop on the session strand.  The loop will
-    // build the listener, write listeners_[id] / listener_endpoints_[id],
-    // then PARK for 100ms (the one-sided seam).
     engine->start();
 
-    // Start background thread NOW — after engine->start() so the accept loop
-    // coroutine is queued on the executor.  The thread will service the ioc and
-    // run the accept loop (including the seam sleep).
-    // [[feedback_fork_inherited_asio_pool_deadlock]] — construct executor in the
-    // forked context; here we construct the thread after start() which is correct.
+    // Start engine executor threads AFTER start() so the accept loop is already
+    // queued.  t1 and t2 drive the ioc (and the accept loop which writes the map).
+    // [[feedback_fork_inherited_asio_pool_deadlock]] — threads constructed after
+    // engine->start(), not before.
     std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
 
-    // Give the accept loop enough time to start and execute the listeners_ write
-    // + enter the seam sleep on t1.  20ms is sufficient: the loop runs immediately
-    // when t1 calls ioc.run().
+    // Reader thread: calls acceptor_bound_endpoint() and lookup() in a tight
+    // loop with NO synchronisation between this thread and the engine threads.
+    // The loop runs until reader_stop is set.
     //
-    // IMPORTANT: there is NO shared synchronisation object between this sleep and
-    // the seam sleep in run_accept_loop.  This is a one-sided park: we sleep to
-    // give the accept loop time to write the map, but we do NOT wait for a signal
-    // from the loop.  A two-sided latch would create an HB edge and suppress the
-    // race. [research D6]
-    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    // V-8 DATA RACE SURFACE:
+    //   - acceptor_bound_endpoint() reads listener_endpoints_ (unordered_map)
+    //     while the accept loop thread (t1 or t2) WRITES listener_endpoints_[id].
+    //   - lookup() reads registry_ (unordered_map) while stop() thread CLEARS it.
+    //   - No HB edge between t_reader and the engine threads (no mutex/atomic/sync).
+    //   → TSan: DATA RACE on listener_endpoints_ or registry_.
+    //
+    // IMPORTANT: there is deliberately NO shared synchronisation object between
+    // this reader thread and the engine executor threads.  Any sync object would
+    // create a happens-before edge and suppress the race TSan must report.
+    std::atomic<bool> reader_stop{false};
+    std::atomic<int>  reader_iterations{0};
+    std::thread t_reader{[&engine, &acc_id, &reader_stop, &reader_iterations]() {
+        // Spin calling the public readers.  The reads race:
+        //   (a) the accept-loop write of listener_endpoints_[id]  — write vs read
+        //   (b) stop()'s clear() of listener_endpoints_             — clear vs read
+        //   (c) stop()'s clear() of registry_                      — clear vs read
+        while (!reader_stop.load(std::memory_order_relaxed)) {
+            // Read listener_endpoints_ via acceptor_bound_endpoint().
+            (void)engine->acceptor_bound_endpoint(acc_id);
+            // Read registry_ via lookup().
+            (void)engine->lookup(acc_id);
+            reader_iterations.fetch_add(1, std::memory_order_relaxed);
+        }
+    }};
 
-    // Now drive stop() from the MAIN thread via asio::co_spawn.  stop() runs on
-    // the control strand (serviced by t1 when main's wait_pred drives ioc).
-    // stop() will reach listeners_.clear() while the accept loop is parked.
-    //
-    // V-8 PRIMARY ASSERTION: TSan will observe:
-    //   - t1:   engine.listeners_[session_id] = ... (run_accept_loop)
-    //   - main: listeners_.clear()               (stop() step-5)
-    //   - No happens-before edge between them.
-    // With halt_on_error=1, TSan aborts the process on the first race → RED.
-    // If we reach the EXPECT below, it is GREEN (post-T018).
+    // Let the accept loop start and write listener_endpoints_.
+    // 30ms is sufficient: the accept loop runs immediately when t1/t2 pick up work.
+    ioc.run_for(std::chrono::milliseconds{30});
+    ioc.restart();
+
+    // Stop the engine.  stop() will clear listener_endpoints_ and registry_ while
+    // t_reader is spinning.  This is the second window where the race fires (in
+    // addition to the initial write window above).
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
         bool done = wait_pred(ioc,
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             12000ms);
+
+        // Signal the reader to stop AFTER stop() completes (or times out).
+        reader_stop.store(true, std::memory_order_relaxed);
+
         ioc.stop();
         t1.join();
+        t2.join();
+        t_reader.join();
+
         ASSERT_TRUE(done) << "V-8: engine.stop() did not complete within 12s";
         stop_fut.get();
     }
 
-    // Reached post-T018 (control-plane confined): no race, TSan clean.
-    // Pre-T018: TSan aborts before this line.
+    // V-8 PRIMARY ASSERTION (TSan-witnessed):
+    //   Pre-T026 (no D-SNAP): TSan fires a DATA RACE on listener_endpoints_ or
+    //   registry_ (t_reader reads vs engine writes/clears with no HB) →
+    //   halt_on_error=1 aborts the process → test is RED.
+    //
+    //   Post-T026 (D-SNAP installed): public readers go through the snapshot
+    //   (atomic_load of an immutable shared_ptr) → no unsynchronised map access
+    //   → TSan clean → GREEN.
+    //
+    //   The gtest assertion below is the GREEN post-condition.  Pre-T026, TSan
+    //   aborts before this line is reached.
     EXPECT_TRUE(engine->stopped())
         << "V-8: engine must be stopped after stop() completes";
-}
 
-#endif  // FIXPP_TEST_SEAMS
+    // Confirm the reader actually executed enough iterations to give TSan time
+    // to observe the race window (both the initial write and the clear).
+    EXPECT_GT(reader_iterations.load(), 0)
+        << "V-8: reader thread must have iterated at least once";
+}
 
 // ── V-12: StopBeforeAwaitedPublish ───────────────────────────────────────────
 //
