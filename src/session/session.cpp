@@ -637,12 +637,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // make_strand under per_session_strand, carries the bare attested
     // executor under direct_executor, and rejects direct_executor && !attested.
     // This is the first observable mutation; all config rejections are above.
-    auto bound = fixpp::core::make_session_executor(std::move(resolved), cfg_.mode,
-                                                    cfg_.already_serialized_executor, this);
-    if (!bound) {
-        co_return std::unexpected(bound.error());
+    //
+    // 023 T009 (D3-B / E-3 / INV-3a): if the engine pre-created a strand and
+    // stored it in cfg_.engine_adopt_strand, use the adopt_strand_t overload
+    // which stores it DIRECTLY with strand_wrapped=true (no second make_strand
+    // wrap — the D1 anti-pattern). The ordinary user per_session_strand path
+    // (the make_session_executor(resolved, mode, ...) call below) is
+    // BYTE-UNCHANGED and still unconditionally wraps with make_strand.
+    if (cfg_.engine_adopt_strand.has_value()) {
+        // Engine-only path: adopt the pre-created strand directly.
+        exec_ = fixpp::core::make_session_executor(
+            fixpp::core::adopt_strand_t{}, *cfg_.engine_adopt_strand, this);
+    } else {
+        // Ordinary user path (per_session_strand or direct_executor).
+        auto bound = fixpp::core::make_session_executor(std::move(resolved), cfg_.mode,
+                                                        cfg_.already_serialized_executor, this);
+        if (!bound) {
+            co_return std::unexpected(bound.error());
+        }
+        exec_ = std::move(*bound);
     }
-    exec_ = std::move(*bound);
+    // INV-3 (E-3/023): when the engine adopts a strand, the session's inner
+    // executor IS that strand. Debug-assert verifies identity (catches D1 double-
+    // wrap if the engine accidentally re-wraps before calling open()).
+    assert((!cfg_.engine_adopt_strand.has_value()
+            || exec_.underlying() == *cfg_.engine_adopt_strand)
+           && "INV-3: adopted strand mismatch — session executor must equal engine_adopt_strand");
 
     // (2) effective_clock = SessionConfig::clock_override ?:
     // EngineConfig::clock, resolved ONCE here, bound to session lifetime

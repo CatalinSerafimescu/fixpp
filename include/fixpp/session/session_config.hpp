@@ -280,6 +280,20 @@ struct SessionConfig {
     // per-session-direct model where open() emits the Logon at open.
     bool engine_managed = false;
 
+    // 023 T009 — engine-only strand adoption seam (D3-B / E-3 / INV-3a).
+    // When set by Engine::start(), Session::open() calls the adopt_strand_t
+    // overload of make_session_executor, storing this executor DIRECTLY with
+    // strand_wrapped=true instead of re-wrapping via make_strand (D1 anti-pattern).
+    //
+    // MUST NOT be set by non-engine callers. The ordinary user per_session_strand
+    // path is BYTE-UNCHANGED: open() only uses this field when it is non-empty.
+    // Default: nullopt (ordinary path; make_session_executor wraps with make_strand).
+    //
+    // Type: asio::any_io_executor (type-erased) so session_config.hpp need not
+    // include <asio/strand.hpp>; the engine passes asio::any_io_executor{strand}.
+    // Copy-constructible: asio::any_io_executor satisfies std::is_copy_constructible.
+    std::optional<asio::any_io_executor> engine_adopt_strand;
+
     // 021 FR-010 / data-model §2 — inbound validated too-low possible-duplicate
     // APPLICATION-message disposition. When false (default, QFJ-parity), a
     // tolerated too-low app duplicate is dropped (no Application::fromApp call);

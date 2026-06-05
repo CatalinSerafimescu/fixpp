@@ -204,6 +204,17 @@ public:
     // [FR-028 / data-model §E-5]
     void set_listener_events(ListenerEvents* le) noexcept { listener_events_ = le; }
 
+    // T011 (D5/E-5/INV-7/023): engine-internal accessor for the socket's executor.
+    // Used by the INV-7 debug assert in engine.cpp to verify
+    // `transport.socket_executor() == session_strand` at every construction site.
+    // Returns the underlying TCP socket's associated executor (the executor the
+    // socket was constructed with — in engine-managed sessions this MUST equal
+    // the per-session strand after T010). Non-const because get_executor() is
+    // not const on asio::ip::tcp::socket.
+    [[nodiscard]] asio::any_io_executor socket_executor() noexcept {
+        return socket_.get_executor();
+    }
+
     // ── Test-access friend ──────────────────────────────────────────────────
     //
     // Grants state_ visibility to integration tests that need to verify the

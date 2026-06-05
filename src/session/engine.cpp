@@ -43,6 +43,12 @@
 // Internal concrete transport/listener types — only used in this .cpp.
 // [arch §5.3 engine-bootstrap carve-out]
 #include "transport/asio_listener.hpp"
+// T011 (D5/E-5/INV-7): asio_tls_transport_test_access for the INV-7 debug
+// assert (transport.socket().get_executor() == session_strand). This is the
+// R8 lynchpin: every construction site must be audited and asserted.
+// Allowed under [arch §5.3] engine-bootstrap carve-out (engine.cpp already
+// includes asio_listener.hpp — same concession for concrete transport types).
+#include "transport/asio_tls_transport.hpp"
 
 namespace fixpp::session {
 
@@ -143,6 +149,41 @@ bool Engine::stopped() const noexcept {
 // (open() is awaitable; cannot run in synchronous void start()).
 
 namespace {
+
+// ── INV-7 debug assert helper (D5/E-5/T011/R8) ──────────────────────────────
+// Verifies that transport.socket().get_executor() == session_strand.
+// In DEBUG builds: asserts and returns the check result.
+// In RELEASE builds: compiles away to a no-op (zero cost).
+// The comparison uses asio::any_io_executor::operator==, which compares the
+// type-erased executor targets — two any_io_executors wrapping the same
+// asio::strand<any_io_executor> object are equal iff they share the same strand.
+//
+// Called after every engine-managed transport construction site (R8 lynchpin):
+//   (1) accept path: after raw_listener->async_accept() returns a transport.
+//   (2) connect path: after session->drive_reconnect() installs the transport.
+// The assert witnesses that no construction site samples the bare exec_ member
+// instead of the loop-local session strand.
+[[maybe_unused]] void assert_transport_on_session_strand(
+    fixpp::transport::Transport& transport,
+    const asio::strand<asio::any_io_executor>& session_strand) noexcept {
+#ifndef NDEBUG
+    // Downcast to asio_tls_transport to access socket_executor().
+    // The engine exclusively uses asio_tls_transport (via asio_tls_transport_factory).
+    // A null downcast means a non-standard transport was injected (test-seam or future
+    // transport type); skip the assert in that case (the V-10 gtest cell covers all sites).
+    auto* tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(&transport);
+    if (tls != nullptr) {
+        // INV-7: the socket's executor MUST equal the session strand.
+        // Failure = a construction site sampled bare exec_ (R8 — the silent lynchpin).
+        assert(tls->socket_executor() == asio::any_io_executor{session_strand}
+               && "INV-7: transport socket executor != session_strand "
+                  "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
+    }
+#else
+    (void)transport;
+    (void)session_strand;
+#endif
+}
 
 // ── Minimal SOH-delimited scanner for CompID resolution (T012) ───────────────
 // Extracts begin_string (tag 8), sender_comp_id (tag 49), target_comp_id (tag 56)
@@ -497,6 +538,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         }
         std::unique_ptr<fixpp::transport::Transport> transport = std::move(*accept_r);
 
+        // T011/INV-7 (D5/E-5/R8): verify the accepted transport's socket is bound
+        // to the session strand. Auto-satisfied because:
+        //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
+        //   - asio_listener was constructed with `exec` = co_await this_coro::executor
+        //     = the session strand (run_accept_loop:433).
+        //   - async_accept() creates accepted_socket{exec_} = session strand.
+        //   - make_accepted() adopts accepted_socket.get_executor() = session strand.
+        // This assert fires if any site regresses to bare exec_ (R8 silent lynchpin).
+        assert_transport_on_session_strand(*transport, *entry.session_strand);
+
         // Step 2: TLS handshake.
         // async_accept returns a TLS-capable transport (see asio_listener.cpp
         // which builds transports via asio_tls_transport_factory::make_accepted).
@@ -657,6 +708,15 @@ static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& e
         }
     }
 
+    // T011/INV-7 (D5/E-5/R8): verify the connect-path transport's socket is bound
+    // to the session strand. Auto-satisfied because:
+    //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
+    //   - drive_reconnect() → drive_reconnect_attempt() → co_await this_coro::executor
+    //     = the session strand (reconnect_fsm.cpp:117) → factory_->make(exec, ...) uses it.
+    //   - The factory-path ctor stores exec as socket_'s executor.
+    // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
+    assert_transport_on_session_strand(session->live_transport(), *entry.session_strand);
+
     // Publish the live transport so stop() can close the socket and unblock the
     // read-pump's in-flight async_read_some (see SessionEntry::live_transport). [T018]
     entry.live_transport = &session->live_transport();
@@ -683,15 +743,32 @@ void Engine::start() {
         // Session, and transport to this strand. [E-1/E-2/D1]
         entry.session_strand.emplace(asio::make_strand(exec_));
 
+        // T009 (D3-B / E-3 / INV-3a): set the engine-only adopt-strand seam so
+        // Session::open() stores the pre-created strand directly (strand_wrapped=true)
+        // instead of re-wrapping in a second make_strand (the D1 anti-pattern).
+        // This seam is NOT the public `already_serialized_executor` flag — D3-B
+        // explicitly forbids inferring adoption from it (a user may set it under
+        // per_session_strand and the flag does not guarantee the executor is a strand).
+        entry.config.engine_adopt_strand = asio::any_io_executor{*entry.session_strand};
+
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {
             auto& scope_sig = accept_scope_signals_[id];  // default-constructs
+            // T010 (E-1/INV-1/D2): spawn the accept loop ON the session strand so the
+            // whole role loop (accept/handshake/read-pump/both teardown closes) runs
+            // serialized on the per-session strand. The socket created inside the loop
+            // via co_await this_coro::executor will inherit the strand executor —
+            // satisfying D5/E-5/INV-7 (transport socket on session strand) without any
+            // explicit socket rebind. [research D2; data-model E-1/INV-1; tasks T010/T011]
             asio::co_spawn(
-                exec_, run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
+                *entry.session_strand,
+                run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         } else {
+            // T010: same for the connect loop — spawned on the per-session strand.
             asio::co_spawn(
-                exec_, run_connect_loop(engine_cfg_, entry, counter),
+                *entry.session_strand,
+                run_connect_loop(engine_cfg_, entry, counter),
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
