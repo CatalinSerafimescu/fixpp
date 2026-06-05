@@ -167,9 +167,10 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     // The 022 send-path strip must excise these before framing. The payload is a
     // minimal NewOrderSingle (35=D) with deliberately injected 43=Y+122.
     // The counterparty should accept the stripped frame (no 43/122 on wire).
-    //
-    // INV-2: literal "43=" inside field value 11=ORD43=Y is NOT stripped (it is
-    // not at a field boundary). Only the boundary "43=Y\x01" field is excised.
+    // (INV-2 injection-safety — a literal "43=" inside a field value is NOT
+    // excised — is covered by the W3 unit hostile witness in
+    // tests/session/test_send_allow_pos_dup_strip.cpp; this live cell exercises
+    // only the boundary-field strip.)
     const std::string payload =
         "35=D\x01"
         "11=ORD001\x01"
