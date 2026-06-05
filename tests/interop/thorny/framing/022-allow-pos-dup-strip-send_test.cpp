@@ -42,15 +42,14 @@
 #include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
-#include <span>
-#include <string>
-#include <tuple>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <span>
+#include <string>
+#include <tuple>
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -68,8 +67,7 @@ namespace {
 // diff_transcripts() bites under the admin profile {52,10}. NEVER mutate 52 or
 // 10 (canonicalized → false non-biting pass).
 
-TEST(AllowPosDupStripSendGateBite, MutatedTag35MsgTypeCausesGateBite)
-{
+TEST(AllowPosDupStripSendGateBite, MutatedTag35MsgTypeCausesGateBite) {
     // Synthetic stripped NewOrderSingle (35=D) carrying no PossDupFlag or
     // OrigSendingTime (the strip ran successfully).
     const char* expected_text =
@@ -87,8 +85,7 @@ TEST(AllowPosDupStripSendGateBite, MutatedTag35MsgTypeCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "35");
 }
 
-TEST(AllowPosDupStripSendGateBite, MutatedTag34MsgSeqNumCausesGateBite)
-{
+TEST(AllowPosDupStripSendGateBite, MutatedTag34MsgSeqNumCausesGateBite) {
     // Synthetic stripped NewOrderSingle — mutate MsgSeqNum(34) which is COMPARED.
     const char* expected_text =
         "> 8=FIX.4.4\\x0135=D\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
@@ -117,8 +114,7 @@ TEST(AllowPosDupStripSendGateBite, MutatedTag34MsgSeqNumCausesGateBite)
 // The golden assertion verifies the outbound bytes contain no boundary 43/122
 // in the application portion (deferred to first paired live run; absent → skip).
 
-class AllowPosDupStripSend
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class AllowPosDupStripSend : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     const auto [counterparty, role] = GetParam();
@@ -140,11 +136,10 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
 
     fixpp::interop::InteropEngineFixture fx;
     // Default SessionConfig: allow_pos_dup == false (the strip is ON by default).
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                       fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     // Verify the default: allow_pos_dup must be false (C2.1/SC-005).
-    ASSERT_FALSE(cfg.allow_pos_dup)
-        << "allow_pos_dup default must be false (C1/C2.1)";
+    ASSERT_FALSE(cfg.allow_pos_dup) << "allow_pos_dup default must be false (C1/C2.1)";
 
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
@@ -155,8 +150,7 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     // ── Drive to Active ────────────────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; state=" << static_cast<int>(reached);
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -179,12 +173,12 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     const std::string payload =
         "35=D\x01"
         "11=ORD001\x01"
-        "54=1\x01"       // Side=Buy
-        "44=100.00\x01"  // Price
-        "38=10\x01"      // OrderQty
-        "40=2\x01"       // OrdType=Limit
-        "55=SYMB\x01"    // Symbol
-        "43=Y\x01"       // PossDupFlag — MUST be stripped (C2.1)
+        "54=1\x01"                        // Side=Buy
+        "44=100.00\x01"                   // Price
+        "38=10\x01"                       // OrderQty
+        "40=2\x01"                        // OrdType=Limit
+        "55=SYMB\x01"                     // Symbol
+        "43=Y\x01"                        // PossDupFlag — MUST be stripped (C2.1)
         "122=20260605-10:00:00.000\x01";  // OrigSendingTime — MUST be stripped
 
     std::vector<std::byte> payload_bytes;
@@ -198,10 +192,8 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     std::atomic<bool> send_succeeded{false};
 
     asio::co_spawn(
-        fx.ioc().get_executor(),
-        fx.engine().send(id, payload_bytes),
-        [&send_called, &send_succeeded](std::exception_ptr ep,
-                                        fixpp::core::expected_t<void> r) {
+        fx.ioc().get_executor(), fx.engine().send(id, payload_bytes),
+        [&send_called, &send_succeeded](std::exception_ptr ep, fixpp::core::expected_t<void> r) {
             if (!ep) {
                 send_succeeded.store(r.has_value(), std::memory_order_release);
             }
@@ -209,9 +201,7 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
         });
 
     // ── Wait for the send to complete (up to 5 s) ─────────────────────────────
-    fx.run_until(
-        [&send_called] { return send_called.load(std::memory_order_acquire); },
-        5s);
+    fx.run_until([&send_called] { return send_called.load(std::memory_order_acquire); }, 5s);
 
     // ── In-process witness (a): Engine::send returned success (C5/SC-005) ─────
     EXPECT_TRUE(send_called.load(std::memory_order_acquire))
@@ -242,17 +232,18 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     const auto seqnum_after = s->seqnum_mgr_test_access().next_outbound_unsafe();
     EXPECT_EQ(seqnum_after, seqnum_before + 1u)
         << "outbound seqnum did not advance by one after the send; "
-           "expected=" << (seqnum_before + 1u) << " got=" << seqnum_after;
+           "expected="
+        << (seqnum_before + 1u) << " got=" << seqnum_after;
 
     // ── Golden assertion: admin profile {52,10} ───────────────────────────────
     // Tags 34/35 compared verbatim (gate-biting per SC-004). The golden is
     // captured by `run_interop_cell.py --update-goldens` at first paired run.
     // The golden MUST NOT contain boundary 43= or 122= in the app portion
     // (the parent harness verifies this at capture time). Absent → skip.
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "APDS-" + cp_part + "-" + role_part
-                                  + "-fix44-allow-pos-dup-strip-send";
+    const std::string cell_id =
+        "APDS-" + cp_part + "-" + role_part + "-fix44-allow-pos-dup-strip-send";
     hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop ─────────────────────────────────────────────────────────
@@ -261,9 +252,8 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
 
 INSTANTIATE_TEST_SUITE_P(
     Fix44, AllowPosDupStripSend,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     fixpp::interop::hp::cell_name);
 
 }  // namespace

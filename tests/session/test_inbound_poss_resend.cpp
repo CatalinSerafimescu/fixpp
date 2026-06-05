@@ -54,10 +54,10 @@ public:
 // ── Build a frame that carries PossResend(97)=Y ─────────────────────────────────
 
 // Injects "97=Y\x01" into the extra_fields of make_frame.
-inline std::vector<std::byte> make_poss_resend_frame(
-    std::string_view msg_type, std::uint32_t seq,
-    std::string_view sender, std::string_view target,
-    bool poss_resend, std::string extra_fields = {}) {
+inline std::vector<std::byte> make_poss_resend_frame(std::string_view msg_type, std::uint32_t seq,
+                                                     std::string_view sender,
+                                                     std::string_view target, bool poss_resend,
+                                                     std::string extra_fields = {}) {
     std::string ef;
     if (poss_resend) ef += "97=Y\x01";
     if (!extra_fields.empty()) ef += extra_fields;
@@ -117,12 +117,10 @@ TEST_F(InboundPossResendTest, DeliverInSeq_97Y) {
         << "(was " << expected_before << ", got " << expected_after << ")";
 
     // No Reject (35=3) emitted.
-    EXPECT_FALSE(any_reject())
-        << "C4.1/FR-002: in-seq 97=Y must NOT emit a session Reject(35=3)";
+    EXPECT_FALSE(any_reject()) << "C4.1/FR-002: in-seq 97=Y must NOT emit a session Reject(35=3)";
 
     // No Logout (35=5) emitted.
-    EXPECT_FALSE(any_logout())
-        << "C4.1/FR-002: in-seq 97=Y must NOT emit a Logout";
+    EXPECT_FALSE(any_logout()) << "C4.1/FR-002: in-seq 97=Y must NOT emit a Logout";
 }
 
 // ── Test 2: NoApp_ByteIdentity ──────────────────────────────────────────────────
@@ -139,7 +137,8 @@ TEST_F(InboundPossResendTest, NoApp_ByteIdentity) {
         drive_to_active(sessA);
 
         const std::size_t frames_before = captured_frames.size();
-        auto frame_no97 = make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/false);
+        auto frame_no97 =
+            make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/false);
         feed(sessA, frame_no97);
 
         const auto seqnum_after_A = sessA.seqnum_mgr_test_access().next_inbound_unsafe();
@@ -156,7 +155,8 @@ TEST_F(InboundPossResendTest, NoApp_ByteIdentity) {
         drive_to_active(sessB);
 
         const std::size_t frames_before_B = captured_frames.size();
-        auto frame_with97 = make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/true);
+        auto frame_with97 =
+            make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/true);
         feed(sessB, frame_with97);
 
         const auto seqnum_after_B = sessB.seqnum_mgr_test_access().next_inbound_unsafe();
@@ -168,8 +168,8 @@ TEST_F(InboundPossResendTest, NoApp_ByteIdentity) {
             << "C4.4/FR-005: seqnum after 97=Y must equal seqnum after no-97 (no-app case)";
         EXPECT_EQ(state_A, state_B)
             << "C4.4/FR-005: session state after 97=Y must equal state after no-97 (no-app case)";
-        EXPECT_EQ(new_frames_A, new_frames_B)
-            << "C4.4/FR-005: captured outbound frame count must be identical with/without 97 (no-app case)";
+        EXPECT_EQ(new_frames_A, new_frames_B) << "C4.4/FR-005: captured outbound frame count must "
+                                                 "be identical with/without 97 (no-app case)";
     }
 }
 
@@ -194,7 +194,8 @@ TEST_F(InboundPossResendTest, Combo_43Y_97Y) {
         const std::size_t frames_before = captured_frames.size();
 
         auto frame_43only = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
-                                               "45=1\x01" "373=0\x01");
+                                               "45=1\x01"
+                                               "373=0\x01");
         feed(sessA, frame_43only);
 
         const auto state_A = sessA.state();
@@ -210,8 +211,12 @@ TEST_F(InboundPossResendTest, Combo_43Y_97Y) {
         const std::size_t frames_before_B = captured_frames.size();
 
         // Build a too-low frame carrying 43=Y, 122=..., AND 97=Y.
-        std::string ef = "43=Y\x01" "122=20240101-00:00:00.000\x01" "97=Y\x01"
-                         "45=1\x01" "373=0\x01";
+        std::string ef =
+            "43=Y\x01"
+            "122=20240101-00:00:00.000\x01"
+            "97=Y\x01"
+            "45=1\x01"
+            "373=0\x01";
         auto frame_43_97 = make_frame("3", /*seq=*/1, "TW", "ISLD", ef);
         feed(sessB, frame_43_97);
 
@@ -222,8 +227,7 @@ TEST_F(InboundPossResendTest, Combo_43Y_97Y) {
         // 97 must not change the Arm A disposition vs 43-only.
         EXPECT_EQ(state_A, state_B)
             << "C4.3/FR-004: adding 97=Y to 43=Y must not change session state";
-        EXPECT_EQ(seqnum_A, seqnum_B)
-            << "C4.3/FR-004: adding 97=Y to 43=Y must not change seqnum";
+        EXPECT_EQ(seqnum_A, seqnum_B) << "C4.3/FR-004: adding 97=Y to 43=Y must not change seqnum";
         EXPECT_EQ(new_frames_A, new_frames_B)
             << "C4.3/FR-004: adding 97=Y to 43=Y must not change outbound frame count";
     }
@@ -286,8 +290,8 @@ TEST_F(InboundPossResendTest, Edge_TooHigh_97Ignored) {
     feed(sess, frame);
 
     // ResendRequest(35=2) must fire — the existing too-high path is unaffected by 97.
-    EXPECT_TRUE(any_resend_request())
-        << "Edge: too-high 97=Y must emit ResendRequest(35=2); 97 must not suppress the too-high arm";
+    EXPECT_TRUE(any_resend_request()) << "Edge: too-high 97=Y must emit ResendRequest(35=2); 97 "
+                                         "must not suppress the too-high arm";
 
     // Session stays Active.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -316,7 +320,8 @@ TEST_F(InboundPossResendTest, Edge_Admin_97Ignored) {
     // In-seq admin frame (35=3, seq=2) with 97=Y.
     // Admin Reject needs RefSeqNum(45) and SessionRejectReason(373).
     auto frame = make_poss_resend_frame("3", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/true,
-                                        "45=1\x01" "373=0\x01");
+                                        "45=1\x01"
+                                        "373=0\x01");
     feed(sess, frame);
 
     // Session stays Active (admin frame processed normally).
@@ -329,8 +334,7 @@ TEST_F(InboundPossResendTest, Edge_Admin_97Ignored) {
         << "Edge: seqnum must advance after in-seq admin message with 97=Y";
 
     // No Logout emitted for 97.
-    EXPECT_FALSE(any_logout())
-        << "Edge: admin message with 97=Y must NOT emit Logout";
+    EXPECT_FALSE(any_logout()) << "Edge: admin message with 97=Y must NOT emit Logout";
 }
 
 }  // namespace

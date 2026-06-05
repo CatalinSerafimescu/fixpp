@@ -38,10 +38,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <memory>
-#include <string>
-#include <tuple>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/application.hpp>
@@ -49,6 +45,9 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory>
+#include <string>
+#include <tuple>
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -56,11 +55,11 @@
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
 using fixpp::interop::Role;
-using fixpp::session::fsm_state;
 using fixpp::session::Application;
+using fixpp::session::fsm_state;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -70,8 +69,7 @@ namespace {
 // diff_transcripts() bites under the admin profile {52,10}. NEVER mutate 52 or
 // 10 (canonicalized → false non-biting pass).
 
-TEST(PossResendDeliverGateBite, MutatedTag97PossResendCausesGateBite)
-{
+TEST(PossResendDeliverGateBite, MutatedTag97PossResendCausesGateBite) {
     // Synthetic inbound NewOrderSingle (35=D) with PossResend(97)=Y.
     // Tag 97 is COMPARED under admin_profile {52,10}.
     const char* expected_text =
@@ -91,8 +89,7 @@ TEST(PossResendDeliverGateBite, MutatedTag97PossResendCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "97");
 }
 
-TEST(PossResendDeliverGateBite, MutatedTag34MsgSeqNumCausesGateBite)
-{
+TEST(PossResendDeliverGateBite, MutatedTag34MsgSeqNumCausesGateBite) {
     // Tag 34 (MsgSeqNum) is COMPARED under admin_profile {52,10} — mutation must bite.
     const char* expected_text =
         "< 8=FIX.4.4\\x0135=D\\x0149=CPTY_ACC\\x0156=FIXPP_INIT"
@@ -119,10 +116,8 @@ public:
     std::atomic<int> from_app_calls{0};
     std::atomic<bool> tag97_present{false};
 
-    fixpp::core::expected_t<void> fromApp(
-        const MessageView<access_mode::Index>& msg,
-        const SessionId& /*id*/) override
-    {
+    fixpp::core::expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
+                                          const SessionId& /*id*/) override {
         // Check for PossResend(97). The MessageView is available only for the
         // duration of this call; read tag 97 before returning.
         const auto field97 = msg.get(static_cast<std::uint16_t>(97));
@@ -149,8 +144,7 @@ public:
 // Golden assertion: diff using admin profile {52,10}; tags 34/35/97 compared
 // verbatim (gate-biting). Golden captured at first paired live run; absent → skip.
 
-class PossResendDeliver
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class PossResendDeliver : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     const auto [counterparty, role] = GetParam();
@@ -176,8 +170,8 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     ecfg.application = tracking_app;
 
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                       fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -187,8 +181,7 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     // ── Drive to Active ────────────────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; state=" << static_cast<int>(reached);
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -209,11 +202,8 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     // If no parent harness sends the 97=Y message, this window expires and the
     // FSM-Active assertion below still passes (conservative: no false failure).
     // The test only asserts fromApp delivery when the counterparty actually sent.
-    fx.run_until(
-        [&] {
-            return tracking_app->from_app_calls.load(std::memory_order_acquire) >= 1;
-        },
-        20s);
+    fx.run_until([&] { return tracking_app->from_app_calls.load(std::memory_order_acquire) >= 1; },
+                 20s);
 
     fixpp::session::Session* s2 = fx.engine().lookup(id);
     ASSERT_NE(s2, nullptr) << "session disappeared during PossResend window";
@@ -247,10 +237,9 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     // ── Golden assertion: admin profile {52,10} ────────────────────────────────
     // Tags 34/35/97 compared verbatim (gate-biting per SC-004/SC-005). Golden
     // captured at first paired live run; absent → skip:golden-not-yet-captured.
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "PR-" + cp_part + "-" + role_part
-                                  + "-fix44-poss-resend-deliver";
+    const std::string cell_id = "PR-" + cp_part + "-" + role_part + "-fix44-poss-resend-deliver";
     hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop ─────────────────────────────────────────────────────────
@@ -259,9 +248,8 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
 
 INSTANTIATE_TEST_SUITE_P(
     Fix44, PossResendDeliver,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     fixpp::interop::hp::cell_name);
 
 }  // namespace
