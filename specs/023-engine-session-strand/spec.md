@@ -119,10 +119,33 @@ change, a block (banned), or a published snapshot.
   **atomically-published immutable snapshot** (no signature change). `lookup()`
   changes its return type from `Session*` to `std::shared_ptr<Session>` — a
   deliberate, accepted, **safening-only** public API change so the handle is valid
-  across `stop()` / `registry_.clear()`. The control plane publishes an immutable
-  snapshot after each mutation (RCU-style); readers `atomic_load` it (lock-free, no
-  domain entry). FR-008 is amended to permit this one change; FR-011/FR-014
+  across `stop()` / `registry_.clear()` **while the `Engine` is alive** (bounded
+  handle — see the round-3 note below). The control plane publishes an immutable
+  snapshot after each mutation (RCU-style); readers `atomic_load` it (no domain
+  entry, no `std::mutex`). FR-008 is amended to permit this one change; FR-011/FR-014
   encode the read discipline; SC-004 records the intended `abidiff`/`nm` delta.
+
+### Session 2026-06-05 (Gate A round 3)
+
+Gate A round 3 (Codex) confirmed the rev-3 two-domain + D-SNAP architecture and
+closed RC#B/RC#C/RC#D; it surfaced two D-SNAP residuals and three stale-marker fixes,
+applied here (rev-4) without an architecture change. The one item needing a **user
+decision** — the lifetime of the `lookup()` keepalive vs `~Engine`:
+
+- Q: A `lookup()` `shared_ptr<Session>` can keep a `Session` alive past `~Engine`,
+  but `Session` borrows `const EngineConfig& engine_` (session.hpp:486) → a UAF if a
+  handle is dereferenced after `~Engine` (the same hazard the send path documents at
+  engine.cpp:726-730). Re-own `Session`'s engine dependencies behind a
+  `shared_ptr<const EngineRuntime>`, or keep `Session`'s borrowed back-reference and
+  make the keepalive a **bounded handle**? → A: **Bounded handle (accept the
+  precondition; do NOT refactor `Session`'s dependency model).** `lookup()`'s
+  `shared_ptr<Session>` is valid across a concurrent `stop()` / `registry_.clear()`
+  **only while the `Engine` is alive**; the caller MUST NOT let a `lookup()`/snapshot
+  handle outlive the `Engine`. This is a documented hard precondition, guarded by a
+  **debug `~Engine` assertion** that no outstanding `lookup()`/snapshot handle remains
+  (exact accounting where practical; otherwise a debug `use_count()` check on the
+  published snapshot). FR-008/FR-014, E-7, and C-8 encode the bound; the keepalive is
+  **not** a general keepalive past `~Engine`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -244,7 +267,8 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   thread while shutdown clears the registry/endpoint tables on another. The reader
   must observe a consistent immutable snapshot (never an in-place-mutating
   structure), and a `lookup()` handle obtained just before `registry_.clear()`
-  must keep its session alive (shared ownership).
+  must keep its session alive (shared ownership) for as long as the `Engine` is
+  alive (bounded handle — not valid past `~Engine`; FR-008/FR-014).
 
 ## Requirements *(mandatory)*
 
@@ -282,12 +306,16 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   **minimal, safening-only** change: the sole permitted signature change is
   `Engine::lookup()` returning a **shared-ownership handle**
   (`std::shared_ptr<Session>`, was a raw `Session*`) so the returned handle stays
-  valid across `stop()` / `registry_.clear()` under multi-threaded operation. No
-  other public signature change, no public type removal, no required-configuration
-  change, and no new mandatory step for applications to obtain safe multi-threaded
-  behavior under the default configuration. (This single change is the user-accepted
-  cost of making the synchronous public readers MT-safe at runtime — see FR-014/D-SNAP;
-  it is recorded, not silent — see SC-004.)
+  valid across `stop()` / `registry_.clear()` under multi-threaded operation. The
+  handle is a **bounded handle**: it is valid only **while the `Engine` is alive** —
+  because `Session` borrows the engine's runtime config, the caller MUST NOT let a
+  `lookup()`/snapshot handle outlive the `Engine` (a documented hard precondition,
+  debug-asserted at `~Engine`; see FR-014). It is NOT a general keepalive past
+  `~Engine`. No other public signature change, no public type removal, no
+  required-configuration change, and no new mandatory step for applications to obtain
+  safe multi-threaded behavior under the default configuration. (This single change is
+  the user-accepted cost of making the synchronous public readers MT-safe at runtime —
+  see FR-014/D-SNAP; it is recorded, not silent — see SC-004.)
 - **FR-009**: The feature MUST reuse the engine's existing strand primitive (the
   same mechanism behind the default per-session strand mode) for both
   serialization domains rather than introducing a new serialization mechanism or
@@ -297,11 +325,12 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   land and the full set of witnesses passes** — the per-session
   teardown/lifecycle witnesses (V-1, V-2), the transport-on-strand identity
   witness (V-10), the control-plane race witness (V-8), the re-entrant-send
-  witness (V-9), and the snapshot-reader MT witness (V-11) — **and** a clean
+  witness (V-9), the snapshot-reader MT witness (V-11), and the
+  publish-vs-stop ordering witness (V-12) — **and** a clean
   address-, undefined-behavior-, and thread-sanitizer run. Lifting the limitation
   while any of those is still racy or failing is prohibited: the supported-mode
   documentation MUST NOT claim multi-threaded safety until **all** of V-1, V-2,
-  V-8, V-9, V-10, V-11 pass under a clean sanitizer matrix.
+  V-8, V-9, V-10, V-11, V-12 pass under a clean sanitizer matrix.
 - **FR-011**: All engine control-plane state — the session registry, the
   stopping flag, the listener and endpoint tables, the in-flight counters, and
   the publication of per-session handles that the shutdown path reads — MUST be
@@ -329,11 +358,18 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   control-plane mutation, **atomically publish an immutable snapshot** of the
   state these readers need (the registry's `SessionId → shared_ptr<Session>` map
   and the bound-endpoint table); each reader **atomically loads** the current
-  snapshot (no domain entry, no lock, no blocking — consistent with the
-  no-`std::mutex` constraint) and returns a value / shared-ownership handle drawn
-  from it. `lookup()`'s returned `shared_ptr<Session>` keeps the session alive
-  past a concurrent `stop()` / `registry_.clear()` (FR-008). `stopped()` is
-  covered separately by the atomic stopping flag (FR-013).
+  snapshot (no domain entry, no `std::mutex`, no blocking — consistent with the
+  no-`std::mutex` constraint; the standard `std::atomic<std::shared_ptr<…>>`
+  primitive, wait-free where the STL makes it lock-free and otherwise STL-internal
+  non-`std::mutex` synchronization, not an absolute lock-free guarantee) and returns
+  a value / shared-ownership handle drawn from it. `lookup()`'s returned `shared_ptr<Session>` keeps the session alive
+  past a concurrent `stop()` / `registry_.clear()` **while the `Engine` is alive**
+  (FR-008, bounded handle) — it is NOT valid past `~Engine`, because `Session`
+  borrows the engine's runtime config; the caller MUST NOT let a `lookup()`/snapshot
+  handle outlive the `Engine`. This precondition MUST be **debug-asserted at
+  `~Engine`** (no outstanding `lookup()`/snapshot handle remains — exact accounting
+  where practical, otherwise a debug `use_count()` check on the published snapshot).
+  `stopped()` is covered separately by the atomic stopping flag (FR-013).
 
 ### Key Entities
 

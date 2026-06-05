@@ -9,7 +9,8 @@ The default per-session strand mode now serializes each session's full lifecycle
 that `Engine::lookup()` now returns a `std::shared_ptr<Session>` (was a raw `Session*`)
 so the handle stays valid if the engine shuts down concurrently — `lookup()` and
 `acceptor_bound_endpoint()` are now safe to call from any thread while the engine runs
-(they read a lock-free immutable snapshot, no lock, no block).
+(they read an immutable snapshot via `std::atomic<std::shared_ptr<…>>` — no
+`std::mutex`, no block; wait-free where the STL makes it lock-free).
 
 ## Using it (application perspective)
 
@@ -25,8 +26,10 @@ for (int i = 0; i < N; ++i) pool.emplace_back([&]{ ioc.run(); });
 
 // ... application runs; sends may be issued from any thread via engine.send(...) ...
 // lookup()/acceptor_bound_endpoint() are also any-thread-safe now:
-std::shared_ptr<fixpp::session::Session> s = engine.lookup(some_id); // keepalive handle
-if (s) { /* safe even if stop() races registry_.clear() on another thread */ }
+std::shared_ptr<fixpp::session::Session> s = engine.lookup(some_id); // bounded keepalive handle
+if (s) { /* safe even if stop() races registry_.clear() on another thread —
+            but the handle is valid only while `engine` is alive (do NOT let it
+            outlive the Engine; Session borrows the engine's config) */ }
 
 // Shutdown is safe under multi-threading: teardown is serialized per session.
 asio::co_spawn(ioc, engine.stop(), asio::use_future).get();
@@ -59,16 +62,20 @@ The downstream TLS-teardown BIO crash is covered as a symptom by the MT acceptan
 test (§2), not a separate seam (a transport-level seam gates after the BIO touch —
 research D6 / Gate A round 1).
 
-### 1b. Re-entrant send (V-9) + executor binding (V-10) + snapshot readers (V-11)
+### 1b. Re-entrant send (V-9) + executor binding (V-10) + snapshot readers (V-11) + stop-before-publish (V-12)
 
 ```bash
 ./build/linux-clang-tsan/bin/engine_session_strand_test \
-  --gtest_filter='*ReentrantSend_SessionControlSession*:*SocketExecutorIsSessionStrand*:*SnapshotReadersMtSafe*'
+  --gtest_filter='*ReentrantSend_SessionControlSession*:*SocketExecutorIsSessionStrand*:*SnapshotReadersMtSafe*:*StopBeforeAwaitedPublish*'
 # V-9: send from inside a callback (session→control→session) completes, no deadlock, TSan-clean;
 #      a re-entrant send after stop() has begun fast-fails cleanly (no half-cleared-registry race).
 # V-10: asserts transport.socket().get_executor() == the session strand at every ctor site.
 # V-11: lookup()/acceptor_bound_endpoint() called from a thread while the engine runs and stop()
-#       clears concurrently → TSan-clean; a lookup() handle taken before clear() keeps its session alive.
+#       clears concurrently → TSan-clean; a lookup() handle taken before clear() keeps its session
+#       alive while the engine is alive (bounded handle); ~Engine debug-asserts no outstanding handle.
+# V-12: stop() set stopped_ while a role loop sits between transport creation and its awaited publish
+#       → the publish takes the stopped disposition (no live publish) and the loop closes before any
+#       read is initiated; TSan-clean, no pumped transport exposed behind the in-progress stop().
 ```
 
 ### 2. Multi-threaded lifecycle acceptance (SC-001)
@@ -118,7 +125,8 @@ nm -D --defined-only build/linux-clang-release/lib/libfixpp_capi.so \
   clean fast-fail when issued after `stop()` has begun.
 - **V-10** transport socket executor == session strand (asserted, all ctor sites).
 - **V-11** snapshot public readers (`lookup`/`acceptor_bound_endpoint`) MT-safe under TSan;
-  `lookup()` handle keepalive across a concurrent `clear()`.
+  `lookup()` handle bounded keepalive across a concurrent `clear()` (valid while the engine is
+  alive); `~Engine` debug-asserts no outstanding `lookup()`/snapshot handle remains.
 - MT lifecycle clean (ASan/UBSan/TSan); cross-session parallelism preserved.
 - Single-threaded suite green, no rewrites; perf within ±5% on the two-hop send path.
 - `nm`/`abidiff` show **exactly one** intended diff (`lookup()` return type) and no other.

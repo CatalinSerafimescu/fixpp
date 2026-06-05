@@ -103,7 +103,7 @@ src/session/
 │                        #             strand (E-5/INV-7); listeners_/endpoints_ writes + AWAITED session/
 │                        #             live_transport publication VIA control strand BEFORE read-pump (E-0/E-2/D-PUB);
 │                        #             each control mutation republishes reader_snapshot_ (E-7)
-│                        #   lookup()/acceptor_bound_endpoint() — atomic_load(reader_snapshot_), lock-free (E-7/C-8)
+│                        #   lookup()/acceptor_bound_endpoint() — atomic_load(reader_snapshot_), std::atomic<shared_ptr<const Snapshot>>, no std::mutex (E-7/C-8)
 │                        #   send()   — caller → control strand (registry/stopped) → session strand
 │                        #   stop()   — control strand: snapshot/cancel/clear; per-session: transport
 │                        #             close() (before join) + Session::close() (after join) on strand
@@ -118,7 +118,8 @@ tests/session/
 │                                          #   V-9: re-entrant send session→control→session under TSan ≥3 threads
 │                                          #        (+ clean fast-fail when issued after stop() has begun)
 │                                          #   V-10: assert transport.socket().get_executor()==session_strand
-│                                          #   V-11: lookup()/acceptor_bound_endpoint() any-thread vs concurrent stop() — TSan-clean + keepalive
+│                                          #   V-11: lookup()/acceptor_bound_endpoint() any-thread vs concurrent stop() — TSan-clean + bounded keepalive
+│                                          #   V-12: stop() racing between transport creation and the awaited publish → stopped disposition, no read initiated
 │                                          #   V-3: 2-session cross-parallelism cell
 └── test_business_messages_roundtrip.cpp  # existing MT (3-thread) harness — acceptance witness (V-2), now clean
 
@@ -174,7 +175,8 @@ binding seam (`session_executor.cpp`), and `stopped_`'s type — reusing 007's
   (was raw `Session*`) — a deliberate, accepted, safening-only public API change. Root
   causes addressed:
   - **RC#A** — D0/FR-011's "ALL engine-global state on the control strand" omitted the
-    synchronous public read path → added **D-SNAP** lock-free reader snapshot + entity **E-7**
+    synchronous public read path → added **D-SNAP** atomic immutable reader snapshot
+    (`std::atomic<std::shared_ptr<const Snapshot>>`, primitive pinned round-3) + entity **E-7**
     + contract **C-8** + obligation **V-11**; **FR-008** amended (safening-only,
     `lookup()`→`shared_ptr`) + new **FR-014**; **FR-011** reconciled (mutate on strand, read
     via snapshot); **SC-004** reworded (no *unintended* change, one recorded `lookup()` diff);
@@ -202,3 +204,32 @@ binding seam (`session_executor.cpp`), and `stopped_`'s type — reusing 007's
   applied as a deliberate, accepted API delta rather than a doc-narrowing.
   Reviews: `research/reviews/codex_023-engine-session-strand_gate_a_2_review.md`,
   `research/reviews/opus_023-engine-session-strand_gate_a_2_adversarial_review.md`.
+- **Round 3 (2026-06-05): Codex P1=1 P2=2 P3=2 → architecture converged; surgical rev-4.**
+  Codex confirmed the rev-3 two-domain + D-SNAP architecture (RC#B/RC#C/RC#D closed) and
+  surfaced two D-SNAP residuals + three stale-marker fixes, applied in this rev-4 bundle
+  (no architecture change):
+  - **F1 (P1) — `lookup()` keepalive lifetime.** A `shared_ptr<Session>` from `lookup()` could
+    outlive `Engine` while `Session` borrows `const EngineConfig& engine_` (session.hpp:486) →
+    UAF (same hazard the send path documents at engine.cpp:726-730). **User decision
+    (authoritative): bounded handle** — keep `lookup() → shared_ptr<Session>`, do NOT refactor
+    `Session`'s dependency model; the handle is valid across `stop()`/`registry_.clear()` **only
+    while the `Engine` is alive** (documented hard precondition + debug `~Engine` assertion that
+    no outstanding handle remains). Encoded in spec FR-008/FR-014 + Clarifications round-3 note,
+    data-model E-7 (INV-9a), contract C-8/C-4, quickstart.
+  - **F2 (P2) — D-SNAP primitive pinned.** Dropped the absolute "lock-free" claim and the
+    deferral to the unshipped `fixpp::sync::atomic_shared_ptr` (NFR-017 backlog, whose
+    `std::mutex` fallback is barred from the awaitable `engine.hpp` by Art. XI §3 / XV); pinned
+    the standard **`std::atomic<std::shared_ptr<const Snapshot>>`** (header-only, no `std::mutex`
+    in our headers; wait-free where the STL makes it lock-free, else STL-internal non-`std::mutex`
+    sync). Added to the **V-6 perf gate**. NFR-017 is only a possible later optimization. Research
+    D-SNAP, data-model E-7, contract C-8/V-6.
+  - **F3 (P2) — D-PUB stop-before-publish hole.** The awaited publish only covered publish-before-
+    stop; if `stop()` is already in progress when the role loop reaches the awaited publish, a
+    naive publish would expose a live transport after `stop()` saw `live_transport == nullptr`.
+    Pinned the publish-coroutine contract (check `stopped_` first; if true, take a **stopped
+    disposition** — no live publish — and the loop closes/returns before any read) + new **V-12**.
+    Research D-PUB, data-model E-2 (INV-2a)/E-4, contract C-6/V-12.
+  - **F4 (P3)** — rewrote the contract's stale "No new public API" to "No new public type, command
+    schema, or C-ABI surface; one changed C++ public signature (`lookup()`)".
+  - **F5 (P3)** — bumped research/data-model/contract rev-2 headers to rev-3.
+  Reviews: `research/reviews/codex_023-engine-session-strand_gate_a_3_review.md`.

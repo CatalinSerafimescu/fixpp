@@ -1,7 +1,7 @@
 # Data Model: Per-Session + Control-Plane Strand Binding
 
 **Feature**: 023-engine-session-strand
-**Date**: 2026-06-05 (rev 2 — two-domain model)
+**Date**: 2026-06-05 (rev 3 — D-SNAP public-reader decision + Gate A round-3 lifetime/primitive fixes)
 
 No persisted data, no public types. The entities are engine-internal runtime
 serialization domains and bindings, documented so `/speckit-tasks` and Gate A can
@@ -53,6 +53,13 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   `live_transport`) on the control strand before the entry can be cleared. The struck
   atomic-`live_transport` alternative is NOT used (it gives read-definedness but not the
   ordering — research D-PUB). No bare-session-strand write that the control strand later reads.
+- **Stopped-before-publish disposition (INV-2a / D-PUB / V-12)**: the publish coroutine checks
+  `stopped_` **first** on the control strand. If `stop()` is already in progress (`stopped_`
+  true), it MUST **NOT** publish a live `live_transport` for pumping — it records a **stopped
+  disposition** (leaves `live_transport == nullptr` / closes the freshly-created transport) and
+  the session-strand role loop **closes/returns before initiating any read** (never enters
+  `async_read_some`). This closes the symmetric *stop-before-publish* hole (Gate A round-3): a
+  transport created just before the awaited publish is never pumped once `stop()` has begun.
 - **Unchanged**: `session_role`, `config`, `session_cancel`. The `live_transport`
   close-to-wake contract is preserved; only the executor it runs on (the session strand)
   and the publication discipline change.
@@ -84,7 +91,10 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
 `Engine::stop()` per live session, with domains explicit:
 
 1. **(control strand)** set `stopped_` true (atomic release), snapshot + total-cancel
-   every `session_cancel` / `accept_scope_signals_`.
+   every `session_cancel` / `accept_scope_signals_`. (Because this runs on the control
+   strand, any concurrent role-loop's awaited D-PUB publish that arrives after this sees
+   `stopped_` true and takes the INV-2a stopped disposition — never publishes a pumped
+   transport behind an in-progress `stop()`.)
 2. **(session strand, before join)** dispatch transport `close()` — wakes the idle
    in-flight read; serialized with that read's completion (fixes the BIO race). INV-4a.
 3. **(control strand)** drive the outstanding-loop **join** + the send-drain.
@@ -132,18 +142,32 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
 
 - **What**: an **atomically-published immutable snapshot** of the control-plane state the
   synchronous public readers need — the registry's `SessionId → shared_ptr<Session>` map and
-  the bound-endpoint table. Held as a `shared_ptr<const …>` published via `atomic_store` /
-  read via `atomic_load` (the lock-free RCU idiom — Art. XV-consistent, NOT a `std::mutex`).
-  Exact primitive (`std::atomic<std::shared_ptr<T>>` vs the project `atomic_shared_ptr`)
-  deferred to `/tasks`.
+  the bound-endpoint table. Held in a **`std::atomic<std::shared_ptr<const Snapshot>>`** (the
+  standard C++20 primitive — header-only, **no `std::mutex` in our headers**, Art. XV-consistent),
+  published via `atomic_store` / read via `atomic_load` (the RCU idiom). The read is **wait-free
+  on STLs where `std::atomic<shared_ptr>` is lock-free**, otherwise standard-library-internal
+  synchronization that is NOT a `std::mutex` in our code — the absolute "lock-free" claim is
+  dropped; the read cost is measured by the V-6 perf gate. This deliberately does **NOT** use the
+  project's unshipped `fixpp::sync::atomic_shared_ptr` (NFR-017, backlog) — that is only a possible
+  later optimization (research D-SNAP).
 - **Owner**: the `Engine` (a new member; e.g. `reader_snapshot_`). Republished by the control
   strand after **every** control-plane mutation (registry insert/erase, listener/endpoint
   mutation, D-PUB publish/unpublish).
 - **Readers**: `lookup()` `atomic_load`s the snapshot and returns a
   **`std::shared_ptr<Session>`** drawn from it (the accepted FR-008 signature change — the
-  handle outlives a concurrent `registry_.clear()`); `acceptor_bound_endpoint()` `atomic_load`s
-  the snapshot and returns its `Endpoint` **by value** (no signature change). Neither enters a
-  strand, takes a lock, or blocks.
+  handle outlives a concurrent `registry_.clear()` **while the `Engine` is alive**);
+  `acceptor_bound_endpoint()` `atomic_load`s the snapshot and returns its `Endpoint`
+  **by value** (no signature change). Neither enters a strand, takes a lock, or blocks.
+- **Bounded handle (INV-9a / FR-008/FR-014)**: the `lookup()`/snapshot handle is a
+  **bounded handle** — valid across a concurrent `stop()` / `registry_.clear()` **only
+  while the `Engine` is alive**. `Session` borrows `const EngineConfig& engine_`
+  (session.hpp:486) from `Engine::engine_cfg_`, so dereferencing a handle after `~Engine`
+  is a UAF (the same hazard the send path documents at engine.cpp:726-730). This is a
+  documented hard precondition (NOT a refactor of `Session`'s dependency model): the
+  caller MUST NOT let a handle outlive the `Engine`, **debug-asserted at `~Engine`** that
+  no outstanding `lookup()`/snapshot handle remains (exact accounting where practical,
+  otherwise a debug `use_count()` check on the published snapshot). The keepalive is NOT
+  a general keepalive past `~Engine`.
 - **Invariant (INV-9 / FR-014)**: the synchronous public readers NEVER read a control-plane
   structure the control strand is mutating in place — only the published immutable snapshot.
   Mutation is control-strand-confined (FR-011); the snapshot decouples reads from it.
@@ -162,7 +186,7 @@ start():  (on control strand)  for each registered session →
               └─ listeners_/listener_endpoints_ writes         on control strand          [E-0/INV-0]
               (each control-strand mutation republishes the E-7 reader snapshot)          [E-7/INV-9]
 
-lookup()/acceptor_bound_endpoint():  atomic_load(reader_snapshot_) → handle/value   [E-7]  (any thread, lock-free, no strand)
+lookup()/acceptor_bound_endpoint():  atomic_load(reader_snapshot_) → handle/value   [E-7]  (any thread, no std::mutex, no strand; std::atomic<shared_ptr<const Snapshot>>)
 
 send():   caller → control_strand (registry/stopped read, counter bump)   [E-0]
                  → session_strand (toApp + Session::send)                  [E-1]   (both non-blocking posts)

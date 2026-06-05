@@ -1,7 +1,7 @@
 # Research: Per-Session + Control-Plane Strand Binding for the Engine
 
 **Feature**: 023-engine-session-strand
-**Date**: 2026-06-05 (rev 2 — two-domain model after Gate A round 1)
+**Date**: 2026-06-05 (rev 3 — D-SNAP public-reader decision + Gate A round-3 lifetime/primitive fixes)
 **Inputs**: spec.md (clarified + Gate A round-1 session); constitution Art. XI; the
 `BIO_ctrl` crash analysis; feature 007 (`fixpp::core::session_executor`); the engine
 role-loop + `stop()` + `Engine::send` code; the Gate A round-1 reviews
@@ -108,6 +108,21 @@ and then have a later queued publish expose a live transport after the stop sequ
   be cleared, so a concurrent `stop()` never reads a stale handle for a loop that has ended.
 - **Snapshot republish**: each publish/unpublish on the control strand also refreshes the
   D-SNAP immutable reader snapshot, so the public readers see the new state.
+- **Stop-already-in-progress (the symmetric ordering hole — Gate A round-3)**: the awaited
+  publish closes the *publish-before-stop* race but NOT the *stop-before-publish* one. If
+  `stop()` is already running on the control strand when the role loop reaches the awaited
+  publish — `stop()` has set `stopped_`, emitted cancellation, iterated `registry_`, seen
+  `live_transport == nullptr` — a naive publish would still expose a live transport for
+  pumping *after* the stop sequence began. **Contract (pinned)**: the publish coroutine runs
+  on the control strand and **checks `stopped_` first**; if `stopped_` is already true it MUST
+  **NOT** publish a live transport for normal pumping — instead it records a **stopped
+  disposition** (and leaves `live_transport == nullptr` / closes the freshly-created transport)
+  and makes the session-strand role loop **close/return before any read is initiated** (the
+  loop observes the stopped disposition the awaited publish returns and never enters
+  `async_read_some`). So a transport created just before the awaited publish is never pumped
+  once `stop()` has begun, and `stop()` never has a late publish expose a live transport behind
+  its back. Verified by **V-12** (`stop()` racing exactly between transport creation and the
+  awaited publish).
 
 **The atomic-`live_transport` alternative is struck** (was offered in rev-2 as co-equal): an
 atomic `live_transport` makes the *read* well-defined but does **not** provide the *ordering*
@@ -117,7 +132,8 @@ is mandatory; an atomic form is acceptable only for `stopped_` (D-STOP), where t
 ordering obligation beyond the flag itself.
 
 **Rationale**: closes Gate A round-2 Codex-#2 (P1) + NEW-3 / Root cause B (torn read AND
-missed-close ordering of the published handles across domains).
+missed-close ordering of the published handles across domains); the stop-already-in-progress
+clause + V-12 close Gate A round-3 Codex-#3 (the symmetric stop-before-publish hole).
 
 ### D-STOP — `stopped_` memory model
 
@@ -132,7 +148,7 @@ control strand in `stop()`.
 **Rationale**: closes Gate A NEW-6; the plain-bool "safe under confinement" comment is
 exactly the invariant this feature removes.
 
-### D-SNAP — Lock-free snapshot for the synchronous public readers (NEW; Gate A round-2 user decision)
+### D-SNAP — Atomic immutable snapshot for the synchronous public readers (NEW; Gate A round-2 user decision; primitive pinned round-3)
 
 **Decision**: the synchronous public readers `lookup()` (engine.cpp:117-119) and
 `acceptor_bound_endpoint()` (engine.cpp:896-899) read control-plane `unordered_map`s
@@ -145,22 +161,35 @@ Art. XV), or a published snapshot. The user chose **Full MT-safe (accept the API
 - After **every** control-plane mutation, the control strand **atomically publishes**
   an **immutable snapshot** (RCU-style) of the state the readers need: the registry's
   `SessionId → shared_ptr<Session>` map and the bound-endpoint table. Publish = build
-  a fresh immutable structure, then `atomic_store` a `shared_ptr<const …>` to it.
-- Public readers **`atomic_load`** the current snapshot (no strand entry, no lock, no
-  block) and return a value (`acceptor_bound_endpoint()` → `Endpoint` by value — no
+  a fresh immutable structure, then `atomic_store` a `shared_ptr<const Snapshot>` to it.
+- Public readers **`atomic_load`** the current snapshot (no strand entry, no `std::mutex`,
+  no block) and return a value (`acceptor_bound_endpoint()` → `Endpoint` by value — no
   signature change) or a shared-ownership handle (`lookup()` → `std::shared_ptr<Session>`,
   drawn from the snapshot's `shared_ptr<Session>` map, so the handle outlives a concurrent
-  `registry_.clear()`).
+  `registry_.clear()` while the `Engine` is alive — bounded handle, FR-008/FR-014).
 - **`lookup()`'s return type changes** from raw `Session*` to `std::shared_ptr<Session>`
   — the single deliberate, accepted, safening-only public API change (FR-008/SC-004).
   `acceptor_bound_endpoint()` keeps its `Endpoint`-by-value signature.
 
-**Consistency with Art. XV (no `std::mutex`)**: an `atomic_load` of a `shared_ptr<const>`
-is the lock-free RCU idiom — not a mutex. The project's isolated `atomic_shared_ptr`
-follow-up (`[[project_libcxx_atomic_shared_ptr_followup]]`) is the eventual primitive; at
-the design level this decision commits the **lock-free reader-snapshot intent** and leaves
-the exact primitive (`std::atomic<std::shared_ptr<T>>` vs the project `atomic_shared_ptr`
-vs a `seqlock`-free generational pointer) to `/tasks`.
+**Primitive (pinned — standard `std::atomic<std::shared_ptr<const Snapshot>>`)**: the
+publication primitive is the **standard-library** `std::atomic<std::shared_ptr<const Snapshot>>`
+(C++20, header-only, no `std::mutex`) — `atomic_store` to publish, `atomic_load` to read. It is
+deliberately NOT the project's unshipped `fixpp::sync::atomic_shared_ptr` (NFR-017,
+`spec/feature-catalogue.md:288` — backlog, "its OWN spec + own Gate A"), whose `std::mutex`-sharded
+fallback (`../atomic-shared-ptr/.../atomic_shared_ptr.hpp`) **cannot** be included into `engine.hpp`,
+which includes `asio::awaitable` (Art. XI §3 / Art. XV ban plain `std::mutex` in awaitable-including
+headers, `.specify/constitution.md:146-149,217`). The design does NOT depend on NFR-017 landing;
+NFR-017 is only a possible **later optimization** if the bench gate (V-6) shows the standard
+primitive's read cost is material.
+
+**Consistency with Art. XV (no `std::mutex` in our headers)**: `std::atomic<std::shared_ptr<…>>`
+is an STL primitive — it introduces **no `std::mutex` into our headers** regardless of the STL's
+internal lock strategy. Read cost: it is a **wait-free read on STLs where
+`std::atomic<shared_ptr>` is lock-free** (a runtime `is_lock_free()` probe); otherwise the STL uses
+**standard-library-internal synchronization that is NOT a `std::mutex` in our code/headers**, so the
+absolute "lock-free / no lock" claim is dropped — the read is non-blocking from the caller's view but
+not guaranteed lock-free on every STL. The perf gate (V-6) measures the real read/publish cost on
+the supported STL matrix.
 
 **Rationale**: closes Gate A round-2 Codex-#1 / Root cause A; reconciles FR-011's "ALL …
 on the control strand" to **mutate on the strand, read via the published snapshot**. The
