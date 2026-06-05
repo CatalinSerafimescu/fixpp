@@ -395,3 +395,14 @@ bare shared executor (the rev-1 bug).
 - **R6 — an awaited publish deadlocks the role loop** (D-PUB) → the publish runs on a
   **distinct** strand over the same context and the loop **suspends** (does not block a
   thread); witnessed by V-2 lifecycle + the absence of any thread held across the hop.
+- **R7 — implementer must NOT unify the two lifetime mechanisms** (Gate A final / Opus) → the
+  same `Session`-borrows-`EngineConfig&` hazard is guarded by **two intentionally separate**
+  mechanisms: engine-internal `Engine::send` uses a **hard runtime barrier** (`send_counter_`
+  drained before `registry_.clear()`); the app-facing `lookup()` handle uses **only** a debug
+  assert + caller obligation (the bounded handle — NO `stop()` drain). Do not "unify the
+  keepalive": draining on app-held leases would hang `stop()`; weakening the send barrier into
+  an assert would re-open the send-path UAF. Keep them separate (note for `/tasks`).
+- **R8 — D5 "no ctor samples bare `exec_`" is the silent lynchpin** (Gate A final / Opus) → a
+  single un-fixed transport/listener ctor at ANY of the four audited sites silently re-opens the
+  per-session race with **no compile-time signal**. Fix all four (half-restructure precedent) and
+  run the **V-10** `socket().get_executor() == session_strand` assertion at every site under TSan.

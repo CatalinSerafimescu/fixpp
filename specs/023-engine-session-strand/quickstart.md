@@ -12,6 +12,11 @@ so the handle stays valid across a concurrent `stop()` / registry clear **while 
 (they read an immutable snapshot via `std::atomic<std::shared_ptr<…>>` — no
 `std::mutex`, no block; wait-free where the STL makes it lock-free).
 
+> **Bounded handle:** a `lookup()` handle must not outlive the `Engine` (the `Session`
+> borrows the engine's runtime config — dereferencing it past `~Engine` is a UAF). This
+> precondition is **debug-asserted at `~Engine`** but **unenforced in release builds**;
+> releasing all `lookup()` handles before destroying the `Engine` is a caller obligation.
+
 ## Using it (application perspective)
 
 ```cpp
