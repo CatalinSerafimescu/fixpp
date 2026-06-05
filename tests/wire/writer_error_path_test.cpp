@@ -50,6 +50,11 @@ constexpr char soh = '\x01';
 // Helper: bytes of a string literal.
 std::vector<std::byte> bv(std::string_view s) {
     std::vector<std::byte> out(s.size());
+    // An empty string_view has a null data() pointer; memcpy(_, nullptr, 0) is
+    // UB (src declared nonnull) — same class as the write_span bug this fixes.
+    if (s.empty()) {
+        return out;
+    }
     std::memcpy(out.data(), s.data(), s.size());
     return out;
 }
