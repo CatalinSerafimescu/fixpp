@@ -50,8 +50,14 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   `stop()` can never observe a null `live_transport` and skip the close-to-wake. The publish
   job is part of the **outstanding-loop join accounting** (stop's join does not complete while
   a publish is pending). On **every** loop-exit path — normal return, cancellation, AND
-  error — the loop **unpublishes** (resets `session` / `live_transport`) on the control
-  strand before the entry can be cleared (FR-011). The struck
+  error — the loop **unpublishes** (resets **`live_transport`** — the load-bearing stale-
+  pointer hazard) on the control strand before the entry can be cleared (FR-011).
+  **`session` is deliberately retained** (it is a `shared_ptr` owned by the entry, never a
+  dangling read, and lives until `registry_.clear()`): nulling it would break the
+  terminal-state-visibility contract that `lookup()` returns a disconnected/auth-failed
+  session while the engine is alive — asserted by the pre-existing 015
+  `engine_acceptor_failclosed` cells that **V-4 forbids rewriting** (SC-003/FR-007). `stop()`
+  step 4 still `close()`s the retained session — idempotent on an already-closed one. The struck
   atomic-`live_transport` alternative is NOT used (it gives read-definedness but not the
   ordering — research D-PUB). No bare-session-strand write that the control strand later reads.
 - **Stopped-before-publish disposition (INV-2a / D-PUB / V-12)**: the publish coroutine checks

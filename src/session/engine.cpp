@@ -458,9 +458,10 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
 //     returns false. The caller must close/return without entering the read pump.
 //   - If not stopped: publishes entry.session and entry.live_transport; returns true.
 //
-// unpublish_entry: runs on the control strand; resets entry.session and
-//   entry.live_transport to null. Called on EVERY loop exit path (normal return,
-//   cancellation, error) before the entry can be cleared. [data-model E-2/INV-2]
+// unpublish_entry: runs on the control strand; resets entry.live_transport to null
+//   (entry.session is retained — owned by the entry, observable via lookup() until
+//   registry_.clear()). Called on EVERY loop exit path (normal return, cancellation,
+//   error) before the entry can be cleared. [data-model E-2/INV-2]
 //
 // Both are co_spawned with co_spawn(control_strand_, fn, use_awaitable) from the
 // session-strand role loop — a non-blocking post across two distinct strands, so
@@ -496,10 +497,18 @@ asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_, SessionEntry& e
 // Must be called on EVERY exit path of the role loop (normal, cancel, error).
 // The reset is a no-op if the entry was never published (stopped disposition).
 asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
-    // Reset the published handles so stop() observes a clean null on any
-    // subsequent iteration (e.g. for a second stop() call or an audit).
-    // Idempotent: resetting an already-null shared_ptr/pointer is harmless.
-    entry.session.reset();
+    // Reset ONLY entry.live_transport — the load-bearing D-PUB hazard. After the
+    // role loop exits, the transport is being torn down; a stale live_transport
+    // raw pointer would let stop() step 2 close a freed transport. Nulling it makes
+    // stop() correctly skip an already-exited session (entry.live_transport==nullptr).
+    //
+    // entry.session is DELIBERATELY retained (not reset). It is a shared_ptr OWNED by
+    // the SessionEntry, never a dangling read, and lives until registry_.clear() in
+    // stop() step 5. Keeping it preserves the terminal-state-visibility contract that
+    // lookup() returns a disconnected/auth-failed session while the engine is alive
+    // (asserted by the pre-existing 015 engine_acceptor_failclosed cells, which V-4
+    // forbids rewriting). stop() step 4 still close()s it — idempotent on an already-
+    // closed session. [data-model E-2/INV-2 refinement; preserves SC-003/FR-007/V-4]
     entry.live_transport = nullptr;
     co_return;
 }
@@ -741,9 +750,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // counter or detached spawn needed. [T015 locked design decision #3]
         co_await run_read_pump(*raw, *session, entry.config, surplus);
 
-        // Step 10 (T013): unpublish on normal exit — reset entry.session and
-        // entry.live_transport on the control strand BEFORE this loop entry can be
-        // cleared by stop(). This path is also reached on read-pump EOF (normal).
+        // Step 10 (T013): unpublish on normal exit — reset entry.live_transport
+        // (entry.session retained for lookup() terminal-visibility) on the control
+        // strand BEFORE this loop entry can be cleared by stop(). Also reached on
+        // read-pump EOF (normal) and the acceptor auth-fail close.
         // The unpublish is co_awaited so it completes before the counter_guard
         // decrements (which signals stop()'s join that this loop has exited). [INV-2]
         co_await asio::co_spawn(engine.control_strand_, unpublish_entry(entry),
