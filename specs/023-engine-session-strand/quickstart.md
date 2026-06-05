@@ -34,18 +34,30 @@ out of scope).
 
 ## Verifying the fix (developer perspective)
 
-### 1. Deterministic regression witness (RED → GREEN)
+### 1. Deterministic regression witness — control-plane race (RED → GREEN, V-8)
 
 ```bash
-# Build + run the interleaving-seam witness under sanitizers.
-cmake --build build/linux-clang-asan  --target engine_session_strand_test -j2
-./build/linux-clang-asan/bin/engine_session_strand_test \
-  --gtest_filter='*TeardownRaceClosesDuringInflightRead*'
-# Pre-change engine: reproduces the BIO_ctrl UAF every run (reliable RED).
-# Post-change engine: passes clean.
+# A latch holds an accept-loop registry/listener write open while stop() (and an
+# any-thread send) run on other threads — TSan reports the data race deterministically.
+cmake --build build/linux-clang-tsan --target engine_session_strand_test -j2
+./build/linux-clang-tsan/bin/engine_session_strand_test \
+  --gtest_filter='*ControlPlaneRace_StopVsAcceptPublish*'
+# Pre-change engine: TSan reports the registry_/listeners_ data race EVERY run (reliable RED).
+# Post-change engine: clean (the control strand serializes them).
 ```
 
-Repeat under `build/linux-clang-ubsan` and `build/linux-clang-tsan`.
+The downstream TLS-teardown BIO crash is covered as a symptom by the MT acceptance
+test (§2), not a separate seam (a transport-level seam gates after the BIO touch —
+research D6 / Gate A round 1).
+
+### 1b. Re-entrant send across both domains (V-9) + executor binding (V-10)
+
+```bash
+./build/linux-clang-tsan/bin/engine_session_strand_test \
+  --gtest_filter='*ReentrantSend_SessionControlSession*:*SocketExecutorIsSessionStrand*'
+# V-9: send from inside a callback (session→control→session) completes, no deadlock, TSan-clean.
+# V-10: asserts transport.socket().get_executor() == the session strand at every ctor site.
+```
 
 ### 2. Multi-threaded lifecycle acceptance (SC-001)
 
@@ -66,9 +78,11 @@ ctest --test-dir build/linux-clang-tsan -L 'session' --output-on-failure
 ctest --test-dir build/linux-clang-debug -R '^session_' --output-on-failure
 ```
 
-### 4. Perf gate (V-6, Article VIII ±5%)
+### 4. Perf gate — TWO-hop send path (V-6, Article VIII ±5%)
 
 ```bash
+# Cover session throughput AND the send / send-from-callback path (the two-hop
+# caller→control→session route); re-measure the baseline against the two-hop design.
 cd build/linux-clang-release && ./bin/<session_throughput_bench> \
   --benchmark_format=json --benchmark_out=../../bench/results/session_strand.json
 cd ../.. && python3 tools/bench_compare.py \
@@ -85,9 +99,11 @@ nm -D --defined-only build/linux-clang-release/lib/libfixpp_capi.so \
 
 ## Done criteria
 
-- Deterministic witness: RED pre-change, GREEN post-change, all three sanitizers.
-- MT lifecycle clean (ASan/UBSan/TSan).
-- Single-threaded suite green, no rewrites; perf within ±5%.
+- **V-8** control-plane race witness: TSan RED pre-change, GREEN post-change.
+- **V-9** re-entrant send (session→control→session) no deadlock under TSan ≥3 threads.
+- **V-10** transport socket executor == session strand (asserted, all ctor sites).
+- MT lifecycle clean (ASan/UBSan/TSan); cross-session parallelism preserved.
+- Single-threaded suite green, no rewrites; perf within ±5% on the two-hop send path.
 - `nm`/`abidiff` no-diff.
-- behaviors-and-limitations **L-019-3 lifted**; multi-threaded operation documented
-  as supported.
+- behaviors-and-limitations **L-019-3 lifted** — only after BOTH domains' TSan
+  witnesses pass; multi-threaded operation documented as supported.

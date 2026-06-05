@@ -24,11 +24,32 @@ closes a session's live network connection on one thread while that session's
 in-flight inbound read completes on another, corrupting the shared TLS state and
 crashing the process.
 
+There is a **second, co-equal** hazard the per-session boundary does not address:
+the engine's *control plane*. The engine keeps engine-global bookkeeping — its
+registry of sessions, its "stopping" flag, its listener/endpoint tables, and its
+in-flight counters — and today reads and mutates that bookkeeping on the bare
+executor with no serialization (it was only ever safe under single-thread
+confinement). On a multi-threaded executor, a connection accepted on one thread
+writes the registry/listener tables while shutdown on another thread clears them,
+and an outbound send issued from any thread reads the registry while shutdown
+mutates it — a data race on the engine's own data structures that is *worse* than
+the TLS-teardown crash, and that no per-session boundary can fix.
+
 This feature makes a multi-threaded executor a **first-class, supported** way to
-run the engine, by ensuring that **all** work for a single session — including
-the engine's read loop and the teardown close — happens inside that session's
-serialization domain. Two operations for the same session never run
-concurrently, even on a many-threaded executor, and even during shutdown.
+run the engine by establishing **two** serialization domains:
+
+1. a **per-session domain** — all work for a single session (establishment,
+   handshake, read-pump, callbacks, sends, and teardown closes) is serialized so
+   no two operations for that session ever overlap; and
+2. an **engine control-plane domain** — all engine-global bookkeeping
+   (registry, stopping flag, listener/endpoint tables, counters, and the
+   publication of per-session handles the shutdown path reads) is serialized, and
+   every cross-thread engine entry point (any-thread send, shutdown) routes
+   through it.
+
+Cross-session parallelism is preserved: unrelated sessions still progress on
+different threads. The two domains together make multi-threaded operation safe by
+construction — in steady state and during shutdown.
 
 ## Clarifications
 
@@ -42,10 +63,44 @@ concurrently, even on a many-threaded executor, and even during shutdown.
   satisfies the transport's own strand-confinement contract.
 - Q: What reproduction standard must the regression witness (US2 / SC-002) meet?
   → A: **Deterministic** — a controlled interleaving (a test-only barrier/seam)
-  forces the teardown close to run between an in-flight read's eof-arrival and
-  its completion, so the witness reproduces the failure on **every** run of the
-  pre-change engine (reliable RED) and is green post-change. A flaky/probabilistic
-  stress reproducer is NOT acceptable as the gate.
+  forces the failure on **every** run of the pre-change engine (reliable RED) and
+  is green post-change. A flaky/probabilistic stress reproducer is NOT acceptable
+  as the gate. (Seam target refined in the Gate A round-1 session below.)
+
+### Session 2026-06-05 (Gate A round 1)
+
+Gate A round 1 (Codex + Opus adversarial) found the per-session domain necessary
+but **not sufficient** and ruled the design structural; the following resolutions
+expand the design to a two-domain model and are folded into the requirements/plan:
+
+- Q: Is per-session serialization enough for multi-threaded support? → A: **No.**
+  The engine *control plane* (registry, stopping flag, listener/endpoint tables,
+  counters, per-session-handle publication) is a second, co-equal race class.
+  A dedicated **engine control strand** is required; every engine-global access
+  and every cross-thread entry point (any-thread send, shutdown) runs on it.
+- Q: How is a session bound to the engine-created strand? → A: **D3-B** — extend
+  the per-session-strand binding to *adopt a pre-created strand* while preserving
+  the `per_session_strand` mode (and its strand-wrapped semantics + spin-policy
+  legality). Do **not** internally rewrite a user's config to the `direct_executor`
+  mode (verified to break a valid `locks = spin` config).
+- Q: Is binding the transport's I/O object to the session strand optional? → A:
+  **No — mandatory and asserted.** It is auto-satisfied when the role loop runs on
+  the strand (the accepted/connected socket inherits the loop's executor), so the
+  real obligation is to ensure **no** construction site samples the bare engine
+  executor instead of the loop's executor, and to assert the socket's executor
+  equals the session strand.
+- Q: What does shutdown serialize? → A: **both** teardown closes on the session
+  strand — the transport `close()` (before the join, to wake an idle read) **and**
+  the terminal `Session::close()` (after join + send-drain, before registry clear,
+  preserving the existing liveness-loop-drain) — with the registry iteration/clear
+  confined to the control strand.
+- Q: What does the deterministic witness target? → A: the **control-plane data
+  race** (concurrent shutdown vs accept-loop registry/listener mutation), which a
+  thread-sanitizer reports deterministically under a latch-controlled interleave.
+  This is the feasible, root-cause-targeting witness; the TLS-teardown crash is a
+  downstream symptom covered by the multi-threaded acceptance test. (Supersedes
+  the earlier "force close between eof-arrival and read completion" seam, which is
+  not reachable from the transport interface.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -86,27 +141,29 @@ findings and zero crashes across repeated runs.
 
 ### User Story 2 - The teardown crash is eliminated and stays eliminated (Priority: P2)
 
-The specific intermittent shutdown crash (a use-after-free / data race in the
-TLS layer when teardown races an in-flight inbound read) no longer occurs, and a
-regression guard prevents it from returning.
+The shutdown-time concurrency defects (the engine control-plane data race on the
+registry/listener tables, and the downstream TLS-teardown crash) no longer occur,
+and a regression guard prevents the root-cause race from returning.
 
-**Why this priority**: Reliability and regression protection. The crash is rare
-and timing-dependent, so it needs a dedicated witness that reliably reproduces
-the pre-fix failure and proves the post-fix safety.
+**Why this priority**: Reliability and regression protection. The defects are
+rare and timing-dependent, so they need a dedicated witness that *deterministically*
+reproduces the root-cause race pre-fix and proves the post-fix safety.
 
 **Independent Test**: A regression witness that **deterministically** reproduces
-the teardown race/crash on the pre-change engine (via a controlled interleaving
-seam) fails every pre-change run and passes 100% of runs on the post-change
-engine under the sanitizer matrix.
+the engine control-plane data race on the pre-change engine (a latch-controlled
+interleave of shutdown vs. an accept-loop registry/listener mutation, reported by
+the thread-sanitizer) fails every pre-change run and passes 100% of runs on the
+post-change engine.
 
 **Acceptance Scenarios**:
 
-1. **Given** the regression witness for the teardown race driven by a controlled
-   interleaving seam, **When** it is run against the pre-change engine, **Then**
-   it reproduces the failure on every run (reliable RED).
+1. **Given** the regression witness driving a latch-controlled interleave of
+   shutdown against an accept-loop registry/listener mutation, **When** it is run
+   against the pre-change engine under the thread-sanitizer, **Then** the race is
+   reported on every run (reliable RED).
 2. **Given** the same witness, **When** it is run against the changed engine
-   repeatedly under sanitizers, **Then** it passes every run with no crash or
-   sanitizer finding.
+   repeatedly under sanitizers, **Then** it passes every run with no race, crash,
+   or sanitizer finding.
 
 ---
 
@@ -147,6 +204,14 @@ single-threaded test rewrites, and the public interface is unchanged.
 - **Idle established session at shutdown**: a session blocked on an inbound read
   with no peer traffic must still be unblocked and torn down (the close-to-wake
   behavior is preserved, now performed inside the session's domain).
+- **Shutdown vs. connection accept**: shutdown clears the registry/listener
+  tables on one thread while an accept loop is publishing a newly accepted
+  session into those tables on another. Must be serialized within the
+  control-plane domain.
+- **Any-thread send vs. shutdown**: an outbound send issued from an external
+  thread reads the registry while shutdown mutates/clears it. The send must
+  resolve the registry inside the control-plane domain (and fail cleanly if
+  shutdown has begun), never read a half-cleared registry.
 
 ## Requirements *(mandatory)*
 
@@ -172,7 +237,11 @@ single-threaded test rewrites, and the public interface is unchanged.
 - **FR-005**: Inbound message ordering and exactly-once in-order delivery
   guarantees MUST be preserved under multi-threaded operation.
 - **FR-006**: Outbound send issued from within an application callback MUST
-  continue to complete without deadlock under multi-threaded operation.
+  continue to complete without deadlock under multi-threaded operation, including
+  when the send must traverse both serialization domains
+  (session → control plane → session). Every cross-domain handoff MUST be a
+  non-blocking handoff (never a synchronous wait that occupies a serialization
+  domain), so a callback-issued send cannot deadlock the domain it runs on.
 - **FR-007**: The behavior of an engine run on a single-threaded executor MUST
   be unchanged by this feature (message handling, ordering, and lifecycle
   identical to the prior behavior).
@@ -180,25 +249,50 @@ single-threaded test rewrites, and the public interface is unchanged.
   new or altered public types, function signatures, or required configuration,
   and no new mandatory step for applications to obtain safe multi-threaded
   behavior under the default configuration.
-- **FR-009**: The feature MUST reuse the engine's existing per-session
-  serialization primitive (the default per-session strand mode) rather than
-  introducing a new serialization mechanism.
+- **FR-009**: The feature MUST reuse the engine's existing strand primitive (the
+  same mechanism behind the default per-session strand mode) for both
+  serialization domains rather than introducing a new serialization mechanism or
+  any lock.
 - **FR-010**: The previously-documented limitation that a multi-threaded
-  executor is unsupported MUST be lifted, and the supported-mode documentation
-  updated to reflect that multi-threaded operation is now safe under the default
-  configuration.
+  executor is unsupported MUST be lifted **only once both serialization domains
+  land and are witnessed** (the per-session domain AND the engine control-plane
+  domain). Lifting the limitation while either domain is still racy is
+  prohibited — the supported-mode documentation MUST NOT claim multi-threaded
+  safety until both are covered by passing thread-sanitizer witnesses.
+- **FR-011**: All engine control-plane state — the session registry, the
+  stopping flag, the listener and endpoint tables, the in-flight counters, and
+  the publication of per-session handles that the shutdown path reads — MUST be
+  accessed only within a single engine control-plane serialization domain, so no
+  two threads ever read/mutate engine-global state concurrently when the executor
+  is serviced by multiple threads.
+- **FR-012**: Every cross-thread engine entry point MUST enter through the
+  control-plane domain before touching engine-global state: an any-thread
+  outbound send MUST resolve the registry/stopping flag inside the control-plane
+  domain before handing off to the target session's domain; engine shutdown MUST
+  snapshot, signal-cancel, drain, and clear engine-global state inside the
+  control-plane domain.
+- **FR-013**: The stopping flag that gates the role loops and the send path MUST
+  have a defined cross-thread access discipline (read within the control-plane
+  domain, or via an atomic with acquire/release ordering) — it MUST NOT remain a
+  plain non-atomic flag justified by single-thread confinement.
 
 ### Key Entities
 
+- **Engine control-plane domain**: a single engine-wide serialization boundary
+  inside which all engine-global bookkeeping (session registry, stopping flag,
+  listener/endpoint tables, counters, per-session-handle publication) is read and
+  mutated; every cross-thread engine entry point routes through it.
 - **Session serialization domain**: the per-session boundary inside which all of
   one session's operations are ordered so none overlap; the unit of
-  serialization is a single session, not the whole engine.
+  serialization is a single session, not the whole engine. Distinct from, and
+  subordinate to, the control-plane domain.
 - **Engine-managed session lifecycle work**: the engine-owned activities for a
   session (establishing the connection, the inbound read loop, and teardown)
   that must run inside that session's serialization domain.
-- **Teardown step**: the shutdown action that closes a session's live connection;
-  it both frees resources and unblocks an otherwise-idle inbound read, and must
-  occur inside the session's serialization domain.
+- **Teardown step**: the shutdown action that closes a session's live connection
+  (transport close) and the terminal session close; both must occur inside the
+  session's serialization domain, while the surrounding registry iteration/clear
+  occurs inside the control-plane domain.
 
 ## Success Criteria *(mandatory)*
 
@@ -209,9 +303,12 @@ single-threaded test rewrites, and the public interface is unchanged.
   threads with **zero** address-, undefined-behavior-, and thread-sanitizer
   findings and zero crashes across repeated runs.
 - **SC-002**: A regression witness that **deterministically** reproduces the
-  teardown race/crash on the pre-change engine (via a controlled interleaving
-  seam — failing every pre-change run) passes **100%** of runs on the post-change
-  engine under the sanitizer matrix.
+  **engine control-plane data race** on the pre-change engine — a latch-controlled
+  interleave that runs shutdown concurrently with an accept-loop registry/listener
+  mutation (and an any-thread send) — is reported by the thread-sanitizer on
+  **every** pre-change run (reliable RED) and passes **100%** of runs on the
+  post-change engine. (The TLS-teardown crash is a downstream symptom covered by
+  the multi-threaded acceptance test of SC-001.)
 - **SC-003**: The complete existing test suite remains green with **no**
   single-threaded test rewrites required.
 - **SC-004**: The public engine/session interface is **unchanged** (no public
@@ -222,13 +319,16 @@ single-threaded test rewrites, and the public interface is unchanged.
 
 ## Assumptions
 
-- The engine's existing per-session strand machinery (the default threading
-  mode, introduced by the threading/clock feature) is sufficient as the
-  serialization primitive and is reused — no new strand or locking abstraction is
-  introduced.
+- The engine's existing strand machinery (the mechanism behind the default
+  per-session threading mode, from the threading/clock feature) is reused for
+  **both** domains — the per-session strand and a new engine control strand — so
+  no new strand or locking abstraction is introduced.
 - "Multi-threaded executor" means several threads concurrently servicing the
-  same execution context; per-session strands provide the required serialization
-  on top of it.
+  same execution context; the control-plane strand serializes engine-global state
+  and per-session strands serialize each session's work on top of it.
+- The two domains are distinct strands over the same executor; every handoff
+  between them (and into them from an external thread) is a non-blocking post, so
+  no thread is ever blocked holding a domain.
 - Applications that explicitly opt out of per-session strands (the expert
   "direct executor" mode) remain responsible for their own serialization; making
   that opt-out path safe under multiple threads is **out of scope** for this

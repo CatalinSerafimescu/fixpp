@@ -6,7 +6,12 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [x] No implementation details (languages, frameworks, APIs) — *documented
+  exception: SC-001/FR-003 name the address/UB/thread sanitizers, and SC-002
+  names a thread-sanitizer-reported race. For an internal concurrency-correctness
+  feature whose entire deliverable IS "clean under the sanitizer matrix", the
+  sanitizer names ARE the user-facing acceptance vocabulary; tool/build specifics
+  otherwise live in plan.md.*
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
@@ -16,7 +21,9 @@
 - [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
-- [x] Success criteria are technology-agnostic (no implementation details)
+- [x] Success criteria are technology-agnostic (no implementation details) —
+  *same documented exception: sanitizer names are the acceptance vocabulary for
+  this internal concurrency feature.*
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded
@@ -41,4 +48,10 @@
 - RESOLVED by `/speckit-clarify` (Session 2026-06-05): the re-bind scope is the
   **whole role loop** (establishment + handshake + read-pump) plus teardown, on
   the session's single existing strand (FR-001); and the US2/SC-002 regression
-  witness must be **deterministic** via a controlled interleaving seam.
+  witness must be **deterministic**.
+- EXPANDED by **Gate A round 1** (Session 2026-06-05, Gate A round 1): the design
+  is now **two-domain** — a per-session strand AND an engine control strand
+  (FR-011/FR-012/FR-013). The witness targets the control-plane data race (the
+  feasible, root-cause-targeting deterministic seam). D3-B binding; dual teardown
+  close; mandatory+asserted transport-on-strand. See spec `## Clarifications`
+  Session 2026-06-05 (Gate A round 1) and `research.md` decisions.
