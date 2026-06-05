@@ -342,7 +342,11 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   control-plane domain, or (b) — for the synchronous public readers `lookup()` /
   `acceptor_bound_endpoint()` — from an **atomically-published immutable
   snapshot** of that state (FR-014). No read path observes a structure that the
-  control-plane domain is concurrently mutating in place.
+  control-plane domain is concurrently mutating in place. The per-session handle
+  publication (`session` / `live_transport`) MUST be **unpublished** (reset on
+  the control strand) on **every** role-loop exit path — normal return,
+  cancellation, AND error — before the entry can be cleared, so that `stop()`
+  never reads a stale handle for a loop that has ended.
 - **FR-012**: Every cross-thread engine entry point MUST enter through the
   control-plane domain before touching engine-global state: an any-thread
   outbound send MUST resolve the registry/stopping flag inside the control-plane
