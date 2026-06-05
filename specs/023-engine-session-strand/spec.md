@@ -142,10 +142,11 @@ decision** — the lifetime of the `lookup()` keepalive vs `~Engine`:
   `shared_ptr<Session>` is valid across a concurrent `stop()` / `registry_.clear()`
   **only while the `Engine` is alive**; the caller MUST NOT let a `lookup()`/snapshot
   handle outlive the `Engine`. This is a documented hard precondition, guarded by a
-  **debug `~Engine` assertion** that no outstanding `lookup()`/snapshot handle remains
-  (exact accounting where practical; otherwise a debug `use_count()` check on the
-  published snapshot). FR-008/FR-014, E-7, and C-8 encode the bound; the keepalive is
-  **not** a general keepalive past `~Engine`.
+  **debug `~Engine` assertion** that no outstanding `lookup()`/snapshot handle remains,
+  via the debug-only **lease control block** mechanism of FR-014 (NOT a snapshot
+  `use_count()` check — that cannot observe a handle copied out then detached).
+  FR-008/FR-014, E-7, and C-8 encode the bound; the keepalive is **not** a general
+  keepalive past `~Engine`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -367,14 +368,20 @@ the single recorded `lookup()` return-type safening (FR-008/SC-004).
   (FR-008, bounded handle) — it is NOT valid past `~Engine`, because `Session`
   borrows the engine's runtime config; the caller MUST NOT let a `lookup()`/snapshot
   handle outlive the `Engine`. This precondition MUST be **debug-asserted at
-  `~Engine`** via a realizable mechanism: in debug builds `lookup()` returns an
-  **aliasing** `std::shared_ptr<Session>` whose control block increments an
-  engine-owned outstanding-handle counter on construction/copy and decrements it
-  on destruction, and `~Engine` asserts that counter is **zero**. (A bare
-  `use_count()` on the published snapshot is insufficient — a caller can copy the
-  `Session` handle out and drop the snapshot, so the snapshot's count would never
-  observe it.) In release builds the handle is a plain `std::shared_ptr<Session>`
-  with no counter overhead; the bounded-handle contract then holds by caller
+  `~Engine`** via a realizable **lease-control-block** mechanism (NOT per-copy
+  hooks — a `std::shared_ptr` control block cannot run logic on every copy, only a
+  deleter when the last owner of that control block is destroyed): in debug builds
+  `lookup()` returns an **aliasing** `std::shared_ptr<Session>` whose owning control
+  block holds a small **lease** object; the lease constructor increments an
+  engine-owned `std::atomic<std::uint64_t>` outstanding-lease counter, and the lease
+  destructor (run when the **last** copy sharing that control block is destroyed)
+  decrements it. `~Engine` asserts the counter is **zero**. This does not count
+  every copy individually, but it proves the required property — no outstanding
+  returned handle exists. (A bare `use_count()` on the published snapshot is
+  insufficient — a caller can copy the `Session` handle out and drop the snapshot,
+  so the snapshot's count would never observe it.) In release builds the handle is a
+  plain `std::shared_ptr<Session>` with no lease/counter overhead; the bounded-handle
+  contract then holds by caller
   obligation. `stopped()` is covered separately by the atomic stopping flag (FR-013).
 
 ### Key Entities

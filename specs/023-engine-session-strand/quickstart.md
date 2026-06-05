@@ -7,7 +7,7 @@ This feature makes a multi-threaded `io_context` a supported way to drive the en
 The default per-session strand mode now serializes each session's full lifecycle
 (including teardown) across worker threads. The **only** application-visible change is
 that `Engine::lookup()` now returns a `std::shared_ptr<Session>` (was a raw `Session*`)
-so the handle stays valid if the engine shuts down concurrently — `lookup()` and
+so the handle stays valid across a concurrent `stop()` / registry clear **while the `Engine` remains alive** (a bounded handle — it must not outlive the `Engine`) — `lookup()` and
 `acceptor_bound_endpoint()` are now safe to call from any thread while the engine runs
 (they read an immutable snapshot via `std::atomic<std::shared_ptr<…>>` — no
 `std::mutex`, no block; wait-free where the STL makes it lock-free).

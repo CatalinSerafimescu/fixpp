@@ -129,10 +129,12 @@ across a concurrent `stop()` / `registry_.clear()` **only while the `Engine` is 
 after `~Engine` is a UAF (same hazard as the send path at engine.cpp:726-730). The caller
 MUST NOT let a `lookup()`/snapshot handle outlive the `Engine` (documented hard precondition,
 NOT a `Session` dependency-model refactor); `~Engine` MUST **debug-assert** no outstanding
-`lookup()`/snapshot handle remains — via a debug-only aliasing `shared_ptr<Session>` whose
-control block inc/decrements an engine-owned outstanding-handle counter, asserted zero at
-`~Engine` (a bare snapshot `use_count()` cannot observe a handle copied out then detached
-from the snapshot). Release builds carry no counter. It is NOT a general keepalive past `~Engine`.
+`lookup()`/snapshot handle remains — via a debug-only **lease control block** (a `shared_ptr`
+control block runs no per-copy logic, only a deleter at last-owner destruction): the aliasing
+`shared_ptr<Session>` owns a lease whose ctor increments an engine-owned `std::atomic<uint64_t>`
+and whose dtor (last copy destroyed) decrements it, asserted zero at `~Engine` (a bare snapshot
+`use_count()` cannot observe a handle copied out then detached from the snapshot). Release builds
+carry no lease/counter. It is NOT a general keepalive past `~Engine`.
 
 ## C-7 — Verification obligations (consumed by /speckit-tasks)
 

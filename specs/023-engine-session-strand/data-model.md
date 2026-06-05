@@ -165,10 +165,12 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   is a UAF (the same hazard the send path documents at engine.cpp:726-730). This is a
   documented hard precondition (NOT a refactor of `Session`'s dependency model): the
   caller MUST NOT let a handle outlive the `Engine`, **debug-asserted at `~Engine`** that
-  no outstanding `lookup()`/snapshot handle remains — via a debug-only aliasing
-  `shared_ptr<Session>` whose control block inc/decrements an engine-owned
-  outstanding-handle counter, asserted zero at `~Engine` (a bare snapshot `use_count()`
-  cannot see a handle copied out then detached from the snapshot). Release builds carry
+  no outstanding `lookup()`/snapshot handle remains — via a debug-only **lease control
+  block** (a `shared_ptr` control block cannot hook every copy, only its deleter at
+  last-owner destruction): the aliasing `shared_ptr<Session>` owns a lease whose ctor
+  increments an engine-owned `std::atomic<uint64_t>` and whose dtor (last copy destroyed)
+  decrements it, asserted zero at `~Engine`. (A bare snapshot `use_count()` cannot see a
+  handle copied out then detached from the snapshot.) Release builds carry
   no counter. The keepalive is NOT a general keepalive past `~Engine`.
 - **Invariant (INV-9 / FR-014)**: the synchronous public readers NEVER read a control-plane
   structure the control strand is mutating in place — only the published immutable snapshot.
