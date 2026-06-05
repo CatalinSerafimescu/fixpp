@@ -50,6 +50,11 @@ constexpr char soh = '\x01';
 // Helper: bytes of a string literal.
 std::vector<std::byte> bv(std::string_view s) {
     std::vector<std::byte> out(s.size());
+    // An empty string_view has a null data() pointer; memcpy(_, nullptr, 0) is
+    // UB (src declared nonnull) — same class as the write_span bug this fixes.
+    if (s.empty()) {
+        return out;
+    }
     std::memcpy(out.data(), s.data(), s.size());
     return out;
 }
@@ -112,6 +117,34 @@ TEST(WriterErrorPath, CommitWithNoFieldsReturnsError) {
     auto result = std::move(w).commit();
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::wire_field_value_truncated);
+}
+
+// An empty FIELD VALUE (e.g. "58=\x01" empty Text) yields a zero-length value
+// span whose data() is null. write_span then did memcpy(dst, nullptr, 0), which
+// is UB (memcpy's src is declared nonnull) and trips UBSan at writer.cpp:129 —
+// the latent flake behind business_messages_roundtrip. write_span must early-out
+// on an empty span. A valid FIX field may legitimately carry an empty value.
+TEST(WriterErrorPath, EmptyValueFieldIsWellFormedNoUB) {
+    std::array<std::byte, 256> buf{};
+    std::pmr::monotonic_buffer_resource mr;
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+
+    auto bs = bv("FIX.4.4");
+    ASSERT_TRUE(w.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
+
+    // Default-constructed span: data()==nullptr, size()==0 — the exact shape the
+    // builders produce for an empty optional field value.
+    const std::span<const std::byte> empty_value{};
+    ASSERT_EQ(empty_value.data(), nullptr);
+    EXPECT_TRUE(w.append_raw(58, empty_value).has_value())
+        << "empty-value field must append cleanly";
+
+    auto out = std::move(w).commit();
+    ASSERT_TRUE(out.has_value());
+    // Wire must contain the empty field "58=\x01" (tag, '=', SOH, no value bytes).
+    const std::string_view wire(reinterpret_cast<const char*>(buf.data()), out.value());
+    EXPECT_NE(wire.find("58=\x01"), std::string_view::npos)
+        << "empty 58= field must be on the wire";
 }
 
 // ── commit() with overflow_ already set ──────────────────────────────────────
