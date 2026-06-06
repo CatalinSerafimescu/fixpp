@@ -64,18 +64,29 @@ wait on a strand. Consequence: a send issued from inside an application callback
   **out of scope** (unchanged; `error::executor_not_serialised` slot 48 still rejects an
   unattested direct executor).
 
-## C-4 — Public surface: one intended, recorded change only
+## C-4 — Public surface: one ABI-changing delta + two additive engine-internal additions
 
-The only public surface change is `Engine::lookup()` returning `std::shared_ptr<Session>`
+The **ABI-changing** delta is `Engine::lookup()` returning `std::shared_ptr<Session>`
 instead of a raw `Session*` (FR-008/SC-004/C-8) — a deliberate safening so the handle is
 valid across a concurrent `stop()` / `registry_.clear()` **while the `Engine` is alive** (a
 bounded handle — not valid past `~Engine`; see C-8). `abidiff` / `nm` **will** show
-this one change; it is expected and documented, not a silent break. Every other
-`Engine`/`Session` public type, signature, and required configuration is identical
-before/after (no other new/changed exported symbols; `acceptor_bound_endpoint()` keeps its
-`Endpoint`-by-value signature; no `c_api.h` change). No new configuration: the default
-`per_session_strand` mode already selects per-session serialization; the control strand and
-the reader snapshot are engine-internal.
+this one change; it is expected and documented, not a silent break.
+
+**Two additive (backward-compatible) engine-internal public additions** also landed in this
+PR — they extend the public surface but do NOT break existing callers (no signature removed
+or altered; aggregate-initialization of `SessionConfig` is backward-compatible when new
+optional fields are appended):
+
+1. `SessionConfig::engine_adopt_strand` (session_config.hpp) — an `std::optional<asio::any_io_executor>`
+   field set exclusively by `Engine::start()` to pass the pre-created per-session strand
+   to `Session::open()`. Application code constructing `SessionConfig` directly is unaffected
+   (the field is never set by application code; its default empty-optional is correct).
+2. `fixpp::core::adopt_strand_t` tag type + `make_session_executor(adopt_strand_t, …)` overload
+   (session_executor.hpp) — engine-internal strand-adoption factory, not intended for application use.
+
+These two additions are intentional, required by the D3-B design (no double-wrapping), and
+documented here so any future `abidiff` reviewer knows they are expected. The control strand
+and the reader snapshot remain engine-internal (not exposed in any public header).
 
 ## C-5 — `stopped_` access discipline
 

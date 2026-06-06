@@ -837,24 +837,46 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
         return;
     }
 
-    // V-10 core assertion:
-    // socket_.get_executor().target<asio::strand<asio::any_io_executor>>() must NOT be null.
+    // V-10 core assertion (gate-b/r1 #6 strengthened):
+    // socket_.get_executor() must EQUAL the session's own strand executor —
+    // NOT merely be "some strand" (a wrong or double-wrapped strand passes
+    // the weaker target<strand_t>() != nullptr check but fails this equality).
     //
-    // asio::any_io_executor::target<T>() returns non-null iff the contained executor is T.
+    // asio::any_io_executor::operator== compares the contained executor by
+    // identity (same strand object).  This rejects:
+    //   - a bare io_context executor (pre-T011 RED)
+    //   - a double-wrapped strand (a strand of a strand)
+    //   - the wrong session's strand
     //
-    // Pre-T011 (loops on bare exec_):
-    //   socket executor = bare io_context executor (NOT a strand).
-    //   target<strand_t>() returns nullptr → EXPECT_NE(nullptr) FAILS → RED.
+    // acc_session->executor().underlying() is the any_io_executor holding the
+    // asio::strand<asio::any_io_executor> that was emplaced in start() for this
+    // session.  The socket's executor must be exactly this object.
     //
-    // Post-T011 (loops on session_strand):
-    //   socket executor = asio::strand<asio::any_io_executor> (IS a strand).
-    //   target<strand_t>() returns non-null → EXPECT_NE(nullptr) PASSES → GREEN.
+    // The older target<strand_t>() != nullptr check is kept alongside to
+    // preserve its RED-proof explanation; both must pass.
 
     auto& acc_sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*acc_tls);
     auto& ini_sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*ini_tls);
 
     using strand_t = asio::strand<asio::any_io_executor>;
 
+    // Stronger equality check: socket executor == session's own strand.
+    const asio::any_io_executor acc_expected_exec = acc_session->executor().underlying();
+    const asio::any_io_executor ini_expected_exec = ini_session->executor().underlying();
+
+    EXPECT_EQ(acc_sock.get_executor(), acc_expected_exec)
+        << "V-10: acceptor socket executor != session's own strand.\n"
+        << "  A bare executor, wrong strand, or double-wrapped strand all fail here.\n"
+        << "  Pre-T011 RED: socket on bare exec_; post-T011 GREEN: socket on session_strand.\n"
+        << "  [gate-b/r1 #6: equality check, not just is-a-strand]";
+
+    EXPECT_EQ(ini_sock.get_executor(), ini_expected_exec)
+        << "V-10: initiator socket executor != session's own strand.\n"
+        << "  A bare executor, wrong strand, or double-wrapped strand all fail here.\n"
+        << "  Pre-T011 RED: socket on bare exec_; post-T011 GREEN: socket on session_strand.\n"
+        << "  [gate-b/r1 #6: equality check, not just is-a-strand]";
+
+    // Legacy target<strand_t>() != nullptr checks (kept for RED-proof documentation).
     const strand_t* acc_strand_ptr = acc_sock.get_executor().target<strand_t>();
     EXPECT_NE(acc_strand_ptr, nullptr)
         << "V-10 RED (pre-T011): acceptor socket is NOT bound to a strand.\n"
@@ -888,22 +910,34 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 //   stop()'s clear() by construction — the park merely delayed both sides, so
 //   TSan never fired.  [DD-2026-06-06 / codex_023-engine-session-strand_gate_a_v8_retarget.md]
 //
-//   This retargeted V-8 witnesses the GENUINELY HB-free control-plane data race:
+//   This retargeted V-8 witnesses the GENUINELY HB-free control-plane data race.
 //
-//     PUBLIC READER vs MAP MUTATION (no live peer needed):
+// ── Historical RED mechanism (pre-T026) ──────────────────────────────────────
+//   PUBLIC READER vs MAP MUTATION (no live peer needed):
 //
-//       Thread-reader (raw std::thread): calls engine.acceptor_bound_endpoint(acc_id)
-//         and/or engine.lookup(acc_id) in a tight loop — these read listener_endpoints_
-//         and registry_ directly WITHOUT any synchronisation (no strand, no mutex,
-//         no atomic).  [engine.cpp:1227-1230, 134-136]
+//     Thread-reader (raw std::thread): calls engine.acceptor_bound_endpoint(acc_id)
+//       and/or engine.lookup(acc_id) in a tight loop — these read listener_endpoints_
+//       and registry_ DIRECTLY WITHOUT any synchronisation (no strand, no mutex,
+//       no atomic).  [pre-T026 engine.cpp:1227-1230, 134-136]
 //
-//       Engine executor threads: the accept loop WRITES listener_endpoints_[id] at
-//         run_accept_loop startup [engine.cpp:586-588]; stop() CLEARS the maps at
-//         step-5 [engine.cpp:1084-1087].
+//     Engine executor threads: the accept loop WRITES listener_endpoints_[id] at
+//       run_accept_loop startup; stop() CLEARS both maps.
 //
-//       NO happens-before edge exists between the reader thread and the engine
-//       executor threads — the reader is a raw std::thread with no synchronisation.
-//       TSan observes: WRITE in engine-thread vs READ in reader-thread → DATA RACE.
+//     NO happens-before edge exists between the reader thread and the engine
+//     executor threads — the reader is a raw std::thread with no synchronisation.
+//     TSan observes: WRITE in engine-thread vs READ in reader-thread → DATA RACE.
+//
+//   RED expected: pre-T018 (public readers not yet protected by D-SNAP/T023-T024).
+//
+// ── Current GREEN mechanism (post-T026 / D-SNAP installed) ───────────────────
+//   acceptor_bound_endpoint() and lookup() now load an immutable snapshot via
+//   std::atomic<shared_ptr<const Snapshot>> (atomic_load — no direct map access).
+//   The map mutations (write + clear) still happen on the control strand, but the
+//   raw std::thread reader never touches the maps directly.  TSan observes only
+//   atomic operations between the reader and engine threads → DATA RACE gone → GREEN.
+//
+//   The reader thread still spins with no explicit sync object — the synchronisation
+//   is entirely inside the atomic<shared_ptr> load, which is the point of D-SNAP.
 //
 // Mechanism:
 //   1. Register an acceptor session and call engine.start().
@@ -914,15 +948,10 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 //   4. Call stop() from the main thread (via wait_pred driving ioc).
 //   5. Join t_reader after stop() completes.
 //
-//   TSan observes the unsynchronised read (t_reader) vs the map write (t1/t2
-//   running the accept loop) or the map clear (stop()): DATA RACE → RED.
-//   halt_on_error=1 aborts the process.
-//
 // Widen the overlap window:
 //   The reader spins throughout the whole start→stop duration (not just a brief
 //   window) so even on a fast machine the read reliably overlaps the write or clear.
 //
-// RED expected: pre-T018 (public readers not yet protected by D-SNAP/T023-T024).
 // GREEN expected: post-T026 (D-SNAP snapshot readers installed).
 //
 // Anti-hang: 15s hard budget; engine always stop()'d before test exit; reader
@@ -931,7 +960,8 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 // No live peer needed: the listener binds before any peer connects; the write
 //   at listener_endpoints_[id] happens during accept-loop startup.
 //
-// [DD-2026-06-06; spec SC-002; contract V-8; tasks T016/T017; research D-SNAP]
+// [DD-2026-06-06; spec SC-002; contract V-8; tasks T016/T017; research D-SNAP;
+//  gate-b/r1 #7: historical RED vs current GREEN mechanism documented separately]
 
 TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     const char* fixture_dir = get_fixture_dir();
@@ -1213,12 +1243,18 @@ TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
         "anchor: contracts/engine-session-strand.md C-4 + research.md D-SNAP");
 
     // V-5: runtime confirmation that the Engine public API compiles correctly
-    // with the current Session* return type.  Verifies the ABI gate is wired.
+    // with the current shared_ptr<Session> return type.  Verifies the ABI gate is wired.
     //
     // The nm baseline at tests/abi/baseline/libfixpp_session_engine_pre023.nm
-    // was captured pre-T024 (T022); T026 will diff the post-T024 nm output
-    // against it and confirm exactly 0 symbol-name changes (return type is not
-    // in the mangled name, but the symbol SET is stable).
+    // was captured pre-T024 (T022); T026 diffs the post-T024 nm output against it
+    // and confirms exactly 0 symbol-NAME changes (return type is not in the mangled
+    // name, but the symbol SET is stable).
+    //
+    // C-4 update (gate-b/r1 #5): the PR ships ONE ABI-changing delta (lookup() return
+    // type) plus TWO additive backward-compatible engine-internal public additions:
+    //   1. SessionConfig::engine_adopt_strand (new optional field, aggregate-init safe)
+    //   2. fixpp::core::adopt_strand_t + make_session_executor(adopt_strand_t, …)
+    // These two additive changes are intentional and documented in contracts/C-4.
     //
     // No runtime assertion is needed here — the static_assert above IS the gate.
     // This PASS confirms the static_assert compiled and the type is correct.
@@ -1228,35 +1264,39 @@ TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
 // ── V-11: SnapshotReadersMtSafe ──────────────────────────────────────────────
 //
 // US3 RED-phase witness.  Three parts — only Part 1 runs now (compiles and
-// executes with the current Session* return type from lookup()).  Parts 2 and 3
-// are deferred (#if 0) until T024 and T025 respectively.
+// executes with the current shared_ptr<Session> return type from lookup()).
+// Parts 2 and 3 are deferred (#if 0) until T025 respectively.
 //
-// ── PART 1 — TSan-race (compiles and runs NOW; RED pre-T026) ─────────────────
+// ── PART 1 — TSan-race ───────────────────────────────────────────────────────
 //
 // Witnesses the same public-reader data-race as V-8, but with a broader
 // surface (both lookup() AND acceptor_bound_endpoint() in the reader thread)
 // and while a LIVE session pair is running (not just an acceptor-only setup).
 //
-// Mechanism:
-//   1. Establish a session pair on a 2-thread engine executor.
-//   2. Start a separate raw std::thread (t_reader) that spins calling:
-//        engine.lookup(acc_id)               → reads registry_    (unordered_map)
-//        engine.lookup(ini_id)               → reads registry_
-//        engine.acceptor_bound_endpoint(id)  → reads listener_endpoints_ (unordered_map)
-//      with NO shared sync object between t_reader and the engine threads.
-//   3. Call stop() from the main thread: stop() clears registry_ and
-//      listener_endpoints_ on the control strand — a concurrent WRITE vs
-//      t_reader's concurrent READ.
-//   4. Under TSan with halt_on_error=1: DATA RACE → process aborted → test RED.
-//   5. Post-T026 (D-SNAP installed): both readers go through atomic_load of
-//      the immutable snapshot → no unsynchronised map access → TSan clean → GREEN.
+// ── Historical RED mechanism (pre-T026) ──────────────────────────────────────
+//   A raw std::thread spins calling:
+//     engine.lookup(acc_id)               → reads registry_ (unordered_map) DIRECTLY
+//     engine.lookup(ini_id)               → reads registry_ DIRECTLY
+//     engine.acceptor_bound_endpoint(id)  → reads listener_endpoints_ DIRECTLY
+//   with NO shared sync object between t_reader and the engine threads.
+//   stop() clears registry_ and listener_endpoints_ on the control strand —
+//   concurrent WRITE vs t_reader's concurrent READ.
+//   Under TSan with halt_on_error=1: DATA RACE → process aborted → test RED.
+//
+// ── Current GREEN mechanism (post-T026 / D-SNAP installed) ───────────────────
+//   lookup() and acceptor_bound_endpoint() now load an immutable snapshot via
+//   std::atomic<shared_ptr<const Snapshot>> (atomic_load).  No direct map access
+//   from the raw reader thread; the maps are only touched on the control strand.
+//   TSan observes only atomic operations → DATA RACE gone → GREEN.
 //
 // Key difference from V-8: V-11 uses a LIVE session (established Active state)
 // so the registry_ is populated and lookup() actually finds an entry — wider
 // race surface than V-8's acceptor-only setup.
 //
-// RED expected: pre-T026 (no D-SNAP snapshot readers).
-// GREEN expected: post-T026 (T023/T024 install D-SNAP; lookup() reads snapshot).
+// GREEN expected: post-T026 (T023/T024 installed D-SNAP; lookup() reads snapshot).
+//
+// [gate-b/r1 #7: historical RED mechanism and current GREEN mechanism documented
+//  separately for V-11 Part 1, matching the V-8 comment update]
 //
 // ── PART 2 — keepalive (DEFERRED until T024) ─────────────────────────────────
 //
@@ -1553,6 +1593,250 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         SUCCEED() << "V-11 Part 3: ~Engine with no outstanding handles did not abort";
     }
 #endif
+}
+
+// ── V-13: SendVsFsmTransition_NoRace (gate-b/r1 #1) ─────────────────────────
+//
+// Witnesses the data race that existed when Engine::send() read kl->state()
+// (fsm_state_) on the control strand, while the per-session strand FSM writer
+// concurrently transitioned the session to Disconnected (or any non-Active state).
+//
+// ── Historical RED mechanism (pre-fix) ───────────────────────────────────────
+//   Engine::send() Step B (on control_strand_) called:
+//     if (!kl || kl->state() != fsm_state::Active) { reject; }
+//   Session::state() reads fsm_state_ (session.hpp:560) which is single-writer on
+//   the per-session strand.  Any concurrent FSM transition (e.g. stop()-induced
+//   terminal-close) from the session strand raced this control-strand read.
+//   TSan with halt_on_error=1: DATA RACE on fsm_state_ → process aborts → RED.
+//
+// ── Current GREEN mechanism (post-fix) ───────────────────────────────────────
+//   The kl->state() call is removed from the control strand entirely.  Step B
+//   now only null-checks kl (session published).  The Active check moved to Step C
+//   (session-strand lambda), where fsm_state_ is owned.  No cross-strand read.
+//
+// Mechanism:
+//   1. Establish a session pair on a ≥3-thread executor.
+//   2. Spawn 3 sender threads, each calling Engine::send() in a tight loop.
+//   3. Call Engine::stop() (triggers FSM transitions) while the senders loop.
+//   4. Under TSan: any cross-strand fsm_state_ read fires DATA RACE → RED.
+//   5. Post-fix: all fsm_state_ reads are on the session strand → GREEN.
+//
+// Thread count: 3 engine threads + 3 sender threads = 6 total.
+// Anti-hang: 10s stop budget; senders stop on sender_stop flag.
+//
+// [contracts C-0/C-1; gate-b/r1 #1; research D6/R7; session.hpp:556/560]
+
+TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V13", "INITIATOR_V13",
+        fixpp::session::session_role::acceptor, "INITIATOR_V13",
+        ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(
+        fac, "INITIATOR_V13", "ACCEPTOR_V13",
+        fixpp::session::session_role::initiator, "ACCEPTOR_V13",
+        ioc.get_executor(), port);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-13: acceptor register_session failed";
+    }
+    if (!engine->register_session(std::move(ini_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-13: initiator register_session failed";
+    }
+
+    engine->start();
+
+    // Wait for both sessions to reach Active (ensures fsm_state_ is Active
+    // before senders start, widening the send-vs-transition race window).
+    bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
+    if (!both_active) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-13: sessions did not reach Active within 8s";
+    }
+
+    // Start engine executor threads.  These drive the session-strand FSM
+    // transitions (Active→Disconnecting→Disconnected) during stop().
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t3{[&ioc]{ ioc.run(); }};
+
+    std::atomic<bool> sender_stop{false};
+    std::atomic<int>  send_iters{0};
+
+    // Dummy payload — send will be rejected once the session transitions out of
+    // Active, but that is tolerated.  We care only about no data race on fsm_state_.
+    const std::array<std::byte, 4> dummy{};
+    const std::span<const std::byte> payload_view{dummy};
+
+    // 3 sender threads: each fires Engine::send() in a loop.
+    // Pre-fix: kl->state() on control strand races session-strand FSM writes.
+    // Post-fix: no cross-strand fsm_state_ read → TSan clean.
+    auto sender_fn = [&]() {
+        while (!sender_stop.load(std::memory_order_relaxed)) {
+            auto fut = asio::co_spawn(
+                ioc.get_executor(),
+                engine->send(acc_id, payload_view),
+                asio::use_future);
+            if (fut.wait_for(std::chrono::milliseconds{200}) == std::future_status::ready) {
+                (void)fut.get();
+            }
+            send_iters.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+    std::thread ts1{sender_fn};
+    std::thread ts2{sender_fn};
+    std::thread ts3{sender_fn};
+
+    // Allow senders to overlap with the Active state before triggering stop().
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+
+    // stop() drives the session-strand FSM to Disconnected while senders loop.
+    // Under TSan pre-fix: DATA RACE on fsm_state_ → process abort.
+    {
+        auto stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->stop(), asio::use_future);
+        bool done = wait_pred(ioc,
+            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+            10000ms);
+
+        sender_stop.store(true, std::memory_order_relaxed);
+        ioc.stop();
+        t1.join();
+        t2.join();
+        t3.join();
+        ts1.join();
+        ts2.join();
+        ts3.join();
+
+        ASSERT_TRUE(done) << "V-13: engine.stop() did not complete within 10s";
+        stop_fut.get();
+    }
+
+    EXPECT_GT(send_iters.load(), 0)
+        << "V-13: sender threads must have iterated at least once";
+    EXPECT_TRUE(engine->stopped())
+        << "V-13: engine must be stopped after stop() completes";
+}
+
+// ── V-14: StartStopCounterOrdering_NoUAF (gate-b/r1 #2) ─────────────────────
+//
+// Witnesses the TOCTOU UAF that existed when outstanding_counter_ was assigned
+// AFTER the spawn loop in Engine::start().
+//
+// ── Historical RED mechanism (pre-fix) ───────────────────────────────────────
+//   start() assigned outstanding_counter_ = counter at the END of the loop:
+//     for (...) { ++(*counter); co_spawn(..., counter); }   // loop body
+//     outstanding_counter_ = counter;                       // ← AFTER spawns
+//   If stop() ran between the first co_spawn and this assignment:
+//     stop() observed outstanding_counter_ == null → skipped the join →
+//     registry_.clear() freed SessionEntry objects while the spawned loops
+//     held SessionEntry& references → UAF.
+//   Under ASan: heap-use-after-free; under TSan: data race on outstanding_counter_.
+//
+// ── Current GREEN mechanism (post-fix) ───────────────────────────────────────
+//   outstanding_counter_ = counter is assigned BEFORE the loop.  stop() always
+//   observes a valid counter.  Any spawned loop that incremented the counter
+//   before stop() loads it is included in the join; if stop() drains before
+//   all spawns increment, it waits correctly because the counter is valid.
+//
+// Mechanism:
+//   1. Register 2 acceptor sessions (wider loop body).
+//   2. Start engine on 3 threads.
+//   3. Call start() immediately followed by stop() — the stop() may run while
+//      start()'s loop is still co_spawning (the TOCTOU window).
+//   4. Under ASan/TSan: pre-fix UAF/race; post-fix: clean.
+//
+// Thread count: 3 engine threads + main = 4 total.
+// Anti-hang: 10s budget.
+//
+// [contracts C-0/INV-4a; gate-b/r1 #2; engine.cpp start()/stop()]
+
+TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    // Register 2 acceptors to widen the spawn loop (more spawns = wider TOCTOU).
+    const uint16_t port1 = reserve_free_port(ioc);
+    const uint16_t port2 = reserve_free_port(ioc);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    auto acc1_cfg = make_session_cfg(
+        fac, "ACC1_V14", "INI1_V14",
+        fixpp::session::session_role::acceptor, "INI1_V14",
+        ioc.get_executor(), port1);
+    if (!engine->register_session(std::move(acc1_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-14: acceptor1 register_session failed";
+    }
+
+    auto acc2_cfg = make_session_cfg(
+        fac, "ACC2_V14", "INI2_V14",
+        fixpp::session::session_role::acceptor, "INI2_V14",
+        ioc.get_executor(), port2);
+    if (!engine->register_session(std::move(acc2_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-14: acceptor2 register_session failed";
+    }
+
+    // Drive the ioc on 3 threads so spawned loops begin executing immediately —
+    // this narrows the window between co_spawn and the old post-loop assignment.
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t3{[&ioc]{ ioc.run(); }};
+
+    // start() spawns loops for all registered sessions.
+    // Pre-fix: outstanding_counter_ assigned AFTER loop → concurrent stop() sees null.
+    // Post-fix: assigned BEFORE loop → stop() always finds a valid counter.
+    engine->start();
+
+    // Immediately call stop() — exercises the start/stop concurrent window.
+    {
+        auto stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->stop(), asio::use_future);
+        bool done = wait_pred(ioc,
+            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+            10000ms);
+
+        ioc.stop();
+        t1.join();
+        t2.join();
+        t3.join();
+
+        ASSERT_TRUE(done) << "V-14: engine.stop() did not complete within 10s";
+        stop_fut.get();
+    }
+
+    EXPECT_TRUE(engine->stopped())
+        << "V-14: engine must be stopped after stop() completes";
 }
 
 }  // namespace
