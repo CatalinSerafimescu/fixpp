@@ -583,3 +583,48 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   change) fixpp does not yet have. Operators needing external-store sequence-number mutation
   must restart the session. **Status: follow-up** — tracked as its own future store-hydrate
   slice; S-018 stays `backlog`. *(Clarifications Q3; contract C7.1; catalogue S-018 gap-note.)*
+
+## Nanosecond-resolution SendingTime (026-nanosecond-sendingtime)
+
+### Feature Catalogue Rows
+
+- **S-039** (session) — Configurable SendingTime(52) emit precision incl. nanoseconds + lenient
+  inbound UTCTimestamp parse — `backlog → done`.
+
+### Behaviors
+
+- **B-026-1 — A per-session `fix_time_precision` selects `SendingTime(52)` emit precision
+  (including nanoseconds); inbound parsing is leniently width-tolerant; `OrigSendingTime(122)`
+  is preserved verbatim; default `millis` is a byte-identical no-op.** `SessionConfig::sending_time_precision`
+  (`fix_time_precision`, default `millis`) controls the precision of every **newly-stamped
+  outbound `SendingTime(52)`**: `nanos` emits the 27-char `YYYYMMDD-HH:MM:SS.sssssssss` form,
+  `micros` the 24-char form, `millis` (default) the 21-char FIX 4.x form. The precision threads
+  compile-time-exhaustively (non-defaulted parameter) through both stamp helpers
+  (`session::stamp_sending_time`, file-local `stamp_sending_time(Clock&)`) and all 21 call sites
+  — a missed site is a build error, not a silent wrong-precision frame. The inbound parser
+  (`core::fix_string_to_utc_time`) is **lenient**: it accepts a bare length-17 timestamp OR a
+  `.` at index 17 followed by any 1–9 sub-second digits (total length 19–27), scaling an N-digit
+  fraction to nanoseconds by `10^(9−N)` — so a counterparty's nanos (or any non-standard-width)
+  `52=`/`122=` parses instead of being rejected (Postel's law; matches QuickFIX-cpp). Malformed
+  fractions reject via `wire_invalid_field_format`: empty fraction (`…SS.`), a non-digit fraction
+  char, or >9 digits (caught by an explicit **width/length gate** before any digit parse — a
+  10-digit value fits in `int64` and would not trip an arithmetic overflow). `OrigSendingTime(122)`
+  on a PossDup resend echoes the **stored original** `52=` bytes verbatim — `build_replay_frame`
+  byte-copies them, never re-stamping at the configured precision. MaxLatency (S-019) operates
+  correctly on the parsed ns instant with no boundary-logic change. Default `millis` ⇒ every
+  outbound `52=` is byte-identical to the pre-feature baseline. No new wire field, error slot,
+  codegen, or C-ABI surface (formatter reuses `decimal_buffer_too_small`; parser reuses
+  `wire_invalid_field_format`). **Status: shipped** (026). *(FR-001..FR-009; SC-001..SC-005;
+  contract C1–C7; data-model E1–E6 / I-NST-1..6.)*
+
+### Limitations
+
+- **L-026-1 — Achieved sub-second resolution is bounded by the platform `system_clock::period`;
+  FIXT/version-gating of sub-second precision is deferred to G4.** When `nanos` is selected the
+  wire FORMAT is always 9 digits, but the achieved resolution reflects the clock's true tick:
+  full nanoseconds on libstdc++ (Tier-1 Linux), coarser on platforms whose `system_clock` ticks
+  at ~100 ns (e.g. MSVC, Tier-2) — there the trailing digits are `00`, a documented platform
+  nuance, not a defect. fixpp is FIX.4.4-scoped, so the QuickFIX-cpp/J FIX4.2+/FIXT
+  `supportsSubSecondTimestamps` version-gate is moot here; it becomes relevant when FIXT.1.1 /
+  5.0SP2 land (G4). **Status: documented** — version-gating tracked for G4. *(research D6;
+  spec Edge Cases; contract C6.)*

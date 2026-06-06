@@ -25,10 +25,12 @@
 namespace fixpp::session {
 
 [[nodiscard]] fixpp::core::expected_t<std::span<char>> stamp_sending_time(
-    fixpp::core::utc_time_point now, std::span<char> buf) noexcept {
-    // T022 (Phase 3 / US1): format effective_clock.now() as FIX UTCTimestamp
-    // at millis precision (FIX 4.x default, D-3). Round-trips losslessly (I-6).
-    return fixpp::core::utc_time_to_fix_string(now, fixpp::core::fix_time_precision::millis, buf);
+    fixpp::core::utc_time_point now, fixpp::core::fix_time_precision prec,
+    std::span<char> buf) noexcept {
+    // Format effective_clock.now() as FIX UTCTimestamp at the configured precision.
+    // prec is caller-supplied (non-defaulted, I-NST-6); callers pass
+    // cfg_.sending_time_precision. Default millis = FIX 4.x parity (FR-003).
+    return fixpp::core::utc_time_to_fix_string(now, prec, buf);
 }
 
 [[nodiscard]] fixpp::core::expected_t<void> check_sending_time(

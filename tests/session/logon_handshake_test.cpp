@@ -664,10 +664,11 @@ TEST_F(LogonHandshakeTest, StampSendingTimeFormatsCorrectly) {
     using namespace std::chrono;
     auto now = clock->now();
     std::array<char, 32> buf{};
-    auto result = fixpp::session::stamp_sending_time(now, std::span<char>{buf});
+    auto result = fixpp::session::stamp_sending_time(
+        now, fixpp::core::fix_time_precision::millis, std::span<char>{buf});
     ASSERT_TRUE(result.has_value()) << "stamp_sending_time() returned error; T022 not yet wired";
     EXPECT_GE(result->size(), 17u) << "SendingTime too short (need ≥17 chars for seconds)";
-    EXPECT_LE(result->size(), 25u) << "SendingTime too long";
+    EXPECT_LE(result->size(), 27u) << "SendingTime too long (max nanos = 27 chars)";
 
     // Round-trip: parse back and compare.
     auto parse_result =

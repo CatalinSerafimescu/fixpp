@@ -15,6 +15,7 @@
 //   YYYYMMDD-HH:MM:SS              (fix_time_precision::seconds)
 //   YYYYMMDD-HH:MM:SS.sss          (fix_time_precision::millis — FIX 4.x default)
 //   YYYYMMDD-HH:MM:SS.ssssss       (fix_time_precision::micros — where version permits)
+//   YYYYMMDD-HH:MM:SS.sssssssss    (fix_time_precision::nanos — 9-digit sub-second)
 //
 // Precision: never coarser than seconds; format→parse is lossless at the
 // emitted precision (truncation, not rounding, for sub-second surplus).
@@ -40,9 +41,10 @@ using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
 // ── Precision selector ───────────────────────────────────────────────────────
 
 enum class fix_time_precision : std::uint8_t {
-    seconds = 0,  // YYYYMMDD-HH:MM:SS          (15 chars)
-    millis = 1,   // YYYYMMDD-HH:MM:SS.sss       (19 chars, FIX 4.x default)
-    micros = 2,   // YYYYMMDD-HH:MM:SS.ssssss    (23 chars, where version permits)
+    seconds = 0,  // YYYYMMDD-HH:MM:SS          (17 chars)
+    millis = 1,   // YYYYMMDD-HH:MM:SS.sss       (21 chars, FIX 4.x default)
+    micros = 2,   // YYYYMMDD-HH:MM:SS.ssssss    (24 chars, where version permits)
+    nanos = 3,    // YYYYMMDD-HH:MM:SS.sssssssss (27 chars, 9-digit sub-second)
 };
 
 // ── Format ───────────────────────────────────────────────────────────────────
@@ -52,7 +54,8 @@ enum class fix_time_precision : std::uint8_t {
 // `out` is unmodified). The caller-supplied buffer must be at least:
 //   - seconds:  17 bytes  (YYYYMMDD-HH:MM:SS)
 //   - millis:   21 bytes  (YYYYMMDD-HH:MM:SS.sss)
-//   - micros:   25 bytes  (YYYYMMDD-HH:MM:SS.ssssss)
+//   - micros:   24 bytes  (YYYYMMDD-HH:MM:SS.ssssss)
+//   - nanos:    27 bytes  (YYYYMMDD-HH:MM:SS.sssssssss)
 // A 32-byte buffer covers all precisions.
 //
 // If `out` is too small, returns std::unexpected(error::decimal_buffer_too_small)
@@ -73,7 +76,8 @@ enum class fix_time_precision : std::uint8_t {
 // Accepted lengths:
 //   17 — seconds only      (YYYYMMDD-HH:MM:SS)
 //   21 — milliseconds      (YYYYMMDD-HH:MM:SS.sss)
-//   25 — microseconds      (YYYYMMDD-HH:MM:SS.ssssss)
+//   24 — microseconds      (YYYYMMDD-HH:MM:SS.ssssss)
+//   19–27 — lenient nanos  (dot at index 17 + 1–9 fraction digits, any width)
 // Any other length returns unexpected (currently mapped to
 // error::wire_invalid_field_format — reuses the pre-existing wire-domain
 // parse-error slot; no new error slot needed for the grammar error path).

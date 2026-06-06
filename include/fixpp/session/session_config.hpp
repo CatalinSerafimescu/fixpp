@@ -58,6 +58,10 @@ class TracerProvider;  // 017 T012: tracer_override field ([2d §4.5])
 // complete type. [const §XV.9] check: reconnect_policy.hpp includes only
 // <chrono>/<cstdint>/<memory_resource>/<vector> — no shared_mutex / awaitable.
 #include <fixpp/transport/reconnect_policy.hpp>
+// 026 T003 — fix_time_precision for sending_time_precision field below.
+// [const §XV.9] verified safe in Gate A (New-5): fix_time.hpp is mutex-free
+// chrono; it pulls no std::mutex into the session.hpp awaitable closure.
+#include <fixpp/core/fix_time.hpp>
 
 namespace fixpp::transport {
 class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-off; the actual
@@ -357,6 +361,19 @@ struct SessionConfig {
     // default-strip is an intentional default wire-behavior change for plain
     // sends containing caller-supplied 43/122 (matching QF defaults).
     bool allow_pos_dup = false;
+
+    // 026 T003 / data-model E4 — precision used to stamp newly-stamped outbound
+    // SendingTime(52) only.  OrigSendingTime(122) on resend is the stored
+    // original 52 preserved verbatim — never re-stamped at this precision
+    // (I-NST-4; build_replay_frame byte-copies the stored 52 into 122).
+    // Default millis ⇒ FIX 4.x parity = byte-identical no-op (FR-003/SC-002,
+    // I-NST-1); nanos/micros/seconds are opt-in.
+    // No-implicit-default: millis is an EXPLICIT per-field default
+    // ([const §XII.5]).  ABI note: adding this field changes SessionConfig
+    // struct layout → a normal source rebuild is required (no C-ABI surface;
+    // SessionConfig is a C++-only value type).
+    fixpp::core::fix_time_precision sending_time_precision =
+        fixpp::core::fix_time_precision::millis;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

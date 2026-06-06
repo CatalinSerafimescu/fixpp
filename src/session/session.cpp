@@ -567,8 +567,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     std::array<char, 32> time_buf{};
     std::string_view sending_time_view;
     if (effective_clock_) {
-        auto fmt_r = fixpp::session::stamp_sending_time(
-            effective_clock_->now(), std::span<char>{time_buf.data(), time_buf.size()});
+        auto fmt_r =
+            fixpp::session::stamp_sending_time(effective_clock_->now(), cfg_.sending_time_precision,
+                                               std::span<char>{time_buf.data(), time_buf.size()});
         if (fmt_r) {
             sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
         }
@@ -1286,17 +1287,18 @@ struct FrameHeader {
 // return a string_view into it. Returns an empty string_view if the clock is
 // null or formatting fails (caller must check before passing to build_*).
 // FR-003/RC#4: replaces kSendingTimePlaceholder at all admin-builder call sites.
-// Buffer must be at least 21 bytes (millis precision). noexcept per I-7.
+// Buffer must be at least 27 bytes (nanos precision max). noexcept per I-7.
+// prec is NON-DEFAULTED — compiler enforces exhaustive threading (I-NST-6).
 struct SendingTimeStamp {
     std::array<char, 32> buf{};
     std::string_view value;  // points into buf
 };
 
-[[nodiscard]] SendingTimeStamp stamp_sending_time(fixpp::core::Clock& clock) noexcept {
+[[nodiscard]] SendingTimeStamp stamp_sending_time(fixpp::core::Clock& clock,
+                                                  fixpp::core::fix_time_precision prec) noexcept {
     SendingTimeStamp s;
-    auto fmt_r =
-        fixpp::core::utc_time_to_fix_string(clock.now(), fixpp::core::fix_time_precision::millis,
-                                            std::span<char>{s.buf.data(), s.buf.size()});
+    auto fmt_r = fixpp::core::utc_time_to_fix_string(clock.now(), prec,
+                                                     std::span<char>{s.buf.data(), s.buf.size()});
     if (fmt_r) {
         s.value = std::string_view{fmt_r->data(), fmt_r->size()};
     }
@@ -1416,8 +1418,9 @@ public:
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type) noexcept {
     std::array<std::byte, 512> rj_buf{};
-    const auto rj_st52 =
-        effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+    const auto rj_st52 = effective_clock_
+                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                             : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
     auto rj_r =
         fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -1693,7 +1696,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 std::string_view reply_sending_time_view;
                 if (effective_clock_) {
                     auto fmt_r = fixpp::session::stamp_sending_time(
-                        effective_clock_->now(),
+                        effective_clock_->now(), cfg_.sending_time_precision,
                         std::span<char>{reply_time_buf.data(), reply_time_buf.size()});
                     if (fmt_r) {
                         reply_sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
@@ -1841,7 +1844,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!sending_time_ok) {
                     // Q3 established-session path: Reject(reason=10, refTag=52) → Logout →
                     // Disconnect.
-                    const auto st52 = stamp_sending_time(*effective_clock_);
+                    const auto st52 =
+                        stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                     // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
                     {
                         std::array<std::byte, 512> rj_buf{};
@@ -1925,9 +1929,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Best-effort: proceed even if assign or emit fails
                         // (session still applies the SequenceReset below — co_return ok).
                         const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
-                        const auto rj_st52 = effective_clock_
-                                                 ? stamp_sending_time(*effective_clock_)
-                                                 : SendingTimeStamp{};
+                        const auto rj_st52 =
+                            effective_clock_
+                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                                : SendingTimeStamp{};
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf{};
                         auto rj_r = fixpp::session::build_reject(
@@ -1973,8 +1978,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // via the shared admin builder into a stack buffer (no heap —
                     // [const §VIII.5]). EndSeqNo=0 → "through current" per FIX-SL §4.3.2.
                     std::array<std::byte, 256> rr_buf{};
-                    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                       : SendingTimeStamp{};
+                    const auto st52 =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
                     const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
                     auto rr_result = fixpp::session::build_resend_request(
                         std::span<std::byte>{rr_buf.data(), rr_buf.size()}, rr_seq,
@@ -2014,8 +2021,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Arm C (row 2): OrigSendingTime(122) absent → Reject(35=3),
                         // 371=122 (RefTagID=OrigSendingTime), 373=1 (RequiredTagMissing).
                         // Session survives (no disconnect). data-model INV-3; research D4.
-                        const auto st52_c = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                             : SendingTimeStamp{};
+                        const auto st52_c =
+                            effective_clock_
+                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                                : SendingTimeStamp{};
                         const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq_c = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf_c{};
@@ -2057,9 +2066,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!parse_122) {
                             // 122 is non-empty (Arm C's empty-check above already handled empty),
                             // so it is present but malformed — treat as RequiredTagMissing.
-                            const auto st52_rc1 = effective_clock_
-                                                      ? stamp_sending_time(*effective_clock_)
-                                                      : SendingTimeStamp{};
+                            const auto st52_rc1 =
+                                effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                      cfg_.sending_time_precision)
+                                                 : SendingTimeStamp{};
                             const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
                             const seqnum_t rj_seq_rc1 = seqnum_mgr_.peek_outbound();
                             std::array<std::byte, 512> rj_buf_rc1{};
@@ -2085,9 +2095,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             hdr.sending_time.data(), hdr.sending_time.size()});
                         if (parse_122 && parse_52 && *parse_122 > *parse_52) {
                             // Arm D — strict 122 > 52.
-                            const auto st52_d = effective_clock_
-                                                    ? stamp_sending_time(*effective_clock_)
-                                                    : SendingTimeStamp{};
+                            const auto st52_d =
+                                effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                      cfg_.sending_time_precision)
+                                                 : SendingTimeStamp{};
                             // Step 1: emit Reject(35=3, 371=122, 373=10).
                             {
                                 std::array<std::byte, 512> rj_buf{};
@@ -2238,8 +2249,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Emit a confirming Logout via store_then_emit.
                     // Use a stack buffer (I-7: no heap on inbound-dispatch path).
                     std::array<std::byte, 256> buf{};
-                    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                       : SendingTimeStamp{};
+                    const auto st52 =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
                     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
                     auto logout_result = fixpp::session::build_logout(
                         std::span<std::byte>{buf.data(), buf.size()}, logout_seq,
@@ -2292,9 +2305,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // regardless).
                     if (!cb_r) {
                         const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
-                        const auto rj_st52 = effective_clock_
-                                                 ? stamp_sending_time(*effective_clock_)
-                                                 : SendingTimeStamp{};
+                        const auto rj_st52 =
+                            effective_clock_
+                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                                : SendingTimeStamp{};
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf{};
                         auto rj_r = fixpp::session::build_reject(
@@ -2387,8 +2401,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // [spec.md US1 Heartbeat echo; T020-A behavioral gate]
                     {
                         std::array<std::byte, 256> hb_buf{};
-                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                           : SendingTimeStamp{};
+                        const auto st52 =
+                            effective_clock_
+                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                                : SendingTimeStamp{};
                         const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
                         // Echo with the inbound TestReqID (if any), else empty.
                         auto hb_result = fixpp::session::build_heartbeat(
@@ -2422,8 +2438,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // TestRequest (35=1) → emit Heartbeat echoing TestReqID(112).
                 if (hdr.msg_type == "1") {  // TestRequest (35=1)
                     std::array<std::byte, 256> hb_buf{};
-                    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                       : SendingTimeStamp{};
+                    const auto st52 =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
                     const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
                     auto hb_result = fixpp::session::build_heartbeat(
                         std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
@@ -2467,8 +2485,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (hdr.msg_type == "2") {  // ResendRequest (35=2)
                     const seqnum_t rr_begin = parse_seqnum(hdr.begin_seqno);
                     const seqnum_t rr_end = parse_seqnum(hdr.end_seqno);
-                    const auto st52_sr = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                          : SendingTimeStamp{};
+                    const auto st52_sr =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
 
                     // FQ-A (gate-b/r2): Transmit-only emit goes through
                     // live_write_serialized_() (which acquires write_gate_) for live
@@ -2679,8 +2699,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // fromApp reject → BusinessMessageReject(35=j). (D4; FR-005)
                         // NOT merged with the 35=3 Reject helper — different builder/fields.
                         const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
-                        const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_)
-                                                           : SendingTimeStamp{};
+                        const auto st52 =
+                            effective_clock_
+                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                                : SendingTimeStamp{};
                         const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> bmr_buf{};
                         auto bmr_r = fixpp::session::build_business_message_reject(
@@ -2789,7 +2811,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!sending_time_error.empty()) {
                     // Logon-path Q3: emit Logout only (no standalone Reject — D-3).
                     std::array<std::byte, 256> lo_buf{};
-                    const auto st52 = stamp_sending_time(*effective_clock_);
+                    const auto st52 =
+                        stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
                     auto lo_result = fixpp::session::build_logout(
                         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
@@ -3301,7 +3324,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     //      Compute checksum over those bytes, append "10=<CCC>\x01".
 
     // (1) Stamp SendingTime(52) from effective_clock.now().
-    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+    const auto st52 = effective_clock_
+                          ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                          : SendingTimeStamp{};
 
     // (2) Peek outbound MsgSeqNum(34) — NOT yet advanced.
     // assign_outbound() is called AFTER toApp check (same ordering as before).
@@ -3582,7 +3607,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // This updates last_outbound_steady_ via store_then_emit.
             if (last_outbound_steady_ + heartbt_int <= now) {
                 std::array<std::byte, 256> hb_buf{};
-                const auto st52_hb = stamp_sending_time(*effective_clock_);
+                const auto st52_hb =
+                    stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                 const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
                 auto hb_result = fixpp::session::build_heartbeat(
                     std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq, cfg_.sender_comp_id,
@@ -3636,7 +3662,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
             {
                 std::array<std::byte, 256> tr_buf{};
-                const auto st52 = stamp_sending_time(*effective_clock_);
+                const auto st52 =
+                    stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                 const seqnum_t tr_seq = seqnum_mgr_.peek_outbound();
                 auto tr_result = fixpp::session::build_test_request(
                     std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
@@ -3818,8 +3845,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         // SessionRejectReason=5 (ValueIsIncorrect), RefTagID=36; counter
         // unchanged. [QuickFIX generateReject(SessionRejectReason_VALUE_IS_INCORRECT)]
         std::array<std::byte, 512> rj_buf{};
-        const auto st52 =
-            effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+        const auto st52 = effective_clock_
+                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                              : SendingTimeStamp{};
         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
         auto rj_result =
             fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -3869,7 +3897,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 
     // Build the Logout frame into a stack buffer.
     std::array<std::byte, 256> buf{};
-    const auto st52 = effective_clock_ ? stamp_sending_time(*effective_clock_) : SendingTimeStamp{};
+    const auto st52 = effective_clock_
+                          ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                          : SendingTimeStamp{};
     const seqnum_t logout_seq = seqnum_mgr_.peek_outbound();
     auto logout_result = fixpp::session::build_logout(
         std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,

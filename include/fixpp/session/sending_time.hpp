@@ -33,13 +33,15 @@ namespace fixpp::session {
 
 // ── Outbound SendingTime stamp ────────────────────────────────────────────────
 
-// Format the current utc_time_point into a SendingTime(52) value using the
-// FIX UTCTimestamp grammar at millis precision (FIX 4.x default, D-3).
-// Fills `buf` (caller must supply ≥ 19 bytes). Returns the written view.
+// Format the current utc_time_point into a SendingTime(52) value at the
+// configured precision (caller-supplied; default millis = FIX 4.x parity).
+// Fills `buf` (caller must supply ≥ 27 bytes for nanos, ≥ 24 micros,
+// ≥ 21 millis, ≥ 17 seconds). Returns the written view.
+// prec is NON-DEFAULTED — compiler enforces exhaustive threading (I-NST-6).
 // noexcept; no heap (uses the caller-supplied buffer, [const §VIII.5]).
-// PLACEHOLDER — outbound stamping wired T022 (Phase 3 / US1).
 [[nodiscard]] fixpp::core::expected_t<std::span<char>> stamp_sending_time(
-    fixpp::core::utc_time_point now, std::span<char> buf) noexcept;
+    fixpp::core::utc_time_point now, fixpp::core::fix_time_precision prec,
+    std::span<char> buf) noexcept;
 
 // ── Inbound SendingTime check (MaxLatency) ────────────────────────────────────
 

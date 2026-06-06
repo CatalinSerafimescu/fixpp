@@ -23,7 +23,7 @@ Phase 1 interface contract. Surfaces touched + pre/post-conditions + the behavio
 - **Grammar (one, verbatim from data-model E3)**: accept **bare length-17** (`YYYYMMDD-HH:MM:SS`, no dot) **OR** `.` at index 17 + **1–9 ASCII digits** (total length 19–27). Reject any other length, a `.` anywhere but index 17, trailing spaces, embedded SOH / non-digit fraction char, and **>9 digits** — the >9 case via an explicit **width/length gate** (total length > 27) **before** any digit parse (a 10-digit fraction = 9,999,999,999 fits in `int64` and does NOT overflow, so it must be caught by the width check, not an arithmetic trap).
 - **Post (accept)**: base `YYYYMMDD-HH:MM:SS` optionally followed by `.` + 1–9 digits → `utc_time_point` with the fraction scaled to nanoseconds (`×10^(9−N)`).
 - **Post (reject → `wire_invalid_field_format`)**: empty fraction after `.` (length 18), non-digit fraction char, >9 fraction digits (width gate), or malformed base / out-of-range field.
-- **Oracle**: `parse("…SS.1234")` == base + 123 400 000 ns; `parse("…SS.")`, `parse("…SS.12a")`, `parse("…SS.1234567890")` (10 digits → **rejected by the width gate**, C3-tied) all reject; `parse(format(t,P)) == time_point_cast<period(P)>(t)` uniformly for all P incl. nanos (for nanos = `time_point_cast<nanoseconds>(t)`; never a bare `== t`).
+- **Oracle**: `parse("…SS.1234")` == base + 123 400 000 ns; `parse("…SS.")`, `parse("…SS.12a")`, `parse("…SS.1234567890")` (10 digits → **rejected by the width gate**, C3-tied) all reject; `parse(format(t,P)) == time_point_cast<period_for(P)>(t)` uniformly for all P incl. nanos (for nanos = `time_point_cast<nanoseconds>(t)`; never a bare `== t`).
 
 ## C4 — `SessionConfig::sending_time_precision`
 

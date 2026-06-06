@@ -21,7 +21,7 @@ Default (`millis`) ⇒ outbound `SendingTime(52)` is the 21-char form, byte-iden
 
 Inbound: any 1–9-digit fraction is accepted (padded to ns); only non-digit / empty / >9-digit fractions are rejected.
 
-## Core witnesses (`tests/core/fix_time_test.cpp`, extend, RED-first)
+## Core witnesses (`tests/session/fix_time_roundtrip_test.cpp`, target `session_fix_time_roundtrip`, extend, RED-first)
 
 1. **Nanos format** — `format(t, nanos)` returns a span of length **== 27** (assert == 27, NOT 17 — guards both the missing-`else if` 17-char regression and the `min_size[3]` OOB); the 9 digits equal the sub-second ns of `t`. **Run under UBSan** (`-fsanitize=undefined,bounds`) so the `min_size[3]` out-of-bounds read fails RED.
 2. **Nanos round-trip** — `parse(format(t, nanos)) == time_point_cast<nanoseconds>(t)` (ns-lossless; use the cast form, NOT a bare `== t`, which is a cross-platform flake on a coarser `system_clock`).
@@ -41,19 +41,19 @@ Inbound: any 1–9-digit fraction is accepted (padded to ns); only non-digit / e
 Run:
 
 ```bash
-cmake --build build/linux-clang-debug-py --target fixpp_core_tests fixpp_session_tests
-cd build/linux-clang-debug-py && ctest -R '^(fix_time|sending_time_precision)' --output-on-failure
+cmake --build build/linux-clang-debug-py --target session_fix_time_roundtrip session_sending_time_precision
+cd build/linux-clang-debug-py && ctest -R '^(session_fix_time|session_sending_time_precision)' --output-on-failure
 ```
 
 ## Sanitizers + coverage
 
 ```bash
 for P in linux-clang-asan linux-clang-ubsan linux-clang-tsan; do
-  cmake --build build/$P --target fixpp_core_tests fixpp_session_tests
-  ( cd build/$P && ctest -R '^(fix_time|sending_time|session|wire)' --output-on-failure )
+  cmake --build build/$P --target session_fix_time_roundtrip session_sending_time_precision
+  ( cd build/$P && ctest -R '^(session|wire)' --output-on-failure )
 done
-cmake --build build/linux-clang-coverage --target fixpp_core_tests fixpp_session_tests
-( cd build/linux-clang-coverage && ctest -R '^(fix_time|sending_time_precision)' )   # ≥95/85 new branches
+cmake --build build/linux-clang-coverage --target session_fix_time_roundtrip session_sending_time_precision
+( cd build/linux-clang-coverage && ctest -R '^(session_fix_time|session_sending_time_precision)' )   # ≥95/85 new branches
 ```
 
 ## §XV.9 watch-item (new include into session_config.hpp)
