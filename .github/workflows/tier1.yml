@@ -389,6 +389,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build/linux-clang-coverage/coverage.lcov
           flags: unittests
+          disable_search: true   # prevent auto-discovery of .ddi/.modmap CMake artefacts
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
 
   # ── Python bindings job ──────────────────────────────────────────────────
