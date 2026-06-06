@@ -222,6 +222,42 @@ struct SessionConfig {
     // [FR-017; Clarifications Q1=A; triage RC#C(a)]
     reset_seqnum_policy reset_seqnum_policy_field{reset_seqnum_policy::bilateral_strict};
 
+    // ── 024-reset-refresh-on-logon (S-017) — lifecycle reset knobs ──────────
+    //
+    // Three additive bool knobs that trigger a durable seqnum reset to {1,1}
+    // at the corresponding session lifecycle event.  All default false =
+    // QuickFIX-compatible no-op; default-off is an EXPLICIT per-field default,
+    // not an implicit-zero ([const §XII.5]).  The QuickFIX cfg-key spellings
+    // (ResetOnLogon / ResetOnLogout / ResetOnDisconnect) inform naming so a
+    // future cfg_loader mapping is 1:1, but the loader is NOT extended in this
+    // slice (C1.2).  ABI note: adding three bool members changes SessionConfig
+    // struct layout → a normal source rebuild is required (no C-ABI surface;
+    // SessionConfig is a C++-only value type).
+    //
+    // reset_on_logon  (QuickFIX: ResetOnLogon)
+    //   Initiator: reset seqnums to {1,1} before building the outbound Logon;
+    //   the Logon then carries ResetSeqNumFlag(141)=Y (OR-of-three predicate).
+    //   Acceptor: reset before check_inbound so a fresh peer 34=1 is admitted
+    //   even when local next-expected > 1.
+    // [data-model §"Additive config fields"; C1.1; research D5]
+    bool reset_on_logon = false;
+
+    // reset_on_logout  (QuickFIX: ResetOnLogout)
+    //   Reset seqnums to {1,1} at Logout teardown in EITHER direction:
+    //   Logout sent (locally-initiated, close(graceful)) OR Logout received
+    //   (peer-initiated, keyed on a dedicated logout_seen_ flag).  Does NOT
+    //   fire on an abnormal disconnect with no Logout (that is reset_on_disconnect).
+    // [data-model §"Additive config fields"; C1.1; C3.1; research D5]
+    bool reset_on_logout = false;
+
+    // reset_on_disconnect  (QuickFIX: ResetOnDisconnect)
+    //   Reset seqnums to {1,1} on ANY transport disconnect/teardown, including
+    //   an abnormal connection drop (no Logout exchanged).  Superset of
+    //   reset_on_logout: fires on graceful Logout, peer-initiated Logout, AND
+    //   any raw read-pump EOF or transport error.
+    // [data-model §"Additive config fields"; C1.1; C4.1; research D5]
+    bool reset_on_disconnect = false;
+
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
     // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at

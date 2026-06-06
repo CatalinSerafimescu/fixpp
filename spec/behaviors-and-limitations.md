@@ -538,3 +538,48 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   — a dedicated send/establish-churn bench + baseline is a low-risk bench-only carry-forward
   (cf. the 012 RC#G handshake-bench scaffold precedent). *(V-6; research.md D7/D-SNAP;
   Article VIII.)*
+
+## ResetOn{Logon,Logout,Disconnect} Lifecycle Reset Knobs (024-reset-refresh-on-logon)
+
+### Behaviors
+
+- **B-024-1 — Three `SessionConfig` knobs reset both sequence numbers to 1 at a session
+  lifecycle event; default off.** `reset_on_logon` / `reset_on_logout` / `reset_on_disconnect`
+  (all default `false`, QuickFIX cfg-key parity) trigger a durable reset to `{1,1}` —
+  `SeqnumManager::reset_to_one()` then `MessageStore::reset()` — at, respectively, Logon, a
+  Logout teardown (sent OR received), and ANY disconnect (incl. an abnormal drop). The reset
+  reuses the `013` reset primitive via a shared `reset_seqnums_to_one_durable(disposition)`
+  helper; it adds no new error slot, codegen, or wire field. **The initiator announces a
+  ResetOnLogon via `ResetSeqNumFlag(141)=Y`** on its outbound Logon through an OR-of-three
+  predicate (`(reset_on_logon || reset_on_logout || reset_on_disconnect) && seqnums=={1,1}`,
+  evaluated against post-reset live state — matching QuickFIX-cpp `shouldSendReset()` /
+  QuickFIX-J `isResetNeeded()`); a `reset_on_logout`/`reset_on_disconnect` session that reset
+  to `{1,1}` at a prior teardown therefore also sets `141=Y` on its NEXT initiator Logon. The
+  reset is wired at the **shared** initiator-Logon emission point (`emit_initiator_logon_()`),
+  so it fires for both per-session-direct `open()` and engine-managed `drive_reconnect()`
+  (initial lazy-connect + reconnect). The store-failure disposition is **cause-keyed**:
+  knob-driven Logon = **fatal** (blocks `Active`); the `013`-only received-`141` path stays
+  **I-07 logged-then-proceed** (all-off byte-identical, zero regression); teardown = logged.
+  The acceptor handles the two reset causes via a **cause-dependent split** (mutually exclusive
+  arms): the knob-driven reset (`reset_on_logon==true`) runs **before** `check_inbound`
+  (`session.cpp:1559`, fatal disposition) so a fresh peer `34=1` at local-expected>1 is
+  admitted; the 013-only received-`141` reset (`peer_sent_reset && !reset_on_logon`) runs
+  **after** `check_inbound` (`session.cpp:1715`, I-07 logged disposition), byte/semantics-
+  identical to pre-024 (FR-001 zero regression). The arms are mutually exclusive → exactly
+  one `store_->reset()` per path. A logout+disconnect teardown double-trigger collapses via
+  a single-fire guard — each teardown also yields exactly one observable `MessageStore::reset()`
+  (`FileStore::reset()` is non-idempotent I/O). *The "single combined pre-validation decision" sketch in earlier contract prose was superseded by this verify-driven correctness
+  fix: a unified pre-check reset for the 013-only arm changes `next_inbound` 1→2, breaking
+  byte identity; /speckit-verify caught the regression; the binding requirements
+  (FR-001/SC-003) are satisfied by the cause-dependent split.*
+  **Status: shipped** (024). *(FR-001..FR-010; C2.1–C5.2; data-model disposition table.)*
+
+### Limitations
+
+- **L-024-1 — `RefreshOnLogon` (S-018) is NOT implemented.** fixpp's `SeqnumManager` is never
+  store-seeded at `open()` (it starts at 1; the only `set_next_inbound` caller is the inbound
+  SequenceReset handler), so there is no construction-time store cache to refresh on reconnect.
+  A meaningful `RefreshOnLogon` needs a store→manager hydrate-on-open path (an `008`-boundary
+  change) fixpp does not yet have. Operators needing external-store sequence-number mutation
+  must restart the session. **Status: follow-up** — tracked as its own future store-hydrate
+  slice; S-018 stays `backlog`. *(Clarifications Q3; contract C7.1; catalogue S-018 gap-note.)*

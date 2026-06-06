@@ -483,6 +483,30 @@ public:
     [[nodiscard]] fixpp::transport::Transport& live_transport() noexcept;
 
 private:
+    // ── 024-reset-refresh-on-logon (S-017) — durable reset helper ────────────
+    //
+    // Disposition for the store-failure handling in reset_seqnums_to_one_durable.
+    // The disposition is keyed on the TRIGGER CAUSE (not the call site):
+    //   fatal  — knob-driven Logon reset: a store failure propagates the error
+    //            so the caller can block reaching Active (C2.6; research D2).
+    //   logged — teardown / 013-only received-141: store failure is swallowed
+    //            and logged (I-07 logged-then-proceed) and the method co_returns
+    //            success (matching the existing :1589-1592 inline pattern; C2.6
+    //            zero-regression clause; data-model §"Durable reset helper").
+    // Logic lives in session.cpp to keep this enum include-free ([const §XV.9]).
+    // [024 data-model §"Durable reset helper"; C2.6; research D2]
+    enum class reset_disposition : std::uint8_t { fatal = 0, logged = 1 };
+
+    // reset_seqnums_to_one_durable — shared durable-reset helper (T003).
+    // Body: co_await seqnum_mgr_.reset_to_one() then co_await store_->reset().
+    // store_ null-checked (matching the existing :1589-1592 null-guard pattern).
+    // Disposition controls store-failure handling (see reset_disposition above).
+    // NOT wired to any trigger in this slice (T002/T003 foundational only);
+    // wired in T007 (initiator Logon), T008 (acceptor Logon), T014 (teardown).
+    // [024 data-model §"Durable reset helper"; C2.6; research D2]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_seqnums_to_one_durable(
+        reset_disposition disposition) noexcept;  // wired in T007/T008/T014
+
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
                          // mutate the config after the ctor returns without causing UAF
@@ -762,6 +786,28 @@ private:
     // run_logout_phase1 coroutine polls this to determine whether the
     // graceful-close completes normally or times out. Single-writer on strand.
     bool logout_confirmed_ = false;
+
+    // 024 T013 — logout_seen_: set to true at EXACTLY two Logout-specific sites:
+    //   (a) run_logout_phase1(): local graceful-Logout-sent path
+    //       (session.cpp, before record_state_transition_(LogoutSent)).
+    //   (b) on_inbound_frame() Active branch: inbound peer-Logout 35=5 receipt.
+    // Used by the teardown reset predicate in close() (T014).
+    //
+    // NOT derived from onLogout_fired_ — that flag fires on ANY Active→!Active
+    // transition (including abnormal terminal close with no Logout), so it is a
+    // "left-Active" predicate, not a "logout-seen" predicate. Keying the teardown
+    // reset on onLogout_fired_ would collapse reset_on_logout into reset_on_disconnect,
+    // contradicting C4.2. [contracts/reset-knobs.md C3.1; plan.md Gate A note (b)]
+    // Additive POD; no new include → no std::mutex in the awaitable closure [const §XV.9].
+    bool logout_seen_ = false;
+
+    // 024 T014 — teardown_reset_done_: single-fire guard for the teardown reset in
+    // close(). Prevents a logout+disconnect double-trigger (graceful Logout → timeout
+    // → terminal close path) from calling store_->reset() twice. FileStore::reset() is
+    // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
+    // [contracts/reset-knobs.md C5.1; plan.md Gate A note (e)]
+    // Additive POD; no new include [const §XV.9].
+    bool teardown_reset_done_ = false;
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // Owns the AwaitingResend transient bool (NOT a new fsm_state per D-1),

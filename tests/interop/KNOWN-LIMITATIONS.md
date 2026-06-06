@@ -44,7 +44,6 @@ intentionally scopes out at v1.0, each with its tracking ref:
 | Limitation | Upstream provenance | Tracking |
 |---|---|---|
 | Inbound PossDup / OrigSendingTime handling (dup-tolerance; missing/bad OrigSendingTime → Reject/Logout) | quickfix-cpp `noOrigSendingTime`/`badOrigSendingTime`, quickfix-j#703 | `S-010` (out of scope; session-recovery successor feature) |
-| Connection-event auto-reset knobs (ResetOnLogon / ResetOnLogout / ResetOnDisconnect) | quickfix-cpp `logOn_ResetOnLogon` / `disconnect_ResetOnDisconnect` | `S-017` (catalogue backlog) |
 | RefreshOnLogon (store refresh before logon) | quickfix-cpp `logOn_RefreshOnLogon` | `S-018` (catalogue backlog) |
 | FIXT.1.1 / FIX 5.0 SP2 parse routing + DefaultApplVerID(1137) | quickfix-j `testParseFixt*` | `S-020-FIXT` / `S-025` (backlog) |
 | Application-callback layer (RejectLogon-from-callback, BusinessMessageReject, callback-exception rollback) | quickfix-j#60 / #696 / #572 | `app-message-layer` (matrix option (a); session-only badge) |

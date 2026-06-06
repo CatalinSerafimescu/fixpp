@@ -67,6 +67,40 @@ runs self-contained (no counterparty). The whole-feature AC exact set
 |------|--------|----------|------|
 | Down-peer `stop()` watchdog (FR-028) | `hp_down_peer_stop_watchdog_test.cpp` (T016) | [FIX-SL §4.4] + FR-004/028 | **Not** in the matrix; no counterparty (deliberate never-accepting peer) → runs green locally. Guards the 015 down-peer L2 carry-forward / T008 fix. The watchdog IS the assertion. |
 
+## G3 slice 3 — ResetOnLogon interop cells (024-reset-refresh-on-logon)
+
+Extends the 018 fixture with two new scenario groups covering both-role live
+`reset_on_logon` interop (SC-005 / FR-010 / C6.1, C6.2). Value-parameterized
+over `counterparty ∈ {quickfix-cpp, quickfix-j}` × role (initiator / acceptor) in
+one file; 4 cells total.
+
+| Scenario | Driver | Cells | Clause | In-process witnesses |
+|----------|--------|-------|--------|---------------------|
+| `reset_on_logon_initiator` — fixpp initiator with `reset_on_logon=true` sends `141=Y` + `34=1`; live acceptor accepts; both sides resync from 1 | `hp_fix44_reset_on_logon_test.cpp` (T016) | QFcpp/QFj × init (2) | C6.1 / FR-010 | (a) FSM Active; (b) outbound seqnum ≥ 2 after Active (Logon accepted) |
+| `reset_on_logon_acceptor` — live initiator sends `141=Y` + `34=1`; fixpp acceptor with `reset_on_logon=true` resets before `check_inbound`, admits `34=1`, reaches Active; no ResendRequest | `hp_fix44_reset_on_logon_test.cpp` (T017) | QFcpp/QFj × acc (2) | C6.2 / FR-010 | (a) FSM Active (no disconnect); (b) outbound > 1 (reply Logon sent); (c) next\_inbound == 2 (no ResendRequest issued) |
+
+Golden artifact names (captured by parent harness at first paired live run):
+
+| Golden file | Cell | Note |
+|-------------|------|------|
+| `happy/golden/RL-QFcpp-init-fix44-reset-on-logon.fix` | QFcpp initiator T016 | 141=Y + 34=1 verbatim; admin profile {52,10} |
+| `happy/golden/RL-QFj-init-fix44-reset-on-logon.fix` | QFj initiator T016 | 141=Y + 34=1 verbatim; admin profile {52,10} |
+| `happy/golden/RL-QFcpp-acc-fix44-reset-on-logon.fix` | QFcpp acceptor T017 | peer 34=1 Logon + fixpp reply Logon; admin profile {52,10} |
+| `happy/golden/RL-QFj-acc-fix44-reset-on-logon.fix` | QFj acceptor T017 | peer 34=1 Logon + fixpp reply Logon; admin profile {52,10} |
+
+Golden absent → `skip:golden-not-yet-captured` (per `diff_golden_or_skip` convention).
+MUST NOT be hand-fabricated.
+
+**Parent-harness obligations for T016/T017:**
+- T016 (initiator): run QFcpp/QFJ as TLS acceptors tolerating `141=Y` Logons. No
+  special initiator config on the counterparty side (they receive 141=Y, which
+  both QFcpp and QFJ accept under the `bilateral_lenient` / default policy).
+  Set `INTEROP_<TOKEN>_PORT` + optional `INTEROP_<TOKEN>_HOST`.
+- T017 (acceptor): configure the counterparty INITIATOR with `ResetOnLogon=Y`
+  (QFcpp: `[SESSION] ResetOnLogon=Y`; QFJ: `ResetOnLogon=Y` in `quickfix.properties`)
+  so it sends `141=Y` + `34=1` on each Logon. Set `INTEROP_FIXPP_PORT` (or let
+  OS-assign; bound port readable via `Engine::acceptor_bound_endpoint()`).
+
 ## Deferred rows (present, NOT executed — `status: n/a`)
 
 | Row | Tag | FR | Rationale |

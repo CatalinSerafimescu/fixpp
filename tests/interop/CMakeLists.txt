@@ -210,6 +210,20 @@ fixpp_add_interop_test(
     EXTRA_LIBS fixpp_mock_clock
 )
 
+# ── 024 live ResetOnLogon interop cells — T016 (initiator) + T017 (acceptor) ──
+# Both cells value-parameterized over counterparty × role in one file.
+# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Parent harness must: (T016) run QFcpp/QFJ acceptor with ResetOnLogon tolerant;
+#   (T017) run QFcpp/QFJ initiator with ResetOnLogon=Y so it sends 141=Y + 34=1.
+# Anchors: tasks.md T016/T017; contracts/reset-knobs.md C6.1/C6.2; FR-010/SC-005.
+fixpp_add_interop_test(
+    NAME interop_024_reset_on_logon_test
+    GROUP happy
+    LABEL "interop;024;interop-happy;polish;reset;reset-on-logon"
+    SOURCES happy/hp_fix44_reset_on_logon_test.cpp
+    TLS
+)
+
 # ── US2 thorny-corpus P1 witnesses (T020-T021) ────────────────────────────────
 # Standalone provenance-linked replays of upstream closed-with-fix bugs; reuse the
 # parity ParityAcceptorFixture (parity/parity_support.hpp) — no counterparty, no

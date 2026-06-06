@@ -1441,6 +1441,33 @@ set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "022;us2;allowposdup;strip")
 
+# ── 024-reset-refresh-on-logon (S-017) — ResetOn{Logon,Logout,Disconnect} knobs ─
+# Three additive SessionConfig reset knobs wired onto the 013 reset_to_one()
+# primitive at open()/inbound-Logon/close(). Witnesses: initiator+acceptor
+# ResetOnLogon (141 OR-of-three, reset-before-check_inbound), teardown
+# (graceful/peer-Logout/abnormal-drop), single-fire guard, durable disposition
+# split, both-roles. FIXPP_TEST_HOOKS required (set_counters_for_test seed-non-1
+# seam). contracts/reset-knobs.md §C1–C5; quickstart.md.
+add_executable(session_reset_on_lifecycle
+  test_reset_on_lifecycle.cpp
+  $<TARGET_OBJECTS:session_test_support>
+)
+target_link_libraries(session_reset_on_lifecycle PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_reset_on_lifecycle PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_reset_on_lifecycle PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_reset_on_lifecycle
+  COMMAND session_reset_on_lifecycle)
+set_tests_properties(session_reset_on_lifecycle PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "024;s017;reset-knobs")
+
 # ── 023-engine-session-strand T001/T002 — MT lifecycle + strand-binding witness ─
 #
 # Witnesses V-1..V-12 (per-session strand binding, control-plane confinement,

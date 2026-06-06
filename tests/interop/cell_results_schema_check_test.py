@@ -196,6 +196,11 @@ EXPECTED_IDS = frozenset({
     "PR-QFcpp-acc-fix44-poss-resend-deliver",
     "PR-QFj-init-fix44-poss-resend-deliver",
     "PR-QFj-acc-fix44-poss-resend-deliver",
+    # G3 slice 3 024-reset-refresh-on-logon ResetOnLogon interop cells (4)
+    "RL-QFcpp-init-fix44-reset-on-logon",
+    "RL-QFj-init-fix44-reset-on-logon",
+    "RL-QFcpp-acc-fix44-reset-on-logon",
+    "RL-QFj-acc-fix44-reset-on-logon",
 })
 
 

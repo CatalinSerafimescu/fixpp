@@ -1,0 +1,48 @@
+# Contract: ResetOn{Logon,Logout,Disconnect} Knobs (024, S-017)
+
+Normative contract for the three reset knobs. C-prefixed clauses are binding; witnesses in `quickstart.md` map 1:1.
+
+## C1 — Config surface
+
+- **C1.1**: `SessionConfig` exposes exactly three additive `bool` fields — `reset_on_logon`, `reset_on_logout`, `reset_on_disconnect` — each defaulting to `false`. No other public surface is added (no error slot, no new method, no codegen).
+- **C1.2 (out of scope — cfg-key parsing)**: This slice delivers the C++ `SessionConfig` bool fields ONLY. The QuickFIX cfg-key spellings (`ResetOnLogon`/`ResetOnLogout`/`ResetOnDisconnect`) inform the field NAMING so a future `cfg_loader` mapping is 1:1, but the `008` `cfg_loader` (`src/session/quickfix_compat/cfg_loader.cpp`) parses **only** `FileStorePath`/`SenderCompID`/`TargetCompID` today and is **not** extended to parse these bool keys in this slice. Wiring the three cfg-keys into the loader is an explicit follow-up — no cfg-parse witness is in scope here.
+
+## C2 — `ResetOnLogon`
+
+- **C2.1 (initiator reset + 141 predicate)**: With `reset_on_logon == true`, when the initiator opens, it MUST `reset_seqnums_to_one_durable()` **before** sampling the outbound Logon's `MsgSeqNum`, so the Logon carries `MsgSeqNum=1`. The outbound-Logon `ResetSeqNumFlag(141)=Y` emission predicate MUST be `send_reset_flag || ((reset_on_logon || reset_on_logout || reset_on_disconnect) && seqnums == {1,1})` — the OR-of-three (matching QFcpp `shouldSendReset()` / QFJ `isResetNeeded()`). Consequently a session with `reset_on_logout` or `reset_on_disconnect` (but not `reset_on_logon`) that reset to `{1,1}` at a **prior teardown** MUST also set `141=Y` on its NEXT initiator Logon while seqnums are `{1,1}` (else it desyncs vs QuickFIX).
+- **C2.2 (acceptor reset — cause-dependent split, mutually exclusive arms, exactly one store reset per path)**: When the acceptor processes an inbound Logon, the reset is handled via a **cause-dependent split** with two mutually exclusive arms:
+  - **(a) Knob-driven** (`reset_on_logon == true`): `reset_seqnums_to_one_durable(fatal)` MUST run **BEFORE** inbound-Logon sequence validation (`check_inbound`, `session.cpp:1437`), at `session.cpp:1559`. This is required so a fresh peer Logon `34=1` is admitted when the local next-expected is > 1; a reset placed after `check_inbound` would let the too-low seqnum disconnect the session first. The store-failure disposition is **fatal** (C2.6).
+  - **(b) 013-only received-`141`** (`peer_sent_reset == true && reset_on_logon == false`): `reset_seqnums_to_one_durable(logged)` MUST run **AFTER** `check_inbound`, before the reply Logon, at `session.cpp:1715`. The store-failure disposition is **logged-then-proceed (I-07)**, byte/semantics-identical to today's `:1589-1592` (FR-001 zero regression).
+  - The two arms are **mutually exclusive** (arm (b) guards on `!reset_on_logon`), so **exactly one** `store_->reset()` fires per path (FR-009 / C5.1). *Note: FR-001 byte-identity requires this split. A unified pre-`check_inbound` reset for arm (b) would change the 013-only path's post-state `next_inbound` from 1 to 2 — breaking byte identity with pre-024 behavior (/speckit-verify caught this regression). The "single combined pre-validation decision" prose in earlier versions of this contract was superseded by this verify-driven correctness fix; the binding requirements (FR-001/SC-003) are satisfied by the cause-dependent split.*
+- **C2.3 (off ⇒ no change)**: With `reset_on_logon == false`, the `141` emission predicate MUST reduce to today's behavior (emit iff `reset_seqnum_policy_field == bilateral_strict`), and no logon-time reset is performed.
+- **C2.4 (policy-independence)**: `reset_on_logon == true` MUST log on cleanly under every `reset_seqnum_policy_field` value (`bilateral_strict`/`bilateral_lenient`/`unilateral`); knob-driven `141=Y` emission and policy-driven echo validation compose without wedging.
+- **C2.5 (gap suppression)**: After a `reset_on_logon` reset, the session MUST NOT issue a ResendRequest for any seqnum below the reset point (the fresh `{1,1}` space has no pre-reset gap).
+- **C2.6 (durable — knob-driven Logon path is fatal; 013-only path keeps I-07)**: The reset MUST be persisted (via `MessageStore::reset()`, the second op of `reset_seqnums_to_one_durable()`) before the dialogue proceeds, so a subsequent open observes `{1,1}`. The store-failure disposition is keyed on the **trigger cause**, not the trigger location:
+  - **Knob-driven** (`reset_on_logon == true`, initiator `open()` or acceptor inbound-Logon): a `store_->reset()` failure MUST **prevent reaching `Active`** (the error is propagated) — a live reset that is not durable would silently re-desync after a restart.
+  - **013-only received-`141`** (all 024 knobs off, acceptor `hdr.reset_seqnum_flag=="Y"`): the store-failure disposition MUST remain **logged-then-proceed (I-07)** exactly as today (`session.cpp:1589-1592`) — the session MUST still reach `Active` on a tolerated store failure (FR-001 zero regression). The 024 fatal disposition MUST NOT regress this path.
+
+## C3 — `ResetOnLogout`
+
+- **C3.1 (either direction)**: With `reset_on_logout == true`, the reset (`reset_seqnums_to_one_durable()`, logged-then-proceed on store failure) MUST fire when a Logout occurred in **EITHER direction** before teardown — Logout **sent** (locally-initiated, via `close(close_mode::graceful)`) OR Logout **received** (peer-initiated inbound `35=5`). It MUST NOT be keyed on `close_mode::graceful` alone: a peer-initiated Logout never enters `close(graceful)` — it transitions inline to `Disconnected` (`session.cpp:~2095-2174`) and teardown arrives via read-pump EOF → `close(close_mode::terminal)`. The trigger MUST therefore be a dedicated `logout_seen_` flag set at exactly two Logout-specific sites — (a) the locally-initiated graceful-Logout-sent path (`close(close_mode::graceful)`, `session.cpp:880`) AND (b) the inbound peer-Logout `35=5` receipt in `Active`/`LogonReceived`/`LogoutSent` (`session.cpp:~2095`) — and evaluated at the teardown reset site in `close()`. It MUST NOT be derived from `onLogout_fired_`: `record_state_transition_` (`session.cpp:175-191`) sets `onLogout_fired_` on ANY `Active→!Active` transition (incl. an abnormal terminal close / fatal with no Logout), so it is a *left-Active* predicate, not a *logout-seen* predicate; keying off it would fire on a raw disconnect and collapse `reset_on_logout` into `reset_on_disconnect` (contradicting C4.2).
+- **C3.2 (off ⇒ no change)**: With `reset_on_logout == false`, a Logout teardown MUST preserve the persisted seqnums (today's behavior).
+
+## C4 — `ResetOnDisconnect`
+
+- **C4.1**: With `reset_on_disconnect == true`, ANY transport disconnect/teardown — graceful Logout OR an abnormal connection drop with no Logout — MUST `reset_seqnums_to_one_durable()` (logged-then-proceed on store failure). The reset MUST run **before** the SeqnumManager async-mutex drain (`~:1002`) so `reset_to_one()` does not hit a drained mutex (which returns `session_already_closed` and silently no-ops).
+- **C4.2 (abnormal arm)**: The reset MUST fire on a raw read-pump EOF/error path (the abnormal drop), not only on a graceful close. This is the distinguishing requirement vs `ResetOnLogout`.
+- **C4.3 (off ⇒ no change)**: With `reset_on_disconnect == false`, a disconnect MUST preserve the persisted seqnums.
+
+## C5 — Idempotency & both-roles
+
+- **C5.1 (single-fire teardown guard)**: Applying a reset onto an already-`{1,1}` state leaves the sequence-number **result** unchanged. But `MessageStore::reset()` (`FileStore::reset()`) is NOT a value no-op — it does a full atomic-rename + fdatasync + dir-fsync on every call. Therefore overlapping triggers on one teardown (`reset_on_logout` + `reset_on_disconnect`, or a graceful Logout that then disconnects) MUST be collapsed by a **single-fire guard** (a "reset already done this teardown" flag in `close()`) so the durable reset fires **at most once** observably per teardown. The witness MUST assert exactly one store-reset I/O.
+- **C5.2 (both roles)**: Every knob behaves identically whether fixpp is the initiator or the acceptor — witnessed per knob: `reset_on_logon` (both roles), `reset_on_logout` (both roles, incl. peer-initiated Logout), and `reset_on_disconnect` (both roles).
+
+## C6 — Interop
+
+- **C6.1 (fixpp initiator)**: A fixpp initiator with `reset_on_logon` MUST interop with live QuickFIX-cpp v1.16.0 and QuickFIX-J 3.0.1 **acceptors**: the fixpp `141=Y` Logon is accepted and the dialogue resyncs from seqnum 1.
+- **C6.2 (fixpp acceptor)**: A fixpp **acceptor** with `reset_on_logon` MUST interop with live QuickFIX-cpp v1.16.0 and QuickFIX-J 3.0.1 **initiators** that send a `141=Y` Logon at a fresh `34=1`: fixpp performs its pre-validation reset before `check_inbound`, admits the fresh `34=1` (no disconnect, no ResendRequest), reaches `Active`, and the dialogue resyncs from seqnum 1. (C6.1 + C6.2 together satisfy the FR-010/SC-005 *both-roles* live-interop requirement; the C5.2 unit witnesses do NOT satisfy the *live* AC.)
+
+## C7 — Out of scope (explicit)
+
+- **C7.1**: `RefreshOnLogon` (S-018) is NOT implemented (no store→manager hydrate path exists). The store-hydrate primitive and `RefreshOnLogon` are a separate future slice.
+- **C7.2**: No FIXT.1.1 / FIX 5.0 SP2 routing, no other G3 knobs (`CheckCompID`, `validateSequenceNumbers`, `MaxLatency`, `NextExpectedMsgSeqNum(789)`).

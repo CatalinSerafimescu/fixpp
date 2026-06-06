@@ -92,6 +92,15 @@ cells:
   - { id: PD-QFj-init-fix44-malformed-dup-rejected,     config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
   - { id: PD-QFj-acc-fix44-malformed-dup-rejected,      config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
 
+  # ── G3 slice 3 (024-reset-refresh-on-logon) ResetOnLogon interop cells (4) ─────
+  # T016 initiator (C6.1): fixpp init + reset_on_logon=true → 141=Y + 34=1 to live acceptor.
+  # T017 acceptor (C6.2): live init sends 141=Y + 34=1 → fixpp acceptor resets before validation.
+  # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
+  - { id: RL-QFcpp-init-fix44-reset-on-logon, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  - { id: RL-QFcpp-acc-fix44-reset-on-logon,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
+  - { id: RL-QFj-acc-fix44-reset-on-logon,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
+
   # ── G3 slice 2 (022-possresend-allowpossdup-send) live cells (8) ──────────────
   # T011 AllowPosDup wire-capture: default strip sends 43/122-free frame; counterparty accepts.
   # T012 PossResend deliver: counterparty sends 97=Y; fixpp delivers to fromApp; session Active.
