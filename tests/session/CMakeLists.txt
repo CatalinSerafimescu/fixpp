@@ -1446,11 +1446,6 @@ set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
 # Witnesses V-1..V-12 (per-session strand binding, control-plane confinement,
 # snapshot readers, bounded-handle).  Mirrors business_messages_roundtrip_test
 # (:1326-1350) in link requirements and TLS fixture wiring.
-#
-# T002: FIXPP_TEST_SEAMS is defined ON for this target unconditionally so the
-# one-sided-park seam hooks (authored in T016, guarded by #ifdef FIXPP_TEST_SEAMS
-# in engine.cpp) compile into the witness binary.  The global
-# option(FIXPP_TEST_SEAMS) defaults OFF — no release binary is affected.
 add_executable(engine_session_strand_test
   test_engine_session_strand.cpp
 )
@@ -1471,7 +1466,6 @@ target_include_directories(engine_session_strand_test PRIVATE
 )
 target_compile_definitions(engine_session_strand_test PRIVATE
   FIXPP_TEST_HOOKS
-  FIXPP_TEST_SEAMS
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME engine_session_strand COMMAND engine_session_strand_test)

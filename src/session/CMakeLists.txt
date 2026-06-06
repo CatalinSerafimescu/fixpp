@@ -81,10 +81,3 @@ target_sources(fixpp_session PRIVATE
 )
 
 target_link_libraries(fixpp_session PRIVATE Crc32c::crc32c)
-
-# 023-engine-session-strand T002: propagate FIXPP_TEST_SEAMS into engine.cpp
-# when the option is ON so the #ifdef hooks compile.  Defined PRIVATE so the
-# flag does NOT leak into consumers of fixpp_session.
-if(FIXPP_TEST_SEAMS)
-  target_compile_definitions(fixpp_session PRIVATE FIXPP_TEST_SEAMS)
-endif()

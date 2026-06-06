@@ -189,13 +189,14 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     entry.session_role = role;
     entry.config = std::move(cfg);
 
-    // T023 (E-7/D-SNAP): republish the reader snapshot after this registry insert.
-    // register_session() is called before start() (single-threaded by contract),
-    // so no control-strand dispatch is needed here — we are already on the
-    // single thread. The snapshot reflects the new registry entry (entry.session
-    // is still null at registration time; lookup() will return nullptr for this
-    // id until publish_entry writes entry.session). [data-model E-7; INV-9]
-    publish_reader_snapshot_unlocked_();
+    // T023 (E-7/D-SNAP): NO snapshot republish needed here. A registered entry has
+    // entry.session == null, so it contributes nothing to the reader snapshot (the
+    // snapshot only carries non-null sessions + bound endpoints). The first
+    // observable reader content for this id appears when publish_entry writes
+    // entry.session / the accept loop writes its endpoint — each republishes then.
+    // The ctor already seeds a non-null empty snapshot, so lookup() safely returns
+    // nullptr for a registered-but-not-open id. [/simplify: removed redundant
+    // O(N^2) pre-start republish; data-model E-7; INV-9; B-015-3.]
     return {};
 }
 
@@ -734,7 +735,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     // delayed both, so TSan never fired.  The genuine HB-free control-plane races
     // are public synchronous readers (lookup()/acceptor_bound_endpoint()) vs the
     // map write/clear — witnessed by V-8 (T016/T017) without any production seam.
-    // The FIXPP_TEST_SEAMS CMake option is retained (zero-cost, harmless).
+    // (The FIXPP_TEST_SEAMS CMake option was removed in the /simplify pass — it
+    // gated nothing once the seam was deleted.)
     // [DD-2026-06-06 / research/reviews/codex_023-engine-session-strand_gate_a_v8_retarget.md]
     // Capture raw_listener pointer BEFORE moving into the control-strand lambda,
     // so we never read back from the engine map on the session strand.
