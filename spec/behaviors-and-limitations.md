@@ -560,11 +560,20 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   (initial lazy-connect + reconnect). The store-failure disposition is **cause-keyed**:
   knob-driven Logon = **fatal** (blocks `Active`); the `013`-only received-`141` path stays
   **I-07 logged-then-proceed** (all-off byte-identical, zero regression); teardown = logged.
-  The acceptor collapses knob + received-`141` into ONE combined `need_logon_reset` decision
-  **before** `check_inbound` (so a fresh peer `34=1` at local-expected>1 is admitted), and a
-  logout+disconnect teardown double-trigger collapses via a single-fire guard — each yields
-  **exactly one** observable `MessageStore::reset()` (`FileStore::reset()` is non-idempotent
-  I/O). **Status: shipped** (024). *(FR-001..FR-010; C2.1–C5.2; data-model disposition table.)*
+  The acceptor handles the two reset causes via a **cause-dependent split** (mutually exclusive
+  arms): the knob-driven reset (`reset_on_logon==true`) runs **before** `check_inbound`
+  (`session.cpp:1559`, fatal disposition) so a fresh peer `34=1` at local-expected>1 is
+  admitted; the 013-only received-`141` reset (`peer_sent_reset && !reset_on_logon`) runs
+  **after** `check_inbound` (`session.cpp:1715`, I-07 logged disposition), byte/semantics-
+  identical to pre-024 (FR-001 zero regression). The arms are mutually exclusive → exactly
+  one `store_->reset()` per path. A logout+disconnect teardown double-trigger collapses via
+  a single-fire guard — each teardown also yields exactly one observable `MessageStore::reset()`
+  (`FileStore::reset()` is non-idempotent I/O). *The "single combined pre-validation
+  decision" sketch in earlier contract prose was superseded by this verify-driven correctness
+  fix: a unified pre-check reset for the 013-only arm changes `next_inbound` 1→2, breaking
+  byte identity; /speckit-verify caught the regression; the binding requirements
+  (FR-001/SC-003) are satisfied by the cause-dependent split.*
+  **Status: shipped** (024). *(FR-001..FR-010; C2.1–C5.2; data-model disposition table.)*
 
 ### Limitations
 
