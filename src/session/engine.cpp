@@ -1208,21 +1208,36 @@ asio::awaitable<void> Engine::stop() {
             // stopped_=true and fast-fail without posting. [gate-b/r3 P1]
             stopped_.store(true, std::memory_order_seq_cst);
 
-            // Dispatch emit to each session strand rather than calling directly on the
+            // Emit the cancellation ON each session strand rather than directly on the
             // control strand. The role loops call async_mutex::async_lock() which calls
             // reset_cancellation_state() on the same entry.session_cancel slot (from the
-            // session strand). Calling emit() concurrently from the control strand would
-            // race on the slot's handler — TSan: data race in cancellation_signal::emit vs
-            // cancellation_slot::prepare_memory. [gate-b/r4 production fix]
+            // session strand). Emitting concurrently from the control strand would race
+            // on the slot's handler — TSan: data race in cancellation_signal::emit vs
+            // cancellation_slot::prepare_memory.
+            //
+            // The emit is AWAITED (co_spawn + use_awaitable), NOT fire-and-forget. A
+            // posted-and-forgotten emit capturing [&entry] is a UAF: an orphan entry
+            // that has a session_strand but no live_transport and no session — a role
+            // loop that exited before publish (bind/connect/open failure; cf. the
+            // down-peer initiator, behaviors-and-limitations L2) — is drained by
+            // neither step 2 (needs live_transport) nor step 4 (needs session), so its
+            // queued lambda would outlive registry_.clear() (step 5) which frees
+            // entry.session_cancel. Awaiting guarantees the emit completes before clear.
+            // Same awaited-co_spawn pattern as steps 2/4; the role loop is suspended on
+            // I/O so the session strand is free to run the emit (no deadlock).
+            // [gate-b/r5 P1: dangling-&entry UAF fix — Codex 2nd-opinion]
             for (auto& [id, entry] : registry_) {
                 if (entry.session_strand.has_value()) {
-                    asio::dispatch(*entry.session_strand,
-                        [&entry]() noexcept {
+                    co_await asio::co_spawn(
+                        *entry.session_strand,
+                        [&entry]() -> asio::awaitable<void> {
                             entry.session_cancel.emit(asio::cancellation_type::total);
-                        });
+                            co_return;
+                        },
+                        asio::use_awaitable);
                 } else {
-                    // session_strand not yet created (start() not called) — fall back to
-                    // direct emit (no concurrent role loop running, so no race).
+                    // session_strand not yet created (start() not called) — direct emit
+                    // (no concurrent role loop running, so no race). [INV-0]
                     entry.session_cancel.emit(asio::cancellation_type::total);
                 }
             }

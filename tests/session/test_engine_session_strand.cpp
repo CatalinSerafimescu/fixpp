@@ -2344,4 +2344,115 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     engine.reset();
 }
 
+// ── V-17: OrphanEntryStopEmit_NoUAF (gate-b/r5; Codex 2nd-opinion) ────────────
+//
+// Regression guard for the ORPHAN-ENTRY stop() teardown path, which was
+// previously untested. An orphan entry has a session_strand (emplaced in
+// start()) but never published a session or live_transport — it arises when a
+// role loop exits BEFORE publishing, e.g. an initiator whose connect exhausts
+// (run_connect_loop: drive_reconnect() fails → close(terminal) + co_return
+// without publish; cf. behaviors-and-limitations L2 down-peer initiator). This
+// cell forces that: an initiator pointed at a free port with NO listener and a
+// 1-attempt reconnect policy → connection refused → exhaust → orphan entry,
+// then stop() on a 3-thread ioc. lookup() staying null asserts we are in the
+// orphan path (not a live session).
+//
+// ── What the gate-b/r5 fix changed (inspection-found defect) ──────────────────
+//   gate-b/r4 (a26a8e5) dispatched stop() Step 1's per-session cancellation emit
+//   fire-and-forget — `asio::dispatch(*session_strand, [&entry]{ emit(); })`. For
+//   an orphan entry the posted lambda is drained by NEITHER Step 2 (needs
+//   live_transport) NOR Step 4 (needs session), and Step 3's counter-drain does
+//   not order it, so there is NO happens-before guaranteeing it runs before
+//   registry_.clear() (Step 5) frees entry.session_cancel → a latent dangling
+//   `&entry` capture (Codex P1, codex_pr105_4_2ndopinion_review.md). gate-b/r5
+//   makes the emit AWAITED (co_spawn + use_awaitable), like Steps 2/4, so it
+//   always completes before clear() — orphan entries included.
+//
+//   NOTE — this defect is inspection-found, NOT deterministically reproducible
+//   here: with idle worker threads the posted emit is serviced promptly, long
+//   before clear(), so neither ASan (UAF) nor TSan (race) trips on the pre-fix
+//   code in this scenario (verified 0/10 ASan, 0/6 TSan). That is precisely why
+//   a26a8e5's local sanitizers passed. This cell therefore GUARDS the orphan
+//   teardown path (it must tear down cleanly under ASan/TSan) rather than
+//   reproducing the race; the fix removes the dangling capture categorically.
+//
+// Thread count: 3 engine threads + main = 4. Anti-hang: 10s stop budget; the
+// orphan forms within ~300ms (loopback connection-refused is sub-ms).
+// [engine.cpp stop() Step 1; gate-b/r5; Codex codex_pr105_4_2ndopinion_review.md]
+
+TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    // A free port with NOTHING listening → initiator connect is refused.
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    // Initiator ONLY (no acceptor registered) → connect to `port` is refused.
+    auto ini_cfg = make_session_cfg(
+        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
+        ioc.get_executor(), port);
+    // Bounded reconnect: a single 1ms attempt, then exhaust → run_connect_loop
+    // unwinds without publishing → orphan entry (session_strand set, no
+    // session / no live_transport).
+    fixpp::transport::ReconnectPolicy rp;
+    rp.schedule = std::pmr::vector<std::chrono::milliseconds>{std::chrono::milliseconds{1}};
+    rp.jitter = 0.0;
+    rp.max_attempts = 1;
+    ini_cfg.reconnect_policy = std::move(rp);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(ini_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-17: initiator register_session failed";
+    }
+
+    engine->start();
+
+    // Worker threads drive the connect loop (which exhausts) + later stop().
+    // work_guard keeps run() alive across the idle window (no run_for/restart UB).
+    auto wg = asio::make_work_guard(ioc);
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t3{[&ioc]{ ioc.run(); }};
+
+    // Let the connect loop exhaust (refused → 1ms → exhaust → co_return) so the
+    // entry is an ORPHAN before stop() runs. Generous budget; sub-ms in practice.
+    std::this_thread::sleep_for(std::chrono::milliseconds{300});
+
+    // Sanity: the session never published (lookup stays null) — confirms we are
+    // exercising the orphan path, not a live session (witness-quality guard).
+    EXPECT_EQ(engine->lookup(ini_id), nullptr)
+        << "V-17: orphan precondition — initiator must never have published a session";
+
+    {
+        auto stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->stop(), asio::use_future);
+        bool done = wait_pred_nodrive(
+            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+            10000ms);
+
+        wg.reset();
+        t1.join();
+        t2.join();
+        t3.join();
+
+        ASSERT_TRUE(done) << "V-17: engine.stop() did not complete within 10s";
+        stop_fut.get();
+    }
+
+    EXPECT_TRUE(engine->stopped())
+        << "V-17: engine must be stopped after stop() completes";
+
+    engine.reset();
+}
+
 }  // namespace

@@ -1261,22 +1261,35 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // Transition to closed immediately.
     state_ = state_t::closed;
 
+    // ── Best-effort TLS close-notify (graceful shutdown) ──────────────────────
+    // Send the close_notify alert ONLY when no SSL operation is suspended on this
+    // strand. close() is strand-confined (FR-006 — see header §"State machine"),
+    // so read_in_flight_ / write_in_flight_ are authoritative reads here. If a
+    // read/write is in flight, its completion handler will later run
+    // map_error_code → BIO_ctrl on ssl_stream_; mutating the SSL state via
+    // SSL_shutdown underneath that suspended op is unsafe, and socket_.close()
+    // below already interrupts it with an error (a truncated close — acceptable
+    // non-fatal per [2g §7.8]). When nothing is in flight, we send the
+    // close_notify for a clean bidi shutdown the peer can observe.
+    //
+    // ssl_stream_ is NEVER reset here. The pending async_read_some completion (on
+    // this session strand) passes through asio's SSL layer which calls
+    // map_error_code → BIO_ctrl on the SSL BIO; ssl_stream_.reset() would free the
+    // BIO underneath it → UAF / SEGFAULT (the prior bug). ssl_stream_ is destroyed
+    // in ~asio_tls_transport, which (for engine-managed sessions) runs after the
+    // role loop exits — i.e., after run_read_pump co_returns and all pending SSL
+    // completions have executed. [2g §7.8]
+    if (ssl_stream_ && !read_in_flight_ && !write_in_flight_) {
+        SSL* ssl = ssl_stream_->native_handle();
+        if (ssl) {
+            // First SSL_shutdown sends close_notify; bounded by tls_close_timeout
+            // {1s} — for a synchronous close() we send but do NOT block for the
+            // peer's response. Return value ignored (best-effort).
+            (void)SSL_shutdown(ssl);
+        }
+    }
+
     // ── Close the underlying TCP socket ───────────────────────────────────────
-    // NOTE: ssl_stream_ is intentionally NOT reset here.
-    //
-    // The pending async_read_some completion (on the session strand) passes through
-    // asio's SSL layer which calls map_error_code → BIO_ctrl on the SSL BIO object.
-    // If ssl_stream_.reset() freed the BIO here, the completion handler would run
-    // against a freed BIO → UAF / SEGFAULT under gcc-release.
-    //
-    // ssl_stream_ is destroyed in the Transport destructor (~asio_tls_transport),
-    // which runs after the role loop exits — i.e., after run_read_pump co_returns and
-    // all pending SSL completions have executed. [2g §7.8 / gate-b production fix]
-    //
-    // ssl_stream_ is also NOT reset on the SSL_shutdown path: sending close_notify
-    // is a best-effort operation; the transport is closed by socket_.close() which
-    // interrupts any in-flight SSL reads/writes with an error.  The SSL object is
-    // freed by ssl_stream_'s destructor (Transport dtor), which is always safe.
     asio::error_code ec;
     socket_.close(ec);
     // Best-effort; ignore ec.
