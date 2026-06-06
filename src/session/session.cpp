@@ -1594,7 +1594,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // peer_sent_reset: event emission deferred to after the reply-Logon block
                 // so the event fires with consistent post-reset counters (FR-018) and the
                 // reply Logon is stamped at seq=1 (FR-017). The reset itself has already
-                // run above via reset_seqnums_to_one_durable() when need_logon_reset.
+                // run above via reset_seqnums_to_one_durable() when reset_on_logon.
             }
 
             // 013 T036 US2: CompID authorization BEFORE FSM transition to
