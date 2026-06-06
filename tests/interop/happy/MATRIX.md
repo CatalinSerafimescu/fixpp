@@ -76,7 +76,7 @@ one file; 4 cells total.
 
 | Scenario | Driver | Cells | Clause | In-process witnesses |
 |----------|--------|-------|--------|---------------------|
-| `reset_on_logon_initiator` — fixpp initiator with `reset_on_logon=true` sends `141=Y` + `34=1`; live acceptor accepts; both sides resync from 1 | `hp_fix44_reset_on_logon_test.cpp` (T016) | QFcpp/QFj × init (2) | C6.1 / FR-010 | (a) FSM Active; (b) outbound seqnum ≥ 1 + session Active (Logon accepted) |
+| `reset_on_logon_initiator` — fixpp initiator with `reset_on_logon=true` sends `141=Y` + `34=1`; live acceptor accepts; both sides resync from 1 | `hp_fix44_reset_on_logon_test.cpp` (T016) | QFcpp/QFj × init (2) | C6.1 / FR-010 | (a) FSM Active; (b) outbound seqnum ≥ 2 after Active (Logon accepted) |
 | `reset_on_logon_acceptor` — live initiator sends `141=Y` + `34=1`; fixpp acceptor with `reset_on_logon=true` resets before `check_inbound`, admits `34=1`, reaches Active; no ResendRequest | `hp_fix44_reset_on_logon_test.cpp` (T017) | QFcpp/QFj × acc (2) | C6.2 / FR-010 | (a) FSM Active (no disconnect); (b) outbound > 1 (reply Logon sent); (c) next\_inbound == 2 (no ResendRequest issued) |
 
 Golden artifact names (captured by parent harness at first paired live run):
