@@ -250,7 +250,7 @@ std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
         std::atomic<std::uint64_t>* counter;
         ~LeasedHandle() noexcept { counter->fetch_sub(1, std::memory_order_release); }
     };
-    std::atomic<std::uint64_t>* lease_ctr_ptr = &(const_cast<Engine*>(this)->lease_counter_);
+    std::atomic<std::uint64_t>* lease_ctr_ptr = &lease_counter_;  // mutable (debug-only)
     lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
 
     auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
@@ -787,6 +787,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         //   - async_accept() creates accepted_socket{exec_} = session strand.
         //   - make_accepted() adopts accepted_socket.get_executor() = session strand.
         // This assert fires if any site regresses to bare exec_ (R8 silent lynchpin).
+        // session_strand is invariantly emplaced in start() before the loop spawns (T005).
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         assert_transport_on_session_strand(*transport, *entry.session_strand);
 
         // Step 2: TLS handshake.
@@ -1021,6 +1023,8 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     //     = the session strand (reconnect_fsm.cpp:117) → factory_->make(exec, ...) uses it.
     //   - The factory-path ctor stores exec as socket_'s executor.
     // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
+    // session_strand is invariantly emplaced in start() before the loop spawns (T005).
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     assert_transport_on_session_strand(session->live_transport(), *entry.session_strand);
 
     // Step 4 (T013): awaited publication — publish entry.session and
@@ -1405,8 +1409,9 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             auto strand_exec = kl->executor().underlying();
             core::expected_t<void> send_result = co_await asio::co_spawn(
                 strand_exec,
-                [kl, payload_copy =
-                         std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
+                // payload_copy is captured by copy: the enclosing lambda's capture is
+                // const (non-mutable lambda), so a std::move here would be a no-op.
+                [kl, payload_copy]() -> asio::awaitable<core::expected_t<void>> {
                     // Enable total cancellation so stop()'s
                     // cancellation_type::total reaches Session::send.
                     // [[feedback_asio_cospawn_total_cancellation_default]]

@@ -444,7 +444,10 @@ private:
     //   - NEVER drives a stop() drain (draining on app-held leases would hang stop()).
     //
     // Release builds carry NO counter — zero runtime overhead. [R7]
-    std::atomic<std::uint64_t> lease_counter_{0};
+    // `mutable`: lookup() is logically const (a snapshot read) but increments this
+    // debug-only instrumentation counter — the canonical use of mutable (avoids a
+    // const_cast in the const lookup()).
+    mutable std::atomic<std::uint64_t> lease_counter_{0};
 #endif
 };
 
