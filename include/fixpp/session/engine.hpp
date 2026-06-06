@@ -312,6 +312,17 @@ public:
     // Never null post-construction (validate_engine_config rejects null clocks).
     [[nodiscard]] const std::shared_ptr<fixpp::core::Clock>& clock() const noexcept;
 
+#ifdef FIXPP_TEST_HOOKS
+    // gate-b/r1 #3 (V-12 seam): public setter for the pre-publish hook.
+    // Set before calling start(); invoked by run_accept_loop on the session strand
+    // between step 7 (attach_accepted_transport) and step 7a (publish_entry).
+    // Production builds (FIXPP_TEST_HOOKS not defined) carry zero overhead.
+    // [contracts C-6/V-12; gate-b/r1 #3]
+    void set_pre_publish_hook(std::function<asio::awaitable<void>()> hook) {
+        test_hook_pre_publish_ = std::move(hook);
+    }
+#endif  // FIXPP_TEST_HOOKS
+
 private:
     // Injected executor; all loops co_spawn on this.
     asio::any_io_executor exec_;
@@ -427,6 +438,15 @@ private:
     // Initialized to a non-null empty Snapshot in the ctor so readers never
     // load null even before start() has been called. [E-7 invariant]
     std::atomic<std::shared_ptr<const ReaderSnapshot>> reader_snapshot_;
+
+    // gate-b/r1 #3 (V-12 seam): awaitable hook invoked by run_accept_loop on the
+    // session strand BETWEEN step 7 (attach_accepted_transport) and step 7a
+    // (publish_entry co_spawn).  The hook is always compiled in (so engine.cpp,
+    // which does not get FIXPP_TEST_HOOKS, can always check it) but is always null
+    // in production (no production code path calls set_pre_publish_hook, which is
+    // guarded by FIXPP_TEST_HOOKS).  Overhead = one null function<> check per
+    // accepted connection: zero in practice. [contracts C-6/V-12; gate-b/r1 #3]
+    std::function<asio::awaitable<void>()> test_hook_pre_publish_;  // null unless test sets it
 
 #ifndef NDEBUG
     // T025 (INV-9a / FR-014 / R7): debug-only outstanding-lease counter.

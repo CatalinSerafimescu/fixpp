@@ -880,6 +880,17 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         fixpp::transport::Transport* raw = transport.get();
         session->attach_accepted_transport(std::move(transport), std::move(hr));
 
+        // gate-b/r1 #3 (V-12 seam): test hook between step 7 (transport attached)
+        // and step 7a (publish_entry).  Always compiled in (member always exists);
+        // always null in production (set_pre_publish_hook is FIXPP_TEST_HOOKS-gated).
+        // Overhead = one null function<> check per accepted connection (zero cost).
+        // The hook co_awaits on the session strand — stop() may run concurrently on
+        // the control strand during the pause, setting stopped_=true, which
+        // publish_entry then observes.  [contracts C-6/V-12; gate-b/r1 #3]
+        if (engine.test_hook_pre_publish_) {
+            co_await engine.test_hook_pre_publish_();
+        }
+
         // Step 7a: T013 awaited publication — publish entry.session and
         // entry.live_transport ON the control strand, BEFORE entering the read pump.
         // [data-model E-2/INV-2; research D-PUB; contract C-6]
