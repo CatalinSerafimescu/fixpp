@@ -274,8 +274,10 @@ static bool wait_both_active(asio::io_context& ioc,
                              const SessionId& acc_id, const SessionId& ini_id,
                              std::chrono::milliseconds budget) {
     return wait_pred(ioc, [&]() -> bool {
-        auto* a = engine.lookup(acc_id);
-        auto* i = engine.lookup(ini_id);
+        // T024: lookup() now returns shared_ptr<Session> (bounded handle).
+        // operator bool() and -> work the same as with raw Session*.
+        auto a = engine.lookup(acc_id);
+        auto i = engine.lookup(ini_id);
         return a && i
             && a->state() == fsm_state::Active
             && i->state() == fsm_state::Active;
@@ -808,9 +810,9 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     }
 
     // Access the live session objects via lookup().
-    // Pre-T024: lookup() returns raw Session*.
-    fixpp::session::Session* acc_session = engine->lookup(acc_id);
-    fixpp::session::Session* ini_session = engine->lookup(ini_id);
+    // T024: lookup() returns shared_ptr<Session> (bounded handle).
+    auto acc_session = engine->lookup(acc_id);
+    auto ini_session = engine->lookup(ini_id);
 
     if (!acc_session || !ini_session) {
         stop_engine_sync(ioc, *engine);
@@ -1132,12 +1134,12 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
         << "V-12: engine must be stopped after stop_engine_sync";
 
     // V-12 primary assertion: no session has been published as Active.
-    // After stop(), lookup() returns nullptr (registry cleared in step 5).
+    // After stop(), lookup() returns nullptr (empty shared_ptr, registry cleared in step 5).
     // This confirms that NO live transport was published behind the in-progress stop().
     //
     // [INV-2a: publish_entry checks stopped_.load(acquire) FIRST → false → no publish]
     // [contract C-6: stopped disposition → loop closes without initiating any read]
-    fixpp::session::Session* acc_session = engine->lookup(acc_id);
+    auto acc_session = engine->lookup(acc_id);
     EXPECT_EQ(acc_session, nullptr)
         << "V-12: acceptor session must NOT be reachable after stop() clears the registry\n"
         << "  A non-null Session* here would indicate the registry was NOT cleared\n"
@@ -1194,15 +1196,20 @@ TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
     //
     // [anchor: engine.hpp:249 "Session* lookup(SessionId const& id) const"]
     // [anchor: contracts C-4 "one intended, recorded change only"]
+    // T024 (FR-008/SC-004/D-SNAP): lookup() return type changed from Session* to
+    // std::shared_ptr<Session>.  This static_assert is flipped to verify the new
+    // type (the "one intended ABI diff" confirmed by V-5).  The Itanium mangled
+    // symbol name does NOT encode the return type, so the nm baseline at
+    // tests/abi/baseline/libfixpp_session_engine_pre023.nm shows 0 symbol-name
+    // changes — but this compile-time check confirms the signature changed.
+    // [tasks T024/T026; contracts C-4/C-8; research D8/D-SNAP]
     using LookupReturnType = decltype(
         std::declval<fixpp::session::Engine const&>().lookup(
             std::declval<fixpp::session::SessionId const&>()));
     static_assert(
-        std::is_same_v<LookupReturnType, fixpp::session::Session*>,
-        "V-4/V-5: Engine::lookup() must return Session* (raw pointer) pre-T024.\n"
-        "If this static_assert FAILS, T024 has changed the return type to\n"
-        "std::shared_ptr<Session>.  Update this test to use shared_ptr<Session>\n"
-        "and verify it is the ONLY change (V-5 one-diff gate, tasks T026).\n"
+        std::is_same_v<LookupReturnType, std::shared_ptr<fixpp::session::Session>>,
+        "V-4/V-5: Engine::lookup() must return std::shared_ptr<Session> (T024).\n"
+        "If this static_assert FAILS, T024's return-type change was not applied.\n"
         "anchor: contracts/engine-session-strand.md C-4 + research.md D-SNAP");
 
     // V-5: runtime confirmation that the Engine public API compiles correctly
@@ -1421,64 +1428,131 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     EXPECT_TRUE(engine->stopped())
         << "V-11 Part 1: engine must be stopped after stop() completes";
 
-    // ── V-11 PART 2: keepalive (DEFERRED until T024) ─────────────────────────
-    //
-    // TODO-T024: When T024 changes lookup() → std::shared_ptr<Session>,
-    // enable this block in T026.  It verifies that a shared_ptr<Session> handle
-    // obtained BEFORE clear() keeps the Session alive ACROSS stop()/clear().
-    //
-    // Pseudocode (to replace #if 0 block in T026):
-    //
-    //   // 1. Obtain handle BEFORE stop().
-    //   std::shared_ptr<fixpp::session::Session> handle = engine->lookup(acc_id);
-    //   ASSERT_NE(handle, nullptr);
-    //   ASSERT_EQ(handle->state(), fsm_state::Active);
-    //
-    //   // 2. Call stop() — clears registry_ but handle's shared_ptr keeps Session alive.
-    //   stop_engine_sync(ioc, *engine);
-    //   ASSERT_TRUE(engine->stopped());
-    //
-    //   // 3. Verify the handle is still valid (not a dangling pointer).
-    //   //    Session borrows EngineConfig& — so it is valid only while Engine is alive.
-    //   //    Engine is still alive here (unique_ptr not yet reset).
-    //   ASSERT_NE(handle, nullptr) << "V-11 Part 2: handle must remain valid while Engine is alive";
-    //   // Session::state() is observable (Session not freed by clear()).
-    //   (void)handle->state();   // Must not crash/UAF.
-    //
-    //   // 4. Destroy the handle BEFORE the engine goes out of scope.
-    //   handle.reset();
-    //
+    // ── V-11 PART 2: keepalive [T024] ────────────────────────────────────────
+    // A shared_ptr<Session> handle obtained BEFORE stop()/clear() keeps the
+    // Session alive ACROSS the registry_.clear() call.
     // [anchor: C-8 "bounded handle — valid while Engine is alive";
     //  data-model INV-9 "keepalive across registry_.clear()"]
     //
-    // ── V-11 PART 3: lease/~Engine assert (DEFERRED until T025) ─────────────
+    // Requires a live session pair so that publish_entry() runs and the session
+    // appears in the snapshot (acceptor-only sessions are never published until
+    // an initiator connects).  Reuses the main ioc (restart after Part 1).
+    {
+        ioc.restart();
+        const uint16_t port2 = reserve_free_port(ioc);
+        fixpp::core::EngineConfig ecfg2;
+        ecfg2.executor = ioc.get_executor();
+        ecfg2.clock = make_mock_clock(ioc);
+        auto acc_cfg2 = make_session_cfg(
+            fac, "ACC_P2", "INI_P2", fixpp::session::session_role::acceptor, "INI_P2",
+            ioc.get_executor(), port2);
+        auto ini_cfg2 = make_session_cfg(
+            fac, "INI_P2", "ACC_P2", fixpp::session::session_role::initiator, "ACC_P2",
+            ioc.get_executor(), port2);
+        const SessionId acc_id2 = SessionId::from_config(acc_cfg2);
+        const SessionId ini_id2 = SessionId::from_config(ini_cfg2);
+
+        auto engine2 = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg2));
+        if (!engine2->register_session(std::move(acc_cfg2)).has_value()) {
+            stop_engine_sync(ioc, *engine2);
+            FAIL() << "V-11 Part 2: acceptor register_session failed";
+        }
+        if (!engine2->register_session(std::move(ini_cfg2)).has_value()) {
+            stop_engine_sync(ioc, *engine2);
+            FAIL() << "V-11 Part 2: initiator register_session failed";
+        }
+        engine2->start();
+
+        // Wait for both sessions to reach Active (publish_entry has run).
+        bool both_active = wait_both_active(ioc, *engine2, acc_id2, ini_id2, 8000ms);
+        if (!both_active) {
+            stop_engine_sync(ioc, *engine2);
+            FAIL() << "V-11 Part 2: sessions did not reach Active within 8s";
+        }
+
+        // 1. Obtain handle BEFORE stop() — lookup returns non-null (session published).
+        std::shared_ptr<fixpp::session::Session> handle = engine2->lookup(acc_id2);
+        if (!handle) {
+            stop_engine_sync(ioc, *engine2);
+            FAIL() << "V-11 Part 2: lookup() returned null for active session";
+        }
+        fixpp::session::Session* raw_ptr = handle.get();
+        EXPECT_EQ(handle->state(), fsm_state::Active)
+            << "V-11 Part 2: session must be Active before stop()";
+
+        // 2. Call stop() — clears registry_, but handle keeps Session alive.
+        stop_engine_sync(ioc, *engine2);
+        ASSERT_TRUE(engine2->stopped());
+
+        // 3. Engine is still alive (unique_ptr not reset); handle keeps Session.
+        ASSERT_NE(handle, nullptr)
+            << "V-11 Part 2: handle must remain non-null after stop()";
+        ASSERT_EQ(handle.get(), raw_ptr)
+            << "V-11 Part 2: Session must not have been reallocated (keepalive)";
+        (void)handle->state();  // Must not crash/UAF.
+
+        // 4. Destroy handle BEFORE engine2 goes out of scope (counter → 0).
+        handle.reset();
+    }  // engine2 destroyed: ~Engine with lease_counter_ == 0 → no abort.
+
+    // ── V-11 PART 3: lease / ~Engine assert [T025] ───────────────────────────
+    // [anchor: C-8 "~Engine MUST debug-assert no outstanding handles";
+    //  data-model INV-9a; research R7 "NOT a stop() drain"]
     //
-    // TODO-T025: When T025 adds the debug-only lease control block, enable
-    // this block in T026.  It verifies ~Engine debug-asserts that no outstanding
-    // lookup() handles remain (the lease counter is zero at destruction).
-    //
-    // Pseudocode (to replace #if 0 block in T026):
-    //
-    //   // 1. Establish a session, obtain a handle, stop the engine.
-    //   std::shared_ptr<fixpp::session::Session> h = engine->lookup(acc_id);
-    //   ASSERT_NE(h, nullptr);
-    //   stop_engine_sync(ioc, *engine);
-    //
-    //   // 2. Destroy the handle BEFORE engine destruction (counter goes to 0).
-    //   h.reset();
-    //
-    //   // 3. Destroy the engine — lease counter == 0 → PASS (no abort).
-    //   engine.reset();   // ~Engine: debug-assert lease_counter_ == 0 → passes.
-    //
-    //   // The NON-abort case: handle is destroyed before engine → lease counter
-    //   // decrements to 0 → ~Engine does not abort → test PASSES.
-    //   //
-    //   // The ABORT case (not tested here, but verified by INV-9a):
-    //   //   If 'h' were still alive when engine.reset() ran, ~Engine would
-    //   //   fire the debug assert (SIGABRT) because lease_counter_ > 0.
-    //   //
-    //   // [anchor: C-8 "~Engine MUST debug-assert no outstanding handles";
-    //   //  data-model INV-9a; research R7 "NOT a stop() drain"]
+    // Verify ~Engine with zero outstanding handles does NOT abort.
+    // The ABORT path (handle outlives ~Engine) is intentionally not exercised
+    // (SIGABRT would kill the test process); it is documented in INV-9a.
+#ifndef NDEBUG
+    {
+        ioc.restart();
+        const uint16_t port3 = reserve_free_port(ioc);
+        fixpp::core::EngineConfig ecfg3;
+        ecfg3.executor = ioc.get_executor();
+        ecfg3.clock = make_mock_clock(ioc);
+        auto acc_cfg3 = make_session_cfg(
+            fac, "ACC_P3", "INI_P3", fixpp::session::session_role::acceptor, "INI_P3",
+            ioc.get_executor(), port3);
+        auto ini_cfg3 = make_session_cfg(
+            fac, "INI_P3", "ACC_P3", fixpp::session::session_role::initiator, "ACC_P3",
+            ioc.get_executor(), port3);
+        const SessionId acc_id3 = SessionId::from_config(acc_cfg3);
+        const SessionId ini_id3 = SessionId::from_config(ini_cfg3);
+
+        auto engine3 = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg3));
+        if (!engine3->register_session(std::move(acc_cfg3)).has_value()) {
+            stop_engine_sync(ioc, *engine3);
+            FAIL() << "V-11 Part 3: acceptor register_session failed";
+        }
+        if (!engine3->register_session(std::move(ini_cfg3)).has_value()) {
+            stop_engine_sync(ioc, *engine3);
+            FAIL() << "V-11 Part 3: initiator register_session failed";
+        }
+        engine3->start();
+
+        bool both_active3 = wait_both_active(ioc, *engine3, acc_id3, ini_id3, 8000ms);
+        if (!both_active3) {
+            stop_engine_sync(ioc, *engine3);
+            FAIL() << "V-11 Part 3: sessions did not reach Active within 8s";
+        }
+
+        // 1. Obtain handle.
+        auto h = engine3->lookup(acc_id3);
+        if (!h) {
+            stop_engine_sync(ioc, *engine3);
+            FAIL() << "V-11 Part 3: lookup() returned null for active session";
+        }
+
+        // 2. Stop the engine.
+        stop_engine_sync(ioc, *engine3);
+
+        // 3. Destroy handle BEFORE engine destruction (counter → 0).
+        h.reset();
+
+        // 4. Destroy engine3 — ~Engine: lease_counter_ == 0 → PASS (no abort).
+        engine3.reset();
+        SUCCEED() << "V-11 Part 3: ~Engine with no outstanding handles did not abort";
+    }
+#endif
 }
 
 }  // namespace

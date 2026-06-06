@@ -202,7 +202,7 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── In-process seqnum witness (US1-1 / New-4) ─────────────────────────
@@ -220,7 +220,7 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     const auto seqnum_after_logon = s->seqnum_mgr_test_access().peek_outbound();
     fx.run_until(
         [&] {
-            fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
                    ss->seqnum_mgr_test_access().peek_outbound() > seqnum_after_logon;
         },
@@ -228,7 +228,7 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
 
     // ── FSM still Active (US1-1, US1-2: session survives the round-trip) ──
     {
-        fixpp::session::Session* ss = fx.engine().lookup(id);
+        auto ss = fx.engine().lookup(id);
         ASSERT_NE(ss, nullptr) << "session vanished mid-cell";
         EXPECT_EQ(ss->state(), fsm_state::Active)
             << "FSM left Active during the TestRequest round-trip window";

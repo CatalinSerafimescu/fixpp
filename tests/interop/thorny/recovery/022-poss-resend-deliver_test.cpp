@@ -188,7 +188,7 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
         return;
     }
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── Snapshot inbound seqnum after Logon ───────────────────────────────────
@@ -205,7 +205,7 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     fx.run_until([&] { return tracking_app->from_app_calls.load(std::memory_order_acquire) >= 1; },
                  20s);
 
-    fixpp::session::Session* s2 = fx.engine().lookup(id);
+    auto s2 = fx.engine().lookup(id);
     ASSERT_NE(s2, nullptr) << "session disappeared during PossResend window";
 
     // ── In-process witness (c): FSM stays Active (SC-001/SC-005) ─────────────

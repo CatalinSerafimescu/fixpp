@@ -224,8 +224,8 @@ bool setup_engine(asio::io_context& ioc, fixpp::session::Engine& engine,
     engine.start();
     bool ok = wait_until(ioc,
         [&] {
-            auto* a = engine.lookup(out_acc_id);
-            auto* i = engine.lookup(out_ini_id);
+            auto a = engine.lookup(out_acc_id);
+            auto i = engine.lookup(out_ini_id);
             return a && i && a->state() == fixpp::session::fsm_state::Active &&
                    i->state() == fixpp::session::fsm_state::Active;
         },

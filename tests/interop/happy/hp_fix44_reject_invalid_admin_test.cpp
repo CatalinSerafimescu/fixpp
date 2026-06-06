@@ -194,7 +194,7 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── In-process witness (b): seqnum snapshot after logon ────────────────
@@ -214,7 +214,7 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     // malformed content (there is no such API).
     fx.run_until(
         [&] {
-            fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
                    ss->seqnum_mgr_test_access().peek_outbound() > seqnum_after_logon;
         },
@@ -222,7 +222,7 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
 
     // ── In-process witness (a): FSM still Active (US4-1 — non-fatal reject) ─
     {
-        fixpp::session::Session* ss = fx.engine().lookup(id);
+        auto ss = fx.engine().lookup(id);
         ASSERT_NE(ss, nullptr) << "session vanished mid-cell (unexpected disconnect)";
         EXPECT_EQ(ss->state(), fsm_state::Active)
             << "FSM left Active after the Reject window (session_reject must be non-fatal)";
@@ -230,7 +230,7 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
 
     // ── In-process witness (b+c): seqnum advanced (Reject + heartbeats sent) ─
     {
-        fixpp::session::Session* ss = fx.engine().lookup(id);
+        auto ss = fx.engine().lookup(id);
         ASSERT_NE(ss, nullptr);
         EXPECT_GT(ss->seqnum_mgr_test_access().peek_outbound(), seqnum_after_logon)
             << "outbound seqnum did not advance past the post-logon snapshot; "

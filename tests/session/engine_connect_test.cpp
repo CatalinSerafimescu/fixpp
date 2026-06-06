@@ -363,7 +363,7 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     ioc.restart();
 
     // ── Capture state BEFORE stop() frees the session ────────────────────────
-    fixpp::session::Session* ini_session = engine.lookup(ini_id);
+    auto ini_session = engine.lookup(ini_id);
 
     // Session should exist (it's constructed and open()ed in run_connect_loop).
     // If it's null the stub didn't even build the session — that's also a RED.

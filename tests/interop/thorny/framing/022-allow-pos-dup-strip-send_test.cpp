@@ -157,7 +157,7 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
         return;
     }
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── Snapshot outbound seqnum before the send ───────────────────────────────
@@ -216,7 +216,7 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     // The counterparty must not Reject or disconnect. Give it time to process.
     fx.run_until(
         [&] {
-            const fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss == nullptr || ss->state() != fsm_state::Active;
         },
         5s);

@@ -91,7 +91,7 @@ TEST_P(HappyLogonHbLogout, LogonHeartbeatLogout) {
         << "; reached state=" << static_cast<int>(reached);
 
     // ── Seqnum delta (FR-007): outbound advanced past the Logon ──────────────
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
     EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";

@@ -109,6 +109,35 @@ struct std::hash<fixpp::session::SessionId> {
     }
 };
 
+// ── ReaderSnapshot — immutable snapshot for public readers (E-7 / D-SNAP) ─────
+//
+// Holds an immutable point-in-time copy of the two control-plane maps that the
+// synchronous public readers `lookup()` and `acceptor_bound_endpoint()` need.
+// Published by the control strand after every mutation; `atomic_load`'d by readers
+// from any thread without entering a strand, taking a lock, or blocking. [E-7/INV-9]
+//
+// Standard C++20 `std::atomic<std::shared_ptr<const ReaderSnapshot>>` — no
+// `std::mutex` in our headers (Art. XV / [const §XV.9]). [D-SNAP / research D-SNAP]
+
+namespace fixpp::session {
+
+/// Immutable snapshot of the control-plane reader maps (E-7 / D-SNAP).
+/// Built fresh and atomically published after every control-plane mutation
+/// (registry insert/erase, listener/endpoint write, D-PUB publish/unpublish).
+/// Never mutated in place — always replaced with a new allocation.
+struct ReaderSnapshot {
+    /// SessionId → owning shared_ptr<Session> (drawn from registry_).
+    /// The shared_ptr keeps the Session alive across a concurrent registry_.clear()
+    /// while the Engine is alive — the bounded keepalive (INV-9/FR-008/FR-014).
+    std::unordered_map<SessionId, std::shared_ptr<Session>> sessions;
+
+    /// SessionId → bound Endpoint (drawn from listener_endpoints_).
+    /// Copied by value so the snapshot is completely self-contained.
+    std::unordered_map<SessionId, fixpp::transport::Endpoint> endpoints;
+};
+
+}  // namespace fixpp::session
+
 // ── SessionEntry — registry value (data-model "SessionEntry" / E-5) ──────────
 
 namespace fixpp::session {
@@ -166,11 +195,12 @@ struct SessionEntry {
 // Lifecycle:  constructed → started → stopping → stopped
 //   start()  once; stop()  idempotent from any state.
 //
-// Threading (E-5 — single-executor confinement):
-//   015 uses single-threaded confinement, not a strand.
+// Threading (023 two-domain design — MT-safe):
 //   register_session() is called before start() (single-threaded by contract).
-//   lookup(), start(), stop(), and the spawned loops all run on the same
-//   injected executor.  Multi-threaded io_context is NOT supported in 015.
+//   Control-plane mutations (registry/listeners/endpoints) are confined to the
+//   control strand.  Per-session work (read-pump/handshake/teardown) is confined
+//   to each session's own strand.  Public readers lookup() / acceptor_bound_endpoint()
+//   are any-thread-safe via the atomic D-SNAP reader_snapshot_ (E-7/D-SNAP).
 //   NO std::mutex ([const §XV.9]).  Each spawned loop/pump MUST call
 //     co_await asio::this_coro::reset_cancellation_state(
 //             asio::enable_total_cancellation())
@@ -242,11 +272,21 @@ public:
     /// A second stop() is a no-op.  Returns when teardown is complete.
     [[nodiscard]] asio::awaitable<void> stop();
 
-    /// Registry addressing.  Returns nullptr if `id` is not registered, OR is
-    /// registered but not yet established (e.g. acceptor with no peer yet, or
-    /// a session whose loop has not yet reached open()) — null is NOT an error
-    /// (Gate A New-3).
-    [[nodiscard]] Session* lookup(SessionId const& id) const;
+    /// Registry addressing.  Returns nullptr (empty shared_ptr) if `id` is not
+    /// registered, OR is registered but not yet established (e.g. acceptor with
+    /// no peer yet, or a session whose loop has not yet reached open()) — null
+    /// is NOT an error (Gate A New-3).
+    ///
+    /// T024 (FR-008 / SC-004 / D-SNAP): return type changed from Session* to
+    /// std::shared_ptr<Session>.  The handle keeps the Session alive across a
+    /// concurrent stop()/registry_.clear() WHILE THE ENGINE IS ALIVE (bounded
+    /// handle — INV-9a).  Session borrows const EngineConfig& from the Engine;
+    /// the caller MUST NOT let a handle outlive the Engine (~Engine asserts zero
+    /// outstanding handles in DEBUG builds via lease_counter_ — T025/INV-9a).
+    ///
+    /// Reads the atomically-published reader_snapshot_ — any-thread-safe, no
+    /// strand entry, no std::mutex, no block. [E-7/INV-9/D-SNAP/research D8]
+    [[nodiscard]] std::shared_ptr<Session> lookup(SessionId const& id) const;
 
     [[nodiscard]] bool stopped() const noexcept;
 
@@ -342,6 +382,11 @@ private:
                                                   SessionEntry&,
                                                   std::shared_ptr<std::atomic<int>>);
 
+    // T023 (E-7/D-SNAP): internal snapshot republisher — called on the control strand
+    // (or pre-start single-thread) after every control-plane mutation. Builds a fresh
+    // ReaderSnapshot from registry_+listener_endpoints_ and atomically stores it.
+    void publish_reader_snapshot_unlocked_();
+
     // (015 /simplify R-3: the rebindable outbound send-slot lives entirely inside
     // each Session — transport_send_ is rebound by attach_accepted_transport /
     // install_reconnected_transport to the live Transport::async_write. The engine
@@ -364,6 +409,44 @@ private:
     // Engine::~Engine() runs. Separate from outstanding_counter_ (loop
     // counter) so the two domains can be drained independently.
     std::shared_ptr<std::atomic<int>> send_counter_;
+
+    // T023 (E-7 / D-SNAP / INV-9): atomic immutable snapshot for the synchronous
+    // public readers lookup() and acceptor_bound_endpoint().
+    //
+    // Published (via atomic_store/store(release)) on the control strand after
+    // EVERY control-plane mutation: registry inserts/erases (register_session,
+    // publish_entry, unpublish_entry, stop() clear), listener/endpoint writes
+    // (run_accept_loop map write), and stop()'s clears.
+    //
+    // Read (via atomic_load/load(acquire)) by the public readers from any thread
+    // without entering a strand, taking a lock, or blocking. [E-7/INV-9/D-SNAP]
+    //
+    // Standard C++20 std::atomic<shared_ptr<>> — NO std::mutex in our headers
+    // (Art. XV / [const §XV.9]). Not lock-free on all STLs (measured by V-6
+    // perf gate), but correctness does not depend on lock-freedom. [D-SNAP]
+    //
+    // Initialized to a non-null empty Snapshot in the ctor so readers never
+    // load null even before start() has been called. [E-7 invariant]
+    std::atomic<std::shared_ptr<const ReaderSnapshot>> reader_snapshot_;
+
+#ifndef NDEBUG
+    // T025 (INV-9a / FR-014 / R7): debug-only outstanding-lease counter.
+    //
+    // In DEBUG builds, lookup() returns an aliasing shared_ptr<Session> backed
+    // by a small Lease control block that:
+    //   ctor: increments this counter (new handle issued)
+    //   dtor (last copy): decrements this counter (handle released)
+    // ~Engine() debug-asserts this counter is zero (all handles returned before
+    // engine destruction).
+    //
+    // STRICTLY SEPARATE from send_counter_ (R7):
+    //   - send_counter_ is a hard runtime barrier drained by stop() (prevents UAF).
+    //   - lease_counter_ is a debug assert + caller obligation ONLY.
+    //   - NEVER drives a stop() drain (draining on app-held leases would hang stop()).
+    //
+    // Release builds carry NO counter — zero runtime overhead. [R7]
+    std::atomic<std::uint64_t> lease_counter_{0};
+#endif
 };
 
 }  // namespace fixpp::session

@@ -183,7 +183,7 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
     // — the FSM-Active assertion below still passes (conservative: no false failure).
     fx.run_until(
         [&] {
-            const fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             // We do not have a dedicated "Reject emitted" observable from outside
             // Session internals. The golden assertion (below) verifies the Reject
             // was actually sent. Here we wait a bounded window for the exchange.
@@ -191,7 +191,7 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
         },
         10s);
 
-    const fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session disappeared during malformed-dup window";
 
     // ── In-process witness (a): FSM stays Active (SC-002/FR-007) ─────────────

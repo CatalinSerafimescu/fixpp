@@ -178,8 +178,8 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     ioc.restart();
 
     // ── (a) non-null after open(): both sessions addressable by SessionId ─────
-    fixpp::session::Session* acc_s = engine.lookup(acc_id);
-    fixpp::session::Session* ini_s = engine.lookup(ini_id);
+    auto acc_s = engine.lookup(acc_id);
+    auto ini_s = engine.lookup(ini_id);
     EXPECT_NE(acc_s, nullptr) << "acceptor lookup() must be non-null after open().";
     EXPECT_NE(ini_s, nullptr) << "initiator lookup() must be non-null after open().";
 
@@ -189,10 +189,10 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     // reply Logon. (SC-004/005 — "both run their loops".)
     int acc_state = (acc_s != nullptr) ? static_cast<int>(acc_s->state()) : -1;
     int ini_state = (ini_s != nullptr) ? static_cast<int>(ini_s->state()) : -1;
-    EXPECT_TRUE(is_established(acc_s))
+    EXPECT_TRUE(is_established(acc_s.get()))
         << "acceptor must reach an established state (the initiator connected, "
         << "handshook, and its Logon was resolved + admitted). state=" << acc_state;
-    EXPECT_TRUE(is_established(ini_s))
+    EXPECT_TRUE(is_established(ini_s.get()))
         << "initiator must reach an established state (it connected and received "
         << "the acceptor's reply Logon via its read-pump). state=" << ini_state;
 

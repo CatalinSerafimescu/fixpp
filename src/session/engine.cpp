@@ -92,7 +92,12 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // zero; Engine::send bumps/decrements it; stop() drains it before
       // registry_.clear() to prevent send coroutines from dereferencing engine_
       // after Engine::~Engine() runs.
-      send_counter_{std::make_shared<std::atomic<int>>(0)}
+      send_counter_{std::make_shared<std::atomic<int>>(0)},
+      // T023 (E-7/D-SNAP/INV-9): initialize the reader snapshot to a non-null
+      // empty Snapshot so readers never load null even before start(). The first
+      // real publish happens after register_session() inserts a registry entry.
+      // [data-model E-7; research D-SNAP; tasks T023]
+      reader_snapshot_{std::make_shared<const ReaderSnapshot>()}
 
 {}
 
@@ -107,6 +112,64 @@ Engine::~Engine() {
     // final stop() write before the dtor proceeds.
     assert(stopped_.load(std::memory_order_acquire)
            && "Engine destroyed without calling co_await stop() first");
+
+#ifndef NDEBUG
+    // T025 (INV-9a/FR-014/R7): debug-only assertion that no outstanding lookup()
+    // handles remain at destruction time. A caller holding a handle past ~Engine
+    // would UAF-dereference Session's const EngineConfig& engine_ ref.
+    //
+    // This is a DEBUG ASSERT + CALLER OBLIGATION — NEVER a stop() drain (R7):
+    // draining on app-held leases would hang stop(); the hard send_counter_
+    // barrier guards the UAF on the send path. Keep the two mechanisms separate.
+    // [data-model INV-9a; research R7; tasks T025]
+    assert(lease_counter_.load(std::memory_order_acquire) == 0
+           && "Engine destroyed with outstanding lookup() handles — "
+              "all shared_ptr<Session> handles obtained from lookup() must be "
+              "released before ~Engine (INV-9a: Session borrows EngineConfig& "
+              "from Engine; a dangling handle is a UAF). [T025/R7]");
+#endif
+}
+
+// ── publish_reader_snapshot_unlocked_ — T023 (E-7/D-SNAP/INV-9) ─────────────
+// Builds a fresh immutable ReaderSnapshot from the current registry_ and
+// listener_endpoints_ state, then atomically publishes it via reader_snapshot_.
+//
+// MUST be called on the control strand (or pre-start single-thread) AFTER
+// every control-plane mutation. "Unlocked" because the caller already holds
+// the serialization guarantee (control strand). [E-7/INV-9/D-SNAP]
+//
+// Called from:
+//   register_session()         — after registry_ insert (pre-start, single-thread)
+//   publish_entry()            — after entry.session/live_transport published
+//   unpublish_entry()          — after entry.live_transport reset
+//   run_accept_loop map write  — after listener_endpoints_/listeners_ written
+//   stop() inner coroutine     — after registry_.clear() + listener_endpoints_.clear()
+// [data-model E-7; research D-SNAP; tasks T023/T024]
+
+void Engine::publish_reader_snapshot_unlocked_() {
+    // Build a fresh Snapshot from current control-plane state.
+    auto snap = std::make_shared<ReaderSnapshot>();
+
+    // Populate sessions map: copy shared_ptr<Session> from each registry entry.
+    // Only entries whose session field is non-null appear in the snapshot
+    // (pre-publish entries have entry.session == nullptr → lookup() returns null
+    // for them, per Gate A New-3). [E-7/INV-9]
+    snap->sessions.reserve(registry_.size());
+    for (auto const& [id, entry] : registry_) {
+        if (entry.session) {
+            snap->sessions.emplace(id, entry.session);
+        }
+    }
+
+    // Populate endpoints map: copy Endpoint by value from listener_endpoints_.
+    snap->endpoints.reserve(listener_endpoints_.size());
+    for (auto const& [id, ep] : listener_endpoints_) {
+        snap->endpoints.emplace(id, ep);
+    }
+
+    // Atomically publish: store(release) pairs with readers' load(acquire).
+    // The old snapshot is released here (shared_ptr ref-count drop → may free).
+    reader_snapshot_.store(std::move(snap), std::memory_order_release);
 }
 
 // ── register_session (FR-002 / E-1) ──────────────────────────────────────────
@@ -125,14 +188,83 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     auto& entry = registry_[id];  // id copied into map key
     entry.session_role = role;
     entry.config = std::move(cfg);
+
+    // T023 (E-7/D-SNAP): republish the reader snapshot after this registry insert.
+    // register_session() is called before start() (single-threaded by contract),
+    // so no control-strand dispatch is needed here — we are already on the
+    // single thread. The snapshot reflects the new registry entry (entry.session
+    // is still null at registration time; lookup() will return nullptr for this
+    // id until publish_entry writes entry.session). [data-model E-7; INV-9]
+    publish_reader_snapshot_unlocked_();
     return {};
 }
 
-// ── lookup (Gate A New-3) ─────────────────────────────────────────────────────
+// ── lookup (Gate A New-3 / T024 D-SNAP) ──────────────────────────────────────
+// T024 (FR-008/SC-004/D-SNAP): changed from Session* to std::shared_ptr<Session>.
+// Reads the atomically-published reader_snapshot_ (any-thread-safe, no strand,
+// no std::mutex, no block). Returns a shared_ptr<Session> drawn from the snapshot's
+// sessions map — the handle outlives a concurrent registry_.clear() WHILE THE ENGINE
+// IS ALIVE (bounded keepalive, INV-9). Returns nullptr (empty) if id is not in the
+// snapshot or the entry's session has not been published yet (Gate A New-3).
+//
+// T025 (INV-9a): in DEBUG builds, wraps the raw shared_ptr in an aliasing
+// shared_ptr backed by a Lease control block (ctor increments lease_counter_,
+// dtor decrements) so ~Engine can assert zero outstanding handles. Release builds
+// return a plain shared_ptr (no lease overhead, no counter). [R7 — separate from
+// send_counter_; the lease is NEVER a stop() drain] [data-model E-7/INV-9/INV-9a]
 
-Session* Engine::lookup(SessionId const& id) const {
-    auto it = registry_.find(id);
-    return (it == registry_.end()) ? nullptr : it->second.session.get();
+std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
+    // Load the current snapshot — any-thread-safe acquire load. The snapshot
+    // was built from registry_ state as of the last control-strand mutation;
+    // its sessions map holds shared_ptr<Session> entries that keep each Session
+    // alive independently of a concurrent registry_.clear(). [E-7/D-SNAP]
+    auto snap = reader_snapshot_.load(std::memory_order_acquire);
+    if (!snap) return nullptr;  // defensive: never null post-ctor, but guard anyway
+
+    auto it = snap->sessions.find(id);
+    if (it == snap->sessions.end()) return nullptr;
+
+    // it->second is the shared_ptr<Session> from the snapshot (may be null if
+    // the entry exists but entry.session was not yet published). Return it as-is.
+    std::shared_ptr<Session> raw_handle = it->second;
+    if (!raw_handle) return nullptr;
+
+#ifndef NDEBUG
+    // T025 (INV-9a/R7): wrap raw_handle in a LeasedHandle shared_ptr so that:
+    //   (a) the Session is kept alive as long as ANY copy of the returned handle
+    //       exists (LeasedHandle::session holds raw_handle; its refcount keeps the
+    //       Session alive independently of the snapshot), and
+    //   (b) ~Engine can debug-assert no outstanding handles remain (destructor
+    //       decrements lease_counter_ when the LAST copy is destroyed).
+    //
+    // Using an aliasing ptr backed by the lease's control block alone (without
+    // holding raw_handle) is incorrect: the Session would be freed when the
+    // snapshot is cleared, while the aliasing ptr is still alive → UAF. [INV-9]
+    //
+    // This is STRICTLY SEPARATE from send_counter_ (R7): the lease counter is
+    // a debug assert + caller obligation only; it is NEVER drained by stop().
+    // Draining on app-held leases would hang stop() indefinitely. [R7/INV-9a]
+    struct LeasedHandle {
+        std::shared_ptr<Session> session;  // keeps Session alive across clear() [INV-9]
+        std::atomic<std::uint64_t>* counter;
+        ~LeasedHandle() noexcept {
+            counter->fetch_sub(1, std::memory_order_release);
+        }
+    };
+    std::atomic<std::uint64_t>* lease_ctr_ptr =
+        &(const_cast<Engine*>(this)->lease_counter_);
+    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
+
+    auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
+    // Return an aliasing shared_ptr<Session> that SHARES the LeasedHandle's control
+    // block while pointing at the Session. Destroying the last copy decrements
+    // lease_counter_ and releases leased->session (which may then free the Session
+    // if no other copies exist). [INV-9/INV-9a]
+    return std::shared_ptr<Session>{leased, leased->session.get()};
+#else
+    // Release: plain shared_ptr, no lease overhead, no counter. [R7]
+    return raw_handle;
+#endif
 }
 
 bool Engine::stopped() const noexcept {
@@ -472,8 +604,11 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
 namespace {
 
 // Publish helper — returns true (alive) or false (stopped disposition).
-// Must be called with: co_await co_spawn(control_strand_, publish_entry(...), use_awaitable)
-asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_, SessionEntry& entry,
+// Called from run_accept_loop and run_connect_loop via a wrapper lambda that
+// also calls engine.publish_reader_snapshot_unlocked_() after this returns true.
+// [T023/D-SNAP: snapshot republish is the caller's responsibility]
+asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_,
+                                    SessionEntry& entry,
                                     std::shared_ptr<Session> session_ptr,
                                     fixpp::transport::Transport* live_transport_ptr) {
     // INV-2a: check stopped_ FIRST on the control strand. If stop() is already
@@ -493,9 +628,10 @@ asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_, SessionEntry& e
     co_return true;
 }
 
-// Unpublish helper — resets both published handles to null on the control strand.
+// Unpublish helper — resets entry.live_transport to null on the control strand.
 // Must be called on EVERY exit path of the role loop (normal, cancel, error).
 // The reset is a no-op if the entry was never published (stopped disposition).
+// [T023/D-SNAP: snapshot republish is the caller's responsibility after this]
 asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
     // Reset ONLY entry.live_transport — the load-bearing D-PUB hazard. After the
     // role loop exits, the transport is being torn down; a stale live_transport
@@ -616,6 +752,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             }
             engine.listener_endpoints_[session_id] = bound_ep;
             engine.listeners_[session_id] = std::move(lptr);
+            // T023 (E-7/D-SNAP): republish the reader snapshot so
+            // acceptor_bound_endpoint() sees the new endpoint. Called on the
+            // control strand (we are already here via co_spawn(control_strand_,...)).
+            engine.publish_reader_snapshot_unlocked_();
             co_return true;
         },
         asio::use_awaitable);
@@ -761,7 +901,17 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // entering async_read_some. [research D-PUB; data-model INV-2a; contract C-6]
         bool published = co_await asio::co_spawn(
             engine.control_strand_,
-            publish_entry(engine.stopped_, entry, local_session, raw),
+            [&engine, &entry, local_session, raw]() -> asio::awaitable<bool> {
+                bool ok = co_await publish_entry(engine.stopped_, entry,
+                                                 local_session, raw);
+                if (ok) {
+                    // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
+                    // sees the newly-published session. Called on the control strand.
+                    // Engine& is a friend → private access is allowed here. [INV-9]
+                    engine.publish_reader_snapshot_unlocked_();
+                }
+                co_return ok;
+            },
             asio::use_awaitable);
 
         if (!published) {
@@ -794,8 +944,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // read-pump EOF (normal) and the acceptor auth-fail close.
         // The unpublish is co_awaited so it completes before the counter_guard
         // decrements (which signals stop()'s join that this loop has exited). [INV-2]
-        co_await asio::co_spawn(engine.control_strand_, unpublish_entry(entry),
-                                asio::use_awaitable);
+        co_await asio::co_spawn(
+            engine.control_strand_,
+            [&engine, &entry]() -> asio::awaitable<void> {
+                co_await unpublish_entry(entry);
+                // T023 (E-7/D-SNAP): republish the snapshot after live_transport reset.
+                // entry.session remains for terminal-state visibility; lookup() keeps
+                // returning the session in its post-teardown state. [E-7/INV-9]
+                engine.publish_reader_snapshot_unlocked_();
+            },
+            asio::use_awaitable);
 
         // Re-spin the accept loop to serve the next peer (C5 — loop continuously).
         // For the current static-registry model (R2), the session stays live for
@@ -881,7 +1039,16 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     fixpp::transport::Transport* live_tp = &session->live_transport();
     bool published = co_await asio::co_spawn(
         engine.control_strand_,
-        publish_entry(engine.stopped_, entry, local_session, live_tp),
+        [&engine, &entry, local_session, live_tp]() -> asio::awaitable<bool> {
+            bool ok = co_await publish_entry(engine.stopped_, entry,
+                                             local_session, live_tp);
+            if (ok) {
+                // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
+                // sees the newly-published session. Called on the control strand.
+                engine.publish_reader_snapshot_unlocked_();
+            }
+            co_return ok;
+        },
         asio::use_awaitable);
 
     if (!published) {
@@ -899,8 +1066,14 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     co_await run_read_pump(session->live_transport(), *session, entry.config);
 
     // Step 6 (T013): unpublish on normal exit (read-pump EOF / error unwind). [INV-2]
-    co_await asio::co_spawn(engine.control_strand_, unpublish_entry(entry),
-                            asio::use_awaitable);
+    co_await asio::co_spawn(
+        engine.control_strand_,
+        [&engine, &entry]() -> asio::awaitable<void> {
+            co_await unpublish_entry(entry);
+            // T023 (E-7/D-SNAP): republish the snapshot after live_transport reset.
+            engine.publish_reader_snapshot_unlocked_();
+        },
+        asio::use_awaitable);
     co_return;
 }
 
@@ -1128,6 +1301,12 @@ asio::awaitable<void> Engine::stop() {
             listeners_.clear();
             listener_endpoints_.clear();
             registry_.clear();
+
+            // T023 (E-7/D-SNAP): publish an empty snapshot after all maps are
+            // cleared.  Any reader loading after this point sees an empty snapshot
+            // (no sessions, no endpoints) — the correct post-stop() state. Called
+            // on the control strand (we are already here via co_spawn(control_strand_,...)).
+            publish_reader_snapshot_unlocked_();
         },
         asio::use_awaitable);
 
@@ -1262,16 +1441,24 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     co_return result;
 }
 
-// ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────
+// ── acceptor_bound_endpoint (SC-010 delta #6 / T024 D-SNAP) ──────────────────
 // Returns the OS-resolved bound endpoint of the acceptor's listener for `id`.
 // Returns Endpoint{} (port==0) if the id is not a registered acceptor or the
-// listener has not been built yet.  The accept loop builds and stores the
-// listener at the start of run_accept_loop; the endpoint is readable once the
-// executor runs at least one step after start().
+// listener has not been built yet.
+//
+// T024 (D-SNAP): reads the atomically-published reader_snapshot_ (any-thread-
+// safe, no strand, no std::mutex, no block). Signature UNCHANGED (Endpoint by
+// value) — only the internal implementation switches from direct map access to
+// snapshot load. [E-7/INV-9/D-SNAP; research D8 "acceptor_bound_endpoint()
+// keeps its Endpoint-by-value signature"]
 
 fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(SessionId const& id) const {
-    auto it = listener_endpoints_.find(id);
-    if (it == listener_endpoints_.end()) return fixpp::transport::Endpoint{};
+    // Load the current snapshot — any-thread-safe acquire load. [E-7/D-SNAP]
+    auto snap = reader_snapshot_.load(std::memory_order_acquire);
+    if (!snap) return fixpp::transport::Endpoint{};  // defensive: never null post-ctor
+
+    auto it = snap->endpoints.find(id);
+    if (it == snap->endpoints.end()) return fixpp::transport::Endpoint{};
     return it->second;
 }
 

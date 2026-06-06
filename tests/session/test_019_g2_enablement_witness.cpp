@@ -238,8 +238,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
            (!acc_active || !ini_active)) {
         ioc.run_for(100ms);
         ioc.restart();
-        const fixpp::session::Session* acc_s = engine.lookup(acc_id);
-        const fixpp::session::Session* ini_s = engine.lookup(ini_id);
+        auto acc_s = engine.lookup(acc_id);
+        auto ini_s = engine.lookup(ini_id);
         acc_active = acc_s && acc_s->state() == fixpp::session::fsm_state::Active;
         ini_active = ini_s && ini_s->state() == fixpp::session::fsm_state::Active;
     }
