@@ -110,8 +110,8 @@ Engine::~Engine() {
     // T004/INV-8: stopped_ is std::atomic<bool>; load(acquire) pairs with
     // stop()'s sequentially-consistent write, ensuring the assertion sees the
     // final stop() write before the dtor proceeds.
-    assert(stopped_.load(std::memory_order_acquire)
-           && "Engine destroyed without calling co_await stop() first");
+    assert(stopped_.load(std::memory_order_acquire) &&
+           "Engine destroyed without calling co_await stop() first");
 
 #ifndef NDEBUG
     // T025 (INV-9a/FR-014/R7): debug-only assertion that no outstanding lookup()
@@ -122,11 +122,11 @@ Engine::~Engine() {
     // draining on app-held leases would hang stop(); the hard send_counter_
     // barrier guards the UAF on the send path. Keep the two mechanisms separate.
     // [data-model INV-9a; research R7; tasks T025]
-    assert(lease_counter_.load(std::memory_order_acquire) == 0
-           && "Engine destroyed with outstanding lookup() handles — "
-              "all shared_ptr<Session> handles obtained from lookup() must be "
-              "released before ~Engine (INV-9a: Session borrows EngineConfig& "
-              "from Engine; a dangling handle is a UAF). [T025/R7]");
+    assert(lease_counter_.load(std::memory_order_acquire) == 0 &&
+           "Engine destroyed with outstanding lookup() handles — "
+           "all shared_ptr<Session> handles obtained from lookup() must be "
+           "released before ~Engine (INV-9a: Session borrows EngineConfig& "
+           "from Engine; a dangling handle is a UAF). [T025/R7]");
 #endif
 }
 
@@ -248,12 +248,9 @@ std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
     struct LeasedHandle {
         std::shared_ptr<Session> session;  // keeps Session alive across clear() [INV-9]
         std::atomic<std::uint64_t>* counter;
-        ~LeasedHandle() noexcept {
-            counter->fetch_sub(1, std::memory_order_release);
-        }
+        ~LeasedHandle() noexcept { counter->fetch_sub(1, std::memory_order_release); }
     };
-    std::atomic<std::uint64_t>* lease_ctr_ptr =
-        &(const_cast<Engine*>(this)->lease_counter_);
+    std::atomic<std::uint64_t>* lease_ctr_ptr = &(const_cast<Engine*>(this)->lease_counter_);
     lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
 
     auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
@@ -308,9 +305,9 @@ namespace {
     if (tls != nullptr) {
         // INV-7: the socket's executor MUST equal the session strand.
         // Failure = a construction site sampled bare exec_ (R8 — the silent lynchpin).
-        assert(tls->socket_executor() == asio::any_io_executor{session_strand}
-               && "INV-7: transport socket executor != session_strand "
-                  "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
+        assert(tls->socket_executor() == asio::any_io_executor{session_strand} &&
+               "INV-7: transport socket executor != session_strand "
+               "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
     }
 #else
     (void)transport;
@@ -608,8 +605,7 @@ namespace {
 // Called from run_accept_loop and run_connect_loop via a wrapper lambda that
 // also calls engine.publish_reader_snapshot_unlocked_() after this returns true.
 // [T023/D-SNAP: snapshot republish is the caller's responsibility]
-asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_,
-                                    SessionEntry& entry,
+asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_, SessionEntry& entry,
                                     std::shared_ptr<Session> session_ptr,
                                     fixpp::transport::Transport* live_transport_ptr) {
     // INV-2a: check stopped_ FIRST on the control strand. If stop() is already
@@ -650,7 +646,7 @@ asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
     co_return;
 }
 
-}  // namespace (anonymous)
+}  // namespace
 
 // ── run_accept_loop — T012/T013 production body ───────────────────────────────
 // Still inside namespace fixpp::session (the outer `namespace fixpp::session {`
@@ -904,8 +900,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         bool published = co_await asio::co_spawn(
             engine.control_strand_,
             [&engine, &entry, local_session, raw]() -> asio::awaitable<bool> {
-                bool ok = co_await publish_entry(engine.stopped_, entry,
-                                                 local_session, raw);
+                bool ok = co_await publish_entry(engine.stopped_, entry, local_session, raw);
                 if (ok) {
                     // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
                     // sees the newly-published session. Called on the control strand.
@@ -990,9 +985,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 // control_strand_ and stopped_ for the D-PUB awaited publish/unpublish.
 // Declared in fixpp::session namespace (not anonymous, not static) so Engine
 // can declare it as a friend for private-member access. [dcl.friend]
-asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
-                                       Engine& engine, SessionEntry& entry,
-                                       outstanding_t counter) {
+asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg, Engine& engine,
+                                       SessionEntry& entry, outstanding_t counter) {
     counter_guard guard{counter};
 
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
@@ -1042,8 +1036,7 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     bool published = co_await asio::co_spawn(
         engine.control_strand_,
         [&engine, &entry, local_session, live_tp]() -> asio::awaitable<bool> {
-            bool ok = co_await publish_entry(engine.stopped_, entry,
-                                             local_session, live_tp);
+            bool ok = co_await publish_entry(engine.stopped_, entry, local_session, live_tp);
             if (ok) {
                 // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
                 // sees the newly-published session. Called on the control strand.
@@ -1119,8 +1112,7 @@ void Engine::start() {
             // T013: pass *this so run_connect_loop can access control_strand_ and
             // stopped_ for the D-PUB awaited publish/unpublish. [data-model E-2/INV-2]
             asio::co_spawn(
-                *entry.session_strand,
-                run_connect_loop(engine_cfg_, *this, entry, counter),
+                *entry.session_strand, run_connect_loop(engine_cfg_, *this, entry, counter),
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
@@ -1180,8 +1172,7 @@ asio::awaitable<void> Engine::stop() {
             // The outer frame already disabled cancellation, but the inner co_spawn'd
             // coroutine gets a fresh cancellation state — disable it again so the
             // teardown runs to completion even if the calling context is cancelled.
-            co_await asio::this_coro::reset_cancellation_state(
-                asio::disable_cancellation{});
+            co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
             // ── Step 1: set stopped_ true + total-cancel all loops ───────────────
             // Authoritative write on the control strand. sequentially-consistent
@@ -1191,8 +1182,7 @@ asio::awaitable<void> Engine::stop() {
 
             for (auto& [id, entry] : registry_)
                 entry.session_cancel.emit(asio::cancellation_type::total);
-            for (auto& [id, sig] : accept_scope_signals_)
-                sig.emit(asio::cancellation_type::total);
+            for (auto& [id, sig] : accept_scope_signals_) sig.emit(asio::cancellation_type::total);
 
             // ── Step 2 (T014/INV-4a): dispatch transport.close() on each session_strand ──
             // An established session's read-pump is blocked in async_read_some with no
@@ -1368,77 +1358,73 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // Non-blocking co_spawn — the re-entrant case (session→control→session) is
     // safe because the session strand and control strand are distinct: posting
     // from the session strand onto the control strand never blocks. [C-2/R1]
-    core::expected_t<void> result =
-        co_await asio::co_spawn(
-            control_strand_,
-            [this, id, payload_copy = std::move(payload_copy)]()
-                -> asio::awaitable<core::expected_t<void>> {
-                // ── Step B: on control_strand_ — safe to read registry + stopped_ ──
-                // All engine-global state (registry_, stopped_, send_counter_) is
-                // serialized with stop()'s mutations through this strand. [D0/E-0]
+    core::expected_t<void> result = co_await asio::co_spawn(
+        control_strand_,
+        [this, id,
+         payload_copy = std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
+            // ── Step B: on control_strand_ — safe to read registry + stopped_ ──
+            // All engine-global state (registry_, stopped_, send_counter_) is
+            // serialized with stop()'s mutations through this strand. [D0/E-0]
 
-                // T004/INV-8: acquire load — pairs with stop()'s write on the
-                // control strand.
-                if (stopped_.load(std::memory_order_acquire)) {
-                    co_return std::unexpected(core::error::session_invalid_state_for_send);
-                }
+            // T004/INV-8: acquire load — pairs with stop()'s write on the
+            // control strand.
+            if (stopped_.load(std::memory_order_acquire)) {
+                co_return std::unexpected(core::error::session_invalid_state_for_send);
+            }
 
-                // Registry lookup — serialized with registry_.clear() by control_strand_.
-                auto it = registry_.find(id);
-                if (it == registry_.end()) {
-                    co_return std::unexpected(core::error::session_invalid_argument);
-                }
+            // Registry lookup — serialized with registry_.clear() by control_strand_.
+            auto it = registry_.find(id);
+            if (it == registry_.end()) {
+                co_return std::unexpected(core::error::session_invalid_argument);
+            }
 
-                // Capture strong keepalive before any co_await (UAF guard).
-                std::shared_ptr<Session> kl = it->second.session;
+            // Capture strong keepalive before any co_await (UAF guard).
+            std::shared_ptr<Session> kl = it->second.session;
 
-                // Session null (loop not yet published) or not Active → reject.
-                if (!kl || kl->state() != fsm_state::Active) {
-                    co_return std::unexpected(core::error::session_invalid_state_for_send);
-                }
+            // Session null (loop not yet published) or not Active → reject.
+            if (!kl || kl->state() != fsm_state::Active) {
+                co_return std::unexpected(core::error::session_invalid_state_for_send);
+            }
 
-                // R7: enroll this in-flight send in the send-drain domain with an
-                // RAII guard so the decrement fires on co_return AND on
-                // exception/total-cancel unwind. Keep the send_counter_ mechanism
-                // STRICTLY SEPARATE from the US3 lookup() lease (R7 — draining on
-                // app-held leases would hang stop(); weakening the barrier would
-                // re-open the send-path UAF). [spec.md FR-012]
-                ++(*send_counter_);
-                counter_guard send_guard{send_counter_};
+            // R7: enroll this in-flight send in the send-drain domain with an
+            // RAII guard so the decrement fires on co_return AND on
+            // exception/total-cancel unwind. Keep the send_counter_ mechanism
+            // STRICTLY SEPARATE from the US3 lookup() lease (R7 — draining on
+            // app-held leases would hang stop(); weakening the barrier would
+            // re-open the send-path UAF). [spec.md FR-012]
+            ++(*send_counter_);
+            counter_guard send_guard{send_counter_};
 
-                // Reset cancellation state on the control-strand frame so total
-                // cancellation has a defined policy for the bump→guard window.
-                co_await asio::this_coro::reset_cancellation_state(
-                    asio::enable_total_cancellation());
+            // Reset cancellation state on the control-strand frame so total
+            // cancellation has a defined policy for the bump→guard window.
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
-                // ── Step C: hop to session_strand for toApp + Session::send ──
-                // Non-blocking post onto the session strand — distinct from the
-                // control strand, so no deadlock even for re-entrant sends. [C-2]
-                auto strand_exec = kl->executor().underlying();
-                core::expected_t<void> send_result =
-                    co_await asio::co_spawn(
-                        strand_exec,
-                        [kl, payload_copy = std::move(payload_copy)]()
-                            -> asio::awaitable<core::expected_t<void>> {
-                            // Enable total cancellation so stop()'s
-                            // cancellation_type::total reaches Session::send.
-                            // [[feedback_asio_cospawn_total_cancellation_default]]
-                            co_await asio::this_coro::reset_cancellation_state(
-                                asio::enable_total_cancellation());
-                            // Re-check state on the strand (may have changed
-                            // since the control-strand check above).
-                            if (kl->state() != fsm_state::Active) {
-                                co_return std::unexpected(
-                                    core::error::session_invalid_state_for_send);
-                            }
-                            co_return co_await kl->send(std::span<const std::byte>(
-                                payload_copy.data(), payload_copy.size()));
-                        },
-                        asio::use_awaitable);
+            // ── Step C: hop to session_strand for toApp + Session::send ──
+            // Non-blocking post onto the session strand — distinct from the
+            // control strand, so no deadlock even for re-entrant sends. [C-2]
+            auto strand_exec = kl->executor().underlying();
+            core::expected_t<void> send_result = co_await asio::co_spawn(
+                strand_exec,
+                [kl, payload_copy =
+                         std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
+                    // Enable total cancellation so stop()'s
+                    // cancellation_type::total reaches Session::send.
+                    // [[feedback_asio_cospawn_total_cancellation_default]]
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation());
+                    // Re-check state on the strand (may have changed
+                    // since the control-strand check above).
+                    if (kl->state() != fsm_state::Active) {
+                        co_return std::unexpected(core::error::session_invalid_state_for_send);
+                    }
+                    co_return co_await kl->send(
+                        std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
+                },
+                asio::use_awaitable);
 
-                co_return send_result;
-            },
-            asio::use_awaitable);
+            co_return send_result;
+        },
+        asio::use_awaitable);
 
     co_return result;
 }

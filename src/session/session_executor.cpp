@@ -58,8 +58,7 @@ expected_t<session_executor> make_session_executor(asio::any_io_executor resolve
 // with strand_wrapped=true (truthful) — no second make_strand wrap (D1 anti-pattern).
 //
 // NOLINTBEGIN(bugprone-exception-escape)
-session_executor make_session_executor(adopt_strand_t,
-                                       asio::any_io_executor strand_exec,
+session_executor make_session_executor(adopt_strand_t, asio::any_io_executor strand_exec,
                                        fixpp::session::Session* session) noexcept {
     // Precondition (INV-3a / D3-B): strand_exec IS a strand created by the engine.
     // Store it directly — no re-wrap. strand_wrapped=true is truthful here because

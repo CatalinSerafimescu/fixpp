@@ -646,8 +646,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // BYTE-UNCHANGED and still unconditionally wraps with make_strand.
     if (cfg_.engine_adopt_strand.has_value()) {
         // Engine-only path: adopt the pre-created strand directly.
-        exec_ = fixpp::core::make_session_executor(
-            fixpp::core::adopt_strand_t{}, *cfg_.engine_adopt_strand, this);
+        exec_ = fixpp::core::make_session_executor(fixpp::core::adopt_strand_t{},
+                                                   *cfg_.engine_adopt_strand, this);
     } else {
         // Ordinary user path (per_session_strand or direct_executor).
         auto bound = fixpp::core::make_session_executor(std::move(resolved), cfg_.mode,
@@ -660,9 +660,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // INV-3 (E-3/023): when the engine adopts a strand, the session's inner
     // executor IS that strand. Debug-assert verifies identity (catches D1 double-
     // wrap if the engine accidentally re-wraps before calling open()).
-    assert((!cfg_.engine_adopt_strand.has_value()
-            || exec_.underlying() == *cfg_.engine_adopt_strand)
-           && "INV-3: adopted strand mismatch — session executor must equal engine_adopt_strand");
+    assert((!cfg_.engine_adopt_strand.has_value() ||
+            exec_.underlying() == *cfg_.engine_adopt_strand) &&
+           "INV-3: adopted strand mismatch — session executor must equal engine_adopt_strand");
 
     // (2) effective_clock = SessionConfig::clock_override ?:
     // EngineConfig::clock, resolved ONCE here, bound to session lifetime
@@ -1913,10 +1913,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // route to Arm C (Reject 371=122/373=1 RequiredTagMissing, session survives).
                     // Rationale: an unparseable 122 is unusable — morally identical to absent 122;
                     // Arm C (survive+reject) is consistent with SC-002 and the "present & valid"
-                    // contract prose. data-model §1 row 2 (gate-b/r1 addendum); contracts C1 gate-b/r1.
-                    // Note: unparseable 52 while 122 parses is only reachable for 35=3/5 (Guard-3
-                    // skips them); left as existing fall-through with a comment in that sub-case.
-                    // data-model INV-4; research D5; reuses §1685-1737 pattern (RefTagID 52→122).
+                    // contract prose. data-model §1 row 2 (gate-b/r1 addendum); contracts C1
+                    // gate-b/r1. Note: unparseable 52 while 122 parses is only reachable for 35=3/5
+                    // (Guard-3 skips them); left as existing fall-through with a comment in that
+                    // sub-case. data-model INV-4; research D5; reuses §1685-1737 pattern (RefTagID
+                    // 52→122).
                     {
                         auto parse_122 = fixpp::core::fix_string_to_utc_time(std::span<const char>{
                             hdr.orig_sending_time.data(), hdr.orig_sending_time.size()});
@@ -2006,7 +2007,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                         // else: equal or 122 < 52 → validated, fall through.
                         // (parse failure of 52 while 122 parsed: only 35=3/5 reach here since
-                        // Guard-3 kills malformed-52 for all other msg_types; leave as fall-through.)
+                        // Guard-3 kills malformed-52 for all other msg_types; leave as
+                        // fall-through.)
                     }
                 }
                 // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.

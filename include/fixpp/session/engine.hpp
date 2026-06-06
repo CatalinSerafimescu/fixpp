@@ -379,8 +379,7 @@ private:
     // T013 added Engine& parameter for control_strand_ + stopped_ access (D-PUB).
     // Declared in fixpp::session namespace (not anonymous, not static) per [dcl.friend].
     friend asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const&, Engine&,
-                                                  SessionEntry&,
-                                                  std::shared_ptr<std::atomic<int>>);
+                                                  SessionEntry&, std::shared_ptr<std::atomic<int>>);
 
     // T023 (E-7/D-SNAP): internal snapshot republisher — called on the control strand
     // (or pre-start single-thread) after every control-plane mutation. Builds a fresh
