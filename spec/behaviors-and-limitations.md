@@ -309,18 +309,25 @@ Scope and conventions:
   **Status: deferred** (per-session override, a later Phase-5 slice). *(FR-002;
   Clarifications 2026-06-03 Q2; data-model §EngineConfig::application.)*
 
-- **L-019-3 — Callbacks are serialized by single-thread engine-executor confinement; a
-  multi-threaded `io_context` is NOT supported this slice.** Engine-driven session entry
-  points (`on_inbound_frame`, `open()`, `close()`, the admin-emit sites) are NOT hopped
-  onto the per-session strand before invoking callbacks — `Session::open()` sets
-  `this->exec_ = make_strand(...)` but the running engine coroutine is not dispatched
-  onto it. The no-concurrent-callback invariant (FR-010 / INV-2) holds because the 015
-  engine is single-executor-confined: the injected `exec_` is always a single-threaded
-  `io_context` (consistent with 015 E-5 / `engine.hpp:156–160`). Promoting engine-driven
-  entry points to true per-session strand-confinement (hopping each entry point onto
-  `Session::executor()`) is a future Phase-5 slice; it would re-trigger Gate A.
-  **Status: deferred** (true strand-confinement on engine-driven paths). *(INV-2 correction;
-  gate-b/r1 FIX-4; research.md D3 clarification; data-model.md INV-2.)*
+- **L-019-3 — ~~Callbacks are serialized by single-thread engine-executor confinement; a
+  multi-threaded `io_context` is NOT supported this slice.~~ LIFTED by 023.** Engine-driven
+  session entry points now run on a per-session strand (the whole role loop —
+  establish/handshake/read-pump/callbacks/sends/both teardown closes — is `co_spawn`'d on
+  `SessionEntry::session_strand`, and the transport I/O object is bound to that strand), and
+  all engine-global control-plane state is serialized on a distinct engine **control strand**
+  (registry/listeners/endpoints/counters/handle-publication + `stop()`'s teardown reads).
+  **A multi-threaded `io_context` is now safe under the default configuration (SC-005).**
+  **Status: LIFTED 2026-06-06 by `023-engine-session-strand`.** Earned by the FULL witness
+  set passing under a clean ASan ∧ UBSan ∧ TSan matrix (exact set, not a subset —
+  `[[feedback_completeness_gate_exact_set_not_subset]]`): **V-1 ∧ V-2 ∧ V-3 ∧ V-8 ∧ V-9 ∧
+  V-10 ∧ V-11 ∧ V-12** (per-session teardown serialization, MT business-message round-trip
+  acceptance, cross-session parallelism, control-plane public-reader race fixed by the
+  D-SNAP snapshot, re-entrant-send no-deadlock + post-stop fast-fail, transport-on-strand at
+  all four ctor sites, MT-safe snapshot readers + bounded-handle lease, stop-before-publish).
+  TSan full suite 388/388; engine_session_strand + business_messages_roundtrip green ×3
+  sanitizers. Fixes the flaky `BIO_ctrl` SEGV/UAF teardown crash
+  (`[[project_business_roundtrip_bio_ctrl_segv]]`). *(FR-010/SC-005; research.md D0–D8;
+  data-model.md E-0…E-7; contract C-0…C-8 / V-1…V-12.)*
 
 ## G2 Business Messages (020-g2-business-messages)
 
@@ -473,3 +480,61 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   application must perform business-level de-duplication on its own keys (e.g. `ClOrdID`). **Status:
   shipped as witness-only** (022, zero production code — clarify-confirmed). *(FR-001..FR-005;
   data-model.md §3; research.md D4; contracts §C4.)*
+
+## Per-Session + Control-Plane Strand Binding (023-engine-session-strand)
+
+### Feature Catalogue Rows
+
+- **B-023-1 — The per-session strand binds the whole role loop + transport + both teardown
+  closes.** Each engine-managed session runs its entire role loop (accept/connect, TLS
+  handshake, read-pump, application callbacks, sends, and BOTH teardown closes — transport
+  `close()` and terminal `Session::close()`) on a single `asio::strand` created per session
+  (`SessionEntry::session_strand`); the transport I/O object is bound to that strand at every
+  construction site (the four `asio_tls_transport` ctors + the listener-build + reconnect
+  paths — INV-7/V-10). This serializes a session's TLS state against its in-flight read
+  during teardown, fixing the flaky `BIO_ctrl` SEGV/UAF
+  (`[[project_business_roundtrip_bio_ctrl_segv]]`). *(FR-005/FR-009; E-1/E-3/E-5; C-1/C-7.)*
+- **B-023-2 — Engine-global control-plane state is serialized on a distinct control strand.**
+  A single engine **control strand** (distinct from every session strand — INV-0) serializes
+  ALL engine-global mutation AND `stop()`'s teardown reads: `registry_`, `listeners_`,
+  `listener_endpoints_`, `accept_scope_signals_`, the outstanding/send counters, and the
+  awaited handle publication/unpublication. `send` traverses caller→control→session; `stop`
+  runs its whole teardown (snapshot/cancel/join/close-dispatch/clear) on the control strand —
+  all non-blocking posts, no locks, no deadlock. *(FR-011/FR-012; E-0/E-2/E-4; C-0/C-2/C-6.)*
+- **B-023-3 — Public synchronous readers are MT-safe via an atomically-published RCU
+  snapshot; `lookup()` returns a bounded handle.** `lookup()` and `acceptor_bound_endpoint()`
+  read an atomically-published immutable snapshot (`std::atomic<std::shared_ptr<const
+  ReaderSnapshot>>`, standard C++20 — no `std::mutex` in our headers, §XV.9; republished on
+  the control strand after every control-plane mutation) — never entering a session/control
+  strand, a user-visible lock, or a blocking wait. **NOTE: this atomic is NOT lock-free**
+  (`is_lock_free() == false` on the supported libc++/libstdc++ — `atomic<shared_ptr>` is
+  implemented with an STL-internal lock pool); the read is wait-free of *engine* locks/strands
+  but takes a brief STL-internal lock. The "lock-free" claim from earlier design notes is
+  therefore dropped (V-6). Correctness is unaffected (no deadlock, no data race). `Engine::lookup()`
+  changes from `Session*` to **`std::shared_ptr<Session>`** (the single recorded ABI change,
+  FR-008/SC-004) — a **bounded handle**: the `Engine` must outlive any outstanding handle
+  (`~Engine` debug-asserts zero outstanding leases; the lease is a debug-assert + caller
+  obligation only, kept strictly separate from the `send_counter_` barrier — R7).
+  *(FR-008/FR-014; E-7/INV-9/INV-9a; C-4/C-8.)*
+
+### Limitations
+
+- **L-023-1 — The bounded-handle `lookup()` lease is enforced in DEBUG only.** In debug
+  builds `lookup()` returns an aliasing `std::shared_ptr<Session>` whose control block
+  increments an engine-owned outstanding-lease counter (`~Engine` asserts it is zero). In
+  release builds it is a plain `std::shared_ptr<Session>` with no counter; the
+  Engine-outlives-handles precondition is a documented caller obligation, not enforced.
+  **Status: by design** (R7 — never a `stop()` drain; draining on app-held leases would hang
+  `stop()`). *(INV-9a; C-8; research.md R7.)*
+
+- **L-023-2 — No dedicated `Engine::send` two-hop / establish-churn perf micro-bench
+  (V-6 partial evidence).** The two-hop send (`caller→control→session`) and the D-SNAP
+  snapshot read/republish are structurally new (no `Engine::send` bench existed pre-023), so
+  there is no prior baseline to gate Article VIII ±5% against. A standalone micro-bench would
+  be dominated by TLS-loopback setup (the strand hops are µs-scale), giving low signal. What
+  IS recorded: the snapshot atomic `is_lock_free() == false` on the supported libc++/libstdc++
+  (an STL-internal lock pool — see B-023-3). The binding correctness gate for this concurrency
+  feature is TSan (full suite 388/388, exact witness set ×3 sanitizers). **Status: follow-up**
+  — a dedicated send/establish-churn bench + baseline is a low-risk bench-only carry-forward
+  (cf. the 012 RC#G handshake-bench scaffold precedent). *(V-6; research.md D7/D-SNAP;
+  Article VIII.)*
