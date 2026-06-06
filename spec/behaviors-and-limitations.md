@@ -568,8 +568,7 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   identical to pre-024 (FR-001 zero regression). The arms are mutually exclusive → exactly
   one `store_->reset()` per path. A logout+disconnect teardown double-trigger collapses via
   a single-fire guard — each teardown also yields exactly one observable `MessageStore::reset()`
-  (`FileStore::reset()` is non-idempotent I/O). *The "single combined pre-validation
-  decision" sketch in earlier contract prose was superseded by this verify-driven correctness
+  (`FileStore::reset()` is non-idempotent I/O). *The "single combined pre-validation decision" sketch in earlier contract prose was superseded by this verify-driven correctness
   fix: a unified pre-check reset for the 013-only arm changes `next_inbound` 1→2, breaking
   byte identity; /speckit-verify caught the regression; the binding requirements
   (FR-001/SC-003) are satisfied by the cause-dependent split.*

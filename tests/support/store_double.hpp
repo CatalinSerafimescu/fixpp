@@ -102,7 +102,7 @@ public:
     // reset: clear both frame lists and rewind counters to 1.
     //
     // 024 seams: counts every awaitable reset() call (reset_call_count() — the
-    // single-fire-guard / single-combined-decision witnesses assert exactly one
+    // single-fire-guard / one-store-reset-per-path witnesses assert exactly one
     // observable store reset); honours a one-shot "fail next reset" toggle
     // (fail_next_reset() — the durable-disposition witnesses inject a store
     // failure on the reset path). The failure injection short-circuits BEFORE
@@ -126,7 +126,7 @@ public:
     [[nodiscard]] seqnum_t current_next_inbound() const noexcept { return next_in_; }
     [[nodiscard]] seqnum_t current_next_outbound() const noexcept { return next_out_; }
 
-    // 024 single-fire / single-combined-decision witnesses: observable count of
+    // 024 single-fire / one-store-reset-per-path witnesses: observable count of
     // awaitable reset() calls (reset_sync() seeding is NOT counted).
     [[nodiscard]] std::size_t reset_call_count() const noexcept { return reset_calls_; }
 

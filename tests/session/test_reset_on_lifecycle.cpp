@@ -601,7 +601,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpecte
         << "ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpectedGt1 RED (FR-003): "
            "no ResendRequest(35=2) must be emitted after the acceptor reset; [FR-003/C2.5]";
 
-    // SC-001: seqnums must be {1,1} after the combined reset.
+    // SC-001: seqnums must be {1,1} after the acceptor reset.
     // After reset, next_inbound reset to 1, Logon seq=1 consumed → next_inbound=2.
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
@@ -613,7 +613,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpecte
 // ── Witness (7): ResetOnLogon_Acceptor_ResetsIdempotentWith141 ────────────────
 //
 // Acceptor with reset_on_logon=true AND inbound Logon carrying 141=Y: the combined
-// `need_logon_reset` decision collapses to one store reset. Assert exactly ONE
+// The knob + peer-141 overlap resolves (by mutual exclusion) to one store reset. Assert exactly ONE
 // observable store_.reset() call via reset_call_count().
 //
 // [C2.2, C5.1]
@@ -635,13 +635,13 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_ResetsIdempotentWith141) {
     auto logon = make_peer_logon(1, /*reset_seqnum=*/true);
     (void)feed_sync(sess, logon);
 
-    // C5.1: exactly one store reset observable (single combined need_logon_reset decision).
+    // C5.1: exactly one store reset observable (knob-driven arm; 013-only arm mutually excluded).
     // RED: without trigger, no store reset fires → count==0.
     EXPECT_EQ(factory->store->reset_call_count(), 1u)
         << "ResetOnLogon_Acceptor_ResetsIdempotentWith141 RED (C5.1): "
            "exactly one store_.reset() must fire for (reset_on_logon=true + 141=Y); "
            "got " << factory->store->reset_call_count()
-           << " (combined need_logon_reset decision not yet wired)";
+           << " (acceptor reset not yet wired)";
 
     // Also check session reached Active.
     EXPECT_EQ(sess.state(), fsm_state::Active)

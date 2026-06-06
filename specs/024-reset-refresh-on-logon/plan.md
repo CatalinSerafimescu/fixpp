@@ -92,7 +92,8 @@ src/session/
                          #      reset-flag from (policy==bilateral_strict) to
                          #      (… || ((reset_on_logon||reset_on_logout||reset_on_disconnect) && {1,1})).
                          #  (2) inbound-Logon handler: ONE reset_seqnums_to_one_durable() via the
-                         #      combined need_logon_reset = reset_on_logon || peer_sent_reset, BEFORE
+                         #      combined need_logon_reset = reset_on_logon || peer_sent_reset, BEFORE [superseded — cause-dependent split:
+                         #      knob arm :1559 before check_inbound (fatal); 013-only arm :1715 after (logged); see FR-007/C2.2]
                          #      check_inbound(seq) (~:1437), stricter disposition; subsumes the :1584
                          #      141-receipt reset (no second store I/O); reply mirrors 141=Y.
                          #  (3) peer-Logout-received (~:2095) + local graceful path (~:880): set a
