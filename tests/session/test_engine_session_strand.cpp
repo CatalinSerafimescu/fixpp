@@ -89,6 +89,14 @@
 //        stopped-disposition path (INV-2a) is functional.  ALREADY-GREEN because
 //        INV-2a was implemented in T013 publish_entry. [C-6/V-12; T016/T017]
 //
+//   V-16 PostDrainLateSendFastFails_WithoutPosting
+//        Pauses stop() after its send_counter_ drain has already observed zero,
+//        starts a fresh Engine::send() in that post-drain window, then lets
+//        stop() clear/return and destroys the Engine. Proves the outer
+//        enroll-then-recheck admission gate: the late send sees stopped_=true
+//        and fast-fails without posting any control-strand lambda that could
+//        dereference freed Engine state. [gate-b/r3 P1; FR-012/R7]
+//
 // Anti-pattern notes:
 //   - Every cell uses a genuinely multi-threaded executor (io_context + std::thread
 //     background workers) per [[feedback_single_threaded_harness_masks_strand_races]].
@@ -2173,6 +2181,134 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
 
     // Destroy the engine — any UAF on stopped_/registry_ from a dangling lambda
     // would manifest here under ASan or as a crash.
+    engine.reset();
+}
+
+// ── V-16: PostDrainLateSendFastFails_WithoutPosting (gate-b/r3 P1) ──────────
+//
+// Witnesses the residual UAF window that remained after V-15's fix:
+// stop() could set stopped_=true, drain send_counter_ while it was zero, clear
+// registry_, return, and then a fresh Engine::send() body starting afterward
+// could enqueue a [this]-capturing control-strand lambda before noticing stop.
+//
+// Mechanism:
+//   1. Establish an active session pair on a ≥3-thread executor.
+//   2. Install a stop() seam that pauses on the control strand AFTER the
+//      send_counter_ drain has observed zero and BEFORE registry_.clear().
+//   3. Start stop() and wait until that post-drain seam is reached.
+//   4. While stop() is paused, start a fresh Engine::send().
+//   5. Assert the late send fast-fails with session_invalid_state_for_send.
+//      The only correct path is the OUTER admission gate: enroll, recheck
+//      stopped_, return WITHOUT posting the control-strand lambda.
+//   6. Release stop(), let it clear/return, then destroy the Engine.
+//      ASan/TSan must stay clean: no queued lambda may touch freed `this`.
+//
+// This forces the exact "send begins after stop()'s drain saw zero" path that
+// V-15 did not cover. Thread count: 3 engine threads + main.
+
+TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V16", "INITIATOR_V16",
+        fixpp::session::session_role::acceptor, "INITIATOR_V16",
+        ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(
+        fac, "INITIATOR_V16", "ACCEPTOR_V16",
+        fixpp::session::session_role::initiator, "ACCEPTOR_V16",
+        ioc.get_executor(), port);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-16: acceptor register_session failed";
+    }
+    if (!engine->register_session(std::move(ini_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-16: initiator register_session failed";
+    }
+
+    std::atomic<bool> post_drain_reached{false};
+    std::atomic<bool> post_drain_release{false};
+    engine->set_post_send_drain_hook(
+        [&post_drain_reached, &post_drain_release]() -> asio::awaitable<void> {
+            post_drain_reached.store(true, std::memory_order_release);
+
+            auto exec = co_await asio::this_coro::executor;
+            asio::steady_timer t{exec};
+            while (!post_drain_release.load(std::memory_order_acquire)) {
+                t.expires_after(std::chrono::milliseconds{5});
+                co_await t.async_wait(asio::use_awaitable);
+            }
+            co_return;
+        });
+
+    engine->start();
+
+    bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
+    if (!both_active) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-16: sessions did not reach Active within 8s";
+    }
+
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t3{[&ioc]{ ioc.run(); }};
+
+    auto stop_fut = asio::co_spawn(
+        ioc.get_executor(), engine->stop(), asio::use_future);
+
+    bool seam_hit = wait_pred(ioc,
+        [&]{ return post_drain_reached.load(std::memory_order_acquire); },
+        12000ms);
+    ASSERT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
+
+    const std::array<std::byte, 4> dummy{};
+    auto late_send_fut = asio::co_spawn(
+        ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
+        asio::use_future);
+
+    bool late_send_done = wait_pred(ioc,
+        [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
+        5000ms);
+    ASSERT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
+
+    auto late_send_res = late_send_fut.get();
+    ASSERT_FALSE(late_send_res.has_value())
+        << "V-16: late send must fast-fail after stop() drained send_counter_";
+    EXPECT_EQ(late_send_res.error(), fixpp::core::error::session_invalid_state_for_send)
+        << "V-16: late send must fail at the admission gate, not by half-cleared registry";
+
+    post_drain_release.store(true, std::memory_order_release);
+
+    bool stop_done = wait_pred(ioc,
+        [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+        12000ms);
+
+    ioc.stop();
+    t1.join();
+    t2.join();
+    t3.join();
+
+    ASSERT_TRUE(stop_done) << "V-16: engine.stop() did not complete within 12s";
+    stop_fut.get();
+    EXPECT_TRUE(engine->stopped())
+        << "V-16: engine must be stopped after stop() completes";
+
     engine.reset();
 }
 

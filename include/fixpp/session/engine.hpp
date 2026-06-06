@@ -250,6 +250,11 @@ public:
     ///                                   — id registered but session not Active (AC4/FR-013)
     ///   unexpected(session_invalid_argument=119) — id not registered (FR-013)
     ///
+    /// Admission gate: enrolls in send_counter_ before the first hop, then
+    /// rechecks stopped_. A send that starts after stop() has already set
+    /// stopped_=true fast-fails without posting any control-strand work, while
+    /// a send that enrolled before stop()'s drain is waited out by stop().
+    ///
     /// Any-thread safe: captures a shared_ptr keepalive from the registry
     /// that outlives the posted work (prevents UAF when stop() races the post).
     /// Re-entrant calls from on-strand callbacks are enqueued behind the
@@ -320,6 +325,13 @@ public:
     // [contracts C-6/V-12; gate-b/r1 #3]
     void set_pre_publish_hook(std::function<asio::awaitable<void>()> hook) {
         test_hook_pre_publish_ = std::move(hook);
+    }
+
+    // gate-b/r3 P1 witness seam: invoked by stop() on the control strand after
+    // the send_counter_ drain has observed zero and before the registry clear.
+    // Lets a test start a late Engine::send() in the post-drain window.
+    void set_post_send_drain_hook(std::function<asio::awaitable<void>()> hook) {
+        test_hook_post_send_drain_ = std::move(hook);
     }
 #endif  // FIXPP_TEST_HOOKS
 
@@ -447,6 +459,12 @@ private:
     // guarded by FIXPP_TEST_HOOKS).  Overhead = one null function<> check per
     // accepted connection: zero in practice. [contracts C-6/V-12; gate-b/r1 #3]
     std::function<asio::awaitable<void>()> test_hook_pre_publish_;  // null unless test sets it
+
+    // gate-b/r3 P1 (post-drain seam): awaitable hook invoked by stop() on the
+    // control strand AFTER the send_counter_ drain has observed zero and BEFORE
+    // step-4 session close / step-5 registry clear. Always compiled in; null in
+    // production because only FIXPP_TEST_HOOKS builds can install it.
+    std::function<asio::awaitable<void>()> test_hook_post_send_drain_;
 
 #ifndef NDEBUG
     // T025 (INV-9a / FR-014 / R7): debug-only outstanding-lease counter.

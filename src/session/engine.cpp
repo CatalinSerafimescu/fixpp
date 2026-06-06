@@ -1202,10 +1202,11 @@ asio::awaitable<void> Engine::stop() {
             co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
             // ── Step 1: set stopped_ true + total-cancel all loops ───────────────
-            // Authoritative write on the control strand. sequentially-consistent
-            // default store pairs with the acquire reads at the accept-loop gate and
-            // Engine::send fast-fail. [INV-8]
-            stopped_ = true;
+            // Authoritative write on the control strand. seq_cst pairs with the
+            // outer Engine::send admission re-check and the send_counter_ drain:
+            // a send that enrolls after stop() has observed zero must observe
+            // stopped_=true and fast-fail without posting. [gate-b/r3 P1]
+            stopped_.store(true, std::memory_order_seq_cst);
 
             for (auto& [id, entry] : registry_)
                 entry.session_cancel.emit(asio::cancellation_type::total);
@@ -1273,10 +1274,17 @@ asio::awaitable<void> Engine::stop() {
             // the currently-bumped ones to decrement. [spec.md FR-012; R7]
             {
                 asio::steady_timer t2{co_await asio::this_coro::executor};
-                while (send_counter_->load(std::memory_order_acquire) > 0) {
+                while (send_counter_->load(std::memory_order_seq_cst) > 0) {
                     t2.expires_after(std::chrono::milliseconds{0});
                     co_await t2.async_wait(asio::use_awaitable);
                 }
+            }
+
+            // gate-b/r3 P1 seam: the drain has already observed zero, but the
+            // registry is still intact. Tests can start a late Engine::send()
+            // here to force the post-drain admission path.
+            if (test_hook_post_send_drain_) {
+                co_await test_hook_post_send_drain_();
             }
 
             // ── Step 4 (T014/INV-4b): dispatch Session::close(terminal) on each session_strand ──
@@ -1356,9 +1364,13 @@ asio::awaitable<void> Engine::stop() {
 // T012 two-hop design (research D0/D4/R1/R7; data-model E-0; contract C-2; FR-012):
 //   Enroll: bump send_counter_ + RAII counter_guard in the OUTER coroutine frame
 //           (before the first co_await), so a send is counted the instant the
-//           coroutine body starts. stop()'s drain then waits for any
-//           posted-but-not-yet-run send, keeping Engine alive until the full
-//           two-hop completes (no UAF window). [gate-b/r2 P1; R7]
+//           coroutine body starts.
+//   Admission gate: immediately recheck stopped_ AFTER enroll. If stop() has
+//           already started, fast-fail WITHOUT posting the control-strand lambda.
+//           Otherwise continue to Step A. This closes the post-drain enrollment
+//           window: a send that begins after stop()'s drain observed zero sees
+//           stopped_=true under seq_cst and queues no [this]-capturing work.
+//           [gate-b/r3 P1; R7]
 //   Step A: hop onto control_strand_ (NOT bare exec_) so registry reads + stopped_
 //           check are serialized with stop()'s mutations on the control strand
 //           (D0/INV-0). Using exec_ would leave stop()'s registry_.clear() racing
@@ -1376,8 +1388,11 @@ asio::awaitable<void> Engine::stop() {
 //   blocking wait — so a callback-issued send (session→control→session) cannot
 //   deadlock (FR-006/C-2). [research R1]
 //
-//   stop() drains send_counter_ BEFORE registry_.clear() so no send coroutine
-//   can dereference engine_ after Engine::~Engine() runs. [R7]
+//   stop() stores stopped_=true (seq_cst) BEFORE draining send_counter_ (seq_cst)
+//   and BEFORE registry_.clear(). A send either enrolls before the drain load
+//   and is waited out, or enrolls after that load and then sees stopped_=true
+//   on the outer admission re-check, so it returns without posting any
+//   [this]-capturing control-strand work. [R7]
 //   Backpressure = the awaited result ([const §XV.15]).
 asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                                                      std::span<const std::byte> app_payload) {
@@ -1402,8 +1417,15 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // always safe — the decrement never touches `this`.
     // [gate-b/r2 P1; spec.md FR-012/R7; engine.cpp ~1376 contract]
     auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
-    ++(*sc);
+    sc->fetch_add(1, std::memory_order_seq_cst);
     counter_guard send_guard{sc};
+
+    // gate-b/r3 P1: admission re-check after enroll. If stop() already set the
+    // seq_cst stopped_ flag, fail here and queue no control-strand work. The
+    // counter guard still decrements on this early return.
+    if (stopped_.load(std::memory_order_seq_cst)) {
+        co_return std::unexpected(core::error::session_invalid_state_for_send);
+    }
 
     // T012/Step A: first-hop onto control_strand_ so registry reads and stopped_
     // check are serialized with stop()'s control-plane mutations (D0/INV-0).
