@@ -9,11 +9,15 @@
 //   The fixpp outbound Logon carries ResetSeqNumFlag(141)=Y + MsgSeqNum=1.
 //   The live acceptor accepts. Both sides resync from seqnum 1.
 //   In-process witnesses:
-//     (a) fixpp FSM reaches Active.
-//     (b) Outbound seqnum == 1 after Logon (the reset ran, seqnum not advanced past 1
-//         until at least the Logon is sent — we confirm it starts at 1).
-//   The byte-level golden (141=Y + 34=1 verbatim) is asserted by the PARENT gate
-//   against the proxy capture (research R1: no in-library wire capture).
+//     (a) fixpp FSM reaches Active — the counterparty accepted the Logon (implicitly
+//         confirms the counterparty saw 141=Y + 34=1 as expected; if either were absent
+//         or wrong the counterparty would disconnect / Logout instead of reaching Active).
+//     (b) Outbound seqnum >= 2 after Active (the Logon was sent at 34=1 and the
+//         counter advanced; proves the reset ran and the Logon consumed seqnum 1).
+//   The byte-level golden (141=Y + 34=1 verbatim field order) is asserted by the PARENT
+//   gate against the proxy capture (research R1: no in-library wire-capture seam in the
+//   interop fixture). Unit witness ResetOnLogon_Initiator_ResetsAndEmits141 asserts
+//   the byte-level 141=Y + 34=1 directly via captured_frames.
 //
 // T017 — reset_on_logon_acceptor (C6.2):
 //   A live QFcpp/QFJ INITIATOR sends a Logon with 141=Y + fresh 34=1. The fixpp
@@ -123,15 +127,18 @@ TEST_P(ResetOnLogonInitiator, LogonCarries141AndResyncsFrom1) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    // ── In-process witness (b): outbound Logon seqnum started at 1 (C6.1 / C2.1)
-    // After the reset the Logon was sent at MsgSeqNum=1. The engine now has at
-    // least one outbound frame (the Logon at 34=1 and possibly the first Heartbeat).
-    // We assert outbound seqnum >= 1 AND the session is still active, which together
-    // prove the Logon was accepted (not rejected for a bad 34 or missing 141=Y).
+    // ── In-process witness (b): outbound seqnum >= 2 after Active (C6.1 / C2.1)
+    // After the reset the Logon was sent at MsgSeqNum=1 (seqnum 1 consumed);
+    // peek_outbound() returns the NEXT outbound seqnum, which is >= 2 once the
+    // session is Active. Asserting >= 2 (not just >= 1) proves the Logon was
+    // actually sent (consumed seqnum 1) rather than merely that a session exists.
+    // The unit witness ResetOnLogon_Initiator_ResetsAndEmits141 additionally
+    // asserts 34=1 and 141=Y on the captured Logon frame bytes directly.
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
-        << "outbound seqnum should be >= 1 (Logon was sent; reset ran)";
+    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+        << "outbound seqnum should be >= 2 after Active (Logon at 34=1 was sent and "
+           "consumed seqnum 1; the reset ran and next outbound advanced past 1)";
 
     // The golden assertion (141=Y + 34=1 verbatim, admin profile {52,10}) is
     // performed by the parent gate against the proxy capture. Golden file:

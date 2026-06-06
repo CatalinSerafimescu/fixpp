@@ -1393,17 +1393,18 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_NextInitiatorLogon_Emits141) {
 //   1. Warm-up N cycles to prime asio's internal coroutine-frame cache and the
 //      async_mutex slot pool (so the guard window catches ONLY unexpected per-call
 //      allocations, not one-time startup/asio-pool growth).
-//   2. Measure ONE reset cycle under alloc_guard_start/alloc_guard_end:
-//      (a) open() with reset_on_logon=true (fires reset_seqnums_to_one_durable).
-//      (b) close() with reset_on_disconnect=true (fires teardown reset).
+//   2. Measure TWO separate guarded windows:
+//      Window A: open() with reset_on_logon=true (fires reset_seqnums_to_one_durable(fatal)).
+//      Window B: close() with reset_on_disconnect=true (fires teardown reset(logged)).
+//   Each window uses its own session so the measured path is isolated.
 //   The StoreDouble::reset() uses vector::clear() (no dealloc/realloc after warmup).
 //   SeqnumManager::reset_to_one() touches only atomic counters under the async_mutex.
 //
-// [plan.md §VIII.5; contracts/reset-knobs.md C3.1/C4.1; const §VIII.5]
+// [plan.md §VIII.5; contracts/reset-knobs.md C2.2/C2.6/C3.1/C4.1; const §VIII.5]
 TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
     // ── Warm-up phase: prime asio coroutine cache + async_mutex slot pool ──
     //
-    // Run kWarmup open/close cycles before the measured window. The first few
+    // Run kWarmup open/close cycles before the measured windows. The first few
     // cycles may allocate asio-internal state (coroutine promise frames, timer
     // service entries); after warm-up these are recycled from internal pools.
     constexpr int kWarmup = 6;
@@ -1425,75 +1426,108 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         terminal_close_sync(sess);
     }
 
-    // ── Measured window: open() reset + close() teardown reset ────────────────
+    // ── Measured window A: open() reset (reset_on_logon=true) ────────────────
     //
     // Covers:
     //   (a) initiator open() with reset_on_logon=true → reset_seqnums_to_one_durable(fatal).
-    //   (b) close(terminal) with reset_on_disconnect=true → reset_seqnums_to_one_durable(logged).
     //
     // alloc_guard_start() marks the start of the intercepted window.
     // alloc_guard_end()   marks the end — mallocnesia exits 1 if any malloc/calloc/realloc
     //                     was intercepted and the count exceeds MALLOCNESIA_MAX_ALLOCS=0.
-    ioc.restart();
-    captured_frames.clear();
-    factory = std::make_shared<StoreDoubleFactory>();
-
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/true,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/false,
-        /*reset_on_disconnect=*/true);
-    Session sess(engine, cfg);
-
-    // Structural prerequisite: verify open() succeeds (reset_on_logon=true fires the reset).
     {
-        auto r = open_sync(sess);
-        ASSERT_TRUE(r.has_value())
-            << "ResetKnobs_NoHeapOnResetPath: open() must succeed (reset_on_logon path)";
+        ioc.restart();
+        captured_frames.clear();
+        factory = std::make_shared<StoreDoubleFactory>();
+
+        auto cfg_a = make_cfg(
+            session_role::initiator,
+            /*reset_on_logon=*/true,
+            reset_seqnum_policy::bilateral_lenient,
+            /*reset_on_logout=*/false,
+            /*reset_on_disconnect=*/false);
+        Session sess_a(engine, cfg_a);
+
+        alloc_guard_start();
+        {
+            auto r = open_sync(sess_a);
+            ASSERT_TRUE(r.has_value())
+                << "ResetKnobs_NoHeapOnResetPath [window A]: open() must succeed "
+                   "(reset_on_logon path)";
+        }
+        alloc_guard_end();
+
         ASSERT_EQ(factory->store->reset_call_count(), 1u)
-            << "ResetKnobs_NoHeapOnResetPath: reset must have fired on open() (count==1)";
+            << "ResetKnobs_NoHeapOnResetPath [window A]: reset must have fired on "
+               "open() (reset_on_logon=true); count must be 1";
+
+        // Tear down outside the guard (no teardown reset — reset_on_disconnect=false).
+        terminal_close_sync(sess_a);
     }
 
-    // Feed a peer Logon-ack to reach Active (required before close()).
-    auto logon_ack = make_peer_logon(1, /*reset_seqnum=*/false);
-    {
-        auto r2 = feed_sync(sess, logon_ack);
-        ASSERT_TRUE(r2.has_value())
-            << "ResetKnobs_NoHeapOnResetPath: Logon-ack feed must succeed";
-        ASSERT_EQ(sess.state(), fsm_state::Active)
-            << "ResetKnobs_NoHeapOnResetPath: session must reach Active after Logon exchange";
-    }
-
-    // ── alloc_guard window: terminal close triggers the teardown reset ─────────
-    // Under mallocnesia LD_PRELOAD, any global malloc/calloc/realloc between
-    // alloc_guard_start() and alloc_guard_end() causes the process to exit 1
-    // (if count > MALLOCNESIA_MAX_ALLOCS=0).
+    // ── Measured window B: close() teardown reset (reset_on_disconnect=true) ──
     //
-    // The teardown reset path: reset_seqnums_to_one_durable(logged) which calls
-    // SeqnumManager::reset_to_one() [atomic counter update + async_mutex]
-    // then StoreDouble::reset() [vector::clear() — no-alloc after warmup].
-    alloc_guard_start();
+    // Covers:
+    //   (b) close(terminal) with reset_on_disconnect=true → reset_seqnums_to_one_durable(logged).
+    //
+    // The open() reset for this session runs outside the guard (structural prerequisite only).
     {
-        terminal_close_sync(sess);
+        ioc.restart();
+        captured_frames.clear();
+        factory = std::make_shared<StoreDoubleFactory>();
+
+        auto cfg_b = make_cfg(
+            session_role::initiator,
+            /*reset_on_logon=*/true,
+            reset_seqnum_policy::bilateral_lenient,
+            /*reset_on_logout=*/false,
+            /*reset_on_disconnect=*/true);
+        Session sess_b(engine, cfg_b);
+
+        // Structural prerequisite: open() succeeds (reset_on_logon=true fires the logon reset).
+        {
+            auto r = open_sync(sess_b);
+            ASSERT_TRUE(r.has_value())
+                << "ResetKnobs_NoHeapOnResetPath [window B]: open() must succeed";
+            ASSERT_EQ(factory->store->reset_call_count(), 1u)
+                << "ResetKnobs_NoHeapOnResetPath [window B]: logon reset must have fired";
+        }
+
+        // Feed a peer Logon-ack to reach Active (required before close()).
+        auto logon_ack = make_peer_logon(1, /*reset_seqnum=*/false);
+        {
+            auto r2 = feed_sync(sess_b, logon_ack);
+            ASSERT_TRUE(r2.has_value())
+                << "ResetKnobs_NoHeapOnResetPath [window B]: Logon-ack feed must succeed";
+            ASSERT_EQ(sess_b.state(), fsm_state::Active)
+                << "ResetKnobs_NoHeapOnResetPath [window B]: session must reach Active";
+        }
+
+        // alloc_guard window B: terminal close triggers the teardown reset.
+        // The teardown reset path: reset_seqnums_to_one_durable(logged) which calls
+        // SeqnumManager::reset_to_one() [atomic counter update + async_mutex]
+        // then StoreDouble::reset() [vector::clear() — no-alloc after warmup].
+        alloc_guard_start();
+        {
+            terminal_close_sync(sess_b);
+        }
+        alloc_guard_end();
+
+        ASSERT_EQ(sess_b.state(), fsm_state::Disconnected)
+            << "ResetKnobs_NoHeapOnResetPath [window B]: session must reach Disconnected";
+
+        // Verify the teardown reset fired (reset_on_disconnect=true; teardown_reset_done_ guard).
+        // Total resets: 1 from open() + 1 from close() = 2.
+        EXPECT_EQ(factory->store->reset_call_count(), 2u)
+            << "ResetKnobs_NoHeapOnResetPath [window B]: exactly 2 store resets expected "
+               "(1 from open/reset_on_logon + 1 from close/reset_on_disconnect); "
+               "got " << factory->store->reset_call_count();
+
+        // Seqnums reset to {1,1} after teardown.
+        EXPECT_EQ(sess_b.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1))
+            << "ResetKnobs_NoHeapOnResetPath [window B]: peek_outbound must be 1 after teardown";
+        EXPECT_EQ(sess_b.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
+            << "ResetKnobs_NoHeapOnResetPath [window B]: next_inbound must be 1 after teardown";
     }
-    alloc_guard_end();
-
-    ASSERT_EQ(sess.state(), fsm_state::Disconnected)
-        << "ResetKnobs_NoHeapOnResetPath: session must reach Disconnected after close()";
-
-    // Verify the teardown reset fired (reset_on_disconnect=true; teardown_reset_done_ guard).
-    // Total resets: 1 from open() + 1 from close() = 2.
-    EXPECT_EQ(factory->store->reset_call_count(), 2u)
-        << "ResetKnobs_NoHeapOnResetPath: exactly 2 store resets expected "
-           "(1 from open/reset_on_logon + 1 from close/reset_on_disconnect); "
-           "got " << factory->store->reset_call_count();
-
-    // Seqnums reset to {1,1} after teardown.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1))
-        << "ResetKnobs_NoHeapOnResetPath: peek_outbound must be 1 after teardown reset";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
-        << "ResetKnobs_NoHeapOnResetPath: next_inbound must be 1 after teardown reset";
 }
 
 }  // namespace fixpp::session::test
