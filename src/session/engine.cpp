@@ -1083,6 +1083,19 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
 void Engine::start() {
     auto counter = std::make_shared<std::atomic<int>>(0);
 
+    // gate-b/r1 #2 (TOCTOU fix): publish outstanding_counter_ BEFORE spawning any
+    // loop.  A concurrent stop() between the first spawn and the old post-loop
+    // assignment would observe outstanding_counter_==null, skip the join, then
+    // registry_.clear() while a spawned loop still holds SessionEntry& → UAF.
+    // With the assignment here, stop()'s join always finds a valid counter; if the
+    // loop incremented the counter between the spawn and stop()'s load, stop() waits
+    // for it; if stop() runs before start() finishes, it may drain a counter of 0
+    // and still proceed safely because start() must not be called concurrently with
+    // stop() (documented contract — full control-strand routing of start() is a
+    // future improvement; the race window is bounded by the caller not overlapping
+    // start() and stop() on the same engine). [INV-4a/C-0/E-7]
+    outstanding_counter_ = counter;
+
     for (auto& [id, entry] : registry_) {
         // T005 (E-1/INV-1): create the per-session strand BEFORE the loop spawn.
         // One strand per session — INV-1 (never shared across sessions).
@@ -1120,7 +1133,6 @@ void Engine::start() {
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
-    outstanding_counter_ = counter;
 }
 
 // ── stop (FR-011 / C5 / E-7; T014 teardown ordering) ─────────────────────────
@@ -1336,13 +1348,15 @@ asio::awaitable<void> Engine::stop() {
 //           the control strand (D0/INV-0). Using exec_ would leave stop()'s
 //           registry_.clear() racing send's registry_.find() under MT.
 //           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
-//   Step B: on control_strand_ — registry lookup, keepalive capture, Active check,
+//   Step B: on control_strand_ — registry lookup, keepalive capture (null-check only —
+//           NOT Active check; fsm_state_ is single-writer on session strand C-1),
 //           stopped_ check. If stopped_ → fail-fast (session_invalid_state_for_send).
 //           Bump send_counter_ + RAII counter_guard to enroll in the send-drain
 //           domain. The guard fires on co_return AND exception/cancel unwind so
 //           a total-cancel from stop() cannot leave the counter positive. [R7]
-//   Step C: hop to session_strand for toApp + Session::send. counter_guard dtor
-//           decrements after the strand hop completes (or unwinds).
+//   Step C: hop to session_strand for Active check (fsm_state_ owned here, C-1),
+//           toApp + Session::send. counter_guard dtor decrements after the hop
+//           completes (or unwinds). [gate-b/r1 #1: Active check moved here]
 //
 //   Both hops are non-blocking co_spawn(strand, use_awaitable) — never dispatch or
 //   blocking wait — so a callback-issued send (session→control→session) cannot
@@ -1385,8 +1399,13 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             // Capture strong keepalive before any co_await (UAF guard).
             std::shared_ptr<Session> kl = it->second.session;
 
-            // Session null (loop not yet published) or not Active → reject.
-            if (!kl || kl->state() != fsm_state::Active) {
+            // Session null (loop not yet published) → reject on the control strand.
+            // NOTE: kl->state() (fsm_state_) is single-writer on the per-session
+            // strand ([session.hpp:556]); reading it here (control strand) would be a
+            // data race under MT. The Active check is moved entirely into Step C
+            // (session-strand lambda) where fsm_state_ is owned.
+            // [#1 gate-b/r1: data race fix — spec.md §C-1/C-0/D0]
+            if (!kl) {
                 co_return std::unexpected(core::error::session_invalid_state_for_send);
             }
 
@@ -1417,8 +1436,10 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                     // [[feedback_asio_cospawn_total_cancellation_default]]
                     co_await asio::this_coro::reset_cancellation_state(
                         asio::enable_total_cancellation());
-                    // Re-check state on the strand (may have changed
-                    // since the control-strand check above).
+                    // Active-state check on the session strand where fsm_state_ is
+                    // owned (single-writer on session strand, C-1).  The control strand
+                    // checks only for null session (not yet published); the
+                    // fsm_state_ read is ONLY legal here. [gate-b/r1 #1 fix; C-0/C-1]
                     if (kl->state() != fsm_state::Active) {
                         co_return std::unexpected(core::error::session_invalid_state_for_send);
                     }
