@@ -1208,8 +1208,24 @@ asio::awaitable<void> Engine::stop() {
             // stopped_=true and fast-fail without posting. [gate-b/r3 P1]
             stopped_.store(true, std::memory_order_seq_cst);
 
-            for (auto& [id, entry] : registry_)
-                entry.session_cancel.emit(asio::cancellation_type::total);
+            // Dispatch emit to each session strand rather than calling directly on the
+            // control strand. The role loops call async_mutex::async_lock() which calls
+            // reset_cancellation_state() on the same entry.session_cancel slot (from the
+            // session strand). Calling emit() concurrently from the control strand would
+            // race on the slot's handler — TSan: data race in cancellation_signal::emit vs
+            // cancellation_slot::prepare_memory. [gate-b/r4 production fix]
+            for (auto& [id, entry] : registry_) {
+                if (entry.session_strand.has_value()) {
+                    asio::dispatch(*entry.session_strand,
+                        [&entry]() noexcept {
+                            entry.session_cancel.emit(asio::cancellation_type::total);
+                        });
+                } else {
+                    // session_strand not yet created (start() not called) — fall back to
+                    // direct emit (no concurrent role loop running, so no race).
+                    entry.session_cancel.emit(asio::cancellation_type::total);
+                }
+            }
             for (auto& [id, sig] : accept_scope_signals_) sig.emit(asio::cancellation_type::total);
 
             // ── Step 2 (T014/INV-4a): dispatch transport.close() on each session_strand ──

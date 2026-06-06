@@ -1261,25 +1261,22 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // Transition to closed immediately.
     state_ = state_t::closed;
 
-    // ── Best-effort TLS bidi shutdown ─────────────────────────────────────────
-    // ssl_stream_ is present if async_handshake was started (regardless of
-    // whether it completed successfully).
-    if (ssl_stream_) {
-        SSL* ssl = ssl_stream_->native_handle();
-        if (ssl) {
-            // First SSL_shutdown call sends the close_notify alert to the peer.
-            // Return value: 1 = clean bidi shutdown; 0 = close_notify sent but
-            // peer's not yet received; <0 = error.
-            // Bounded by tls_close_timeout {1s}: for a synchronous close() we
-            // send the close_notify but do NOT block for the peer's response.
-            // A truncated close (peer does not respond) is warned-level per
-            // [2g §7.8]; this is acceptable non-fatal behaviour in v1.0.
-            (void)SSL_shutdown(ssl);
-        }
-        ssl_stream_.reset();
-    }
-
     // ── Close the underlying TCP socket ───────────────────────────────────────
+    // NOTE: ssl_stream_ is intentionally NOT reset here.
+    //
+    // The pending async_read_some completion (on the session strand) passes through
+    // asio's SSL layer which calls map_error_code → BIO_ctrl on the SSL BIO object.
+    // If ssl_stream_.reset() freed the BIO here, the completion handler would run
+    // against a freed BIO → UAF / SEGFAULT under gcc-release.
+    //
+    // ssl_stream_ is destroyed in the Transport destructor (~asio_tls_transport),
+    // which runs after the role loop exits — i.e., after run_read_pump co_returns and
+    // all pending SSL completions have executed. [2g §7.8 / gate-b production fix]
+    //
+    // ssl_stream_ is also NOT reset on the SSL_shutdown path: sending close_notify
+    // is a best-effort operation; the transport is closed by socket_.close() which
+    // interrupts any in-flight SSL reads/writes with an error.  The SSL object is
+    // freed by ssl_stream_'s destructor (Transport dtor), which is always safe.
     asio::error_code ec;
     socket_.close(ec);
     // Best-effort; ignore ec.
