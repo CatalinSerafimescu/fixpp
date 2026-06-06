@@ -224,6 +224,22 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 026 live nanos-SendingTime interop cells — T018 (initiator) + T019 (acceptor) ──
+# Both cells value-parameterized over counterparty × role in one file.
+# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Parent harness must: (T018) configure the counterparty to tolerate a 27-char
+#   nanos 52= from fixpp; (T019) configure the counterparty initiator to SEND
+#   nanos 52= so fixpp's acceptor exercises the lenient parser.
+# Anchors: tasks.md T018/T019; contracts/sendingtime-precision.md C7 (C7.1/C7.2);
+#          quickstart.md "Live interop"; FR-007/SC-001/SC-003/SC-004/I-NST-5.
+fixpp_add_interop_test(
+    NAME interop_026_nanos_sendingtime_test
+    GROUP happy
+    LABEL "interop;026;interop-happy;polish;sending-time;nanos"
+    SOURCES happy/hp_fix44_nanos_sendingtime_test.cpp
+    TLS
+)
+
 # ── US2 thorny-corpus P1 witnesses (T020-T021) ────────────────────────────────
 # Standalone provenance-linked replays of upstream closed-with-fix bugs; reuse the
 # parity ParityAcceptorFixture (parity/parity_support.hpp) — no counterparty, no

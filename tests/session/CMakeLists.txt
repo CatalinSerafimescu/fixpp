@@ -1501,6 +1501,49 @@ set_tests_properties(engine_session_strand PROPERTIES
   LABELS "023;session;control_strand;tsan"
   TIMEOUT 120)
 
+# ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
+# Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
+# precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser
+# witnesses extend the EXISTING session_fix_time_roundtrip target (not here).
+# Mirrors the 024 session_reset_on_lifecycle registration. specs/026 tasks T001.
+add_executable(session_sending_time_precision
+  test_sending_time_precision.cpp
+  $<TARGET_OBJECTS:session_test_support>
+)
+target_link_libraries(session_sending_time_precision PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_sending_time_precision PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_sending_time_precision PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_sending_time_precision
+  COMMAND session_sending_time_precision)
+set_tests_properties(session_sending_time_precision PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "026;s039;sending-time-precision")
+
+# ── T017 [P]: mallocnesia interception gate for the no-heap witness ───────────
+# The dual-gate binding per [[feedback_tracking_pmr_resource_false_pass]]:
+# session_sending_time_precision runs the witness; the _mallocnesia variant
+# re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
+# Mirrors perf_session_recovery_alloc_guard_mallocnesia in tests/perf/CMakeLists.txt.
+# Absent mallocnesia.so → skip (the base test is the fallback).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_sending_time_precision_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_sending_time_precision>"
+  )
+  set_tests_properties(session_sending_time_precision_mallocnesia PROPERTIES
+    LABELS "026;s039;sending-time-precision;alloc_guard"
+    DEPENDS session_sending_time_precision)
+endif()
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

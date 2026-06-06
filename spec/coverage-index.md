@@ -37,7 +37,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.2 | Identifying the FIX session | Y | S-016, S-020 | — |
 | §4.2.1 | The FIX session profile | Y | S-020 | — |
 | §4.2.2 | Identification of FIX session peers (CompID) | Y | S-016 | — |
-| §4.2.3 | Validation of SendingTime(52) | Y | S-019 | — |
+| §4.2.3 | Validation of SendingTime(52) | Y | S-019, S-039 | — |
 | §4.2.4 | Additional fields available for peer identification (SubID, LocationID) | Y | S-016 | — |
 | §4.3 | Establishing a FIX connection | Y | S-001, S-015, S-021, S-022 | — |
 | §4.3.1 | Transport layer requirements (TCP/IP, FIXS mandatory) | Y | T-001, T-002 | — |

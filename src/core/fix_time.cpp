@@ -112,12 +112,25 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
                                                                  std::span<char> out) noexcept {
     using namespace std::chrono;
 
-    // Minimum output sizes per precision level.
-    // YYYYMMDD-HH:MM:SS = 8+1+2+1+2+1+2 = 17 chars (seconds)
-    // YYYYMMDD-HH:MM:SS.sss = 17+1+3 = 21 chars (millis)
-    // YYYYMMDD-HH:MM:SS.ssssss = 17+1+6 = 24 chars (micros)
-    constexpr std::size_t min_size[3] = {17, 21, 24};
-    const std::size_t needed = min_size[static_cast<std::uint8_t>(prec)];
+    // Minimum output size per precision. A `switch` with no `default` makes the
+    // compiler (-Wswitch) flag a missing case if a precision is ever added — an
+    // indexed size table would instead silently OOB-read on a new enumerator
+    // (the exact pre-feature `nanos` bug this feature fixed).
+    std::size_t needed = 0;
+    switch (prec) {
+        case fix_time_precision::seconds:
+            needed = 17;
+            break;  // YYYYMMDD-HH:MM:SS
+        case fix_time_precision::millis:
+            needed = 21;
+            break;  // +.sss
+        case fix_time_precision::micros:
+            needed = 24;
+            break;  // +.ssssss
+        case fix_time_precision::nanos:
+            needed = 27;
+            break;  // +.sssssssss
+    }
     if (out.size() < needed) {
         return std::unexpected(error::decimal_buffer_too_small);
     }
@@ -157,18 +170,30 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
     *p++ = ':';
     p = write_digits(p, SS, 2);
 
-    if (prec == fix_time_precision::millis) {
-        // .sss — truncate nanoseconds to milliseconds.
-        const auto ms = static_cast<std::uint32_t>(ns_rem.count() / 1'000'000);
-        *p++ = '.';
-        p = write_digits(p, ms, 3);
-    } else if (prec == fix_time_precision::micros) {
-        // .ssssss — truncate nanoseconds to microseconds.
-        const auto us = static_cast<std::uint32_t>(ns_rem.count() / 1'000);
-        *p++ = '.';
-        p = write_digits(p, us, 6);
+    // Sub-second suffix. A `switch` with no `default` makes the compiler
+    // (-Wswitch) flag a missing case if a precision is ever added — the missing
+    // `nanos` arm in the old if/else-if chain silently fell through to the
+    // 17-char seconds form (the second bug this feature fixed).
+    switch (prec) {
+        case fix_time_precision::seconds:
+            break;  // no sub-second suffix
+        case fix_time_precision::millis:
+            // .sss — truncate nanoseconds to milliseconds.
+            *p++ = '.';
+            p = write_digits(p, static_cast<std::uint32_t>(ns_rem.count() / 1'000'000), 3);
+            break;
+        case fix_time_precision::micros:
+            // .ssssss — truncate nanoseconds to microseconds.
+            *p++ = '.';
+            p = write_digits(p, static_cast<std::uint32_t>(ns_rem.count() / 1'000), 6);
+            break;
+        case fix_time_precision::nanos:
+            // .sssssssss — full nanosecond precision (9 digits, zero-padded).
+            // ns_rem < 1e9 < 2^32, so the cast to uint32_t is safe.
+            *p++ = '.';
+            p = write_digits(p, static_cast<std::uint32_t>(ns_rem.count()), 9);
+            break;
     }
-    // fix_time_precision::seconds — no sub-second suffix.
 
     return std::span<char>{out.data(), static_cast<std::size_t>(p - out.data())};
 }
@@ -178,10 +203,25 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
 [[nodiscard]] expected_t<utc_time_point> fix_string_to_utc_time(std::span<const char> s) noexcept {
     using namespace std::chrono;
 
-    // Accepted lengths: 17 (seconds), 21 (millis), 24 (micros).
-    // YYYYMMDD-HH:MM:SS = 17; +.sss = 21; +.ssssss = 24.
+    // Lenient grammar (contract C3, data-model E3, Gate A RC#4):
+    //   Accept bare length-17 (YYYYMMDD-HH:MM:SS, no dot) OR
+    //   dot at index 17 + 1..9 ASCII digits (total length 19..27).
+    //   Reject:
+    //     - length 18 (dot + 0 fraction digits — empty fraction)
+    //     - total length > 27 (fraction width > 9) — checked BEFORE digit parse
+    //       (a 10-digit value 9,999,999,999 fits in int64 and must be caught by
+    //       the width gate, NOT by arithmetic overflow — contract C3)
+    //     - a '.' anywhere other than index 17
+    //     - any non-digit fraction character
+    //     - malformed base (handled by field-by-field checks below)
     const std::size_t len = s.size();
-    if (len != 17 && len != 21 && len != 24) {
+    // Width gate: total length must be 17 (bare) or 19..27 (dot + 1..9 digits).
+    if (len < 17 || len == 18 || len > 27) {
+        return std::unexpected(error::wire_invalid_field_format);
+    }
+    // If length > 17, index 17 must be '.'. (Fraction digits are validated in the
+    // single accumulation pass below — no separate validation walk.)
+    if (len > 17 && s[17] != '.') {
         return std::unexpected(error::wire_invalid_field_format);
     }
 
@@ -252,26 +292,39 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
     }
     p += 2;
 
-    // Sub-second.
+    // Sub-second (lenient: 0..9 fraction digits, scaled to nanoseconds).
+    // The width gate (len) and dot-presence are verified above; each fraction
+    // char is validated here in the same pass that accumulates it (fail-closed —
+    // a non-digit returns before `frac` is ever scaled/used).
+    // fraction_width = len - 18 (0 for bare length-17, 1..9 for dot + N digits).
     std::int64_t ns_sub = 0;
-    if (len == 21) {
-        if (*p++ != '.') {
-            return std::unexpected(error::wire_invalid_field_format);
+    if (len > 17) {
+        // p currently points at the dot (index 17); skip it.
+        ++p;                                          // skip '.'
+        const std::size_t fraction_width = len - 18;  // N = number of fraction digits
+        std::int64_t frac = 0;
+        for (std::size_t i = 0; i < fraction_width; ++i) {
+            const char c = *p++;
+            if (c < '0' || c > '9') {
+                return std::unexpected(error::wire_invalid_field_format);
+            }
+            frac = (frac * 10) + (c - '0');
         }
-        const std::int64_t ms_i = parse_digits(p, 3);
-        if (ms_i < 0 || ms_i > 999) {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
-        ns_sub = ms_i * 1'000'000LL;
-    } else if (len == 24) {
-        if (*p++ != '.') {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
-        const std::int64_t us_i = parse_digits(p, 6);
-        if (us_i < 0 || us_i > 999'999) {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
-        ns_sub = us_i * 1'000LL;
+        // Scale to nanoseconds: multiply by 10^(9 - fraction_width).
+        // Scale factors for N=0..9 (N=0 is bare/no-dot — unreachable here since len>17 → N≥1):
+        static constexpr std::int64_t scale[10] = {
+            1'000'000'000LL,  // N=0 (unused — bare 17-char takes len==17 branch)
+            100'000'000LL,    // N=1
+            10'000'000LL,     // N=2
+            1'000'000LL,      // N=3 (millis)
+            100'000LL,        // N=4
+            10'000LL,         // N=5
+            1'000LL,          // N=6 (micros)
+            100LL,            // N=7
+            10LL,             // N=8
+            1LL,              // N=9 (nanos)
+        };
+        ns_sub = frac * scale[fraction_width];
     }
 
     // Build the epoch nanosecond offset.
