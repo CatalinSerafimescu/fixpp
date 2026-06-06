@@ -202,11 +202,11 @@ inline fixpp::session::fsm_state drive_to_active(InteropEngineFixture& fx,
                                                  std::chrono::milliseconds deadline) {
     fx.run_until(
         [&] {
-            const fixpp::session::Session* s = fx.engine().lookup(id);
+            auto s = fx.engine().lookup(id);
             return s != nullptr && s->state() == fixpp::session::fsm_state::Active;
         },
         deadline);
-    const fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     return s != nullptr ? s->state() : fixpp::session::fsm_state::NotConnected;
 }
 

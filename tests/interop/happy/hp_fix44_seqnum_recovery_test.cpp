@@ -207,7 +207,7 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── In-process witness (b): outbound seqnum advanced past Logon ────────
@@ -231,7 +231,7 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // expires. A live counterparty completes the dialogue within the window.
     fx.run_until(
         [&] {
-            fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
                    ss->seqnum_mgr_test_access().next_inbound_unsafe() > inbound_before_recovery;
         },
@@ -319,7 +319,7 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
     EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
@@ -328,7 +328,7 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
     // ResendRequest/SequenceReset-GapFill exchange from the proxy golden diff.
     fx.run_until(
         [&] {
-            const fixpp::session::Session* current = fx.engine().lookup(id);
+            auto current = fx.engine().lookup(id);
             return current == nullptr || current->state() != fsm_state::Active;
         },
         1500ms);

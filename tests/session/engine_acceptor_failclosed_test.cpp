@@ -215,7 +215,7 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     ioc.restart();
 
     // Capture state BEFORE stop().
-    fixpp::session::Session* acc_session = engine.lookup(acc_id);
+    auto acc_session = engine.lookup(acc_id);
     bool auth_failed_emitted = (acc_session != nullptr) && has_authz_failed_event(*acc_session);
     bool session_disconnected = (acc_session != nullptr) &&
                                 (acc_session->state() == fixpp::session::fsm_state::Disconnected);
@@ -331,7 +331,7 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     ioc.restart();
 
     // Capture state BEFORE stop().
-    fixpp::session::Session* acc_session = engine.lookup(acc_id);
+    auto acc_session = engine.lookup(acc_id);
 
     // Happens-before invariant (Gate A New-1 / E-4): session MUST NOT reach Active.
     // Under mTLS with any connecting peer whose CN is not in the allow-list,

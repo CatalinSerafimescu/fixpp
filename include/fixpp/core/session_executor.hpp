@@ -180,6 +180,27 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
     asio::any_io_executor resolved_exec, fixpp::session::threading_mode mode,
     bool already_serialized_executor, fixpp::session::Session* session) noexcept;
 
+// Engine-only adoption overload (D3-B / E-3 / INV-3a / FR-009 / 023).
+//
+// Called exclusively from Engine-managed Session::open() when the engine
+// has pre-created a per-session strand (E-1/INV-1). Stores the supplied
+// executor DIRECTLY with strand_wrapped=true (truthful — the engine only
+// passes an already-strand executor via this tag). Does NOT re-wrap in a
+// second make_strand (the D1 anti-pattern). The ordinary user
+// per_session_strand path in make_session_executor(..., mode, ...) is
+// BYTE-UNCHANGED and still unconditionally wraps with make_strand.
+//
+// Declared in the core leaf header; DEFINITION lands in the session TU
+// (src/session/session_executor.cpp) where Session is complete — same
+// constraint as the primary make_session_executor.
+//
+// MUST NOT be called from non-engine sites: the tag is engine-internal.
+// A user must NOT infer adoption from already_serialized_executor (D3-B).
+struct adopt_strand_t {};
+[[nodiscard]] session_executor make_session_executor(adopt_strand_t,
+                                                     asio::any_io_executor strand_exec,
+                                                     fixpp::session::Session* session) noexcept;
+
 // The [2d §6.5]:1153-1154 arena-derivation bridge: recovers the never-null
 // session PMR arena THROUGH the wrapper (== exec.session_ptr()->
 // session_arena(), the [2d §4.5] chain). DECLARED here (core leaf) so

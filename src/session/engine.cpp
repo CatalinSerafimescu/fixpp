@@ -43,6 +43,12 @@
 // Internal concrete transport/listener types — only used in this .cpp.
 // [arch §5.3 engine-bootstrap carve-out]
 #include "transport/asio_listener.hpp"
+// T011 (D5/E-5/INV-7): asio_tls_transport_test_access for the INV-7 debug
+// assert (transport.socket().get_executor() == session_strand). This is the
+// R8 lynchpin: every construction site must be audited and asserted.
+// Allowed under [arch §5.3] engine-bootstrap carve-out (engine.cpp already
+// includes asio_listener.hpp — same concession for concrete transport types).
+#include "transport/asio_tls_transport.hpp"
 
 namespace fixpp::session {
 
@@ -77,12 +83,21 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // from EngineConfig::engine_trace_context at construction time.
       // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
       engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
+      // T003 (E-0/D0/INV-0): control strand — single serialization domain for all
+      // engine-global state. Constructed once over exec_. INV-0: distinct from
+      // every per-session strand (each SessionEntry::session_strand is separate).
+      // No routing through it yet; US1/US2 wire the routing.
+      control_strand_{asio::make_strand(exec_)},
       // FIX-2 (gate-b/r1): initialize the in-flight send counter. Starts at
       // zero; Engine::send bumps/decrements it; stop() drains it before
       // registry_.clear() to prevent send coroutines from dereferencing engine_
       // after Engine::~Engine() runs.
-      send_counter_{std::make_shared<std::atomic<int>>(0)}
-// E-5: single-executor confinement — no strand, no mutex (015 scope).
+      send_counter_{std::make_shared<std::atomic<int>>(0)},
+      // T023 (E-7/D-SNAP/INV-9): initialize the reader snapshot to a non-null
+      // empty Snapshot so readers never load null even before start(). The first
+      // real publish happens after register_session() inserts a registry entry.
+      // [data-model E-7; research D-SNAP; tasks T023]
+      reader_snapshot_{std::make_shared<const ReaderSnapshot>()}
 
 {}
 
@@ -91,7 +106,71 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
 // No synchronous best-effort teardown — synchronous dtor cannot drain
 // in-flight coroutines holding raw Session* → UAF (Gate A Codex-9 / E-7).
 
-Engine::~Engine() { assert(stopped_ && "Engine destroyed without calling co_await stop() first"); }
+Engine::~Engine() {
+    // T004/INV-8: stopped_ is std::atomic<bool>; load(acquire) pairs with
+    // stop()'s sequentially-consistent write, ensuring the assertion sees the
+    // final stop() write before the dtor proceeds.
+    assert(stopped_.load(std::memory_order_acquire) &&
+           "Engine destroyed without calling co_await stop() first");
+
+#ifndef NDEBUG
+    // T025 (INV-9a/FR-014/R7): debug-only assertion that no outstanding lookup()
+    // handles remain at destruction time. A caller holding a handle past ~Engine
+    // would UAF-dereference Session's const EngineConfig& engine_ ref.
+    //
+    // This is a DEBUG ASSERT + CALLER OBLIGATION — NEVER a stop() drain (R7):
+    // draining on app-held leases would hang stop(); the hard send_counter_
+    // barrier guards the UAF on the send path. Keep the two mechanisms separate.
+    // [data-model INV-9a; research R7; tasks T025]
+    assert(lease_counter_.load(std::memory_order_acquire) == 0 &&
+           "Engine destroyed with outstanding lookup() handles — "
+           "all shared_ptr<Session> handles obtained from lookup() must be "
+           "released before ~Engine (INV-9a: Session borrows EngineConfig& "
+           "from Engine; a dangling handle is a UAF). [T025/R7]");
+#endif
+}
+
+// ── publish_reader_snapshot_unlocked_ — T023 (E-7/D-SNAP/INV-9) ─────────────
+// Builds a fresh immutable ReaderSnapshot from the current registry_ and
+// listener_endpoints_ state, then atomically publishes it via reader_snapshot_.
+//
+// MUST be called on the control strand (or pre-start single-thread) AFTER
+// every control-plane mutation. "Unlocked" because the caller already holds
+// the serialization guarantee (control strand). [E-7/INV-9/D-SNAP]
+//
+// Called from:
+//   register_session()         — after registry_ insert (pre-start, single-thread)
+//   publish_entry()            — after entry.session/live_transport published
+//   unpublish_entry()          — after entry.live_transport reset
+//   run_accept_loop map write  — after listener_endpoints_/listeners_ written
+//   stop() inner coroutine     — after registry_.clear() + listener_endpoints_.clear()
+// [data-model E-7; research D-SNAP; tasks T023/T024]
+
+void Engine::publish_reader_snapshot_unlocked_() {
+    // Build a fresh Snapshot from current control-plane state.
+    auto snap = std::make_shared<ReaderSnapshot>();
+
+    // Populate sessions map: copy shared_ptr<Session> from each registry entry.
+    // Only entries whose session field is non-null appear in the snapshot
+    // (pre-publish entries have entry.session == nullptr → lookup() returns null
+    // for them, per Gate A New-3). [E-7/INV-9]
+    snap->sessions.reserve(registry_.size());
+    for (auto const& [id, entry] : registry_) {
+        if (entry.session) {
+            snap->sessions.emplace(id, entry.session);
+        }
+    }
+
+    // Populate endpoints map: copy Endpoint by value from listener_endpoints_.
+    snap->endpoints.reserve(listener_endpoints_.size());
+    for (auto const& [id, ep] : listener_endpoints_) {
+        snap->endpoints.emplace(id, ep);
+    }
+
+    // Atomically publish: store(release) pairs with readers' load(acquire).
+    // The old snapshot is released here (shared_ptr ref-count drop → may free).
+    reader_snapshot_.store(std::move(snap), std::memory_order_release);
+}
 
 // ── register_session (FR-002 / E-1) ──────────────────────────────────────────
 // Records config + role only; does NOT construct a Session (lazy — Gate A New-3).
@@ -109,17 +188,87 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     auto& entry = registry_[id];  // id copied into map key
     entry.session_role = role;
     entry.config = std::move(cfg);
+
+    // T023 (E-7/D-SNAP): NO snapshot republish needed here. A registered entry has
+    // entry.session == null, so it contributes nothing to the reader snapshot (the
+    // snapshot only carries non-null sessions + bound endpoints). The first
+    // observable reader content for this id appears when publish_entry writes
+    // entry.session / the accept loop writes its endpoint — each republishes then.
+    // The ctor already seeds a non-null empty snapshot, so lookup() safely returns
+    // nullptr for a registered-but-not-open id. [/simplify: removed redundant
+    // O(N^2) pre-start republish; data-model E-7; INV-9; B-015-3.]
     return {};
 }
 
-// ── lookup (Gate A New-3) ─────────────────────────────────────────────────────
+// ── lookup (Gate A New-3 / T024 D-SNAP) ──────────────────────────────────────
+// T024 (FR-008/SC-004/D-SNAP): changed from Session* to std::shared_ptr<Session>.
+// Reads the atomically-published reader_snapshot_ (any-thread-safe, no strand,
+// no std::mutex, no block). Returns a shared_ptr<Session> drawn from the snapshot's
+// sessions map — the handle outlives a concurrent registry_.clear() WHILE THE ENGINE
+// IS ALIVE (bounded keepalive, INV-9). Returns nullptr (empty) if id is not in the
+// snapshot or the entry's session has not been published yet (Gate A New-3).
+//
+// T025 (INV-9a): in DEBUG builds, wraps the raw shared_ptr in an aliasing
+// shared_ptr backed by a Lease control block (ctor increments lease_counter_,
+// dtor decrements) so ~Engine can assert zero outstanding handles. Release builds
+// return a plain shared_ptr (no lease overhead, no counter). [R7 — separate from
+// send_counter_; the lease is NEVER a stop() drain] [data-model E-7/INV-9/INV-9a]
 
-Session* Engine::lookup(SessionId const& id) const {
-    auto it = registry_.find(id);
-    return (it == registry_.end()) ? nullptr : it->second.session.get();
+std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
+    // Load the current snapshot — any-thread-safe acquire load. The snapshot
+    // was built from registry_ state as of the last control-strand mutation;
+    // its sessions map holds shared_ptr<Session> entries that keep each Session
+    // alive independently of a concurrent registry_.clear(). [E-7/D-SNAP]
+    auto snap = reader_snapshot_.load(std::memory_order_acquire);
+    if (!snap) return nullptr;  // defensive: never null post-ctor, but guard anyway
+
+    auto it = snap->sessions.find(id);
+    if (it == snap->sessions.end()) return nullptr;
+
+    // it->second is the shared_ptr<Session> from the snapshot (may be null if
+    // the entry exists but entry.session was not yet published). Return it as-is.
+    std::shared_ptr<Session> raw_handle = it->second;
+    if (!raw_handle) return nullptr;
+
+#ifndef NDEBUG
+    // T025 (INV-9a/R7): wrap raw_handle in a LeasedHandle shared_ptr so that:
+    //   (a) the Session is kept alive as long as ANY copy of the returned handle
+    //       exists (LeasedHandle::session holds raw_handle; its refcount keeps the
+    //       Session alive independently of the snapshot), and
+    //   (b) ~Engine can debug-assert no outstanding handles remain (destructor
+    //       decrements lease_counter_ when the LAST copy is destroyed).
+    //
+    // Using an aliasing ptr backed by the lease's control block alone (without
+    // holding raw_handle) is incorrect: the Session would be freed when the
+    // snapshot is cleared, while the aliasing ptr is still alive → UAF. [INV-9]
+    //
+    // This is STRICTLY SEPARATE from send_counter_ (R7): the lease counter is
+    // a debug assert + caller obligation only; it is NEVER drained by stop().
+    // Draining on app-held leases would hang stop() indefinitely. [R7/INV-9a]
+    struct LeasedHandle {
+        std::shared_ptr<Session> session;  // keeps Session alive across clear() [INV-9]
+        std::atomic<std::uint64_t>* counter;
+        ~LeasedHandle() noexcept { counter->fetch_sub(1, std::memory_order_release); }
+    };
+    std::atomic<std::uint64_t>* lease_ctr_ptr = &lease_counter_;  // mutable (debug-only)
+    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
+
+    auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
+    // Return an aliasing shared_ptr<Session> that SHARES the LeasedHandle's control
+    // block while pointing at the Session. Destroying the last copy decrements
+    // lease_counter_ and releases leased->session (which may then free the Session
+    // if no other copies exist). [INV-9/INV-9a]
+    return std::shared_ptr<Session>{leased, leased->session.get()};
+#else
+    // Release: plain shared_ptr, no lease overhead, no counter. [R7]
+    return raw_handle;
+#endif
 }
 
-bool Engine::stopped() const noexcept { return stopped_; }
+bool Engine::stopped() const noexcept {
+    // T004/INV-8: acquire load — pairs with stop()'s write on the control strand.
+    return stopped_.load(std::memory_order_acquire);
+}
 
 // ── Loop stubs ────────────────────────────────────────────────────────────────
 // EVERY co_spawned loop MUST reset_cancellation_state(total) as its first step
@@ -130,6 +279,41 @@ bool Engine::stopped() const noexcept { return stopped_; }
 // (open() is awaitable; cannot run in synchronous void start()).
 
 namespace {
+
+// ── INV-7 debug assert helper (D5/E-5/T011/R8) ──────────────────────────────
+// Verifies that transport.socket().get_executor() == session_strand.
+// In DEBUG builds: asserts and returns the check result.
+// In RELEASE builds: compiles away to a no-op (zero cost).
+// The comparison uses asio::any_io_executor::operator==, which compares the
+// type-erased executor targets — two any_io_executors wrapping the same
+// asio::strand<any_io_executor> object are equal iff they share the same strand.
+//
+// Called after every engine-managed transport construction site (R8 lynchpin):
+//   (1) accept path: after raw_listener->async_accept() returns a transport.
+//   (2) connect path: after session->drive_reconnect() installs the transport.
+// The assert witnesses that no construction site samples the bare exec_ member
+// instead of the loop-local session strand.
+[[maybe_unused]] void assert_transport_on_session_strand(
+    fixpp::transport::Transport& transport,
+    const asio::strand<asio::any_io_executor>& session_strand) noexcept {
+#ifndef NDEBUG
+    // Downcast to asio_tls_transport to access socket_executor().
+    // The engine exclusively uses asio_tls_transport (via asio_tls_transport_factory).
+    // A null downcast means a non-standard transport was injected (test-seam or future
+    // transport type); skip the assert in that case (the V-10 gtest cell covers all sites).
+    auto* tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(&transport);
+    if (tls != nullptr) {
+        // INV-7: the socket's executor MUST equal the session strand.
+        // Failure = a construction site sampled bare exec_ (R8 — the silent lynchpin).
+        assert(tls->socket_executor() == asio::any_io_executor{session_strand} &&
+               "INV-7: transport socket executor != session_strand "
+               "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
+    }
+#else
+    (void)transport;
+    (void)session_strand;
+#endif
+}
 
 // ── Minimal SOH-delimited scanner for CompID resolution (T012) ───────────────
 // Extracts begin_string (tag 8), sender_comp_id (tag 49), target_comp_id (tag 56)
@@ -397,7 +581,74 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
 
 }  // anonymous namespace
 
-// ── run_accept_loop — T012 production body ───────────────────────────────────
+// ── T013 — D-PUB: awaited publication helpers ─────────────────────────────────
+//
+// publish_entry: runs on the control strand; checks stopped_ first (INV-2a).
+//   - If stopped_ is true: does NOT publish a live transport (stopped disposition);
+//     returns false. The caller must close/return without entering the read pump.
+//   - If not stopped: publishes entry.session and entry.live_transport; returns true.
+//
+// unpublish_entry: runs on the control strand; resets entry.live_transport to null
+//   (entry.session is retained — owned by the entry, observable via lookup() until
+//   registry_.clear()). Called on EVERY loop exit path (normal return, cancellation,
+//   error) before the entry can be cleared. [data-model E-2/INV-2]
+//
+// Both are co_spawned with co_spawn(control_strand_, fn, use_awaitable) from the
+// session-strand role loop — a non-blocking post across two distinct strands, so
+// no deadlock even if the session strand is currently occupied. [D-PUB/C-2/R6]
+//
+// Anchors: research.md D-PUB; data-model E-2/INV-2/INV-2a; contract C-6.
+
+namespace {
+
+// Publish helper — returns true (alive) or false (stopped disposition).
+// Called from run_accept_loop and run_connect_loop via a wrapper lambda that
+// also calls engine.publish_reader_snapshot_unlocked_() after this returns true.
+// [T023/D-SNAP: snapshot republish is the caller's responsibility]
+asio::awaitable<bool> publish_entry(std::atomic<bool>& stopped_, SessionEntry& entry,
+                                    std::shared_ptr<Session> session_ptr,
+                                    fixpp::transport::Transport* live_transport_ptr) {
+    // INV-2a: check stopped_ FIRST on the control strand. If stop() is already
+    // in progress, do NOT publish a live transport for pumping — return false.
+    // This closes the stop-before-publish ordering hole: a transport created just
+    // before this awaited publish is never pumped once stop() has begun. [D-PUB]
+    if (stopped_.load(std::memory_order_acquire)) {
+        // Stopped disposition: leave entry.live_transport == nullptr so stop()
+        // (which may already be past its iteration) cannot close a stale handle.
+        // The session pointer is not published either — the loop will return without
+        // entering the read pump.
+        co_return false;
+    }
+    // Not stopped: publish both handles. These are the fields stop() reads.
+    entry.session = std::move(session_ptr);
+    entry.live_transport = live_transport_ptr;
+    co_return true;
+}
+
+// Unpublish helper — resets entry.live_transport to null on the control strand.
+// Must be called on EVERY exit path of the role loop (normal, cancel, error).
+// The reset is a no-op if the entry was never published (stopped disposition).
+// [T023/D-SNAP: snapshot republish is the caller's responsibility after this]
+asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
+    // Reset ONLY entry.live_transport — the load-bearing D-PUB hazard. After the
+    // role loop exits, the transport is being torn down; a stale live_transport
+    // raw pointer would let stop() step 2 close a freed transport. Nulling it makes
+    // stop() correctly skip an already-exited session (entry.live_transport==nullptr).
+    //
+    // entry.session is DELIBERATELY retained (not reset). It is a shared_ptr OWNED by
+    // the SessionEntry, never a dangling read, and lives until registry_.clear() in
+    // stop() step 5. Keeping it preserves the terminal-state-visibility contract that
+    // lookup() returns a disconnected/auth-failed session while the engine is alive
+    // (asserted by the pre-existing 015 engine_acceptor_failclosed cells, which V-4
+    // forbids rewriting). stop() step 4 still close()s it — idempotent on an already-
+    // closed session. [data-model E-2/INV-2 refinement; preserves SC-003/FR-007/V-4]
+    entry.live_transport = nullptr;
+    co_return;
+}
+
+}  // namespace
+
+// ── run_accept_loop — T012/T013 production body ───────────────────────────────
 // Still inside namespace fixpp::session (the outer `namespace fixpp::session {`
 // opened at the top of this file). Defined here (not in the anonymous namespace)
 // so Engine can declare it as a friend — C++ friend declarations only work with
@@ -405,8 +656,9 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
 //
 // Builds asio_listener from reconnect_endpoint (repurposed as bind endpoint),
 // then loops: async_accept → async_handshake → bounded first-frame read →
-// reversed-CompID resolve → attach → direct-deliver first Logon → spawn pump.
-// [data-model E-2/E-7; FR-005/006/014; C1/C7; T012; T-041 acceptor path]
+// reversed-CompID resolve → attach → T013 awaited publish → deliver first Logon →
+// pump → T013 unpublish on all exit paths.
+// [data-model E-2/E-7; FR-005/006/014; C1/C7; T012; T013; T-041 acceptor path]
 asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cfg, Engine& engine,
                                       SessionId const& session_id, SessionEntry& entry,
                                       asio::cancellation_signal& /*accept_scope_signal*/,
@@ -461,13 +713,56 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         co_return;  // listener bind/listen failed; loop exits
     }
 
-    // Store listener and bound endpoint in the engine (direct member access —
-    // run_accept_loop is a friend of Engine per engine.hpp).
+    // T018 (D0/INV-0): store listener and bound endpoint on the CONTROL STRAND
+    // so these writes are serialized with stop()'s reads and clears.  The listener
+    // was built on the session strand (preserving its session-strand executor for
+    // accepted sockets — V-10/D5/R8); only the two map writes are hopped to the
+    // control strand, mirroring the publish_entry pattern.
+    //
+    // The co_await suspends this session-strand coroutine until the control strand
+    // completes the writes, then resumes (non-blocking across distinct strands —
+    // no deadlock, R6/C-2).  A copy of the session_id and bound_ep are captured by
+    // value; listener is moved into the lambda (unique_ptr move).
+    //
+    // NOTE (DD-2026-06-06): the original FIXPP_TEST_SEAMS one-sided park seam
+    // that previously appeared here has been removed.  The seam was misleading:
+    // the pre-existing join-before-clear (outstanding_counter_) makes the loop's
+    // listeners_ write HB-ordered before stop()'s clear() — the park merely
+    // delayed both, so TSan never fired.  The genuine HB-free control-plane races
+    // are public synchronous readers (lookup()/acceptor_bound_endpoint()) vs the
+    // map write/clear — witnessed by V-8 (T016/T017) without any production seam.
+    // (The FIXPP_TEST_SEAMS CMake option was removed in the /simplify pass — it
+    // gated nothing once the seam was deleted.)
+    // [DD-2026-06-06 / research/reviews/codex_023-engine-session-strand_gate_a_v8_retarget.md]
+    // Capture raw_listener pointer BEFORE moving into the control-strand lambda,
+    // so we never read back from the engine map on the session strand.
+    auto* raw_listener = static_cast<fixpp::transport::asio_listener*>(listener.get());
     auto bound_ep = listener->bound_endpoint();
-    engine.listener_endpoints_[session_id] = bound_ep;
-    engine.listeners_[session_id] = std::move(listener);
-    auto* raw_listener =
-        static_cast<fixpp::transport::asio_listener*>(engine.listeners_[session_id].get());
+
+    bool write_ok = co_await asio::co_spawn(
+        engine.control_strand_,
+        [&engine, session_id, bound_ep,
+         lptr = std::move(listener)]() mutable -> asio::awaitable<bool> {
+            // Check stopped_ first: if stop() already ran, skip the write (the maps
+            // are cleared or in the process of being cleared). [INV-2a parallel for map writes]
+            if (engine.stopped_.load(std::memory_order_acquire)) {
+                co_return false;
+            }
+            engine.listener_endpoints_[session_id] = bound_ep;
+            engine.listeners_[session_id] = std::move(lptr);
+            // T023 (E-7/D-SNAP): republish the reader snapshot so
+            // acceptor_bound_endpoint() sees the new endpoint. Called on the
+            // control strand (we are already here via co_spawn(control_strand_,...)).
+            engine.publish_reader_snapshot_unlocked_();
+            co_return true;
+        },
+        asio::use_awaitable);
+
+    if (!write_ok) {
+        // stop() is already in progress; the maps are cleared or will be cleared
+        // without our entries (we never wrote them). Exit cleanly.
+        co_return;
+    }
 
     // ── Accept loop ──────────────────────────────────────────────────────────
     // Session construction is LAZY + MATCH-GATED (FQ-2 / data-model C1 step 6):
@@ -483,6 +778,18 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             break;
         }
         std::unique_ptr<fixpp::transport::Transport> transport = std::move(*accept_r);
+
+        // T011/INV-7 (D5/E-5/R8): verify the accepted transport's socket is bound
+        // to the session strand. Auto-satisfied because:
+        //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
+        //   - asio_listener was constructed with `exec` = co_await this_coro::executor
+        //     = the session strand (run_accept_loop:433).
+        //   - async_accept() creates accepted_socket{exec_} = session strand.
+        //   - make_accepted() adopts accepted_socket.get_executor() = session strand.
+        // This assert fires if any site regresses to bare exec_ (R8 silent lynchpin).
+        // session_strand is invariantly emplaced in start() before the loop spawns (T005).
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        assert_transport_on_session_strand(*transport, *entry.session_strand);
 
         // Step 2: TLS handshake.
         // async_accept returns a TLS-capable transport (see asio_listener.cpp
@@ -552,16 +859,17 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // (E-1 / Gate A New-3 / data-model C1 step 6 / FQ-2)
         // open() is awaitable — must run inside the loop, not in start().
         // On open() failure, close the transport and exit the loop (fatal).
-        entry.session = std::make_shared<Session>(engine_cfg, entry.config);
+        // T013: hold the session locally until the control-strand publish —
+        // do NOT write entry.session directly from the session strand.
+        auto local_session = std::make_shared<Session>(engine_cfg, entry.config);
         {
-            auto res = co_await entry.session->open();
+            auto res = co_await local_session->open();
             if (!res.has_value()) {
                 transport->close();
-                entry.session.reset();
                 co_return;
             }
         }
-        Session* session = entry.session.get();
+        Session* session = local_session.get();
 
         // Step 7: attach the live transport (T011).
         // Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is set
@@ -572,10 +880,59 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         fixpp::transport::Transport* raw = transport.get();
         session->attach_accepted_transport(std::move(transport), std::move(hr));
 
-        // Publish the live transport so stop() can close the socket and unblock
-        // the read-pump's in-flight async_read_some (idle established reads have
-        // no peer EOF; total-cancel alone does not break the SSL read). [T018]
-        entry.live_transport = raw;
+        // gate-b/r1 #3 (V-12 seam): test hook between step 7 (transport attached)
+        // and step 7a (publish_entry).  Always compiled in (member always exists);
+        // always null in production (set_pre_publish_hook is FIXPP_TEST_HOOKS-gated).
+        // Overhead = one null function<> check per accepted connection (zero cost).
+        // The hook co_awaits on the session strand — stop() may run concurrently on
+        // the control strand during the pause, setting stopped_=true, which
+        // publish_entry then observes.  [contracts C-6/V-12; gate-b/r1 #3]
+        if (engine.test_hook_pre_publish_) {
+            co_await engine.test_hook_pre_publish_();
+        }
+
+        // Step 7a: T013 awaited publication — publish entry.session and
+        // entry.live_transport ON the control strand, BEFORE entering the read pump.
+        // [data-model E-2/INV-2; research D-PUB; contract C-6]
+        //
+        // This is a non-blocking post from the session strand → control strand
+        // (two distinct strands over the same io_context → no deadlock, R6/C-2).
+        // The co_await suspends this session-strand coroutine until the control
+        // strand runs the publish, then resumes.
+        //
+        // Lifetime: a COPY of local_session is passed to the publish coroutine so
+        // the caller retains its own owning reference regardless of the disposition.
+        // If stop is in progress, the publish does not write entry.session and the
+        // coroutine's copy is destroyed when it returns false; local_session keeps
+        // the Session alive here so `session` remains a valid raw pointer. [INV-2a]
+        //
+        // INV-2a (stop-before-publish): the publish checks stopped_ first; if stop()
+        // is already in progress, it does NOT publish a live transport (stopped
+        // disposition → returns false). The loop then closes and returns without
+        // entering async_read_some. [research D-PUB; data-model INV-2a; contract C-6]
+        bool published = co_await asio::co_spawn(
+            engine.control_strand_,
+            [&engine, &entry, local_session, raw]() -> asio::awaitable<bool> {
+                bool ok = co_await publish_entry(engine.stopped_, entry, local_session, raw);
+                if (ok) {
+                    // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
+                    // sees the newly-published session. Called on the control strand.
+                    // Engine& is a friend → private access is allowed here. [INV-9]
+                    engine.publish_reader_snapshot_unlocked_();
+                }
+                co_return ok;
+            },
+            asio::use_awaitable);
+
+        if (!published) {
+            // Stopped disposition: stop() is already in progress. The transport
+            // was already moved into the session (step 7). local_session still
+            // holds the only owning reference (entry.session was not written).
+            // Close the session terminally (which closes its transport) and return
+            // without ever entering the read pump. [INV-2a; contract C-6]
+            (void)co_await local_session->close(fixpp::session::close_mode::terminal);
+            co_return;
+        }
 
         // Step 8: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
         // frame, never any coalesced surplus (F-015-002).
@@ -591,15 +948,35 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // counter or detached spawn needed. [T015 locked design decision #3]
         co_await run_read_pump(*raw, *session, entry.config, surplus);
 
+        // Step 10 (T013): unpublish on normal exit — reset entry.live_transport
+        // (entry.session retained for lookup() terminal-visibility) on the control
+        // strand BEFORE this loop entry can be cleared by stop(). Also reached on
+        // read-pump EOF (normal) and the acceptor auth-fail close.
+        // The unpublish is co_awaited so it completes before the counter_guard
+        // decrements (which signals stop()'s join that this loop has exited). [INV-2]
+        co_await asio::co_spawn(
+            engine.control_strand_,
+            [&engine, &entry]() -> asio::awaitable<void> {
+                co_await unpublish_entry(entry);
+                // T023 (E-7/D-SNAP): republish the snapshot after live_transport reset.
+                // entry.session remains for terminal-state visibility; lookup() keeps
+                // returning the session in its post-teardown state. [E-7/INV-9]
+                engine.publish_reader_snapshot_unlocked_();
+            },
+            asio::use_awaitable);
+
         // Re-spin the accept loop to serve the next peer (C5 — loop continuously).
         // For the current static-registry model (R2), the session stays live for
         // one connection; on disconnect US2 T015/T016 will handle reconnect.
         // For now, break after the first successful peer to keep US1 simple.
         co_return;
     }
+    // Loop exited cleanly (stopped_=true, async_accept cancelled): no session was
+    // published (the loop never reached a match after the stop started), so no
+    // unpublish is needed here. The guard's counter decrement signals stop()'s join.
 }
 
-// ── run_connect_loop — T016 production body ──────────────────────────────────
+// ── run_connect_loop — T013 production body ──────────────────────────────────
 // Initiator live connect path (Option A — single connect+pump; multi-cycle
 // reconnect-respin DEFERRED per Clarifications 2026-05-31 / E-1a: close(terminal)
 // is permanent and 014 has no tested multi-cycle reconnect — symmetric with US1's
@@ -612,26 +989,32 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 //   3. drive_reconnect() — connect + handshake + authorize + install (rebinds
 //      transport_send_ to the live sink, re-enters LogonSent) + emit the initial
 //      Logon POST-connect over that live sink.
-//   4. run_read_pump on the live transport until EOF → close(terminal).
-// [data-model E-1a; FR-003/004; C2/C2i/C5; T016(b)-(e); SC-010 (7)/(8)]
-static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg,
-                                              SessionEntry& entry, outstanding_t counter) {
+//   4. T013 awaited publish on control strand BEFORE the read pump. [D-PUB/INV-2]
+//   5. run_read_pump on the live transport until EOF → close(terminal).
+//   6. T013 unpublish on ALL exit paths. [INV-2]
+// [data-model E-1a; FR-003/004; C2/C2i/C5; T013; T016(b)-(e); SC-010 (7)/(8)]
+//
+// T013: Engine& engine added (was: engine_cfg + entry only) to access
+// control_strand_ and stopped_ for the D-PUB awaited publish/unpublish.
+// Declared in fixpp::session namespace (not anonymous, not static) so Engine
+// can declare it as a friend for private-member access. [dcl.friend]
+asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_cfg, Engine& engine,
+                                       SessionEntry& entry, outstanding_t counter) {
     counter_guard guard{counter};
 
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
     entry.config.engine_managed = true;
-    entry.session = std::make_shared<Session>(engine_cfg, entry.config);
+    auto local_session = std::make_shared<Session>(engine_cfg, entry.config);
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
-    auto res = co_await entry.session->open();
+    auto res = co_await local_session->open();
     if (!res.has_value()) {
-        entry.session.reset();
         co_return;
     }
 
-    Session* session = entry.session.get();
+    Session* session = local_session.get();
 
     // Step 3: connect + handshake + authorize + install + rebind + POST-connect
     // Logon. On exhaustion/cancel or Logon-emit failure the session is left
@@ -644,15 +1027,63 @@ static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& e
         }
     }
 
-    // Publish the live transport so stop() can close the socket and unblock the
-    // read-pump's in-flight async_read_some (see SessionEntry::live_transport). [T018]
-    entry.live_transport = &session->live_transport();
+    // T011/INV-7 (D5/E-5/R8): verify the connect-path transport's socket is bound
+    // to the session strand. Auto-satisfied because:
+    //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
+    //   - drive_reconnect() → drive_reconnect_attempt() → co_await this_coro::executor
+    //     = the session strand (reconnect_fsm.cpp:117) → factory_->make(exec, ...) uses it.
+    //   - The factory-path ctor stores exec as socket_'s executor.
+    // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
+    // session_strand is invariantly emplaced in start() before the loop spawns (T005).
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    assert_transport_on_session_strand(session->live_transport(), *entry.session_strand);
 
-    // Step 4: run the read-pump inline on the live transport until EOF.
+    // Step 4 (T013): awaited publication — publish entry.session and
+    // entry.live_transport ON the control strand, BEFORE entering the read pump.
+    // Non-blocking post from session strand → control strand (distinct strands,
+    // no deadlock). co_await suspends until control strand completes the publish. [D-PUB]
+    //
+    // Lifetime: a COPY of local_session is passed to the publish coroutine so the
+    // caller retains its owning reference regardless of the disposition. If stop is
+    // in progress, the coroutine destroys its copy and returns false; local_session
+    // still keeps the Session alive so `session` remains a valid raw pointer. [INV-2a]
+    fixpp::transport::Transport* live_tp = &session->live_transport();
+    bool published = co_await asio::co_spawn(
+        engine.control_strand_,
+        [&engine, &entry, local_session, live_tp]() -> asio::awaitable<bool> {
+            bool ok = co_await publish_entry(engine.stopped_, entry, local_session, live_tp);
+            if (ok) {
+                // T023 (E-7/D-SNAP): republish the reader snapshot so lookup()
+                // sees the newly-published session. Called on the control strand.
+                engine.publish_reader_snapshot_unlocked_();
+            }
+            co_return ok;
+        },
+        asio::use_awaitable);
+
+    if (!published) {
+        // Stopped disposition: stop() is already in progress. local_session still
+        // holds the only owning reference (entry.session was not written).
+        // Close the session terminally and return without entering the read pump. [INV-2a]
+        (void)co_await local_session->close(fixpp::session::close_mode::terminal);
+        co_return;
+    }
+
+    // Step 5: run the read-pump inline on the live transport until EOF.
     // Inline co_await keeps the pump in the counter_guard scope (stop()'s
     // total-cancel propagates into async_read_some; the counter decrements only
-    // after the pump co_returns — mirror of run_accept_loop step 8). [T015/T016(e)]
+    // after the pump co_returns — mirror of run_accept_loop step 9). [T015/T016(e)]
     co_await run_read_pump(session->live_transport(), *session, entry.config);
+
+    // Step 6 (T013): unpublish on normal exit (read-pump EOF / error unwind). [INV-2]
+    co_await asio::co_spawn(
+        engine.control_strand_,
+        [&engine, &entry]() -> asio::awaitable<void> {
+            co_await unpublish_entry(entry);
+            // T023 (E-7/D-SNAP): republish the snapshot after live_transport reset.
+            engine.publish_reader_snapshot_unlocked_();
+        },
+        asio::use_awaitable);
     co_return;
 }
 
@@ -663,30 +1094,75 @@ static asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& e
 void Engine::start() {
     auto counter = std::make_shared<std::atomic<int>>(0);
 
+    // gate-b/r1 #2 (TOCTOU fix): publish outstanding_counter_ BEFORE spawning any
+    // loop.  A concurrent stop() between the first spawn and the old post-loop
+    // assignment would observe outstanding_counter_==null, skip the join, then
+    // registry_.clear() while a spawned loop still holds SessionEntry& → UAF.
+    // With the assignment here, stop()'s join always finds a valid counter; if the
+    // loop incremented the counter between the spawn and stop()'s load, stop() waits
+    // for it; if stop() runs before start() finishes, it may drain a counter of 0
+    // and still proceed safely because start() must not be called concurrently with
+    // stop() (documented contract — full control-strand routing of start() is a
+    // future improvement; the race window is bounded by the caller not overlapping
+    // start() and stop() on the same engine). [INV-4a/C-0/E-7]
+    outstanding_counter_ = counter;
+
     for (auto& [id, entry] : registry_) {
+        // T005 (E-1/INV-1): create the per-session strand BEFORE the loop spawn.
+        // One strand per session — INV-1 (never shared across sessions).
+        // Created-but-not-yet-bound here; US1 (T009/T010) binds the role loop,
+        // Session, and transport to this strand. [E-1/E-2/D1]
+        entry.session_strand.emplace(asio::make_strand(exec_));
+
+        // T009 (D3-B / E-3 / INV-3a): set the engine-only adopt-strand seam so
+        // Session::open() stores the pre-created strand directly (strand_wrapped=true)
+        // instead of re-wrapping in a second make_strand (the D1 anti-pattern).
+        // This seam is NOT the public `already_serialized_executor` flag — D3-B
+        // explicitly forbids inferring adoption from it (a user may set it under
+        // per_session_strand and the flag does not guarantee the executor is a strand).
+        entry.config.engine_adopt_strand = asio::any_io_executor{*entry.session_strand};
+
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {
             auto& scope_sig = accept_scope_signals_[id];  // default-constructs
+            // T010 (E-1/INV-1/D2): spawn the accept loop ON the session strand so the
+            // whole role loop (accept/handshake/read-pump/both teardown closes) runs
+            // serialized on the per-session strand. The socket created inside the loop
+            // via co_await this_coro::executor will inherit the strand executor —
+            // satisfying D5/E-5/INV-7 (transport socket on session strand) without any
+            // explicit socket rebind. [research D2; data-model E-1/INV-1; tasks T010/T011]
             asio::co_spawn(
-                exec_, run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
+                *entry.session_strand,
+                run_accept_loop(engine_cfg_, *this, id, entry, scope_sig, counter),
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         } else {
+            // T010: same for the connect loop — spawned on the per-session strand.
+            // T013: pass *this so run_connect_loop can access control_strand_ and
+            // stopped_ for the D-PUB awaited publish/unpublish. [data-model E-2/INV-2]
             asio::co_spawn(
-                exec_, run_connect_loop(engine_cfg_, entry, counter),
+                *entry.session_strand, run_connect_loop(engine_cfg_, *this, entry, counter),
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
-    outstanding_counter_ = counter;
 }
 
-// ── stop (FR-011 / C5 / E-7) ─────────────────────────────────────────────────
+// ── stop (FR-011 / C5 / E-7; T014 teardown ordering) ─────────────────────────
 // Idempotent total-cancellation teardown.
-//  1. Guard: second call is a no-op.
-//  2. Total-cancel every per-session loop + every accept-scope domain.
-//  3. JOIN: yield to executor until outstanding counter reaches zero (each loop
-//     decrements via counter_guard on exit). Join-before-clear invariant:
-//     no Session* dereference after registry_.clear() (Gate A New-4 / E-7).
-//  4. Clear registry.
+//
+// T014 two-close ordering (data-model E-4/INV-4a/4b/5/6/6a; contract C-6):
+//   Step 1. Guard + stopped_=true + total-cancel all loops.
+//   Step 2. Per-session: dispatch transport.close() on session_strand BEFORE join.
+//           (Wakes the idle in-flight read; serialized with its completion — BIO fix.)
+//   Step 3. JOIN: yield until all outstanding loops exit + drain send_counter_.
+//   Step 4. Per-session: dispatch Session::close(terminal) on session_strand AFTER
+//           join + send-drain, BEFORE registry_.clear(). (Drains run_liveness_loop.)
+//   Step 5. Clear registry (stable, no in-flight loops remain).
+//
+// Every per-session dispatch is a non-blocking co_spawn(session_strand, …,
+// use_awaitable) — INV-5; never inline dispatch or blocking wait on a strand.
+// The registry_ is iterated over a STABLE snapshot (no insert/erase between
+// stopped_=true and clear() because stopped_ gates new entry, and the loops
+// exit before clear()). [INV-6/INV-6a]
 
 asio::awaitable<void> Engine::stop() {
     // F2 (Gate-B/r1): stop() is the teardown driver — it MUST run to completion once
@@ -696,71 +1172,201 @@ asio::awaitable<void> Engine::stop() {
     // production callers spawn stop() under use_future (no slot); this is defensive
     // hardening so the contract holds regardless of how stop() is awaited. [Codex P2]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
-    if (stopped_) {
+    // T004/INV-8: idempotency guard — acquire to observe any prior stop() write.
+    if (stopped_.load(std::memory_order_acquire)) {
         co_return;
     }
-    stopped_ = true;
 
-    for (auto& [id, entry] : registry_) entry.session_cancel.emit(asio::cancellation_type::total);
-    for (auto& [id, sig] : accept_scope_signals_) sig.emit(asio::cancellation_type::total);
+    // T018 (D0/INV-0): run the ENTIRE teardown body on the control strand so all
+    // control-plane reads (registry_ iteration, entry.live_transport, entry.session,
+    // counters) are serialized with the control-strand writes from publish_entry /
+    // run_accept_loop map writes.  This closes race (b): publish_entry writes
+    // entry.live_transport on the control strand; stop() step-2 reading it on the
+    // same strand means no concurrent access.
+    //
+    // Two-strand topology: control_strand_ and each session_strand are DISTINCT
+    // strands over the same io_context.  Posting from the control strand onto a
+    // session strand (steps 2/4 below) or from a session strand onto the control
+    // strand (publish_entry / run_accept_loop map-write) is always non-blocking —
+    // no deadlock by construction (R6/C-2).
+    //
+    // F2 continuation: the inner coroutine re-disables cancellation so the shield
+    // holds across the strand hop. [INV-0/D0/R6]
+    co_await asio::co_spawn(
+        control_strand_,
+        [this]() -> asio::awaitable<void> {
+            // Re-apply the cancellation shield on the control-strand frame.
+            // The outer frame already disabled cancellation, but the inner co_spawn'd
+            // coroutine gets a fresh cancellation state — disable it again so the
+            // teardown runs to completion even if the calling context is cancelled.
+            co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
-    // Close every live transport (the "closes transports" step in this function's
-    // contract). An established session's read-pump is blocked in async_read_some
-    // with no peer EOF; total-cancel does not break the in-flight SSL read, so the
-    // socket MUST be closed for the read to fail and the pump to unwind. close()
-    // is synchronous + idempotent; the transport is owned by the Session (alive
-    // until the join-before-clear below). [T018; Gate A New-4; E-7]
-    for (auto& [id, entry] : registry_)
-        if (entry.live_transport != nullptr) entry.live_transport->close();
+            // ── Step 1: set stopped_ true + total-cancel all loops ───────────────
+            // Authoritative write on the control strand. seq_cst pairs with the
+            // outer Engine::send admission re-check and the send_counter_ drain:
+            // a send that enrolls after stop() has observed zero must observe
+            // stopped_=true and fast-fail without posting. [gate-b/r3 P1]
+            stopped_.store(true, std::memory_order_seq_cst);
 
-    // JOIN: yield until all loops have co_return'd.
-    if (outstanding_counter_) {
-        asio::steady_timer t{co_await asio::this_coro::executor};
-        while (outstanding_counter_->load(std::memory_order_acquire) > 0) {
-            t.expires_after(std::chrono::milliseconds{0});
-            co_await t.async_wait(asio::use_awaitable);
-        }
-        outstanding_counter_.reset();
-    }
+            // Emit the cancellation ON each session strand rather than directly on the
+            // control strand. The role loops call async_mutex::async_lock() which calls
+            // reset_cancellation_state() on the same entry.session_cancel slot (from the
+            // session strand). Emitting concurrently from the control strand would race
+            // on the slot's handler — TSan: data race in cancellation_signal::emit vs
+            // cancellation_slot::prepare_memory.
+            //
+            // The emit is AWAITED (co_spawn + use_awaitable), NOT fire-and-forget. A
+            // posted-and-forgotten emit capturing [&entry] is a UAF: an orphan entry
+            // that has a session_strand but no live_transport and no session — a role
+            // loop that exited before publish (bind/connect/open failure; cf. the
+            // down-peer initiator, behaviors-and-limitations L2) — is drained by
+            // neither step 2 (needs live_transport) nor step 4 (needs session), so its
+            // queued lambda would outlive registry_.clear() (step 5) which frees
+            // entry.session_cancel. Awaiting guarantees the emit completes before clear.
+            // Same awaited-co_spawn pattern as steps 2/4; the role loop is suspended on
+            // I/O so the session strand is free to run the emit (no deadlock).
+            // [gate-b/r5 P1: dangling-&entry UAF fix — Codex 2nd-opinion]
+            for (auto& [id, entry] : registry_) {
+                if (entry.session_strand.has_value()) {
+                    co_await asio::co_spawn(
+                        *entry.session_strand,
+                        [&entry]() -> asio::awaitable<void> {
+                            entry.session_cancel.emit(asio::cancellation_type::total);
+                            co_return;
+                        },
+                        asio::use_awaitable);
+                } else {
+                    // session_strand not yet created (start() not called) — direct emit
+                    // (no concurrent role loop running, so no race). [INV-0]
+                    entry.session_cancel.emit(asio::cancellation_type::total);
+                }
+            }
+            for (auto& [id, sig] : accept_scope_signals_) sig.emit(asio::cancellation_type::total);
 
-    // FIX-2 (gate-b/r1): drain in-flight Engine::send coroutines BEFORE
-    // registry_.clear(). A send coroutine holds a shared_ptr<Session> keepalive
-    // (so the Session object is alive) but the Session stores a const EngineConfig&
-    // engine_ ref — if Engine::~Engine() runs while a send is suspended on the
-    // session strand, dereferencing engine_.application / clock / store is a UAF.
-    // stopped_ is already true, so no new sends can enter; we just wait for
-    // the currently-bumped ones to decrement. [spec.md FR-012]
-    {
-        asio::steady_timer t2{co_await asio::this_coro::executor};
-        while (send_counter_->load(std::memory_order_acquire) > 0) {
-            t2.expires_after(std::chrono::milliseconds{0});
-            co_await t2.async_wait(asio::use_awaitable);
-        }
-    }
+            // ── Step 2 (T014/INV-4a): dispatch transport.close() on each session_strand ──
+            // An established session's read-pump is blocked in async_read_some with no
+            // peer EOF; total-cancel alone does not break the in-flight SSL read (see
+            // BIO_ctrl crash in [[project_business_roundtrip_bio_ctrl_segv]]). The socket
+            // MUST be closed to wake the read-pump. By dispatching close() on the session
+            // strand we serialize it with the in-flight read's completion (BIO fix —
+            // INV-4a).
+            //
+            // T013 D-PUB / T018: entry.live_transport is only written on the control
+            // strand (publish_entry), and this step now also runs on the control strand —
+            // so the read of entry.live_transport here is serialized with the write by
+            // the control strand. Race (b) eliminated. [INV-0]
+            //
+            // The snapshot of live_transport taken here (before dispatching) is valid:
+            //   - The publish sets it before the pump runs (INV-2).
+            //   - The unpublish runs AFTER the pump exits, which is after the join (step 3).
+            //   - So while we are here (pre-join), a published live_transport is stable.
+            //
+            // Each dispatch is a non-blocking co_spawn(session_strand, ...) — control
+            // strand and session strand are distinct, so no deadlock. [INV-5/C-2]
+            for (auto& [id, entry] : registry_) {
+                if (entry.live_transport != nullptr && entry.session_strand.has_value()) {
+                    // Capture the raw pointer BEFORE the co_spawn so the lambda owns a
+                    // local copy (the entry reference remains valid across the co_await
+                    // since the registry_ is stable between stopped_=true and clear()).
+                    // [INV-6]
+                    fixpp::transport::Transport* tp = entry.live_transport;
+                    co_await asio::co_spawn(
+                        *entry.session_strand,
+                        [tp]() -> asio::awaitable<void> {
+                            // close() is synchronous + idempotent. Running on the session
+                            // strand serializes it with the in-flight async_read_some
+                            // completion (the BIO_ctrl touch in map_error_code). [INV-4a]
+                            tp->close();
+                            co_return;
+                        },
+                        asio::use_awaitable);
+                }
+            }
 
-    // F2: drive each surviving session through its own close() to drain the
-    // per-session liveness loop. The role loops (run_read_pump) DO call
-    // session.close(terminal) on read EOF/error, but when Engine::stop() total-
-    // cancels them the loop's `co_await session.close()` throws operation_aborted at
-    // the cancelled await BEFORE close() is entered, so a parked run_liveness_loop
-    // sleep_until is never joined — it survives to io_context shutdown, where its
-    // system_clock_source dereg guard touches the (freed) clock pimpl: a heap-use-
-    // after-free (first seen on the live QuickFIX-cpp interop cell). This stop()
-    // coroutine is NOT cancelled, so close() runs to completion here, draining the
-    // liveness loop + write/seqnum gates. close() is idempotent (session_already_
-    // closed if a loop already drained it). Must precede registry_.clear() so no
-    // Session* is dereferenced after free.
-    for (auto& [id, entry] : registry_) {
-        if (entry.session) {
-            (void)co_await entry.session->close(fixpp::session::close_mode::terminal);
-        }
-    }
+            // ── Step 3: JOIN + send-drain ─────────────────────────────────────────
+            // JOIN: yield until all loops have co_return'd.
+            // The steady_timer uses this_coro::executor = control_strand_, which is
+            // valid (timers can run on any executor). [INV-0]
+            if (outstanding_counter_) {
+                asio::steady_timer t{co_await asio::this_coro::executor};
+                while (outstanding_counter_->load(std::memory_order_acquire) > 0) {
+                    t.expires_after(std::chrono::milliseconds{0});
+                    co_await t.async_wait(asio::use_awaitable);
+                }
+                outstanding_counter_.reset();
+            }
 
-    // Safe now: all loops have exited; Session objects may be freed.
-    accept_scope_signals_.clear();
-    listeners_.clear();
-    listener_endpoints_.clear();
-    registry_.clear();
+            // FIX-2 (gate-b/r1): drain in-flight Engine::send coroutines BEFORE
+            // registry_.clear(). A send coroutine holds a shared_ptr<Session> keepalive
+            // (so the Session object is alive) but the Session stores a const EngineConfig&
+            // engine_ ref — if Engine::~Engine() runs while a send is suspended on the
+            // session strand, dereferencing engine_.application / clock / store is a UAF.
+            // stopped_ is already true, so no new sends can enter; we just wait for
+            // the currently-bumped ones to decrement. [spec.md FR-012; R7]
+            {
+                asio::steady_timer t2{co_await asio::this_coro::executor};
+                while (send_counter_->load(std::memory_order_seq_cst) > 0) {
+                    t2.expires_after(std::chrono::milliseconds{0});
+                    co_await t2.async_wait(asio::use_awaitable);
+                }
+            }
+
+            // gate-b/r3 P1 seam: the drain has already observed zero, but the
+            // registry is still intact. Tests can start a late Engine::send()
+            // here to force the post-drain admission path.
+            if (test_hook_post_send_drain_) {
+                co_await test_hook_post_send_drain_();
+            }
+
+            // ── Step 4 (T014/INV-4b): dispatch Session::close(terminal) on each session_strand ──
+            // All loops have exited (step 3 join). Now drain the per-session liveness loop:
+            //   When Engine::stop() total-cancels a role loop, the loop's `co_await
+            //   session.close()` throws operation_aborted BEFORE close() is entered, so a
+            //   parked run_liveness_loop sleep_until is never joined — it survives to
+            //   io_context shutdown, where its system_clock_source dereg guard touches the
+            //   (freed) clock pimpl: a heap-use-after-free. This stop() coroutine is NOT
+            //   cancelled (F2 + inner disable above), so close() runs to completion here,
+            //   draining the liveness loop + write/seqnum gates. close() is idempotent
+            //   (session_already_closed if a loop already drained it). [INV-4b]
+            //
+            // Dispatched on the session strand (non-blocking co_spawn) so it runs inside
+            // the same domain as the read-pump and both teardown closes (INV-1/INV-5).
+            // All loops have exited so the session strand is idle — the close runs
+            // promptly.  Must precede registry_.clear() so no Session* is dereferenced
+            // after free. [INV-6]
+            for (auto& [id, entry] : registry_) {
+                if (entry.session && entry.session_strand.has_value()) {
+                    // Capture the shared_ptr so the session stays alive for the co_spawn
+                    // duration (the entry reference is stable because the registry_ is not
+                    // mutated between stopped_=true and the clear() in step 5). [INV-6]
+                    std::shared_ptr<Session> sess = entry.session;
+                    co_await asio::co_spawn(
+                        *entry.session_strand,
+                        [sess]() -> asio::awaitable<void> {
+                            // co_await inside the session strand — runs on the same strand
+                            // as run_liveness_loop, so the liveness sleep_until is drained
+                            // before this co_return. [INV-4b]
+                            (void)co_await sess->close(fixpp::session::close_mode::terminal);
+                            co_return;
+                        },
+                        asio::use_awaitable);
+                }
+            }
+
+            // ── Step 5: clear registry ────────────────────────────────────────────
+            // Safe now: all loops have exited; Session objects may be freed.
+            accept_scope_signals_.clear();
+            listeners_.clear();
+            listener_endpoints_.clear();
+            registry_.clear();
+
+            // T023 (E-7/D-SNAP): publish an empty snapshot after all maps are
+            // cleared.  Any reader loading after this point sees an empty snapshot
+            // (no sessions, no endpoints) — the correct post-stop() state. Called
+            // on the control strand (we are already here via co_spawn(control_strand_,...)).
+            publish_reader_snapshot_unlocked_();
+        },
+        asio::use_awaitable);
 
     // FR-014 / T044: flush sinks and shut down the OTel providers.
     // Ordering: sessions are torn down BEFORE provider shutdown so no
@@ -782,120 +1388,172 @@ asio::awaitable<void> Engine::stop() {
     }
 }
 
-// ── Engine::send — T013 (019-app-callbacks US2) ───────────────────────────────
+// ── Engine::send — T012 (023-engine-session-strand US1) ───────────────────────
 //
 // Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
 //
-// FIX-1+FIX-2 (gate-b/r1) + FIX-A (gate-b/r2) design:
-//   Step A: hop onto exec_ (the engine executor) so registry reads + stopped_
-//           check + send_counter_ bump are serialized with stop()'s mutations.
+// T012 two-hop design (research D0/D4/R1/R7; data-model E-0; contract C-2; FR-012):
+//   Enroll: bump send_counter_ + RAII counter_guard in the OUTER coroutine frame
+//           (before the first co_await), so a send is counted the instant the
+//           coroutine body starts.
+//   Admission gate: immediately recheck stopped_ AFTER enroll. If stop() has
+//           already started, fast-fail WITHOUT posting the control-strand lambda.
+//           Otherwise continue to Step A. This closes the post-drain enrollment
+//           window: a send that begins after stop()'s drain observed zero sees
+//           stopped_=true under seq_cst and queues no [this]-capturing work.
+//           [gate-b/r3 P1; R7]
+//   Step A: hop onto control_strand_ (NOT bare exec_) so registry reads + stopped_
+//           check are serialized with stop()'s mutations on the control strand
+//           (D0/INV-0). Using exec_ would leave stop()'s registry_.clear() racing
+//           send's registry_.find() under MT.
 //           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
-//   Step B: on exec_ — registry lookup, keepalive capture, Active check,
-//           stopping check. If stopped_ → fail-fast (no send may outlive stop()).
-//           Bump send_counter_ + RAII counter_guard to enroll in the send-drain
-//           domain. The guard fires on co_return AND exception/cancel unwind so
-//           a total-cancel from stop() cannot leave the counter positive. [FIX-2/A]
-//   Step C: hop to session strand for toApp + Session::send. counter_guard dtor
-//           decrements after the strand hop completes (or unwinds). [FIX-2/A]
+//   Step B: on control_strand_ — stopped_ check + registry lookup + keepalive
+//           capture (null-check only — NOT Active check; fsm_state_ is
+//           single-writer on session strand C-1). If stopped_ → fail-fast
+//           (session_invalid_state_for_send). [gate-b/r2 P1: bump no longer here]
+//   Step C: hop to session_strand for Active check (fsm_state_ owned here, C-1),
+//           toApp + Session::send. counter_guard dtor decrements after the hop
+//           completes (or unwinds). [gate-b/r1 #1: Active check moved here]
 //
-//   stop() drains send_counter_ BEFORE registry_.clear() so no send coroutine
-//   can dereference engine_ after Engine::~Engine() runs.
+//   Both hops are non-blocking co_spawn(strand, use_awaitable) — never dispatch or
+//   blocking wait — so a callback-issued send (session→control→session) cannot
+//   deadlock (FR-006/C-2). [research R1]
+//
+//   stop() stores stopped_=true (seq_cst) BEFORE draining send_counter_ (seq_cst)
+//   and BEFORE registry_.clear(). A send either enrolls before the drain load
+//   and is waited out, or enrolls after that load and then sees stopped_=true
+//   on the outer admission re-check, so it returns without posting any
+//   [this]-capturing control-strand work. [R7]
 //   Backpressure = the awaited result ([const §XV.15]).
-//   Re-entrant call from within an on-strand callback: asio::post is
-//   non-blocking → no deadlock (FR-006 edge case).
 asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                                                      std::span<const std::byte> app_payload) {
     // Copy payload into a coroutine-frame-local buffer so the caller's span
     // (potentially stack-allocated) stays valid across all co_await suspensions.
     std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
 
-    // Step A: first-hop onto exec_ so registry reads are serialized with
-    // stop()'s registry_.clear(). [FIX-1: gate-b/r1]
-    core::expected_t<void> result =
-        co_await asio::co_spawn(
-            exec_,
-            [this, id, payload_copy = std::move(payload_copy)]()
-                -> asio::awaitable<core::expected_t<void>> {
-                // ── Step B: on exec_ — safe to read registry + stopped_ ──
+    // gate-b/r2 [P1]: enroll this send in the send-drain domain BEFORE the
+    // control-strand hop.  If the bump occurred inside the control-strand lambda
+    // (Step B), a send POSTED to control_strand_ but not-yet-run would be
+    // invisible to stop()'s send_counter_ drain: stop() could drain (sees 0),
+    // clear registry_, destroy Engine, and then the still-queued lambda would
+    // run and dereference freed `this` (stopped_/registry_) — UAF.
+    //
+    // By bumping here (synchronously, in the outer coroutine frame), the send
+    // is enrolled the instant the coroutine body starts.  stop()'s drain now
+    // waits for any posted-but-not-yet-run send, keeping Engine alive until the
+    // full two-hop completes.
+    //
+    // Capture send_counter_ by value (shared_ptr copy): this keeps the counter
+    // object alive even after Engine destruction so the guard's decrement is
+    // always safe — the decrement never touches `this`.
+    // [gate-b/r2 P1; spec.md FR-012/R7; engine.cpp ~1376 contract]
+    auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
+    sc->fetch_add(1, std::memory_order_seq_cst);
+    counter_guard send_guard{sc};
 
-                // FIX-2: fail-fast if stop() has begun (stopped_ set on exec_).
-                if (stopped_) {
-                    co_return std::unexpected(core::error::session_invalid_state_for_send);
-                }
+    // gate-b/r3 P1: admission re-check after enroll. If stop() already set the
+    // seq_cst stopped_ flag, fail here and queue no control-strand work. The
+    // counter guard still decrements on this early return.
+    if (stopped_.load(std::memory_order_seq_cst)) {
+        co_return std::unexpected(core::error::session_invalid_state_for_send);
+    }
 
-                // Registry lookup (serialized with registry_.clear() by exec_).
-                auto it = registry_.find(id);
-                if (it == registry_.end()) {
-                    co_return std::unexpected(core::error::session_invalid_argument);
-                }
+    // T012/Step A: first-hop onto control_strand_ so registry reads and stopped_
+    // check are serialized with stop()'s control-plane mutations (D0/INV-0).
+    // Non-blocking co_spawn — the re-entrant case (session→control→session) is
+    // safe because the session strand and control strand are distinct: posting
+    // from the session strand onto the control strand never blocks. [C-2/R1]
+    core::expected_t<void> result = co_await asio::co_spawn(
+        control_strand_,
+        [this, id,
+         payload_copy = std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
+            // ── Step B: on control_strand_ — safe to read registry + stopped_ ──
+            // All engine-global state (registry_, stopped_) is serialized with
+            // stop()'s mutations through this strand. [D0/E-0]
+            // NOTE: send_counter_ is no longer bumped here — it was bumped at
+            // send-entry (outer frame) before this co_spawn, so stop()'s drain
+            // already accounts for this in-flight send. [gate-b/r2 P1]
 
-                // Capture strong keepalive before any co_await (UAF guard).
-                std::shared_ptr<Session> kl = it->second.session;
+            // T004/INV-8: acquire load — pairs with stop()'s write on the
+            // control strand.
+            if (stopped_.load(std::memory_order_acquire)) {
+                co_return std::unexpected(core::error::session_invalid_state_for_send);
+            }
 
-                // Session null (loop not yet started) or not Active → reject.
-                if (!kl || kl->state() != fsm_state::Active) {
-                    co_return std::unexpected(core::error::session_invalid_state_for_send);
-                }
+            // Registry lookup — serialized with registry_.clear() by control_strand_.
+            auto it = registry_.find(id);
+            if (it == registry_.end()) {
+                co_return std::unexpected(core::error::session_invalid_argument);
+            }
 
-                // FIX-2 / gate-b/r2 FIX-A: enroll this in-flight send in the
-                // send-drain domain with an RAII guard so the decrement fires on
-                // co_return AND on exception/total-cancel unwind.
-                // The manual ++/-- pair was not exception-safe: if the inner
-                // co_spawn(strand_exec) was total-cancelled (stop()'s teardown
-                // path), operation_aborted propagated out and skipped the manual
-                // --, leaving send_counter_ permanently positive and wedging
-                // stop()'s drain loop. counter_guard (engine.cpp:61-69) is the
-                // existing RAII pattern used by the accept/connect loops —
-                // reusing it here closes the gap. [spec.md FR-012]
-                ++(*send_counter_);
-                counter_guard send_guard{send_counter_};
+            // Capture strong keepalive before any co_await (UAF guard).
+            std::shared_ptr<Session> kl = it->second.session;
 
-                // Also reset cancellation state on the outer exec_ frame so
-                // total cancellation has a defined policy for the bump→guard
-                // window (belt-and-suspenders; the guard is the load-bearing fix).
-                co_await asio::this_coro::reset_cancellation_state(
-                    asio::enable_total_cancellation());
+            // Session null (loop not yet published) → reject on the control strand.
+            // NOTE: kl->state() (fsm_state_) is single-writer on the per-session
+            // strand ([session.hpp:556]); reading it here (control strand) would be a
+            // data race under MT. The Active check is moved entirely into Step C
+            // (session-strand lambda) where fsm_state_ is owned.
+            // [#1 gate-b/r1: data race fix — spec.md §C-1/C-0/D0]
+            if (!kl) {
+                co_return std::unexpected(core::error::session_invalid_state_for_send);
+            }
 
-                // ── Step C: hop to session strand for toApp + Session::send ──
-                auto strand_exec = kl->executor().underlying();
-                core::expected_t<void> send_result =
-                    co_await asio::co_spawn(
-                        strand_exec,
-                        [kl, payload_copy = std::move(payload_copy)]()
-                            -> asio::awaitable<core::expected_t<void>> {
-                            // Enable total cancellation so stop()'s
-                            // cancellation_type::total reaches Session::send.
-                            // [[feedback_asio_cospawn_total_cancellation_default]]
-                            co_await asio::this_coro::reset_cancellation_state(
-                                asio::enable_total_cancellation());
-                            // Re-check state on the strand (may have changed
-                            // since the exec_ check above).
-                            if (kl->state() != fsm_state::Active) {
-                                co_return std::unexpected(
-                                    core::error::session_invalid_state_for_send);
-                            }
-                            co_return co_await kl->send(std::span<const std::byte>(
-                                payload_copy.data(), payload_copy.size()));
-                        },
-                        asio::use_awaitable);
+            // Reset cancellation state on the control-strand frame so total
+            // cancellation has a defined policy for this hop.
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
-                co_return send_result;
-            },
-            asio::use_awaitable);
+            // ── Step C: hop to session_strand for toApp + Session::send ──
+            // Non-blocking post onto the session strand — distinct from the
+            // control strand, so no deadlock even for re-entrant sends. [C-2]
+            auto strand_exec = kl->executor().underlying();
+            core::expected_t<void> send_result = co_await asio::co_spawn(
+                strand_exec,
+                // payload_copy is captured by copy: the enclosing lambda's capture is
+                // const (non-mutable lambda), so a std::move here would be a no-op.
+                [kl, payload_copy]() -> asio::awaitable<core::expected_t<void>> {
+                    // Enable total cancellation so stop()'s
+                    // cancellation_type::total reaches Session::send.
+                    // [[feedback_asio_cospawn_total_cancellation_default]]
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation());
+                    // Active-state check on the session strand where fsm_state_ is
+                    // owned (single-writer on session strand, C-1).  The control strand
+                    // checks only for null session (not yet published); the
+                    // fsm_state_ read is ONLY legal here. [gate-b/r1 #1 fix; C-0/C-1]
+                    if (kl->state() != fsm_state::Active) {
+                        co_return std::unexpected(core::error::session_invalid_state_for_send);
+                    }
+                    co_return co_await kl->send(
+                        std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
+                },
+                asio::use_awaitable);
+
+            co_return send_result;
+        },
+        asio::use_awaitable);
 
     co_return result;
 }
 
-// ── acceptor_bound_endpoint (SC-010 delta #6) ─────────────────────────────────
+// ── acceptor_bound_endpoint (SC-010 delta #6 / T024 D-SNAP) ──────────────────
 // Returns the OS-resolved bound endpoint of the acceptor's listener for `id`.
 // Returns Endpoint{} (port==0) if the id is not a registered acceptor or the
-// listener has not been built yet.  The accept loop builds and stores the
-// listener at the start of run_accept_loop; the endpoint is readable once the
-// executor runs at least one step after start().
+// listener has not been built yet.
+//
+// T024 (D-SNAP): reads the atomically-published reader_snapshot_ (any-thread-
+// safe, no strand, no std::mutex, no block). Signature UNCHANGED (Endpoint by
+// value) — only the internal implementation switches from direct map access to
+// snapshot load. [E-7/INV-9/D-SNAP; research D8 "acceptor_bound_endpoint()
+// keeps its Endpoint-by-value signature"]
 
 fixpp::transport::Endpoint Engine::acceptor_bound_endpoint(SessionId const& id) const {
-    auto it = listener_endpoints_.find(id);
-    if (it == listener_endpoints_.end()) return fixpp::transport::Endpoint{};
+    // Load the current snapshot — any-thread-safe acquire load. [E-7/D-SNAP]
+    auto snap = reader_snapshot_.load(std::memory_order_acquire);
+    if (!snap) return fixpp::transport::Endpoint{};  // defensive: never null post-ctor
+
+    auto it = snap->endpoints.find(id);
+    if (it == snap->endpoints.end()) return fixpp::transport::Endpoint{};
     return it->second;
 }
 

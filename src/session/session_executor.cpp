@@ -51,6 +51,23 @@ expected_t<session_executor> make_session_executor(asio::any_io_executor resolve
 }
 // NOLINTEND(bugprone-exception-escape)
 
+// Engine-only adoption overload (D3-B / 023 T009).
+//
+// The engine pre-creates one strand per session (E-1/INV-1 / Engine::start())
+// and passes it here via the adopt_strand_t tag. The strand is stored DIRECTLY
+// with strand_wrapped=true (truthful) — no second make_strand wrap (D1 anti-pattern).
+//
+// NOLINTBEGIN(bugprone-exception-escape)
+session_executor make_session_executor(adopt_strand_t, asio::any_io_executor strand_exec,
+                                       fixpp::session::Session* session) noexcept {
+    // Precondition (INV-3a / D3-B): strand_exec IS a strand created by the engine.
+    // Store it directly — no re-wrap. strand_wrapped=true is truthful here because
+    // the engine-created strand IS a strand; the public per_session_strand path
+    // still unconditionally wraps (byte-unchanged at session_executor.cpp:35).
+    return session_executor{std::move(strand_exec), session, /*strand_wrapped=*/true};
+}
+// NOLINTEND(bugprone-exception-escape)
+
 // [2d §6.5]:1153-1154 arena bridge — defined HERE (session TU) so
 // fixpp::session::Session is complete; the core header only declares it.
 std::pmr::memory_resource* session_arena_of(const session_executor& exec) noexcept {

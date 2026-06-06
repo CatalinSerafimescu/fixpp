@@ -488,7 +488,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
 
         // Session must still be Active after the app exchange.
         {
-            const fixpp::session::Session* s = fx.engine().lookup(id);
+            auto s = fx.engine().lookup(id);
             EXPECT_NE(s, nullptr) << "session must still exist after exchange";
             if (s != nullptr) {
                 EXPECT_EQ(s->state(), fsm_state::Active)

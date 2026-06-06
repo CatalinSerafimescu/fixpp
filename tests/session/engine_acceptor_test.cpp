@@ -391,7 +391,8 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     ioc.restart();
 
     // Capture state BEFORE stop() frees the session.
-    fixpp::session::Session* acc_session = engine.lookup(acc_id);
+    // T024: lookup() now returns shared_ptr<Session>; same null/ptr semantics.
+    auto acc_session = engine.lookup(acc_id);
     bool established = (acc_session != nullptr) &&
                        (acc_session->state() == fixpp::session::fsm_state::Active ||
                         acc_session->state() == fixpp::session::fsm_state::LogonReceived);
@@ -445,7 +446,8 @@ TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
     ioc.run_for(3s);
     ioc.restart();
 
-    fixpp::session::Session* s = engine.lookup(acc_id);
+    // T024: lookup() now returns shared_ptr<Session>.
+    auto s = engine.lookup(acc_id);
     bool established = (s != nullptr) && (s->state() == fixpp::session::fsm_state::Active ||
                                           s->state() == fixpp::session::fsm_state::LogonReceived);
     std::string state_str = s ? std::to_string(static_cast<int>(s->state())) : "null";
@@ -493,7 +495,8 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     ioc.run_for(3s);
     ioc.restart();
 
-    fixpp::session::Session* s = engine.lookup(acc_id);
+    // T024: lookup() now returns shared_ptr<Session>.
+    auto s = engine.lookup(acc_id);
     bool established = (s != nullptr) && (s->state() == fixpp::session::fsm_state::Active ||
                                           s->state() == fixpp::session::fsm_state::LogonReceived);
     int next_inbound = s ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe()) : -1;
@@ -754,8 +757,9 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
                    asio::detached);
 
     // Poll until the acceptor session reaches Active (liveness loop spawns + parks).
+    // T024: lookup() returns shared_ptr<Session>; reset each iteration to refresh.
     const auto deadline = std::chrono::steady_clock::now() + 3s;
-    fixpp::session::Session* acc_session = nullptr;
+    std::shared_ptr<fixpp::session::Session> acc_session;
     while (std::chrono::steady_clock::now() < deadline) {
         ioc.run_for(50ms);
         ioc.restart();

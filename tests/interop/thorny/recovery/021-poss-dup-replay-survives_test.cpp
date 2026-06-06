@@ -181,7 +181,7 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
         return;
     }
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── Snapshot inbound seqnum before the replay window ─────────────────────
@@ -195,7 +195,7 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     // Wait up to 20 s for the replay to complete.
     fx.run_until(
         [&] {
-            const fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss == nullptr || ss->state() != fsm_state::Active;
         },
         20s);

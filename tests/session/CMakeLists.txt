@@ -1441,6 +1441,39 @@ set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "022;us2;allowposdup;strip")
 
+# ── 023-engine-session-strand T001/T002 — MT lifecycle + strand-binding witness ─
+#
+# Witnesses V-1..V-12 (per-session strand binding, control-plane confinement,
+# snapshot readers, bounded-handle).  Mirrors business_messages_roundtrip_test
+# (:1326-1350) in link requirements and TLS fixture wiring.
+add_executable(engine_session_strand_test
+  test_engine_session_strand.cpp
+)
+target_link_libraries(engine_session_strand_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_session_strand_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_tls_transport.hpp" (V-10 socket-executor check)
+)
+target_compile_definitions(engine_session_strand_test PRIVATE
+  FIXPP_TEST_HOOKS
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME engine_session_strand COMMAND engine_session_strand_test)
+set_tests_properties(engine_session_strand PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "023;session;control_strand;tsan"
+  TIMEOUT 120)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

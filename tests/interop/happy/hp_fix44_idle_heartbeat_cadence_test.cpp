@@ -244,7 +244,7 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    fixpp::session::Session* s = fx.engine().lookup(id);
+    auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── In-process seqnum witness: record outbound seqnum after Logon ────────
@@ -269,7 +269,7 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
 
     fx.run_until(
         [&] {
-            fixpp::session::Session* ss = fx.engine().lookup(id);
+            auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
                    ss->seqnum_mgr_test_access().peek_outbound() >= target_seqnum;
         },

@@ -12,4 +12,15 @@
 # Affects asio 1.36.0; not a fixpp::session_local concurrency issue (the
 # slot is plain value ownership, read on the strand — race-free).
 race:asio::execution::detail::shared_target_executor
-race:asio::execution::detail::any_executor_base
+#
+# NOTE (T018 / 023-engine-session-strand): the former
+# `race:asio::execution::detail::any_executor_base` suppression has been
+# REMOVED.  After T018 the listener_endpoints_ write is dispatched via
+# co_spawn(control_strand_,...) which routes through any_executor_base::
+# execute_ex in the write call stack — the over-broad any_executor_base
+# suppression was accidentally hiding the V-8 public-reader data race
+# (the genuine race that D-SNAP / US3 T026 fixes).  The narrower
+# shared_target_executor rule is sufficient for the original asio ref-count
+# false-positive (confirmed: V-1/V-3/V-9/V-10/V-12 TSan-clean with only
+# the shared_target_executor rule; V-8 correctly RED until T026).
+# [DD-2026-06-06; tasks T018/T020; research D-SNAP/V-8]

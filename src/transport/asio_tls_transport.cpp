@@ -1261,22 +1261,32 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // Transition to closed immediately.
     state_ = state_t::closed;
 
-    // ── Best-effort TLS bidi shutdown ─────────────────────────────────────────
-    // ssl_stream_ is present if async_handshake was started (regardless of
-    // whether it completed successfully).
-    if (ssl_stream_) {
+    // ── Best-effort TLS close-notify (graceful shutdown) ──────────────────────
+    // Send the close_notify alert ONLY when no SSL operation is suspended on this
+    // strand. close() is strand-confined (FR-006 — see header §"State machine"),
+    // so read_in_flight_ / write_in_flight_ are authoritative reads here. If a
+    // read/write is in flight, its completion handler will later run
+    // map_error_code → BIO_ctrl on ssl_stream_; mutating the SSL state via
+    // SSL_shutdown underneath that suspended op is unsafe, and socket_.close()
+    // below already interrupts it with an error (a truncated close — acceptable
+    // non-fatal per [2g §7.8]). When nothing is in flight, we send the
+    // close_notify for a clean bidi shutdown the peer can observe.
+    //
+    // ssl_stream_ is NEVER reset here. The pending async_read_some completion (on
+    // this session strand) passes through asio's SSL layer which calls
+    // map_error_code → BIO_ctrl on the SSL BIO; ssl_stream_.reset() would free the
+    // BIO underneath it → UAF / SEGFAULT (the prior bug). ssl_stream_ is destroyed
+    // in ~asio_tls_transport, which (for engine-managed sessions) runs after the
+    // role loop exits — i.e., after run_read_pump co_returns and all pending SSL
+    // completions have executed. [2g §7.8]
+    if (ssl_stream_ && !read_in_flight_ && !write_in_flight_) {
         SSL* ssl = ssl_stream_->native_handle();
         if (ssl) {
-            // First SSL_shutdown call sends the close_notify alert to the peer.
-            // Return value: 1 = clean bidi shutdown; 0 = close_notify sent but
-            // peer's not yet received; <0 = error.
-            // Bounded by tls_close_timeout {1s}: for a synchronous close() we
-            // send the close_notify but do NOT block for the peer's response.
-            // A truncated close (peer does not respond) is warned-level per
-            // [2g §7.8]; this is acceptable non-fatal behaviour in v1.0.
+            // First SSL_shutdown sends close_notify; bounded by tls_close_timeout
+            // {1s} — for a synchronous close() we send but do NOT block for the
+            // peer's response. Return value ignored (best-effort).
             (void)SSL_shutdown(ssl);
         }
-        ssl_stream_.reset();
     }
 
     // ── Close the underlying TCP socket ───────────────────────────────────────

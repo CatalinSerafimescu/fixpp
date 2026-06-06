@@ -306,7 +306,7 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     ioc.restart();
 
     // Capture BEFORE stop() frees the session.
-    fixpp::session::Session* acc = h->engine->lookup(h->acc_id);
+    auto acc = h->engine->lookup(h->acc_id);
 
     // If the session never reached established, skip (acceptance path not yet
     // wired for this test environment — but in practice T011/T012/T013 are GREEN
@@ -409,7 +409,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     ioc.run_for(4s);
     ioc.restart();
 
-    fixpp::session::Session* acc = h->engine->lookup(h->acc_id);
+    auto acc = h->engine->lookup(h->acc_id);
     if (!acc) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
         ioc.run();
@@ -482,7 +482,7 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
     ioc.run_for(4s);
     ioc.restart();
 
-    fixpp::session::Session* acc = h->engine->lookup(h->acc_id);
+    auto acc = h->engine->lookup(h->acc_id);
     if (!acc) {
         // Session already freed — reached terminal state and was cleaned up.
         // This is the GREEN outcome: the pump drove the session through close().
