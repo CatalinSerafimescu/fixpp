@@ -2031,4 +2031,149 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
         << "V-14: engine must be stopped after stop() completes";
 }
 
+// ── V-15: SendCounterEnrolledBeforeControlHop_NoUAF (gate-b/r2 P1) ──────────
+//
+// Witnesses the UAF window that existed when send_counter_ was bumped INSIDE
+// the control-strand lambda (Step B) rather than at send-entry (outer frame).
+//
+// ── Historical UAF mechanism (pre-fix) ───────────────────────────────────────
+//   Engine::send() co_spawn'd a lambda onto control_strand_; the lambda did
+//   the stopped_/registry checks and ONLY THEN bumped ++(*send_counter_).
+//   A posted-but-not-yet-run lambda was invisible to stop()'s send_counter_
+//   drain: stop() could observe 0, drain, clear registry_, return, the caller
+//   could destroy the Engine, and the queued lambda would then dereference
+//   freed `this` (reads stopped_, registry_) — UAF.
+//
+// ── Current GREEN mechanism (post-fix, gate-b/r2 P1) ─────────────────────────
+//   send_counter_ is bumped in the outer coroutine frame before the co_spawn.
+//   stop()'s drain therefore waits for any posted-but-not-yet-run send, keeping
+//   Engine alive until the full two-hop completes.  The captured shared_ptr<sc>
+//   keeps the counter object alive past Engine destruction so the guard's
+//   decrement is always safe.
+//
+// Mechanism:
+//   1. Establish a session pair on a ≥3-thread executor.
+//   2. Spawn many sender coroutines concurrently (saturates the control strand
+//      queue — maximizes the probability that some sends are posted but not run
+//      when stop() drains).
+//   3. Concurrently call Engine::stop() immediately after the sends are posted.
+//   4. Assert that stop() completes without crash/TSan/ASan finding.
+//   5. Destroy the Engine — any UAF on `this` would be caught here by ASan.
+//   6. Assert that every send returned a result (not a hang): no deadlock.
+//
+// Thread count: 3 engine threads + main.
+// Anti-hang: 12s stop budget; each send has a 200ms future-wait.
+//
+// [gate-b/r2 P1; spec.md FR-012/R7; engine.cpp send_counter_/counter_guard]
+
+TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
+    const char* fixture_dir = get_fixture_dir();
+    if (!fixture_dir || fixture_dir[0] == '\0')
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+
+    asio::io_context ioc;
+    const uint16_t port = reserve_free_port(ioc);
+    auto fac = make_tls_factory(fixture_dir);
+    if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
+
+    auto acc_cfg = make_session_cfg(
+        fac, "ACCEPTOR_V15", "INITIATOR_V15",
+        fixpp::session::session_role::acceptor, "INITIATOR_V15",
+        ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(
+        fac, "INITIATOR_V15", "ACCEPTOR_V15",
+        fixpp::session::session_role::initiator, "ACCEPTOR_V15",
+        ioc.get_executor(), port);
+    // Capture ids before the configs are moved into register_session.
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.clock = make_mock_clock(ioc);
+
+    auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
+
+    if (!engine->register_session(std::move(acc_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-15: acceptor register_session failed";
+    }
+    if (!engine->register_session(std::move(ini_cfg)).has_value()) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-15: initiator register_session failed";
+    }
+
+    engine->start();
+
+    // Wait for both sessions to reach Active so sends have a real session to target.
+    bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
+    if (!both_active) {
+        stop_engine_sync(ioc, *engine);
+        FAIL() << "V-15: sessions did not reach Active within 8s";
+    }
+
+    // Start engine executor threads.
+    std::thread t1{[&ioc]{ ioc.run(); }};
+    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t3{[&ioc]{ ioc.run(); }};
+
+    // Post N send coroutines concurrently onto the ioc.  Each is co_spawn'd
+    // onto the ioc executor; they will queue up on the control_strand_.
+    // The goal: maximize the number of sends that are POSTED (send_counter_
+    // already bumped) but NOT YET RUN on the control strand when stop() fires.
+    constexpr int kNumSends = 32;
+    const std::array<std::byte, 4> dummy{};
+    const std::span<const std::byte> payload_view{dummy};
+
+    std::vector<std::future<expected_t<void>>> send_futs;
+    send_futs.reserve(kNumSends);
+    for (int i = 0; i < kNumSends; ++i) {
+        send_futs.push_back(asio::co_spawn(
+            ioc.get_executor(),
+            engine->send(ini_id, payload_view),
+            asio::use_future));
+    }
+
+    // Immediately call stop() — races the queued control-strand sends.
+    // Pre-fix: stop() drains (sees counter 0 because bumps are still queued),
+    //          clears registry, returns; caller destroys engine; queued lambdas
+    //          run and dereference freed `this` → UAF.
+    // Post-fix: sends already bumped counter before co_spawn → stop() waits
+    //           for all of them to complete → Engine stays alive → no UAF.
+    auto stop_fut = asio::co_spawn(
+        ioc.get_executor(), engine->stop(), asio::use_future);
+    bool stop_done = wait_pred(ioc,
+        [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
+        12000ms);
+
+    ioc.stop();
+    t1.join();
+    t2.join();
+    t3.join();
+
+    ASSERT_TRUE(stop_done) << "V-15: engine.stop() did not complete within 12s";
+    stop_fut.get();
+
+    // Collect all send results — each must have completed (not hung).
+    // They may succeed or fail (session gone) — both are fine; what matters is
+    // that Engine::~Engine() below does not trigger ASan/TSan on freed memory.
+    int completed = 0;
+    for (auto& f : send_futs) {
+        if (f.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready) {
+            (void)f.get();
+            ++completed;
+        }
+    }
+    // All sends must have completed once stop() drained the counter.
+    EXPECT_EQ(completed, kNumSends)
+        << "V-15: all send futures must be ready after stop() drained send_counter_";
+
+    EXPECT_TRUE(engine->stopped())
+        << "V-15: engine must be stopped after stop() completes";
+
+    // Destroy the engine — any UAF on stopped_/registry_ from a dangling lambda
+    // would manifest here under ASan or as a crash.
+    engine.reset();
+}
+
 }  // namespace

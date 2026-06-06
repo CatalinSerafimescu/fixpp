@@ -1354,17 +1354,20 @@ asio::awaitable<void> Engine::stop() {
 // Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
 //
 // T012 two-hop design (research D0/D4/R1/R7; data-model E-0; contract C-2; FR-012):
+//   Enroll: bump send_counter_ + RAII counter_guard in the OUTER coroutine frame
+//           (before the first co_await), so a send is counted the instant the
+//           coroutine body starts. stop()'s drain then waits for any
+//           posted-but-not-yet-run send, keeping Engine alive until the full
+//           two-hop completes (no UAF window). [gate-b/r2 P1; R7]
 //   Step A: hop onto control_strand_ (NOT bare exec_) so registry reads + stopped_
-//           check + send_counter_ bump are serialized with stop()'s mutations on
-//           the control strand (D0/INV-0). Using exec_ would leave stop()'s
-//           registry_.clear() racing send's registry_.find() under MT.
+//           check are serialized with stop()'s mutations on the control strand
+//           (D0/INV-0). Using exec_ would leave stop()'s registry_.clear() racing
+//           send's registry_.find() under MT.
 //           [[feedback_asio_post_resume_bounces_to_spawn_executor]]
-//   Step B: on control_strand_ — registry lookup, keepalive capture (null-check only —
-//           NOT Active check; fsm_state_ is single-writer on session strand C-1),
-//           stopped_ check. If stopped_ → fail-fast (session_invalid_state_for_send).
-//           Bump send_counter_ + RAII counter_guard to enroll in the send-drain
-//           domain. The guard fires on co_return AND exception/cancel unwind so
-//           a total-cancel from stop() cannot leave the counter positive. [R7]
+//   Step B: on control_strand_ — stopped_ check + registry lookup + keepalive
+//           capture (null-check only — NOT Active check; fsm_state_ is
+//           single-writer on session strand C-1). If stopped_ → fail-fast
+//           (session_invalid_state_for_send). [gate-b/r2 P1: bump no longer here]
 //   Step C: hop to session_strand for Active check (fsm_state_ owned here, C-1),
 //           toApp + Session::send. counter_guard dtor decrements after the hop
 //           completes (or unwinds). [gate-b/r1 #1: Active check moved here]
@@ -1382,6 +1385,26 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // (potentially stack-allocated) stays valid across all co_await suspensions.
     std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
 
+    // gate-b/r2 [P1]: enroll this send in the send-drain domain BEFORE the
+    // control-strand hop.  If the bump occurred inside the control-strand lambda
+    // (Step B), a send POSTED to control_strand_ but not-yet-run would be
+    // invisible to stop()'s send_counter_ drain: stop() could drain (sees 0),
+    // clear registry_, destroy Engine, and then the still-queued lambda would
+    // run and dereference freed `this` (stopped_/registry_) — UAF.
+    //
+    // By bumping here (synchronously, in the outer coroutine frame), the send
+    // is enrolled the instant the coroutine body starts.  stop()'s drain now
+    // waits for any posted-but-not-yet-run send, keeping Engine alive until the
+    // full two-hop completes.
+    //
+    // Capture send_counter_ by value (shared_ptr copy): this keeps the counter
+    // object alive even after Engine destruction so the guard's decrement is
+    // always safe — the decrement never touches `this`.
+    // [gate-b/r2 P1; spec.md FR-012/R7; engine.cpp ~1376 contract]
+    auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
+    ++(*sc);
+    counter_guard send_guard{sc};
+
     // T012/Step A: first-hop onto control_strand_ so registry reads and stopped_
     // check are serialized with stop()'s control-plane mutations (D0/INV-0).
     // Non-blocking co_spawn — the re-entrant case (session→control→session) is
@@ -1392,8 +1415,11 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
         [this, id,
          payload_copy = std::move(payload_copy)]() -> asio::awaitable<core::expected_t<void>> {
             // ── Step B: on control_strand_ — safe to read registry + stopped_ ──
-            // All engine-global state (registry_, stopped_, send_counter_) is
-            // serialized with stop()'s mutations through this strand. [D0/E-0]
+            // All engine-global state (registry_, stopped_) is serialized with
+            // stop()'s mutations through this strand. [D0/E-0]
+            // NOTE: send_counter_ is no longer bumped here — it was bumped at
+            // send-entry (outer frame) before this co_spawn, so stop()'s drain
+            // already accounts for this in-flight send. [gate-b/r2 P1]
 
             // T004/INV-8: acquire load — pairs with stop()'s write on the
             // control strand.
@@ -1420,17 +1446,8 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                 co_return std::unexpected(core::error::session_invalid_state_for_send);
             }
 
-            // R7: enroll this in-flight send in the send-drain domain with an
-            // RAII guard so the decrement fires on co_return AND on
-            // exception/total-cancel unwind. Keep the send_counter_ mechanism
-            // STRICTLY SEPARATE from the US3 lookup() lease (R7 — draining on
-            // app-held leases would hang stop(); weakening the barrier would
-            // re-open the send-path UAF). [spec.md FR-012]
-            ++(*send_counter_);
-            counter_guard send_guard{send_counter_};
-
             // Reset cancellation state on the control-strand frame so total
-            // cancellation has a defined policy for the bump→guard window.
+            // cancellation has a defined policy for this hop.
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
             // ── Step C: hop to session_strand for toApp + Session::send ──
