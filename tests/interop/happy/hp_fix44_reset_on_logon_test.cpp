@@ -6,18 +6,23 @@
 //
 // T016 — reset_on_logon_initiator (C6.1):
 //   fixpp INITIATOR with reset_on_logon=true against a live QFcpp/QFJ ACCEPTOR.
-//   The fixpp outbound Logon carries ResetSeqNumFlag(141)=Y + MsgSeqNum=1.
-//   The live acceptor accepts. Both sides resync from seqnum 1.
-//   In-process witnesses:
-//     (a) fixpp FSM reaches Active — the counterparty accepted the Logon (implicitly
-//         confirms the counterparty saw 141=Y + 34=1 as expected; if either were absent
-//         or wrong the counterparty would disconnect / Logout instead of reaching Active).
-//     (b) Outbound seqnum >= 2 after Active (the Logon was sent at 34=1 and the
-//         counter advanced; proves the reset ran and the Logon consumed seqnum 1).
-//   The byte-level golden (141=Y + 34=1 verbatim field order) is asserted by the PARENT
-//   gate against the proxy capture (research R1: no in-library wire-capture seam in the
-//   interop fixture). Unit witness ResetOnLogon_Initiator_ResetsAndEmits141 asserts
-//   the byte-level 141=Y + 34=1 directly via captured_frames.
+//   In-process witnesses (what this cell can assert in-process):
+//     (a) fixpp FSM reaches Active — the live counterparty accepted the Logon.
+//         This proves the reset ran and the counterparty accepted the session
+//         (a counterparty that rejected 141=Y or saw a wrong seqnum would
+//         Logout / disconnect instead of reaching Active).
+//     (b) Outbound seqnum >= 2 after Active — the Logon consumed seqnum 1,
+//         so the next outbound is at least 2. This witnesses seqnum advancement
+//         past 1 (i.e., the reset ran and the Logon was sent).
+//   NOTE: in-process byte capture of the outbound Logon frame is NOT reachable
+//   in this interop fixture (research R1: no in-library wire-capture seam on the
+//   live outbound path). The byte-level assertion that the Logon carried 141=Y
+//   and 34=1 verbatim is provided by two authoritative sources:
+//     - Unit witness ResetOnLogon_Initiator_ResetsAndEmits141
+//       (tests/session/test_reset_on_lifecycle.cpp:357/366): directly asserts
+//       34=1 and 141=Y on captured Logon frame bytes via extract_field/frame_has_tag.
+//     - Parent golden (diff_golden_or_skip below): asserts 141=Y + 34=1 verbatim
+//       under the {52,10} admin profile against the live proxy capture.
 //
 // T017 — reset_on_logon_acceptor (C6.2):
 //   A live QFcpp/QFJ INITIATOR sends a Logon with 141=Y + fresh 34=1. The fixpp
@@ -90,7 +95,7 @@ namespace {
 
 class ResetOnLogonInitiator : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(ResetOnLogonInitiator, LogonCarries141AndResyncsFrom1) {
+TEST_P(ResetOnLogonInitiator, LogonAcceptedAndResyncs) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -127,13 +132,13 @@ TEST_P(ResetOnLogonInitiator, LogonCarries141AndResyncsFrom1) {
         << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
-    // ── In-process witness (b): outbound seqnum >= 2 after Active (C6.1 / C2.1)
-    // After the reset the Logon was sent at MsgSeqNum=1 (seqnum 1 consumed);
-    // peek_outbound() returns the NEXT outbound seqnum, which is >= 2 once the
-    // session is Active. Asserting >= 2 (not just >= 1) proves the Logon was
-    // actually sent (consumed seqnum 1) rather than merely that a session exists.
-    // The unit witness ResetOnLogon_Initiator_ResetsAndEmits141 additionally
-    // asserts 34=1 and 141=Y on the captured Logon frame bytes directly.
+    // ── In-process witness (b): outbound seqnum >= 2 after Active ───────────
+    // The Logon was sent (consuming seqnum 1); peek_outbound() >= 2 proves
+    // seqnum advancement past 1. This witnesses that the reset ran and the
+    // Logon was transmitted — not that the Logon bytes contain 141=Y or 34=1
+    // (byte content is asserted by the sources listed in the file header above).
+    // Asserting >= 2 (not >= 1) distinguishes "Logon was sent" from
+    // "session merely exists".
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
     EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
