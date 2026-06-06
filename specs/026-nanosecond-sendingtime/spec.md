@@ -9,7 +9,7 @@
 
 ### Session 2026-06-06
 
-- Q: How lenient should fixpp be about the number of sub-second fraction digits a peer sends? → A: **Lenient — accept any 1–9 fraction digits** (timestamp length 17–27), padding internally to nanoseconds; still **emit** only the configured standard precision. (Postel's law / interop-robust; matches QuickFIX-cpp which accepts 0–9; also simpler since the parser already composes nanoseconds from whatever digits are present.)
+- Q: How lenient should fixpp be about the number of sub-second fraction digits a peer sends? → A: **Lenient — accept any 1–9 fraction digits** (bare length-17 seconds form, OR a `.` at index 17 followed by 1–9 ASCII digits ⇒ total length 19–27), padding internally to nanoseconds; still **emit** only the configured standard precision. (Postel's law / interop-robust; matches QuickFIX-cpp which accepts 0–9; also simpler since the parser already composes nanoseconds from whatever digits are present.)
 - Reference sweep (QFcpp + QFJ; Fix8 n/a) settled the rest:
   - **Config shape**: reuse fixpp's existing `fix_time_precision` enum extended with `nanos` (matches QFJ's `TimeStampPrecision` enum {SECONDS,MILLIS,MICROS,NANOS}; cleaner than QFcpp's raw int and already wired into the core formatter). **Default = MILLIS** (both engines).
   - **Version-gating**: both engines gate sub-second precision to FIX4.2+/FIXT.1.1 (FIX4.0/4.1 → seconds). fixpp targets FIX.4.4, so sub-second is always permitted in current scope; FIXT/5.0SP2 gating defers to G4.
@@ -56,7 +56,7 @@ When a counterparty sends `SendingTime(52)` (or `OrigSendingTime(122)` on a rese
 - **Mixed precision**: the local emit precision and the peer's emit precision are independent; the parser accepts any standard precision regardless of the local setting.
 - **Default unchanged**: with no precision configured, every outbound `52=` is the millisecond form — byte-identical, no behaviour change for existing sessions.
 - **Non-standard fraction width (accepted)**: a peer sending 4, 5, 7, or 8 fraction digits is parsed (lenient, padded to nanoseconds) — not rejected. Only non-digit characters, an empty fraction, or >9 digits are malformed.
-- **OrigSendingTime echo on resend**: when fixpp resends a stored message, the `OrigSendingTime(122)` it stamps reflects the original message's `SendingTime` (existing behaviour); this feature does not change resend semantics, only the precision the formatter can produce.
+- **OrigSendingTime echo on resend**: when fixpp resends a stored message, the `OrigSendingTime(122)` it emits is the stored original `SendingTime(52)` bytes copied verbatim (existing behaviour — never re-formatted at the configured precision); this feature does not change resend semantics, only the precision the formatter can produce for newly-stamped `SendingTime(52)`.
 
 ## Requirements *(mandatory)*
 
@@ -65,11 +65,11 @@ When a counterparty sends `SendingTime(52)` (or `OrigSendingTime(122)` on a rese
 - **FR-001**: The system MUST support emitting `SendingTime(52)` at nanosecond precision (9 sub-second decimal digits, `YYYYMMDD-HH:MM:SS.sssssssss`, 27 characters).
 - **FR-002**: The system MUST expose a per-session configuration selecting the outbound SendingTime precision via the `fix_time_precision` enum extended with `nanos` (values {seconds, millis, micros, nanos}), defaulting to **millis** (FIX 4.x parity; matches QFJ's enum-style `TimeStampPrecision`).
 - **FR-003**: When the precision is the default (millis), outbound `SendingTime(52)` MUST be byte-for-byte identical to current behaviour (no regression for existing sessions).
-- **FR-004**: The inbound timestamp parser MUST leniently accept any sub-second fraction width of **1–9 digits** (timestamp lengths 17–27, plus the no-fraction seconds form at 17), padding internally to nanoseconds, so a peer's nanosecond (or any non-standard-width) `SendingTime(52)` / `OrigSendingTime(122)` is parsed, not rejected. [Clarifications: lenient parse]
+- **FR-004**: The inbound timestamp parser MUST leniently accept the FIX UTCTimestamp grammar: **bare length-17** (`YYYYMMDD-HH:MM:SS`, no dot) **OR** a `.` at index 17 followed by **1–9 ASCII digits** (total length 19–27, no other length valid), padding internally to nanoseconds (an N-digit fraction scales by `10^(9−N)`), so a peer's nanosecond (or any non-standard-width) `SendingTime(52)` / `OrigSendingTime(122)` is parsed, not rejected. [Clarifications: lenient parse]
 - **FR-005**: A nanosecond timestamp emitted by the system MUST round-trip losslessly through the parser (parse(format(t)) == t at nanosecond resolution, subject to the clock's resolution ceiling).
-- **FR-006**: The nanosecond precision MUST apply to both `SendingTime(52)` and any newly-stamped `OrigSendingTime(122)` produced by the outbound/resend path, consistent with the configured precision.
+- **FR-006**: The configured precision MUST apply to **newly-stamped `SendingTime(52)` only**. A replayed `OrigSendingTime(122)` is **never** stamped at the configured precision: on resend the resender preserves the **stored original** `SendingTime(52)` bytes/instant verbatim and re-emits them as `122` unchanged (no reformatting at the current config). [matches `build_replay_frame`, `session.cpp:1341-1358`; Clarifications / research D5 / contract C6 / I-NST-4]
 - **FR-007**: The existing MaxLatency (SendingTime freshness) check MUST operate correctly on nanosecond-precision inbound timestamps.
-- **FR-008**: A timestamp with non-digit sub-second characters, an empty fraction after the `.`, or more than 9 fraction digits MUST be rejected as malformed. (Fraction widths 1–9 are all accepted per FR-004; only genuinely malformed sub-seconds are rejected.)
+- **FR-008**: A timestamp that is not the bare length-17 form and not `.`-at-index-17 + 1–9 digits MUST be rejected as malformed: specifically length 18 (`YYYYMMDD-HH:MM:SS.` — empty fraction), a `.` anywhere other than index 17, trailing spaces, an embedded SOH or any non-digit fraction character, or **more than 9 fraction digits**. The >9-digit case MUST be rejected by an explicit **width/length gate** (reject total length > 27, equivalently fraction width > 9) **before** any digit parse — a 10-digit fraction (max 9,999,999,999) fits in `int64`, so it does NOT trip an arithmetic-overflow trap and must be caught by the width check. (Fraction widths 1–9 are all accepted per FR-004; only genuinely malformed sub-seconds are rejected.)
 - **FR-009**: The feature MUST NOT introduce a new wire field, a new error slot, or a C-ABI surface change; it extends the existing time formatter/parser and adds one additive `SessionConfig` field.
 
 ### Key Entities *(include if feature involves data)*
@@ -97,3 +97,9 @@ When a counterparty sends `SendingTime(52)` (or `OrigSendingTime(122)` on a rese
 - **Scope is timestamp precision only** — SendingTime(52) and OrigSendingTime(122). No change to resend selection, seqnum handling, or any other field. (Confirmed orthogonal to the seqnum/persistence/handshake area.)
 - **No new wire field / error slot / codegen / C-ABI**; reuses the existing time formatter/parser + an additive `SessionConfig` field.
 - **Clarify decisions (reference-grounded, recorded above)**: per-session `fix_time_precision` enum (not a build option), default millis; sub-second always permitted in fixpp's FIX.4.4 scope (FIXT/version-gating defers to G4); `OrigSendingTime(122)` preserved verbatim on resend (configured precision applies only to new `SendingTime(52)`); inbound parse is lenient (any 1–9 fraction digits).
+
+## Normative References
+
+- **`[FIX50SP2 §3.3] Field data types`** — the UTCTimestamp field datatype `YYYYMMDD-HH:MM:SS[.sss[sss[sss]]]` in UTC, with optional 3- (millisecond), 6- (microsecond), or 9-digit (nanosecond) sub-second precision. Authority for the 27-character nanosecond emit form (FR-001) and the accepted-width grammar (FR-004/FR-008). FIX 5.0 SP2 venues commonly expect nanosecond `SendingTime`; FIXT.1.1/5.0SP2 per-version precision gating is out of scope here (deferred to G4, L-026-1).
+- **`[FIX-SL §4.2.3] Validation of SendingTime(52)`** (the section S-019 cites): the MaxLatency freshness check that operates on the parsed instant (FR-007/SC-004; the precision extension changes only what parses, not the check arithmetic).
+- **`[FIX-SL §4.8.4] Possible duplicates (PossDupFlag semantics)`**: `OrigSendingTime(122)` carries the *original* message's `SendingTime` on a `PossDupFlag=Y` resend → preserved verbatim, never re-stamped at the configured precision (FR-006/I-NST-4).

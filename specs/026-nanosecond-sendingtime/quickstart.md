@@ -23,8 +23,8 @@ Inbound: any 1–9-digit fraction is accepted (padded to ns); only non-digit / e
 
 ## Core witnesses (`tests/core/fix_time_test.cpp`, extend, RED-first)
 
-1. **Nanos format** — `format(t, nanos)` is 27 chars; the 9 digits equal the sub-second ns of `t`.
-2. **Nanos round-trip** — `parse(format(t, nanos)) == t` (ns-lossless).
+1. **Nanos format** — `format(t, nanos)` returns a span of length **== 27** (assert == 27, NOT 17 — guards both the missing-`else if` 17-char regression and the `min_size[3]` OOB); the 9 digits equal the sub-second ns of `t`. **Run under UBSan** (`-fsanitize=undefined,bounds`) so the `min_size[3]` out-of-bounds read fails RED.
+2. **Nanos round-trip** — `parse(format(t, nanos)) == time_point_cast<nanoseconds>(t)` (ns-lossless; use the cast form, NOT a bare `== t`, which is a cross-platform flake on a coarser `system_clock`).
 3. **Lenient parse** — `parse("YYYYMMDD-HH:MM:SS.D")` for each width D = 1..9 yields the ns-scaled instant (e.g. `.1234` → 123 400 000 ns).
 4. **Reject malformed** — `.` (empty), `.12a` (non-digit), `.1234567890` (10 digits) → `wire_invalid_field_format`.
 5. **No regression** — `format(t, millis)` / `micros` byte-identical to pre-feature; seconds path unchanged.

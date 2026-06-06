@@ -26,9 +26,9 @@ Phase 0 decisions. Grounded in a source sweep of fixpp + the reference engines (
 
 ## D3 — Inbound parse: lenient (any 1–9 fraction digits)
 
-**Decision**: `fix_string_to_utc_time` accepts any sub-second width 1–9 (timestamp length 17–27), parsing the digits present and scaling to nanoseconds; rejects only non-digit fraction chars, an empty fraction after `.`, or >9 digits. [spec Clarifications]
+**Decision**: `fix_string_to_utc_time` accepts one grammar — bare length-17 (no dot) OR `.`-at-index-17 + 1–9 ASCII digits (total length 19–27), parsing the digits present and scaling to nanoseconds; rejects length-18 (empty fraction after `.`), a `.` anywhere else, non-digit fraction chars, or >9 digits (the >9 case via an explicit width gate, not an int64 overflow trap). [spec Clarifications]
 
-**Rationale**: QFcpp `FieldConvertors.h:convert(string)` accepts length 17–27 (any 0–9 fraction). Postel's law — a peer emitting a non-standard width (e.g. 7 or 8 digits) should parse, not be rejected. It is also simpler than the current strict 17/21/24 check: the parser already composes `ns_sub` from the fraction (`fix_time.cpp:277-287`); lenient parsing scales an N-digit fraction by `10^(9-N)`. Emit stays at the configured standard precision (we never emit a non-standard width).
+**Rationale**: QFcpp `FieldConvertors.h:convert(string)` accepts the same widths (bare-17 or `.` + 1–9 digits). Postel's law — a peer emitting a non-standard width (e.g. 7 or 8 digits) should parse, not be rejected. It is also simpler than the current strict 17/21/24 check: the parser already composes `ns_sub` from the fraction (`fix_time.cpp:277-287`); lenient parsing scales an N-digit fraction by `10^(9-N)`. Emit stays at the configured standard precision (we never emit a non-standard width).
 
 **Alternatives considered**: strict (only 0/3/6/9) — rejected (brittle for interop; diverges from QFcpp; more code than lenient). Accept >9 digits (truncate) — rejected (>9 is malformed per the grammar; reject it).
 
@@ -36,9 +36,9 @@ Phase 0 decisions. Grounded in a source sweep of fixpp + the reference engines (
 
 ## D4 — Wiring: thread precision non-defaulted through both stamp helpers + all sites
 
-**Decision**: add a `fix_time_precision` parameter (**non-defaulted**) to (a) `session::stamp_sending_time` (`sending_time.cpp`) and (b) the file-local `stamp_sending_time(Clock&)` (`session.cpp:1295`); update all ~25 call sites to pass `cfg_.sending_time_precision`.
+**Decision**: add a `fix_time_precision` parameter (**non-defaulted**) to (a) `session::stamp_sending_time` (2-arg `(now, buf)` → 3-arg `(now, prec, buf)`, prec middle) and (b) the file-local `stamp_sending_time(Clock&)` (`session.cpp:1295`); update the verified 21 call sites (19 file-local + 2 public) to pass `cfg_.sending_time_precision`.
 
-**Rationale**: the dominant outbound-stamp path is the file-local `stamp_sending_time(Clock&)` at `:1295`, used at ~23 sites (admin builders, heartbeat, test-request, logout, resend, app send, etc.); the public `session::stamp_sending_time` is used at 2 more (`:570`, `:1695`). If any site keeps the millis default, that message type silently emits the wrong precision (the half-restructure class, [[feedback_half_restructure_symmetric_api]]). Making the param **non-defaulted** turns "did I update every site?" into a compile error — the compiler is the exhaustiveness gate. The inbound parse paths (MaxLatency `:1826`, `OrigSendingTime(122)` `:2054`, `SendingTime(52)` `:2084`, LogonSent `:2772`) all call the shared `fix_string_to_utc_time`, so they accept ns automatically once D3 lands — no per-site change.
+**Rationale**: the dominant outbound-stamp path is the file-local `stamp_sending_time(Clock&)` at `:1295`, used at 19 sites (admin builders, heartbeat, test-request, logout, resend, app send, etc.); the public `session::stamp_sending_time` is used at 2 more (`:570`, `:1695`) — 21 total (enumerated in plan.md / data-model E5; also breaks `logon_handshake_test.cpp:667`). If any site keeps the millis default, that message type silently emits the wrong precision (the half-restructure class, [[feedback_half_restructure_symmetric_api]]). Making the param **non-defaulted** turns "did I update every site?" into a compile error — the compiler is the exhaustiveness gate. The inbound parse paths (MaxLatency `:1826`, `OrigSendingTime(122)` `:2054`, `SendingTime(52)` `:2084`, LogonSent `:2772`) all call the shared `fix_string_to_utc_time`, so they accept ns automatically once D3 lands — no per-site change.
 
 **Alternatives considered**: defaulted param — rejected (a missed site silently misbehaves; the 026 spec's whole risk). Reading `cfg_` inside a non-member helper — not possible (free function); the param is the clean seam.
 
@@ -63,7 +63,7 @@ Phase 0 decisions. Grounded in a source sweep of fixpp + the reference engines (
 ## Cross-references
 
 - Core: `fix_time.hpp:42 enum`, `:63 utc_time_to_fix_string`, `:83 fix_string_to_utc_time`; `fix_time.cpp:130 ns_rem`, `:162/:167 truncation`, `:181 accepted lengths`, `:277-287 ns_sub compose`.
-- Session stamping: `sending_time.cpp:27/31` (public, millis-hardcoded); `session.cpp:1295` (file-local `stamp_sending_time(Clock&)`); ~25 call sites enumerated in plan.md. Inbound parse: `session.cpp:1826/:2054/:2084/:2772`.
+- Session stamping: `sending_time.cpp:27/31` (public, millis-hardcoded); `session.cpp:1295` (file-local `stamp_sending_time(Clock&)`); the verified 21 call sites (19 file-local + 2 public) enumerated in plan.md / data-model E5. Inbound parse: `session.cpp:1826/:2054/:2084/:2772`.
 - Config: `session_config.hpp:145 struct SessionConfig` (insert near `:223`).
 - Clock/type: `clock.hpp:21 utc_time_point = time_point<system_clock>`; libstdc++11 (conan profiles).
 - Reference: QFcpp `Session.h:159-185`, `SessionSettings.h:132-133`, `FieldConvertors.h:465`; QFJ `Session.java:281-284,830-837`.
