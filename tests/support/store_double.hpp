@@ -100,7 +100,19 @@ public:
     }
 
     // reset: clear both frame lists and rewind counters to 1.
+    //
+    // 024 seams: counts every awaitable reset() call (reset_call_count() — the
+    // single-fire-guard / single-combined-decision witnesses assert exactly one
+    // observable store reset); honours a one-shot "fail next reset" toggle
+    // (fail_next_reset() — the durable-disposition witnesses inject a store
+    // failure on the reset path). The failure injection short-circuits BEFORE
+    // mutating state, mirroring a FileStore::reset() that faults on I/O.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        ++reset_calls_;
+        if (fail_next_reset_) {
+            fail_next_reset_ = false;
+            co_return std::unexpected(fixpp::core::error::store_io_failure);
+        }
         inbound_.clear();
         outbound_.clear();
         stored_frames_.clear();
@@ -113,6 +125,14 @@ public:
 
     [[nodiscard]] seqnum_t current_next_inbound() const noexcept { return next_in_; }
     [[nodiscard]] seqnum_t current_next_outbound() const noexcept { return next_out_; }
+
+    // 024 single-fire / single-combined-decision witnesses: observable count of
+    // awaitable reset() calls (reset_sync() seeding is NOT counted).
+    [[nodiscard]] std::size_t reset_call_count() const noexcept { return reset_calls_; }
+
+    // 024 durable-disposition witnesses: make the NEXT awaitable reset() fail
+    // once with store_io_failure, then auto-clear.
+    void fail_next_reset() noexcept { fail_next_reset_ = true; }
 
     [[nodiscard]] std::size_t stored_inbound_count() const noexcept { return inbound_.size(); }
     [[nodiscard]] std::size_t stored_outbound_count() const noexcept { return outbound_.size(); }
@@ -133,6 +153,9 @@ private:
 
     seqnum_t next_in_ = seqnum_min;   // next expected inbound  seqnum
     seqnum_t next_out_ = seqnum_min;  // next expected outbound seqnum
+
+    std::size_t reset_calls_ = 0;     // 024: observable awaitable reset() count
+    bool fail_next_reset_ = false;    // 024: one-shot reset failure injection
 };
 
 }  // namespace fixpp::session::test

@@ -37,6 +37,15 @@ unusedStructMember
 # clang-tidy posture. Pure style, fires widely.
 useStlAlgorithm
 
+# checkLevelNormal: cppcheck's normal-mode ValueFlow caps analysis depth on very
+# large functions and emits this *information*-class notice ("too complex; specify
+# --check-level=exhaustive"). It is an analysis-depth limitation, NOT a defect.
+# First tripped by 024 enlarging session.cpp's already-large Session::on_inbound_frame
+# past the normal-mode complexity threshold. Verified harmless: a full
+# `--check-level=exhaustive` run over session.cpp exits clean (0 findings). Suppress
+# categorically — it is whole-function-scoped and cannot be annotated inline.
+checkLevelNormal
+
 # Minor-style classes the codebase deliberately does not adopt — mirrors the already-
 # suppressed clang-tidy misc-const-correctness (.clang-tidy): local scope/const are a
 # deliberate authoring choice here, not a defect.

@@ -55,7 +55,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.3.10 | Responding to FIX session establishment request (acceptor Logon ack / Logout reject) | Y | S-001 | — |
 | §4.3.11 | Initial synchronization of messages (Logon seqnum check, ResendRequest on gap) | Y | S-014 | — |
 | §4.3.12 | Synchronization after successful logon | Y | S-014, S-031 | — |
-| §4.4 | Extended features for FIX session and connection initiation | Y | S-031, S-032 | — |
+| §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; the still-deferred G3 set is exactly S-018 (RefreshOnLogon) + NextExpectedMsgSeqNum(789, S-031 row §4.4.1) + the named config knobs CheckCompID / validateSequenceNumbers / MaxLatency — none of which 024 touches. |
 | §4.4.1 | Using NextExpectedMsgSeqNum(789) | Y | S-031 | — |
 | §4.4.2 | Using ResetSeqNumFlag(141) for 24-hour connectivity | Y | S-032 | — |
 | §4.4.3 | Using ResetSeqNumFlag(141) during connection establishment | Y | S-032 | — |

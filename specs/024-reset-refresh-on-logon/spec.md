@@ -68,7 +68,7 @@ An operator configures `ResetOnLogout` and/or `ResetOnDisconnect` so the session
 - **`ResetOnLogon` drives `141=Y` on the initiator** (Clarifications): with `ResetOnLogon` on, the initiator's outbound Logon carries `ResetSeqNumFlag(141)=Y` (seqnums `{1,1}` after the reset); the local reset and the wire announcement are the *same* event, and the `013` policy validates the peer's echo. The local reset and a received `141=Y` MUST resolve to a **single** `{1,1}` reset — never a double-reset, never a direction left inconsistent.
 - **`ResetOnLogon` and gap recovery**: a reset at Logon starts a fresh sequence space, so there is no pre-reset gap to recover; fixpp MUST NOT issue a ResendRequest for sequence numbers below the reset point.
 - **`ResetOnDisconnect` on an abnormal drop (no Logout)**: the reset MUST still fire on a raw connection loss, not only on a graceful Logout (this is what distinguishes it from `ResetOnLogout`).
-- **Reset idempotency**: applying a reset onto an already-`{1,1}` sequence state is a no-op; overlapping triggers (e.g. `ResetOnLogout` + `ResetOnDisconnect` on the same teardown) reset at most once observably.
+- **Reset idempotency**: the sequence-number *result* of a reset onto an already-`{1,1}` state is unchanged, but the durable `MessageStore::reset()` is NOT a value no-op (FR-009) — so overlapping triggers (e.g. `ResetOnLogout` + `ResetOnDisconnect` on the same teardown) MUST reset at most once observably via the single-fire guard.
 - **All three knobs off (default)**: a session is behavior-identical to today's — no lifecycle reset; existing `013` `ResetSeqNumFlag(141)` behavior and every merged session are unaffected.
 - **Both roles**: every knob's behavior MUST hold whether fixpp is the initiator or the acceptor.
 

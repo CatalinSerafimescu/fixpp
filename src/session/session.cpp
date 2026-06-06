@@ -487,6 +487,51 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
     // the acceptor gate (:1048) when the first inbound Logon is processed.
 }
 
+// 024 T003 — shared durable-reset helper.
+// Body: co_await seqnum_mgr_.reset_to_one() then co_await store_->reset().
+// Disposition keys store-failure handling on the trigger CAUSE (not location):
+//   fatal  → a store failure propagates → caller can block reaching Active (C2.6
+//             knob-driven Logon path).
+//   logged → store failure swallowed (I-07 logged-then-proceed; matching the
+//             existing :1589-1592 inline pattern for the 013-only 141 path and
+//             all teardown paths).
+// seqnum_mgr_.reset_to_one() failure always propagates regardless of disposition
+// (the live-counter reset is the primary gate; a store failure is I-07-able but
+// a seqnum-manager failure is not).
+// store_ is null-checked to match the existing :1589 null-guard pattern.
+// NOT wired to any trigger in this slice (T003 foundational only); wired in
+// T007 (initiator Logon), T008 (acceptor Logon), T014 (teardown).
+// [024 data-model §"Durable reset helper"; C2.6; research D2]
+asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_durable(
+    reset_disposition disposition) noexcept {
+    // Step 1: reset the live seqnum counters to {1, 1}.
+    // On failure: propagate regardless of disposition (live-counter reset is
+    // the primary gate — if it fails the in-memory state is unknown).
+    auto rst_r = co_await seqnum_mgr_.reset_to_one();
+    if (!rst_r) {
+        co_return std::unexpected(rst_r.error());
+    }
+
+    // Step 2: persist the reset via store_->reset().
+    // Disposition controls failure handling:
+    //   fatal  → propagate the error to the caller.
+    //   logged → swallow (I-07): the session can still proceed; a subsequent
+    //            open will re-observe stale counters from the store (acceptable
+    //            per the logged-then-proceed policy for teardown + 013 paths).
+    if (store_) {
+        auto store_rst_r = co_await (*store_).reset();
+        if (!store_rst_r) {
+            if (disposition == reset_disposition::fatal) {
+                co_return std::unexpected(store_rst_r.error());
+            }
+            // logged: (void) — store_io_failure → logged-then-proceed (I-07).
+            (void)store_rst_r;
+        }
+    }
+
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
 // Two call sites: open() (per-session-direct, AT open) and drive_reconnect()
 // (engine lazy-connect, POST-connect). The build/seqnum/store-emit sequence and
@@ -502,6 +547,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
     // stamp_sending_time internal helper is defined after open() in this TU;
     // use the public two-arg form from sending_time.hpp with a local buffer.
+
+    // 024 T007: reset_on_logon — durable reset here (the shared emission point)
+    // so BOTH open() (per-session-direct, engine_managed=false) AND drive_reconnect()
+    // (engine lazy-connect and reconnect) reset symmetrically before building the Logon.
+    // fatal disposition: a store failure propagates → record Disconnected + return error.
+    // peek_outbound() below samples the post-reset seqnum=1 (analyze B1).
+    // [[feedback_half_restructure_symmetric_api]]: fix at the shared point, not two copies.
+    // [024 data-model initiator row; C2.1; C2.6; plan.md Complexity Tracking row 1]
+    if (cfg_.reset_on_logon) {
+        auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
+        if (!rst_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(rst_r.error());
+        }
+    }
+
     std::array<std::byte, 256> logon_buf{};
     std::array<char, 32> time_buf{};
     std::string_view sending_time_view;
@@ -521,9 +582,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
     const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
     // RC#C (gate-b/r1): bilateral_strict → send 141=Y in our outbound Logon.
-    // [spec.md FR-017; Clarifications Q1=A]
+    // 024 T007: extend to OR-of-three predicate: also emit 141=Y when any reset knob
+    // is on AND seqnums are {1,1} post-reset (QFcpp shouldSendReset / QFJ isResetNeeded).
+    // The {1,1} guard is evaluated against the LIVE post-reset manager state (peek_outbound()
+    // + next_inbound_unsafe()) — always after reset_seqnums_to_one_durable() above, so the
+    // sample is post-reset for both the open() and drive_reconnect() call sites.
+    // [spec.md FR-017; Clarifications Q1=A; 024 data-model OR-of-three predicate; C2.1]
+    const bool any_reset_knob =
+        cfg_.reset_on_logon || cfg_.reset_on_logout || cfg_.reset_on_disconnect;
+    // logon_seq already holds peek_outbound() (sampled just above on this strand, no
+    // suspension between) — reuse it rather than re-querying the manager.
+    const bool seqnums_at_one =
+        (logon_seq == seqnum_min && seqnum_mgr_.next_inbound_unsafe() == seqnum_min);
     const bool initr_reset_seqnum =
-        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
+        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
+        (any_reset_knob && seqnums_at_one);
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum);
@@ -776,6 +849,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // POST-connect via emit_initiator_logon_() (E-1a). The per-session-direct
         // model (013/014, engine_managed=false) keeps emitting at open below.
         if (!cfg_.engine_managed) {
+            // 024 T007: reset_on_logon is handled inside emit_initiator_logon_() (the
+            // shared emission point for open() and drive_reconnect()) so both call sites
+            // reset symmetrically. [[feedback_half_restructure_symmetric_api]]
             record_state_transition_(fsm_state::LogonSent);
             auto logon_r = co_await emit_initiator_logon_();
             if (!logon_r) {
@@ -983,6 +1059,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             // a clean return, then the RAII guard decrements the counter.
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         }
+    }
+
+    // 024 T014 — teardown reset (reset_on_logout / reset_on_disconnect).
+    // Placement: BEFORE write_gate_.cancel_and_drain() (the first drain).
+    // Binding constraint (analyze F1): reset_seqnums_to_one_durable() acquires the
+    // seqnum async-mutex via reset_to_one(). If seqnum_mgr_.drain() has already run,
+    // the mutex is drained and reset_to_one() would return session_already_closed,
+    // silently no-oping without resetting counters. Must therefore run before BOTH
+    // drains (write_gate_.cancel_and_drain() and seqnum_mgr_.drain()).
+    //
+    // Single-fire guard (C5.1): teardown_reset_done_ prevents a logout+disconnect
+    // double-trigger (e.g. graceful Logout → timeout → terminal close via close()
+    // re-entry) from calling store_->reset() twice. FileStore::reset() is
+    // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
+    //
+    // Predicate: (logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect.
+    //   - reset_on_logout: fires when a Logout occurred in either direction
+    //     (local sent → run_logout_phase1 set logout_seen_; peer received →
+    //      on_inbound_frame 35=5 handler set logout_seen_). [C3.1]
+    //   - reset_on_disconnect: fires on ANY close() — graceful, terminal, or
+    //     abnormal read-pump EOF → close(terminal). [C4.1, C4.2]
+    //
+    // Disposition: logged-then-proceed (I-07) — teardown store failure is not fatal;
+    // the session should still complete close() normally. [contracts C3.1, C4.1]
+    //
+    // [contracts/reset-knobs.md C3.1, C4.1, C4.2, C5.1; plan.md Complexity row 3]
+    if (!teardown_reset_done_ &&
+        ((logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect)) {
+        teardown_reset_done_ = true;
+        auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
+        (void)rst_r;  // I-07 logged-then-proceed: store failure does not abort close.
     }
 
     // FQ-A (gate-b/r2): drain the write gate after the liveness loop exits.
@@ -1434,6 +1541,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
+                // 024: capture peer_sent_reset before check_inbound. The reset SITE is
+                // cause-dependent (this preserves FR-001 byte-identity — a /speckit-verify
+                // finding: a single unified pre-check reset changed the 013 received-141
+                // post-state from next_inbound==1 to ==2):
+                //   - knob-driven (reset_on_logon): reset BEFORE check_inbound so a fresh
+                //     peer Logon at seq=1 is admitted even when local next_inbound > 1
+                //     (Gate A note (a)); post-state next_inbound == 2 (witness 6).
+                //   - 013-only received-141 (no knob): reset AFTER check_inbound (below),
+                //     byte-identical to pre-024 — next_inbound == 1 (reset_seqnum_policy_matrix
+                //     acceptor cells; FR-017:150).
+                // The two are mutually exclusive (the post-check arm guards on !reset_on_logon),
+                // so exactly one store reset fires per path (C5.1 / witness 7).
+                // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001]
+                peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
+
+                if (cfg_.reset_on_logon) {
+                    // Knob-driven → fatal: a store failure blocks Active (C2.6).
+                    auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
+                    if (!rst_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(rst_r.error());
+                    }
+                }
+
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
                     // Too-low or too-high: session-fatal (I-2/I-4/[FIX-SL §4.1]).
@@ -1449,7 +1580,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // unilateral: always honour any peer 141=Y.
                 // All modes: if peer sends 141=Y → emit session_event_sequence_numbers_reset.
                 // [spec.md FR-017; data-model.md §E-4; Clarifications Q1=A]
-                peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
 
                 if (!peer_sent_reset &&
                     cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
@@ -1461,9 +1591,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
                 }
 
-                // peer_sent_reset: reset + event emission deferred to after the
-                // reply-Logon block so the event fires with consistent post-reset
-                // counters (FR-018) and the reply Logon is stamped at seq=1 (FR-017).
+                // peer_sent_reset: event emission deferred to after the reply-Logon block
+                // so the event fires with consistent post-reset counters (FR-018) and the
+                // reply Logon is stamped at seq=1 (FR-017). The reset itself has already
+                // run above via reset_seqnums_to_one_durable() when need_logon_reset.
             }
 
             // 013 T036 US2: CompID authorization BEFORE FSM transition to
@@ -1572,27 +1703,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                             ? static_cast<int>(cfg_.heartbeat_interval->count())
                                             : 30;  // D-8 default 30 s
 
-                // RC#C-1 (gate-b/r2): reset live counters + store on successful 141=Y.
-                // FR-017:150: "both sides advance next_expected_inbound and
-                // next_expected_outbound to 1" on a successful reset handshake.
-                // Reset BEFORE peek_outbound() so the reply Logon is stamped seq=1
-                // (the first message after the reset is our Logon seq=1).
-                // Then emit the event so it fires with post-reset state consistent
-                // (FR-018: event after counters at 1).
-                // [spec.md FR-017/FR-018; [[feedback_half_restructure_symmetric_api]]]
-                if (peer_sent_reset) {
-                    auto rst_r = co_await seqnum_mgr_.reset_to_one();
+                // 024: the 013-only received-141 reset runs HERE (after check_inbound,
+                // before the reply Logon) to keep next_inbound == 1 byte-identical to
+                // pre-024 — check_inbound advanced inbound 1->2, this rewinds it to 1 while
+                // the reply Logon consumes outbound 1->2 (reset_seqnum_policy_matrix acceptor
+                // cells: {next_inbound=1, next_outbound=2}). The knob-driven reset already ran
+                // BEFORE check_inbound; guarded on !reset_on_logon so the two are mutually
+                // exclusive — exactly one store reset per path (C5.1 / witness 7). Logged
+                // (I-07): a store failure is swallowed; the session still reaches Active
+                // (witness 5, FR-001). [024 C2.6; FR-001; FR-017:150]
+                if (peer_sent_reset && !cfg_.reset_on_logon) {
+                    auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
                     if (!rst_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
-                    if (store_) {
-                        auto store_rst_r = co_await (*store_).reset();
-                        (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
-                    }
-                    // FR-018: event fires AFTER post-reset state is consistent.
+                }
+                // FR-018: emit the reset event once, after post-reset state is consistent,
+                // when any reset happened (knob-driven OR received-141). by_peer_request
+                // reflects whether the peer requested it via 141=Y.
+                if (cfg_.reset_on_logon || peer_sent_reset) {
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
-                        .by_peer_request = true});
+                        .by_peer_request = peer_sent_reset});
                 }
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
@@ -2093,6 +2225,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   when Active receives peer Logout (peer-initiated clean termination
             //   implies seqnum context is being reset at next Logon). [spec FR-018]
             if (hdr.msg_type == "5") {  // Logout (35=5)
+                // 024 T013 (site b): mark that a peer Logout was received.
+                // Set before any FSM action so close() can detect logout_seen_ even
+                // if later teardown arrives via terminal close after this transition.
+                // Both Active (emit-confirming-Logout → Disconnected) and LogonReceived
+                // (Disconnected directly per [FIX-SL §4.6]) paths are covered.
+                // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
+                logout_seen_ = true;
+
                 if (fsm_state_ == fsm_state::Active) {
                     // Active → emit confirming Logout → Disconnected.
                     // Emit a confirming Logout via store_then_emit.
@@ -2970,6 +3110,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         // (2a) Payload must end with SOH so the last field is terminated before
         //      checksum append. A trailing-SOH-less payload would cause the checksum
         //      field to be appended without a field boundary. [RC#2: gate-b/r1]
+        // cppcheck-suppress containerOutOfBounds  // FP: pv.empty() guard at :3101 returns first
         if (pv.back() != '\x01') {
             co_return std::unexpected(error::app_payload_malformed);
         }
@@ -3755,6 +3896,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
     }
+
+    // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
+    // Keyed here (after emit, before LogoutSent) so logout_seen_ is true whenever
+    // the Logout frame was actually placed on the wire. The teardown reset in close()
+    // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
+    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
+    logout_seen_ = true;
 
     // Transition to LogoutSent.
     record_state_transition_(fsm_state::LogoutSent);
