@@ -331,3 +331,24 @@ add_test(NAME transport_verify_peer_pmr_oom
          COMMAND transport_verify_peer_pmr_oom)
 set_tests_properties(transport_verify_peer_pmr_oom PROPERTIES
   LABELS "transport;012;gate-b-witness;rc-c;pmr-oom;tls")
+
+add_executable(transport_asio_tls_transport_error_paths
+  test_asio_tls_transport_error_paths.cpp)
+target_include_directories(transport_asio_tls_transport_error_paths PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(transport_asio_tls_transport_error_paths PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(transport_asio_tls_transport_error_paths PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME transport_asio_tls_transport_error_paths
+         COMMAND transport_asio_tls_transport_error_paths)
