@@ -84,4 +84,4 @@ The acceptor's *reply* Logon (`session.cpp:1745`) is built AFTER `check_inbound(
 | `WalkExtraction_SingleImplementation` | `replay_outbound_range_` is the sole store-walk; ResendRequest handler + 789 path both call it (I-NEX-3) |
 | `WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore` | request `[10,20]`, store through 5 ⇒ GapFill `NewSeqNo=21` (NOT 6) — guards the 013 regression; asserted via BOTH the ResendRequest caller and the 789 caller (I-NEX-3) |
 | `WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore` | `EndSeqNo=0`/through-current, empty store ⇒ GapFill `NewSeqNo=peek_outbound()`, BOTH callers (I-NEX-3) |
-| `NoHeap_EmitAndResendPath_789Entry` | emit append + proactive resend via the 789 entry allocate zero heap (mallocnesia) — exercises the 789 entry specifically, not just the ResendRequest entry |
+| `NoHeap_Emit789Append` | `build_logon` with `next_expected_seq` set allocates zero heap (mallocnesia, markers bracket only the synchronous call); proactive resend no-heap is inherited from the recovery alloc-guard witness (`replay_outbound_range_` is the single-implementation walk) |

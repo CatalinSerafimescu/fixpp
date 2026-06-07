@@ -39,7 +39,7 @@ cfg.enable_next_expected_msg_seq_num = true;   // default false; enable on BOTH 
 | Reset cause table (1 / 2 / 1) | `Reset_InitiatorResetLogon_Advertises1`, `Reset_AcceptorReplyResetOnLogon_Advertises2`, `Reset_AcceptorReplyReceived141_Advertises1` |
 | Walk has a single implementation | `WalkExtraction_SingleImplementation` |
 | Walk two-value end (explicit-end-beyond-store / `EndSeqNo=0`-empty-store, both callers) | `WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore`, `WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore` |
-| No heap on emit/resend (789 entry) | `NoHeap_EmitAndResendPath_789Entry` |
+| No heap on 789 emit append (`build_logon`) | `NoHeap_Emit789Append` (markers bracket the synchronous call; resend no-heap inherited from recovery alloc-guard witness) |
 | Live both-role vs QFcpp/QFJ | `tests/interop/happy/hp_fix44_next_expected_test.cpp` (skip-without-counterparty) |
 
 ## Not in scope

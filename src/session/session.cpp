@@ -1588,9 +1588,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
-                    // Too-low or too-high: session-fatal (I-2/I-4/[FIX-SL §4.1]).
-                    record_state_transition_(fsm_state::Disconnected);
-                    co_return fixpp::core::expected_t<void>{};
+                    // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
+                    // When the knob is on AND the failure is too-high (NOT too-low),
+                    // do NOT take the fatal branch. Leave next_inbound_ at X (the
+                    // handler did not advance it — check_inbound only advances on
+                    // in-sequence). Do NOT call set_next_inbound. Emit no at-logon
+                    // ResendRequest. Proceed toward Active so the peer's proactive
+                    // resend [X, peer_N-1] arrives in-sequence through the Active path.
+                    // [contract C5, data-model I-NEX-5/12, research D-7]
+                    //
+                    // Too-low: unchanged — session-fatal (I-2/[FIX-SL §4.1]).
+                    // Knob-OFF: completely unchanged — fatal on too-high exactly as today.
+                    if (cfg_.enable_next_expected_msg_seq_num &&
+                        chk.error() == fixpp::core::error::session_seqnum_too_high) {
+                        // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
+                        // Fall through to the existing acceptor reply-build path below.
+                    } else {
+                        // Too-low OR knob off: session-fatal (I-2/I-4/[FIX-SL §4.1]).
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                 }
 
                 // T027 FR-017 — ResetSeqNumFlag(141) policy (Clarifications Q1=A).
@@ -2018,6 +2035,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // (NOT Disconnected per 013 T006a amendment).
                 // State owned by reconnect_fsm_ (data-model §E-1 / T023 Fix1).
                 // [spec.md FR-009; data-model.md §E-1; plan.md T026]
+                //
+                // 027 T017 (confirm/review): this arm is NOT the primary 789 honor site
+                // (the Logon-path honor runs in the NotConnected and LogonSent handlers).
+                // It stays active as the recovery-of-last-resort for a lost proactive
+                // resend: if the peer's 789-driven resend is dropped, the next inbound
+                // frame triggers this arm and issues a ResendRequest (I-NEX-10 / D-11).
+                // Knob-off path byte-identical. A future suppression of this arm would
+                // create a never-recover hole — see L-027-2. No behavioural change.
+                // [data-model I-NEX-10, research D-11]
                 const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
                 if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend()) {
                     // Too-high: enter AwaitingResend and emit ResendRequest(2).
@@ -2759,9 +2785,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             auto chk = co_await seqnum_mgr_.check_inbound(seq);
             if (!chk) {
-                // Too-low or too-high → fatal (recovery deferred; I-2/I-4).
-                record_state_transition_(fsm_state::Disconnected);
-                co_return fixpp::core::expected_t<void>{};
+                // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
+                // When the knob is on AND the failure is too-high (NOT too-low),
+                // do NOT take the fatal branch. Leave next_inbound_ at X. Emit no
+                // at-logon ResendRequest. Proceed toward Active so the peer's
+                // proactive resend [X, peer_N-1] is admitted in-sequence.
+                // [contract C5, data-model I-NEX-5/12, research D-7]
+                //
+                // Too-low OR knob off: fatal exactly as today.
+                if (cfg_.enable_next_expected_msg_seq_num &&
+                    chk.error() == fixpp::core::error::session_seqnum_too_high) {
+                    // Behind-side: tolerate. Fall through to Active transition below.
+                } else {
+                    // Too-low or too-high with knob off → fatal (I-2/I-4).
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // RC#C (gate-b/r1): bilateral_strict initiator path — symmetric to acceptor.
