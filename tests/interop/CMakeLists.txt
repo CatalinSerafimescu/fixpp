@@ -365,6 +365,20 @@ else()
         "tests/interop: fixpp_codegen_generate not available; skipping business message interop test")
 endif()
 
+# ── 027 live NextExpectedMsgSeqNum(789) interop cells — T002 (Setup) + T022 (Polish) ──
+# T002: skeleton with skip-without-counterparty guard; body is a stub for now.
+# T022: full both-role live cells (initiator + acceptor); parent harness MUST
+#   configure the counterparty with EnableNextExpectedMsgSeqNum=Y.
+# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Anchors: tasks.md T002/T022; contracts C10; SC-005/FR-001/FR-002.
+fixpp_add_interop_test(
+    NAME interop_027_next_expected_msgseqnum_test
+    GROUP happy
+    LABEL "interop;027;interop-happy;polish;next-expected-msgseqnum"
+    SOURCES happy/hp_fix44_next_expected_test.cpp
+    TLS
+)
+
 # ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
 # Validates cell_results.yaml against the parent gate-evaluator's result schema
 # (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs

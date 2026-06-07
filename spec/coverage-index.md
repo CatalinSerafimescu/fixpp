@@ -55,8 +55,8 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.3.10 | Responding to FIX session establishment request (acceptor Logon ack / Logout reject) | Y | S-001 | — |
 | §4.3.11 | Initial synchronization of messages (Logon seqnum check, ResendRequest on gap) | Y | S-014 | — |
 | §4.3.12 | Synchronization after successful logon | Y | S-014, S-031 | — |
-| §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; the still-deferred G3 set is exactly S-018 (RefreshOnLogon) + NextExpectedMsgSeqNum(789, S-031 row §4.4.1) + the named config knobs CheckCompID / validateSequenceNumbers / MaxLatency — none of which 024 touches. |
-| §4.4.1 | Using NextExpectedMsgSeqNum(789) | Y | S-031 | — |
+| §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; S-031 **FIX 4.4 parity** shipped via 027 (`implementation-parity-4.4`); FIXT.1.1 / 5.0SP2 version-gating outstanding to G4. S-018 (RefreshOnLogon) parked (T034 store-hydrate prerequisite). The named config knobs CheckCompID / validateSequenceNumbers / MaxLatency remain deferred. |
+| §4.4.1 | Using NextExpectedMsgSeqNum(789) | Y | S-031 | **FIX 4.4 parity shipped (027)**: per-session knob; advertise 789 in Logon (both roles); honor peer 789 with proactive resend (X<N → resend [X,N-1], no ResendRequest round-trip); X>N or invalid → Logout+disconnect; default off byte-identical; behind-side tolerance (no at-logon ResendRequest suppression). Tests: `tests/session/test_next_expected_msgseqnum.cpp` + `tests/interop/happy/hp_fix44_next_expected_test.cpp`. **FIXT.1.1 / 5.0SP2 outstanding to G4** (row is versioned "5.0–5.0SP2, FIXT.1.1"; this slice is FIX 4.4 only). |
 | §4.4.2 | Using ResetSeqNumFlag(141) for 24-hour connectivity | Y | S-032 | — |
 | §4.4.3 | Using ResetSeqNumFlag(141) during connection establishment | Y | S-032 | — |
 | §4.4.4 | Using initiator state to restore acceptor session state | Y | S-014 | — |
@@ -71,8 +71,8 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.6.2 | Logout without acknowledgement (timeout → force disconnect) | Y | S-002 | — |
 | §4.6.3 | Logout with retransmission of missed messages | Y | S-002, S-014 | — |
 | §4.6.4 | When to terminate without Logout(35=5) (invalid BeginString/CompID cases) | Y | S-016, S-020 | — |
-| §4.7 | Extended features for FIX connection termination | Y | S-031 | — |
-| §4.7.1 | Using NextExpectedMsgSeqNum(789) on invalid MsgSeqNum(34) | Y | S-031 | — |
+| §4.7 | Extended features for FIX connection termination | Y | S-031 | S-031 FIX 4.4 parity shipped via 027; FIXT/5.0 outstanding to G4. |
+| §4.7.1 | Using NextExpectedMsgSeqNum(789) on invalid MsgSeqNum(34) | Y | S-031 | **FIX 4.4 parity shipped (027)**: X>N (peer's 789 exceeds our next-outbound) → Logout+disconnect; present-but-invalid 789 (parse→0, empty, non-digit) → Logout+disconnect (evaluated before X<N compare to close the [1,N-1] amplification path). **FIXT.1.1 / 5.0SP2 outstanding to G4.** |
 | §4.8 | Message recovery | Y | S-011, S-012, S-013, S-014 | — |
 | §4.8.1 | Ordered message processing | Y | S-009, S-014 | — |
 | §4.8.2 | Request retransmission of messages (ResendRequest) | Y | S-005, S-024 | — |

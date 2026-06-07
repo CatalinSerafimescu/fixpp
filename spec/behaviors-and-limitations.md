@@ -628,3 +628,63 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   `supportsSubSecondTimestamps` version-gate is moot here; it becomes relevant when FIXT.1.1 /
   5.0SP2 land (G4). **Status: documented** — version-gating tracked for G4. *(research D6;
   spec Edge Cases; contract C6.)*
+
+## Per-Session NextExpectedMsgSeqNum(789) fast resume (027-next-expected-msgseqnum)
+
+### Feature Catalogue Rows
+
+- **S-031** (session) — NextExpectedMsgSeqNum(789) in Logon — fast session resume without
+  ResendRequest round-trip — `backlog → implementation-parity-4.4`.
+  FIX 4.4 parity only; FIXT.1.1 / 5.0SP2 outstanding to G4.
+
+### Behaviors
+
+- **B-027-1 — Per-session `NextExpectedMsgSeqNum(789)`: advertise next-expected-inbound in
+  Logon; honor a peer's 789 with a proactive resend that eliminates the ResendRequest
+  round-trip; X>N or present-but-invalid 789 ⇒ Logout+disconnect; default off byte-identical;
+  FIX 4.4 only.**
+  When `SessionConfig::enable_next_expected_msg_seq_num` is `true` (default `false`),
+  fixpp appends tag `789=<next_inbound>` to every outbound Logon (both the initiator's opening
+  Logon and the acceptor's reply), where `<next_inbound>` is `seqnum_mgr_.next_inbound_unsafe()`
+  — plain, no `+1` (the acceptor reply is built post-`check_inbound` which already advanced
+  the counter, so the read is already correct; matches research D-3/E-OBO). When an inbound
+  Logon carries `789=X`: (a) present-but-invalid X (parse→0, empty, non-digit, overflow) ⇒
+  `Logout`+disconnect — evaluated **before** the X<N compare to close the `[1,N-1]`
+  full-history-amplification path (research D-10, contract C6); (b) X>N (peer expects more
+  than we have sent) ⇒ `Logout("NextExpectedMsgSeqNum too high …")`+disconnect (FR-005);
+  (c) X<N ⇒ proactive resend `replay_outbound_range_(X, N-1, through_current=true)` with
+  PossDup app frames + GapFill admin frames — no `ResendRequest` round-trip; (d) X==N ⇒
+  in sync, no resend. The comparison basis is outbound: N = `seqnum_mgr_.peek_outbound()`
+  (I-NEX-11 — never confused with the inbound counter). The acceptor's proactive resend runs
+  AFTER the reply `store_then_emit` (RC#4 ordering, `:1766`). Default off (`false`) ⇒ outbound
+  Logon byte-identical to pre-feature baseline; inbound `789` ignored; existing `ResendRequest`
+  recovery (013) untouched. FIX 4.4 only — no FIXT / 5.0 version-gating this slice (G4).
+  **Status: shipped** (027). *(FR-001..FR-009; SC-001..SC-005; contracts C1–C10; data-model
+  E1–E3, I-NEX-1..12; `tests/session/test_next_expected_msgseqnum.cpp`;
+  `tests/interop/happy/hp_fix44_next_expected_test.cpp`.)*
+
+### Limitations
+
+- **L-027-1 — 789 is both-peers-required; there is NO automatic ResendRequest fallback at
+  logon when only one side enables the knob.** When `enable_next_expected_msg_seq_num=true`
+  and the peer's inbound Logon carries NO `789`, the at-logon ResendRequest is suppressed
+  (FR-004 suppression is unconditional when the knob is on). If fixpp has an at-logon gap
+  and the peer does not send `789`, the gap is NOT proactively filled at logon time — it will
+  only self-heal when the Active too-high arm emits a `ResendRequest` on the first in-sequence
+  frame whose seqnum exposes the gap. Operators MUST enable `789` on BOTH endpoints (QFcpp:
+  `EnableNextExpectedMsgSeqNum=Y`; QFJ: `EnableNextExpectedMsgSeqNum=Y`). This matches
+  QuickFIX-cpp v1.16.0 and QuickFIX-J 3.0.1, which likewise have no automatic fallback.
+  **Status: by design** (FR-004/FR-009, L-027-1 deliberate divergence from a hypothetical
+  mixed-mode). *(research D-7/D-11; contract C5/C9; data-model I-NEX-10.)*
+
+- **L-027-2 — A lost proactive resend self-heals via the Active too-high arm on the next
+  inbound frame; a permanent no-recover hole cannot arise from the current codebase.**
+  When the behind-side partner sent 789=X and expected to receive `[X, N-1]` proactively but
+  the proactive resend was lost (e.g. a transport error after the Logon exchange), the behind
+  side's `next_inbound_` is still at X. The first in-sequence active frame from the far side
+  (seqnum M > X) hits the `Active` too-high arm (`:1968-2009`), which issues a `ResendRequest`
+  for `[X, M-1]` — recovering the gap via the normal recovery path. A true never-recover hole
+  would only arise if a future change ALSO suppressed the Active too-high arm when the knob is
+  on, which the current code does not do (T017 review comment annotates `:1968` as
+  recovery-of-last-resort — stays active regardless of knob state). **Status: documented**
+  (research D-11, data-model I-NEX-10). *(contracts C5; `session.cpp:1968`; T017 annotation.)*

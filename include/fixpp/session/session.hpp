@@ -912,6 +912,62 @@ private:
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
+
+    // 027 T005 — replay_outbound_range_: extracted from the inline
+    // ResendRequest-reply walk (session.cpp:2485-2635). Replays stored outbound
+    // app messages in [begin, requested_end] (or through current when
+    // end_is_through_current=true) with PossDupFlag(43)=Y+OrigSendingTime(122)
+    // at their original MsgSeqNum; collapses admin/absent runs into
+    // SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live
+    // outbound counter, not re-stored). [const §VIII.5]: fixed stack buffers.
+    //
+    // TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3):
+    //   eff_end = (end_is_through_current || requested_end > our_last)
+    //               ? our_last : requested_end   (store-walk upper bound)
+    //   empty/short-store GapFill NewSeqNo =
+    //               end_is_through_current ? peek_outbound() : (requested_end+1)
+    // A single (begin, end_inclusive) signature would lose requested_end and
+    // regress the shipped 013 ResendRequest GapFill NewSeqNo for an explicit-end
+    // beyond-store request. The EndSeqNo=0 => through-current resolution is
+    // conveyed via end_is_through_current (NOT re-derived inside the helper).
+    //
+    // Returns expected_t<void>{}  on success (resend complete, remain in Active).
+    // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
+    // Returns std::unexpected(dispatch_aborted) on transport write error.
+    //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
+    //   The helper NEVER calls record_state_transition_ directly (D-5).
+    //
+    // Callers:
+    //   (1) ResendRequest handler (Active): begin=rr_begin, requested_end=rr_end
+    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0).
+    //   (2) 789 honor path (T014/T015, US1): begin=X, requested_end=N-1,
+    //       end_is_through_current=true.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> replay_outbound_range_(
+        fixpp::session::seqnum_t begin, fixpp::session::seqnum_t requested_end,
+        bool end_is_through_current) noexcept;
+
+    // 027 — honor_peer_next_expected_: shared body for the 789-honor dispatch.
+    // Extracted from the acceptor (NotConnected) and initiator (LogonSent)
+    // handlers; both are byte-for-byte identical EXCEPT the input expressions.
+    //
+    // Inputs:
+    //   raw_789    — the raw string_view of tag 789's value from the inbound Logon
+    //                (may be empty if tag was present but had no value).
+    //   present_789 — true iff tag 789 appeared in the inbound Logon frame.
+    //
+    // Outcomes (D-10 ordering preserved: invalid-X FIRST, then X>N, then X<N):
+    //   true   (continue)    — X==N (in sync), or X<N resend succeeded; caller continues.
+    //   false  (terminated)  — X==0 invalid OR X>N violation: helper emitted Logout,
+    //                          called record_state_transition_(Disconnected), caller MUST
+    //                          co_return expected_t<void>{} (terminal, already handled).
+    //   unexpected(err)      — X<N resend failed; helper called
+    //                          record_state_transition_(Disconnected); caller MUST
+    //                          co_return std::unexpected(err).
+    //
+    // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
+    // remains at each call site so the knob-off / tag-absent no-op stays visible.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>> honor_peer_next_expected_(
+        std::string_view raw_789, bool present_789) noexcept;
 };
 
 }  // namespace fixpp::session
