@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -44,7 +45,8 @@ namespace fixpp::session {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
-    std::string_view sending_time, bool reset_seqnum = false) noexcept;
+    std::string_view sending_time, bool reset_seqnum = false,
+    std::optional<seqnum_t> next_expected_seq = std::nullopt) noexcept;
 
 // Interpret an inbound Logon frame; validate BeginString/CompID/HeartBtInt.
 // Returns the negotiated HeartBtInt on success.

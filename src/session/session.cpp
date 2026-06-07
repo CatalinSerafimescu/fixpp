@@ -598,9 +598,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     const bool initr_reset_seqnum =
         (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
         (any_reset_knob && seqnums_at_one);
+    // 027 T013 I-NEX-1: advertise next_inbound_unsafe() when knob is on (plain, NO +1).
+    // Absent (nullopt) when knob is off ⇒ byte-identical baseline. [contract C2, I-NEX-7]
+    const std::optional<fixpp::session::seqnum_t> initr_next_expected =
+        cfg_.enable_next_expected_msg_seq_num
+            ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
+            : std::nullopt;
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum);
+        cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
+        initr_next_expected);
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -1164,7 +1171,8 @@ struct FrameHeader {
     std::string_view poss_dup_flag;      // tag 43 (PossDupFlag "Y"/"N")
     std::string_view orig_sending_time;  // tag 122 (OrigSendingTime) — 021 PossDup
     std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
-    std::string_view reset_seqnum_flag;  // tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view reset_seqnum_flag;       // tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view next_expected_msg_seq_num;  // tag 789 (NextExpectedMsgSeqNum in Logon) — 027
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -1253,6 +1261,9 @@ struct FrameHeader {
             case 141:
                 h.reset_seqnum_flag = val;
                 break;  // T027 ResetSeqNumFlag
+            case 789:
+                h.next_expected_msg_seq_num = val;
+                break;  // 027 NextExpectedMsgSeqNum in Logon
             default:
                 break;
         }
@@ -1742,10 +1753,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                      cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_lenient) &&
                     peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
+                // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (`:1571`)
+                // which already advanced next_inbound_. Advertise plain next_inbound_unsafe() —
+                // NO +1 (E-OBO). Value is cause-dependent under 141 reset (data-model Reset table).
+                // [contract C2, I-NEX-1, E-OBO]
+                const std::optional<fixpp::session::seqnum_t> acpt_next_expected =
+                    cfg_.enable_next_expected_msg_seq_num
+                        ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
+                        : std::nullopt;
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
-                    reply_sending_time_view, acpt_reset_seqnum);
+                    reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.

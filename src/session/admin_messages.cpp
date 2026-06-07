@@ -27,6 +27,7 @@
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>  // NOLINT(misc-include-cleaner) — IWYU: std::char_traits via string_view ops
 #include <string_view>
@@ -75,7 +76,8 @@ namespace {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
-    std::string_view sending_time, bool reset_seqnum) noexcept {
+    std::string_view sending_time, bool reset_seqnum,
+    std::optional<seqnum_t> next_expected_seq) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -150,6 +152,20 @@ namespace {
     if (reset_seqnum) {
         std::byte val[] = {static_cast<std::byte>('Y')};
         if (auto r = w.append_raw(141, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 789=NextExpectedMsgSeqNum — emitted only when next_expected_seq is present.
+    // 027 T012: knob-on callers pass next_inbound_unsafe() (NO +1) here.
+    // Absent (nullopt) ⇒ no 789 field ⇒ byte-identical to baseline. [contract C2, I-NEX-7]
+    if (next_expected_seq.has_value()) {
+        char nbuf[12];
+        auto sv = render_u32(static_cast<std::uint32_t>(*next_expected_seq), nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(789, sv_to_bytes(sv)); !r) {
             return std::unexpected(r.error());
         }
     }

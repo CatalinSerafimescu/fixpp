@@ -338,6 +338,90 @@ static std::unique_ptr<Fixture> make_acceptor(
     return fix;
 }
 
+// ── Initiator fixture ─────────────────────────────────────────────────────────
+//
+// Builds an initiator Session and calls open() to emit the outbound Logon
+// (which transitions the session to LogonSent). The outbound capture holds
+// exactly the Logon frame after open().
+
+static std::unique_ptr<Fixture> make_initiator(
+    std::shared_ptr<MessageStoreFactory> store_factory,
+    bool enable_789 = false)
+{
+    auto fix = std::make_unique<Fixture>();
+
+    fix->cfg.role = fixpp::session::session_role::initiator;
+    fix->cfg.sender_comp_id = "CLI";
+    fix->cfg.target_comp_id = "SRV";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{0};  // disable liveness in LogonSent
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::move(store_factory);
+    fix->cfg.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.enable_next_expected_msg_seq_num = enable_789;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+        fix.capture(data);
+    };
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+    // open() emits the initiator Logon and transitions to LogonSent.
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(2s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "make_initiator: session must be LogonSent after open()";
+
+    return fix;
+}
+
+// Builds an acceptor Session with the knob controlled separately, feeding peer
+// Logon at a given seq, but does NOT complete the handshake (caller can inspect
+// before or after the Logon).
+static std::unique_ptr<Fixture> make_acceptor_knob(
+    std::shared_ptr<MessageStoreFactory> store_factory,
+    bool enable_789,
+    std::uint32_t peer_logon_seq = 1)
+{
+    auto fix = std::make_unique<Fixture>();
+
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::move(store_factory);
+    fix->cfg.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.enable_next_expected_msg_seq_num = enable_789;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+        fix.capture(data);
+    };
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    // Feed peer Logon to reach Active.
+    fix->feed(make_logon("FIX.4.4", peer_logon_seq, "CLI", "SRV"));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "make_acceptor_knob: session must be Active after Logon";
+
+    return fix;
+}
+
 // ── Phase 2 (Foundational) — T004 walk-extraction safety witnesses ────────────
 //
 // The two TwoValueEnd witnesses assert EXISTING 013 behavior (they pass before
@@ -458,6 +542,69 @@ TEST(WalkExtraction, SingleImplementation)
 
     EXPECT_GE(fn_count, 1)
         << "replay_outbound_range_ must appear in session.cpp after T005 extraction";
+}
+
+// ── T007 — US1 emit witnesses ─────────────────────────────────────────────────
+//
+// Anchors: data-model.md I-NEX-1, E-OBO; contracts C2.
+
+// T007 witness 1 (I-NEX-1):
+// When enable_next_expected_msg_seq_num is on, the initiator's outbound Logon
+// MUST carry 789 == seqnum_mgr_.next_inbound_unsafe() (= 1 before any peer
+// frame is received).
+TEST(Emit, Initiator_AdvertisesNextExpectedInbound)
+{
+    auto fix = make_initiator(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/true);
+
+    // The capture contains exactly the initiator Logon (emitted by open()).
+    ASSERT_EQ(fix->capture.frames.size(), 1U) << "Expected exactly 1 outbound frame (Logon)";
+    const auto& logon_frame = fix->capture.frames[0];
+
+    // Tag 35 must be "A" (Logon).
+    EXPECT_EQ(extract_tag(logon_frame, 35), "A");
+
+    // Tag 789 MUST be present and equal to 1 (next_inbound_unsafe() before any
+    // peer Logon = seqnum_min = 1 — no check_inbound has run yet).
+    const std::string tag789 = extract_tag(logon_frame, 789);
+    EXPECT_EQ(tag789, "1")
+        << "Initiator Logon must carry 789=1 (next_inbound_unsafe()) when knob is on";
+}
+
+// T007 witness 2 (E-OBO, I-NEX-1):
+// When enable_next_expected_msg_seq_num is on, the acceptor's REPLY Logon
+// MUST carry 789 == next_inbound_unsafe() AFTER check_inbound has run
+// (which advances next_inbound_ on a successful seq=1 Logon).
+// With a peer Logon at seq=1, check_inbound(1) succeeds and next_inbound_ → 2.
+// Therefore the reply Logon must carry 789=2 (NOT 789=3, i.e. NO extra +1).
+//
+// The E-OBO witness: 789 == 2 == the peer's actual next send after seq=1 Logon.
+// If the implementation adds +1, we'd see 789=3, which is WRONG.
+TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne)
+{
+    auto fix = make_acceptor_knob(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/true,
+                                  /*peer_logon_seq=*/1);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    // The acceptor's reply Logon is the first (and only) outbound frame here.
+    ASSERT_GE(fix->capture.frames.size(), 1U) << "Expected at least 1 outbound frame (reply Logon)";
+
+    // Find the Logon (35=A) frame.
+    auto it =
+        std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
+                     [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
+    ASSERT_NE(it, fix->capture.frames.end()) << "Expected a Logon frame in outbound capture";
+
+    // Tag 789 MUST be 2:
+    // - check_inbound(1) advanced next_inbound_ to 2
+    // - The reply Logon is built AFTER check_inbound (E-OBO: no extra +1 needed)
+    // - Advertising 2 means "we have received all through 1; send us 2 next"
+    // - This equals the peer's actual next expected send (seq=2 after its Logon at seq=1)
+    const std::string tag789 = extract_tag(*it, 789);
+    EXPECT_EQ(tag789, "2")
+        << "Acceptor reply Logon must carry 789=2 (post-check_inbound next_inbound_unsafe()). "
+           "No +1 needed because check_inbound already incremented. "
+           "Got: 789=" << tag789;
 }
 
 }  // namespace
