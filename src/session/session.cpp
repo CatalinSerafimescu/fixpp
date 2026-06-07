@@ -2922,6 +2922,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // production AND tests (T020/T021, SC-006/FR-009). Both roles bind a
             // real identity — no asymmetry remains. [FR-008/009; data-model §E-2; C2]
 
+            // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).
+            // [gate-b/r1 FQ-1: mirror acceptor ordering at :1827-1831 — C6/C8/D-0]
+            // On X>N or invalid-789, honor_peer_next_expected_() records Disconnected
+            // and returns false/*h789==false; the session MUST NOT enter Active first.
+            // On X<N (resend) or X==N (no-op), returns true and we proceed to Active.
+            // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
+            if (cfg_.enable_next_expected_msg_seq_num && hdr.next_expected_present) {
+                auto h789 = co_await honor_peer_next_expected_(hdr.next_expected_msg_seq_num,
+                                                               hdr.next_expected_present);
+                if (!h789) co_return std::unexpected(h789.error());
+                if (!*h789) co_return fixpp::core::expected_t<void>{};
+            }
+
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);
             // 019 T016: if onLogon threw, terminal-close the session.
@@ -2949,16 +2962,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // NOLINTNEXTLINE(misc-include-cleaner)
                 asio::co_spawn(ex, run_liveness_loop(),
                                asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
-            }
-
-            // 027 T015/T021 — initiator 789 honor (after processing the Logon-ack).
-            // Delegates to honor_peer_next_expected_() — single implementation.
-            // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
-            if (cfg_.enable_next_expected_msg_seq_num && hdr.next_expected_present) {
-                auto h789 = co_await honor_peer_next_expected_(hdr.next_expected_msg_seq_num,
-                                                               hdr.next_expected_present);
-                if (!h789) co_return std::unexpected(h789.error());
-                if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
 
             co_return fixpp::core::expected_t<void>{};

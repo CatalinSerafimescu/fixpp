@@ -20,9 +20,9 @@
 // Production-shape: drives bytes through Session::on_inbound_frame().
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 
 #include <algorithm>
-#include <sys/stat.h>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -34,6 +34,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -68,20 +69,52 @@ __attribute__((weak)) long alloc_guard_count() { return 0; }
 
 namespace {
 
+// ── Application stubs for FQ-1 / FQ-2 witnesses ──────────────────────────────
+
+// CountingApp027: records onLogon + toAdmin invocation counts.
+// Used to assert (a) onLogon was NOT called on integrity-error paths (FQ-1),
+// and (b) toAdmin IS called for 789-triggered Logout frames (FQ-2).
+class CountingApp027 : public fixpp::session::Application {
+public:
+    int onLogon_count{0};
+    int toAdmin_count{0};
+
+    void onLogon(const fixpp::session::SessionId& /*id*/) override { ++onLogon_count; }
+
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                 const fixpp::session::SessionId& /*id*/) override {
+        ++toAdmin_count;
+    }
+};
+
+// ThrowingToAdmin027: throws from toAdmin on the N-th call.
+// Used to witness that a toAdmin throw on the 789-Logout path surfaces
+// app_callback_threw + terminal-closes (FQ-2 negative case).
+class ThrowingToAdmin027 : public fixpp::session::Application {
+public:
+    explicit ThrowingToAdmin027(int n) : throw_at_(n) {}
+    mutable int call_count{0};
+    const int throw_at_;
+
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                 const fixpp::session::SessionId& /*id*/) override {
+        ++call_count;
+        if (call_count == throw_at_) {
+            throw std::runtime_error("toAdmin throw from 789 Logout path");
+        }
+    }
+};
+
 // ── Frame-building helpers (mirror test_recovery_*.cpp pattern) ───────────────
 
-static std::string field(int tag, std::string_view val)
-{
+static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
 static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type,
-                                             std::uint32_t seq,
-                                             std::string_view sender,
-                                             std::string_view target,
-                                             std::string_view extra = {})
-{
+                                             std::string_view msg_type, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -107,10 +140,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                         std::string_view s, std::string_view t,
-                                         int hbt = 30)
-{
+static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                         std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -120,21 +151,18 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 // make_logon_with_789: Logon frame carrying NextExpectedMsgSeqNum(789).
 // make_app_frame_posdup: app frame (35=D) with PossDupFlag(43)=Y + OrigSendingTime(122).
 static std::vector<std::byte> make_app_frame_posdup(std::string_view bs, std::uint32_t seq,
-                                                     std::string_view s, std::string_view t)
-{
+                                                    std::string_view s, std::string_view t) {
     std::string extra;
     extra += field(43, "Y");
-    extra += field(97, "N");   // PossResend=N
+    extra += field(97, "N");  // PossResend=N
     extra += field(122, "20240101-00:00:00.000");
     extra += field(11, "ORD" + std::to_string(seq));
     return make_fix_frame(bs, "D", seq, s, t, extra);
 }
 
 static std::vector<std::byte> make_logon_with_789(std::string_view bs, std::uint32_t seq,
-                                                   std::string_view s, std::string_view t,
-                                                   std::uint32_t next_expected,
-                                                   int hbt = 30)
-{
+                                                  std::string_view s, std::string_view t,
+                                                  std::uint32_t next_expected, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -145,8 +173,7 @@ static std::vector<std::byte> make_logon_with_789(std::string_view bs, std::uint
 static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
                                                   std::string_view s, std::string_view t,
                                                   std::uint32_t begin_seqno,
-                                                  std::uint32_t end_seqno)
-{
+                                                  std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -155,12 +182,11 @@ static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint
 
 // make_seq_reset_gapfill: SequenceReset-GapFill for admin fills during resend.
 static std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
-                                                      std::string_view s, std::string_view t,
-                                                      std::uint32_t new_seqno)
-{
+                                                     std::string_view s, std::string_view t,
+                                                     std::uint32_t new_seqno) {
     std::string extra;
     extra += field(43, "Y");
-    extra += field(123, "Y");   // GapFillFlag=Y
+    extra += field(123, "Y");  // GapFillFlag=Y
     extra += field(36, std::to_string(new_seqno));
     return make_fix_frame(bs, "4", seq, s, t, extra);
 }
@@ -169,16 +195,14 @@ static std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::u
 
 struct OutboundCapture {
     std::vector<std::vector<std::byte>> frames;
-    void operator()(std::span<const std::byte> data)
-    {
+    void operator()(std::span<const std::byte> data) {
         frames.emplace_back(data.begin(), data.end());
     }
 };
 
 // ── Frame field extractors ────────────────────────────────────────────────────
 
-static std::string extract_tag(const std::vector<std::byte>& frame, int tag)
-{
+static std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
     const auto* data = reinterpret_cast<const char*>(frame.data());
     std::string sv(data, frame.size());
     const std::string needle = std::to_string(tag) + "=";
@@ -190,8 +214,7 @@ static std::string extract_tag(const std::vector<std::byte>& frame, int tag)
     return sv.substr(pos, end - pos);
 }
 
-static bool frame_is_gapfill(const std::vector<std::byte>& frame)
-{
+static bool frame_is_gapfill(const std::vector<std::byte>& frame) {
     return extract_tag(frame, 35) == "4" && extract_tag(frame, 123) == "Y";
 }
 
@@ -210,8 +233,7 @@ using fixpp::session::visit_result;
 class ShortStore final : public MessageStore {
 public:
     explicit ShortStore(seqnum_t last_stored)
-        : MessageStore(flush_thunk_for<ShortStore>()), next_outbound_(last_stored + 1U)
-    {
+        : MessageStore(flush_thunk_for<ShortStore>()), next_outbound_(last_stored + 1U) {
         for (seqnum_t k = 1; k <= last_stored; ++k) {
             const auto raw = make_fix_frame("FIX.4.4", "D", k, "SRV", "CLI",
                                             field(11, "ORD" + std::to_string(k)));
@@ -221,15 +243,13 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
-        direction_t /*dir*/) noexcept override
-    {
+        direction_t /*dir*/) noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         seqnum_t begin, seqnum_t end, direction_t dir,
-        retrieve_visitor& visitor) noexcept override
-    {
+        retrieve_visitor& visitor) noexcept override {
         if (dir != direction_t::outbound) {
             co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
         }
@@ -248,13 +268,11 @@ public:
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
-        direction_t dir, bool /*increment*/) noexcept override
-    {
+        direction_t dir, bool /*increment*/) noexcept override {
         co_return dir == direction_t::outbound ? next_outbound_ : seqnum_t{1};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override
-    {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -268,11 +286,9 @@ public:
     explicit ShortStoreFactory(seqnum_t last_stored) : last_stored_(last_stored) {}
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view /*sender*/, std::string_view /*target*/,
-        std::pmr::memory_resource* /*mr*/,
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
-        asio::any_io_executor /*file_io_executor*/) noexcept override
-    {
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
         return std::unique_ptr<MessageStore>(new ShortStore(last_stored_));
     }
 
@@ -287,26 +303,22 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
-        direction_t /*dir*/) noexcept override
-    {
+        direction_t /*dir*/) noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         seqnum_t /*begin*/, seqnum_t /*end*/, direction_t /*dir*/,
-        retrieve_visitor& /*visitor*/) noexcept override
-    {
+        retrieve_visitor& /*visitor*/) noexcept override {
         co_return std::unexpected(fixpp::core::error::store_seqnum_gap);
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
-        direction_t /*dir*/, bool /*increment*/) noexcept override
-    {
+        direction_t /*dir*/, bool /*increment*/) noexcept override {
         co_return seqnum_t{1};
     }
 
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override
-    {
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         co_return fixpp::core::expected_t<void>{};
     }
 };
@@ -314,11 +326,9 @@ public:
 class EmptyStoreFactory final : public MessageStoreFactory {
 public:
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view /*sender*/, std::string_view /*target*/,
-        std::pmr::memory_resource* /*mr*/,
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
-        asio::any_io_executor /*file_io_executor*/) noexcept override
-    {
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
         return std::unique_ptr<MessageStore>(new EmptyStore());
     }
 };
@@ -336,11 +346,9 @@ struct Fixture {
     fixpp::session::SessionConfig cfg;
     std::unique_ptr<fixpp::session::Session> session;
 
-    void feed(const std::vector<std::byte>& frame)
-    {
-        auto fut = asio::co_spawn(
-            ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
-            asio::use_future);
+    void feed(const std::vector<std::byte>& frame) {
+        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
+                                  asio::use_future);
         ioc.run_for(5s);
         ioc.restart();
         (void)fut.get();
@@ -349,11 +357,9 @@ struct Fixture {
     void clear_capture() { capture.frames.clear(); }
 };
 
-static std::unique_ptr<Fixture> make_acceptor(
-    std::shared_ptr<MessageStoreFactory> store_factory,
-    std::uint32_t peer_logon_seq = 1,
-    bool enable_789 = false)
-{
+static std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> store_factory,
+                                              std::uint32_t peer_logon_seq = 1,
+                                              bool enable_789 = false) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -366,12 +372,9 @@ static std::unique_ptr<Fixture> make_acceptor(
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::move(store_factory);
     // bilateral_lenient: accept peer Logon without requiring matching 141=Y.
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = enable_789;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
@@ -396,10 +399,8 @@ static std::unique_ptr<Fixture> make_acceptor(
 // (which transitions the session to LogonSent). The outbound capture holds
 // exactly the Logon frame after open().
 
-static std::unique_ptr<Fixture> make_initiator(
-    std::shared_ptr<MessageStoreFactory> store_factory,
-    bool enable_789 = false)
-{
+static std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> store_factory,
+                                               bool enable_789 = false) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::initiator;
@@ -411,12 +412,9 @@ static std::unique_ptr<Fixture> make_initiator(
     fix->cfg.heartbeat_interval = std::chrono::seconds{0};  // disable liveness in LogonSent
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::move(store_factory);
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = enable_789;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
@@ -444,8 +442,7 @@ static std::unique_ptr<Fixture> make_initiator(
 // Peer sends ResendRequest([10,20]) when our store only has [1..5].
 // Response MUST be SequenceReset-GapFill with NewSeqNo=21 (rr_end+1), NOT 6
 // (eff_end+1). This guards the two-value end model in the existing inline walk.
-TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore)
-{
+TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     // Store has seqnums [1..5]; next outbound = 6.
     auto fix = make_acceptor(std::make_shared<ShortStoreFactory>(5));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
@@ -473,8 +470,7 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore)
 // After the acceptor's reply Logon (seq=1), peek_outbound()==2. The empty store
 // returns next_seqnum(outbound)=1 so our_last=0; the early-GapFill fires.
 // NewSeqNo = (rr_end==0) ? peek_outbound() : (rr_end+1) = peek_outbound() = 2.
-TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore)
-{
+TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore) {
     auto fix = make_acceptor(std::make_shared<EmptyStoreFactory>());
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
@@ -512,8 +508,7 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore)
 // RED before T005: grep for "replay_outbound_range_" returns 0 matches.
 // GREEN after T005: grep for "replay_outbound_range_" returns >= 1 match,
 //                  loop token appears exactly once.
-TEST(WalkExtraction, SingleImplementation)
-{
+TEST(WalkExtraction, SingleImplementation) {
     const char* src_dir = nullptr;
 #ifdef FIXPP_TEST_SOURCE_DIR
     src_dir = FIXPP_TEST_SOURCE_DIR;
@@ -536,10 +531,9 @@ TEST(WalkExtraction, SingleImplementation)
     pclose(fp_loop);
 
     // After T005 extraction the loop is in exactly ONE place.
-    EXPECT_EQ(loop_count, 1)
-        << "Store-walk loop must exist exactly once in session.cpp "
-        << "(inside replay_outbound_range_() after T005). "
-        << "count=" << loop_count;
+    EXPECT_EQ(loop_count, 1) << "Store-walk loop must exist exactly once in session.cpp "
+                             << "(inside replay_outbound_range_() after T005). "
+                             << "count=" << loop_count;
 
     // replay_outbound_range_ must be defined in session.cpp after T005.
     const std::string grep_fn_cmd =
@@ -562,8 +556,7 @@ TEST(WalkExtraction, SingleImplementation)
 // When enable_next_expected_msg_seq_num is on, the initiator's outbound Logon
 // MUST carry 789 == seqnum_mgr_.next_inbound_unsafe() (= 1 before any peer
 // frame is received).
-TEST(Emit, Initiator_AdvertisesNextExpectedInbound)
-{
+TEST(Emit, Initiator_AdvertisesNextExpectedInbound) {
     auto fix = make_initiator(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/true);
 
     // The capture contains exactly the initiator Logon (emitted by open()).
@@ -589,8 +582,7 @@ TEST(Emit, Initiator_AdvertisesNextExpectedInbound)
 //
 // The E-OBO witness: 789 == 2 == the peer's actual next send after seq=1 Logon.
 // If the implementation adds +1, we'd see 789=3, which is WRONG.
-TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne)
-{
+TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne) {
     auto fix = make_acceptor(std::make_shared<EmptyStoreFactory>(), /*peer_logon_seq=*/1,
                              /*enable_789=*/true);
 
@@ -614,7 +606,8 @@ TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne)
     EXPECT_EQ(tag789, "2")
         << "Acceptor reply Logon must carry 789=2 (post-check_inbound next_inbound_unsafe()). "
            "No +1 needed because check_inbound already incremented. "
-           "Got: 789=" << tag789;
+           "Got: 789="
+        << tag789;
 }
 
 // ── T008 — US1 honor witnesses ────────────────────────────────────────────────
@@ -637,8 +630,7 @@ TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne)
 //   (a) At least 3 PossDup app frames at seqs 3,4,5 appear AFTER the reply Logon.
 //   (b) Zero ResendRequest(35=2) frames emitted.
 //   (c) Session reaches Active.
-TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest)
-{
+TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest) {
     // Build acceptor fixture manually to allow counter seeding before Logon.
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -650,12 +642,9 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -679,14 +668,13 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest)
 
     // (b) Zero ResendRequest(35=2) frames.
     for (const auto& f : frames) {
-        EXPECT_NE(extract_tag(f, 35), "2")
-            << "Honor_Acceptor: no ResendRequest must be emitted";
+        EXPECT_NE(extract_tag(f, 35), "2") << "Honor_Acceptor: no ResendRequest must be emitted";
     }
 
     // Find the reply Logon frame (35=A).
-    auto reply_it =
-        std::find_if(frames.begin(), frames.end(),
-                     [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
+    auto reply_it = std::find_if(frames.begin(), frames.end(), [](const std::vector<std::byte>& f) {
+        return extract_tag(f, 35) == "A";
+    });
     ASSERT_NE(reply_it, frames.end()) << "Expected reply Logon (35=A) in outbound capture";
     const std::size_t reply_idx = static_cast<std::size_t>(reply_it - frames.begin());
 
@@ -697,15 +685,13 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest)
         bool found = false;
         for (std::size_t i = reply_idx + 1; i < frames.size(); ++i) {
             const auto& f = frames[i];
-            if (extract_tag(f, 34) == std::to_string(expected_seq) &&
-                extract_tag(f, 43) == "Y") {
+            if (extract_tag(f, 34) == std::to_string(expected_seq) && extract_tag(f, 43) == "Y") {
                 found = true;
                 break;
             }
         }
-        EXPECT_TRUE(found)
-            << "Expected PossDup frame at seq=" << expected_seq
-            << " after reply Logon (RC#4 ordering)";
+        EXPECT_TRUE(found) << "Expected PossDup frame at seq=" << expected_seq
+                           << " after reply Logon (RC#4 ordering)";
     }
 }
 
@@ -717,8 +703,7 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest)
 //   (a) At least 3 PossDup app frames at seqs 2,3,4.
 //   (b) Zero ResendRequest(35=2) frames after the peer Logon-ack.
 //   (c) Session reaches Active.
-TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest)
-{
+TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::initiator;
     fix->cfg.sender_comp_id = "CLI";
@@ -729,12 +714,9 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest)
     fix->cfg.heartbeat_interval = std::chrono::seconds{0};  // disable liveness
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(4);
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // open() emits the initiator Logon at seq=1 and transitions to LogonSent.
@@ -760,8 +742,7 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest)
 
     // (b) Zero ResendRequest(35=2) frames.
     for (const auto& f : frames) {
-        EXPECT_NE(extract_tag(f, 35), "2")
-            << "Honor_Initiator: no ResendRequest must be emitted";
+        EXPECT_NE(extract_tag(f, 35), "2") << "Honor_Initiator: no ResendRequest must be emitted";
     }
 
     // (a) PossDup frames at seqs 2,3,4 must be present.
@@ -769,14 +750,12 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest)
     for (std::uint32_t expected_seq : expected_seqs) {
         bool found = false;
         for (const auto& f : frames) {
-            if (extract_tag(f, 34) == std::to_string(expected_seq) &&
-                extract_tag(f, 43) == "Y") {
+            if (extract_tag(f, 34) == std::to_string(expected_seq) && extract_tag(f, 43) == "Y") {
                 found = true;
                 break;
             }
         }
-        EXPECT_TRUE(found)
-            << "Expected PossDup frame at seq=" << expected_seq;
+        EXPECT_TRUE(found) << "Expected PossDup frame at seq=" << expected_seq;
     }
 }
 
@@ -784,8 +763,7 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest)
 // X == N ⇒ no resend (both roles).
 // Acceptor: seeded outbound=4, peer sends 789=5 (X == N=5 after reply Logon).
 // Initiator: seeded outbound=3, peer sends 789=3 (X == N=3).
-TEST(Honor, XeqN_NoResend)
-{
+TEST(Honor, XeqN_NoResend) {
     // ── Acceptor arm ─────────────────────────────────────────────────────────
     {
         auto fix = std::make_unique<Fixture>();
@@ -798,8 +776,7 @@ TEST(Honor, XeqN_NoResend)
         fix->cfg.heartbeat_interval = std::chrono::seconds{30};
         fix->cfg.executor_override = fix->ioc.get_executor();
         fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
-        fix->cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         fix->cfg.enable_next_expected_msg_seq_num = true;
         fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
             fix.capture(data);
@@ -825,8 +802,7 @@ TEST(Honor, XeqN_NoResend)
         }
         // No ResendRequest.
         for (const auto& f : fix->capture.frames) {
-            EXPECT_NE(extract_tag(f, 35), "2")
-                << "XeqN acceptor: no ResendRequest expected";
+            EXPECT_NE(extract_tag(f, 35), "2") << "XeqN acceptor: no ResendRequest expected";
         }
     }
 
@@ -869,8 +845,7 @@ TEST(Honor, XeqN_NoResend)
                 << "XeqN initiator: no PossDup frame expected when X==N";
         }
         for (const auto& f : fix2->capture.frames) {
-            EXPECT_NE(extract_tag(f, 35), "2")
-                << "XeqN initiator: no ResendRequest expected";
+            EXPECT_NE(extract_tag(f, 35), "2") << "XeqN initiator: no ResendRequest expected";
         }
     }
 }
@@ -882,8 +857,7 @@ TEST(Honor, XeqN_NoResend)
 // NewSeqNo = peek_outbound() = 9 (NOT our_last+1=3 — guards through-current path).
 //
 // Anchors: data-model.md I-NEX-3, contracts C3.
-TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller)
-{
+TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -894,12 +868,9 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);  // store through 2
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     fix->ioc.run_for(1s);
@@ -936,8 +907,7 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller)
 // → early GapFill, NewSeqNo = peek_outbound() = 6.
 //
 // Anchors: data-model.md I-NEX-3, contracts C3.
-TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller)
-{
+TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -948,12 +918,9 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     fix->ioc.run_for(1s);
@@ -996,8 +963,7 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller)
 //     peer_N=7 is set ≥1 frame beyond X_logon=5, so peer_N ≠ X_logon+1
 //     and the assertion is not a coincidental pass (I-NEX-12).
 //   - Zero ResendRequest on the wire.
-TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor)
-{
+TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1008,12 +974,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1024,7 +987,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor)
     // Seed inbound counter to X=2 (simulates: we have seen seq 1, expect 2 next).
     // next_outbound=1 (reply Logon will go at seq=1).
     fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                  /*next_outbound=*/1);
+                                                                 /*next_outbound=*/1);
     fix->clear_capture();
 
     // Feed peer Logon at seq=X_logon=5 (too-high from our next_inbound_=2).
@@ -1056,10 +1019,12 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor)
     }
 
     // Final counter check: next_inbound_ == peer_N = 7 (NOT X_logon+1=6).
-    const seqnum_t final_next_inbound = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t final_next_inbound =
+        fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(final_next_inbound, 7U)
         << "BehindSide acceptor: final next_inbound_ must be peer_N=7 (NOT X_logon+1=6). "
-           "Counter was: " << final_next_inbound;
+           "Counter was: "
+        << final_next_inbound;
 
     // Session still Active after resend fill.
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
@@ -1073,8 +1038,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor)
 //   - No at-logon ResendRequest.
 //   - Peer resends [3,4,5,6,7] (peer_N=8 ≥1 beyond X_logon=6).
 //   - final next_inbound_==8 (NOT X_logon+1=7).
-TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator)
-{
+TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::initiator;
     fix->cfg.sender_comp_id = "CLI";
@@ -1085,12 +1049,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator)
     fix->cfg.heartbeat_interval = std::chrono::seconds{0};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1102,7 +1063,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator)
     // Seed inbound counter to X=3 (simulates: peer sent 1,2 but we missed them).
     // next_outbound=2 (our Logon went at seq=1).
     fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/3,
-                                                                  /*next_outbound=*/2);
+                                                                 /*next_outbound=*/2);
     fix->clear_capture();
 
     // Feed peer Logon-ack at seq=X_logon=6 (too-high, we expect 3).
@@ -1131,10 +1092,12 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator)
     }
 
     // Final counter: next_inbound_ == peer_N = 8 (NOT X_logon+1=7).
-    const seqnum_t final_next_inbound = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t final_next_inbound =
+        fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(final_next_inbound, 8U)
         << "BehindSide initiator: final next_inbound_ must be peer_N=8 (NOT X_logon+1=7). "
-           "Got: " << final_next_inbound;
+           "Got: "
+        << final_next_inbound;
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 }
@@ -1147,8 +1110,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator)
 // Specifically: acceptor has outbound gap (peer will send 789=3, i.e., peer
 // expects our seq 3), AND peer's Logon arrives at too-high seq (behind-side).
 // Both recoveries happen without ResendRequest and without double-count.
-TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
-{
+TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1160,12 +1122,9 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
     fix->cfg.executor_override = fix->ioc.get_executor();
     // Store has [1..4] — so we can resend [3,4] when peer's 789=3.
     fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(4);
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1178,7 +1137,7 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
     // Peer's Logon MsgSeqNum=6 (too-high = behind-side gap).
     // peer_N=8 (peer has sent through 7).
     fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                  /*next_outbound=*/5);
+                                                                 /*next_outbound=*/5);
     fix->clear_capture();
 
     // Feed peer Logon at seq=6 carrying 789=3 (BOTH gaps).
@@ -1205,8 +1164,7 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
 
     // Behind-side: next_inbound_ left at X=2 (not advanced for held Logon at seq=6).
     const seqnum_t x_pre = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(x_pre, 2U)
-        << "Bidirectional: next_inbound_ must be X=2 after behind-side tolerance";
+    EXPECT_EQ(x_pre, 2U) << "Bidirectional: next_inbound_ must be X=2 after behind-side tolerance";
 
     // Now simulate the peer's in-sequence resend [2,3,4,5,6,7] (peer_N=8).
     fix->clear_capture();
@@ -1216,8 +1174,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
 
     // final next_inbound_ == peer_N = 8.
     const seqnum_t final_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(final_ni, 8U)
-        << "Bidirectional: final next_inbound_ must be peer_N=8. Got: " << final_ni;
+    EXPECT_EQ(final_ni, 8U) << "Bidirectional: final next_inbound_ must be peer_N=8. Got: "
+                            << final_ni;
 
     // No double-count: no ResendRequest emitted by us during the fill.
     for (const auto& f : fix->capture.frames) {
@@ -1233,8 +1191,7 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery)
 // fails to send its resend. The next live frame from the peer arrives at seq=6
 // (which is too-high relative to our next_inbound_=2). The Active arm
 // (`:1968-2009`) issues a ResendRequest — the recovery-of-last-resort path.
-TEST(BehindSide, LostResend_SelfHealsViaActiveArm)
-{
+TEST(BehindSide, LostResend_SelfHealsViaActiveArm) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1245,12 +1202,9 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1260,7 +1214,7 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm)
 
     // Seed: next_inbound_=2, next_outbound_=1. Peer Logon arrives at seq=5 (too-high).
     fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                  /*next_outbound=*/1);
+                                                                 /*next_outbound=*/1);
     fix->clear_capture();
 
     // Feed too-high peer Logon: with T016, session reaches Active, next_inbound_=2.
@@ -1270,8 +1224,7 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm)
 
     // Verify no at-logon ResendRequest.
     for (const auto& f : fix->capture.frames) {
-        EXPECT_NE(extract_tag(f, 35), "2")
-            << "LostResend: no ResendRequest at logon (suppressed)";
+        EXPECT_NE(extract_tag(f, 35), "2") << "LostResend: no ResendRequest at logon (suppressed)";
     }
 
     // Now the peer skips the resend and sends a live frame at seq=6 (too-high
@@ -1300,8 +1253,7 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm)
 // Knob ON: peer Logon too-high at logon → tolerated (no fatal disconnect) AND
 //   no at-logon ResendRequest (I-NEX-5). This is the 013 regression guard.
 // Knob OFF: peer Logon too-high → fatal (existing 013 behavior: Disconnected).
-TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh)
-{
+TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
     // ── Arm 1: knob ON ────────────────────────────────────────────────────────
     {
         auto fix = std::make_unique<Fixture>();
@@ -1314,8 +1266,7 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh)
         fix->cfg.heartbeat_interval = std::chrono::seconds{30};
         fix->cfg.executor_override = fix->ioc.get_executor();
         fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-        fix->cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         fix->cfg.enable_next_expected_msg_seq_num = true;
         fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
             fix.capture(data);
@@ -1383,8 +1334,7 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh)
 // Initiator with reset_on_logon=true emits a Logon with 141=Y and resets seqnums
 // to 1 BEFORE building the Logon. With the knob on, 789 == next_inbound_unsafe()
 // post-reset == 1. [Reset table row 1]
-TEST(Reset, InitiatorResetLogon_Advertises1)
-{
+TEST(Reset, InitiatorResetLogon_Advertises1) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::initiator;
     fix->cfg.sender_comp_id = "CLI";
@@ -1395,18 +1345,15 @@ TEST(Reset, InitiatorResetLogon_Advertises1)
     fix->cfg.heartbeat_interval = std::chrono::seconds{0};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.reset_on_logon = true;  // reset_on_logon knob
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // Seed inbound/outbound to > 1 so the reset effect is observable.
     fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/5,
-                                                                  /*next_outbound=*/4);
+                                                                 /*next_outbound=*/4);
 
     // open() emits the initiator Logon (with reset_on_logon: reset fires BEFORE build).
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1417,15 +1364,17 @@ TEST(Reset, InitiatorResetLogon_Advertises1)
 
     // Find the Logon frame.
     ASSERT_GE(fix->capture.frames.size(), 1U);
-    auto it = std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
-                            [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
+    auto it =
+        std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
+                     [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
     ASSERT_NE(it, fix->capture.frames.end()) << "Expected Logon frame";
 
     // 789 must be 1 (post-reset next_inbound_unsafe() = 1). [Reset table row 1]
     const std::string tag789 = extract_tag(*it, 789);
     EXPECT_EQ(tag789, "1")
         << "Reset/InitiatorResetLogon: 789 must be 1 (post-reset next_inbound_). "
-           "Got: 789=" << tag789;
+           "Got: 789="
+        << tag789;
 
     // 141 must be Y (the reset Logon).
     EXPECT_EQ(extract_tag(*it, 141), "Y") << "Reset Logon must carry 141=Y";
@@ -1434,8 +1383,7 @@ TEST(Reset, InitiatorResetLogon_Advertises1)
 // T010 witness 2b (I-NEX-8, D-8) — Reset table: acceptor reply with reset_on_logon → 789==2.
 // reset_on_logon resets BEFORE check_inbound(1) which advances to 2. Reply built after →
 // next_inbound_unsafe()=2. [Reset table row 2]
-TEST(Reset, AcceptorReplyResetOnLogon_Advertises2)
-{
+TEST(Reset, AcceptorReplyResetOnLogon_Advertises2) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1446,13 +1394,10 @@ TEST(Reset, AcceptorReplyResetOnLogon_Advertises2)
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.reset_on_logon = true;  // reset_on_logon knob
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1460,27 +1405,30 @@ TEST(Reset, AcceptorReplyResetOnLogon_Advertises2)
     fix->ioc.restart();
     (void)open_fut.get();
 
-    // Feed peer Logon at seq=1 (reset path: reset_on_logon → reset to 1 → check_inbound(1) → next_inbound=2).
+    // Feed peer Logon at seq=1 (reset path: reset_on_logon → reset to 1 → check_inbound(1) →
+    // next_inbound=2).
     fix->feed(make_logon("FIX.4.4", /*seq=*/1, "CLI", "SRV"));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
     // Find the reply Logon.
-    auto it = std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
-                            [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
+    auto it =
+        std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
+                     [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
     ASSERT_NE(it, fix->capture.frames.end()) << "Expected reply Logon";
 
-    // 789 must be 2 (reset → 1 → check_inbound(1) → next_inbound=2 → advertise 2). [Reset table row 2]
+    // 789 must be 2 (reset → 1 → check_inbound(1) → next_inbound=2 → advertise 2). [Reset table row
+    // 2]
     const std::string tag789 = extract_tag(*it, 789);
     EXPECT_EQ(tag789, "2")
         << "Reset/AcceptorReplyResetOnLogon: 789 must be 2 (post-reset post-check_inbound). "
-           "Got: 789=" << tag789;
+           "Got: 789="
+        << tag789;
 }
 
 // T010 witness 2c (I-NEX-8, D-8) — Reset table: acceptor reply, received-141-only → 789==1.
 // 013-only path: NO reset_on_logon, peer sends 141=Y. Reset fires AFTER check_inbound
 // (at `:1718`) then BEFORE build. next_inbound_unsafe()=1 at build site. [Reset table row 3]
-TEST(Reset, AcceptorReplyReceived141_Advertises1)
-{
+TEST(Reset, AcceptorReplyReceived141_Advertises1) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1492,13 +1440,10 @@ TEST(Reset, AcceptorReplyReceived141_Advertises1)
     fix->cfg.executor_override = fix->ioc.get_executor();
     fix->cfg.store_factory = std::make_shared<EmptyStoreFactory>();
     // bilateral_lenient: accepts peer's 141=Y without requiring we also send it.
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.reset_on_logon = false;  // NO knob-driven reset
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1517,15 +1462,17 @@ TEST(Reset, AcceptorReplyReceived141_Advertises1)
     fix->feed(make_fix_frame("FIX.4.4", "A", /*seq=*/1, "CLI", "SRV", extra));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-    auto it = std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
-                            [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
+    auto it =
+        std::find_if(fix->capture.frames.begin(), fix->capture.frames.end(),
+                     [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
     ASSERT_NE(it, fix->capture.frames.end()) << "Expected reply Logon";
 
     // 789 must be 1 (post-received-141 reset, before build). [Reset table row 3]
     const std::string tag789 = extract_tag(*it, 789);
     EXPECT_EQ(tag789, "1")
         << "Reset/AcceptorReplyReceived141: 789 must be 1 (received-141-only path, post-reset). "
-           "Got: 789=" << tag789;
+           "Got: 789="
+        << tag789;
 }
 
 // T010 witness 3 ([const §VIII.5]) — NoHeap: build_logon with 789 append is zero-heap.
@@ -1543,42 +1490,40 @@ TEST(Reset, AcceptorReplyReceived141_Advertises1)
 // The _mallocnesia ctest variant (CMakeLists.txt) runs this binary under
 // LD_PRELOAD with tools/check_alloc.py so any global-heap escape aborts.
 // [const §VIII.5], [[feedback_tracking_pmr_resource_false_pass]]
-TEST(NoHeap, Emit789Append)
-{
+TEST(NoHeap, Emit789Append) {
     // ── Setup OUTSIDE the guarded window (legitimate allocation) ─────────────
     // Stack output buffer — same size session.cpp uses (256 bytes).
     std::array<std::byte, 256> out_buf{};
 
     // All inputs are string literals / integer constants: no heap.
     constexpr seqnum_t seq = 1;
-    constexpr std::string_view sender  = "SRV";
-    constexpr std::string_view target  = "CLI";
-    constexpr std::string_view begin   = "FIX.4.4";
-    constexpr int heartbt              = 30;
-    constexpr std::string_view stime   = "20240101-00:00:00.000";
-    constexpr bool reset_seqnum        = false;
+    constexpr std::string_view sender = "SRV";
+    constexpr std::string_view target = "CLI";
+    constexpr std::string_view begin = "FIX.4.4";
+    constexpr int heartbt = 30;
+    constexpr std::string_view stime = "20240101-00:00:00.000";
+    constexpr bool reset_seqnum = false;
     // next_expected_seq = 5 (non-nullopt → exercises the 789 append branch).
     const std::optional<seqnum_t> next_expected{5};
 
     // ── Guarded window: only the synchronous build_logon call ────────────────
     alloc_guard_start();
 
-    auto result = fixpp::session::build_logon(
-        std::span<std::byte>{out_buf.data(), out_buf.size()},
-        seq, sender, target, begin, heartbt, stime, reset_seqnum, next_expected);
+    auto result = fixpp::session::build_logon(std::span<std::byte>{out_buf.data(), out_buf.size()},
+                                              seq, sender, target, begin, heartbt, stime,
+                                              reset_seqnum, next_expected);
 
     alloc_guard_end();
 
     // ── Post-condition: call succeeded and the frame carries 789=5 ───────────
-    ASSERT_TRUE(result.has_value())
-        << "build_logon with next_expected_seq=5 must succeed";
+    ASSERT_TRUE(result.has_value()) << "build_logon with next_expected_seq=5 must succeed";
 
     // Scan the produced frame for "789=5\x01".
-    const std::string frame_str(
-        reinterpret_cast<const char*>(result->data()), result->size());
+    const std::string frame_str(reinterpret_cast<const char*>(result->data()), result->size());
     EXPECT_NE(frame_str.find("789=5\x01"), std::string::npos)
         << "build_logon must emit tag 789=5 when next_expected_seq=5; "
-           "frame=" << frame_str;
+           "frame="
+        << frame_str;
 
     // Under mallocnesia: alloc_guard_count() returns the number of global
     // malloc/free calls in the window. A nonzero count means build_logon
@@ -1586,7 +1531,8 @@ TEST(NoHeap, Emit789Append)
     const long heap_allocs = alloc_guard_count();
     EXPECT_EQ(heap_allocs, 0L)
         << "build_logon with 789 append must not touch the global heap; "
-           "heap_allocs=" << heap_allocs
+           "heap_allocs="
+        << heap_allocs
         << "; [const §VIII.5 / I-NEX-7 / [[feedback_tracking_pmr_resource_false_pass]]]";
 }
 
@@ -1603,8 +1549,7 @@ TEST(NoHeap, Emit789Append)
 //
 // NOTE: (b) also implicitly validates that with the knob off the session does
 // not fatal-disconnect on an inbound 789 (i.e., the field is silently ignored).
-TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
-{
+TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored) {
     // ── Part (a) + (c): outbound Logon byte-identity ─────────────────────────
 
     // Knob OFF (default): initiator Logon must NOT carry 789.
@@ -1616,7 +1561,8 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
         const std::string tag789_off = extract_tag(logon_off, 789);
         EXPECT_EQ(tag789_off, "")
             << "DefaultOff: knob OFF — initiator Logon must carry NO 789 field. "
-               "Found 789=" << tag789_off;
+               "Found 789="
+            << tag789_off;
     }
 
     // Knob ON (positive control): initiator Logon MUST carry 789.
@@ -1646,8 +1592,7 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
         fix->cfg.heartbeat_interval = std::chrono::seconds{30};
         fix->cfg.executor_override = fix->ioc.get_executor();
         fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(4);
-        fix->cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         fix->cfg.enable_next_expected_msg_seq_num = false;  // KNOB OFF
         fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
             fix.capture(data);
@@ -1661,7 +1606,7 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
 
         // Seed outbound=5 so N=5 at the decision point (if knob were on, X=2<N=5 → resend).
         fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/1,
-                                                                      /*next_outbound=*/5);
+                                                                     /*next_outbound=*/5);
         fix->clear_capture();
 
         // Feed inbound Logon with 789=2 (knob off ⇒ must be ignored).
@@ -1702,17 +1647,13 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
 //   Assert NO [1,N-1] full-history replay (no PossDup/GapFill flood).
 
 // Helper: is this frame a Logout (35=5)?
-static bool frame_is_logout(const std::vector<std::byte>& f)
-{
-    return extract_tag(f, 35) == "5";
-}
+static bool frame_is_logout(const std::vector<std::byte>& f) { return extract_tag(f, 35) == "5"; }
 
 // Helper: make a Logon frame with a raw (possibly malformed) 789 value.
 static std::vector<std::byte> make_logon_with_raw_789(std::string_view bs, std::uint32_t seq,
-                                                       std::string_view s, std::string_view t,
-                                                       std::string_view raw_789_value,
-                                                       int hbt = 30)
-{
+                                                      std::string_view s, std::string_view t,
+                                                      std::string_view raw_789_value,
+                                                      int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -1722,8 +1663,7 @@ static std::vector<std::byte> make_logon_with_raw_789(std::string_view bs, std::
 }
 
 // T020 witness 1 (I-NEX-4, C6, D-6) — X > N: both roles.
-TEST(Honor, XgtN_LogoutTextThenDisconnect)
-{
+TEST(Honor, XgtN_LogoutTextThenDisconnect) {
     // ── Acceptor arm ─────────────────────────────────────────────────────────
     // Store through 3 (our_last=3). Seed outbound=4 → reply Logon at seq=4 →
     // peek_outbound=5=N. Peer sends 789=7 (X=7 > N=5) → Logout+Disconnected.
@@ -1738,8 +1678,7 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
         fix->cfg.heartbeat_interval = std::chrono::seconds{30};
         fix->cfg.executor_override = fix->ioc.get_executor();
         fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(3);
-        fix->cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         fix->cfg.enable_next_expected_msg_seq_num = true;
         fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
             fix.capture(data);
@@ -1761,8 +1700,8 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
             << "Honor_XgtN acceptor: session must be Disconnected after X>N";
 
         // A Logout(35=5) must have been emitted.
-        bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
-                                        frame_is_logout);
+        bool found_logout =
+            std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(), frame_is_logout);
         EXPECT_TRUE(found_logout)
             << "Honor_XgtN acceptor: Logout(35=5) must be emitted before disconnect";
 
@@ -1781,8 +1720,11 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
     // ── Initiator arm ─────────────────────────────────────────────────────────
     // Store through 2 (our_last=2). Seed outbound=3 → N=3 at honor time.
     // Peer sends 789=10 (X=10 > N=3) → Logout+Disconnected.
+    // [gate-b/r1 FQ-1] Also assert: Active NEVER entered + onLogon NOT called.
     {
+        auto app = std::make_shared<CountingApp027>();
         auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
         fix->cfg.role = fixpp::session::session_role::initiator;
         fix->cfg.sender_comp_id = "CLI";
         fix->cfg.target_comp_id = "SRV";
@@ -1792,8 +1734,7 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
         fix->cfg.heartbeat_interval = std::chrono::seconds{0};
         fix->cfg.executor_override = fix->ioc.get_executor();
         fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);
-        fix->cfg.reset_seqnum_policy_field =
-            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         fix->cfg.enable_next_expected_msg_seq_num = true;
         fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
             fix.capture(data);
@@ -1814,8 +1755,8 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
         EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
             << "Honor_XgtN initiator: session must be Disconnected after X>N";
 
-        bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
-                                        frame_is_logout);
+        bool found_logout =
+            std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(), frame_is_logout);
         EXPECT_TRUE(found_logout)
             << "Honor_XgtN initiator: Logout(35=5) must be emitted before disconnect";
 
@@ -1825,23 +1766,36 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect)
                 << "Honor_XgtN initiator: no PossDup resend when X>N";
         }
         for (const auto& f : fix->capture.frames) {
-            EXPECT_FALSE(frame_is_gapfill(f))
-                << "Honor_XgtN initiator: no GapFill when X>N";
+            EXPECT_FALSE(frame_is_gapfill(f)) << "Honor_XgtN initiator: no GapFill when X>N";
         }
+
+        // [gate-b/r1 FQ-1 C6/C8 witness] — Active must NEVER have been entered.
+        // The integrity error must be detected BEFORE the Active transition so that
+        // onLogon is never fired and the FSM ring shows no Active visit.
+        {
+            auto hist = fix->session->fsm_visit_history();
+            bool active_seen = std::any_of(
+                hist.begin(), hist.end(),
+                [](fixpp::session::fsm_state s) { return s == fixpp::session::fsm_state::Active; });
+            EXPECT_FALSE(active_seen)
+                << "Honor_XgtN initiator: Active must NEVER appear in fsm_visit_history() "
+                   "on the X>N integrity path (C6 — MUST NOT advance to established as in-sync)";
+        }
+        EXPECT_EQ(app->onLogon_count, 0)
+            << "Honor_XgtN initiator: onLogon must NOT be called on the X>N integrity path (C6)";
     }
 }
 
 // T020 witness 2 (I-NEX-9, C6, D-10) — invalid 789: empty / non-digit / overflow.
 // Evaluated BEFORE X<N compare (D-10 security guard).
 // Assert NO [1,N-1] replay for any invalid value.
-TEST(Honor, Invalid789_LogoutThenDisconnect)
-{
+TEST(Honor, Invalid789_LogoutThenDisconnect) {
     // Table of invalid raw 789 values.
     // overflow: a value larger than UINT32_MAX (4294967295).
     const std::vector<std::pair<std::string, std::string_view>> invalid_cases = {
-        {"empty",     ""},
+        {"empty", ""},
         {"non-digit", "abc"},
-        {"overflow",  "99999999999"},  // > UINT32_MAX
+        {"overflow", "99999999999"},  // > UINT32_MAX
     };
 
     for (const auto& [label, raw789] : invalid_cases) {
@@ -1888,19 +1842,24 @@ TEST(Honor, Invalid789_LogoutThenDisconnect)
             // NO [1,N-1] replay — the D-10 guard must fire BEFORE X<N.
             for (const auto& f : fix->capture.frames) {
                 EXPECT_NE(extract_tag(f, 43), "Y")
-                    << "Honor_Invalid789 acceptor [" << label << "]: "
+                    << "Honor_Invalid789 acceptor [" << label
+                    << "]: "
                        "no PossDup resend — D-10 invalid-first guard must block X<N";
             }
             for (const auto& f : fix->capture.frames) {
                 EXPECT_FALSE(frame_is_gapfill(f))
-                    << "Honor_Invalid789 acceptor [" << label << "]: "
+                    << "Honor_Invalid789 acceptor [" << label
+                    << "]: "
                        "no GapFill — D-10 invalid-first guard must block X<N";
             }
         }
 
         // ── Initiator arm ─────────────────────────────────────────────────────
+        // [gate-b/r1 FQ-1] Also assert: Active NEVER entered + onLogon NOT called.
         {
+            auto app = std::make_shared<CountingApp027>();
             auto fix = std::make_unique<Fixture>();
+            fix->eng.application = app;
             fix->cfg.role = fixpp::session::session_role::initiator;
             fix->cfg.sender_comp_id = "CLI";
             fix->cfg.target_comp_id = "SRV";
@@ -1940,14 +1899,33 @@ TEST(Honor, Invalid789_LogoutThenDisconnect)
             // NO [1,N-1] replay.
             for (const auto& f : fix->capture.frames) {
                 EXPECT_NE(extract_tag(f, 43), "Y")
-                    << "Honor_Invalid789 initiator [" << label << "]: "
+                    << "Honor_Invalid789 initiator [" << label
+                    << "]: "
                        "no PossDup resend — D-10 invalid-first guard";
             }
             for (const auto& f : fix->capture.frames) {
-                EXPECT_FALSE(frame_is_gapfill(f))
-                    << "Honor_Invalid789 initiator [" << label << "]: "
-                       "no GapFill — D-10 invalid-first guard";
+                EXPECT_FALSE(frame_is_gapfill(f)) << "Honor_Invalid789 initiator [" << label
+                                                  << "]: "
+                                                     "no GapFill — D-10 invalid-first guard";
             }
+
+            // [gate-b/r1 FQ-1 C6/C8 witness] — Active must NEVER have been entered.
+            {
+                auto hist = fix->session->fsm_visit_history();
+                bool active_seen =
+                    std::any_of(hist.begin(), hist.end(), [](fixpp::session::fsm_state s) {
+                        return s == fixpp::session::fsm_state::Active;
+                    });
+                EXPECT_FALSE(active_seen)
+                    << "Honor_Invalid789 initiator [" << label
+                    << "]: "
+                       "Active must NEVER appear in fsm_visit_history() on the invalid-789 path "
+                       "(C6 — MUST NOT advance to established as in-sync)";
+            }
+            EXPECT_EQ(app->onLogon_count, 0)
+                << "Honor_Invalid789 initiator [" << label
+                << "]: "
+                   "onLogon must NOT be called on the invalid-789 path (C6)";
         }
     }
 }
