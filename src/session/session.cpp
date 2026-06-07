@@ -1545,9 +1545,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // peer_sent_reset declared at case scope so the acceptor-reply block below
             // can read it when deciding whether to mirror 141=Y in our reply Logon.
             // [spec.md FR-017; RC#C gate-b/r1]
+            //
+            // 027 T014: peer_789_raw hoisted to case scope so the RC#4-ordering honor
+            // block (after reply store_then_emit) can read it. string_view is safe
+            // because frame (the coroutine parameter) outlives this case.
+            // [contract C4, data-model I-NEX-2, RC#4]
             bool peer_sent_reset = false;
+            std::string_view peer_789_raw;
             {
                 auto hdr = scan_frame_header(frame);
+                peer_789_raw = hdr.next_expected_msg_seq_num;
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — treat as invalid (fatal for protocol safety).
@@ -1788,6 +1795,33 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(emit_r.error());
                 }
+            }
+
+            // 027 T014 — acceptor 789 honor (RC#4 ordering: AFTER reply store_then_emit).
+            // Read peer's NextExpectedMsgSeqNum(789) from the inbound Logon.
+            // N = peek_outbound() sampled here (post-reply-assign); messages [1,N-1] sent.
+            // [contract C4, data-model I-NEX-2/3/11]
+            if (cfg_.enable_next_expected_msg_seq_num && !peer_789_raw.empty()) {
+                const seqnum_t x789 = parse_seqnum(peer_789_raw);
+                const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
+                if (x789 == 0 || x789 > n789) {
+                    // Present-but-invalid (parse→0) or too-high (X>N):
+                    // interim-safe fatal disconnect (US3/T021 will add build_logout).
+                    // [contract C4, I-NEX-4/9 — interim routing until T021]
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                } else if (x789 < n789) {
+                    // X < N: proactively resend [X, N-1].
+                    // Caller (this) owns the Disconnected transition on failure.
+                    // [contract C4, I-NEX-2/3]
+                    auto rr789 = co_await replay_outbound_range_(
+                        x789, n789 - 1U, /*end_is_through_current=*/true);
+                    if (!rr789) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(rr789.error());
+                    }
+                }
+                // X == N: in sync, no resend.
             }
 
             // Reply Logon successfully emitted: transition to Active.
@@ -2887,6 +2921,35 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // NOLINTNEXTLINE(misc-include-cleaner)
                 asio::co_spawn(ex, run_liveness_loop(),
                                asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
+            }
+
+            // 027 T015 — initiator 789 honor (after processing the Logon-ack).
+            // Our own Logon was already sent at open()/emit_initiator_logon_() (:601).
+            // hdr is at case scope (scanned at :2665); next_expected_msg_seq_num valid.
+            // N = peek_outbound() sampled here (post-Active, post-Logon-ack processing).
+            // [contract C4/C8, data-model I-NEX-2/3/11]
+            if (cfg_.enable_next_expected_msg_seq_num &&
+                !hdr.next_expected_msg_seq_num.empty()) {
+                const seqnum_t x789 = parse_seqnum(hdr.next_expected_msg_seq_num);
+                const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
+                if (x789 == 0 || x789 > n789) {
+                    // Present-but-invalid (parse→0) or too-high (X>N):
+                    // interim-safe fatal disconnect (US3/T021 will add build_logout).
+                    // [contract C4, I-NEX-4/9 — interim routing until T021]
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                } else if (x789 < n789) {
+                    // X < N: proactively resend [X, N-1].
+                    // Caller (this) owns the Disconnected transition on failure.
+                    // [contract C4/C8, I-NEX-2/3]
+                    auto rr789 = co_await replay_outbound_range_(
+                        x789, n789 - 1U, /*end_is_through_current=*/true);
+                    if (!rr789) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(rr789.error());
+                    }
+                }
+                // X == N: in sync, no resend.
             }
 
             co_return fixpp::core::expected_t<void>{};
