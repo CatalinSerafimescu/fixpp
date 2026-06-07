@@ -10,7 +10,7 @@ Interface-level contracts for the 027 slice. No C-ABI surface, no new error slot
 - `build_logon(..., std::optional<seqnum_t> next_expected_seq = std::nullopt)` (internal `admin_messages.hpp` builder).
   - `next_expected_seq` present ⇒ append `789=<value>` after the `141` block (`admin_messages.cpp:150-155`); valid SEQNUM, ≥1.
   - absent (default) ⇒ no 789 field; output byte-identical to today.
-- Header capture: `scan_frame_header` (`session.cpp:1170`) gains a `case 789:` writing `FrameHeader::next_expected_msg_seq_num` (E3). `interpret_logon` is unchanged (tolerates the optional field).
+- Header capture: the `scan_frame_header` switch (`session.cpp:1213`) gains a `case 789:` writing `FrameHeader::next_expected_msg_seq_num` (E3; consistent with data-model E3 + tasks T011). `interpret_logon` is unchanged (tolerates the optional field).
 - Call sites pass the value only when the knob is on, **plain `next_inbound_unsafe()` (NO `+1`)**:
   - Initiator (`session.cpp:601`): `next_expected_seq = seqnum_mgr_.next_inbound_unsafe()`.
   - Acceptor reply (`session.cpp:1745`): `next_expected_seq = seqnum_mgr_.next_inbound_unsafe()` — already post-`check_inbound` increment (E-OBO; the value is cause-dependent under 141, data-model Reset table).
