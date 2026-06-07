@@ -943,8 +943,7 @@ private:
     //   (2) 789 honor path (T014/T015, US1): begin=X, requested_end=N-1,
     //       end_is_through_current=true.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> replay_outbound_range_(
-        fixpp::session::seqnum_t begin,
-        fixpp::session::seqnum_t requested_end,
+        fixpp::session::seqnum_t begin, fixpp::session::seqnum_t requested_end,
         bool end_is_through_current) noexcept;
 
     // 027 — honor_peer_next_expected_: shared body for the 789-honor dispatch.
@@ -967,8 +966,8 @@ private:
     //
     // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
     // remains at each call site so the knob-off / tag-absent no-op stays visible.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>>
-    honor_peer_next_expected_(std::string_view raw_789, bool present_789) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>> honor_peer_next_expected_(
+        std::string_view raw_789, bool present_789) noexcept;
 };
 
 }  // namespace fixpp::session

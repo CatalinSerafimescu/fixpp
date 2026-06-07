@@ -1171,9 +1171,11 @@ struct FrameHeader {
     std::string_view poss_dup_flag;      // tag 43 (PossDupFlag "Y"/"N")
     std::string_view orig_sending_time;  // tag 122 (OrigSendingTime) — 021 PossDup
     std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
-    std::string_view reset_seqnum_flag;       // tag 141 (ResetSeqNumFlag in Logon)
-    std::string_view next_expected_msg_seq_num;  // tag 789 value (may be empty if field present-but-empty) — 027
-    bool next_expected_present = false;          // tag 789 was present in frame (even if value is empty) — 027
+    std::string_view reset_seqnum_flag;  // tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view
+        next_expected_msg_seq_num;  // tag 789 value (may be empty if field present-but-empty) — 027
+    bool next_expected_present =
+        false;  // tag 789 was present in frame (even if value is empty) — 027
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -1264,8 +1266,9 @@ struct FrameHeader {
                 break;  // T027 ResetSeqNumFlag
             case 789:
                 h.next_expected_msg_seq_num = val;
-                h.next_expected_present = true;  // set even when val is empty (D-10 empty-value guard)
-                break;  // 027 NextExpectedMsgSeqNum in Logon
+                h.next_expected_present =
+                    true;  // set even when val is empty (D-10 empty-value guard)
+                break;     // 027 NextExpectedMsgSeqNum in Logon
             default:
                 break;
         }
@@ -2952,8 +2955,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Delegates to honor_peer_next_expected_() — single implementation.
             // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
             if (cfg_.enable_next_expected_msg_seq_num && hdr.next_expected_present) {
-                auto h789 = co_await honor_peer_next_expected_(
-                    hdr.next_expected_msg_seq_num, hdr.next_expected_present);
+                auto h789 = co_await honor_peer_next_expected_(hdr.next_expected_msg_seq_num,
+                                                               hdr.next_expected_present);
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
@@ -3949,20 +3952,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 //   unexpected(app_callback_threw)              — a GapFill toAdmin threw
 //   unexpected(dispatch_aborted)                — transport write error
 
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
-                                bool end_is_through_current) noexcept
-{
-    const auto st52_sr =
-        effective_clock_
-            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-            : SendingTimeStamp{};
+asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
+    seqnum_t begin, seqnum_t requested_end, bool end_is_through_current) noexcept {
+    const auto st52_sr = effective_clock_
+                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                             : SendingTimeStamp{};
 
     // Transmit a single replay/gapfill frame; returns false on write error.
     // Uses the live-write path when a transport is attached; sync transport_send_
     // for pre-live/test paths.
-    const auto transmit_async =
-        [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
+    const auto transmit_async = [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
         if (live_transport_shared_()) {
             auto wr = co_await live_write_serialized_(f);
             co_return wr.has_value();
@@ -3979,19 +3978,18 @@ Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
     };
 
     const auto is_admin_type = [](std::string_view mt) -> bool {
-        return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
-               mt == "5" || mt == "A";
+        return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" || mt == "5" ||
+               mt == "A";
     };
 
     // FIX-3 (gate-b/r1): set when emit_gapfill_async detects a toAdmin throw.
     bool gapfill_callback_threw = false;
-    const auto emit_gapfill_async =
-        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
+    const auto emit_gapfill_async = [&](seqnum_t at_seq,
+                                        seqnum_t new_seqno) -> asio::awaitable<bool> {
         std::array<std::byte, 256> gf_buf{};
         auto gf = fixpp::session::build_sequence_reset_gapfill(
-            std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
-            cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
-            st52_sr.value);
+            std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq, cfg_.sender_comp_id,
+            cfg_.target_comp_id, new_seqno, cfg_.begin_string, st52_sr.value);
         if (!gf) {
             co_return true;
         }  // build failure treated as no-op
@@ -4011,10 +4009,9 @@ Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
         auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
         if (ns) our_last = (*ns > 0) ? (*ns - 1U) : 0;
     }
-    const seqnum_t eff_end =
-        (end_is_through_current || (our_last > 0 && requested_end > our_last))
-            ? our_last
-            : requested_end;
+    const seqnum_t eff_end = (end_is_through_current || (our_last > 0 && requested_end > our_last))
+                                 ? our_last
+                                 : requested_end;
 
     // No store, or nothing to replay in range → single GapFill covering the
     // whole requested range (empty-store CHK032).
@@ -4051,8 +4048,7 @@ Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
         const bool app_present =
             rr && cv.captured &&
             !is_admin_type(
-                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len})
-                    .msg_type);
+                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
         if (app_present) {
             if (gap_open) {
                 if (!co_await emit_gapfill_async(gap_start, k)) {
@@ -4064,9 +4060,8 @@ Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
                 gap_open = false;
             }
             std::array<std::byte, kRpBufSize> rp_buf{};
-            auto rp = build_replay_frame(
-                std::span<std::byte>{rp_buf.data(), rp_buf.size()},
-                std::span<const std::byte>{cv.buf.data(), cv.len});
+            auto rp = build_replay_frame(std::span<std::byte>{rp_buf.data(), rp_buf.size()},
+                                         std::span<const std::byte>{cv.buf.data(), cv.len});
             if (rp && !co_await transmit_async(*rp)) {
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
             }
@@ -4104,10 +4099,8 @@ Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
 //                              caller MUST co_return expected_t<void>{}.
 //   unexpected(err)          — X<N resend failed; Disconnected recorded;
 //                              caller MUST co_return std::unexpected(err).
-asio::awaitable<fixpp::core::expected_t<bool>>
-Session::honor_peer_next_expected_(std::string_view raw_789,
-                                   bool /*present_789*/) noexcept
-{
+asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected_(
+    std::string_view raw_789, bool /*present_789*/) noexcept {
     const seqnum_t x789 = parse_seqnum(raw_789);
     const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
     if (x789 == 0) {
@@ -4117,15 +4110,14 @@ Session::honor_peer_next_expected_(std::string_view raw_789,
         // [contract C6, I-NEX-9, D-10]
         {
             std::array<std::byte, 256> lo_buf{};
-            const auto lo_st52 = effective_clock_
-                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-                : SendingTimeStamp{};
+            const auto lo_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                       cfg_.sending_time_precision)
+                                                  : SendingTimeStamp{};
             const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
             auto lo_result = fixpp::session::build_logout(
-                std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
-                cfg_.sender_comp_id, cfg_.target_comp_id,
-                "NextExpectedMsgSeqNum invalid",
-                cfg_.begin_string, lo_st52.value);
+                std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
+                cfg_.target_comp_id, "NextExpectedMsgSeqNum invalid", cfg_.begin_string,
+                lo_st52.value);
             if (lo_result) {
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
@@ -4156,14 +4148,13 @@ Session::honor_peer_next_expected_(std::string_view raw_789,
             const std::string_view text_sv{text_buf, static_cast<std::size_t>(tp - text_buf)};
 
             std::array<std::byte, 256> lo_buf{};
-            const auto lo_st52 = effective_clock_
-                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-                : SendingTimeStamp{};
+            const auto lo_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                       cfg_.sending_time_precision)
+                                                  : SendingTimeStamp{};
             const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
             auto lo_result = fixpp::session::build_logout(
-                std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
-                cfg_.sender_comp_id, cfg_.target_comp_id, text_sv,
-                cfg_.begin_string, lo_st52.value);
+                std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
+                cfg_.target_comp_id, text_sv, cfg_.begin_string, lo_st52.value);
             if (lo_result) {
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
@@ -4177,8 +4168,8 @@ Session::honor_peer_next_expected_(std::string_view raw_789,
     } else if (x789 < n789) {
         // X < N: proactively resend [X, N-1].
         // [contract C4/C8, I-NEX-2/3]
-        auto rr789 = co_await replay_outbound_range_(
-            x789, n789 - 1U, /*end_is_through_current=*/true);
+        auto rr789 =
+            co_await replay_outbound_range_(x789, n789 - 1U, /*end_is_through_current=*/true);
         if (!rr789) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(rr789.error());
