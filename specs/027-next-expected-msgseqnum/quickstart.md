@@ -13,24 +13,33 @@ cfg.enable_next_expected_msg_seq_num = true;   // default false; enable on BOTH 
 
 1. Each side's Logon carries `NextExpectedMsgSeqNum(789)` = the next inbound seqnum it expects from the peer.
 2. On receiving the peer's Logon with `789 = X`, with `N` = our next-outbound:
-   - **X < N** → we proactively resend `[X, N-1]` right after our Logon (application messages with `PossDupFlag=Y`+`OrigSendingTime`; admin gaps as `SeqReset`-`GapFill`) — **no `ResendRequest`**.
+   - **invalid X** (empty / non-numeric / overflow) → treated as a sequence-integrity error → `Logout` + disconnect (checked before the X<N compare, so a malformed 789 can never trigger a full-history replay).
+   - **X < N** → we proactively resend `[X, N-1]` right after our Logon (application messages with `PossDupFlag=Y`+`OrigSendingTime`; admin gaps as `SeqReset`-`GapFill`) — **no `ResendRequest`**. (The acceptor emits the resend after its reply Logon; the initiator after processing the Logon-ack.)
    - **X == N** → in sync, nothing resent.
    - **X > N** → the peer claims messages we never sent → we send a `Logout` (with explanatory text) and disconnect.
-3. The gap is recovered within the Logon exchange — the `ResendRequest`→resend round-trip is eliminated.
+3. If we are the behind side (our own Logon `MsgSeqNum` is too-high for the peer), we do NOT fatally disconnect at logon and we do NOT send a `ResendRequest`. We keep our inbound counter where it is and admit the peer's proactive resend (driven by our advertised 789) **in sequence**: each resent frame advances our inbound counter by one until it reaches the peer's next live sequence number, so the next live frame is in sync. (We do NOT jump our counter past the peer's Logon seqnum — that would make the resent frames look too-low and disconnect; the held Logon's seqnum is recovered simply by being inside the resend range.) Both directions work simultaneously if both sides have a gap.
+4. The gap is recovered within the Logon exchange — the `ResendRequest`→resend round-trip is eliminated. (If the peer's proactive resend is itself lost, the residual gap is re-requested on the next inbound frame via the steady-state recovery path.)
 
 ## Scenarios → witnesses
 
 | Scenario | Witness (`tests/session/test_next_expected_msgseqnum.cpp`) |
 |---|---|
 | Initiator advertises correct 789 | `Emit_Initiator_AdvertisesNextExpectedInbound` |
-| Acceptor reply advertises correct 789 (off-by-one) | `Emit_AcceptorReply_OffByOneCorrect` |
-| Peer behind (X<N) → exact resend, no ResendRequest | `Honor_XltN_ResendsExactRange_NoResendRequest` |
+| Acceptor reply advertises correct 789 (plain, no `+1`) | `Emit_AcceptorReply_AdvertisesNextInboundNoPlusOne` |
+| Acceptor peer behind (X<N) → exact resend AFTER reply, no ResendRequest | `Honor_Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest` |
+| Initiator peer behind (X<N) → exact resend, no ResendRequest | `Honor_Initiator_XltN_ResendsExactRange_NoResendRequest` |
 | In sync (X==N) → no resend | `Honor_XeqN_NoResend` |
 | Impossible expectation (X>N) → Logout+disconnect | `Honor_XgtN_LogoutTextThenDisconnect` |
+| Invalid 789 (empty / non-numeric / overflow) → Logout+disconnect | `Honor_Invalid789_LogoutThenDisconnect` |
+| Behind side admits peer's resend, no fatal disconnect | `BehindSide_KnobOn_AdmitsPeerResend_NoFatalDisconnect` |
+| Bidirectional gap → both recover, no double recovery | `Bidirectional_BothGaps_RecoverNoDoubleRecovery` |
+| Lost proactive resend → self-heals via Active arm | `LostResend_SelfHealsViaActiveArm` |
 | Knob off → byte-identical, inbound 789 ignored | `DefaultOff_ByteIdenticalLogon_InboundIgnored` |
-| ResendRequest suppressed on, kept off | `Suppression_KnobOn_NoResendRequest_KnobOff_Yes` |
-| 141=Y reset + 789 → advertises 1 | `Reset141Plus789_AdvertisesOne` |
-| No heap on emit/resend | `NoHeap_EmitAndResendPath` |
+| At-logon ResendRequest suppressed on, kept off | `Suppression_KnobOn_NoAtLogonResendRequest_KnobOff_Yes` |
+| Reset cause table (1 / 2 / 1) | `Reset_InitiatorResetLogon_Advertises1`, `Reset_AcceptorReplyResetOnLogon_Advertises2`, `Reset_AcceptorReplyReceived141_Advertises1` |
+| Walk has a single implementation | `WalkExtraction_SingleImplementation` |
+| Walk two-value end (explicit-end-beyond-store / `EndSeqNo=0`-empty-store, both callers) | `WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore`, `WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore` |
+| No heap on emit/resend (789 entry) | `NoHeap_EmitAndResendPath_789Entry` |
 | Live both-role vs QFcpp/QFJ | `tests/interop/happy/hp_fix44_next_expected_test.cpp` (skip-without-counterparty) |
 
 ## Not in scope
