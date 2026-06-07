@@ -158,15 +158,20 @@ TEST_F(SessionSpansFullTest, ToSpanContextNonZeroBranch) {
     auto spans = get_spans();
     auto* lifecycle = find_span(spans, "fixpp.session.lifecycle");
     ASSERT_NE(lifecycle, nullptr);
-    // The lifecycle span must be remote-parented (not a root span).
-    // parent_span_id must not be invalid (all-zero is the invalid span_id).
+
+    // The lifecycle span must be remote-parented: GetParentSpanId() must equal
+    // the supplied parent.span_id bytes byte-for-byte.
+    // to_span_context() builds a SpanContext with span_id from parent.span_id;
+    // the SDK propagates that as the parent span_id of the lifecycle span.
     const auto& parent_sid = lifecycle->GetParentSpanId();
-    bool parent_zero = true;
-    uint8_t buf[8]{};
-    parent_sid.CopyBytesTo(opentelemetry::nostd::span<uint8_t, 8>{buf, 8});
-    for (auto b : buf) { if (b != 0) { parent_zero = false; break; } }
-    EXPECT_FALSE(parent_zero)
-        << "lifecycle span must carry a non-zero parent span_id when given a non-zero parent_ctx";
+    uint8_t actual_buf[8]{};
+    parent_sid.CopyBytesTo(opentelemetry::nostd::span<uint8_t, 8>{actual_buf, 8});
+
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_EQ(actual_buf[i], static_cast<uint8_t>(parent.span_id[i]))
+            << "GetParentSpanId() byte[" << i << "] does not match parent.span_id["
+            << i << "]; to_span_context must preserve span_id bytes";
+    }
 }
 
 // ── round-trip: fill trace_context → SessionSpans → session_trace_context ────
@@ -180,16 +185,22 @@ TEST_F(SessionSpansFullTest, TraceContextRoundTrip) {
     fixpp::otel::trace_context parent{};
     for (int i = 0; i < 16; ++i) parent.trace_id[i] = static_cast<std::byte>(0xAB);
     for (int i = 0; i < 8;  ++i) parent.span_id[i]  = static_cast<std::byte>(0xCD);
-    parent.flags = 0x01U;
+    parent.flags = 0x01U;  // sampled
 
     fixpp::otel::SessionSpans ss{*provider_, "SENDER", "TARGET", parent};
 
-    // session_trace_context() returns the LIFECYCLE SPAN's own context, not the
-    // parent's.  The trace_id is SHARED across the chain (same trace), so it must
-    // match the parent's trace_id bytes.
+    // session_trace_context() returns the LIFECYCLE SPAN's own context (via
+    // from_span_context), not the parent's context.  The lifecycle span is started
+    // as a child of parent, so:
+    //   • trace_id is SHARED across the chain — must equal parent.trace_id.
+    //   • flags reflect the sampling decision propagated from parent.flags —
+    //     must equal parent.flags (from_span_context copies TraceFlags::flags()).
     auto tc = ss.session_trace_context();
     EXPECT_EQ(tc.trace_id, parent.trace_id)
         << "trace_id must be propagated from parent through the lifecycle span";
+    EXPECT_EQ(tc.flags, parent.flags)
+        << "flags must be propagated from parent through the lifecycle span; "
+           "from_span_context copies sc.trace_flags().flags() into tc.flags";
 }
 
 // ── make_store_span: set_seq_num + ok branch ──────────────────────────────────

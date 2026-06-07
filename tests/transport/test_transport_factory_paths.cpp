@@ -222,22 +222,31 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
     ASSERT_TRUE(client_transport_result.has_value()) << static_cast<int>(client_transport_result.error());
 
     auto client_transport = std::move(*client_transport_result);
-    auto* client_tls = dynamic_cast<TlsTransport*>(client_transport.get());
-    ASSERT_NE(client_tls, nullptr);
+
+    // Verify the transport is a TlsTransport before moving it into the coroutine.
+    ASSERT_NE(dynamic_cast<TlsTransport*>(client_transport.get()), nullptr);
 
     expected_t<fixpp::transport::handshake_result> client_handshake =
         std::unexpected{error::transport_handshake_cancelled};
     expected_t<fixpp::transport::handshake_result> server_handshake =
         std::unexpected{error::transport_handshake_cancelled};
 
-    asio::co_spawn(
+    // Move the transport into the coroutine by value; derive TlsTransport*
+    // INSIDE the coroutine so it is never dangled across a suspension point.
+    // Keep the future so we can bounded-wait on it after run_for.
+    auto client_future = asio::co_spawn(
         ioc.get_executor(),
-        [&, client = std::move(client_transport)]() mutable -> asio::awaitable<void> {
-            auto connected = co_await client->async_connect(Endpoint{"127.0.0.1", port, 0});
+        [client_moved = std::move(client_transport),
+         &client_handshake, &client_cfg, port]() mutable -> asio::awaitable<void> {
+            auto connected = co_await client_moved->async_connect(Endpoint{"127.0.0.1", port, 0});
             if (!connected.has_value()) {
                 co_return;
             }
-            client_handshake = co_await client_tls->async_handshake(client_cfg);
+            auto* tls = dynamic_cast<TlsTransport*>(client_moved.get());
+            if (tls == nullptr) {
+                co_return;
+            }
+            client_handshake = co_await tls->async_handshake(client_cfg);
         },
         asio::use_future);
 
@@ -254,14 +263,24 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
     auto* server_tls = dynamic_cast<TlsTransport*>(server_transport_result->get());
     ASSERT_NE(server_tls, nullptr);
 
-    asio::co_spawn(
+    // Keep the future so we can bounded-wait after run_for.
+    // server_tls is valid for the duration of the coroutine because
+    // server_transport_result outlives the ioc.run_for + future.wait_for below.
+    auto server_future = asio::co_spawn(
         ioc.get_executor(),
-        [&]() -> asio::awaitable<void> {
+        [server_tls, &server_handshake, &server_cfg]() -> asio::awaitable<void> {
             server_handshake = co_await server_tls->async_handshake(server_cfg);
         },
         asio::use_future);
 
     ioc.run_for(10s);
+
+    // Bounded-wait both futures to ensure both coroutines have completed and no
+    // coroutine outlives any referenced stack locals.
+    ASSERT_EQ(client_future.wait_for(0s), std::future_status::ready)
+        << "client coroutine did not complete within the run_for deadline";
+    ASSERT_EQ(server_future.wait_for(0s), std::future_status::ready)
+        << "server coroutine did not complete within the run_for deadline";
 
     ASSERT_TRUE(server_handshake.has_value()) << static_cast<int>(server_handshake.error());
     EXPECT_TRUE(client_handshake.has_value()) << static_cast<int>(client_handshake.error());

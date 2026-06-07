@@ -511,6 +511,7 @@ TEST(AsioTlsTransportErrorPaths, GracefulTlsShutdownMapsToTransportReadEof) {
     std::array<std::byte, 8> buf{};
     std::optional<expected_t<std::size_t>> read_result;
     asio::error_code shutdown_ec;
+    bool shutdown_done = false;  // completion flag for the shutdown coroutine
 
     // Server waits for data; client sends TLS close_notify (async_shutdown).
     asio::co_spawn(
@@ -525,21 +526,36 @@ TEST(AsioTlsTransportErrorPaths, GracefulTlsShutdownMapsToTransportReadEof) {
         [&]() -> asio::awaitable<void> {
             co_await pair->raw_client->async_shutdown(
                 asio::redirect_error(asio::use_awaitable, shutdown_ec));
+            shutdown_done = true;
         },
         asio::detached);
 
-    // Pump only until the server read completes (close_notify → EOF). We do NOT
-    // drain all work: the client's async_shutdown waits for a reciprocal
-    // close_notify the server never sends, so it stays pending — draining would
-    // burn the full 10 s deadline. Poll for the observable; 10 s is a safety cap.
-    const auto deadline = std::chrono::steady_clock::now() + 10s;
-    while (!read_result.has_value() && std::chrono::steady_clock::now() < deadline) {
+    // Phase 1: pump until the server read completes (close_notify → EOF).
+    // The client's async_shutdown is still pending — it waits for the server's
+    // reciprocal close_notify which the server has not sent yet.
+    const auto phase1_deadline = std::chrono::steady_clock::now() + 10s;
+    while (!read_result.has_value() && std::chrono::steady_clock::now() < phase1_deadline) {
         pair->ioc.run_for(50ms);
     }
 
     ASSERT_TRUE(read_result.has_value()) << "server read must complete within 10 s";
     ASSERT_FALSE(read_result->has_value());
     EXPECT_EQ(read_result->error(), error::transport_read_eof);
+
+    // Phase 2: close the raw client's TCP socket to unblock the pending
+    // async_shutdown (which is waiting for a reciprocal close_notify the server
+    // will never send).  Then pump until the shutdown coroutine completes.
+    {
+        asio::error_code close_ec;
+        pair->raw_client->lowest_layer().close(close_ec);
+    }
+
+    const auto phase2_deadline = std::chrono::steady_clock::now() + 5s;
+    while (!shutdown_done && std::chrono::steady_clock::now() < phase2_deadline) {
+        pair->ioc.run_for(50ms);
+    }
+    EXPECT_TRUE(shutdown_done)
+        << "async_shutdown coroutine must complete after client socket close";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

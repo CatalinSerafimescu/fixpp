@@ -194,6 +194,9 @@ target_include_directories(transport_listener_accept_error_cancel PRIVATE
 target_link_libraries(transport_listener_accept_error_cancel PRIVATE
   fixpp_transport
   fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
   GTest::gtest
   GTest::gtest_main)
 add_test(NAME transport_listener_accept_error_cancel
