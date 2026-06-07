@@ -110,8 +110,15 @@ PHASE 4 — PUBLISH + MERGE
     b. parent: submodule-pointer bump commit (post-merge)
     c. gate-{a,b}-{done,waived} label via `gh api` REST on the merged PR
        (post-PR gap recurs; `gh pr edit --add-label/--body` silently fails)
-    d. phases/phase-4.md Track Log: Phase status / Active module / Active
-       feature / Last action / Next gate; + Module Status table row
+    d. phases/phase-4.md is a STATUS dashboard ONLY — update only the
+       terse Track Log status cells (Phase status / Active module / Active
+       feature / Last action / Next gate) + the Module Status table row.
+       Do NOT write decision/convergence narrative here. The feature's
+       Gate A/B story + sign-off go in its per-feature sub-file
+       phases/phase-4/<module>/<feature>.md; cross-feature/cross-module
+       lessons go in phases/phase-4/cross-module-decisions.md; stable
+       process reference is phases/phase-4/methodology.md. (Split
+       2026-06-07 to stop phase-4.md re-bloating.)
     e. phases/phase-4/<module>/README.md: feature progress + exit-criteria
     f. controlling plan / decision-doc progress log if one governs this
        work (e.g. .specify/decisions/<plan>.md progress table) — LOCAL-ONLY
