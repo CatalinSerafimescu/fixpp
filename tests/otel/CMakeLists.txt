@@ -71,3 +71,46 @@ if(TARGET opentelemetry-cpp::api)
   endif()
   add_test(NAME ts12_session_spans COMMAND test_session_spans)
 endif()
+
+# ── test_session_spans_full ───────────────────────────────────────────────────
+# Coverage-remediation: exercises SessionSpans ctor/dtor, make_store_span,
+# make_dispatch_span, session_trace_context (from_span_context), the
+# to_span_context non-zero path, StoreSpan and DispatchSpan ok/error branches.
+# Uses fixpp::otel::TracerProvider with tracer_factory_for_test injection.
+if(TARGET opentelemetry-cpp::api)
+  add_executable(test_session_spans_full test_session_spans_full.cpp)
+  target_link_libraries(test_session_spans_full PRIVATE
+    fixpp_otel
+    opentelemetry-cpp::exporter_in_memory
+    opentelemetry-cpp::trace
+    GTest::gtest
+    GTest::gtest_main
+  )
+  if(OTEL_EXPORTER_IN_MEMORY_LIB)
+    target_link_libraries(test_session_spans_full PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB})
+  else()
+    find_library(OTEL_EXPORTER_IN_MEMORY_LIB_2
+      NAMES opentelemetry_exporter_in_memory
+      HINTS ${opentelemetry-cpp_LIB_DIRS_DEBUG} ${opentelemetry-cpp_LIB_DIRS}
+    )
+    if(OTEL_EXPORTER_IN_MEMORY_LIB_2)
+      target_link_libraries(test_session_spans_full PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB_2})
+    endif()
+  endif()
+  add_test(NAME ts12_session_spans_full COMMAND test_session_spans_full)
+endif()
+
+# ── test_exporters ────────────────────────────────────────────────────────────
+# Coverage-remediation: exercises PrometheusExporter ctor/shutdown,
+# OtlpMetricExporter ctor/shutdown, OtelDualExportBuilder::with_prometheus /
+# with_otlp / build (two-AddMetricReader wiring).
+if(TARGET opentelemetry-cpp::api)
+  add_executable(test_exporters test_exporters.cpp)
+  target_link_libraries(test_exporters PRIVATE
+    fixpp_otel
+    opentelemetry-cpp::metrics
+    GTest::gtest
+    GTest::gtest_main
+  )
+  add_test(NAME otel_exporters COMMAND test_exporters)
+endif()
