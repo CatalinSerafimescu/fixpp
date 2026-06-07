@@ -31,8 +31,10 @@
 
 ## Notes
 
-- Two axes deliberately left to `/speckit-clarify` (next pipeline step) with informed defaults recorded in Assumptions, to be settled by the reference-engine sweep (QuickFIX-cpp/QFJ `EnableNextExpectedMsgSeqNum`):
-  1. **Version applicability** — implement now on fixpp's FIX 4.4 sessions (QuickFIX 4.x parity) vs. gate to FIXT/5.0 (defer to G4). Default: do it now on 4.4.
-  2. **Asymmetric-peer fallback** — exact fallback shape when the knob is on but the peer ignores 789 (FR-009). Default: fall back to standard ResendRequest.
-- One real dependency to confirm at plan: dictionary/field support for tag **789** in the Logon message (emit + parse). Assumed additive with no new error slot; if it requires a codegen/dictionary change, that surfaces at /speckit-plan.
-- Status: all items pass — ready for `/speckit-clarify`.
+- `/speckit-clarify` (2026-06-07) resolved the deferred axes via the reference-engine sweep (QuickFIX-cpp v1.16.0 + QuickFIX/J 3.0.1):
+  1. **Version applicability** — RESOLVED: implement now on FIX 4.4 (789 ships in QFcpp `fix44/Logon.h`); FIXT/5.0 gating defers to G4.
+  2. **Asymmetric-peer fallback** — RESOLVED: **no automatic ResendRequest fallback** (789 is both-peers-required; FR-009 revised from a fallback to a documented limitation — corrected a spec/reference divergence).
+  3. **Knob shape** — RESOLVED: single additive `SessionConfig` bool (emit+honor), default off.
+  4. **Too-high disposition** — RESOLVED: Logout(text)+disconnect (FR-005 sharpened).
+- One real dependency to confirm at plan: dictionary/field support for tag **789** in the Logon message (emit + parse). QFcpp ships it in the 4.4 Logon; for fixpp this is assumed additive with no new error slot — if it requires a codegen/dictionary change, that surfaces at `/speckit-plan`.
+- Status: all items pass; clarifications integrated — ready for `/speckit-plan`.
