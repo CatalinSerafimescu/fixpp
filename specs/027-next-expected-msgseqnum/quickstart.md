@@ -31,11 +31,11 @@ cfg.enable_next_expected_msg_seq_num = true;   // default false; enable on BOTH 
 | In sync (X==N) → no resend | `Honor_XeqN_NoResend` |
 | Impossible expectation (X>N) → Logout+disconnect | `Honor_XgtN_LogoutTextThenDisconnect` |
 | Invalid 789 (empty / non-numeric / overflow) → Logout+disconnect | `Honor_Invalid789_LogoutThenDisconnect` |
-| Behind side admits peer's resend, no fatal disconnect | `BehindSide_KnobOn_AdmitsPeerResend_NoFatalDisconnect` |
+| Behind side admits peer's resend, no fatal disconnect | `BehindSide_KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor` + `_Initiator` (both roles) |
 | Bidirectional gap → both recover, no double recovery | `Bidirectional_BothGaps_RecoverNoDoubleRecovery` |
 | Lost proactive resend → self-heals via Active arm | `LostResend_SelfHealsViaActiveArm` |
 | Knob off → byte-identical, inbound 789 ignored | `DefaultOff_ByteIdenticalLogon_InboundIgnored` |
-| At-logon ResendRequest suppressed on, kept off | `Suppression_KnobOn_NoAtLogonResendRequest_KnobOff_Yes` |
+| At-logon ResendRequest suppressed on, kept off | `Suppression_KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh` |
 | Reset cause table (1 / 2 / 1) | `Reset_InitiatorResetLogon_Advertises1`, `Reset_AcceptorReplyResetOnLogon_Advertises2`, `Reset_AcceptorReplyReceived141_Advertises1` |
 | Walk has a single implementation | `WalkExtraction_SingleImplementation` |
 | Walk two-value end (explicit-end-beyond-store / `EndSeqNo=0`-empty-store, both callers) | `WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore`, `WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore` |
