@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/fuzz/fuzz_session_recovery_admin_parse.cpp — T021 [US1] Phase 3
+// tests/fuzz/fuzz_session_recovery_admin_parse.cpp — T021 [US1] Phase 3 / T026 [Polish]
 //
 // libFuzzer harness for the session recovery + admin parse surface.
 //
 // Feeds random byte sequences into Session::on_inbound_frame() driving the
 // session through the Framer + session FSM. Covers:
 //   - Logon with ResetSeqNumFlag(141)=Y
+//   - Logon with NextExpectedMsgSeqNum(789) — well-formed, malformed, overflow
+//     (T026 extension: exercises the new case 789: in scan_frame_header)
 //   - ResendRequest(2) inbound (triggers reply_to_inbound_resend_request)
 //   - SequenceReset(4) with GapFillFlag (triggers process_inbound_sequence_reset)
 //   - Heartbeat(0) with TestReqID(112) (triggers validate_inbound_heartbeat_testreqid)
@@ -14,10 +16,18 @@
 //
 // All paths must: no crash / no UB / no memory corruption / no deadlock.
 // The harness is NOT a behavioral correctness test; behavioral correctness is
-// in T014–T019.
+// in T014–T019 and T007–T010 (027 unit witnesses).
 //
-// Anchors: spec.md §US1 / FR-009..FR-016; [const §VII.7]; plan.md §T021;
-//   [const §IX.4]; contracts/reconnect_fsm.hpp.
+// T026 (Polish, 027): the new `case 789:` in `scan_frame_header` is a
+// parser-touching change per [const §VII] item 7. It is already driven via
+// Session::on_inbound_frame() → Framer → scan_frame_header when a Logon
+// carrying 789 is fed. This is a seed/corpus extension, NOT a new harness:
+// preamble bits 2–3 now select 789-bearing Logon variants (well-formed 789=2,
+// malformed 789=, invalid 789=abc, overflow 789=99999999999) to exercise both
+// the happy parse path and the parse_seqnum→0 invalid path.
+//
+// Anchors: spec.md §US1 / FR-009..FR-016; [const §VII.7]; plan.md §T021/T026;
+//   [const §IX.4]; contracts/reconnect_fsm.hpp; 027 contracts C6 (invalid 789).
 //
 // Build: cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
 //   then: build/linux-clang-asan/bin/fuzz_session_recovery_admin_parse
@@ -98,30 +108,68 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         }
     }
 
-    // Optionally drive through a Logon first (preamble bit 0 set).
+    // Optionally drive through a Logon first (preamble bits 0–3 select variant).
+    //
+    // Bit 0: drive a Logon (any variant).
+    // Bits 1–2: select which Logon variant:
+    //   0b00 — plain Logon (no 789)           — exercises the existing parser path.
+    //   0b01 — Logon with 789=2 (well-formed) — exercises the new case 789: arm (T026).
+    //   0b10 — Logon with 789=   (empty)      — exercises parse_seqnum→0 invalid path.
+    //   0b11 — Logon with 789=abc (non-digit) — exercises parse_seqnum→0 invalid path.
+    // Bit 3: if set AND variant 0b01, use overflow value 789=99999999999 instead.
+    //
+    // The framer will reject semantically-wrong BodyLength/checksum gracefully; we
+    // compute a rough checksum for minimal frame validity.
+
     if (preamble & 0x01) {
-        // Minimal Logon frame (well-formed enough to pass framer).
-        constexpr std::string_view logon_wire =
-            "8=FIX.4.2\x01"
-            "9=67\x01"
+        const int variant = (preamble >> 1) & 0x03;
+        const bool use_overflow = (preamble >> 3) & 0x01;
+
+        // Build the Logon body suffix for tag 789, depending on variant.
+        // variant 0: no 789 field.
+        // variant 1: 789=2 (well-formed; or 789=99999999999 if overflow bit set).
+        // variant 2: 789= (empty value).
+        // variant 3: 789=abc (non-digit).
+        const char* tag789_suffix = "";
+        if (variant == 1) {
+            tag789_suffix = use_overflow ? "789=99999999999\x01" : "789=2\x01";
+        } else if (variant == 2) {
+            tag789_suffix = "789=\x01";
+        } else if (variant == 3) {
+            tag789_suffix = "789=abc\x01";
+        }
+
+        // Logon body fields (before the 789 suffix and the checksum trailer).
+        constexpr std::string_view logon_base =
             "35=A\x01"
             "34=1\x01"
             "49=TW\x01"
             "52=20240101-00:00:00.000\x01"
             "56=ISLD\x01"
             "98=0\x01"
-            "108=30\x01"
-            "10=";
-        // Compute a rough checksum (fuzzer doesn't need correctness here;
-        // the framer will reject malformed frames gracefully).
-        const char* logon_str = logon_wire.data();
+            "108=30\x01";
+
+        // Compute BodyLength: logon_base + tag789_suffix.
+        const std::size_t body_len = logon_base.size() + strlen(tag789_suffix);
+
+        // Build the full frame: header + body + 10=<cs>\x01.
+        char full[512];
+        int hdr_len = snprintf(full, sizeof(full), "8=FIX.4.2\x01" "9=%zu\x01",
+                               body_len);
+        // Append body.
+        memcpy(full + hdr_len, logon_base.data(), logon_base.size());
+        memcpy(full + hdr_len + logon_base.size(), tag789_suffix, strlen(tag789_suffix));
+        std::size_t body_end = static_cast<std::size_t>(hdr_len) + body_len;
+        // Compute a rough checksum over everything so far.
         unsigned int cs = 0;
-        for (const char* p = logon_str; *p; ++p) cs += static_cast<unsigned char>(*p);
+        for (std::size_t i = 0; i < body_end; ++i)
+            cs += static_cast<unsigned char>(full[i]);
         cs &= 0xFF;
-        char full[256];
-        snprintf(full, sizeof(full), "%s%03u\x01", logon_str, cs);
-        auto buf =
-            std::span<const std::byte>(reinterpret_cast<const std::byte*>(full), strlen(full));
+        int trailer_len = snprintf(full + body_end, sizeof(full) - body_end,
+                                   "10=%03u\x01", cs);
+        const std::size_t total = body_end + static_cast<std::size_t>(trailer_len);
+
+        auto buf = std::span<const std::byte>(reinterpret_cast<const std::byte*>(full), total);
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
         ioc.run_for(50ms);
         ioc.restart();
