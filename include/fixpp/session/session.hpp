@@ -946,6 +946,29 @@ private:
         fixpp::session::seqnum_t begin,
         fixpp::session::seqnum_t requested_end,
         bool end_is_through_current) noexcept;
+
+    // 027 — honor_peer_next_expected_: shared body for the 789-honor dispatch.
+    // Extracted from the acceptor (NotConnected) and initiator (LogonSent)
+    // handlers; both are byte-for-byte identical EXCEPT the input expressions.
+    //
+    // Inputs:
+    //   raw_789    — the raw string_view of tag 789's value from the inbound Logon
+    //                (may be empty if tag was present but had no value).
+    //   present_789 — true iff tag 789 appeared in the inbound Logon frame.
+    //
+    // Outcomes (D-10 ordering preserved: invalid-X FIRST, then X>N, then X<N):
+    //   true   (continue)    — X==N (in sync), or X<N resend succeeded; caller continues.
+    //   false  (terminated)  — X==0 invalid OR X>N violation: helper emitted Logout,
+    //                          called record_state_transition_(Disconnected), caller MUST
+    //                          co_return expected_t<void>{} (terminal, already handled).
+    //   unexpected(err)      — X<N resend failed; helper called
+    //                          record_state_transition_(Disconnected); caller MUST
+    //                          co_return std::unexpected(err).
+    //
+    // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
+    // remains at each call site so the knob-off / tag-absent no-op stays visible.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>>
+    honor_peer_next_expected_(std::string_view raw_789, bool present_789) noexcept;
 };
 
 }  // namespace fixpp::session

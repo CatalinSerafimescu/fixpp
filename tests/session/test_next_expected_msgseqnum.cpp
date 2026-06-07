@@ -351,7 +351,8 @@ struct Fixture {
 
 static std::unique_ptr<Fixture> make_acceptor(
     std::shared_ptr<MessageStoreFactory> store_factory,
-    std::uint32_t peer_logon_seq = 1)
+    std::uint32_t peer_logon_seq = 1,
+    bool enable_789 = false)
 {
     auto fix = std::make_unique<Fixture>();
 
@@ -367,6 +368,7 @@ static std::unique_ptr<Fixture> make_acceptor(
     // bilateral_lenient: accept peer Logon without requiring matching 141=Y.
     fix->cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.enable_next_expected_msg_seq_num = enable_789;
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
         fix.capture(data);
     };
@@ -426,48 +428,6 @@ static std::unique_ptr<Fixture> make_initiator(
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
         << "make_initiator: session must be LogonSent after open()";
-
-    return fix;
-}
-
-// Builds an acceptor Session with the knob controlled separately, feeding peer
-// Logon at a given seq, but does NOT complete the handshake (caller can inspect
-// before or after the Logon).
-static std::unique_ptr<Fixture> make_acceptor_knob(
-    std::shared_ptr<MessageStoreFactory> store_factory,
-    bool enable_789,
-    std::uint32_t peer_logon_seq = 1)
-{
-    auto fix = std::make_unique<Fixture>();
-
-    fix->cfg.role = fixpp::session::session_role::acceptor;
-    fix->cfg.sender_comp_id = "SRV";
-    fix->cfg.target_comp_id = "CLI";
-    fix->cfg.begin_string = "FIX.4.4";
-    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
-    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
-    fix->cfg.executor_override = fix->ioc.get_executor();
-    fix->cfg.store_factory = std::move(store_factory);
-    fix->cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    fix->cfg.enable_next_expected_msg_seq_num = enable_789;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-        fix.capture(data);
-    };
-
-    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
-    (void)open_fut.get();
-
-    // Feed peer Logon to reach Active.
-    fix->feed(make_logon("FIX.4.4", peer_logon_seq, "CLI", "SRV"));
-
-    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
-        << "make_acceptor_knob: session must be Active after Logon";
 
     return fix;
 }
@@ -631,8 +591,8 @@ TEST(Emit, Initiator_AdvertisesNextExpectedInbound)
 // If the implementation adds +1, we'd see 789=3, which is WRONG.
 TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne)
 {
-    auto fix = make_acceptor_knob(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/true,
-                                  /*peer_logon_seq=*/1);
+    auto fix = make_acceptor(std::make_shared<EmptyStoreFactory>(), /*peer_logon_seq=*/1,
+                             /*enable_789=*/true);
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
