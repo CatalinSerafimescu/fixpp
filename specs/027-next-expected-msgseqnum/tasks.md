@@ -72,11 +72,11 @@
 
 ### Tests for User Story 2 (write RED first) ⚠️
 
-- [ ] T018 [US2] `DefaultOff_ByteIdenticalLogon_InboundIgnored` in `tests/session/test_next_expected_msgseqnum.cpp`: knob off ⇒ no 789 emitted (byte-identical Logon) + inbound 789 ignored + ResendRequest still used — I-NEX-7, contract C9.
+- [X] T018 [US2] `DefaultOff_ByteIdenticalLogon_InboundIgnored` in `tests/session/test_next_expected_msgseqnum.cpp`: knob off ⇒ no 789 emitted (byte-identical Logon) + inbound 789 ignored + ResendRequest still used — I-NEX-7, contract C9.
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] Audit every emit/honor/suppression/behind-side site (T013–T016) for the knob guard so the default-off path is a pure no-op. **Completion criterion (analyze C1, measurable):** T018 (`DefaultOff_ByteIdenticalLogon_InboundIgnored`) is green AND the full existing session/recovery/logon regression suite (013/021) passes unchanged. No new witness required — this is a guard-completeness audit, not new behaviour — FR-006, SC-002.
+- [X] T019 [US2] Audit every emit/honor/suppression/behind-side site (T013–T016) for the knob guard so the default-off path is a pure no-op. **Completion criterion (analyze C1, measurable):** T018 (`DefaultOff_ByteIdenticalLogon_InboundIgnored`) is green AND the full existing session/recovery/logon regression suite (013/021) passes unchanged. No new witness required — this is a guard-completeness audit, not new behaviour — FR-006, SC-002.
 
 **Checkpoint**: US2 witness green; full regression suite green; outbound Logon byte-identical when off.
 
@@ -90,11 +90,11 @@
 
 ### Tests for User Story 3 (write RED first) ⚠️
 
-- [ ] T020 [US3] Integrity witnesses in `tests/session/test_next_expected_msgseqnum.cpp`: `Honor_XgtN_LogoutTextThenDisconnect` (both roles) and `Honor_Invalid789_LogoutThenDisconnect` (`789=` empty / `789=abc` / overflow ⇒ Logout+disconnect, NO `[1,N-1]` replay) — I-NEX-4/9, contract C6, D-6/D-10.
+- [X] T020 [US3] Integrity witnesses in `tests/session/test_next_expected_msgseqnum.cpp`: `Honor_XgtN_LogoutTextThenDisconnect` (both roles) and `Honor_Invalid789_LogoutThenDisconnect` (`789=` empty / `789=abc` / overflow ⇒ Logout+disconnect, NO `[1,N-1]` replay) — I-NEX-4/9, contract C6, D-6/D-10.
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Integrity-error disposition in BOTH handlers (`src/session/session.cpp`): invalid-X (parse→0) evaluated FIRST (before the `X<N` compare, closes the `[1,N-1]` amplification) and X>N ⇒ `build_logout("NextExpectedMsgSeqNum too high, expecting N but received X"` / `"… invalid")` then disconnect; replace the T014/T015 interim-safe routing — contract C6, I-NEX-4/9, D-6/D-10.
+- [X] T021 [US3] Integrity-error disposition in BOTH handlers (`src/session/session.cpp`): invalid-X (parse→0) evaluated FIRST (before the `X<N` compare, closes the `[1,N-1]` amplification) and X>N ⇒ `build_logout("NextExpectedMsgSeqNum too high, expecting N but received X"` / `"… invalid")` then disconnect; replace the T014/T015 interim-safe routing — contract C6, I-NEX-4/9, D-6/D-10.
 
 **Checkpoint**: US3 witnesses green; all three stories independently functional.
 

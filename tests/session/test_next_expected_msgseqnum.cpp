@@ -1630,4 +1630,366 @@ TEST(NoHeap, Emit789Append)
         << "; [const §VIII.5 / I-NEX-7 / [[feedback_tracking_pmr_resource_false_pass]]]";
 }
 
+// ── T018 — US2 default-off byte-identical + inbound-789-ignored witness ──────
+//
+// Anchors: data-model.md I-NEX-7, contracts C9, FR-006/SC-002.
+//
+// (a) Knob OFF (default) ⇒ outbound Logon carries NO 789 field (byte-identical
+//     to pre-feature baseline).
+// (b) Knob OFF ⇒ an inbound Logon carrying 789 does NOT trigger the 789 honor
+//     path — the session still reaches Active, but no proactive resend occurs.
+//     Recovery uses the existing ResendRequest path (013 regression guard).
+// (c) Contrast: knob ON ⇒ 789 IS emitted (positive control).
+//
+// NOTE: (b) also implicitly validates that with the knob off the session does
+// not fatal-disconnect on an inbound 789 (i.e., the field is silently ignored).
+TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored)
+{
+    // ── Part (a) + (c): outbound Logon byte-identity ─────────────────────────
+
+    // Knob OFF (default): initiator Logon must NOT carry 789.
+    {
+        auto fix_off = make_initiator(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/false);
+        ASSERT_GE(fix_off->capture.frames.size(), 1U);
+        const auto& logon_off = fix_off->capture.frames[0];
+        EXPECT_EQ(extract_tag(logon_off, 35), "A");
+        const std::string tag789_off = extract_tag(logon_off, 789);
+        EXPECT_EQ(tag789_off, "")
+            << "DefaultOff: knob OFF — initiator Logon must carry NO 789 field. "
+               "Found 789=" << tag789_off;
+    }
+
+    // Knob ON (positive control): initiator Logon MUST carry 789.
+    {
+        auto fix_on = make_initiator(std::make_shared<EmptyStoreFactory>(), /*enable_789=*/true);
+        ASSERT_GE(fix_on->capture.frames.size(), 1U);
+        const auto& logon_on = fix_on->capture.frames[0];
+        const std::string tag789_on = extract_tag(logon_on, 789);
+        EXPECT_NE(tag789_on, "")
+            << "DefaultOff: knob ON — initiator Logon must carry 789 (positive control)";
+    }
+
+    // ── Part (b): knob OFF + inbound 789 ⇒ session reaches Active (field ignored).
+    // Verify: (1) session state Active; (2) no proactive resend (no PossDup frames);
+    // (3) no at-logon ResendRequest (039 suppression path not engaged — but also not
+    //     the 789-honor path).
+    // Store has [1..4] so if the 789 honor path ran it would resend [2,4] as PossDup.
+    // X=2 < N=5 (seeded); if the honor path fires we'd see PossDup frames.
+    {
+        auto fix = std::make_unique<Fixture>();
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(4);
+        fix->cfg.reset_seqnum_policy_field =
+            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = false;  // KNOB OFF
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+
+        // Seed outbound=5 so N=5 at the decision point (if knob were on, X=2<N=5 → resend).
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/1,
+                                                                      /*next_outbound=*/5);
+        fix->clear_capture();
+
+        // Feed inbound Logon with 789=2 (knob off ⇒ must be ignored).
+        fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 2));
+
+        // (1) Session must reach Active (inbound 789 silently ignored — no fatal).
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "DefaultOff/InboundIgnored: knob OFF + inbound 789 must NOT fatal-disconnect. "
+               "Session must reach Active.";
+
+        // (2) No PossDup frames (789 honor path did NOT run).
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_NE(extract_tag(f, 43), "Y")
+                << "DefaultOff/InboundIgnored: knob OFF — no proactive resend must fire "
+                   "(789 honor path must be silent when knob is off)";
+        }
+
+        // (3) No ResendRequest from us at logon time (neither 789-path nor 013 at-logon).
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_NE(extract_tag(f, 35), "2")
+                << "DefaultOff/InboundIgnored: knob OFF — no ResendRequest at logon";
+        }
+    }
+}
+
+// ── T020 — US3 integrity witnesses ───────────────────────────────────────────
+//
+// Anchors: data-model.md I-NEX-4/9, contracts C6, research D-6/D-10.
+//
+// Honor_XgtN_LogoutTextThenDisconnect:
+//   Knob on, inbound 789 = X > N (our next-outbound) ⇒ Logout(text)+disconnect.
+//   Session does NOT advance to Active/established.
+//   Both acceptor and initiator roles.
+//
+// Honor_Invalid789_LogoutThenDisconnect:
+//   Knob on, inbound 789 present-but-invalid — empty / non-digit / overflow —
+//   ⇒ Logout+disconnect. Evaluated BEFORE the X<N compare (D-10).
+//   Assert NO [1,N-1] full-history replay (no PossDup/GapFill flood).
+
+// Helper: is this frame a Logout (35=5)?
+static bool frame_is_logout(const std::vector<std::byte>& f)
+{
+    return extract_tag(f, 35) == "5";
+}
+
+// Helper: make a Logon frame with a raw (possibly malformed) 789 value.
+static std::vector<std::byte> make_logon_with_raw_789(std::string_view bs, std::uint32_t seq,
+                                                       std::string_view s, std::string_view t,
+                                                       std::string_view raw_789_value,
+                                                       int hbt = 30)
+{
+    std::string extra;
+    extra += field(98, "0");
+    extra += field(108, std::to_string(hbt));
+    // Build the 789 field with the raw (possibly invalid) value directly.
+    extra += std::to_string(789) + "=" + std::string(raw_789_value) + "\x01";
+    return make_fix_frame(bs, "A", seq, s, t, extra);
+}
+
+// T020 witness 1 (I-NEX-4, C6, D-6) — X > N: both roles.
+TEST(Honor, XgtN_LogoutTextThenDisconnect)
+{
+    // ── Acceptor arm ─────────────────────────────────────────────────────────
+    // Store through 3 (our_last=3). Seed outbound=4 → reply Logon at seq=4 →
+    // peek_outbound=5=N. Peer sends 789=7 (X=7 > N=5) → Logout+Disconnected.
+    {
+        auto fix = std::make_unique<Fixture>();
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(3);
+        fix->cfg.reset_seqnum_policy_field =
+            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+
+        // Seed outbound=4: reply Logon at seq=4 → peek_outbound=5=N.
+        // X=7 > N=5 → must emit Logout then Disconnected.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+
+        fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 7));
+
+        // Session must be Disconnected.
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Honor_XgtN acceptor: session must be Disconnected after X>N";
+
+        // A Logout(35=5) must have been emitted.
+        bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
+                                        frame_is_logout);
+        EXPECT_TRUE(found_logout)
+            << "Honor_XgtN acceptor: Logout(35=5) must be emitted before disconnect";
+
+        // NO PossDup frames — no [1,N-1] replay.
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_NE(extract_tag(f, 43), "Y")
+                << "Honor_XgtN acceptor: no PossDup resend must be emitted when X>N";
+        }
+        // NO GapFill frames.
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_FALSE(frame_is_gapfill(f))
+                << "Honor_XgtN acceptor: no GapFill must be emitted when X>N";
+        }
+    }
+
+    // ── Initiator arm ─────────────────────────────────────────────────────────
+    // Store through 2 (our_last=2). Seed outbound=3 → N=3 at honor time.
+    // Peer sends 789=10 (X=10 > N=3) → Logout+Disconnected.
+    {
+        auto fix = std::make_unique<Fixture>();
+        fix->cfg.role = fixpp::session::session_role::initiator;
+        fix->cfg.sender_comp_id = "CLI";
+        fix->cfg.target_comp_id = "SRV";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);
+        fix->cfg.reset_seqnum_policy_field =
+            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(2s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+
+        // Seed outbound=3: N=3 at honor time. X=10 > N=3.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fix->clear_capture();
+
+        fix->feed(make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 10));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Honor_XgtN initiator: session must be Disconnected after X>N";
+
+        bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
+                                        frame_is_logout);
+        EXPECT_TRUE(found_logout)
+            << "Honor_XgtN initiator: Logout(35=5) must be emitted before disconnect";
+
+        // No [1,N-1] replay.
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_NE(extract_tag(f, 43), "Y")
+                << "Honor_XgtN initiator: no PossDup resend when X>N";
+        }
+        for (const auto& f : fix->capture.frames) {
+            EXPECT_FALSE(frame_is_gapfill(f))
+                << "Honor_XgtN initiator: no GapFill when X>N";
+        }
+    }
+}
+
+// T020 witness 2 (I-NEX-9, C6, D-10) — invalid 789: empty / non-digit / overflow.
+// Evaluated BEFORE X<N compare (D-10 security guard).
+// Assert NO [1,N-1] replay for any invalid value.
+TEST(Honor, Invalid789_LogoutThenDisconnect)
+{
+    // Table of invalid raw 789 values.
+    // overflow: a value larger than UINT32_MAX (4294967295).
+    const std::vector<std::pair<std::string, std::string_view>> invalid_cases = {
+        {"empty",     ""},
+        {"non-digit", "abc"},
+        {"overflow",  "99999999999"},  // > UINT32_MAX
+    };
+
+    for (const auto& [label, raw789] : invalid_cases) {
+        // Test both acceptor and initiator for each invalid value.
+        // ── Acceptor arm ─────────────────────────────────────────────────────
+        {
+            auto fix = std::make_unique<Fixture>();
+            fix->cfg.role = fixpp::session::session_role::acceptor;
+            fix->cfg.sender_comp_id = "SRV";
+            fix->cfg.target_comp_id = "CLI";
+            fix->cfg.begin_string = "FIX.4.4";
+            fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+            fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+            fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+            fix->cfg.executor_override = fix->ioc.get_executor();
+            fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
+            fix->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            fix->cfg.enable_next_expected_msg_seq_num = true;
+            fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+                fix.capture(data);
+            };
+            fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+            auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+            fix->ioc.run_for(1s);
+            fix->ioc.restart();
+            (void)open_fut.get();
+
+            // Seed outbound=6 so N=7 after reply Logon.
+            // If invalid-789 fell through to X<N branch (D-10 guard missing), the
+            // parse→0 would clamp begin to 1 and replay [1, N-1=6] — PossDup flood.
+            fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 6);
+
+            fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "CLI", "SRV", raw789));
+
+            EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+                << "Honor_Invalid789 acceptor [" << label << "]: must be Disconnected";
+
+            bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
+                                            frame_is_logout);
+            EXPECT_TRUE(found_logout)
+                << "Honor_Invalid789 acceptor [" << label << "]: Logout must be emitted";
+
+            // NO [1,N-1] replay — the D-10 guard must fire BEFORE X<N.
+            for (const auto& f : fix->capture.frames) {
+                EXPECT_NE(extract_tag(f, 43), "Y")
+                    << "Honor_Invalid789 acceptor [" << label << "]: "
+                       "no PossDup resend — D-10 invalid-first guard must block X<N";
+            }
+            for (const auto& f : fix->capture.frames) {
+                EXPECT_FALSE(frame_is_gapfill(f))
+                    << "Honor_Invalid789 acceptor [" << label << "]: "
+                       "no GapFill — D-10 invalid-first guard must block X<N";
+            }
+        }
+
+        // ── Initiator arm ─────────────────────────────────────────────────────
+        {
+            auto fix = std::make_unique<Fixture>();
+            fix->cfg.role = fixpp::session::session_role::initiator;
+            fix->cfg.sender_comp_id = "CLI";
+            fix->cfg.target_comp_id = "SRV";
+            fix->cfg.begin_string = "FIX.4.4";
+            fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+            fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+            fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+            fix->cfg.executor_override = fix->ioc.get_executor();
+            fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(4);
+            fix->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            fix->cfg.enable_next_expected_msg_seq_num = true;
+            fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+                fix.capture(data);
+            };
+            fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+            auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+            fix->ioc.run_for(2s);
+            fix->ioc.restart();
+            (void)open_fut.get();
+            ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+
+            // Seed outbound=5 so N=5 at honor time. Store has [1..4].
+            fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 5);
+            fix->clear_capture();
+
+            fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "SRV", "CLI", raw789));
+
+            EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+                << "Honor_Invalid789 initiator [" << label << "]: must be Disconnected";
+
+            bool found_logout = std::any_of(fix->capture.frames.begin(), fix->capture.frames.end(),
+                                            frame_is_logout);
+            EXPECT_TRUE(found_logout)
+                << "Honor_Invalid789 initiator [" << label << "]: Logout must be emitted";
+
+            // NO [1,N-1] replay.
+            for (const auto& f : fix->capture.frames) {
+                EXPECT_NE(extract_tag(f, 43), "Y")
+                    << "Honor_Invalid789 initiator [" << label << "]: "
+                       "no PossDup resend — D-10 invalid-first guard";
+            }
+            for (const auto& f : fix->capture.frames) {
+                EXPECT_FALSE(frame_is_gapfill(f))
+                    << "Honor_Invalid789 initiator [" << label << "]: "
+                       "no GapFill — D-10 invalid-first guard";
+            }
+        }
+    }
+}
+
 }  // namespace

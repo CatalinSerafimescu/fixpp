@@ -1172,7 +1172,8 @@ struct FrameHeader {
     std::string_view orig_sending_time;  // tag 122 (OrigSendingTime) — 021 PossDup
     std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
     std::string_view reset_seqnum_flag;       // tag 141 (ResetSeqNumFlag in Logon)
-    std::string_view next_expected_msg_seq_num;  // tag 789 (NextExpectedMsgSeqNum in Logon) — 027
+    std::string_view next_expected_msg_seq_num;  // tag 789 value (may be empty if field present-but-empty) — 027
+    bool next_expected_present = false;          // tag 789 was present in frame (even if value is empty) — 027
 };
 
 [[nodiscard]] FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
@@ -1263,6 +1264,7 @@ struct FrameHeader {
                 break;  // T027 ResetSeqNumFlag
             case 789:
                 h.next_expected_msg_seq_num = val;
+                h.next_expected_present = true;  // set even when val is empty (D-10 empty-value guard)
                 break;  // 027 NextExpectedMsgSeqNum in Logon
             default:
                 break;
@@ -1552,9 +1554,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [contract C4, data-model I-NEX-2, RC#4]
             bool peer_sent_reset = false;
             std::string_view peer_789_raw;
+            bool peer_789_present = false;
             {
                 auto hdr = scan_frame_header(frame);
                 peer_789_raw = hdr.next_expected_msg_seq_num;
+                peer_789_present = hdr.next_expected_present;
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — treat as invalid (fatal for protocol safety).
@@ -1814,17 +1818,78 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
-            // 027 T014 — acceptor 789 honor (RC#4 ordering: AFTER reply store_then_emit).
+            // 027 T014/T021 — acceptor 789 honor (RC#4 ordering: AFTER reply store_then_emit).
             // Read peer's NextExpectedMsgSeqNum(789) from the inbound Logon.
             // N = peek_outbound() sampled here (post-reply-assign); messages [1,N-1] sent.
-            // [contract C4, data-model I-NEX-2/3/11]
-            if (cfg_.enable_next_expected_msg_seq_num && !peer_789_raw.empty()) {
+            // Integrity guard ordering (D-10): invalid-X FIRST, then X>N, then X<N.
+            // [contract C4/C6, data-model I-NEX-2/3/4/9/11, D-6/D-10]
+            if (cfg_.enable_next_expected_msg_seq_num && peer_789_present) {
+                // peer_789_present: tag 789 was in the inbound Logon (even if value is empty).
+                // A present-but-empty/unparseable 789 must be handled as invalid (D-10).
                 const seqnum_t x789 = parse_seqnum(peer_789_raw);
                 const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
-                if (x789 == 0 || x789 > n789) {
-                    // Present-but-invalid (parse→0) or too-high (X>N):
-                    // interim-safe fatal disconnect (US3/T021 will add build_logout).
-                    // [contract C4, I-NEX-4/9 — interim routing until T021]
+                if (x789 == 0) {
+                    // Present-but-invalid (parse→0: empty / non-digit / overflow).
+                    // Evaluated FIRST (D-10): a parse→0 value must never reach the X<N branch
+                    // (which would clamp begin to 1 and replay [1,N-1]).
+                    // [contract C6, I-NEX-9, D-10]
+                    {
+                        std::array<std::byte, 256> lo_buf{};
+                        const auto lo_st52 = effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                        const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id,
+                            "NextExpectedMsgSeqNum invalid",
+                            cfg_.begin_string, lo_st52.value);
+                        if (lo_result) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                        }
+                    }
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                } else if (x789 > n789) {
+                    // X > N: peer claims to have received frames we haven't sent yet.
+                    // Sequence-integrity violation: Logout(text) + disconnect.
+                    // [contract C6, I-NEX-4, D-6]
+                    {
+                        // Build "NextExpectedMsgSeqNum too high, expecting N but received X".
+                        // Stack-only: use a fixed-size char buffer (N and X are seqnum_t ≤10 digits each).
+                        char text_buf[80];
+                        char* tp = text_buf;
+                        const char* prefix = "NextExpectedMsgSeqNum too high, expecting ";
+                        for (const char* p = prefix; *p; ++p) *tp++ = *p;
+                        auto [n_end, n_ec] = std::to_chars(tp, text_buf + sizeof(text_buf) - 20, n789);
+                        if (n_ec == std::errc{}) tp = n_end;
+                        const char* mid = " but received ";
+                        for (const char* p = mid; *p; ++p) *tp++ = *p;
+                        auto [x_end, x_ec] = std::to_chars(tp, text_buf + sizeof(text_buf), x789);
+                        if (x_ec == std::errc{}) tp = x_end;
+                        const std::string_view text_sv{text_buf, static_cast<std::size_t>(tp - text_buf)};
+
+                        std::array<std::byte, 256> lo_buf{};
+                        const auto lo_st52 = effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                        const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, text_sv,
+                            cfg_.begin_string, lo_st52.value);
+                        if (lo_result) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                        }
+                    }
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 } else if (x789 < n789) {
@@ -2962,19 +3027,75 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                asio::bind_cancellation_slot(root_cancel_.slot(), asio::detached));
             }
 
-            // 027 T015 — initiator 789 honor (after processing the Logon-ack).
+            // 027 T015/T021 — initiator 789 honor (after processing the Logon-ack).
             // Our own Logon was already sent at open()/emit_initiator_logon_() (:601).
             // hdr is at case scope (scanned at :2665); next_expected_msg_seq_num valid.
             // N = peek_outbound() sampled here (post-Active, post-Logon-ack processing).
-            // [contract C4/C8, data-model I-NEX-2/3/11]
-            if (cfg_.enable_next_expected_msg_seq_num &&
-                !hdr.next_expected_msg_seq_num.empty()) {
+            // Integrity guard ordering (D-10): invalid-X FIRST, then X>N, then X<N.
+            // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
+            if (cfg_.enable_next_expected_msg_seq_num && hdr.next_expected_present) {
+                // hdr.next_expected_present: tag 789 was in the Logon-ack (even if value is empty).
+                // A present-but-empty/unparseable 789 must be handled as invalid (D-10).
                 const seqnum_t x789 = parse_seqnum(hdr.next_expected_msg_seq_num);
                 const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
-                if (x789 == 0 || x789 > n789) {
-                    // Present-but-invalid (parse→0) or too-high (X>N):
-                    // interim-safe fatal disconnect (US3/T021 will add build_logout).
-                    // [contract C4, I-NEX-4/9 — interim routing until T021]
+                if (x789 == 0) {
+                    // Present-but-invalid (parse→0: empty / non-digit / overflow).
+                    // Evaluated FIRST (D-10): must never reach the X<N branch.
+                    // [contract C6, I-NEX-9, D-10]
+                    {
+                        std::array<std::byte, 256> lo_buf{};
+                        const auto lo_st52 = effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                        const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id,
+                            "NextExpectedMsgSeqNum invalid",
+                            cfg_.begin_string, lo_st52.value);
+                        if (lo_result) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                        }
+                    }
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                } else if (x789 > n789) {
+                    // X > N: sequence-integrity violation — Logout(text) + disconnect.
+                    // [contract C6, I-NEX-4, D-6]
+                    {
+                        char text_buf[80];
+                        char* tp = text_buf;
+                        const char* prefix = "NextExpectedMsgSeqNum too high, expecting ";
+                        for (const char* p = prefix; *p; ++p) *tp++ = *p;
+                        auto [n_end, n_ec] = std::to_chars(tp, text_buf + sizeof(text_buf) - 20, n789);
+                        if (n_ec == std::errc{}) tp = n_end;
+                        const char* mid = " but received ";
+                        for (const char* p = mid; *p; ++p) *tp++ = *p;
+                        auto [x_end, x_ec] = std::to_chars(tp, text_buf + sizeof(text_buf), x789);
+                        if (x_ec == std::errc{}) tp = x_end;
+                        const std::string_view text_sv{text_buf, static_cast<std::size_t>(tp - text_buf)};
+
+                        std::array<std::byte, 256> lo_buf{};
+                        const auto lo_st52 = effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                        const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+                        auto lo_result = fixpp::session::build_logout(
+                            std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, text_sv,
+                            cfg_.begin_string, lo_st52.value);
+                        if (lo_result) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (assign_r) {
+                                auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                                (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                            }
+                        }
+                    }
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 } else if (x789 < n789) {
