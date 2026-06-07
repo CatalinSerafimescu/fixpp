@@ -1930,4 +1930,280 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
     }
 }
 
+// ── FQ-2 witnesses: 789-Logout paths route through fire_to_admin_ ────────────
+//
+// T020/T021 — every engine-originated admin emit calls toAdmin (FR-008/010).
+// Before gate-b/r1 FQ-2 fix, the two honor_peer_next_expected_() Logout sites
+// (invalid-789 and X>N) bypassed fire_to_admin_. Post-fix they call it.
+//
+// Two sub-tests per arm:
+//   (a) observe: toAdmin IS invoked for the 789-triggered Logout frame.
+//   (b) throw: a throwing toAdmin surfaces app_callback_threw + terminal-close.
+//
+// Covers both acceptor and initiator (C8 symmetry).
+
+// ── Sub-test (a): toAdmin IS observed for the X>N Logout — both roles ─────────
+TEST(Honor, Integrity_FiresToAdmin_XgtN) {
+    // Acceptor arm.
+    {
+        auto app = std::make_shared<CountingApp027>();
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(3);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+
+        // outbound=4 → reply Logon seq=4 → peek_outbound=5=N. X=9 > N=5.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+
+        // toAdmin call #1: acceptor reply Logon. toAdmin call #2: the 789-Logout.
+        fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 9));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_FiresToAdmin acceptor X>N: must disconnect";
+        // toAdmin must have been called at least twice (reply Logon + 789-Logout).
+        EXPECT_GE(app->toAdmin_count, 2)
+            << "Integrity_FiresToAdmin acceptor X>N: toAdmin must be called for the 789-Logout "
+               "(FR-008 — every engine-originated admin emit calls toAdmin)";
+    }
+
+    // Initiator arm.
+    {
+        auto app = std::make_shared<CountingApp027>();
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::initiator;
+        fix->cfg.sender_comp_id = "CLI";
+        fix->cfg.target_comp_id = "SRV";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(2s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+
+        // toAdmin call #1: outbound Logon (emitted by open()). N=3 at honor. X=7 > N=3.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fix->clear_capture();
+
+        fix->feed(make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 7));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_FiresToAdmin initiator X>N: must disconnect";
+        // toAdmin call #1 was the outbound Logon. The 789-Logout must add at least one more.
+        EXPECT_GE(app->toAdmin_count, 2)
+            << "Integrity_FiresToAdmin initiator X>N: toAdmin must be called for the 789-Logout "
+               "(FR-008 — every engine-originated admin emit calls toAdmin)";
+    }
+}
+
+// ── Sub-test (b): toAdmin IS observed for the invalid-789 Logout — both roles ─
+TEST(Honor, Integrity_FiresToAdmin_Invalid789) {
+    // Acceptor arm: invalid 789 (empty string).
+    {
+        auto app = std::make_shared<CountingApp027>();
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(3);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+
+        fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "CLI", "SRV", "GARBAGE"));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_FiresToAdmin acceptor Invalid789: must disconnect";
+        EXPECT_GE(app->toAdmin_count, 2)
+            << "Integrity_FiresToAdmin acceptor Invalid789: toAdmin must be called for "
+               "the invalid-789 Logout (FR-008)";
+    }
+
+    // Initiator arm: invalid 789 (empty string).
+    {
+        auto app = std::make_shared<CountingApp027>();
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::initiator;
+        fix->cfg.sender_comp_id = "CLI";
+        fix->cfg.target_comp_id = "SRV";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(2s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fix->clear_capture();
+
+        fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "SRV", "CLI", "GARBAGE"));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_FiresToAdmin initiator Invalid789: must disconnect";
+        EXPECT_GE(app->toAdmin_count, 2)
+            << "Integrity_FiresToAdmin initiator Invalid789: toAdmin must be called for "
+               "the invalid-789 Logout (FR-008)";
+    }
+}
+
+// ── Sub-test (c): throwing toAdmin on X>N Logout surfaces app_callback_threw ──
+//
+// ThrowingToAdmin027 throws on the N-th toAdmin call.
+// For the initiator: call #1 = outbound Logon; call #2 = the 789-Logout.
+// For the acceptor: call #1 = reply Logon; call #2 = the 789-Logout.
+TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
+    // Acceptor arm: ThrowingToAdmin027(2) — throw on the 789-Logout toAdmin.
+    {
+        auto app = std::make_shared<ThrowingToAdmin027>(2);
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(3);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+
+        // outbound=4 → reply Logon seq=4 → N=5. X=9 > N=5 → 789-Logout → toAdmin(2) throws.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+
+        // Frame must outlive ioc.run_for (on_inbound_frame holds a span into it).
+        const auto logon_frame = make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 9);
+        auto fut = asio::co_spawn(
+            fix->ioc, fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
+            asio::use_future);
+        fix->ioc.run_for(5s);
+        fix->ioc.restart();
+        auto result = fut.get();
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_ToAdminThrow acceptor X>N: must be Disconnected after toAdmin throw";
+        ASSERT_FALSE(result.has_value())
+            << "Integrity_ToAdminThrow acceptor X>N: on_inbound_frame must return an error";
+        EXPECT_EQ(result.error(), fixpp::core::error::app_callback_threw)
+            << "Integrity_ToAdminThrow acceptor X>N: error must be app_callback_threw (130)";
+        EXPECT_EQ(app->call_count, 2)
+            << "Integrity_ToAdminThrow acceptor X>N: toAdmin must have been called exactly twice "
+               "(call 1: reply Logon; call 2: 789-Logout that threw)";
+    }
+
+    // Initiator arm: ThrowingToAdmin027(2) — throw on the 789-Logout toAdmin.
+    {
+        auto app = std::make_shared<ThrowingToAdmin027>(2);
+        auto fix = std::make_unique<Fixture>();
+        fix->eng.application = app;
+        fix->cfg.role = fixpp::session::session_role::initiator;
+        fix->cfg.sender_comp_id = "CLI";
+        fix->cfg.target_comp_id = "SRV";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(2);
+        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.enable_next_expected_msg_seq_num = true;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(2s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+
+        // call #1 = outbound Logon (fired during open()). N=3. X=7 > N=3 → 789-Logout → throw.
+        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fix->clear_capture();
+
+        // Frame must outlive ioc.run_for (on_inbound_frame holds a span into it).
+        const auto logon_frame = make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 7);
+        auto fut = asio::co_spawn(
+            fix->ioc, fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
+            asio::use_future);
+        fix->ioc.run_for(5s);
+        fix->ioc.restart();
+        auto result = fut.get();
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Integrity_ToAdminThrow initiator X>N: must be Disconnected after toAdmin throw";
+        ASSERT_FALSE(result.has_value())
+            << "Integrity_ToAdminThrow initiator X>N: on_inbound_frame must return an error";
+        EXPECT_EQ(result.error(), fixpp::core::error::app_callback_threw)
+            << "Integrity_ToAdminThrow initiator X>N: error must be app_callback_threw (130)";
+        EXPECT_EQ(app->call_count, 2)
+            << "Integrity_ToAdminThrow initiator X>N: toAdmin must have been called exactly twice "
+               "(call 1: outbound Logon; call 2: 789-Logout that threw)";
+    }
+}
+
 }  // namespace

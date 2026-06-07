@@ -4122,6 +4122,12 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 cfg_.target_comp_id, "NextExpectedMsgSeqNum invalid", cfg_.begin_string,
                 lo_st52.value);
             if (lo_result) {
+                // 019 FR-008/010: toAdmin before every engine-originated admin emit.
+                // [gate-b/r1 FQ-2: mirror fire_to_admin_ pattern at :2330-2335]
+                if (!fire_to_admin_(*lo_result)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
@@ -4159,6 +4165,12 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
                 cfg_.target_comp_id, text_sv, cfg_.begin_string, lo_st52.value);
             if (lo_result) {
+                // 019 FR-008/010: toAdmin before every engine-originated admin emit.
+                // [gate-b/r1 FQ-2: mirror fire_to_admin_ pattern at :2330-2335]
+                if (!fire_to_admin_(*lo_result)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
