@@ -186,6 +186,45 @@ add_test(NAME transport_cancellation_propagation
 set_tests_properties(transport_cancellation_propagation PROPERTIES
   LABELS "transport;012;us1;seam5")
 
+add_executable(transport_listener_accept_error_cancel
+  test_listener_accept_error_cancel.cpp)
+target_include_directories(transport_listener_accept_error_cancel PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_link_libraries(transport_listener_accept_error_cancel PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main)
+add_test(NAME transport_listener_accept_error_cancel
+         COMMAND transport_listener_accept_error_cancel)
+set_tests_properties(transport_listener_accept_error_cancel PROPERTIES
+  LABELS "transport;012;us3;seam14;accept-error;cancel")
+
+add_executable(transport_factory_paths
+  test_transport_factory_paths.cpp)
+target_include_directories(transport_factory_paths PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(transport_factory_paths PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(transport_factory_paths PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME transport_factory_paths
+         COMMAND transport_factory_paths)
+
 # ── T044/T045: 011 Gate B F-1 carryover — seam #13 witness ───────────────────
 #
 # FR-033 + SC-008: 8-cell cancellable_dispatch-recipe witness
@@ -295,3 +334,24 @@ add_test(NAME transport_verify_peer_pmr_oom
          COMMAND transport_verify_peer_pmr_oom)
 set_tests_properties(transport_verify_peer_pmr_oom PROPERTIES
   LABELS "transport;012;gate-b-witness;rc-c;pmr-oom;tls")
+
+add_executable(transport_asio_tls_transport_error_paths
+  test_asio_tls_transport_error_paths.cpp)
+target_include_directories(transport_asio_tls_transport_error_paths PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(transport_asio_tls_transport_error_paths PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(transport_asio_tls_transport_error_paths PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME transport_asio_tls_transport_error_paths
+         COMMAND transport_asio_tls_transport_error_paths)
