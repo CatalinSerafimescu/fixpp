@@ -912,6 +912,40 @@ private:
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
+
+    // 027 T005 — replay_outbound_range_: extracted from the inline
+    // ResendRequest-reply walk (session.cpp:2485-2635). Replays stored outbound
+    // app messages in [begin, requested_end] (or through current when
+    // end_is_through_current=true) with PossDupFlag(43)=Y+OrigSendingTime(122)
+    // at their original MsgSeqNum; collapses admin/absent runs into
+    // SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live
+    // outbound counter, not re-stored). [const §VIII.5]: fixed stack buffers.
+    //
+    // TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3):
+    //   eff_end = (end_is_through_current || requested_end > our_last)
+    //               ? our_last : requested_end   (store-walk upper bound)
+    //   empty/short-store GapFill NewSeqNo =
+    //               end_is_through_current ? peek_outbound() : (requested_end+1)
+    // A single (begin, end_inclusive) signature would lose requested_end and
+    // regress the shipped 013 ResendRequest GapFill NewSeqNo for an explicit-end
+    // beyond-store request. The EndSeqNo=0 => through-current resolution is
+    // conveyed via end_is_through_current (NOT re-derived inside the helper).
+    //
+    // Returns expected_t<void>{}  on success (resend complete, remain in Active).
+    // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
+    // Returns std::unexpected(dispatch_aborted) on transport write error.
+    //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
+    //   The helper NEVER calls record_state_transition_ directly (D-5).
+    //
+    // Callers:
+    //   (1) ResendRequest handler (Active): begin=rr_begin, requested_end=rr_end
+    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0).
+    //   (2) 789 honor path (T014/T015, US1): begin=X, requested_end=N-1,
+    //       end_is_through_current=true.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> replay_outbound_range_(
+        fixpp::session::seqnum_t begin,
+        fixpp::session::seqnum_t requested_end,
+        bool end_is_through_current) noexcept;
 };
 
 }  // namespace fixpp::session

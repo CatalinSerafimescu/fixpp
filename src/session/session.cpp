@@ -2483,153 +2483,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // are transmit-only — they do NOT advance the live outbound
                 // counter and are not re-stored.
                 if (hdr.msg_type == "2") {  // ResendRequest (35=2)
+                    // 027 T006: delegate to replay_outbound_range_() — the
+                    // extracted walk helper (T005). Caller owns the FSM
+                    // Disconnected transition on any unexpected return.
+                    // Two-value end model: rr_end==0 → end_is_through_current=true.
+                    // [research D-5, contracts C3, data-model I-NEX-3]
                     const seqnum_t rr_begin = parse_seqnum(hdr.begin_seqno);
                     const seqnum_t rr_end = parse_seqnum(hdr.end_seqno);
-                    const auto st52_sr =
-                        effective_clock_
-                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-                            : SendingTimeStamp{};
-
-                    // FQ-A (gate-b/r2): Transmit-only emit goes through
-                    // live_write_serialized_() (which acquires write_gate_) for live
-                    // transports, or the sync transport_send_ for pre-live/test paths.
-                    // Returns false on write error → caller force-disconnects.
-                    // This ensures replay frames are serialized with every other live
-                    // emit and errors propagate instead of being silently dropped.
-                    // [FQ-A D-6 F2; transport.hpp:47-50; gate-b/r2]
-                    const auto transmit_async =
-                        [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
-                        if (live_transport_shared_()) {
-                            auto wr = co_await live_write_serialized_(f);
-                            co_return wr.has_value();
-                        }
-                        if (!transport_send_) {
-                            co_return true;
-                        }
-                        try {
-                            transport_send_(f);
-                            co_return true;
-                        } catch (...) {  // NOLINT(bugprone-empty-catch)
-                            co_return false;
-                        }
-                    };
-                    const auto is_admin_type = [](std::string_view mt) -> bool {
-                        return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
-                               mt == "5" || mt == "A";
-                    };
-                    // FIX-3 (gate-b/r1): flag set by emit_gapfill_async when
-                    // fire_to_admin_ returns false (toAdmin threw). Callers check
-                    // this flag to distinguish transport-error false from
-                    // callback-threw false and return app_callback_threw.
-                    bool gapfill_callback_threw = false;
-                    const auto emit_gapfill_async =
-                        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
-                        std::array<std::byte, 256> gf_buf{};
-                        auto gf = fixpp::session::build_sequence_reset_gapfill(
-                            std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
-                            cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
-                            st52_sr.value);
-                        if (!gf) {
-                            co_return true;
-                        }  // build failure treated as no-op
-                        // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
-                        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
-                        if (!fire_to_admin_(*gf)) {
-                            gapfill_callback_threw = true;
-                            co_return false;
-                        }
-                        co_return co_await transmit_async(*gf);
-                    };
-
-                    // Resolve the effective end: EndSeqNo=0 → "through current
-                    // last outbound"; clamp anything past our last stored seq
-                    // (CHK031). Discovered via the shipped 008 next_seqnum read.
-                    seqnum_t our_last = 0;
-                    if (store_) {
-                        auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
-                        if (ns) our_last = (*ns > 0) ? (*ns - 1U) : 0;
-                    }
-                    const seqnum_t eff_end =
-                        (rr_end == 0 || (our_last > 0 && rr_end > our_last)) ? our_last : rr_end;
-
-                    // No store, or nothing to replay in range → single GapFill
-                    // covering the whole requested range (empty-store CHK032).
-                    if (!store_ || our_last == 0 || rr_begin > eff_end) {
-                        const seqnum_t new_seq_no =
-                            (rr_end == 0) ? seqnum_mgr_.peek_outbound() : (rr_end + 1U);
-                        if (!co_await emit_gapfill_async(rr_begin > 0 ? rr_begin : 1U,
-                                                         new_seq_no)) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            if (gapfill_callback_threw) {
-                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                            }
-                        }
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-
-                    // Per-slot store-walk over [rr_begin, eff_end]. Accumulate
-                    // absent/admin runs into one GapFill; flush before each replay.
-                    //
-                    // RC#B (gate-b/r1): rp_buf enlarged from 1280→kRpBufSize to match
-                    // the 4096B capture buffer + replay overhead. The truncated path for
-                    // a real app message now disconnects instead of silently GapFilling
-                    // (same silent-data-loss class as FR-010/FR-012). [triage RC#B]
-                    static constexpr std::size_t kRpBufSize =
-                        CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
-                    bool gap_open = false;
-                    seqnum_t gap_start = 0;
-                    for (seqnum_t k = rr_begin; k <= eff_end; ++k) {
-                        CaptureVisitor cv;
-                        auto rr = co_await store_->retrieve(k, k, direction_t::outbound, cv);
-
-                        // If the frame was truncated (> capture buffer), it may be a real
-                        // app message we cannot safely GapFill away. Disconnect to surface
-                        // the anomaly rather than silently losing data. [triage RC#B]
-                        if (cv.truncated) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return fixpp::core::expected_t<void>{};
-                        }
-
-                        const bool app_present =
-                            rr && cv.captured &&
-                            !is_admin_type(
-                                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len})
-                                    .msg_type);
-                        if (app_present) {
-                            if (gap_open) {
-                                if (!co_await emit_gapfill_async(gap_start, k)) {
-                                    record_state_transition_(fsm_state::Disconnected);
-                                    if (gapfill_callback_threw) {
-                                        co_return std::unexpected(
-                                            fixpp::core::error::app_callback_threw);
-                                    }
-                                    co_return fixpp::core::expected_t<void>{};
-                                }
-                                gap_open = false;
-                            }
-                            std::array<std::byte, kRpBufSize> rp_buf{};
-                            auto rp = build_replay_frame(
-                                std::span<std::byte>{rp_buf.data(), rp_buf.size()},
-                                std::span<const std::byte>{cv.buf.data(), cv.len});
-                            if (rp && !co_await transmit_async(*rp)) {
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return fixpp::core::expected_t<void>{};
-                            }
-                        } else {
-                            // Absent slot or admin message → fold into a GapFill run.
-                            if (!gap_open) {
-                                gap_open = true;
-                                gap_start = k;
-                            }
-                        }
-                    }
-                    if (gap_open) {
-                        if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            if (gapfill_callback_threw) {
-                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                            }
-                        }
+                    auto replay_r = co_await replay_outbound_range_(
+                        rr_begin, rr_end, /*end_is_through_current=*/(rr_end == 0));
+                    if (!replay_r) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(replay_r.error());
                     }
                     // Remain in Active after responding to ResendRequest.
                     co_return fixpp::core::expected_t<void>{};
@@ -3973,6 +3838,168 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // Timeout (or root cancellation before confirm): force-disconnect.
     record_state_transition_(fsm_state::Disconnected);
     co_return std::unexpected(fixpp::core::error::session_logout_timeout);
+}
+
+// ── 027 T005 — replay_outbound_range_ ────────────────────────────────────────
+//
+// Extracted from the inline ResendRequest-reply walk (was session.cpp:2485-2635).
+// Replays [begin, requested_end] (or through-current when end_is_through_current)
+// using the same two-value end model as the original inline block.
+//
+// TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3):
+//   eff_end = (end_is_through_current || (our_last > 0 && requested_end > our_last))
+//                 ? our_last : requested_end
+//   empty/short-store GapFill NewSeqNo =
+//               end_is_through_current ? peek_outbound() : (requested_end + 1)
+//
+// The helper NEVER calls record_state_transition_ — the CALLER owns all FSM
+// Disconnected transitions. Returns std::unexpected on all failure paths so
+// the caller can detect and handle them.
+//
+// Returns:
+//   expected_t<void>{}                          — success (resend complete)
+//   unexpected(app_callback_threw)              — a GapFill toAdmin threw
+//   unexpected(dispatch_aborted)                — transport write error
+
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::replay_outbound_range_(seqnum_t begin, seqnum_t requested_end,
+                                bool end_is_through_current) noexcept
+{
+    const auto st52_sr =
+        effective_clock_
+            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+            : SendingTimeStamp{};
+
+    // Transmit a single replay/gapfill frame; returns false on write error.
+    // Uses the live-write path when a transport is attached; sync transport_send_
+    // for pre-live/test paths.
+    const auto transmit_async =
+        [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
+        if (live_transport_shared_()) {
+            auto wr = co_await live_write_serialized_(f);
+            co_return wr.has_value();
+        }
+        if (!transport_send_) {
+            co_return true;
+        }
+        try {
+            transport_send_(f);
+            co_return true;
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
+            co_return false;
+        }
+    };
+
+    const auto is_admin_type = [](std::string_view mt) -> bool {
+        return mt == "0" || mt == "1" || mt == "2" || mt == "3" || mt == "4" ||
+               mt == "5" || mt == "A";
+    };
+
+    // FIX-3 (gate-b/r1): set when emit_gapfill_async detects a toAdmin throw.
+    bool gapfill_callback_threw = false;
+    const auto emit_gapfill_async =
+        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<bool> {
+        std::array<std::byte, 256> gf_buf{};
+        auto gf = fixpp::session::build_sequence_reset_gapfill(
+            std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq,
+            cfg_.sender_comp_id, cfg_.target_comp_id, new_seqno, cfg_.begin_string,
+            st52_sr.value);
+        if (!gf) {
+            co_return true;
+        }  // build failure treated as no-op
+        // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
+        // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+        if (!fire_to_admin_(*gf)) {
+            gapfill_callback_threw = true;
+            co_return false;
+        }
+        co_return co_await transmit_async(*gf);
+    };
+
+    // Resolve the effective end: through-current or clamped to our last stored
+    // sequence number. Mirrors the original rr_end resolution.
+    seqnum_t our_last = 0;
+    if (store_) {
+        auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
+        if (ns) our_last = (*ns > 0) ? (*ns - 1U) : 0;
+    }
+    const seqnum_t eff_end =
+        (end_is_through_current || (our_last > 0 && requested_end > our_last))
+            ? our_last
+            : requested_end;
+
+    // No store, or nothing to replay in range → single GapFill covering the
+    // whole requested range (empty-store CHK032).
+    // NewSeqNo uses the two-value model:
+    //   end_is_through_current → peek_outbound() (mirrors EndSeqNo=0 path)
+    //   else                   → requested_end + 1 (mirrors explicit rr_end+1)
+    if (!store_ || our_last == 0 || begin > eff_end) {
+        const seqnum_t new_seq_no =
+            end_is_through_current ? seqnum_mgr_.peek_outbound() : (requested_end + 1U);
+        if (!co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no)) {
+            if (gapfill_callback_threw) {
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // Per-slot store-walk over [begin, eff_end]. Accumulate absent/admin runs
+    // into one GapFill; flush before each replay.
+    static constexpr std::size_t kRpBufSize =
+        CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
+    bool gap_open = false;
+    seqnum_t gap_start = 0;
+    for (seqnum_t k = begin; k <= eff_end; ++k) {
+        CaptureVisitor cv;
+        auto rr = co_await store_->retrieve(k, k, direction_t::outbound, cv);
+
+        // Truncated frame: disconnect rather than silently losing data. [RC#B]
+        if (cv.truncated) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+
+        const bool app_present =
+            rr && cv.captured &&
+            !is_admin_type(
+                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len})
+                    .msg_type);
+        if (app_present) {
+            if (gap_open) {
+                if (!co_await emit_gapfill_async(gap_start, k)) {
+                    if (gapfill_callback_threw) {
+                        co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                    }
+                    co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+                }
+                gap_open = false;
+            }
+            std::array<std::byte, kRpBufSize> rp_buf{};
+            auto rp = build_replay_frame(
+                std::span<std::byte>{rp_buf.data(), rp_buf.size()},
+                std::span<const std::byte>{cv.buf.data(), cv.len});
+            if (rp && !co_await transmit_async(*rp)) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+        } else {
+            // Absent slot or admin message → fold into a GapFill run.
+            if (!gap_open) {
+                gap_open = true;
+                gap_start = k;
+            }
+        }
+    }
+    if (gap_open) {
+        if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
+            if (gapfill_callback_threw) {
+                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+    }
+    // Remain in Active after responding to ResendRequest / 789 honor.
+    co_return fixpp::core::expected_t<void>{};
 }
 
 }  // namespace fixpp::session

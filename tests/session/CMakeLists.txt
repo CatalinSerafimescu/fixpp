@@ -1544,6 +1544,36 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_sending_time_precision)
 endif()
 
+# ── 027-next-expected-msgseqnum (S-031) — T001/T004 walk-extraction witnesses ──
+# T001 (Setup): test skeleton + ctest target registration.
+# T004 (Foundational RED first): walk-extraction safety witnesses:
+#   WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore (ResendRequest-caller half)
+#   WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore (ResendRequest-caller half)
+#   WalkExtraction_SingleImplementation (structural grep — RED until T005)
+# FIXPP_TEST_SOURCE_DIR wired so the grep witnesses can locate session.cpp.
+# data-model I-NEX-3, research D-5, contracts C3.
+add_executable(session_next_expected_msgseqnum
+  test_next_expected_msgseqnum.cpp
+)
+target_link_libraries(session_next_expected_msgseqnum PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_next_expected_msgseqnum PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_next_expected_msgseqnum PRIVATE
+  FIXPP_TEST_HOOKS
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+add_test(NAME session_next_expected_msgseqnum
+  COMMAND session_next_expected_msgseqnum)
+set_tests_properties(session_next_expected_msgseqnum PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "027;s031;next-expected-msgseqnum;foundational")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

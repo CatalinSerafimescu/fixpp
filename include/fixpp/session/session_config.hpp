@@ -374,6 +374,20 @@ struct SessionConfig {
     // SessionConfig is a C++-only value type).
     fixpp::core::fix_time_precision sending_time_precision =
         fixpp::core::fix_time_precision::millis;
+
+    // 027 T003 / data-model E1 — enable NextExpectedMsgSeqNum(789) fast session
+    // resume. Single knob controlling BOTH emitting our 789 in the outbound Logon
+    // AND honoring a peer's inbound 789 (research D-2):
+    //   emit: build_logon appends 789=<next_inbound_unsafe()> after the 141 block;
+    //   honor: on inbound Logon carrying 789=X, proactively resend [X, N-1] via
+    //          replay_outbound_range_() (eliminates the ResendRequest round-trip).
+    // Default false = QuickFIX-compatible no-op; default-off is an EXPLICIT
+    // per-field default ([const §XII.5]; parity with QFcpp m_sendNextExpectedMsgSeqNum
+    // default false and QFJ enableNextExpectedMsgSeqNum default false).
+    // ABI note: additive bool field changes SessionConfig struct layout → a normal
+    // source rebuild is required (no C-ABI surface; SessionConfig is C++-only).
+    // No new include: primitive bool, §XV.9 N/A (data-model E1).
+    bool enable_next_expected_msg_seq_num = false;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so
