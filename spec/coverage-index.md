@@ -33,7 +33,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §3 | Terms and definitions | N (definitions) | — | covered by impl/constitution |
 | §3.1 | General terms and definitions (23 terms incl. NextNumIn/Out, TestRequestThreshold, etc.) | N | S-008, S-009 | covered by impl/constitution; threshold values are rules-of-engagement |
 | §4 | FIX session (root) | Y | S-001–S-036 (aggregate) | — |
-| §4.1 | Sequence numbers | Y | S-009 | — |
+| §4.1 | Sequence numbers | Y | S-009, S-042 | S-042 (029): durable inbound counter + bidirectional hydrate-on-open — persistent store seeded into `SeqnumManager` at cold open; inbound counter persisted after each delivery. |
 | §4.2 | Identifying the FIX session | Y | S-016, S-020 | — |
 | §4.2.1 | The FIX session profile | Y | S-020 | — |
 | §4.2.2 | Identification of FIX session peers (CompID) | Y | S-016, S-040 | S-040 (028): `check_comp_id=false` skips the steady-state `49`/`56` match; Logon-establishment + BeginString + 013 authz still enforced. |
@@ -54,7 +54,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.3.9 | Identification of application system and FIX session processor | Y | — | MISSING → row added (S-038) |
 | §4.3.10 | Responding to FIX session establishment request (acceptor Logon ack / Logout reject) | Y | S-001 | — |
 | §4.3.11 | Initial synchronization of messages (Logon seqnum check, ResendRequest on gap) | Y | S-014 | — |
-| §4.3.12 | Synchronization after successful logon | Y | S-014, S-031 | — |
+| §4.3.12 | Synchronization after successful logon | Y | S-014, S-031, S-042 | S-042 (029): hydrate-on-open seeds both seqnum counters from the persistent store at cold start so the post-logon seqnum state is synchronized with the stored baseline. S-018 (RefreshOnLogon — per-reconnect re-hydrate knob) stays `backlog` pending 025. |
 | §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032, S-040, S-041 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; S-031 **FIX 4.4 parity** shipped via 027 (`implementation-parity-4.4`); S-040 (`check_comp_id` knob) + S-041 (`validate_sequence_numbers` knob) shipped via 028; FIXT.1.1 / 5.0SP2 version-gating outstanding to G4. S-018 (RefreshOnLogon) parked (T034 store-hydrate prerequisite). MaxLatency knob remains deferred. |
 | §4.4.1 | Using NextExpectedMsgSeqNum(789) | Y | S-031 | **FIX 4.4 parity shipped (027)**: per-session knob; advertise 789 in Logon (both roles); honor peer 789 with proactive resend (X<N → resend [X,N-1], no ResendRequest round-trip); X>N or invalid → Logout+disconnect; default off byte-identical; behind-side tolerance (no at-logon ResendRequest suppression). Tests: `tests/session/test_next_expected_msgseqnum.cpp` + `tests/interop/happy/hp_fix44_next_expected_test.cpp`. **FIXT.1.1 / 5.0SP2 outstanding to G4** (row is versioned "5.0–5.0SP2, FIXT.1.1"; this slice is FIX 4.4 only). |
 | §4.4.2 | Using ResetSeqNumFlag(141) for 24-hour connectivity | Y | S-032 | — |
@@ -615,6 +615,35 @@ Notes that supplement specific catalogue rows (`feature-catalogue.md`) without r
 **SVC-005 supplemental:** Pluggable control-plane interface — `fixpp::service::ControlPlane` (3 pure-virtual methods: `start`, `stop`, `health`; under the `[const §XIV.2]` ≤ 5 cap with 2 slots reserved for v1.x `RotateAuthToken` / `RemapRpcs` per `[2j §10]` Q5). Source spec sections: `[arch §4.11] service` (the surface inventory) and `[2j §4.1] fixpp::service::ControlPlane — abstract interface`. Default impl `fixpp::service::grpc_control_plane` per `[2j §4.6]` (Unix domain socket on Linux / named pipe on Windows; TCP opt-in per `[arch §8.1]`). The proto schema `service/proto/fixpp_control.proto` per `[2j §4.7]` is on the `[arch §9.3]` "Stable from v1.0" tier; proto-evolution rules pinned in `[2j §4.7.1]` (additive-only expansion via MINOR bumps; removals are MAJOR breaks). v1.0 RPC surface: `OpenSession`, `CloseSession`, `Configure` (reserved-empty per `[2j §4.7.1]` additive expansion path), `StreamMetrics`, `StreamLogs`, `StreamSessionEvents`, `Health` (gRPC standard health-check). `RotatePinset` and `ReloadCertSource` are deferred to v1.x per `[2j §10]` Q1 + Q9 (the v1.0 cross-doc state has no AGPL-legal path: `[2i §2]` non-goal #6 declines the C-ABI rotation surface; `service/grpc/*.cpp` cannot include `<fixpp/tls/...>` per `[arch §8]`). AGPL-boundary structural enforcement per `[2j §4.4]` / `[2j §4.6]` + `tools/check_layers.py` lint per `[arch §8]` enforcement bullet (first-landing tracked at `[2j §10]` Q10). Stream backpressure: close-on-overflow with `control_plane_stream_overflow` per `[2j §4.8]` / `[2j §6.4]` (consistent with `[const §XV.15]` no-drop-oldest-on-app-paths; `[const §XIII.2]` permits but does not require drop-oldest on observability paths — v1.0 picks close-on-overflow for visibility). The proto-stability audit-trail file `tools/abi_history/proto_v1.txt` (NEW at 2j sign-off per `[2j App D §D.3]`) mirrors the `tools/abi_history/error_codes_v1.txt` precedent. Source: 2j v0.3 (2026-05-09); see `[2j §11]` drop-in language and `[2j Appendix A]`.
 
 **PY-bindings supplemental:** Python `fixpp` package — SWIG-generated CPython extension wrapping the C ABI per `[arch §4.12]` / `[arch §8]` AGPL boundary; consumes only `<fix/c_api.h>` (no engine-internal C++ headers per `[arch §9.1]`). Source spec sections: `[arch §1.1] Goals` (Python wheel mandatory) and `[2m §1] Goals` + `[2m §4.1–§4.7] Public Python API surface` + `[2m §6.1–§6.7] Behavioral contract` + `[2m §11] Hand-off`. PY-001 (SWIG / `import fixpp`): `[2m §4.1]` package layout + `[2m §4.2]` Engine + `[2m §4.3]` Session + `[2m §4.4]` Message + `[2m §4.5]` Application + `[2m §5]` wrapped C-ABI symbols. PY-002 (GIL discipline): `[2m §6.1]` per-call release/acquire + `[2m §1.3]` rule (4) GIL-protected session-local strand markers + `[2m §6.5]` reentrancy carve-outs. PY-003 (exception translation): `[2m §4.6]` `FixppError` block-mapped hierarchy + `[2m §6.3]` translation boundaries + `[2m §6.7]` 5 new `FIXPP_ERR_BINDING_*` variants in `[2i §1.1]` `[1200, 1299]` (`PYTHON_CALLBACK_RAISED = 1200`, `SUBINTERPRETER = 1201`, `OBJECT_LIFETIME = 1202`, `WHEEL_ABI_MISMATCH = 1203`, `CALLBACK_REENTRANT_CLOSE = 1204` per `[2m App D §D.1, §D.3]`). PY-004 (lifetime / ownership): `[2m §6.2]` Python objects don't outlive native sessions per `[const §X.5]` opaque-handle uniform-destroy + `[2m §6.7]` `OBJECT_LIFETIME` (1202) enforcement. PY-005 (manylinux wheel): `[2m §1.1]` platform matrix (CPython 3.10–3.13 single-interpreter, manylinux 2_28, x86_64) + `[2m §11]` Hand-off CI workflow per `[arch §7.1]` mandatory wheel name `fixpp-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl` + `cibuildwheel` + `auditwheel repair` per `[const §IV.3]`. v1.0 binding consumption surface is **C-ABI-only** per `[arch §8]` structural enforcement; `tools/check_layers.py` lint extended at 2m sign-off to scan `bindings/python/` for any `#include <fixpp/X/...>` violation (mirrors the 2j precedent at `[arch §8]` enforcement bullet). 2m amends `[2j §11]` hand-off via `[2m App D §D.4]` to declare `fixpp_session_post` as the v1.0 strand-post primitive owed to 2m for outbound `Message.__init__`. Source: 2m v0.3 sign-off (2026-05-10); see `[2m §11]` drop-in language and `[2m Appendix A]`.
+
+---
+
+## 029-persistent-seqnum-hydrate — (pending merge)
+
+> Closes "T034" — the inbound store-persistence gap. Ships catalogue row **S-042 → `done`** (FIX 4.4: durable inbound counter + bidirectional hydrate-on-open). Discharges the `008`-boundary prerequisite for S-018 (RefreshOnLogon); S-018 stays `backlog` until 025 ships.
+>
+> **Source units covered.**
+> - `SeqnumManager::hydrate(next_inbound, next_outbound)` — new production awaitable setter; loads both counters from the persisted store into the in-memory manager at cold open.
+> - `Session::ensure_hydrated_()` — one-shot cold-open helper; reads both `next_seqnum(dir,false)` from the persistent store before the first counter touch (both roles, both direct + engine-managed paths); Logon-gate-aware inbound seed (withheld on `141=Y` / `reset_on_logon`); latched-after-success (D-9); non-persistent skip via `store_is_persistent_`.
+> - `Session::persist_inbound_advance_()` — per-delivery durable inbound write; invoked at every `check_inbound`-success site (site-keyed disposition matrix); fatal-disconnect on failure.
+> - `MessageStoreFactory::yields_persistent_store()` — non-pure discriminator accessor (default `true`; `MemoryStoreFactory` → `false`) captured at `open()` into `store_is_persistent_`.
+>
+> **Test files.**
+> - `tests/session/test_persistent_seqnum_hydrate.cpp` — W1–W14 witnesses (outbound resume, inbound durable track + resume, deliver-then-persist ordering, both-direction acceptor cold resume, post-GapFill lower bound, inbound persist failure fatal, non-persistent no-op, one-shot + happens-before, reset-wins, seed-withheld-on-141, hydrated 789 advertisement, validate-off 35=4 persist split, custom-store discriminator, hydrate read-failure fatal, no-heap under mallocnesia).
+> - `tests/interop/happy/hp_fix44_restart_resume_test.cpp` — live both-role restart-resume cell (skip-without-counterparty; assertions (a)–(d): Active reached, outbound resumed > 1, inbound resumed > 1, no fatal).
+>
+> **Normative refs.** `[FIX-SL §4.1]` (sequence numbers); `[FIX-SL §4.3.12]` (synchronization after logon); `[FIX-SL §4.8.x]` (ResendRequest / SequenceReset recovery — at-least-once restart via INV-H1 lower bound). No new wire field, error slot, codegen, or C-ABI surface.
+>
+> **Exact-set diff** `[const §VI.4]` — source units ↔ test files:
+>
+> | Source unit | Test coverage |
+> |---|---|
+> | `SeqnumManager::hydrate` | W1 (outbound resume), W4 (acceptor cold resume both directions), W8/W8-hb (one-shot + happens-before), W9a (reset wins), W9b (seed withheld on 141), W11 (hydrated 789), W14 (read-failure fatal) |
+> | `ensure_hydrated_()` (outbound path) | W1, W8, W9a, W13 (custom-store discriminator), W14 |
+> | `ensure_hydrated_()` (inbound seed + Logon-gate-aware withheld) | W4, W9b, W11 |
+> | `persist_inbound_advance_()` (PERSIST sites) | W2 (durable track + resume), W3 (deliver-then-persist ordering), W6 (persist failure fatal), W12 (validate-off 35=4 split) |
+> | `yields_persistent_store()` / `store_is_persistent_` | W7 (non-persistent no-op — memory + null), W13 (custom-store discriminator) |
+> | Full interop path | `hp_fix44_restart_resume_test.cpp` (W10 — both-role live restart-resume) |
 
 ---
 

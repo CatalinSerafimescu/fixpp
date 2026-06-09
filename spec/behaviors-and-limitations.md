@@ -580,9 +580,15 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   store-seeded at `open()` (it starts at 1; the only `set_next_inbound` caller is the inbound
   SequenceReset handler), so there is no construction-time store cache to refresh on reconnect.
   A meaningful `RefreshOnLogon` needs a store→manager hydrate-on-open path (an `008`-boundary
-  change) fixpp does not yet have. Operators needing external-store sequence-number mutation
-  must restart the session. **Status: follow-up** — tracked as its own future store-hydrate
-  slice; S-018 stays `backlog`. *(Clarifications Q3; contract C7.1; catalogue S-018 gap-note.)*
+  change) fixpp does not yet have. **The `008`-boundary dependency is discharged by 029
+  (S-042)** — `ensure_hydrated_()` + `SeqnumManager::hydrate(in,out)` provide the store→manager
+  hydrate-on-open spine for cold start. However the **per-reconnect re-hydrate knob** (the
+  `RefreshOnLogon` option that re-seeds counters on every reconnect, not just on cold open) is
+  NOT implemented by 029 (which is a one-shot cold-open hydrate). Operators needing
+  external-store sequence-number mutation across reconnects must restart the session.
+  **Status: follow-up** — the `RefreshOnLogon` option (S-018) is tracked as the 025 feature
+  (the 029 spine is its prerequisite); S-018 stays `backlog` until 025 ships. *(Clarifications
+  Q3; contract C7.1; catalogue S-018 gap-note; 029 plan.md §VI delta L-024-1 update.)*
 
 ## Nanosecond-resolution SendingTime (026-nanosecond-sendingtime)
 
@@ -768,3 +774,60 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   establishment strict for safe session bring-up and avoids entangling the 013/024 reset FSM.
   **Status: by design** (clarify Q3 / D-4; steady-state-only scope). *(data-model I-VCT-6;
   FR-012; plan Summary "Steady-state only".)*
+
+## Persistent seqnum continuity — bidirectional hydrate-on-open (029-persistent-seqnum-hydrate)
+
+### Feature Catalogue Rows
+
+- **S-042** (session) — Persistent inbound seqnum continuity — durable inbound counter +
+  bidirectional hydrate-on-open; resume both directions across restart — `backlog → done`.
+  FIX 4.4.
+
+### Behaviors
+
+*(The hydrate-on-open and persist-inbound-advance behaviors are described by the S-042 catalogue
+row; see `feature-catalogue.md`.)*
+
+### Limitations
+
+- **L-029-1 — Post-GapFill restart yields a bounded redundant ResendRequest when 789/reset is
+  available; otherwise the too-high peer Logon fatals on the Logon gate and recovers by
+  reconnect; recovery is correct at-least-once in both cases.** The `persist_inbound_advance_()`
+  helper uses `+1` per-delivery writes only — there is no absolute counter-set in the
+  `MessageStore` interface (preserving the 4-pure-virtual cap). A prior-run
+  `SequenceReset`-GapFill absolute jump (`apply_inbound_sequence_reset`) updates the in-memory
+  manager but is NOT persisted. On restart the persisted counter is a **monotonic lower bound**
+  of the true in-memory value (INV-H1). If the peer's outbound counter advanced past the restart
+  point (e.g. it sent messages after the GapFill that the fixpp side accepted), the peer's next
+  Logon will carry a `MsgSeqNum(34)` above fixpp's hydrated `next_inbound`. Two outcomes
+  depending on knob state: (a) **`enable_next_expected_msg_seq_num=true`** — fixpp advertises
+  `789=<hydrated_next_inbound>` in its Logon; the peer proactively resends or fixpp emits a
+  `ResendRequest` for the gap; session reaches Active, residual gap recovered; bounded redundant
+  resend (at most the untracked GapFill jump range). (b) **knob off** — the Logon gate has no
+  ResendRequest arm; a too-high peer `MsgSeqNum(34)` triggers a fatal
+  Logout+disconnect at the Logon-path check; the session reconnects and the peer resets to `1`
+  (ResetOnLogon) or the gap resolves after a further handshake. Recovery is correct (at-least-once,
+  no skip) in both cases; case (b) incurs an extra reconnect cycle. Operators using persistent
+  stores and SequenceReset-GapFill recovery should enable `enable_next_expected_msg_seq_num` on
+  both sides (QFcpp `EnableNextExpectedMsgSeqNum=Y` / QFJ `EnableNextExpectedMsgSeqNum=Y`) to
+  stay on the fast-recover path. **Status: documented** (INV-H1; research D-5; plan §VI delta
+  L-029-1; data-model W5/SC-004). *(contracts/seqnum-hydrate.md C2/C3; `session.cpp`
+  `apply_inbound_sequence_reset`; `tests/session/test_persistent_seqnum_hydrate.cpp` W5.)*
+
+- **L-029-2 — A swallowed I-07 outbound store-write failure in a prior run leaves the persisted
+  outbound counter behind the true last-sent value; hydrate is only as fresh as the last
+  successful outbound write.** The existing outbound store write (added in 008/024) is I-07
+  logged-then-proceed — an outbound `next_seqnum(outbound,true)` failure is logged but does NOT
+  disconnect the session (asymmetric with the inbound path where failure is fatal, per research
+  D-3). If this outbound write silently fails mid-session, the FileStore's persisted outbound
+  counter is behind the true `next_outbound_`. On restart, `ensure_hydrated_()` reads the stale
+  persisted value and loads it into the manager — the restarted session may replay seqnums the
+  peer has already seen, causing a too-low reject or unexpected seqnum jump. This is a
+  **pre-existing 008/024 property** (the I-07 policy predates 029); 029 adds the hydrate path
+  that makes the stale-write scenario observable but does not alter the I-07 policy. The correct
+  fix (promote the outbound write failure to fatal-disconnect, matching the inbound treatment) is
+  deferred as a separate store-hardening slice. Operators relying on persisted outbound counters
+  should ensure the underlying `MessageStore` (e.g. `FileStore`) operates on a reliable
+  filesystem. **Status: documented** (research D-3 / plan §VI delta L-029-2; pre-existing
+  008/024 I-07 policy; outbound→fatal deferred). *(contracts/seqnum-hydrate.md C3; `file_store.cpp`
+  outbound-write path; `tests/session/test_persistent_seqnum_hydrate.cpp` NoHeap witness.)*
