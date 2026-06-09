@@ -45,18 +45,32 @@ MemoryStore (yields_persistent_store()==false); cfg.refresh_on_logon = true; pol
 EXPECT zero store reads on the refresh path; behaviour byte-identical to knob-off
 ```
 
-## W5 — bilateral_strict: suppressed, no malformed Logon
+## W5a — bilateral_strict: re-hydrate suppressed (the 025 delta)
 
 ```
 persistent store {in:37, out:42}; cfg.refresh_on_logon = true;
 cfg.reset_seqnum_policy_field = bilateral_strict (default);
 → drive a 2nd logon (initiator)
-EXPECT (a) zero EXTRA store reads beyond the 029 cold one-shot (re-hydrate suppressed)
-       (b) the emitted Logon is byte-identical to the knob-off bilateral_strict baseline
-           and NEVER carries 141=Y with a non-1 body
+EXPECT (a) zero EXTRA store reads beyond the 029 cold one-shot (the per-logon re-hydrate suppressed)
+       (b) no NEW malformed Logon attributable to the knob — establishment proceeds exactly as the
+           knob-off bilateral_strict path
 ```
-Asserts BOTH postconditions (read-count AND emitted bytes) — the suppression has two observable
-effects.
+Asserts the 025-delta suppression. Does NOT assert the strict + non-1 **cold-open** Logon is
+well-formed — that is the inherited L-029-3 gap (see W5b).
+
+## W5b — L-029-3 inherited-gap witness (knob-OFF strict cold open)
+
+```
+persistent store {in:37, out:42}; cfg.refresh_on_logon = false (knob OFF);
+cfg.reset_seqnum_policy_field = bilateral_strict; initiator; reset_on_logon = false;
+→ drive the COLD OPEN (first logon)
+EXPECT documents the inherited 029 cold-open behaviour AS-IS — asserts ONLY what holds (the 029
+       cold seed runs). Does NOT assert the cold Logon is well-formed: under bilateral_strict + a
+       non-1 store it may carry 141=Y with a non-1 body.
+```
+This is the **L-029-3 gap witness** (inherited 029 behaviour, **NOT a 025 guarantee**) — labeled so
+it cannot be mistaken for a correctness witness. The fix (e.g. a `{1,1}`-guard on `bilateral_strict`)
+is a deferred 029/024 follow-up, OUT OF 025's scope.
 
 ## W6 — acceptor received-141 still wins under refresh (RC-1)
 
@@ -93,3 +107,8 @@ peer = running QFcpp/QFJ; → standby logs on
 EXPECT the standby re-hydrates to the primary-advanced counters and logs on at them, no fatal
 GTEST_SKIP without a live counterparty.
 ```
+
+> **FR-012** (catalogue S-018 flip + B&L L-024-1 retire / L-025-1 add) has **no synthetic runtime
+> witness** here by design — it is a doc-surface §VI delta discharged at **Polish** and verified by
+> the mandatory **`/speckit-checklist-audit`** gate (the 027/028 precedent), not by a W-row over
+> `feature-catalogue.md`/`coverage-index.md`/`behaviors-and-limitations.md` bytes.

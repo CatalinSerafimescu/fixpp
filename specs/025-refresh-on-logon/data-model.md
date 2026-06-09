@@ -52,7 +52,11 @@ For a given logon event, the re-hydrate runs iff **all** of: `refresh_on_logon =
 > Cold open is **always** the 029 one-shot (`force=false` there is moot — `hydrated_` is still
 > `false` on the first call, so the early-return is not taken regardless of `force`). The knob's
 > only observable effect is on the **2nd+** logon, where it bypasses the latch. This is why the
-> `bilateral_strict` cold-open seed is still the 029 path (the latent gap D-RoL-6, not touched here).
+> `bilateral_strict` cold-open seed is still the 029 path — the inherited L-029-3 gap (D-RoL-6,
+> Gate A resolved: **defer**, NOT a 025 guarantee), where the 029 cold-open seed under
+> `bilateral_strict` + a non-1 store can emit a `141=Y`+non-1 cold Logon. 025 never reaches it
+> (refresh is gated to non-strict); the gap is a property of the policy, deferred to a 029/024
+> follow-up.
 
 ## Invariants
 
@@ -60,9 +64,12 @@ For a given logon event, the re-hydrate runs iff **all** of: `refresh_on_logon =
   029 (the `force` arg is `false`, the `hydrated_` early-return is unchanged). (FR-004/FR-010)
 - **INV-RoL-2 (non-persistent no-op)**: `store_is_persistent_ == false` ⇒ no store read on refresh,
   byte-identical to knob-off (reuses 029 INV-H4 at `:576`). (FR-005)
-- **INV-RoL-3 (strict suppression)**: `policy == bilateral_strict` ⇒ no re-hydrate (zero extra
-  reads); the emitted Logon is byte-identical to the knob-off `bilateral_strict` baseline and never
-  carries `141=Y` with a non-1 body. (FR-008)
+- **INV-RoL-3 (strict suppression — the 025 re-hydrate delta)**: `policy == bilateral_strict` ⇒ the
+  per-logon **re-hydrate** (the 025 2nd+-logon delta) does not run (zero extra reads); the 2nd+ logon
+  introduces no NEW malformed Logon attributable to the knob (establishment proceeds exactly as the
+  knob-off `bilateral_strict` path). This invariant covers the **re-hydrate**, not the cold-open
+  seed: the strict + non-1 **cold-open** path is the inherited **L-029-3** gap (D-RoL-6, deferred),
+  NOT a 025 guarantee. (FR-008)
 - **INV-RoL-4 (store-wins)**: when the re-hydrate runs, the manager counters equal the store's
   values (up or down); no advance-only clamp. (FR-003)
 - **INV-RoL-5 (RC-1 preserved)**: a forced re-hydrate on an acceptor reset Logon (`34=1,141=Y`)
@@ -83,14 +90,25 @@ For a given logon event, the re-hydrate runs iff **all** of: `refresh_on_logon =
 | W2 | knob-on, lenient, store set **below** live → logon | both manager counters = store's lower values (store-wins DOWN) | FR-003, SC-002 |
 | W3 | knob-**off**, 2nd logon/reconnect | no store re-read (call-count unchanged after cold) + counters retained + full regression green | FR-004/010, SC-003 |
 | W4 | knob-on, **non-persistent** store → logon | zero store reads, byte-identical to knob-off | FR-005, SC-004 |
-| W5 | knob-on, **bilateral_strict**, non-1 store → logon | re-hydrate suppressed (zero extra reads); emitted Logon byte-identical to knob-off strict baseline, never `141=Y`+non-1 body | FR-008, SC-005 |
+| W5a | knob-**on**, **bilateral_strict**, non-1 store → **2nd logon** | re-hydrate suppressed (zero EXTRA reads beyond the 029 cold one-shot); no NEW malformed Logon attributable to the knob (establishment == knob-off strict path) | FR-008, SC-005 |
+| W5b | knob-**OFF**, **bilateral_strict**, non-1 store → **cold open** | the **L-029-3 inherited-gap witness** — documents/asserts the inherited 029 cold-open behaviour AS-IS; asserts ONLY what holds (e.g. that the cold seed runs). Does NOT assert the cold Logon is well-formed (it may carry `141=Y`+non-1). Clearly labeled "inherited 029 gap, NOT a 025 guarantee" — must not be mistaken for a correctness witness. | (L-029-3 gap; not a 025 FR/SC) |
 | W6 | knob-on, lenient, **acceptor** non-1 inbound, peer reset Logon `34=1,141=Y` | inbound seed withheld; peer `34=1` accepted; reaches Active | FR-009, SC-006 |
 | W7 | knob-on, lenient, refresh store-**read failure** (fault-injecting store) | `Disconnected`, no partial seed, no new error slot | FR-006, SC-007 |
 | W8 | knob-on, lenient, **no-heap** under mallocnesia on the per-logon re-hydrate | zero allocations on the refresh path (non-allocating ready-awaitable store) | [const §VIII.5] |
 | W9 (interop) | fixpp standby (lenient, knob-on) re-hydrates a primary-advanced store, logs on vs QFcpp/QFJ | resumes at the adopted counters, no fatal | [const §VII.6] |
 
 > W3's "no re-read" assertion must check the **store read call-count** directly (a counting test
-> store), not a proxy — per [[feedback_witness_asserts_named_postcondition_not_proxy]]. W5 must
-> assert BOTH the zero-extra-reads AND the emitted-Logon-bytes (the suppression has two observable
-> postconditions). W2 (store-wins DOWN) is the witness that distinguishes store-wins from
-> advance-only — it MUST move the counter below the live value.
+> store), not a proxy — per [[feedback_witness_asserts_named_postcondition_not_proxy]]. **W5a**
+> asserts the 025-delta suppression: zero EXTRA reads (the re-hydrate did not run) AND no NEW
+> malformed Logon attributable to the knob. **W5b** is the L-029-3 **gap witness** for the knob-OFF
+> strict + non-1 **cold open**: it documents the inherited 029 behaviour as-is and asserts ONLY what
+> holds — it does NOT assert cold-open validity (the strict cold seed may emit `141=Y`+non-1) and
+> must be clearly labeled so a future reader cannot mistake it for a correctness witness
+> (per [[feedback_witness_asserts_named_postcondition_not_proxy]]). W2 (store-wins DOWN) is the
+> witness that distinguishes store-wins from advance-only — it MUST move the counter below the live
+> value.
+>
+> **FR-012** (catalogue S-018 flip + B&L L-024-1 retire / L-025-1 add) has no synthetic runtime
+> witness by design: it is a doc-surface §VI delta discharged at **Polish** and verified by the
+> mandatory **`/speckit-checklist-audit`** gate (the 027/028 precedent), not by a W-row over
+> `feature-catalogue.md`/`coverage-index.md` bytes.

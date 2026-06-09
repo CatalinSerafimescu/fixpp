@@ -31,5 +31,5 @@
 
 ## Notes
 
-- The store-wins semantic (D-RoL-1) and branch identity (D-RoL-2) are pre-resolved user decisions encoded in the spec; the formal `/speckit-clarify` reference sweep is the next pipeline step and may surface additional questions (e.g. the precise `bilateral_strict` reset-precedence mechanics — FR-008 — and the acceptor received-141 ordering — FR-009 — against the merged 024/013/029 code).
+- The store-wins semantic (D-RoL-1) and branch identity (D-RoL-2) are pre-resolved user decisions encoded in the spec; the formal `/speckit-clarify` reference sweep (2026-06-09) and the Gate-A round-1 rewrite RESOLVED the `bilateral_strict` composition (suppress the re-hydrate under strict — FR-008 — and defer the inherited cold-open / non-1-outbound malformed-Logon gap as L-029-3) and preserved the acceptor received-141 ordering via the 029 RC-1 path (FR-009), all against the merged 024/013/029 code.
 - Some spec language names internal concepts (029 INV-H1/H3/H4, the `bilateral_strict` policy, `reset_on_logon`) because they are the established, named composition surface this feature rides on; these are domain entities, not implementation leakage.

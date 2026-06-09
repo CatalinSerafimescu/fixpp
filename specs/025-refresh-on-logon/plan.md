@@ -66,15 +66,17 @@ store surface, no wire/error/codegen/C-ABI change.
   passes `apply_inbound_seed = !(peer_sent_reset || cfg_.reset_on_logon)` (`:1738`), so a forced
   re-hydrate on a peer reset Logon still withholds the inbound seed and the `:1925` received-141
   reset owns the post-state. The peer's `34=1` is accepted, not rejected too-low.
-- **Latent inherited gap, explicitly flagged for Gate A** (NOT fixed here): 029's **cold-open**
+- **Inherited gap, Gate A RESOLVED → DEFER (L-029-3, NOT fixed here):** 029's **cold-open**
   hydrate seeds the outbound counter unconditionally regardless of policy, so a `bilateral_strict`
-  session restarting against a persistent non-1 store already emits a malformed cold-open Logon
-  (`141=Y` + non-1 body) — untested in 029 (its hydrate tests all use `bilateral_lenient`). 025's
-  knob, gated to non-strict, never makes this worse and is correct in isolation; whether to **also**
-  close the cold-open gap (the same one-line `policy != bilateral_strict` guard, applied inside
-  `ensure_hydrated_`'s outbound seed) is routed to Gate A as a fold-in-or-defer decision. Default
-  recommendation: **defer** (out of 025's scope per the advisor; record as L-029-3) to keep 025 a
-  true thin slice; Gate A may overrule.
+  initiator (`reset_on_logon==false`) restarting against a persistent non-1 store already emits a
+  malformed cold-open Logon (`141=Y` + non-1 body) — untested in 029 (its hydrate tests all use
+  `bilateral_lenient`). 025's knob, gated to non-strict, never makes this worse and is correct in
+  isolation. **Gate A resolved to DEFER, not fold in:** the one-line `policy != bilateral_strict`
+  guard on the outbound seed was REJECTED because (a) it breaks **FR-010**'s byte-identity on the
+  knob-OFF strict cold-open path, (b) it is a half-fix of the broader `bilateral_strict`-reset-vs-`141`
+  question (`:1795` handshake, out of scope), and (c) 025's call-site gate already prevents the
+  feature from reaching the path. The inherited gap is a property of the **policy**, recorded as
+  **L-029-3** — a deferred 029/024 follow-up (D-RoL-6). 025 stays a true thin slice.
 
 ## Technical Context
 
@@ -90,7 +92,8 @@ store schema or interface change.
 **Testing**: GoogleTest; ASan/UBSan/TSan; coverage llvm-cov. Witnesses: store-advanced-above /
 store-set-below per-logon re-hydrate (store-wins up/down); default-off second-logon does-not-re-read
 + full regression byte-identity; non-persistent store no-op (zero reads) with knob on;
-`bilateral_strict` suppression (zero re-hydrate reads + no malformed Logon); acceptor received-141
+`bilateral_strict` suppression (zero re-hydrate reads + no NEW malformed Logon attributable to the
+knob); acceptor received-141
 still wins under refresh; refresh read-failure → fatal. Plus a live interop cell (skip-without-
 counterparty): standby re-hydrate against a primary-advanced store. — [const §VII, §IX]
 **Target Platform**: Linux/Clang Tier-1 (sanitizer matrix); the live cell runs against QFcpp/QFJ in
@@ -118,7 +121,7 @@ method, no codegen/C-ABI/wire/error-slot change.
 |---------|------|--------|
 | **II** Language | C++23/Clang, no new deps | ✅ PASS |
 | **VI** Spec coverage | **Existing catalogue row `S-018`** (RefreshOnLogon, `[FIX-SL §4.3.12]`) flips `backlog`→`done` (no net-new row — S-018 already exists, descoped from 024). Add the `spec/coverage-index.md` S-018 entries (§4.3.12 + §4.4: `backlog`→`done`). Retire **L-024-1** (`behaviors-and-limitations.md:579` — "RefreshOnLogon NOT implemented") and add **L-025-1** (store-wins active-session-reconnect regression = operator responsibility / standby-only + the `bilateral_strict`-suppression no-op-under-default note). Normative refs in spec.md `## Normative References` (Article VI.5): QFcpp/QFJ `RefreshOnLogon`, Fix8 `recover_seqnums`, the FIX `141=Y`⟹`MsgSeqNum=1` rule, `[FIX-SL §4.3.12]`/`§4.4`. Exact delta below (Polish). | ⚠ RESOLVED (delta specified) |
-| **VII** Testing/TDD | RED-first witnesses: (1) knob-on non-strict, store-advanced-above → re-hydrate UP; (2) store-set-below → re-hydrate DOWN (store-wins); (3) default-off second logon → NO re-read + counters retained + full regression byte-identity; (4) non-persistent store + knob-on → zero reads, no-op; (5) `bilateral_strict` + knob-on + non-1 store → re-hydrate suppressed (zero extra reads) + emitted Logon never `141=Y`+non-1 (byte-identical to knob-off strict baseline); (6) acceptor received-141 reset Logon under refresh → peer `34=1` accepted (RC-1 still holds); (7) refresh read-failure → fatal disconnect, no partial seed | ✅ planned |
+| **VII** Testing/TDD | RED-first witnesses: (1) knob-on non-strict, store-advanced-above → re-hydrate UP; (2) store-set-below → re-hydrate DOWN (store-wins); (3) default-off second logon → NO re-read + counters retained + full regression byte-identity; (4) non-persistent store + knob-on → zero reads, no-op; (5) **W5a** `bilateral_strict` + knob-on + non-1 store → 2nd-logon re-hydrate suppressed (zero extra reads) + no NEW malformed Logon attributable to the knob (establishment == knob-off strict path); plus **W5b** the L-029-3 inherited-gap witness (knob-OFF strict cold open, asserts only what holds — NOT a 025 validity guarantee); (6) acceptor received-141 reset Logon under refresh → peer `34=1` accepted (RC-1 still holds); (7) refresh read-failure → fatal disconnect, no partial seed | ✅ planned |
 | **VII.6** Interop | live cell (skip-without-counterparty): a fixpp standby (non-strict policy, `refresh_on_logon=on`) re-hydrates from a store a primary advanced, then logs on against a QFcpp/QFJ peer at the adopted counters | ✅ planned |
 | **VIII.5** Allocator | the re-hydrate reads are counter-only (no frame body, no new container); reuses 029's non-allocating hydrate path; no-heap witness on the per-logon re-hydrate (non-allocating ready-awaitable test store) | ✅ planned (witnessed) |
 | **IX.1** Coverage | ≥95/85 on the new `force` branch of `ensure_hydrated_` + the two call-site `force` expressions (incl. the `bilateral_strict` short-circuit) + the refresh read-failure branch | ✅ planned |
@@ -133,9 +136,10 @@ method, no codegen/C-ABI/wire/error-slot change.
 
 **Result**: PASS to proceed. The feature is a default-off, `bilateral_strict`-suppressed
 latch-bypass on the 029 spine; the cold path and the non-strict/non-persistent floors are
-byte-identical; no new store/manager/wire/error/codegen surface. One choice is **explicitly
-flagged for Gate A**: whether to also close the inherited 029 **cold-open** `bilateral_strict`
-malformed-Logon gap inside 025 (default: defer as L-029-3) or leave it to a 029 follow-up.
+byte-identical; no new store/manager/wire/error/codegen surface. One choice was **flagged for Gate A
+and RESOLVED (round 1): DEFER** — the inherited 029 **cold-open** `bilateral_strict` malformed-Logon
+gap is NOT closed inside 025 (fold-in rejected: breaks FR-010, half-fix, unnecessary given the
+call-site gate); it is recorded as **L-029-3**, a deferred 029/024 follow-up.
 The store-wins active-session-regression is an accepted operator responsibility (L-025-1),
 matching QuickFIX. No unjustified violations.
 
@@ -152,8 +156,10 @@ matching QuickFIX. No unjustified violations.
   can regress an **active** session's counters past the INV-H1 lag on reconnect → enable
   `refresh_on_logon` **only on backup/standby topologies** (operator responsibility, same contract
   as QuickFIX); (b) `refresh_on_logon` is **suppressed under `bilateral_strict`** (the default), so
-  it is a no-op until a non-strict reset-seqnum policy is selected. (If Gate A folds in the cold-open
-  fix, also add **L-029-3**; else record L-029-3 as a deferred 029 follow-up.)
+  it is a no-op until a non-strict reset-seqnum policy is selected. **Add L-029-3** as a deferred
+  **inherited** limitation (Gate A resolved: DEFER, not folded in) — an **OPEN** gap: the 029
+  cold-open `bilateral_strict` + non-1 store seed can emit a `141=Y`+non-1 cold Logon (a property of
+  the policy, not the knob), routed to a 029/024 follow-up and **NOT closed by 025**.
 
 ## Project Structure
 
@@ -201,12 +207,12 @@ session→store dependency already exists from 029).
 
 *No constitution violations requiring justification.* The store-wins-can-regress property is an
 accepted operator responsibility (L-025-1, QuickFIX-faithful), not a violation. The one flagged
-choice (fold-in vs defer the 029 cold-open `bilateral_strict` gap) is a scope decision routed to
-Gate A, not a violation.
+choice (fold-in vs defer the 029 cold-open `bilateral_strict` gap) was a scope decision **resolved at
+Gate A round 1: DEFER** (recorded as the inherited L-029-3 follow-up; fold-in rejected — see §VI /
+D-RoL-6), not a violation.
 
 ## Gate A
 
-- *(pending — runs after this plan, before `/speckit-tasks`. Reviews:
-  `research/reviews/{codex,opus}_025-refresh-on-logon_gate_a*` — note the three pre-existing
-  parked-025 review files in `research/reviews/` are from the SUPERSEDED outbound-only design and
-  do NOT apply to this re-scoped knob.)*
+- Round 1 applied 2026-06-09: Codex P1=2 P2=3 P3=1; Opus post-judging P1=1 P2=3 P3=5; rewrite addresses Root cause #1 (narrow the absolute FR-008/SC-005/FR-002/W5 claims to the 025 re-hydrate delta; DEFER the inherited 029 cold-open bilateral_strict gap as L-029-3) + Root cause #2 (Fix8 mechanism wording; record the QFJ-initiator-double-refresh 2-vs-3-site divergence, no third site) + 3 P3 contract/witness clauses. Reviews: research/reviews/codex_025-refresh-on-logon_gate_a_review.md, research/reviews/opus_025-refresh-on-logon_gate_a_adversarial_review.md.
+- Round 2 applied 2026-06-09: Codex P2=1 P3=2; Opus post-judging P1=0 P2=1 P3=2 (root cause CLOSED round 1; residual stale-doc-drift only). Fixed the 3 enumerated residual over-claim sites (contracts C3.3, plan testing-summary, checklists note) — narrowed to "no NEW malformed Logon attributable to the knob". Reviews: research/reviews/codex_025-refresh-on-logon_gate_a_2_review.md, research/reviews/opus_025-refresh-on-logon_gate_a_2_adversarial_review.md.
+- *(Note: the three pre-existing parked-025 review files in `research/reviews/` are from the SUPERSEDED outbound-only design and do NOT apply to this re-scoped knob.)*

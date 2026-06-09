@@ -24,7 +24,11 @@ Behavioral contract for the knob + the `force` latch-bypass. Anchors verified ag
   exactly as the cold path (INV-RoL-6 / FR-006). No new error slot.
 - **C2.6** The `hydrated_` latch is left set after a forced call; this is benign (subsequent forced
   calls ignore it; a subsequent non-forced call short-circuits as already-hydrated, which is the
-  intended cold-path behavior).
+  intended cold-path behavior). **Note (non-persistent path):** on the **non-persistent** path the
+  `hydrated_` latch is never set — `:576` returns before the `:610` latch — so the latch stays
+  `false` and every forced call re-enters to the `:576` skip (still a no-op). The no-op is enforced
+  by `store_is_persistent_`, not the latch; the "latch left set / benign" reasoning above applies
+  only to the **persistent** path.
 
 ## C3 — Call-site force expression (the suppression gate)
 
@@ -42,8 +46,10 @@ const bool refresh_active =
 - **C3.2 (acceptor)** `NotConnected` Logon `:1738`: `co_await ensure_hydrated_(!withhold_inbound,
   /*force=*/refresh_active)`. `withhold_inbound` stays `peer_sent_reset || cfg_.reset_on_logon`
   (029). The hydrate precedes `check_inbound` and the reply `peek_outbound()` (`:1951`).
-- **C3.3 (suppression)** Under `bilateral_strict`, `refresh_active == false`, so the call degrades to
-  the 029 cold one-shot — zero extra reads, no malformed Logon (INV-RoL-3 / FR-008).
+- **C3.3 (suppression)** Under `bilateral_strict`, `refresh_active == false`, so the per-logon
+  re-hydrate is suppressed: zero extra reads and **no NEW malformed Logon attributable to the knob**;
+  establishment matches the knob-off strict path. (The knob-off strict cold-open / non-1-outbound
+  reconnect validity is the inherited L-029-3 gap, out of 025 scope — see C6.) (INV-RoL-3 / FR-008).
 
 ## C4 — Store-wins semantic
 
@@ -65,11 +71,16 @@ const bool refresh_active =
   withheld (C2.4 / C3.2). FR-009.
 - **C5.4** 789 NextExpectedMsgSeqNum (027): unaffected — `next_inbound_unsafe()` is sampled after the
   (possibly refreshed) hydrate, so an advertised `789` reflects the refreshed inbound, consistent.
+  On a store-wins-**DOWN** refresh (W2) the initiator re-advertises a **lower** `789` than it would
+  without refresh — correct under store-wins (the standby is genuinely behind the store); this is the
+  intended standby-follows-primary behaviour, not a regression. (This is also why no third
+  ack-receipt refresh site is added — it would desync the already-advertised `789` from the post-ack
+  inbound; D-RoL-5.)
 
 ## C6 — Out of scope (explicit)
 
 - The cold-open `bilateral_strict` malformed-Logon gap inherited from 029 (L-029-3) — see research
-  D-RoL-6; routed to Gate A (default: defer).
+  D-RoL-6; **Gate A resolved: defer** (a deferred 029/024 follow-up, NOT closed by 025).
 - Making `bilateral_strict` itself `{1,1}`-guarded like QFJ/QFcpp — a 024 change touching the
   `:1795` mutual-agreement handshake.
 - A `cfg_loader` `RefreshOnLogon` name-map.
