@@ -52,12 +52,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
 
 #include "hp_support.hpp"
 
@@ -81,13 +80,11 @@ constexpr seqnum_t kMinResumedSeqnum{2};
 // GoogleTest rejects names containing dashes (e.g. "quickfix-cpp").
 // Mirrors hp_fix44_next_expected_test.cpp's local pattern.
 
-std::string restart_resume_initiator_name(const ::testing::TestParamInfo<Counterparty>& info)
-{
+std::string restart_resume_initiator_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_init" : "QFj_init";
 }
 
-std::string restart_resume_acceptor_name(const ::testing::TestParamInfo<Counterparty>& info)
-{
+std::string restart_resume_acceptor_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_acc" : "QFj_acc";
 }
 
@@ -116,8 +113,7 @@ std::string restart_resume_acceptor_name(const ::testing::TestParamInfo<Counterp
 
 class RestartResume_Initiator : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(RestartResume_Initiator, BothCountersResumeFromStore)
-{
+TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -173,8 +169,7 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore)
     // on-open path loaded that value into the manager before the Logon was sent.
     // If the counter were reset to 1 (no hydrate), this assertion would fail.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
-        << "outbound seqnum was not resumed from the persisted store (got "
-        << mgr.peek_outbound()
+        << "outbound seqnum was not resumed from the persisted store (got " << mgr.peek_outbound()
         << "); expected >= " << kMinResumedSeqnum
         << " — hydrate-on-open must have loaded the persisted outbound counter";
 
@@ -185,23 +180,20 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore)
     // would still be 1 after restart.
     EXPECT_GE(mgr.next_inbound_unsafe(), kMinResumedSeqnum)
         << "inbound seqnum was not resumed from the persisted store (got "
-        << mgr.next_inbound_unsafe()
-        << "); expected >= " << kMinResumedSeqnum
+        << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
         << " — durable inbound tracking + hydrate-on-open must have loaded"
            " the persisted inbound counter";
 
     // Graceful stop: Logout + disconnect within the watchdog.
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCounterparties, RestartResume_Initiator,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    restart_resume_initiator_name);
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, RestartResume_Initiator,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         restart_resume_initiator_name);
 
 // ── Cell 2: RestartResume_Acceptor ────────────────────────────────────────────
 //
@@ -222,8 +214,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 class RestartResume_Acceptor : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(RestartResume_Acceptor, BothCountersResumeFromStore)
-{
+TEST_P(RestartResume_Acceptor, BothCountersResumeFromStore) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -273,29 +264,25 @@ TEST_P(RestartResume_Acceptor, BothCountersResumeFromStore)
 
     // Witness (b): outbound seqnum resumed from the persisted store — > 1.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
-        << "outbound seqnum was not resumed from the persisted store (got "
-        << mgr.peek_outbound()
+        << "outbound seqnum was not resumed from the persisted store (got " << mgr.peek_outbound()
         << "); expected >= " << kMinResumedSeqnum
         << " — hydrate-on-open must have loaded the persisted outbound counter";
 
     // Witness (c): inbound seqnum resumed from the persisted store — > 1.
     EXPECT_GE(mgr.next_inbound_unsafe(), kMinResumedSeqnum)
         << "inbound seqnum was not resumed from the persisted store (got "
-        << mgr.next_inbound_unsafe()
-        << "); expected >= " << kMinResumedSeqnum
+        << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
         << " — durable inbound tracking + hydrate-on-open must have loaded"
            " the persisted inbound counter";
 
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCounterparties, RestartResume_Acceptor,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    restart_resume_acceptor_name);
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, RestartResume_Acceptor,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         restart_resume_acceptor_name);
 
 }  // namespace

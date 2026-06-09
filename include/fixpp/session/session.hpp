@@ -642,9 +642,10 @@ private:
     //   at construction value seqnum_min (withheld on reset-Logon paths — RC-1 / C2.4).
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
     //   delivering callback at every check_inbound-success site (C3).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
+        bool apply_inbound_seed) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    ensure_hydrated_(bool apply_inbound_seed) noexcept;
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_() noexcept;
+    persist_inbound_advance_() noexcept;
 
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().

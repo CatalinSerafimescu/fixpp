@@ -558,8 +558,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 // when false (reset-Logon path), withhold the inbound seed so the reset arm owns
 // the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
 // [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::ensure_hydrated_(bool apply_inbound_seed) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
+    bool apply_inbound_seed) noexcept {
     // One-shot: already hydrated this session lifetime.
     if (hydrated_) {
         co_return fixpp::core::expected_t<void>{};
@@ -617,8 +617,7 @@ Session::ensure_hydrated_(bool apply_inbound_seed) noexcept {
 // Skips when store_is_persistent_==false (INV-H4 / C3.5).
 // Failure → Disconnected (D-3 / C3.3 / SC-006).
 // [029 tasks T010; contracts C3.0/C3.3/C3.5; data-model INV-H1/H2]
-asio::awaitable<fixpp::core::expected_t<void>>
-Session::persist_inbound_advance_() noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_() noexcept {
     if (!store_is_persistent_) {
         co_return fixpp::core::expected_t<void>{};
     }
@@ -650,10 +649,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // so the store-recovered outbound value is in the manager when peek_outbound()
     // is sampled below; the reset_on_logon block then overwrites it (024 reset wins,
     // INV-H5 / C2.6). One-shot latch makes this safe for both the direct open() and
-    // engine-managed drive_reconnect() call paths. [[feedback_initiator_logon_wire_at_shared_emit_point]]
-    // T011 (RC-1 / C2.4): WITHHOLD the inbound seed when reset_on_logon is set — the
-    // reset block below owns next_inbound post-state on that path (INV-H5).
-    // [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5; data-model INV-H3/H5; research D-6]
+    // engine-managed drive_reconnect() call paths.
+    // [[feedback_initiator_logon_wire_at_shared_emit_point]] T011 (RC-1 / C2.4): WITHHOLD the
+    // inbound seed when reset_on_logon is set — the reset block below owns next_inbound post-state
+    // on that path (INV-H5). [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5; data-model
+    // INV-H3/H5; research D-6]
     {
         const bool withhold_inbound = cfg_.reset_on_logon;
         auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
@@ -1726,7 +1726,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // a too-low fatal (INV-H5). The OUTBOUND seed is applied unconditionally and
                 // runs BEFORE the reset_on_logon reset so the 024 reset still wins (INV-H5).
                 // One-shot latch makes reconnect a no-op (INV-H3).
-                // [029 tasks T007/T011 call-site 2; contracts C2.4/C2.5/C2.6; data-model INV-H3/H5/RC-1]
+                // [029 tasks T007/T011 call-site 2; contracts C2.4/C2.5/C2.6; data-model
+                // INV-H3/H5/RC-1]
                 {
                     const bool withhold_inbound = peer_sent_reset || cfg_.reset_on_logon;
                     auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
