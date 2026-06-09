@@ -285,4 +285,50 @@ INSTANTIATE_TEST_SUITE_P(AllCounterparties, RestartResume_Acceptor,
                          ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
                          restart_resume_acceptor_name);
 
+// ── Cell 3: StandbyRehydrate_Initiator ───────────────────────────────────────
+//
+// 025-refresh-on-logon standby re-hydrate live cell (T002 stub / T041 deferred).
+//
+// A fixpp initiator configured as a STANDBY (refresh_on_logon=true,
+// bilateral_lenient, persistent FileStore) connects as a fresh initiator;
+// the counterparty is a QFcpp/QFJ acceptor that has already accumulated seqnums
+// from a prior primary session.  On reconnect, the standby re-reads the store
+// and resumes at the primary-advanced counters — the golden capture and
+// full acceptance assertions are deferred to T041 (Polish phase).
+//
+// This skeleton registers the cell with INTEROP_REQUIRE_COUNTERPARTY so:
+//   (a) the test SKIPS locally (no counterparty port env) — never hangs,
+//       never silently passes.
+//   (b) it appears in the ctest list for counterparty-present CI runs.
+//
+// Anchors: specs/025-refresh-on-logon/data-model.md W9 (interop);
+//          tasks.md T002 (Setup stub), T041 (Polish full).
+
+class StandbyRehydrate_Initiator : public ::testing::TestWithParam<Counterparty> {};
+
+TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
+    const auto counterparty = GetParam();
+    namespace hp = fixpp::interop::hp;
+
+    // Counterparty-required: skip-with-reason when absent (FR-023).
+    // T041 (Polish) wires the full acceptance assertions for the counterparty-PRESENT path.
+    INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty).c_str());
+
+    // T041 deferred: full golden-capture + acceptance assertions go here.
+    // The counterparty-PRESENT path currently falls through to a PASS with no
+    // assertions — this is an explicit stub, NOT fake coverage (the cell was
+    // never reached in local runs; the full witness is tracked in T041).
+    GTEST_SKIP() << "T041 deferred: standby re-hydrate golden-capture not yet implemented "
+                    "(025 Polish phase). Counterparty present but full assertions pending.";
+}
+
+std::string standby_rehydrate_initiator_name(
+    const ::testing::TestParamInfo<Counterparty>& info) {
+    return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_standby" : "QFj_standby";
+}
+
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, StandbyRehydrate_Initiator,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         standby_rehydrate_initiator_name);
+
 }  // namespace

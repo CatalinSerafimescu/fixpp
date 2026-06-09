@@ -246,6 +246,19 @@ struct SessionConfig {
     // [data-model §"Additive config fields"; C1.1; research D5]
     bool reset_on_logon = false;
 
+    // refresh_on_logon  (QuickFIX: RefreshOnLogon)
+    //   When true AND policy != bilateral_strict AND store_is_persistent:
+    //   re-read BOTH seqnum counters from the persistent store at EACH logon
+    //   (including reconnect), overwriting the in-memory manager unconditionally
+    //   (store-wins, up or down).  Primary use: standby session that inherits a
+    //   primary's store and must adopt the primary's counters on every reconnect.
+    //   Default false (no-op; byte-identical to 029 one-shot behaviour).
+    //   Suppressed under bilateral_strict (the unconditional 141=Y in strict mode
+    //   combined with a non-1 store-read would emit a malformed Logon; C3.3).
+    //   No-op when the store is non-persistent (INV-RoL-2 / FR-005).
+    // [025 data-model C1/C2/C3/C4; contracts/refresh-knob.md C1]
+    bool refresh_on_logon = false;
+
     // reset_on_logout  (QuickFIX: ResetOnLogout)
     //   Reset seqnums to {1,1} at Logout teardown in EITHER direction:
     //   Logout sent (locally-initiated, close(graceful)) OR Logout received

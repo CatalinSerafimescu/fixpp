@@ -1691,6 +1691,33 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_persistent_seqnum_hydrate)
 endif()
 
+# ── 025-refresh-on-logon (S-018) — T001 Setup skeleton ──────────────────────
+# T001: skeleton + W1/W2 RED witnesses.
+# Harness mirrors test_persistent_seqnum_hydrate.cpp (029):
+#   FaultStore / FaultStoreFactory / MockReconnectFactory / Fixture
+#   make_initiator / make_reconnect_initiator helpers.
+# W1/W2: drive_reconnect() with mock transport = 2nd-logon vehicle;
+#   asserts store re-read + inbound counter = store value on 2nd logon.
+# Anchors: data-model.md W1/W2; contracts/refresh-knob.md C1/C2/C3/C4.
+add_executable(session_refresh_on_logon
+  test_refresh_on_logon.cpp
+)
+target_link_libraries(session_refresh_on_logon PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_refresh_on_logon PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_refresh_on_logon PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_refresh_on_logon
+  COMMAND session_refresh_on_logon)
+set_tests_properties(session_refresh_on_logon PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "025;s018;refresh-on-logon;setup")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
