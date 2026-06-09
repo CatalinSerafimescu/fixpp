@@ -910,4 +910,187 @@ TEST(ValidationCompatToggles, Seq_KnobOff_LogonTimeTooHighStillRefused) {
            "validate_sequence_numbers=false (steady-state-only scope)";
 }
 
+// ── T007 (US2) — SequenceReset(35=4) witnesses ──────────────────────────────
+//
+// RED witnesses written before T010/T011 (session.cpp S6/S7 edits).
+// Anchors: spec.md FR-013, SC-008; data-model.md I-VCT-11; contracts C2.7.
+//
+// After make_acceptor_seqval_off: session is Active, next_inbound == 2.
+//
+// Helper: build a SequenceReset(35=4) frame.
+//   reset_mode (GapFillFlag not set):  make_seq_reset_frame(bs, seq, new_seqno, "SND", "TGT")
+//   gapfill_mode (123=Y):              make_seq_reset_frame(bs, seq, new_seqno, "SND", "TGT", true)
+
+static std::vector<std::byte> make_seq_reset_frame(std::string_view bs, std::uint32_t seq,
+                                                    std::uint32_t new_seqno, std::string_view sender,
+                                                    std::string_view target,
+                                                    bool gap_fill = false) {
+    std::string extra;
+    extra += field(36, std::to_string(new_seqno));
+    if (gap_fill) {
+        extra += field(123, "Y");
+    }
+    return make_fix_frame(bs, "4", seq, sender, target, extra);
+}
+
+// T007 witness 1 — I-VCT-11, SC-008, C2.7
+// Reset-mode SequenceReset(35=4, GapFillFlag≠Y), S6 path.
+// With validate_sequence_numbers=false: apply_inbound_sequence_reset NOT called,
+// delivered to fromAdmin, counter UNCHANGED.
+// RED before T010: current S6 always calls apply_inbound_sequence_reset.
+TEST(ValidationCompatToggles, SeqReset_KnobOff_ResetMode_NewSeqNoNotApplied) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    // Pre-condition: counter is 2 after Logon.
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    const int from_admin_before = app->from_admin_count;
+
+    // Feed a reset-mode SequenceReset(35=4, no 123=Y) with NewSeqNo=99 at seq=5 (out-of-order).
+    // With knob off, NewSeqNo=99 must NOT be applied.
+    fix->feed(make_seq_reset_frame("FIX.4.4", 5, 99, "CLI", "SRV", false));
+
+    // Post-conditions (I-VCT-11, SC-008, C2.7):
+    //   1. Counter did NOT jump to 99.
+    EXPECT_NE(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{99})
+        << "I-VCT-11/SC-008/C2.7: NewSeqNo(99) must NOT be applied with validate_sequence_numbers=false";
+    //   2. Counter is UNCHANGED (still 2, not incremented either).
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "I-VCT-11/SC-008/C2.7: counter must remain UNCHANGED (deliver-without-advance) for reset-mode 35=4";
+    //   3. Delivered to fromAdmin.
+    EXPECT_GT(app->from_admin_count, from_admin_before)
+        << "I-VCT-11/SC-008/C2.7: reset-mode 35=4 must be delivered to fromAdmin with knob off";
+    //   4. Session stays Active (reset-mode intercept is before the seqnum gate; no disconnect).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "I-VCT-11: session must remain Active after knob-off reset-mode 35=4";
+}
+
+// T007 witness 2 — I-VCT-11, SC-008, C2.7
+// Gapfill-mode SequenceReset(35=4, 123=Y), out-of-order (too-high), S7 path.
+// With validate_sequence_numbers=false: S2 is guarded off so too-high gapfill
+// falls to S4 deliver-without-advance. NewSeqNo NOT applied, counter UNCHANGED.
+// RED before T010/T011: with knob off, too-high 35=4 gapfill currently hits S2
+// which emits ResendRequest and returns (never reaches S7).
+TEST(ValidationCompatToggles, SeqReset_KnobOff_GapfillOutOfOrder_NewSeqNoNotApplied) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    const int from_admin_before = app->from_admin_count;
+
+    // Feed an out-of-order (too-high, seq=5) gapfill SequenceReset(35=4, 123=Y) with NewSeqNo=99.
+    // With knob off: S2 guarded → falls to S4 deliver-without-advance.
+    // NewSeqNo=99 must NOT be applied; counter unchanged; delivered to fromAdmin.
+    fix->feed(make_seq_reset_frame("FIX.4.4", 5, 99, "CLI", "SRV", true));
+
+    // Post-conditions (I-VCT-11, SC-008, C2.7):
+    //   1. Counter did NOT jump to 99.
+    EXPECT_NE(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{99})
+        << "I-VCT-11/SC-008/C2.7: NewSeqNo(99) must NOT be applied for out-of-order gapfill 35=4";
+    //   2. Counter UNCHANGED (too-high → deliver-without-advance via S4).
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "I-VCT-11/SC-008/C2.7: counter must remain UNCHANGED for out-of-order gapfill 35=4 knob off";
+    //   3. Delivered to fromAdmin (35=4 is admin).
+    EXPECT_GT(app->from_admin_count, from_admin_before)
+        << "I-VCT-11/SC-008/C2.7: out-of-order gapfill 35=4 must be delivered to fromAdmin";
+    //   4. Session stays Active.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "I-VCT-11: session must remain Active after knob-off out-of-order gapfill 35=4";
+}
+
+// T007 witness 3 — SC-008 special case, I-VCT-11
+// Exact-match gapfill SequenceReset(35=4, 123=Y), S7 path.
+// With validate_sequence_numbers=false: exact-match passes check_inbound → counter
+// advances by 1 via ordinary exact-match path (S5), THEN S7 is bypassed so NewSeqNo
+// is still NOT applied. The +1 is a fixpp ordering artifact, NOT QFJ-parity.
+// RED before T011: current S7 always calls apply_inbound_sequence_reset (which jumps
+// counter to NewSeqNo). After T011 the counter must be old+1, NOT NewSeqNo.
+TEST(ValidationCompatToggles, SeqReset_KnobOff_GapfillExactMatch_AdvancesByOne_NewSeqNoNotApplied) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    // Pre-condition: counter is 2.
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    const int from_admin_before = app->from_admin_count;
+
+    // Feed an exact-match (seq=2 == expected=2) gapfill SequenceReset(35=4, 123=Y)
+    // with NewSeqNo=99. With knob off:
+    //   - S5 (check_inbound success) advances counter from 2 to 3.
+    //   - S7 bypassed → NewSeqNo=99 NOT applied.
+    fix->feed(make_seq_reset_frame("FIX.4.4", 2, 99, "CLI", "SRV", true));
+
+    // Post-conditions (SC-008 special case, I-VCT-11):
+    //   1. Counter advanced by exactly 1 (from 2 to 3) via ordinary exact-match path.
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{3})
+        << "SC-008/I-VCT-11: exact-match gapfill 35=4 must advance counter by +1 via "
+           "ordinary exact-match path (fixpp ordering artifact)";
+    //   2. Counter did NOT jump to NewSeqNo=99.
+    EXPECT_NE(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{99})
+        << "SC-008/I-VCT-11: NewSeqNo(99) must NOT be applied even for exact-match gapfill 35=4";
+    //   3. Delivered to fromAdmin (35=4 is admin).
+    EXPECT_GT(app->from_admin_count, from_admin_before)
+        << "SC-008/I-VCT-11: exact-match gapfill 35=4 must be delivered to fromAdmin with knob off";
+    //   4. Session stays Active.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "SC-008/I-VCT-11: session must remain Active after knob-off exact-match gapfill 35=4";
+}
+
+// T007 witness 4 — SC-008 paired, C2.7
+// Default (validate_sequence_numbers=true): both reset-mode and gapfill-mode
+// SequenceReset(35=4) apply NewSeqNo exactly as today.
+// Already GREEN: current S6/S7 always call apply_inbound_sequence_reset at default.
+TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
+    // Part A: reset-mode (GapFillFlag≠Y) at default → NewSeqNo IS applied.
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        const auto& smgr = fix->session->seqnum_mgr_test_access();
+        ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+            << "Precondition: next_inbound must be 2";
+
+        // Feed a reset-mode 35=4 with NewSeqNo=10 at seq=5 (any seq — reset-mode bypasses gate).
+        fix->feed(make_seq_reset_frame("FIX.4.4", 5, 10, "CLI", "SRV", false));
+
+        // Post-conditions (SC-008 paired, C2.7 default=true):
+        EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{10})
+            << "SC-008/C2.7 default: reset-mode 35=4 MUST apply NewSeqNo(10) at default (strict)";
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "SC-008/C2.7: session must remain Active after reset-mode 35=4 at default";
+    }
+
+    // Part B: gapfill-mode (123=Y) at default, exact-match → NewSeqNo IS applied.
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        const auto& smgr = fix->session->seqnum_mgr_test_access();
+        ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+            << "Precondition: next_inbound must be 2";
+
+        // Feed an exact-match (seq=2) gapfill 35=4 with NewSeqNo=10 at default.
+        fix->feed(make_seq_reset_frame("FIX.4.4", 2, 10, "CLI", "SRV", true));
+
+        // Post-conditions (SC-008 paired, C2.7 default=true):
+        EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{10})
+            << "SC-008/C2.7 default: gapfill-mode 35=4 MUST apply NewSeqNo(10) at default (strict)";
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "SC-008/C2.7: session must remain Active after exact-match gapfill 35=4 at default";
+    }
+}
+
 }  // namespace

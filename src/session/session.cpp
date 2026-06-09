@@ -2016,6 +2016,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return fixpp::core::expected_t<void>{};
                     }
                 }
+                // 028 T010 (S6): when validate_sequence_numbers=false, bypass
+                // apply_inbound_sequence_reset — the frame was already delivered to
+                // fromAdmin above; counter is left unchanged (deliver-without-advance).
+                // apply_inbound_sequence_reset is UNCHANGED; only whether it is called
+                // is gated. [data-model S6, I-VCT-11, contract C2.7, FR-013]
+                if (!cfg_.validate_sequence_numbers) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
                                                                 parse_seqnum(hdr.msg_seq_num));
             }
@@ -2341,6 +2349,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
             // Reset mode was handled before Guard 4. [S-023]
             if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
+                // 028 T011 (S7): when validate_sequence_numbers=false, bypass
+                // apply_inbound_sequence_reset. An exact-match gapfill 35=4 has already
+                // advanced the counter by 1 via S5 (ordinary exact-match path); NewSeqNo
+                // is still not applied (the +1 is a fixpp ordering artifact, not QFJ-parity).
+                // An out-of-order gapfill with knob off never reaches here (S4 returned it
+                // before this point). Deliver to fromAdmin (35=4 is an admin msgtype).
+                // [data-model S7, I-VCT-11, contract C2.7, FR-013]
+                if (!cfg_.validate_sequence_numbers) {
+                    if (engine_.application != nullptr) {
+                        auto cb_r = parse_and_dispatch_(
+                            frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                return engine_.application->fromAdmin(mv, sid);
+                            });
+                        if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            co_await close(close_mode::terminal);
+                            co_return std::unexpected(cb_r.error());
+                        }
+                    }
+                    // Counter already advanced by S5; NewSeqNo not applied. Stay Active.
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
                                                                 parse_seqnum(hdr.msg_seq_num));
             }
