@@ -18,8 +18,8 @@
 
 **Purpose**: Test scaffolding + ctest target registration for the new unit file and the live interop cell.
 
-- [ ] T001 [P] Create `tests/session/test_validation_compat_toggles.cpp` skeleton (GoogleTest, reusing the existing session-test harness / fixtures used by `tests/session/test_next_expected_msgseqnum.cpp` — specifically the `struct Fixture`, `struct OutboundCapture`, and a `CountingApp`-style `fixpp::session::Application` subclass, driven via free `TEST(...)` macros, not `TEST_F`) and register the ctest target `session_validation_compat_toggles` in `tests/session/CMakeLists.txt`.
-- [ ] T002 [P] Create `tests/interop/happy/hp_fix44_validation_compat_test.cpp` skeleton (skip-without-counterparty guard, per the 016/018/027 harness pattern) and register its interop cell in the `tests/interop` CMake wiring.
+- [X] T001 [P] Create `tests/session/test_validation_compat_toggles.cpp` skeleton (GoogleTest, reusing the existing session-test harness / fixtures used by `tests/session/test_next_expected_msgseqnum.cpp` — specifically the `struct Fixture`, `struct OutboundCapture`, and a `CountingApp`-style `fixpp::session::Application` subclass, driven via free `TEST(...)` macros, not `TEST_F`) and register the ctest target `session_validation_compat_toggles` in `tests/session/CMakeLists.txt`.
+- [X] T002 [P] Create `tests/interop/happy/hp_fix44_validation_compat_test.cpp` skeleton (skip-without-counterparty guard, per the 016/018/027 harness pattern) and register its interop cell in the `tests/interop` CMake wiring.
 
 **Checkpoint**: both targets configure and build (empty/skipped); ctest discovers them.
 
@@ -29,7 +29,7 @@
 
 **Purpose**: The two additive config knobs. Both default `true` (strict = current behaviour); they must exist before any handler site can read them. ⚠️ No story work begins until this phase is complete.
 
-- [ ] T003 Add two additive primitive `bool` fields to `include/fixpp/session/session_config.hpp` — `bool check_comp_id = true;` and `bool validate_sequence_numbers = true;` — each with an EXPLICIT per-field default `[const §XII.5]` and a one-line doc comment (strict = current behaviour; `false` = QuickFIX-compat relaxation). Primitive bools ⇒ no new include (§XV.9 N/A); preserve the 010 W-5 `SessionConfig` copy-constructible `static_assert`. — data-model E1 (Config fields), contract C1/C2, research D-1.
+- [X] T003 Add two additive primitive `bool` fields to `include/fixpp/session/session_config.hpp` — `bool check_comp_id = true;` and `bool validate_sequence_numbers = true;` — each with an EXPLICIT per-field default `[const §XII.5]` and a one-line doc comment (strict = current behaviour; `false` = QuickFIX-compat relaxation). Primitive bools ⇒ no new include (§XV.9 N/A); preserve the 010 W-5 `SessionConfig` copy-constructible `static_assert`. — data-model E1 (Config fields), contract C1/C2, research D-1.
 
 **Checkpoint**: both fields present, default-constructed `SessionConfig` yields `true`/`true`; existing build green.
 
@@ -101,8 +101,8 @@
 - [X] T015 [P] `spec/feature-catalogue.md`: add **`S-040`** (`CheckCompID — skip steady-state SenderCompID/TargetCompID match; QuickFIX-compat`) and **`S-041`** (`ValidateSequenceNumbers — accept out-of-order inbound without gap-fill recovery; QuickFIX-compat`), both status `done` (FIX 4.4), cite `028-validation-compat-toggles`, evidence_pr `(pending merge)`, Tests `tests/session/test_validation_compat_toggles.cpp` + the interop cell. Normative refs per plan §VI (QuickFIX `CheckCompID` / `ValidateSequenceNumbers` + `[FIX-SL §4.2.2]` / `[FIX-SL §4.8]`). — plan §VI delta.
 - [X] T016 [P] `spec/coverage-index.md`: add the two coverage entries for S-040 (`§4.2.2`) and S-041 (`§4.8` / `§4.8.2` / `§4.8.5` / `§4.8.6`) as an exact-set diff. — plan §VI delta, [[feedback_completeness_gate_exact_set_not_subset]].
 - [X] T017 [P] `spec/behaviors-and-limitations.md`: add **B-028-1** (CompID-check knob: steady-state `49`/`56` match skipped when off; BeginString/Logon/013-authz still strict; default byte-identical), **B-028-2** (seqnum knob: out-of-order tolerated, no `ResendRequest`/no too-low-disconnect, exact-match-only advance, `35=4` `NewSeqNo` not applied; PossDup + `seq==0` + too-low-Heartbeat retained; default byte-identical), **L-028-1** (`validate_sequence_numbers=false` disables gap detection — real gaps silently accepted, possible out-of-order processing), **L-028-2** (`check_comp_id=false` removes the steady-state mis-routing guard — rely on 013 authz + transport binding), **L-028-3** (steady-state only — Logon establishment unaffected by either knob). — plan §VI delta, research D-7.
-- [ ] T018 Run `quickstart.md` validation: confirm each quickstart scenario (relax CompID / tolerate out-of-order / combine / caveats) maps 1:1 to a landed witness; reconcile any drifted witness names back into quickstart + data-model.
-- [ ] T019 Feature-completeness audit (Gate B precondition, [[feedback_feature_completeness_gate]]): every tasks.md row `[X]` or waived; every FR-001..013 and SC-001..008 maps to a landed test AND landed impl; S-040/S-041 catalogue rows + coverage-index entries consistent (exact-set); record the result in `.specify/decisions/028-validation-compat-toggles-completeness.md`.
+- [X] T018 Run `quickstart.md` validation: confirm each quickstart scenario (relax CompID / tolerate out-of-order / combine / caveats) maps 1:1 to a landed witness; reconcile any drifted witness names back into quickstart + data-model.
+- [X] T019 Feature-completeness audit (Gate B precondition, [[feedback_feature_completeness_gate]]): every tasks.md row `[X]` or waived; every FR-001..013 and SC-001..008 maps to a landed test AND landed impl; S-040/S-041 catalogue rows + coverage-index entries consistent (exact-set); record the result in `.specify/decisions/028-validation-compat-toggles-completeness.md`.
 
 ---
 
