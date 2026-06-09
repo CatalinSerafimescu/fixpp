@@ -642,7 +642,10 @@ private:
     // persist_inbound_advance_(): site-keyed durable inbound +1 (C3).
     //   Body wired in Phase 4 T010.
     // Declared-but-undefined here; no call sites exist yet (Phase 3/4).
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_() noexcept;
+    // apply_inbound_seed: true → apply *in_r from the store; false → keep next_inbound
+    // at construction value seqnum_min (withheld on reset-Logon paths — RC-1 / C2.4).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    ensure_hydrated_(bool apply_inbound_seed) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_() noexcept;
 
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──

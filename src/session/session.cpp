@@ -554,7 +554,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 //   latch           : hydrated_ = true; hydrating_ = false (set ONLY after success, D-9)
 //
 // [029 tasks T007; contracts C2.1–C2.6; data-model INV-H3..H6; research D-6/D-9/D-10]
-asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_() noexcept {
+// 029 T011 — apply_inbound_seed: when true, seed next_inbound from the store;
+// when false (reset-Logon path), withhold the inbound seed so the reset arm owns
+// the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
+// [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::ensure_hydrated_(bool apply_inbound_seed) noexcept {
     // One-shot: already hydrated this session lifetime.
     if (hydrated_) {
         co_return fixpp::core::expected_t<void>{};
@@ -588,11 +593,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_() noexc
         co_return std::unexpected(out_r.error());
     }
 
-    // Phase 3: apply the OUTBOUND seed unconditionally.
-    // Pass the construction value 1 for inbound — the inbound seed is Phase 4 T011.
-    // [029 tasks T007: "pass construction value 1 for inbound at this stage"]
-    auto hydrate_r =
-        co_await seqnum_mgr_.hydrate(/*next_inbound=*/seqnum_min, /*next_outbound=*/*out_r);
+    // Apply seeds: outbound unconditionally; inbound conditionally (RC-1/C2.4).
+    // When apply_inbound_seed==false (reset-Logon path), keep next_inbound at
+    // the construction value seqnum_min so check_inbound(1) is in-sequence and
+    // the existing reset arm (received-141 / reset_on_logon) owns the post-state.
+    // [029 tasks T011; contracts C2.4; data-model INV-H5/RC-1]
+    const seqnum_t seed_inbound = apply_inbound_seed ? *in_r : seqnum_min;
+    auto hydrate_r = co_await seqnum_mgr_.hydrate(seed_inbound, /*next_outbound=*/*out_r);
     if (!hydrate_r) {
         hydrating_ = false;
         record_state_transition_(fsm_state::Disconnected);
@@ -600,10 +607,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_() noexc
     }
 
     // Latch success: set hydrated_ ONLY after both reads and hydrate() succeeded (D-9).
-    // hydrating_ is cleared so a future call (e.g. on a different reconnect) can proceed
-    // if hydrated_ is somehow cleared (it is not today, but the discipline is explicit).
     hydrated_ = true;
     hydrating_ = false;
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// 029 T010 — durable inbound advance (C3.0).
+// Called at every PERSIST site in the disposition matrix (data-model §Persist matrix).
+// Skips when store_is_persistent_==false (INV-H4 / C3.5).
+// Failure → Disconnected (D-3 / C3.3 / SC-006).
+// [029 tasks T010; contracts C3.0/C3.3/C3.5; data-model INV-H1/H2]
+asio::awaitable<fixpp::core::expected_t<void>>
+Session::persist_inbound_advance_() noexcept {
+    if (!store_is_persistent_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
+    if (!r) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(fixpp::core::error::store_io_failure);
+    }
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -623,14 +646,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // stamp_sending_time internal helper is defined after open() in this TU;
     // use the public two-arg form from sending_time.hpp with a local buffer.
 
-    // 029 T007 — call site 1 (initiator): hydrate BEFORE the reset_on_logon block
+    // 029 T007/T011 — call site 1 (initiator): hydrate BEFORE the reset_on_logon block
     // so the store-recovered outbound value is in the manager when peek_outbound()
     // is sampled below; the reset_on_logon block then overwrites it (024 reset wins,
     // INV-H5 / C2.6). One-shot latch makes this safe for both the direct open() and
     // engine-managed drive_reconnect() call paths. [[feedback_initiator_logon_wire_at_shared_emit_point]]
-    // [029 tasks T007 call-site 1; contracts C2.5; data-model INV-H3/H5; research D-6]
+    // T011 (RC-1 / C2.4): WITHHOLD the inbound seed when reset_on_logon is set — the
+    // reset block below owns next_inbound post-state on that path (INV-H5).
+    // [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5; data-model INV-H3/H5; research D-6]
     {
-        auto h_r = co_await ensure_hydrated_();
+        const bool withhold_inbound = cfg_.reset_on_logon;
+        auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
         if (!h_r) {
             // ensure_hydrated_ already transitioned to Disconnected on failure (C2.3).
             co_return std::unexpected(h_r.error());
@@ -971,6 +997,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     } else {
         // Acceptor: stay in NotConnected, emit nothing.
         // fsm_state_ remains fsm_state::NotConnected (its default constructed value).
+        // Hydration is lazy (first-counter-touch, D-1/D-6): the acceptor hydrates in the
+        // NotConnected inbound-Logon handler (call site 2), not at open() — no counter is
+        // sampled at acceptor open().
     }
 
     // T041 (US3): seed last_inbound_steady_ and last_outbound_steady_ at open()
@@ -1615,8 +1644,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // For the NotConnected/Logon path the peer's first Logon carries seq=1.
 // If seq != 1 → too-low or too-high → fatal.
 //
-// Inbound ordering (I-3 / [2e §7.6]): store(inbound) BEFORE fromAdmin/fromApp.
-// T034 wires the store call; here the seqnum check is the gate.
+// Inbound ordering: deliver-then-persist (D-8 supersedes I-3 / [2e §7.6] store-before-deliver).
+// 029 T010 wires persist_inbound_advance_() AFTER the fromAdmin/fromApp callback returns,
+// not before — at-least-once delivery (INV-H2); seqnum gate is here.
 //
 // LogoutSent / Disconnected: all inbound silently drained (defined cells).
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
@@ -1685,25 +1715,33 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001]
                 peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
 
+                // 029 T007/T011 — call site 2 (acceptor): hydrate at the first counter
+                // touch (lazy, D-1/D-6), AFTER the peer_sent_reset header pre-scan and
+                // BEFORE the reset_on_logon block + check_inbound (C2.4/C2.5).
+                // Decide-then-apply (RC-1 / C2.4): WITHHOLD the inbound seed when the peer
+                // is announcing a reset (141=Y) OR reset_on_logon is set — leave next_inbound
+                // at seqnum_min so check_inbound(1) is in-sequence and the existing reset arm
+                // (received-141 at the post-check block / reset_on_logon below) owns the
+                // post-state; a hydrated next_inbound never pre-empts a peer reset Logon into
+                // a too-low fatal (INV-H5). The OUTBOUND seed is applied unconditionally and
+                // runs BEFORE the reset_on_logon reset so the 024 reset still wins (INV-H5).
+                // One-shot latch makes reconnect a no-op (INV-H3).
+                // [029 tasks T007/T011 call-site 2; contracts C2.4/C2.5/C2.6; data-model INV-H3/H5/RC-1]
+                {
+                    const bool withhold_inbound = peer_sent_reset || cfg_.reset_on_logon;
+                    auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
+                    if (!h_r) {
+                        // ensure_hydrated_ already transitioned to Disconnected (C2.3).
+                        co_return std::unexpected(h_r.error());
+                    }
+                }
+
                 if (cfg_.reset_on_logon) {
                     // Knob-driven → fatal: a store failure blocks Active (C2.6).
                     auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
                     if (!rst_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
-                    }
-                }
-
-                // 029 T007 — call site 2 (acceptor): hydrate AFTER the peer_sent_reset /
-                // reset_on_logon header pre-scan (C2.5) and BEFORE check_inbound (C2.4/C2.6).
-                // Phase 3: outbound seed only; inbound seed is Phase 4 T011.
-                // The one-shot latch prevents re-hydration on reconnect (INV-H3).
-                // [029 tasks T007 call-site 2; contracts C2.4/C2.5; data-model INV-H3/H5]
-                {
-                    auto h_r = co_await ensure_hydrated_();
-                    if (!h_r) {
-                        // ensure_hydrated_ already transitioned to Disconnected (C2.3).
-                        co_return std::unexpected(h_r.error());
                     }
                 }
 
@@ -1956,6 +1994,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_await close(fixpp::session::close_mode::terminal);
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
+            // 029 T010 — PERSIST: acceptor Logon in-seq → durable inbound advance.
+            // check_inbound advanced next_inbound (Logon seq=N → N+1). Persist after
+            // reply Logon emitted and Active reached (C3.1). Store_ is still live.
+            // [029 tasks T010; contracts C3.1; data-model §Persist matrix site 1]
+            {
+                auto p_r = co_await persist_inbound_advance_();
+                if (!p_r) co_return std::unexpected(p_r.error());
+            }
+
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
@@ -2469,8 +2516,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             co_return std::unexpected(cb_r.error());
                         }
                     }
+                    // 029 T010 — PERSIST: validate-off exact-match GapFill (35=4, S7).
+                    // check_inbound +1-advanced at S5 (the GapFill frame is in-sequence);
+                    // NewSeqNo NOT applied (deliver-then-persist ordering, C3.4 case 1).
+                    // [029 tasks T010; contracts C3.4 case 1; data-model §Persist matrix RC-B]
+                    {
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
+                    }
                     // Counter already advanced by S5; NewSeqNo not applied. Stay Active.
                     co_return fixpp::core::expected_t<void>{};
+                }
+                // 029 T010 — PERSIST: validate-ON GapFill (35=4, 123=Y) — persist the
+                // check_inbound +1 advance (C3.1/C3.4 case 3 boundary).
+                // check_inbound at S5 advanced the manager (e.g., seq=3 → next_inbound=4).
+                // apply_inbound_sequence_reset (below) then performs the absolute jump
+                // (set_next_inbound, NOT +1) which is NOT persisted (INV-H1/D-5).
+                // So: persist the +1 here, then jump — durable stays at the +1 boundary.
+                // [029 tasks T010; contracts C3.1, C3.4; data-model §Persist matrix]
+                {
+                    auto p_r = co_await persist_inbound_advance_();
+                    if (!p_r) co_return std::unexpected(p_r.error());
                 }
                 co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
                                                                 parse_seqnum(hdr.msg_seq_num));
@@ -2571,6 +2637,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                     }
                 }
+                // 029 T010 — PERSIST: inbound Logout (35=5) in Active state.
+                // check_inbound advanced next_inbound (the Logout is in-sequence).
+                // Persist AFTER fromAdmin returns but BEFORE record_state_transition_
+                // (Disconnected) so store_ is still live (C3.1). Skipped in
+                // LogonReceived (check_inbound advanced, but LogonReceived only for
+                // the edge case where the peer disconnected before we finished — still
+                // correct to persist: check_inbound advanced in both states).
+                // [029 tasks T010; contracts C3.1; data-model §Persist matrix Logout site]
+                {
+                    auto p_r = co_await persist_inbound_advance_();
+                    if (!p_r) {
+                        // persist failed → already Disconnected inside helper.
+                        co_return std::unexpected(p_r.error());
+                    }
+                }
                 // Both Active and LogonReceived → Disconnected.
                 // onLogout fires inside record_state_transition_ (INV-7 guard).
                 record_state_transition_(fsm_state::Disconnected);
@@ -2580,6 +2661,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // I-5: inbound Reject(35=3) is logged and accepted; never re-rejected.
             if (hdr.msg_type == "3") {  // Reject (35=3)
                 // Active row: session-level log, no Reject-of-a-Reject (I-5).
+                // 029 T010 — PERSIST: check_inbound advanced next_inbound for the
+                // inbound Reject. No fromAdmin dispatch (I-5). Persist before return.
+                // [029 tasks T010; contracts C3.1; data-model §Persist matrix Reject site]
+                {
+                    auto p_r = co_await persist_inbound_advance_();
+                    if (!p_r) co_return std::unexpected(p_r.error());
+                }
                 // Remain in current state.
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -2678,6 +2766,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             }
                         }
                     }
+                    // 029 T010 — PERSIST: inbound Heartbeat (35=0).
+                    // check_inbound advanced next_inbound; fromAdmin dispatched above.
+                    // [029 tasks T010; contracts C3.1; data-model §Persist matrix Heartbeat]
+                    {
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
+                    }
                     // Remain in Active — liveness tick.
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -2715,6 +2810,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             co_return std::unexpected(emit_r.error());
                         }
                     }
+                    // 029 T010 — PERSIST: inbound TestRequest (35=1).
+                    // check_inbound advanced next_inbound; fromAdmin dispatched above.
+                    // [029 tasks T010; contracts C3.1; data-model §Persist matrix TestRequest]
+                    {
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
+                    }
                     // Remain in Active.
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -2743,6 +2845,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (!replay_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(replay_r.error());
+                    }
+                    // 029 T010 — PERSIST: inbound ResendRequest (35=2).
+                    // check_inbound advanced next_inbound (ResendRequest is in-seq);
+                    // fromAdmin dispatched above. Persist after handling.
+                    // [029 tasks T010; contracts C3.1; data-model §Persist matrix ResendRequest]
+                    {
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
                     }
                     // Remain in Active after responding to ResendRequest.
                     co_return fixpp::core::expected_t<void>{};
@@ -2840,6 +2950,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // If parse fails (cb_r == ok from parse_and_dispatch_):
                     // frame accepted for seqnum; session stays Active.
                 }
+            }
+
+            // 029 T010 — PERSIST: in-sequence app message (and resend-fill PossDup in-seq).
+            // check_inbound advanced next_inbound; fromApp/fromAdmin dispatched above.
+            // This also covers resend-fill replayed in-seq app (PossDup arriving in-sequence)
+            // — those advance the counter like any in-seq message (C3.1 / New-2).
+            // [029 tasks T010; contracts C3.1; data-model §Persist matrix in-seq app + resend-fill]
+            {
+                auto p_r = co_await persist_inbound_advance_();
+                if (!p_r) co_return std::unexpected(p_r.error());
             }
 
             // In-sequence: counter advanced. Remain in current state.
@@ -3122,6 +3242,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 lifecycle_cb_threw_ = false;
                 co_await close(fixpp::session::close_mode::terminal);
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
+            }
+
+            // 029 T010 — PERSIST: initiator Logon-ack (LogonSent, in-seq).
+            // check_inbound advanced next_inbound (peer Logon-ack seq); Active reached.
+            // Persist after Active transition, store_ still live.
+            // [029 tasks T010; contracts C3.1; data-model §Persist matrix LogonSent site]
+            {
+                auto p_r = co_await persist_inbound_advance_();
+                if (!p_r) co_return std::unexpected(p_r.error());
             }
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
