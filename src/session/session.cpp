@@ -2302,26 +2302,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // [data-model S4, contract C2.2/C2.3, FR-006, research D-3]
                     if (!cfg_.validate_sequence_numbers) {
                         if (engine_.application != nullptr) {
-                            if (detail::is_admin_msgtype(hdr.msg_type)) {
-                                auto cb_r = parse_and_dispatch_(
-                                    frame, kInboundParseArena, [&](auto& mv, auto& sid) {
-                                        return engine_.application->fromAdmin(mv, sid);
-                                    });
-                                if (!cb_r &&
-                                    cb_r.error() == fixpp::core::error::app_callback_threw) {
-                                    co_await close(close_mode::terminal);
-                                    co_return std::unexpected(cb_r.error());
-                                }
-                            } else {
-                                auto cb_r = parse_and_dispatch_(
-                                    frame, kInboundParseArena, [&](auto& mv, auto& sid) {
-                                        return engine_.application->fromApp(mv, sid);
-                                    });
-                                if (!cb_r &&
-                                    cb_r.error() == fixpp::core::error::app_callback_threw) {
-                                    co_await close(close_mode::terminal);
-                                    co_return std::unexpected(cb_r.error());
-                                }
+                            const bool admin = detail::is_admin_msgtype(hdr.msg_type);
+                            auto cb_r = parse_and_dispatch_(
+                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                    return admin ? engine_.application->fromAdmin(mv, sid)
+                                                 : engine_.application->fromApp(mv, sid);
+                                });
+                            if (!cb_r &&
+                                cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                co_await close(close_mode::terminal);
+                                co_return std::unexpected(cb_r.error());
                             }
                         }
                         // Stay Active, counter unchanged (no advance). C2.3.
