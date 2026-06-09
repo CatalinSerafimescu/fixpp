@@ -48,6 +48,8 @@ write is therefore keyed to each site where `check_inbound` **advanced** the man
 | Logout (`:2463`) | yes | **PERSIST** (after `fromAdmin`, **before** `record_state_transition_(Disconnected)` at `:2462` — store_ is still live; the session is in its prior state when the persist runs) |
 | Reject (`:2470`) | yes | **PERSIST** (after `fromAdmin`, before any terminal transition — same ordering as Logout) |
 | In-seq app message (tail `:2732`) | yes | **PERSIST** (after `fromApp`) |
+| **`fromAdmin`-rejection via `emit_session_reject_` (`:2709`)** — `check_inbound` advanced, but `co_return co_await emit_session_reject_(...)` exits before the Heartbeat/TestRequest/ResendRequest persist sites | yes (check_inbound advanced), persist SKIPPED by early-return | **NO-PERSIST** (durable lag, INV-H1-safe — store < manager; rejected message re-delivers at-least-once on restart, deduped by PossDup). [gate-b/r1 triage #3 P2-drift, non-blocking] |
+| **In-seq app, no registered `Application` (`engine.application == nullptr`, `:2898`)** — `check_inbound` advanced, but `co_return co_await emit_session_reject_(...)` exits before the tail persist | yes (check_inbound advanced), persist SKIPPED by early-return | **NO-PERSIST** (durable lag, INV-H1-safe — same rationale as fromAdmin-rejection above). [gate-b/r1 triage #3 P2-drift, non-blocking] |
 | **Resend-fill replayed in-seq app** (PossDup app arriving in-sequence through the Active path) | yes | **PERSIST** (New-2 — these advance the counter and DO persist; distinct from the GapFill jump) |
 | Too-low / PossDup redelivery (`:2257`/`:2269`/`:2292`) | no (returns false, no advance) | **NO-PERSIST** |
 | `validate_sequence_numbers=false` deliver-without-advance (`:2294-2316`) | no (delivered, counter not advanced) | **NO-PERSIST** |
@@ -70,6 +72,18 @@ exact-match GapFill on a validate-off session — a 028-interop-cell config). Th
 is the INV-H1 lower-bound exclusion → NO-PERSIST. **Fatal-after-advance exits** (outbound emit/assign
 failure, TestReqID-mismatch `:2531`) do not persist because the session terminates; INV-H1 keeps the
 durable counter a safe lower bound (reconnect re-hydrates the last durable value).
+
+**Reject early-return carve-outs (gate-b/r1 P2-drift, non-blocking):** two sub-paths where
+`check_inbound` advanced the manager but the persist is NOT reached:
+(a) `fromAdmin`-rejection via `emit_session_reject_` (`:2709`): the Active path issues a session
+Reject in response to a `fromAdmin` callback error; the `co_return co_await emit_session_reject_(...)`
+exits before the Heartbeat/TestRequest/ResendRequest persist sites. This is INV-H1-safe (durable lag:
+store < manager); the rejected message re-delivers at-least-once on restart, deduped by PossDup.
+(b) In-seq app with no registered `Application` (`engine.application == nullptr`, `:2898`): same
+pattern — session Reject emitted, early return, persist skipped. INV-H1-safe (at-least-once).
+The original "site-keyed to every `check_inbound`-success site" claim is amended: **every cleanly
+delivered** `check_inbound`-success site. A rejected message was not cleanly delivered; the durable
+lag is the correct semantic and matches the `Fatal-after-advance` carve-out precedent above.
 
 ## Invariants
 

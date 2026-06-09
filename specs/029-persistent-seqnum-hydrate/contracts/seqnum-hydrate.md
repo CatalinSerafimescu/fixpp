@@ -68,13 +68,18 @@ hydrate(seqnum_t next_inbound, seqnum_t next_outbound) noexcept;
   `store_is_persistent_`; failure → Disconnected). It is invoked at every **PERSIST** site in the
   disposition matrix (data-model.md §Persist disposition matrix), **not** as a single tail write.
 - **C3.1** PERSIST sites: after the callback/handling returns at each `check_inbound`-success site
-  that advanced the manager — acceptor Logon, initiator Logon-ack, Heartbeat, TestRequest,
-  ResendRequest, Logout, Reject, in-seq app, **and resend-fill replayed in-seq app** (these DO
-  persist — they advance the counter like any in-seq message). For the **terminal** sites
-  (Logout `:2462`, Reject) the persist runs **after `fromAdmin` but before**
-  `record_state_transition_(Disconnected)` — `store_` is still live and the session is in its
-  prior state when the persist runs; not persisting these is still a safe lower bound (INV-H1) but
-  the matrix persists them for QFcpp-parity (`incrNextTargetMsgSeqNum`).
+  that **cleanly delivered** the message — acceptor Logon, initiator Logon-ack, Heartbeat,
+  TestRequest, ResendRequest, Logout, Reject (main path), in-seq app (main path), **and resend-fill
+  replayed in-seq app** (these DO persist — they advance the counter like any in-seq message). For
+  the **terminal** sites (Logout `:2462`, Reject main-path) the persist runs **after `fromAdmin`
+  but before** `record_state_transition_(Disconnected)` — `store_` is still live and the session
+  is in its prior state when the persist runs; not persisting these is still a safe lower bound
+  (INV-H1) but the matrix persists them for QFcpp-parity (`incrNextTargetMsgSeqNum`).
+  **Carve-outs (durable lag, INV-H1-safe):** `fromAdmin`-rejection via `emit_session_reject_`
+  (`:2709`) and in-seq app with no registered Application (`:2898`) do NOT persist — these early-
+  return via session Reject before reaching the persist site; the manager advanced but the message
+  was not cleanly delivered → at-least-once re-delivery on restart is the correct semantic.
+  See data-model §Persist matrix reject-early-return carve-outs. [gate-b/r1 P2-drift, non-blocking]
 - **C3.2** ordering (INV-H2): the persist MUST follow the callback/handling — never precede it.
 - **C3.3** failure (D-3): a failed persist → `record_state_transition_(Disconnected)` +
   `std::unexpected(store_io_failure)`. Fatal.
