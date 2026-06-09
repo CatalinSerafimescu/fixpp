@@ -540,9 +540,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 //   (b) the acceptor NotConnected inbound-Logon case, AFTER the peer_sent_reset /
 //       reset_on_logon header pre-scan and BEFORE check_inbound (C2.5).
 //
-// Phase 3 implements the OUTBOUND seed only (C2.4 split; inbound seed is Phase 4 T011).
-// At this stage hydrate() always receives next_inbound=1 (construction value) so the
-// inbound counter is not changed.  The outbound counter is loaded from the store.
+// The OUTBOUND seed is applied unconditionally; the INBOUND seed is applied only when
+// apply_inbound_seed is true (C2.4 split — withheld on the reset-Logon path so the reset
+// arm owns the post-state and check_inbound(1) is in-sequence).
 //
 // Body design (C2.1–C2.3, D-9):
 //   one-shot latch  : if (hydrated_)  co_return ok   — already done this lifetime
@@ -550,7 +550,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 //   non-persistent  : if (!store_is_persistent_) skip reads, co_return ok (INV-H4)
 //   read both       : next_seqnum(inbound,false) then next_seqnum(outbound,false)
 //   read failure    : clear hydrating_, Disconnected, no partial seed (C2.3/INV-H6)
-//   hydrate         : seqnum_mgr_.hydrate(1 [Phase-3 inbound placeholder], *out)
+//   hydrate         : seqnum_mgr_.hydrate(apply_inbound_seed ? *in : seqnum_min, *out)
 //   latch           : hydrated_ = true; hydrating_ = false (set ONLY after success, D-9)
 //
 // [029 tasks T007; contracts C2.1–C2.6; data-model INV-H3..H6; research D-6/D-9/D-10]

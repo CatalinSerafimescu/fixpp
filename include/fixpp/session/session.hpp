@@ -635,15 +635,13 @@ private:
     bool hydrating_ = false;
     bool store_is_persistent_ = false;
 
-    // ── 029-persistent-seqnum-hydrate awaitable declarations (T005) ──────────
+    // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
     // ensure_hydrated_(): one-shot cold-open hydration gate (C2.1–C2.7).
-    //   Body wired in Phase 3 T007 (outbound) + Phase 4 T011 (inbound seed).
-    // persist_inbound_advance_(): site-keyed durable inbound +1 (C3).
-    //   Body wired in Phase 4 T010.
-    // Declared-but-undefined here; no call sites exist yet (Phase 3/4).
-    // apply_inbound_seed: true → apply *in_r from the store; false → keep next_inbound
-    // at construction value seqnum_min (withheld on reset-Logon paths — RC-1 / C2.4).
+    //   apply_inbound_seed: true → apply *in_r from the store; false → keep next_inbound
+    //   at construction value seqnum_min (withheld on reset-Logon paths — RC-1 / C2.4).
+    // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
+    //   delivering callback at every check_inbound-success site (C3).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     ensure_hydrated_(bool apply_inbound_seed) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_() noexcept;

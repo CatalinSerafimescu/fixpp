@@ -1949,15 +1949,6 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     // the persist path (persist_inbound_advance_ for each accepted message) are exercised.
     auto app = std::make_shared<CountingApp029>();
 
-    // Build the session and run the warm-up iterations outside the guard window.
-    // Note: each make_acceptor builds a fresh session; we build one session here
-    // and drive repeated Logon + message sequences to warm up, but since make_acceptor
-    // drives to Active (consuming the hydrate) we need a fresh fixture each iteration.
-    //
-    // Simpler: build one session, do a multi-round warm-up with the SAME session
-    // (non-Active paths do NOT re-hydrate — INV-H3). But post-Active we can deliver
-    // repeated heartbeats (persist_inbound_advance_ calls) without re-opening.
-    //
     // Strategy: (1) Build the active session (includes open + hydrate + Logon accept persist).
     //           (2) Warm-up: deliver kWarmup heartbeats (triggers persist_inbound_advance_).
     //           (3) Open the guard window.
