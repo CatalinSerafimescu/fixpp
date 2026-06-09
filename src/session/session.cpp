@@ -789,6 +789,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // user impls with no flush method); FileStore returns a typed thunk.
         // T032 (Phase 4 US2) dispatches this at close(graceful).
         close_flush_hook_a1_ = store_->flush_hook();
+        // 029 T005 — capture persistence discriminator (C2.2 / D-10 / New-A).
+        // Read ONCE here (before any counter touch) from the factory that just
+        // minted the store.  false for MemoryStoreFactory (volatile); true for
+        // FileStoreFactory + any custom factory that does not override the default.
+        // The null-store path (no cfg_.store_factory) leaves store_is_persistent_
+        // at its default false (no read, no allocation — INV-H4).
+        // Both the direct-open and engine-managed paths call Session::open() and
+        // flow through this single if(cfg_.store_factory) branch — ONE capture
+        // point covers both roles (confirmed by inspection: store_ is minted
+        // exclusively here; reconnect_fsm.cpp factory_->make() mints the transport,
+        // not the session store).
+        store_is_persistent_ = cfg_.store_factory->yields_persistent_store();
     }
 
     state_ = lifecycle::open;

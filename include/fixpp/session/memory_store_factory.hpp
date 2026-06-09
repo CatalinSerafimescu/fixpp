@@ -42,6 +42,12 @@ class MemoryStoreFactory final : public MessageStoreFactory {
 public:
     explicit MemoryStoreFactory(MemoryStore::Config c = {}) noexcept : cfg_(c) {}
 
+    // MemoryStore is volatile (in-memory only) — not durable across restart.
+    // Override the factory default (true) to false so Session::open() sets
+    // store_is_persistent_ = false and ensure_hydrated_() skips the read
+    // (029 C2.2 / research D-10 / INV-H4).
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
+
     // make(): mint a MemoryStore for the given <sender, target> session.
     //
     // sender / target are accepted but NOT used by MemoryStore (it has no

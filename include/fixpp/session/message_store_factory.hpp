@@ -44,6 +44,16 @@ public:
     MessageStoreFactory& operator=(MessageStoreFactory&&) = delete;
     virtual ~MessageStoreFactory() = default;
 
+    // yields_persistent_store(): true iff the stores minted by this factory
+    // are durable across process restart (029 C2.2 / FR-005 / research D-10).
+    // Non-pure; default true — a custom store hydrates unless it opts out
+    // (safe default: unknown factory → hydrate; MemoryStoreFactory overrides
+    // to false; FileStoreFactory inherits true). Accessed ONCE at Session::open()
+    // to capture store_is_persistent_; no runtime overhead on the hot path.
+    // Does NOT touch the MessageStore 4-pure-virtual cap (Article XIV.2 governs
+    // MessageStore, not the factory; this is a factory-only surface).
+    [[nodiscard]] virtual bool yields_persistent_store() const noexcept { return true; }
+
     // make: mint a MessageStore for the given <sender, target> identity.
     //
     // sender / target are FIX-CompID strings consumed for the on-disk log

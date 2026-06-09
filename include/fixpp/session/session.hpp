@@ -617,6 +617,34 @@ private:
     bool onLogout_fired_ = false;
     bool lifecycle_cb_threw_ = false;
 
+    // ── 029-persistent-seqnum-hydrate strand-confined flags (T005) ───────────
+    //
+    // hydrated_: true once ensure_hydrated_() has completed successfully (one-shot
+    //   latch; set only after both reads + SeqnumManager::hydrate() succeed — D-9 /
+    //   INV-H6 / C2.1). A transient read failure leaves it false so the next
+    //   reconnect retries.
+    // hydrating_: re-entrancy guard for ensure_hydrated_(); cleared on failure so a
+    //   failed hydrate is not sticky (C2.1 / D-9).
+    // store_is_persistent_: captured ONCE at open() inside the if(cfg_.store_factory)
+    //   branch from cfg_.store_factory->yields_persistent_store() (C2.2 / D-10).
+    //   Null-store path leaves it false (default). When false, ensure_hydrated_()
+    //   skips the read and persist_inbound_advance_() skips the write (INV-H4).
+    // All three are strand-confined (single-writer on the per-session strand).
+    // Additive POD bools; no new include — [const §XV.9] closure unaffected.
+    bool hydrated_ = false;
+    bool hydrating_ = false;
+    bool store_is_persistent_ = false;
+
+    // ── 029-persistent-seqnum-hydrate awaitable declarations (T005) ──────────
+    //
+    // ensure_hydrated_(): one-shot cold-open hydration gate (C2.1–C2.7).
+    //   Body wired in Phase 3 T007 (outbound) + Phase 4 T011 (inbound seed).
+    // persist_inbound_advance_(): site-keyed durable inbound +1 (C3).
+    //   Body wired in Phase 4 T010.
+    // Declared-but-undefined here; no call sites exist yet (Phase 3/4).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_() noexcept;
+
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().
     // Written exclusively from the per-session strand ([const §XI.4]).
