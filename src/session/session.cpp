@@ -558,8 +558,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 // when false (reset-Logon path), withhold the inbound seed so the reset arm owns
 // the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
 // [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
-asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
-    bool apply_inbound_seed, bool force) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool apply_inbound_seed,
+                                                                         bool force) noexcept {
     // One-shot: already hydrated this session lifetime.
     // force=true (025 refresh_on_logon) bypasses the latch to re-read on each reconnect.
     if (hydrated_ && !force) {
@@ -662,8 +662,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // INV-RoL-3 / FR-008 / D-RoL-3). Default false → zero delta (byte-identical pre-025).
         const bool refresh_active =
             cfg_.refresh_on_logon &&
-            cfg_.reset_seqnum_policy_field !=
-                fixpp::session::reset_seqnum_policy::bilateral_strict;
+            cfg_.reset_seqnum_policy_field != fixpp::session::reset_seqnum_policy::bilateral_strict;
         auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
                                              /*force=*/refresh_active);
         if (!h_r) {
