@@ -54,8 +54,8 @@
 
 **Goal**: knob-off ⇒ 029 one-shot unchanged; non-persistent store ⇒ no-op even knob-on. **Independent test**: W3 + W4.
 
-- [ ] T020 [US2] Write W3 RED then GREEN: `refresh_on_logon=false` (default), persistent store `{in:50,out:60}`; record store read-count after cold open = N; drive a 2nd logon; assert read-count == N (NO re-read) and counters retain their live values; then run the full existing session/recovery/029-hydrate regression suite and assert green (byte-identity). — SC-003, FR-004/010, INV-RoL-1.
-- [ ] T021 [US2] Write W4 RED then GREEN: `refresh_on_logon=true` on a non-persistent store (`yields_persistent_store()==false`), lenient; drive logons; assert ZERO store reads on the refresh path (the `:576` skip fires even under `force`), behaviour byte-identical to knob-off. — SC-004, FR-005, INV-RoL-2, contract C2.3/C2.6.
+- [X] T020 [US2] Write W3 RED then GREEN: `refresh_on_logon=false` (default), persistent store `{in:50,out:60}`; record store read-count after cold open = N; drive a 2nd logon; assert read-count == N (NO re-read) and counters retain their live values; then run the full existing session/recovery/029-hydrate regression suite and assert green (byte-identity). — SC-003, FR-004/010, INV-RoL-1.
+- [X] T021 [US2] Write W4 RED then GREEN: `refresh_on_logon=true` on a non-persistent store (`yields_persistent_store()==false`), lenient; drive logons; assert ZERO store reads on the refresh path (the `:576` skip fires even under `force`), behaviour byte-identical to knob-off. — SC-004, FR-005, INV-RoL-2, contract C2.3/C2.6.
 
 **Checkpoint**: US2 GREEN — zero-regression floor holds; non-persistent is a no-op.
 

@@ -185,15 +185,20 @@ private:
     seqnum_t next_outbound_;
 };
 
-// FaultStoreFactory: wraps FaultStore, yields_persistent_store() = true.
+// FaultStoreFactory: wraps FaultStore, yields_persistent_store() configurable.
+// persistent=true (default) → persistent store (used by W1/W2/W3).
+// persistent=false          → non-persistent store (used by W4 to test INV-RoL-2).
 class FaultStoreFactory final : public MessageStoreFactory {
 public:
-    explicit FaultStoreFactory(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1)
-        : seeded_inbound_(seeded_inbound), seeded_outbound_(seeded_outbound) {}
+    explicit FaultStoreFactory(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1,
+                               bool persistent = true)
+        : seeded_inbound_(seeded_inbound),
+          seeded_outbound_(seeded_outbound),
+          persistent_(persistent) {}
 
     mutable FaultStore* last_store{nullptr};
 
-    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return persistent_; }
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
@@ -207,6 +212,7 @@ public:
 private:
     seqnum_t seeded_inbound_;
     seqnum_t seeded_outbound_;
+    bool persistent_;
 };
 
 // ── MockReconnectFactory: TransportFactory returning mock_transport ────────────
@@ -316,13 +322,16 @@ struct ReconnectInitiatorFixture {
     MockReconnectFactory* transport_fac{nullptr};  // owning ptr kept in cfg_ via shared_ptr
 };
 
+// refresh_on_logon: true for W1/W2 (knob-on); false for W3 (knob-off byte-identity).
+// persistent: true (default) for persistent store; false for W4 (non-persistent no-op).
 static ReconnectInitiatorFixture make_reconnect_initiator(
-    seqnum_t seeded_in, seqnum_t seeded_out) {
+    seqnum_t seeded_in, seqnum_t seeded_out,
+    bool refresh_on_logon = true, bool persistent = true) {
     ReconnectInitiatorFixture result;
     result.fix = std::make_unique<Fixture>();
     auto& fix = *result.fix;
 
-    auto store_factory = std::make_shared<FaultStoreFactory>(seeded_in, seeded_out);
+    auto store_factory = std::make_shared<FaultStoreFactory>(seeded_in, seeded_out, persistent);
     auto transport_factory = std::make_shared<MockReconnectFactory>();
     result.transport_fac = transport_factory.get();
 
@@ -338,7 +347,7 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
     fix.cfg.transport_factory_override = transport_factory;
     fix.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
     fix.cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    fix.cfg.refresh_on_logon = true;
+    fix.cfg.refresh_on_logon = refresh_on_logon;
     fix.cfg.transport_send = [&fix](std::span<const std::byte> data) { fix.capture(data); };
 
     fix.session = std::make_unique<fixpp::session::Session>(fix.eng, fix.cfg);
@@ -592,6 +601,192 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
         << "W2 RED: after re-hydrate to out=6 (store-wins DOWN) + 2nd Logon emit, "
            "peek_outbound must be 7. WITHOUT T004: latch fires → out stays 42 → "
            "2nd Logon at 42 → peek_outbound=43. "
+           "Actual peek_outbound="
+        << fix.session->seqnum_mgr_test_access().peek_outbound();
+}
+
+// ── Phase 4 (T020) — W3: KnobOff_NoReread — default-off byte-identity ───────
+//
+// refresh_on_logon=false (default) with a persistent store {in:50, out:60}.
+// After cold open (call_count=2, manager={50,61}), lower live counters to {40,42}
+// to simulate divergence. Drive a 2nd logon via drive_reconnect().
+//
+// refresh_active = false && policy!=strict = false → force=false → 029 one-shot
+// latch fires → ensure_hydrated_ returns immediately → ZERO additional reads.
+// The manager's live values are RETAINED (not overwritten from the store).
+//
+// Direct assertions (not proxies — [[feedback_witness_asserts_named_postcondition_not_proxy]]):
+//   (a) call_count == N (no new reads, N = count after cold open)
+//   (b) next_inbound == 40 (live, NOT 50 from store)
+//   (c) peek_outbound == 43 (42 → 2nd Logon emits at 42 → peek=43)
+//
+// Anchors: data-model.md W3; SC-003; FR-004/010; INV-RoL-1 (knob-off = 029 unchanged).
+
+TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
+    // knob-off, persistent store seeded at {50, 60}.
+    auto result = make_reconnect_initiator(/*seeded_in=*/50, /*seeded_out=*/60,
+                                           /*refresh_on_logon=*/false,
+                                           /*persistent=*/true);
+    auto& fix = *result.fix;
+    auto* store = result.store;
+    ASSERT_NE(store, nullptr);
+
+    // Cold open: 2 reads (inbound + outbound via ensure_hydrated_).
+    ASSERT_EQ(store->call_count, 2)
+        << "W3 precondition: cold open must issue exactly 2 store reads; got "
+        << store->call_count;
+
+    // Confirm cold hydrate applied: manager={50,60}, then Logon at 60 → outbound=61.
+    {
+        auto& mgr = fix.session->seqnum_mgr_test_access();
+        ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(50))
+            << "W3 precondition: cold hydrate must set next_inbound=50";
+        ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(61))
+            << "W3 precondition: after cold-open Logon(34=60), outbound must be 61";
+    }
+
+    // Diverge: lower live counters to {40, 42} (simulates the standby case).
+    fix.session->seqnum_mgr_test_access().set_counters_for_test(
+        /*next_inbound=*/40, /*next_outbound=*/42);
+
+    const int call_count_before = store->call_count;  // snapshot N = 2
+
+    // Drive 2nd logon via drive_reconnect() with mock transport.
+    auto reconnect_fut = asio::co_spawn(
+        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    fix.ioc.run_for(3s);
+    fix.ioc.restart();
+
+    // Vehicle check: drive_reconnect must succeed (reaches emit_initiator_logon_).
+    {
+        auto rr = reconnect_fut.get();
+        ASSERT_TRUE(rr.has_value())
+            << "W3 vehicle: drive_reconnect() must succeed (mock transport). "
+               "If this fails, ensure_hydrated_ was never reached.";
+    }
+
+    fix.ioc.run_for(1s);
+    fix.ioc.restart();
+
+    // ── Assertions: knob-off → zero re-reads → live values retained ──────────
+
+    // (a) No additional store reads: call_count stays at N.
+    // refresh_on_logon=false → refresh_active=false → force=false → one-shot latch fires
+    // → ensure_hydrated_ exits at the first guard without any store->next_seqnum call.
+    EXPECT_EQ(store->call_count, call_count_before)
+        << "W3: refresh_on_logon=false must produce ZERO additional store reads on 2nd logon. "
+           "call_count before=" << call_count_before
+        << " got=" << store->call_count
+        << ". A non-zero delta means the knob-off guard is broken (INV-RoL-1).";
+
+    // (b) Inbound counter retained at live value (40), NOT overwritten from store (50).
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<seqnum_t>(40))
+        << "W3: knob-off must NOT re-hydrate; next_inbound must stay at live value 40, "
+           "not the store's 50. Actual="
+        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+
+    // (c) Outbound counter: live=42 → 2nd Logon emits at 42 → peek_outbound=43.
+    // A re-hydrate from store (out=60) would give peek=61; getting 43 confirms no re-read.
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
+              static_cast<seqnum_t>(43))
+        << "W3: knob-off must NOT re-hydrate; peek_outbound must be 43 (42+1 after 2nd Logon), "
+           "not 61 (60+1 from store). Actual="
+        << fix.session->seqnum_mgr_test_access().peek_outbound();
+}
+
+// ── Phase 4 (T021) — W4: NonPersistentStore_NoReread — INV-RoL-2 ────────────
+//
+// refresh_on_logon=true on a NON-persistent store (yields_persistent_store()==false),
+// bilateral_lenient.
+//
+// The !store_is_persistent_ skip at session.cpp:576 fires even when force=true:
+//   ensure_hydrated_: if (hydrated_ && !force) → NOT taken (force=true).
+//   if (hydrating_)  → NOT taken (not re-entrant).
+//   hydrating_ = true.
+//   if (!store_is_persistent_) → TAKEN → hydrating_=false; co_return ok (no reads).
+//
+// So cold open issues ZERO store reads (the non-persistent skip fires before the reads).
+// The 2nd logon with force=true also issues ZERO reads (same skip path).
+// Total call_count stays at 0 throughout.
+//
+// Direct assertions:
+//   (a) call_count == 0 after cold open (non-persistent skip on cold hydrate)
+//   (b) call_count == 0 after 2nd logon (non-persistent skip on forced hydrate)
+//   (c) manager counters start at seqnum_min (1) — no hydration ever ran
+//
+// Anchors: data-model.md W4; SC-004; FR-005; INV-RoL-2; contract C2.3/C2.6.
+
+TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
+    // knob-on, NON-persistent store seeded at {50, 60}.
+    // The seeded values are irrelevant — they should never be read.
+    auto result = make_reconnect_initiator(/*seeded_in=*/50, /*seeded_out=*/60,
+                                           /*refresh_on_logon=*/true,
+                                           /*persistent=*/false);
+    auto& fix = *result.fix;
+    auto* store = result.store;
+    ASSERT_NE(store, nullptr);
+
+    // Cold open: non-persistent skip fires (store_is_persistent_=false) →
+    // ensure_hydrated_ returns without any store reads.
+    ASSERT_EQ(store->call_count, 0)
+        << "W4 precondition: non-persistent store → cold open must issue ZERO store reads; "
+           "got call_count=" << store->call_count
+        << ". store_is_persistent_=false must trigger the !store_is_persistent_ skip (INV-RoL-2).";
+
+    // Manager at construction-time defaults (seqnum_min=1): no hydration ran.
+    {
+        auto& mgr = fix.session->seqnum_mgr_test_access();
+        ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(1))
+            << "W4 precondition: with non-persistent store, no hydration ran; "
+               "next_inbound must stay at seqnum_min=1";
+        // Outbound: cold Logon emits at seq=1 (seqnum_min), advances to 2.
+        ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(2))
+            << "W4 precondition: cold Logon at seq=1 → outbound advanced to 2";
+    }
+
+    const int call_count_before = store->call_count;  // = 0
+
+    // Drive 2nd logon via drive_reconnect() with mock transport.
+    auto reconnect_fut = asio::co_spawn(
+        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    fix.ioc.run_for(3s);
+    fix.ioc.restart();
+
+    // Vehicle check.
+    {
+        auto rr = reconnect_fut.get();
+        ASSERT_TRUE(rr.has_value())
+            << "W4 vehicle: drive_reconnect() must succeed (mock transport). "
+               "ensure_hydrated_ must be reached (it just no-ops due to non-persistent).";
+    }
+
+    fix.ioc.run_for(1s);
+    fix.ioc.restart();
+
+    // ── Assertions: non-persistent store → ZERO reads even with force=true ───
+
+    // (a) call_count stays at 0: the !store_is_persistent_ guard fires BEFORE the reads,
+    // even when force=true bypasses the hydrated_ latch. No reads ever occur.
+    EXPECT_EQ(store->call_count, call_count_before)
+        << "W4: non-persistent store (yields_persistent_store()==false) must produce "
+           "ZERO store reads even when refresh_on_logon=true (force=true). "
+           "call_count before=" << call_count_before
+        << " got=" << store->call_count
+        << ". A non-zero delta means the !store_is_persistent_ skip (session.cpp:576) "
+           "is not firing under force (INV-RoL-2 violated).";
+
+    // (b) The manager was never seeded from the store; counters reflect only the
+    // post-2nd-Logon advance (outbound: 2 → Logon at 2 → peek=3).
+    // next_inbound stays at 1 (seqnum_min, no hydration on either path).
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<seqnum_t>(1))
+        << "W4: no hydration ran (non-persistent); next_inbound must stay at 1. Actual="
+        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
+              static_cast<seqnum_t>(3))
+        << "W4: 2nd Logon emits at seq=2 (no re-hydrate, outbound stayed at 2) → peek=3. "
            "Actual peek_outbound="
         << fix.session->seqnum_mgr_test_access().peek_outbound();
 }
