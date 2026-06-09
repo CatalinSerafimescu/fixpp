@@ -1,5 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
+// mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
+// Must be at file scope for the LD_PRELOAD override to bind.
+extern "C" {
+// NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
+__attribute__((weak)) void alloc_guard_start() {}
+// NOLINTNEXTLINE(misc-use-anonymous-namespace)
+__attribute__((weak)) void alloc_guard_end() {}
+// NOLINTNEXTLINE(misc-use-anonymous-namespace)
+__attribute__((weak)) long alloc_guard_count() { return 0; }
+}
+
 // tests/session/test_refresh_on_logon.cpp
 //
 // 025-refresh-on-logon unit test suite.
@@ -1300,4 +1311,90 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
            "failed 2nd-logon re-hydrate. Snapshot=" << snap_outbound
         << " actual=" << post_outbound
         << ". Non-equal means the failed read partially overwrote the manager (C2.5 violated).";
+}
+
+// ── Phase 5 (T040) — W8: NoHeap_RehydratePath ────────────────────────────────
+//
+// [const §VIII.5]: the per-logon re-hydrate path must touch ZERO global-heap
+// allocations after a warm-up that primes all per-thread caches.
+//
+// BINDING gate: the mallocnesia LD_PRELOAD interceptor
+//   tools/mallocnesia/libmallocnesia.so, wired in CMakeLists.txt as the
+//   session_refresh_on_logon_mallocnesia ctest companion.
+//   [[feedback_tracking_pmr_resource_false_pass]]: a PMR counting_resource
+//   alone is a false-pass; LD_PRELOAD is the binding proof.
+//
+// Strategy: measure SeqnumManager::hydrate() directly — this IS the re-hydrate
+// apply step that ensure_hydrated_() calls after reading the store. The FaultStore's
+// next_seqnum() returns a ready-value (no heap), so the full re-hydrate hot path
+// (mutex acquire + set counters) is zero-alloc after warm-up.
+//
+// drive_reconnect() is NOT wrapped (MockReconnectFactory::make() calls
+// std::make_unique<mock_transport>, a global new). SeqnumManager::hydrate()
+// is the equivalent proxy — it is exactly the apply step of ensure_hydrated_().
+// This matches 029's proxy approach (029 W8 measures the warm persist path which
+// traverses the same async_mutex + co_await surface; same class of steady-state
+// hot-path witness).
+//
+// Anchors: data-model.md W8; [const §VIII.5]; seqnum_manager.hpp hydrate();
+//          029 test NoHeap_HydrateAndPersistPaths (proxy strategy);
+//          [[feedback_tracking_pmr_resource_false_pass]].
+
+TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
+    // ── Setup OUTSIDE the guarded window ─────────────────────────────────────
+    // Build an initiator with refresh_on_logon=true, bilateral_lenient, persistent
+    // FaultStore. All one-time allocations (Session ctor, coroutine frames,
+    // per-thread recycler init) happen during setup outside the alloc guard.
+    auto result = make_reconnect_initiator(/*seeded_in=*/5, /*seeded_out=*/7,
+                                           /*refresh_on_logon=*/true, /*persistent=*/true);
+    auto& fix = *result.fix;
+
+    // Warm-up: run SeqnumManager::hydrate() kWarmup times OUTSIDE the guard window.
+    // The first iterations touch per-thread lazy-init paths (async_mutex slot pool,
+    // cancellation_slot thread_info_base, promise frame recycling); subsequent
+    // iterations are steady-state zero-alloc.
+    constexpr int kWarmup = 8;
+    for (int i = 0; i < kWarmup; ++i) {
+        auto warm_fut = asio::co_spawn(
+            fix.ioc,
+            fix.session->seqnum_mgr_test_access().hydrate(
+                static_cast<fixpp::session::seqnum_t>(5),
+                static_cast<fixpp::session::seqnum_t>(7)),
+            asio::use_future);
+        fix.ioc.run_for(500ms);
+        fix.ioc.restart();
+        (void)warm_fut.get();
+    }
+
+    // ── Guarded window: one SeqnumManager::hydrate() invocation ───────────────
+    alloc_guard_start();
+
+    auto measured_fut = asio::co_spawn(
+        fix.ioc,
+        fix.session->seqnum_mgr_test_access().hydrate(
+            static_cast<fixpp::session::seqnum_t>(5),
+            static_cast<fixpp::session::seqnum_t>(7)),
+        asio::use_future);
+    fix.ioc.run_for(500ms);
+    fix.ioc.restart();
+    (void)measured_fut.get();
+
+    const long heap_allocs = alloc_guard_count();
+    alloc_guard_end();
+    // ── End of guarded window ─────────────────────────────────────────────────
+
+    // Functional post-condition: hydrate set counters correctly.
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(5))
+        << "W8: hydrate() must apply the inbound counter inside the guarded window";
+
+    // No-heap post-condition.
+    // Under mallocnesia (LD_PRELOAD): heap_allocs must be 0.
+    // Without LD_PRELOAD: heap_allocs is 0 (no-op weak symbol) — passes vacuously.
+    // The BINDING proof is the session_refresh_on_logon_mallocnesia ctest companion.
+    EXPECT_EQ(heap_allocs, 0L)
+        << "[const §VIII.5]: SeqnumManager::hydrate() (the re-hydrate apply step) must "
+           "not touch the global heap; heap_allocs=" << heap_allocs
+        << ". Run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so for the binding proof. "
+           "[[feedback_tracking_pmr_resource_false_pass]]";
 }

@@ -1717,6 +1717,27 @@ add_test(NAME session_refresh_on_logon
 set_tests_properties(session_refresh_on_logon PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "025;s018;refresh-on-logon;setup")
+# T040 W8 NoHeap_RehydratePath: wire mallocnesia LD_PRELOAD so the
+# alloc_guard_count() weak symbol is replaced by the live interceptor.
+# Pattern mirrors session_persistent_seqnum_hydrate (029).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  set_property(TEST session_refresh_on_logon APPEND PROPERTY
+    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+endif()
+# T040 mallocnesia companion — runs the binary under check_alloc.py so any
+# global malloc/calloc/realloc between the guard markers causes exit(1).
+# Absent mallocnesia.so → skip; the base test is the fallback.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_refresh_on_logon_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_refresh_on_logon>"
+  )
+  set_tests_properties(session_refresh_on_logon_mallocnesia PROPERTIES
+    LABELS "025;s018;refresh-on-logon;noheap"
+    DEPENDS session_refresh_on_logon)
+endif()
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.

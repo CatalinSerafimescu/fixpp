@@ -576,19 +576,47 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
 
 ### Limitations
 
-- **L-024-1 — `RefreshOnLogon` (S-018) is NOT implemented.** fixpp's `SeqnumManager` is never
-  store-seeded at `open()` (it starts at 1; the only `set_next_inbound` caller is the inbound
-  SequenceReset handler), so there is no construction-time store cache to refresh on reconnect.
-  A meaningful `RefreshOnLogon` needs a store→manager hydrate-on-open path (an `008`-boundary
-  change) fixpp does not yet have. **The `008`-boundary dependency is discharged by 029
-  (S-042)** — `ensure_hydrated_()` + `SeqnumManager::hydrate(in,out)` provide the store→manager
-  hydrate-on-open spine for cold start. However the **per-reconnect re-hydrate knob** (the
-  `RefreshOnLogon` option that re-seeds counters on every reconnect, not just on cold open) is
-  NOT implemented by 029 (which is a one-shot cold-open hydrate). Operators needing
-  external-store sequence-number mutation across reconnects must restart the session.
-  **Status: follow-up** — the `RefreshOnLogon` option (S-018) is tracked as the 025 feature
-  (the 029 spine is its prerequisite); S-018 stays `backlog` until 025 ships. *(Clarifications
-  Q3; contract C7.1; catalogue S-018 gap-note; 029 plan.md §VI delta L-024-1 update.)*
+- **L-024-1 — `RefreshOnLogon` (S-018) is NOT implemented.** *(DISCHARGED by 025 — see S-018
+  catalogue row and L-025-1 below for the remaining per-reconnect re-hydrate caveat.
+  Historical record preserved below.)*
+  fixpp's `SeqnumManager` was never store-seeded at `open()` (it started at 1; the only
+  `set_next_inbound` caller was the inbound SequenceReset handler), so there was no
+  construction-time store cache to refresh on reconnect. A meaningful `RefreshOnLogon` needed
+  a store→manager hydrate-on-open path (an `008`-boundary change) fixpp did not yet have.
+  **The `008`-boundary dependency was discharged by 029 (S-042)**; the `RefreshOnLogon` knob
+  (`refresh_on_logon=true`) was shipped by 025 (S-018). **Status: discharged** (025, S-018
+  → `done`). *(Clarifications Q3; contract C7.1; catalogue S-018.)*
+
+## RefreshOnLogon — per-logon re-hydrate knob (025-refresh-on-logon)
+
+### Feature Catalogue Rows
+
+- **S-018** (session) — RefreshOnLogon — reload persisted state on reconnect — `backlog → done`.
+  FIX 4.0–5.0SP2, FIXT.1.1.
+
+### Behaviors
+
+*(The re-hydrate-on-logon behavior is described by the S-018 catalogue row; see
+`feature-catalogue.md`.)*
+
+### Limitations
+
+- **L-025-1 — A `refresh_on_logon` re-hydrate on an ACTIVE session can transiently set the
+  manager's inbound or outbound counter to a value BELOW the previously-seen in-memory high-water
+  mark (store-wins DOWN, INV-RoL-4).** This is the design intent for standby topologies where the
+  store reflects a primary's authoritative counter; it is NOT a violation of the 029 INV-H1
+  lower-bound (which is a store ≤ manager store-side invariant, not a manager monotonicity
+  constraint). However, operators using `refresh_on_logon=true` in a configuration where the
+  store can lag behind the in-memory counter (e.g. a single-node session reconnecting after a
+  partial in-memory-only run) should be aware that the re-hydrate will regress the in-memory
+  counter to the store's (lower) value — potentially causing duplicate-seqnum acceptance or
+  replay. This is suppressed by `reset_seqnum_policy = bilateral_strict` (INV-RoL-3), which
+  prevents the re-hydrate entirely; under `bilateral_strict` the knob is a no-op and the
+  managed counter is monotonic. `refresh_on_logon=true` is intended for **standby-only**
+  topologies where the authoritative source is the external store (shared with the primary).
+  **Status: documented** (research D-RoL-6; data-model.md INV-RoL-3/INV-RoL-4;
+  contracts/refresh-knob.md C4). *(catalogue S-018; `session.cpp` `refresh_active_`
+  suppression; test W5a INV-RoL-3 witness.)*
 
 ## Nanosecond-resolution SendingTime (026-nanosecond-sendingtime)
 
@@ -831,3 +859,18 @@ row; see `feature-catalogue.md`.)*
   filesystem. **Status: documented** (research D-3 / plan §VI delta L-029-2; pre-existing
   008/024 I-07 policy; outbound→fatal deferred). *(contracts/seqnum-hydrate.md C3; `file_store.cpp`
   outbound-write path; `tests/session/test_persistent_seqnum_hydrate.cpp` NoHeap witness.)*
+
+- **L-029-3 — Under `reset_seqnum_policy = bilateral_strict` with a non-1 persisted outbound
+  counter, the 029 cold-open hydrate seeds the manager at the stored (non-1) outbound value
+  and the cold Logon is then emitted with `141=Y` AND `34=<N>` (N > 1), which is malformed per
+  FIX spec when a peer validates that `ResetSeqNumFlag(141)=Y` implies `MsgSeqNum(34)=1`.
+  This is a property of the `bilateral_strict` cold-open path (029's one-shot `ensure_hydrated_`
+  seeds from a non-1 store, then the strict policy adds `141=Y` unconditionally); 025 does NOT
+  close this gap — the per-reconnect re-hydrate (025) is suppressed under `bilateral_strict`
+  (INV-RoL-3), so 025 introduces no new exposure. QuickFIX-cpp/J peers that enforce the
+  `141=Y`→`34=1` invariant will reject the cold Logon; the session will disconnect+reconnect
+  until the peer or the store is reset. Operators should use `bilateral_lenient` or
+  `unilateral` policy when the persisted outbound counter may be > 1 at cold open.
+  **Status: documented, DEFERRED** (Gate A D-RoL-6; data-model.md W5b L-029-3 gap-witness;
+  025 INV-RoL-3; NOT closed by 025). *(contracts/refresh-knob.md C4; `session.cpp` strict-policy
+  cold-open path; `tests/session/test_refresh_on_logon.cpp` W5b.)*
