@@ -1,0 +1,131 @@
+# Implementation Plan: Persistent seqnum hydrate — resume both counters from the store across restart/reconnect
+
+**Branch**: `029-persistent-seqnum-hydrate` | **Date**: 2026-06-09 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `specs/029-persistent-seqnum-hydrate/spec.md`
+
+## Summary
+
+Make the persistent `MessageStore` the durable source of truth for **both**
+sequence-number directions and resume the in-memory counters from it at **cold
+open**. Two coupled mechanisms:
+
+1. **Inbound counter persistence** (closes "T034"): after each accepted in-sequence
+   inbound message is **delivered** (`fromApp`/`fromAdmin`), advance the durable
+   inbound counter via `store_->next_seqnum(direction_t::inbound, /*increment=*/true)`
+   — counter-only, no inbound frame retention (fixpp never resends inbound), matching
+   QFcpp's `incrNextTargetMsgSeqNum`. Deliver-then-persist = at-least-once (**D-2**).
+2. **Hydrate-on-open**: a **one-shot** `ensure_hydrated_()` reads both persisted
+   counters (`next_seqnum(dir, false)`) and loads them into the `SeqnumManager` via a
+   new production `hydrate(in, out)` — before the counters are first used, on cold
+   start only, for both roles and both direct/engine-managed sessions (**D-1/D-6**).
+
+**This is a store↔session seqnum-boundary slice (own Gate A) — the highest-risk area
+(008 drew 5 P1s; the outbound-only 025 drew 3 P1s).** The *code* is small (a manager
+setter, a one-shot helper + two call sites, one post-delivery persist call, and the
+I-3 comment reconciliation); the *risk* is in the durability invariants, which this
+plan pins explicitly. RefreshOnLogon (025 / S-018, the per-logon **re**-hydrate knob)
+rides on this spine and is **out of scope**.
+
+**Key design grounding (source sweep + reference engines, in [research.md](./research.md)):**
+
+- **Always-on cold hydrate, one-shot** (D-1/D-6): QFcpp `FileStore::populateCache()` hydrates from disk at construction and is read through on every access — the store *is* the source of truth, no enable-flag. fixpp mirrors this with a one-shot `ensure_hydrated_()` (guarded by `hydrated_`) at the **first** counter touch. Placed at the top of `emit_initiator_logon_()` (`:542`, before the 024 `reset_on_logon` block at `:558`) for initiators — the shared emit point that covers BOTH `open()` direct AND engine-managed first-connect via `drive_reconnect` ([[feedback_initiator_logon_wire_at_shared_emit_point]]) — and at the top of the `NotConnected` inbound-Logon case (`:1524`) for acceptors. **One-shot ⇒ reconnect does NOT re-hydrate** (re-hydrating a live session would regress the manager to the store's lower-bound value — the exact 025 Gate-A New-1 corruption; re-hydrate-on-reconnect is 025's gated job, deliberately not here).
+- **Deliver-then-persist, counter-only** (D-2/D-4): persist the inbound advance **after** the in-seq `fromApp`/`fromAdmin` delivery returns, via `next_seqnum(inbound, true)` (counter only — no frame body, fixpp does not resend inbound). The in-memory `check_inbound` advance stays **before** delivery (unchanged — it is the gate); only the *durable* write moves after delivery. Crash mid-delivery ⇒ durable not advanced ⇒ restart re-delivers (PossDup dedup), never skips.
+- **Lower-bound invariant** (D-5): the `MessageStore` interface (4 pure-virtuals: `store`/`retrieve`/`next_seqnum`/`reset`) has **no absolute counter set**, so a `+1` persist cannot mirror a `SequenceReset`-GapFill **jump** (`apply_inbound_sequence_reset` updates the manager but — verified — never persists to `store_`). We **do not** persist GapFill jumps. **INV-H1**: `persisted_next_inbound ≤ manager.next_inbound` always — the persisted counter is a monotonic lower bound, never ahead, so no inbound is ever skipped on restart; any residual gap is reconciled by the existing 013 ResendRequest on the post-restart Logon. Documented limitation **L-029-1** (bounded redundant resend after a restart-following-a-GapFill). Alternatives (a 5th pure-virtual `set_seqnum`, or a bounded catch-up loop) are rejected for KISS + cap headroom — **flagged for Gate A**.
+- **Fatal-disconnect on inbound persist failure** (D-3): `next_seqnum(inbound,true)` failure → fatal, reusing the existing store-failure disposition (`record_state_transition_(Disconnected)`); reconnect re-hydrates the last durable value + 013 resyncs. Avoids the New-2 swallowed-failure desync class. **Asymmetry note**: the existing **outbound** store write stays I-07 logged-then-proceed (008/024 behavior, out of scope) — the residual New-2 outbound-desync-on-hydrate is documented **L-029-2**, not fixed here.
+- **`SeqnumManager::hydrate(in,out)`** (D-7): the new production setter (FR-008) — mirrors `set_next_inbound` (acquire `async_mutex`, set both fields). The first production way to set the outbound counter (only `set_counters_for_test` existed).
+- **I-3 reconciliation** (D-8): the unwired aspirational comment at `session.cpp:1517` ("store(inbound) BEFORE fromAdmin/fromApp") and any `[2e §7.6]`-derived prose asserting store-before-deliver are **corrected to deliver-then-persist** so shipped code and comments agree.
+
+## Technical Context
+
+**Language/Version**: C++23 (Clang; asio awaitables, `std::expected`) — [const §II]
+**Primary Dependencies**: `Session::on_inbound_frame` in-seq delivery path (`session.cpp` Active/LogonReceived handler — `check_inbound` `:2253`, in-seq dispatch), `emit_initiator_logon_` (`:542`), `open()` (`:651`), the `NotConnected` inbound-Logon case (`:1524`), `SeqnumManager` (+`hydrate`), `MessageStore::next_seqnum` (existing, both directions). No new third-party deps, no codegen, no wire field, no new error slot.
+**Storage**: the existing `MessageStore` (008/FileStore) — **read** both counters at cold open (`next_seqnum(dir,false)`); **write** the inbound counter after each in-seq delivery (`next_seqnum(inbound,true)`). No store schema change (FileStore already persists both counters in one record; the inbound counter was simply never advanced by the session). No new pure-virtual (cap stays 4/5).
+**Testing**: GoogleTest; ASan/UBSan/TSan; coverage llvm-cov; restart-resume witnesses (both directions, both roles); deliver-then-persist crash-ordering witness; lower-bound (post-GapFill) witness; fatal-on-inbound-persist-failure witness (with a fault-injecting test store); default-no-op (memory/null store) byte-identity + full regression; one-shot-fires-exactly-once (both roles) witness; live interop cell (skip-without-counterparty) — restart a fixpp side mid-session vs a QFcpp/QFJ peer and resume. — [const §VII, §IX]
+**Target Platform**: Linux/Clang Tier-1 (sanitizer matrix); the live cell runs against QFcpp/QFJ in the parent harness.
+**Project Type**: single C++ library (`fixpp`) + tests + interop-harness extension.
+**Performance Goals**: one extra durable counter write per accepted inbound message (counter-only, no frame body) — symmetric with the existing per-send outbound write; default path with no persistent store is unchanged. No new allocation on the hot path.
+**Constraints**: `noexcept`/`expected_t` preserved; no new `std::mutex` in awaitable headers ([const §XV.9] — `hydrate` adds an awaitable method to `seqnum_manager.hpp`, which already includes `<asio/awaitable.hpp>` + `async_mutex.hpp`; no new include, so N/A — confirm via the unfiltered/`-L sync` verify step); **no persistent store ⇒ byte-identical** (no `store_` ⇒ `ensure_hydrated_` skips the read; FR-005); **INV-H1** persisted ≤ manager (lower bound); hydrate is **cold-open one-shot** (never on reconnect).
+**Scale/Scope**: +1 `SeqnumManager::hydrate` method; +1 `ensure_hydrated_` one-shot helper + `hydrated_` flag, 2 call sites (initiator emit, acceptor Logon); +1 post-delivery inbound persist call on the in-seq path; the `session.cpp:1517` I-3 comment + `[2e §7.6]` prose reconciliation. New `tests/session/test_persistent_seqnum_hydrate.cpp` + a live interop cell. No FSM state added; no new store pure-virtual; no codegen/C-ABI/wire change.
+
+## Constitution Check
+
+*GATE: must pass before Phase 0 (passed) and re-checked after Phase 1 (re-confirmed).*
+
+| Article | Gate | Status |
+|---------|------|--------|
+| **II** Language | C++23/Clang, no new deps | ✅ PASS |
+| **VI** Spec coverage | **One net-new catalogue row** `S-042` (persistent inbound seqnum continuity / hydrate-on-open) `done` (FIX 4.4); cross-link S-018 (025) + retire the deferred **L-025-1** inbound-refresh marker (now discharged by the spine). Normative refs: `[FIX-SL §4.3.12]` (synchronization after logon) + QuickFIX `FileStore` construction-time refresh + `incrNextTargetMsgSeqNum`. New limitations **L-029-1** (post-GapFill restart redundant resend) + **L-029-2** (outbound I-07 desync residual). Exact delta below (Polish). | ⚠ RESOLVED (delta specified) |
+| **VII** Testing/TDD | RED-first: (1) restart resumes outbound `34=N`; (2) restart resumes inbound `N+1`; (3) deliver-then-persist crash ordering (durable not advanced until after callback); (4) post-GapFill restart stays ≤ true + recovers (INV-H1); (5) inbound persist failure → fatal disconnect, no partial state; (6) memory/null store byte-identical + full regression; (7) one-shot fires exactly once across both roles + NOT on reconnect | ✅ planned |
+| **VII.6** Interop | live both-role cell: restart a fixpp initiator/acceptor mid-session vs a QFcpp/QFJ peer → resumes both counters, no fatal too-low/too-high, peer-ahead recovers via ResendRequest | ✅ planned |
+| **VIII.5** Allocator | hydrate reads + the per-message counter write are counter-only (no frame body, no new container); no-heap witness on the in-seq persist path + the cold-open hydrate path (non-allocating ready-awaitable test store) | ✅ planned (witnessed) |
+| **IX.1** Coverage | ≥95/85 on `ensure_hydrated_`, `SeqnumManager::hydrate`, the post-delivery inbound persist call + its fatal-failure branch | ✅ planned |
+| **IX.2** Sanitizers | ASan/UBSan/TSan on the session inbound + open changes + interop ctest | ✅ planned |
+| **X** ABI | no C-ABI/error-slot/wire change. +1 `SeqnumManager` method, +1 private flag/helper on `Session` — source rebuild only. **No new `MessageStore` pure-virtual (cap stays 4/5)** | ✅ source rebuild (additive) |
+| **XI.4** Threading | `ensure_hydrated_` + the persist run on the existing session strand (open path / inbound handler); one-shot flag is strand-confined; no new concurrency surface | ✅ PASS |
+| **XII.5** No-implicit-default | hydrate-on-open has no config flag (always-on when `store_` present, D-1); the no-store path is the explicit byte-identical floor | ✅ PASS (no new config) |
+| **XIV.2** Pluggable ≤5 pure-virtual | `MessageStore` stays at **4** pure-virtuals — `hydrate`/persist reuse the existing `next_seqnum(dir, increment)`; **no 5th added** (the rejected `set_seqnum` alternative is the reason INV-H1 lower-bound is accepted) | ✅ PASS (cap preserved) |
+| **XV.9** Banned (`std::mutex` in awaitable hdr) | `hydrate` adds an awaitable method to `seqnum_manager.hpp`; that header already includes `<asio/awaitable.hpp>` + `async_mutex.hpp` — no new include into the `session.hpp` closure | ✅ N/A (confirm at verify) |
+| **XVI.3/4** /clarify before /plan | Session 2026-06-09 (3 asked: hydrate trigger, crash persist-vs-deliver ordering, inbound persist failure) + reference sweep (QFcpp `FileStore::populateCache`/`incrNextTargetMsgSeqNum`/`setNextTargetMsgSeqNum`, QFJ) | ✅ PASS |
+| **XVII.1** Gate A before /tasks | mandatory — runs after this plan, before `/speckit-tasks` | ⏳ PENDING (Gate A next) |
+
+**Result**: PASS to proceed. The hydrate is always-on-when-persistent but one-shot/cold,
+so the no-store default is byte-identical; the inbound persist is additive and counter-only;
+no new store pure-virtual (cap preserved); the durability invariants (INV-H1 lower-bound,
+deliver-then-persist, fatal-on-inbound-failure) are pinned. Two design choices are
+**explicitly flagged for Gate A**: (i) the INV-H1 lower-bound / no-GapFill-jump-persist
+vs a 5th pure-virtual `set_seqnum`; (ii) the inbound-fatal / outbound-logged asymmetry
+(L-029-2). No unjustified violations.
+
+**Exact §VI delta (applied at Polish):**
+- `spec/feature-catalogue.md`: add **`S-042`** (`Persistent inbound seqnum continuity — durable inbound counter + bidirectional hydrate-on-open; resume both directions across restart`), `done` (FIX 4.4), cite `029-persistent-seqnum-hydrate`, evidence_pr `(pending merge)`, Tests `tests/session/test_persistent_seqnum_hydrate.cpp` + the interop cell; cross-link `S-018`.
+- `spec/behaviors-and-limitations.md`: add **L-029-1** (post-GapFill restart → bounded redundant ResendRequest; recovery-correct, at-least-once) and **L-029-2** (a swallowed I-07 **outbound** store-write failure in a prior run leaves the persisted outbound counter behind true; hydrate is only as fresh as the last successful outbound write — pre-existing 008/024 property, outbound→fatal deferred).
+- Retire the deferred **L-025-1** "inbound refresh gated on T034" marker — discharged.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/029-persistent-seqnum-hydrate/
+├── plan.md              # This file
+├── research.md          # Phase 0 — D-1..D-8 decisions + reference sweep + INV-H1 derivation
+├── data-model.md        # Phase 1 — entities, FSM placement, invariants, witness matrix
+├── quickstart.md        # Phase 1 — the RED witnesses
+├── contracts/
+│   └── seqnum-hydrate.md # Phase 1 — hydrate() + inbound-persist + INV-H1 contract
+└── checklists/
+    └── requirements.md   # spec quality checklist (done)
+```
+
+### Source Code (repository root)
+
+```text
+include/fixpp/session/
+├── seqnum_manager.hpp        # +hydrate(next_inbound, next_outbound) awaitable setter
+└── session.hpp               # +ensure_hydrated_() helper decl, +hydrated_ flag
+
+src/session/
+├── seqnum_manager.cpp        # hydrate() impl (mirrors set_next_inbound, both counters)
+└── session.cpp               # ensure_hydrated_() impl; call at emit_initiator_logon_ top
+                              #   + NotConnected Logon top; post-delivery inbound persist
+                              #   on the in-seq path; reconcile the :1517 I-3 comment
+
+tests/session/
+└── test_persistent_seqnum_hydrate.cpp   # new witnesses (both roles, both directions)
+
+# parent harness
+research/G19-fix-fpml-iso20022/phase-9-harness/   # +restart-resume live interop cell
+```
+
+**Structure Decision**: single-library layout; all changes in `session/` (manager +
+session) plus the existing store interface used as-is. No new module, no new store
+method, no layer change (`tools/check_layers.py` unaffected — session→store dependency
+already exists).
+
+## Complexity Tracking
+
+*No constitution violations requiring justification.* The two flagged design choices
+(INV-H1 lower-bound vs 5th pure-virtual; inbound-fatal/outbound-logged asymmetry) are
+**simplicity-preserving** decisions (avoid a 5th pure-virtual; avoid re-opening the
+008/024 outbound I-07 policy), documented as limitations L-029-1/L-029-2 and routed to
+Gate A — not violations.
