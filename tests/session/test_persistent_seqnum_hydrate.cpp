@@ -1587,6 +1587,33 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
         EXPECT_EQ(ni, fixpp::session::seqnum_t{1})
             << "W9b: after 141=Y reset-Logon, next_inbound must be 1 (reset won over hydrate)";
     }
+
+    // gate-b/r1 extension: assert INV-H1 (store.durable_inbound <= manager.next_inbound)
+    // UNCONDITIONALLY — the proxy gap that let the over-persist slip.
+    // Pre-fix: reset_seqnums_to_one_durable set store=1, then unconditional persist pushed
+    //   store→2 while manager stayed at 1. INV-H1 violated: store(2) > manager(1).
+    // Post-fix: persist is skipped (!peer_sent_reset guard), store stays 1 == manager(1). ✓
+    // [[feedback_witness_asserts_named_postcondition_not_proxy]]
+    // [029 INV-H1; triage root-cause #1; data-model §Persist matrix]
+    {
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr) << "W9b-ext: store must have been minted";
+        const seqnum_t manager_ni =
+            fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        EXPECT_LE(store->durable_inbound, manager_ni)
+            << "W9b-ext (INV-H1): store.durable_inbound must be <= manager.next_inbound "
+               "after received-141=Y reset. Pre-fix: store=2 > manager=1 (over-persist). "
+               "Post-fix: store=1 == manager=1. "
+               "store.durable_inbound="
+            << store->durable_inbound << " manager.next_inbound=" << manager_ni;
+        // Stronger: both must equal 1 after reset (not just LE, but exact equality
+        // since the reset set both to 1 and no advance fired).
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
+            << "W9b-ext (INV-H1): store.durable_inbound must be exactly 1 after 141=Y reset. "
+               "Pre-fix RED: durable_inbound=2 (over-persist fired). "
+               "Post-fix GREEN: durable_inbound=1 (persist correctly skipped). "
+               "[029 gate-b/r1 triage root-cause #1]";
+    }
 }
 
 // ── W11 — Hydrated_Initiator_Advertises789 ────────────────────────────────────
@@ -2021,6 +2048,258 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
         << heap_allocs
         << ". Run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so for the binding proof. "
            "[[feedback_tracking_pmr_resource_false_pass]]";
+}
+
+// ── gate-b/r1 counter-tests: INV-H1 over-persist guards ─────────────────────
+//
+// These three tests (+ the W9b extension above) witness the two over-persist
+// sub-paths fixed by gate-b/r1:
+//   #1  received-141 reset rewinds store+manager to 1, then unconditional persist
+//       pushed store 1→2 while manager=1. Fixed by: !peer_sent_reset guard.
+//   #2  789 behind-side tolerance: check_inbound failure (too-high), manager stays
+//       at X, but unconditional persist did store X→X+1. Fixed by: logon_inbound_advanced
+//       guard (false when check_inbound failed).
+//
+// TDD ordering: each test was written and verified RED on the pre-fix production
+// (no logon_inbound_advanced guard, no !peer_sent_reset guard), then GREEN post-fix.
+//
+// [029 INV-H1; triage root-cause #1 (Codex #1) + root-cause #2 (Codex #2);
+//  contracts C3.1; data-model §Persist matrix]
+
+// ── INV-H1_Initiator_PeerAck141_NoOverPersist ────────────────────────────────
+//
+// Initiator hydrated {in=37, out=42} (persistent store). Peer Logon-ack carries
+// 141=Y at seq=37 (in-seq relative to manager=37 — so check_inbound succeeds and
+// advances manager 37→38, THEN the reset arm rewinds manager+store to 1).
+//
+// After the reset:
+//   manager.next_inbound == 1
+//   store.durable_inbound MUST == 1 (reset set it to 1; persist must be skipped).
+//
+// Pre-fix (RED): reset sets store=1, unconditional persist fires → store=2, manager=1.
+//   EXPECT_EQ(store->durable_inbound, 1u) → FAIL (durable_inbound==2). ✓ RED.
+// Post-fix (GREEN): persist is guarded by !peer_ack_sent_reset_flag → skipped.
+//   store stays 1 == manager. ✓ GREEN.
+//
+// NOTE: seq must be 37 (the hydrated in-seq value). Using seq=1 would make
+//   check_inbound(1) against manager=37 → too-low → fatal → Disconnected (wrong path).
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]
+// [029 INV-H1; triage root-cause #1 initiator arm; contracts C3.1]
+TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/37, /*out=*/42);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/false);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "INV_H1_Initiator_PeerAck141 precondition: initiator must be LogonSent after open()";
+
+    // After open(), the initiator has been hydrated: next_inbound=37.
+    // Verify the store was set up correctly (2 reads from ensure_hydrated_).
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+
+    // Feed peer Logon-ack with 141=Y at seq=37 (in-seq → check_inbound succeeds,
+    // then reset arm fires → manager+store rewound to 1).
+    // bilateral_lenient does NOT require we sent 141=Y first, so this is accepted.
+    fix->feed(make_logon_reset("FIX.4.4", 37, "SRV", "CLI"));
+
+    // Session must reach Active (141=Y bilateral_lenient: peer initiated reset, accepted).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "INV_H1_Initiator_PeerAck141: session must reach Active after peer-ack 141=Y";
+
+    // INV-H1 assertion (MANDATORY — not inside an if-Active guard):
+    // Post-reset: both store and manager must equal 1.
+    // Pre-fix RED: store=2 (unconditional persist fired after reset), manager=1 → INV-H1 violated.
+    // Post-fix GREEN: persist skipped (!peer_ack_sent_reset_flag), store=1 == manager=1. ✓
+    const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
+        << "INV_H1_Initiator_PeerAck141 (INV-H1): store.durable_inbound must be 1 after "
+           "141=Y reset. Pre-fix RED: durable_inbound=2 (unconditional persist over-persisted "
+           "after reset_seqnums_to_one). Post-fix GREEN: persist skipped. "
+           "durable_inbound="
+        << store->durable_inbound;
+    EXPECT_LE(store->durable_inbound, manager_ni)
+        << "INV_H1_Initiator_PeerAck141 (INV-H1): store.durable_inbound must be <= "
+           "manager.next_inbound. Pre-fix: store(2) > manager(1). "
+           "durable="
+        << store->durable_inbound << " manager=" << manager_ni;
+}
+
+// ── INV_H1_Acceptor_789BehindSide_NoOverPersist ──────────────────────────────
+//
+// Acceptor with persistent store {in=2, out=1} + enable_next_expected_msg_seq_num=true.
+// Peer Logon at seq=5 with NO 789 field (bare too-high Logon — natural behind-side trigger).
+//
+// check_inbound(5) against manager=2 → session_seqnum_too_high → chk failure.
+// Behind-side tolerance: manager stays at 2. (No 789 field → honor block is skipped.)
+//
+// Post-handler state:
+//   manager.next_inbound == 2 (not advanced)
+//   store.durable_inbound MUST == 2 (no advance → no persist).
+//
+// Pre-fix (RED): logon_inbound_advanced not tracked → unconditional persist fires →
+//   durable_inbound goes 1→3 (next_inbound_ seeded at 2, persist writes 2→3).
+//   INV-H1 violated: store(3) > manager(2).
+//   EXPECT_LT(store->durable_inbound, manager_ni) → FAIL (3 > 2). ✓ RED.
+// Post-fix (GREEN): logon_inbound_advanced=false → persist skipped. durable_inbound=1<manager=2. ✓
+//
+// NOTE: NO 789 field in the peer Logon is required. A 789 field could:
+//   - trigger the honor block → early return (X>N Logout path) before the persist site.
+//   False-GREEN if the test reaches the persist ONLY via the honor-early-return
+//   path rather than the intended behind-side-tolerance path.
+//   [[feedback_witness_asserts_named_postcondition_not_proxy]], triage Codex #2 trap.
+// [029 INV-H1; triage root-cause #2 acceptor arm; contracts C3.1]
+TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
+    // Store seeded {in=2, out=1}: manager starts at in=2 after hydrate.
+    // We need the Logon seq to be AHEAD of manager (5 > 2 → too-high).
+    // Build acceptor manually so we can feed a too-high Logon directly.
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/2, /*out=*/1);
+
+    auto manual_fix = std::make_unique<Fixture>();
+    manual_fix->cfg.role = fixpp::session::session_role::acceptor;
+    manual_fix->cfg.sender_comp_id = "SRV";
+    manual_fix->cfg.target_comp_id = "CLI";
+    manual_fix->cfg.begin_string = "FIX.4.4";
+    manual_fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    manual_fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    manual_fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    manual_fix->cfg.executor_override = manual_fix->ioc.get_executor();
+    manual_fix->cfg.store_factory = factory;
+    manual_fix->cfg.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    manual_fix->cfg.enable_next_expected_msg_seq_num = true;  // knob on for behind-side tolerance
+    manual_fix->cfg.reset_on_logon = false;
+    manual_fix->cfg.transport_send = [&f = *manual_fix](std::span<const std::byte> data) {
+        f.capture(data);
+    };
+    manual_fix->session =
+        std::make_unique<fixpp::session::Session>(manual_fix->eng, manual_fix->cfg);
+
+    auto open_fut = asio::co_spawn(manual_fix->ioc, manual_fix->session->open(), asio::use_future);
+    manual_fix->ioc.run_for(1s);
+    manual_fix->ioc.restart();
+    (void)open_fut.get();
+
+    ASSERT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::NotConnected)
+        << "INV_H1_Acceptor_789BehindSide precondition: acceptor must be NotConnected after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+
+    // Feed peer Logon at seq=5 (too-high vs manager=2) with NO 789 field.
+    // The behind-side tolerance path: check_inbound(5) fails (too-high), knob is on →
+    // tolerate, manager stays at 2. Fall through toward Active.
+    // NO 789 field: the honor block at line ~1980 is skipped (peer_789_present=false).
+    // Pre-fix: unconditional persist fires → durable_inbound 1→3 (next_inbound_ seeded at 2,
+    //   write goes 2→3), manager=2. INV-H1 violated.
+    // Post-fix: logon_inbound_advanced=false → persist skipped. durable_inbound stays 1. ✓
+    manual_fix->feed(make_logon("FIX.4.4", 5, "CLI", "SRV"));
+
+    // Session must reach Active (behind-side tolerance → Active, waiting for peer resend).
+    EXPECT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::Active)
+        << "INV_H1_Acceptor_789BehindSide: session must reach Active via behind-side tolerance";
+
+    // INV-H1 assertion (MANDATORY — unconditional):
+    // manager.next_inbound must still be 2 (check_inbound failed, no advance).
+    // store.durable_inbound must be 1 (FaultStore.durable_inbound tracks the last
+    //   WRITTEN value, initialized to 1 at construction; no persist write happened →
+    //   it stays at 1; the seeded next_inbound_=2 is the READ value used by
+    //   ensure_hydrated_, not reflected in durable_inbound until a write fires).
+    // Pre-fix RED: persist fires → next_inbound_=3, durable_inbound=3 > manager=2.
+    //   INV-H1 violated. EXPECT_LT(durable, manager) FAILS (3 > 2). ✓ RED.
+    // Post-fix GREEN: persist skipped → durable_inbound=1 < manager=2. INV-H1 holds. ✓
+    const seqnum_t manager_ni =
+        manual_fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
+        << "INV_H1_Acceptor_789BehindSide: manager.next_inbound must stay 2 "
+           "(check_inbound failed, behind-side tolerance did not advance). "
+           "Got " << manager_ni;
+    // The critical INV-H1 check: store < manager (strict — no write happened at all).
+    // Pre-fix: durable_inbound=3 > manager=2 → LT assertion FAILS. ✓ RED.
+    // Post-fix: durable_inbound=1 < manager=2 → LT assertion PASSES. ✓ GREEN.
+    EXPECT_LT(store->durable_inbound, manager_ni)
+        << "INV_H1_Acceptor_789BehindSide (INV-H1 pre-fix RED): "
+           "store < manager on behind-side path (no advance → no persist). "
+           "Pre-fix: durable_inbound=3 > manager=2 (persist over-fired). "
+           "Post-fix: durable_inbound=1 < manager=2. "
+           "durable=" << store->durable_inbound << " manager=" << manager_ni;
+    // Secondary: no write at all → durable stays at FaultStore initial value (1).
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
+        << "INV_H1_Acceptor_789BehindSide (INV-H1): no persist write → "
+           "durable_inbound stays at initial value 1. "
+           "Pre-fix RED: durable_inbound=3. Post-fix GREEN: durable_inbound=1. "
+           "durable="
+        << store->durable_inbound;
+}
+
+// ── INV_H1_Initiator_789BehindSide_NoOverPersist ─────────────────────────────
+//
+// Initiator with persistent store {in=2, out=1} + enable_next_expected_msg_seq_num=true.
+// Peer Logon-ack at seq=5 with NO 789 field (bare too-high Logon-ack).
+//
+// check_inbound(5) against manager=2 → too-high → behind-side tolerance →
+// manager stays at 2. NO 789 field → initiator honor block (~line 3232) is skipped.
+//
+// Pre-fix (RED): logon_inbound_advanced_init not tracked → unconditional persist fires →
+//   durable_inbound goes 1→3 (next_inbound_ seeded at 2, persist writes 2→3).
+//   INV-H1 violated: store(3) > manager(2).
+//   EXPECT_LT(store->durable_inbound, manager_ni) → FAIL (3 > 2). ✓ RED.
+// Post-fix (GREEN): logon_inbound_advanced_init=false → persist skipped. durable_inbound=1<2. ✓
+//
+// [029 INV-H1; triage root-cause #2 initiator arm; contracts C3.1]
+TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
+    // Store seeded {in=2, out=1}: manager starts at in=2 after hydrate.
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/2, /*out=*/1);
+    // enable_789=true: behind-side tolerance requires the knob.
+    auto fix = make_initiator(factory, /*enable_789=*/true, /*reset_on_logon=*/false);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "INV_H1_Initiator_789BehindSide precondition: initiator must be LogonSent after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+
+    // After open() + hydrate, the initiator has next_inbound=2 (seeded).
+    // The initiator outbound was seeded at 1, Logon emitted at seq=1, next_outbound=2.
+
+    // Feed peer Logon-ack at seq=5 (too-high vs manager=2) with NO 789 field.
+    // (The Logon-ack comes from "SRV" → "CLI", sender=SRV, target=CLI).
+    // Behind-side tolerance: check_inbound(5) fails (too-high), knob is on → tolerate.
+    // NO 789 field: initiator honor block is skipped (peer's next_expected_present=false).
+    // Pre-fix: unconditional persist fires → durable_inbound 1→3 (next_inbound_ seeded at 2,
+    //   write goes 2→3), manager=2. INV-H1 violated.
+    // Post-fix: logon_inbound_advanced_init=false → persist skipped. durable_inbound stays 1. ✓
+    fix->feed(make_logon("FIX.4.4", 5, "SRV", "CLI"));
+
+    // Session must reach Active (behind-side tolerance → Active).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "INV_H1_Initiator_789BehindSide: session must reach Active via behind-side tolerance";
+
+    // INV-H1 assertion (MANDATORY — unconditional):
+    // manager.next_inbound must stay 2 (behind-side: check_inbound failed, no advance).
+    // store.durable_inbound must be 1 (no write happened; FaultStore.durable_inbound
+    //   initialized to 1 at construction; seeded next_inbound_=2 is the READ value
+    //   returned by ensure_hydrated_, not a write into durable_inbound).
+    // Pre-fix RED: persist fires → durable_inbound=3 > manager=2. INV-H1 violated.
+    //   EXPECT_LT(durable, manager) FAILS. ✓ RED.
+    // Post-fix GREEN: durable_inbound=1 < manager=2. INV-H1 holds. ✓
+    const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
+        << "INV_H1_Initiator_789BehindSide: manager.next_inbound must stay 2 "
+           "(check_inbound failed, behind-side tolerance). Got " << manager_ni;
+    // Critical INV-H1 check: store < manager. Pre-fix FAILS (3 > 2). Post-fix PASSES (1 < 2).
+    EXPECT_LT(store->durable_inbound, manager_ni)
+        << "INV_H1_Initiator_789BehindSide (INV-H1 pre-fix RED): "
+           "store < manager on behind-side path (no advance → no persist). "
+           "Pre-fix: durable_inbound=3 > manager=2 (persist over-fired). "
+           "Post-fix: durable_inbound=1 < manager=2. "
+           "durable=" << store->durable_inbound << " manager=" << manager_ni;
+    // Secondary: no write → durable stays at initial value 1.
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
+        << "INV_H1_Initiator_789BehindSide (INV-H1): no persist write → "
+           "durable_inbound stays at initial value 1. "
+           "Pre-fix RED: durable_inbound=3. Post-fix GREEN: durable_inbound=1. "
+           "durable="
+        << store->durable_inbound;
 }
 
 }  // namespace

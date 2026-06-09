@@ -1689,6 +1689,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             bool peer_sent_reset = false;
             std::string_view peer_789_raw;
             bool peer_789_present = false;
+            // 029 gate-b/r1: hoisted to case scope so the persist guard at the
+            // Logon persist site (below) can read it. Set to chk.has_value() after
+            // check_inbound; false on the behind-side tolerated path (chk failure)
+            // and stays false on any early-return before check_inbound executes.
+            // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
+            bool logon_inbound_advanced = false;
             {
                 auto hdr = scan_frame_header(frame);
                 peer_789_raw = hdr.next_expected_msg_seq_num;
@@ -1763,11 +1769,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         chk.error() == fixpp::core::error::session_seqnum_too_high) {
                         // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
                         // Fall through to the existing acceptor reply-build path below.
+                        // logon_inbound_advanced stays false (check_inbound did not advance).
                     } else {
                         // Too-low OR knob off: session-fatal (I-2/I-4/[FIX-SL §4.1]).
                         record_state_transition_(fsm_state::Disconnected);
                         co_return fixpp::core::expected_t<void>{};
                     }
+                } else {
+                    // check_inbound succeeded: next_inbound_ advanced by 1.
+                    // Record this so the persist guard below can fire correctly.
+                    // [029 gate-b/r1; INV-H1 fix; triage root-cause #1/#2]
+                    logon_inbound_advanced = true;
                 }
 
                 // T027 FR-017 — ResetSeqNumFlag(141) policy (Clarifications Q1=A).
@@ -1995,11 +2007,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_await close(fixpp::session::close_mode::terminal);
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
-            // 029 T010 — PERSIST: acceptor Logon in-seq → durable inbound advance.
-            // check_inbound advanced next_inbound (Logon seq=N → N+1). Persist after
-            // reply Logon emitted and Active reached (C3.1). Store_ is still live.
-            // [029 tasks T010; contracts C3.1; data-model §Persist matrix site 1]
-            {
+            // 029 T010 / gate-b/r1 — PERSIST: acceptor Logon in-seq → durable advance.
+            // Guard: only when check_inbound net-advanced the manager AND no reset rewound
+            // the counter (INV-H1 fix, triage root-cause #1/#2):
+            //   logon_inbound_advanced false → behind-side tolerance path (chk failure,
+            //     manager stayed at X) → skip; store stays X, INV-H1 holds.
+            //   peer_sent_reset true → reset_seqnums_to_one_durable already set
+            //     store=manager=1; an additional +1 would put store ahead → skip.
+            //   reset_on_logon true → knob-driven reset ran before check_inbound, then
+            //     check_inbound advanced 1→2, reset_seqnums_to_one ran BEFORE check_inbound
+            //     so the advance was real — BUT reset_on_logon is excluded here as an
+            //     INV-H1-safe under-persist: store lags by ≤1, re-delivers at-least-once.
+            //   All three false → normal in-seq Logon: persist fires → store==manager. ✓
+            // [029 INV-H1; triage root-cause #1/#2; contracts C3.1; data-model §Persist matrix]
+            if (logon_inbound_advanced && !peer_sent_reset && !cfg_.reset_on_logon) {
                 auto p_r = co_await persist_inbound_advance_();
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
@@ -3073,6 +3094,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
+            // 029 gate-b/r1: hoisted to LogonSent case scope so the persist guard
+            // below can read them. Symmetric carried-bool approach (same as acceptor).
+            // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
+            bool logon_inbound_advanced_init = false;
+            bool peer_ack_sent_reset_flag = false;
+
             auto chk = co_await seqnum_mgr_.check_inbound(seq);
             if (!chk) {
                 // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
@@ -3086,25 +3113,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (cfg_.enable_next_expected_msg_seq_num &&
                     chk.error() == fixpp::core::error::session_seqnum_too_high) {
                     // Behind-side: tolerate. Fall through to Active transition below.
+                    // logon_inbound_advanced_init stays false (manager not advanced).
                 } else {
                     // Too-low or too-high with knob off → fatal (I-2/I-4).
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
+            } else {
+                // check_inbound succeeded: next_inbound_ advanced by 1.
+                // [029 gate-b/r1; INV-H1 fix; triage root-cause #1/#2]
+                logon_inbound_advanced_init = true;
             }
 
             // RC#C (gate-b/r1): bilateral_strict initiator path — symmetric to acceptor.
             // We sent 141=Y in our outbound Logon (see open() above). If the peer's
             // Logon-ack omits 141=Y, reject with session_seqnum_reset_mismatch(116).
             // [spec.md FR-017; triage RC#C(b); [[feedback_half_restructure_symmetric_api]]]
+            // peer_ack_sent_reset_flag: hoisted to case scope for the persist guard.
+            // [029 gate-b/r1; INV-H1 fix; triage root-cause #1]
+            peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
             {
-                const bool peer_ack_sent_reset = (hdr.reset_seqnum_flag == "Y");
-                if (!peer_ack_sent_reset &&
+                if (!peer_ack_sent_reset_flag &&
                     cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
                 }
-                if (peer_ack_sent_reset) {
+                if (peer_ack_sent_reset_flag) {
                     // RC#C-1 (gate-b/r2): reset live counters + store before event.
                     // FR-017:150: mutual reset → both sides advance to 1.
                     // FR-018: event fires AFTER post-reset state is consistent.
@@ -3245,11 +3279,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
 
-            // 029 T010 — PERSIST: initiator Logon-ack (LogonSent, in-seq).
-            // check_inbound advanced next_inbound (peer Logon-ack seq); Active reached.
-            // Persist after Active transition, store_ still live.
-            // [029 tasks T010; contracts C3.1; data-model §Persist matrix LogonSent site]
-            {
+            // 029 T010 / gate-b/r1 — PERSIST: initiator Logon-ack (LogonSent, in-seq).
+            // Guard: only when check_inbound net-advanced the manager AND no reset
+            // rewound the counter (INV-H1 fix, triage root-cause #1/#2):
+            //   logon_inbound_advanced_init false → behind-side tolerance (chk failure,
+            //     manager stayed at X) → skip; store stays X, INV-H1 holds.
+            //   peer_ack_sent_reset_flag true → reset already set store=manager=1;
+            //     an additional +1 would put store ahead → skip.
+            //   Both false → normal in-seq Logon-ack: persist fires → store==manager. ✓
+            // [029 INV-H1; triage root-cause #1/#2; contracts C3.1]
+            if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
                 auto p_r = co_await persist_inbound_advance_();
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
