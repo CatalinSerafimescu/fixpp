@@ -2043,7 +2043,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // create a never-recover hole — see L-027-2. No behavioural change.
                 // [data-model I-NEX-10, research D-11]
                 const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
-                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend()) {
+                // 028 T008 (S2): guard on validate_sequence_numbers.
+                // When the knob is off, skip AwaitingResend/ResendRequest entirely
+                // and fall through to S4 (deliver-without-advance).
+                // [data-model S2, contract C2.2, FR-006, research D-3]
+                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend() &&
+                    cfg_.validate_sequence_numbers) {
                     // Too-high: enter AwaitingResend and emit ResendRequest(2).
                     // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
                     // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
@@ -2279,8 +2284,43 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Row 7 (redeliver=false) or post-redeliver: stay Active, no advance.
                         co_return fixpp::core::expected_t<void>{};
                     }
+                    // 028 T009 (S4): deliver-without-advance when knob is off.
+                    // Catches BOTH too-low AND too-high frames that fell through S2
+                    // (complexity tracking hazard 1 — both arrive here when validation off).
+                    // Counter is NOT advanced (check_inbound already returned false; no
+                    // explicit increment here). Session stays Active.
+                    // Discriminate via is_admin_msgtype (as the in-sequence path does at S4):
+                    //   admin → fromAdmin, app → fromApp. Reuse parse_and_dispatch_.
+                    // [data-model S4, contract C2.2/C2.3, FR-006, research D-3]
+                    if (!cfg_.validate_sequence_numbers) {
+                        if (engine_.application != nullptr) {
+                            if (detail::is_admin_msgtype(hdr.msg_type)) {
+                                auto cb_r = parse_and_dispatch_(
+                                    frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                        return engine_.application->fromAdmin(mv, sid);
+                                    });
+                                if (!cb_r &&
+                                    cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                    co_await close(close_mode::terminal);
+                                    co_return std::unexpected(cb_r.error());
+                                }
+                            } else {
+                                auto cb_r = parse_and_dispatch_(
+                                    frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                        return engine_.application->fromApp(mv, sid);
+                                    });
+                                if (!cb_r &&
+                                    cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                    co_await close(close_mode::terminal);
+                                    co_return std::unexpected(cb_r.error());
+                                }
+                            }
+                        }
+                        // Stay Active, counter unchanged (no advance). C2.3.
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // Arm B: too-low non-Heartbeat without 43=Y — fatal (row 5).
-                    // UNCHANGED, byte-identical to pre-feature (INV-2).
+                    // Default-true guard above: byte-identical to pre-feature (INV-2).
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }

@@ -97,6 +97,32 @@ public:
     void onLogon(const fixpp::session::SessionId& /*id*/) override { ++on_logon_count; }
 };
 
+// ── Frame-scanning helper ────────────────────────────────────────────────────
+
+// extract_tag: find the value of tag N in a raw FIX frame.
+// Returns "" if absent. (Mirrors test_next_expected_msgseqnum.cpp:205.)
+static std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
+    const auto* data = reinterpret_cast<const char*>(frame.data());
+    std::string sv(data, frame.size());
+    const std::string needle = std::to_string(tag) + "=";
+    auto pos = sv.find(needle);
+    if (pos == std::string::npos) return "";
+    pos += needle.size();
+    auto end = sv.find('\x01', pos);
+    if (end == std::string::npos) return sv.substr(pos);
+    return sv.substr(pos, end - pos);
+}
+
+// count_frames_with_msgtype: returns the number of captured frames whose 35= equals mt.
+static int count_frames_with_msgtype(const std::vector<std::vector<std::byte>>& frames,
+                                     std::string_view mt) {
+    int n = 0;
+    for (const auto& f : frames) {
+        if (extract_tag(f, 35) == mt) ++n;
+    }
+    return n;
+}
+
 // ── Frame-building helpers ────────────────────────────────────────────────────
 
 static std::string field(int tag, std::string_view val) {
@@ -546,6 +572,342 @@ TEST(ValidationCompatToggles, CompID_KnobOff_LogonTimeMismatchStillRefused) {
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
         << "I-VCT-6/SC-007/FR-012: Logon-time CompID mismatch must refuse even with "
            "check_comp_id=false (steady-state-only scope)";
+}
+
+// ── Fixture builder with validate_sequence_numbers=false ─────────────────────
+//
+// Builds an acceptor session with the seqnum-validation knob OFF so the tests
+// below can be written without repeating the full construction boilerplate.
+// After construction the session is Active and next_inbound == 2 (the peer's
+// Logon at seq=1 was accepted and advanced the counter).
+
+static std::unique_ptr<Fixture> make_acceptor_seqval_off(
+    std::shared_ptr<fixpp::session::Application> app = nullptr) {
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.validate_sequence_numbers = false;  // knob off
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    if (app) {
+        fix->eng.application = std::move(app);
+    }
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "make_acceptor_seqval_off: session must be Active after Logon";
+
+    return fix;
+}
+
+// ── T006 (US2) — Ordinary-seqnum witnesses ───────────────────────────────────
+//
+// RED witnesses written before T008/T009 (session.cpp S2/S4 edits).
+// Anchors: spec.md FR-006, SC-002/SC-006/SC-007; data-model.md I-VCT-3/4/5/6/10;
+//          contracts C2.2/C2.3/C2.4/C2.5; tasks.md T006.
+//
+// After make_acceptor_seqval_off: session is Active, next_inbound == 2.
+//   too-high example: feed seq=5  (expected=2, forward gap)
+//   too-low  example: feed seq=1  (expected=2, replay)
+//   exact    example: feed seq=2  (expected=2, in-order)
+
+// T006 witness 1 — SC-002, C2.2, I-VCT-3
+// Forward gap with validate_sequence_numbers=false ⇒ frame delivered (fromApp),
+// ZERO ResendRequest(35=2) on wire, session NOT in AwaitingResend.
+// RED before T008: current S2 guard always emits ResendRequest and returns.
+TEST(ValidationCompatToggles, Seq_KnobOff_TooHigh_NoResendRequest) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session Active, next_inbound=2";
+
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+
+    // Feed an app frame at seq=5 (expected=2 → too-high gap).
+    fix->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));
+
+    // Post-conditions (SC-002, C2.2, I-VCT-3):
+    //   1. Session stays Active.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "SC-002/C2.2/I-VCT-3: too-high with knob off must keep session Active";
+    //   2. Zero ResendRequest frames on wire.
+    EXPECT_EQ(count_frames_with_msgtype(fix->capture.frames, "2"), 0)
+        << "SC-002/C2.2/I-VCT-3: ZERO ResendRequest(35=2) must be emitted with knob off";
+    //   3. Frame delivered to fromApp (it is an app msgtype 35=D).
+    EXPECT_GT(app->from_app_count, from_app_before)
+        << "SC-002/C2.2: too-high app frame must be delivered to fromApp with knob off";
+}
+
+// T006 witness 2 — SC-002, C2.2
+// Too-low (replay) with validate_sequence_numbers=false ⇒ delivered (fromApp),
+// session stays Active (no fatal disconnect).
+// RED before T009: current S4 Arm B disconnects on too-low non-PossDup non-HB.
+TEST(ValidationCompatToggles, Seq_KnobOff_TooLow_NoDisconnect_Delivered) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session Active, next_inbound=2";
+
+    const int from_app_before = app->from_app_count;
+
+    // Feed an app frame at seq=1 (expected=2 → too-low replay).
+    fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));
+
+    // Post-conditions (SC-002, C2.2):
+    //   1. Session stays Active (not Disconnected).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "SC-002/C2.2: too-low with knob off must NOT disconnect";
+    //   2. Frame delivered to fromApp.
+    EXPECT_GT(app->from_app_count, from_app_before)
+        << "SC-002/C2.2: too-low app frame must be delivered to fromApp with knob off";
+}
+
+// T006 witness 3 — SC-002 paired, C2.1
+// Default (validate_sequence_numbers=true): too-high → ResendRequest + AwaitingResend;
+// too-low → disconnect. Verifies existing behaviour is unchanged at default.
+// Already GREEN: this is the current code path.
+TEST(ValidationCompatToggles, Seq_Default_OutOfOrder_RecoveryAndDisconnect) {
+    // Test part A: too-high at default → ResendRequest emitted.
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        // cfg.validate_sequence_numbers is default true.
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        fix->clear_capture();
+        // Feed too-high (seq=5, expected=2).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));
+
+        EXPECT_GE(count_frames_with_msgtype(fix->capture.frames, "2"), 1)
+            << "C2.1/SC-002 default: too-high must emit at least one ResendRequest(35=2)";
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "C2.1: session stays Active (enters AwaitingResend, not Disconnected)";
+    }
+
+    // Test part B: too-low at default → Disconnected.
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        // Feed too-low (seq=1, expected=2).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "C2.1/SC-002 default: too-low must disconnect (fatal)";
+    }
+}
+
+// T006 witness 4 — SC-006, I-VCT-4, C2.3
+// Out-of-order frame does NOT advance the counter; a following exact-expected
+// frame DOES advance it.
+// Asserts counter value directly, not just session state.
+// RED before T008+T009: the too-high arm currently returns before S4 can deliver;
+// counter may or may not move after disconnect.
+TEST(ValidationCompatToggles, Seq_KnobOff_ExactMatchOnlyAdvance) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    // Pre-condition: counter is at 2 after the Logon exchange.
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    // Feed an out-of-order frame (seq=5, too-high gap). Counter must NOT advance.
+    fix->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "SC-006/I-VCT-4/C2.3: counter must NOT advance on out-of-order (too-high) frame";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "SC-006: session must stay Active after too-high with knob off";
+
+    // Feed an exact-match frame (seq=2). Counter MUST advance to 3.
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{3})
+        << "SC-006/I-VCT-4/C2.3: counter MUST advance to 3 on exact-match frame (seq=2)";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "SC-006: session must stay Active after exact-match frame";
+}
+
+// T006 witness 5 — C2.2, S4
+// Out-of-order admin msgtype → fromAdmin; app msgtype → fromApp.
+// Both must be dispatched; neither must disconnect.
+// RED before T009: current S4 disconnects before dispatch.
+TEST(ValidationCompatToggles, Seq_KnobOff_AdminVsAppFanOut) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    // Snapshot counters.
+    const int from_admin_before = app->from_admin_count;
+    const int from_app_before = app->from_app_count;
+
+    // Feed a too-low admin frame: Heartbeat(35=0) at seq=1.
+    // NOTE: the C2.2 carve-out says too-low Heartbeat(35=0) is SILENTLY DROPPED
+    // (pre-existing too-low Heartbeat silent-drop at line 2234).
+    // So we use a different admin type. 35=3 (Reject) is admin.
+    // Use seq=1 (too-low) for the admin frame.
+    fix->feed(make_fix_frame("FIX.4.4", "3", 1, "CLI", "SRV"));
+    EXPECT_GT(app->from_admin_count, from_admin_before)
+        << "C2.2/S4: too-low admin (35=3) must dispatch to fromAdmin with knob off";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "C2.2: session must stay Active after too-low admin with knob off";
+
+    // Feed a too-high app frame: OrderSingle(35=D) at seq=5.
+    const int from_app_before2 = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));
+    EXPECT_GT(app->from_app_count, from_app_before2)
+        << "C2.2/S4: too-high app (35=D) must dispatch to fromApp with knob off";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "C2.2: session must stay Active after too-high app with knob off";
+}
+
+// T006 witness 6 — I-VCT-5, C2.4, FR-006
+// PossDup(43=Y)-flagged frame still flows through the 021 Stage-1/Stage-2
+// disposition path even with validate_sequence_numbers=false.
+// With redeliver_poss_dup=false (default): a too-low 43=Y app frame is silently
+// dropped (row 7 stay Active), NOT delivered to fromApp (that is the Stage-2 row-7
+// disposition). For an in-sequence 43=Y app frame: delivered (redeliver check
+// happens after check_inbound, but row-7 applies only on check_inbound failure).
+//
+// The key invariant: with knob off, PossDup frames still go through the 021 path
+// and are NOT rerouted through the S4 deliver-without-advance path.
+// We verify that a too-low 43=Y admin frame is silently dropped (row 6 admin-ignore)
+// just like with the knob on, proving Stage-2 is still entered.
+// RED before T008+T009: currently the Stage-2 check runs on check_inbound failure;
+// after T009 we must preserve this (S4 new arm must check poss_dup_flag first,
+// but actually per the code structure: Stage-2 runs at line 2252 (poss_dup_flag=="Y")
+// BEFORE Arm B at line 2282 — so PossDup handling is already upstream of the S4 site).
+// Therefore this test should already be GREEN after T009 only IF the knob-off arm is
+// placed AFTER the Stage-2 PossDup block (i.e. as a guard inside Arm B only).
+//
+// The witness: too-low PossDup(43=Y) admin frame → session Active (row 6 drop),
+// fromAdmin NOT fired (silently dropped per 021 row 6).
+TEST(ValidationCompatToggles, Seq_KnobOff_PossDupRetained) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const int from_admin_before = app->from_admin_count;
+
+    // Build a too-low admin frame with PossDupFlag(43)=Y and OrigSendingTime(122).
+    // 35=3 (Reject) is admin, seq=1 (too-low, expected=2).
+    const std::string extra = field(43, "Y") + field(122, "20240101-00:00:00.000");
+    fix->feed(make_fix_frame("FIX.4.4", "3", 1, "CLI", "SRV", extra));
+
+    // Post-conditions (I-VCT-5, C2.4):
+    //   1. Session stays Active (not disconnected).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "I-VCT-5/C2.4: too-low PossDup admin frame must keep session Active";
+    //   2. fromAdmin NOT fired (021 row 6: admin PossDup is silently dropped, even with knob off).
+    EXPECT_EQ(app->from_admin_count, from_admin_before)
+        << "I-VCT-5/C2.4: admin PossDup too-low must be silently dropped (row 6), "
+           "not delivered via S4 with knob off";
+}
+
+// T006 witness 7 — I-VCT-10, C2.5
+// Unparseable MsgSeqNum (seq==0) is still fatal even with validate_sequence_numbers=false.
+// The seq==0 check at line 2026 runs BEFORE the S2 too-high guard; the knob does NOT
+// apply to it.
+// Already GREEN: the seq==0 check is strictly before S2 and is not gated on any knob.
+// We confirm it as a carve-out assertion — it MUST remain green after T008/T009.
+TEST(ValidationCompatToggles, Seq_KnobOff_SeqZeroStillFatal) {
+    auto fix = make_acceptor_seqval_off();
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    // Build a frame with 34=0 (MsgSeqNum=0 → parse_seqnum returns 0 → fatal).
+    // We construct a frame directly with seq=0.
+    fix->feed(make_fix_frame("FIX.4.4", "D", 0, "CLI", "SRV"));
+
+    // Post-condition (I-VCT-10, C2.5):
+    // seq==0 is session-fatal regardless of validate_sequence_numbers.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "I-VCT-10/C2.5: seq==0 must STILL be fatal even with validate_sequence_numbers=false";
+}
+
+// T006 witness 8 — N3 carve-out, C2.2
+// Too-low Heartbeat(35=0) is silently dropped (not delivered) even with
+// validate_sequence_numbers=false. The pre-existing silent-drop at line 2237-2246
+// (hdr.msg_type == "0" check inside the check_inbound failure branch) runs before
+// Arm B, so even when we add knob-off deliver-to-app, we must check that the
+// Heartbeat silent-drop is PRESERVED.
+// Already GREEN for the Heartbeat path: the silent-drop is upstream of S4 Arm B.
+// This test CONFIRMS the carve-out is retained after T009.
+TEST(ValidationCompatToggles, Seq_KnobOff_TooLowHeartbeatStillDropped) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const int from_admin_before = app->from_admin_count;
+
+    // Feed a too-low Heartbeat: 35=0, seq=1 (expected=2).
+    fix->feed(make_fix_frame("FIX.4.4", "0", 1, "CLI", "SRV"));
+
+    // Post-conditions (N3 carve-out, C2.2):
+    //   1. Session stays Active (silently dropped, not fatal, not delivered).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "N3/C2.2: too-low Heartbeat must be silently dropped (Active, not Disconnected)";
+    //   2. fromAdmin NOT fired (silently dropped).
+    EXPECT_EQ(app->from_admin_count, from_admin_before)
+        << "N3/C2.2: too-low Heartbeat must NOT be delivered to fromAdmin with knob off";
+}
+
+// T006 witness 9 — I-VCT-6, SC-007, FR-012
+// Logon-time too-high still takes the strict path (disconnects).
+// validate_sequence_numbers relaxes only the Active/steady-state path.
+// The Logon/establishment path (NotConnected handler) is entirely untouched.
+// Already GREEN: the NotConnected handler is not changed.
+// Confirm as a carve-out assertion — must remain green after T008/T009.
+TEST(ValidationCompatToggles, Seq_KnobOff_LogonTimeTooHighStillRefused) {
+    // Build an acceptor from scratch with validate_sequence_numbers=false.
+    // Do NOT use make_acceptor_seqval_off (that already feeds a Logon).
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.validate_sequence_numbers = false;  // knob off
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
+        << "Precondition: acceptor starts NotConnected";
+
+    // Feed a Logon with seq=5 (too-high; first expected is 1).
+    fix->feed(make_logon("FIX.4.4", 5, "CLI", "SRV"));
+
+    // Post-condition (I-VCT-6, SC-007, FR-012):
+    // Logon-time too-high still disconnects (knob does NOT relax Logon establishment).
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "I-VCT-6/SC-007/FR-012: Logon too-high must STILL disconnect with "
+           "validate_sequence_numbers=false (steady-state-only scope)";
 }
 
 }  // namespace
