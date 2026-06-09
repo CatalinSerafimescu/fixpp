@@ -1592,6 +1592,57 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_next_expected_msgseqnum)
 endif()
 
+# ── 028-validation-compat-toggles (S-040/S-041) — T001 Setup skeleton ────────
+# T001: skeleton + ctest target registration.
+# Real RED witnesses (T004/T006/T007/T012) are added in later phases.
+# Fixture shape mirrors test_next_expected_msgseqnum.cpp (Fixture + OutboundCapture
+# + CountingApp028; free TEST() macros not TEST_F).
+# data-model I-VCT-1..11; contracts/validation-compat-toggles.md C1/C2/C3.
+add_executable(session_validation_compat_toggles
+  test_validation_compat_toggles.cpp
+)
+target_link_libraries(session_validation_compat_toggles PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_validation_compat_toggles PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_validation_compat_toggles PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_validation_compat_toggles
+  COMMAND session_validation_compat_toggles)
+set_tests_properties(session_validation_compat_toggles PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "028;s040;s041;validation-compat-toggles;setup")
+# T012 NoHeap_RelaxedDeliverPath: mallocnesia LD_PRELOAD wired so global-heap
+# escapes from the S4 deliver-without-advance path are intercepted by the
+# alloc_guard_{start,end,count} hooks. This APPEND avoids overwriting TSAN_OPTIONS
+# (same pattern as perf_session_recovery_alloc_guard in tests/perf/CMakeLists.txt).
+# [[feedback_tracking_pmr_resource_false_pass]]
+set_property(TEST session_validation_compat_toggles APPEND PROPERTY
+  ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+
+# T012 mallocnesia companion — runs the binary under check_alloc.py so any global
+# malloc/free call between the alloc_guard_start/end markers exits nonzero (the
+# binding no-heap proof; the TSAN variant above only wires LD_PRELOAD).
+# Pattern mirrors session_next_expected_msgseqnum_mallocnesia (027) and
+# session_sending_time_precision_mallocnesia (026).
+# Absent mallocnesia.so → skip; the base test is the fallback.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_validation_compat_toggles_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_validation_compat_toggles>"
+  )
+  set_tests_properties(session_validation_compat_toggles_mallocnesia PROPERTIES
+    LABELS "028;s040;s041;validation-compat-toggles;alloc_guard"
+    DEPENDS session_validation_compat_toggles)
+endif()
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

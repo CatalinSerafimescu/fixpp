@@ -1865,10 +1865,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             auto hdr = scan_frame_header(frame);
 
             // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
-            // Any mismatch → session-fatal → Disconnected.
-            if (hdr.begin_string != cfg_.begin_string ||
-                hdr.sender_comp_id != cfg_.target_comp_id ||
-                hdr.target_comp_id != cfg_.sender_comp_id) {
+            // BeginString(8) mismatch → always session-fatal → Disconnected.
+            // SenderCompID(49)/TargetCompID(56) mismatch → fatal ONLY when
+            // cfg_.check_comp_id is true (default); skipped when false
+            // (028 T005 / S1, data-model S1, contract C1, FR-003).
+            // Steady-state only: Logon-establishment CompID check (interpret_logon
+            // at NotConnected) is untouched (FR-012 / I-VCT-6).
+            if (hdr.begin_string != cfg_.begin_string) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return fixpp::core::expected_t<void>{};
+            }
+            if (cfg_.check_comp_id && (hdr.sender_comp_id != cfg_.target_comp_id ||
+                                       hdr.target_comp_id != cfg_.sender_comp_id)) {
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -2007,6 +2015,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return fixpp::core::expected_t<void>{};
                     }
                 }
+                // 028 T010 (S6): when validate_sequence_numbers=false, bypass
+                // apply_inbound_sequence_reset — the frame was already delivered to
+                // fromAdmin above; counter is left unchanged (deliver-without-advance).
+                // apply_inbound_sequence_reset is UNCHANGED; only whether it is called
+                // is gated. [data-model S6, I-VCT-11, contract C2.7, FR-013]
+                if (!cfg_.validate_sequence_numbers) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
                                                                 parse_seqnum(hdr.msg_seq_num));
             }
@@ -2034,7 +2050,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // create a never-recover hole — see L-027-2. No behavioural change.
                 // [data-model I-NEX-10, research D-11]
                 const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
-                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend()) {
+                // 028 T008 (S2): guard on validate_sequence_numbers.
+                // When the knob is off, skip AwaitingResend/ResendRequest entirely
+                // and fall through to S4 (deliver-without-advance).
+                // [data-model S2, contract C2.2, FR-006, research D-3]
+                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend() &&
+                    cfg_.validate_sequence_numbers) {
                     // Too-high: enter AwaitingResend and emit ResendRequest(2).
                     // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
                     // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
@@ -2270,8 +2291,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Row 7 (redeliver=false) or post-redeliver: stay Active, no advance.
                         co_return fixpp::core::expected_t<void>{};
                     }
+                    // 028 T009 (S4): deliver-without-advance when knob is off.
+                    // Catches BOTH too-low AND too-high frames that fell through S2
+                    // (complexity tracking hazard 1 — both arrive here when validation off).
+                    // Counter is NOT advanced (check_inbound already returned false; no
+                    // explicit increment here). Session stays Active.
+                    // Discriminate via is_admin_msgtype (as the in-sequence path does at S4):
+                    //   admin → fromAdmin, app → fromApp. Reuse parse_and_dispatch_.
+                    // [data-model S4, contract C2.2/C2.3, FR-006, research D-3]
+                    if (!cfg_.validate_sequence_numbers) {
+                        if (engine_.application != nullptr) {
+                            const bool admin = detail::is_admin_msgtype(hdr.msg_type);
+                            auto cb_r = parse_and_dispatch_(
+                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                    return admin ? engine_.application->fromAdmin(mv, sid)
+                                                 : engine_.application->fromApp(mv, sid);
+                                });
+                            if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                co_await close(close_mode::terminal);
+                                co_return std::unexpected(cb_r.error());
+                            }
+                        }
+                        // Stay Active, counter unchanged (no advance). C2.3.
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // Arm B: too-low non-Heartbeat without 43=Y — fatal (row 5).
-                    // UNCHANGED, byte-identical to pre-feature (INV-2).
+                    // Default-true guard above: byte-identical to pre-feature (INV-2).
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -2292,6 +2337,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
             // Reset mode was handled before Guard 4. [S-023]
             if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
+                // 028 T011 (S7): when validate_sequence_numbers=false, bypass
+                // apply_inbound_sequence_reset. An exact-match gapfill 35=4 has already
+                // advanced the counter by 1 via S5 (ordinary exact-match path); NewSeqNo
+                // is still not applied (the +1 is a fixpp ordering artifact, not QFJ-parity).
+                // An out-of-order gapfill with knob off never reaches here (S4 returned it
+                // before this point). Deliver to fromAdmin (35=4 is an admin msgtype).
+                // [data-model S7, I-VCT-11, contract C2.7, FR-013]
+                if (!cfg_.validate_sequence_numbers) {
+                    if (engine_.application != nullptr) {
+                        auto cb_r = parse_and_dispatch_(
+                            frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                return engine_.application->fromAdmin(mv, sid);
+                            });
+                        if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            co_await close(close_mode::terminal);
+                            co_return std::unexpected(cb_r.error());
+                        }
+                    }
+                    // Counter already advanced by S5; NewSeqNo not applied. Stay Active.
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
                                                                 parse_seqnum(hdr.msg_seq_num));
             }
