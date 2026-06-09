@@ -18,8 +18,8 @@
 
 **Purpose**: Test scaffolding + ctest target registration for the new unit file and the live restart-resume interop cell.
 
-- [ ] T001 [P] Create `tests/session/test_persistent_seqnum_hydrate.cpp` skeleton (GoogleTest, reusing the existing session-test harness/fixtures from `tests/session/test_next_expected_msgseqnum.cpp` / `test_validation_compat_toggles.cpp` — the `struct Fixture`, `struct OutboundCapture`, and a `CountingApp`-style `fixpp::session::Application` subclass, driven via free `TEST(...)` macros). Add a fault-injecting / callback-observing test `MessageStore` (and a custom `MessageStoreFactory`) for W3/W6/W13 — a store whose `next_seqnum(dir,false)` can be pre-seeded and can fail-on-Nth, and whose factory's `yields_persistent_store()` is configurable. Register the ctest target `session_persistent_seqnum_hydrate` in `tests/session/CMakeLists.txt`.
-- [ ] T002 [P] Create `tests/interop/happy/hp_fix44_restart_resume_test.cpp` skeleton (skip-without-counterparty guard, per the 016/018/027/028 harness pattern) and register its interop cell in the `tests/interop` CMake wiring.
+- [X] T001 [P] Create `tests/session/test_persistent_seqnum_hydrate.cpp` skeleton (GoogleTest, reusing the existing session-test harness/fixtures from `tests/session/test_next_expected_msgseqnum.cpp` / `test_validation_compat_toggles.cpp` — the `struct Fixture`, `struct OutboundCapture`, and a `CountingApp`-style `fixpp::session::Application` subclass, driven via free `TEST(...)` macros). Add a fault-injecting / callback-observing test `MessageStore` (and a custom `MessageStoreFactory`) for W3/W6/W13 — a store whose `next_seqnum(dir,false)` can be pre-seeded and can fail-on-Nth, and whose factory's `yields_persistent_store()` is configurable. Register the ctest target `session_persistent_seqnum_hydrate` in `tests/session/CMakeLists.txt`.
+- [X] T002 [P] Create `tests/interop/happy/hp_fix44_restart_resume_test.cpp` skeleton (skip-without-counterparty guard, per the 016/018/027/028 harness pattern) and register its interop cell in the `tests/interop` CMake wiring.
 
 **Checkpoint**: both targets configure and build (empty/skipped); ctest discovers them.
 

@@ -396,6 +396,23 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 029 live restart-resume interop cells — T002 (Setup) + T014 (Polish) ─────
+# T002: skeleton with skip-without-counterparty guard; body stubs GTEST_SKIP for now.
+# T014: full both-role live cells: fixpp-initiator/acceptor restarts vs a running
+#   QFcpp/QFJ peer; resumes both seqnum counters from the persisted FileStore;
+#   peer-ahead inbound recovers via ResendRequest (enable_next_expected_msg_seq_num=true).
+# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Knob state: enable_next_expected_msg_seq_num=true on the fixpp side so the Logon
+#   gate's behind-side tolerance admits a peer-ahead inbound (SC-004, W5, L-029-1).
+# Anchors: tasks.md T002/T014; contracts/seqnum-hydrate.md C2/C3; spec.md SC-001/SC-002.
+fixpp_add_interop_test(
+    NAME interop_029_restart_resume_test
+    GROUP happy
+    LABEL "interop;029;interop-happy;polish;persistent-seqnum-hydrate;restart-resume"
+    SOURCES happy/hp_fix44_restart_resume_test.cpp
+    TLS
+)
+
 # ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
 # Validates cell_results.yaml against the parent gate-evaluator's result schema
 # (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs
