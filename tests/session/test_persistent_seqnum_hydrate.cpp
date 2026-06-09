@@ -1598,8 +1598,7 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
     {
         FaultStore* store = factory->last_store;
         ASSERT_NE(store, nullptr) << "W9b-ext: store must have been minted";
-        const seqnum_t manager_ni =
-            fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
         EXPECT_LE(store->durable_inbound, manager_ni)
             << "W9b-ext (INV-H1): store.durable_inbound must be <= manager.next_inbound "
                "after received-141=Y reset. Pre-fix: store=2 > manager=1 (over-persist). "
@@ -2207,12 +2206,12 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
     // Pre-fix RED: persist fires → next_inbound_=3, durable_inbound=3 > manager=2.
     //   INV-H1 violated. EXPECT_LT(durable, manager) FAILS (3 > 2). ✓ RED.
     // Post-fix GREEN: persist skipped → durable_inbound=1 < manager=2. INV-H1 holds. ✓
-    const seqnum_t manager_ni =
-        manual_fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t manager_ni = manual_fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
         << "INV_H1_Acceptor_789BehindSide: manager.next_inbound must stay 2 "
            "(check_inbound failed, behind-side tolerance did not advance). "
-           "Got " << manager_ni;
+           "Got "
+        << manager_ni;
     // The critical INV-H1 check: store < manager (strict — no write happened at all).
     // Pre-fix: durable_inbound=3 > manager=2 → LT assertion FAILS. ✓ RED.
     // Post-fix: durable_inbound=1 < manager=2 → LT assertion PASSES. ✓ GREEN.
@@ -2221,7 +2220,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
            "store < manager on behind-side path (no advance → no persist). "
            "Pre-fix: durable_inbound=3 > manager=2 (persist over-fired). "
            "Post-fix: durable_inbound=1 < manager=2. "
-           "durable=" << store->durable_inbound << " manager=" << manager_ni;
+           "durable="
+        << store->durable_inbound << " manager=" << manager_ni;
     // Secondary: no write at all → durable stays at FaultStore initial value (1).
     EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
         << "INV_H1_Acceptor_789BehindSide (INV-H1): no persist write → "
@@ -2285,14 +2285,16 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
     const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
         << "INV_H1_Initiator_789BehindSide: manager.next_inbound must stay 2 "
-           "(check_inbound failed, behind-side tolerance). Got " << manager_ni;
+           "(check_inbound failed, behind-side tolerance). Got "
+        << manager_ni;
     // Critical INV-H1 check: store < manager. Pre-fix FAILS (3 > 2). Post-fix PASSES (1 < 2).
     EXPECT_LT(store->durable_inbound, manager_ni)
         << "INV_H1_Initiator_789BehindSide (INV-H1 pre-fix RED): "
            "store < manager on behind-side path (no advance → no persist). "
            "Pre-fix: durable_inbound=3 > manager=2 (persist over-fired). "
            "Post-fix: durable_inbound=1 < manager=2. "
-           "durable=" << store->durable_inbound << " manager=" << manager_ni;
+           "durable="
+        << store->durable_inbound << " manager=" << manager_ni;
     // Secondary: no write → durable stays at initial value 1.
     EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
         << "INV_H1_Initiator_789BehindSide (INV-H1): no persist write → "
