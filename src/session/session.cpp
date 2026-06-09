@@ -1875,9 +1875,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
-            if (cfg_.check_comp_id &&
-                (hdr.sender_comp_id != cfg_.target_comp_id ||
-                 hdr.target_comp_id != cfg_.sender_comp_id)) {
+            if (cfg_.check_comp_id && (hdr.sender_comp_id != cfg_.target_comp_id ||
+                                       hdr.target_comp_id != cfg_.sender_comp_id)) {
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -2308,8 +2307,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                     return admin ? engine_.application->fromAdmin(mv, sid)
                                                  : engine_.application->fromApp(mv, sid);
                                 });
-                            if (!cb_r &&
-                                cb_r.error() == fixpp::core::error::app_callback_threw) {
+                            if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                                 co_await close(close_mode::terminal);
                                 co_return std::unexpected(cb_r.error());
                             }
