@@ -292,6 +292,12 @@ public:
         return std::unique_ptr<MessageStore>(new ShortStore(last_stored_));
     }
 
+    // 029 T007: This test-double store is NOT a persistent durable store; declare
+    // non-persistent so ensure_hydrated_() does not read it at session open.
+    // The tests that use ShortStore seed outbound counters via set_counters_for_test
+    // after open() — a hydrate read would overwrite those values.
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
+
 private:
     seqnum_t last_stored_;
 };
@@ -331,6 +337,10 @@ public:
         asio::any_io_executor /*file_io_executor*/) noexcept override {
         return std::unique_ptr<MessageStore>(new EmptyStore());
     }
+
+    // 029 T007: EmptyStore always returns seqnum_t{1} — it is not a durable persistent
+    // store. Declare non-persistent so ensure_hydrated_() skips the read at open.
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
 };
 
 // ── Session fixture ───────────────────────────────────────────────────────────

@@ -119,6 +119,26 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outboun
     co_return fixpp::core::expected_t<seqnum_t>{assigned};
 }
 
+// ── hydrate ───────────────────────────────────────────────────────────────────
+//
+// Acquire the mutex, set both counters from store-recovered values.
+// Called on cold open over a persistent store (029 C1 / FR-008).
+// Production path — NOT FIXPP_TEST_HOOKS-gated.
+// No validation: caller (ensure_hydrated_) supplies values already verified ≥ 1.
+
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
+    seqnum_t next_inbound, seqnum_t next_outbound) noexcept {
+    auto lk_result = co_await mutex_.async_lock();
+    if (!lk_result) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
+    auto lk = std::move(*lk_result);
+
+    next_inbound_ = next_inbound;
+    next_outbound_ = next_outbound;
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // ── reset_to_one ──────────────────────────────────────────────────────────────
 //
 // Acquire the mutex, reset both counters to seqnum_min (1).

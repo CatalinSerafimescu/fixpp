@@ -104,6 +104,17 @@ public:
     [[nodiscard]] seqnum_t next_inbound_unsafe() const noexcept { return next_inbound_; }
     [[nodiscard]] seqnum_t next_outbound_unsafe() const noexcept { return next_outbound_; }
 
+    // hydrate(next_inbound, next_outbound): set BOTH counters from store-recovered
+    // values on cold open (FR-008 / 029-persistent-seqnum-hydrate C1).
+    // Acquires mutex_; on drain/cancel → std::unexpected(session_already_closed).
+    // Sets next_inbound_ = next_inbound; next_outbound_ = next_outbound.
+    // No validation — caller supplies store-recovered values ≥ 1.
+    // Production-only (NOT test-gated); distinct from set_counters_for_test.
+    // C1.2: idempotent at the value level; one-shot guard lives in the caller
+    // (ensure_hydrated_), not here.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> hydrate(
+        seqnum_t next_inbound, seqnum_t next_outbound) noexcept;
+
     // reset_to_one(): reset both counters to seqnum_min (1) for a successful
     // ResetSeqNumFlag(141)=Y handshake (FR-017 §150: "both sides advance
     // next_expected_inbound and next_expected_outbound to 1").

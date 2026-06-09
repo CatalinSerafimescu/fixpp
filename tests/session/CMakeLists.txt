@@ -1643,6 +1643,54 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_validation_compat_toggles)
 endif()
 
+# ── 029-persistent-seqnum-hydrate (S-042) — T001 Setup skeleton ──────────────
+# T001: skeleton + ctest target registration.
+# Real RED witnesses (T006/T008/T009/T012) are added in later phases.
+# Fixture shape mirrors test_next_expected_msgseqnum.cpp (Fixture + OutboundCapture
+# + CountingApp029 + FaultStore/FaultStoreFactory; free TEST() macros not TEST_F).
+# FaultStore: fault-injecting / callback-observing store for W3/W6/W14.
+# data-model W1..W14; contracts/seqnum-hydrate.md C1..C4.
+add_executable(session_persistent_seqnum_hydrate
+  test_persistent_seqnum_hydrate.cpp
+)
+target_link_libraries(session_persistent_seqnum_hydrate PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_persistent_seqnum_hydrate PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_persistent_seqnum_hydrate PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_persistent_seqnum_hydrate
+  COMMAND session_persistent_seqnum_hydrate)
+set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "029;s042;persistent-seqnum-hydrate;setup")
+# T012 NoHeap_HydrateAndPersistPaths: wire mallocnesia LD_PRELOAD so the
+# alloc_guard_count() weak symbol is replaced by the live interceptor.
+# Pattern mirrors session_validation_compat_toggles (028) and
+# session_next_expected_msgseqnum (027).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY
+    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+endif()
+# T012 mallocnesia companion — runs the binary under check_alloc.py so any
+# global malloc/calloc/realloc between the guard markers causes exit(1).
+# Absent mallocnesia.so → skip; the base test is the fallback.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_persistent_seqnum_hydrate_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_persistent_seqnum_hydrate>"
+  )
+  set_tests_properties(session_persistent_seqnum_hydrate_mallocnesia PROPERTIES
+    LABELS "029;s042;persistent-seqnum-hydrate;noheap"
+    DEPENDS session_persistent_seqnum_hydrate)
+endif()
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
