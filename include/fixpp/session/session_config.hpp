@@ -388,6 +388,30 @@ struct SessionConfig {
     // source rebuild is required (no C-ABI surface; SessionConfig is C++-only).
     // No new include: primitive bool, §XV.9 N/A (data-model E1).
     bool enable_next_expected_msg_seq_num = false;
+
+    // 028 T003 / data-model E1 / contract C1 — steady-state inbound CompID
+    // validation knob (QuickFIX: CheckCompID, default Y). Default true = strict
+    // = current behaviour: SenderCompID(49)/TargetCompID(56) of every post-Logon
+    // inbound message must match cfg.target_comp_id/cfg.sender_comp_id; mismatch
+    // disconnects. false = QuickFIX-compat relaxation: steady-state CompID check
+    // is skipped (Logon-establishment CompID check and BeginString(8) check remain
+    // strict; 013 compid_authorization_policy allow-list also remains strict).
+    // Note inverted polarity vs 021/022/024/026/027 knobs (those default false;
+    // this defaults true because strict is the safe baseline and the relaxation
+    // is the opt-in). No new include: primitive bool, §XV.9 N/A (data-model E1).
+    bool check_comp_id = true;
+
+    // 028 T003 / data-model E1 / contract C2 — inbound sequence-number
+    // validation knob (QuickFIX: ValidateSequenceNumbers, default Y). Default
+    // true = strict = current behaviour: too-high triggers ResendRequest +
+    // AwaitingResend; too-low disconnects. false = QuickFIX-compat relaxation:
+    // out-of-order frames (too-high or too-low) are delivered without advancing
+    // the counter; no ResendRequest emitted; session stays Active. The seq==0
+    // fatal, too-low-Heartbeat(35=0) silent-drop, PossDup(43) path, and
+    // Logon-time sequence checks remain strict. Note inverted polarity vs
+    // 021/022/024/026/027 knobs (those default false; this defaults true).
+    // No new include: primitive bool, §XV.9 N/A (data-model E1).
+    bool validate_sequence_numbers = true;
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so
