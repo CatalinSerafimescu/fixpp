@@ -41,8 +41,10 @@ All anchors source-verified against the working tree at branch `029-persistent-s
 ## Decisions
 
 ### D-1 — hydrate trigger: ALWAYS-ON when a persistent store is configured (clarify)
-Load both counters from `store_` at cold open whenever `store_ != nullptr`. A memory/null
-store yields 1 ⇒ `hydrate(1,1)` no-op ⇒ byte-identical (FR-005). No config flag.
+Load both counters from `store_` at cold open whenever a **persistent** store is configured
+(gated by `store_is_persistent_`, D-10 — NOT merely `store_ != nullptr`, since a configured memory
+store is non-null but must be skipped). A memory/null store ⇒ skipped ⇒ counters stay 1 ⇒
+byte-identical (FR-005). No config flag.
 *Rationale:* QF-faithful (store is source of truth). *Alternatives rejected:* a gating flag
 (diverges from QF, leaves the latent "restart starts at 1" bug on by default).
 
@@ -79,24 +81,127 @@ pure-virtual `set_seqnum(dir,n)` — burns the ≤5 cap headroom for exact locks
 catch-up loop of `next_seqnum(inbound,true)` after each jump — O(gap), unbounded for large
 `NewSeqNo`. KISS + cap-preservation favors the lower bound.
 
-### D-6 — one-shot, cold-open placement (`ensure_hydrated_`)
-`ensure_hydrated_()` is idempotent + one-shot (a `hydrated_` flag set on first run). Called at:
-(a) the **top of `emit_initiator_logon_()`** (`:542`), **before** the 024 `reset_on_logon`
-block (`:558`) — the shared emit point covering `open()` direct AND engine-managed first-connect
-via `drive_reconnect` ([[feedback_initiator_logon_wire_at_shared_emit_point]]); (b) the **top of
-the `NotConnected` inbound-Logon case** (`:1524`) for acceptors, before `interpret_logon` /
-`check_inbound` / reply `peek_outbound`. **One-shot ⇒ reconnect skips** — re-hydrating a live
-session regresses the manager to the store's lower-bound value (the 025 Gate-A **New-1**
-corruption). Re-hydrate-on-reconnect is 025 RefreshOnLogon's gated job, deliberately not here.
-*Ordering with existing knobs:* hydrate runs **before** `reset_on_logon` (024 reset wins on the
-initiator) and **before** `check_inbound` (so a 013 received-141 peer reset still wins on the
-acceptor, applied after). *Alternative rejected:* hydrate in `open()` only — silently misses
-engine-managed sessions (the cited memory's exact trap) and acceptors.
+### D-6 — one-shot, cold-open placement + Logon-gate-aware inbound seed (`ensure_hydrated_`)
+`ensure_hydrated_()` is idempotent + one-shot (a `hydrated_` flag set on first **successful**
+run — see D-9). Called at: (a) the **top of `emit_initiator_logon_()`** (`:542`), **before** the
+024 `reset_on_logon` block (`:558`) — the shared emit point covering `open()` direct AND
+engine-managed first-connect via `drive_reconnect`
+([[feedback_initiator_logon_wire_at_shared_emit_point]]); (b) for acceptors, the
+`NotConnected` inbound-Logon case, **before** `interpret_logon` / `check_inbound` / reply
+`peek_outbound`. **One-shot ⇒ reconnect skips** — re-hydrating a live session regresses the
+manager to the store's lower-bound value (the 025 Gate-A **New-1** corruption). Re-hydrate-on-
+reconnect is 025 RefreshOnLogon's gated job, deliberately not here.
+
+**The Logon-path seqnum gate is NOT the steady-state gate (Gate-A round-1 RC-1).** The acceptor
+`NotConnected` `check_inbound` (`:1596`) and the initiator `LogonSent` `check_inbound` (`:2841`)
+both **fatal on too-high** (`record_state_transition_(Disconnected)` at `:1615` / `:2856`) unless
+`enable_next_expected_msg_seq_num` (027/789) is on — there is **no ResendRequest arm** on the
+Logon path; only the steady-state Active path (`:2253`) enters AwaitingResend. So the naive
+"seed `next_inbound` high at the top of the Logon case, the recovery path picks it up" model is
+**false**: a hydrated `next_inbound=37` makes a peer reset Logon `34=1,141=Y` (no `reset_on_logon`)
+return `session_seqnum_too_low` at `:1596` and the handler disconnects at `:1615` — **before** the
+013-only received-141 reset arm at `:1760` can run. This kills FR-010/INV-H5.
+
+*Corrected control flow (RC-1 single-fix, option ii — pre-scan, lower-risk):*
+- **Outbound** is hydrated normally (it only feeds the reply/initiator Logon's `34=`, never a
+  validation gate — no precedence hazard).
+- **Inbound** seed is gated on a **header pre-scan** of the incoming Logon (acceptor) so the
+  received-141 / `reset_on_logon` reset arms are honored **before** the hydrated inbound seed can
+  gate `check_inbound`. The acceptor already pre-scans `peer_sent_reset = (hdr.reset_seqnum_flag ==
+  "Y")` at `:1585` and runs the `reset_on_logon` durable reset at `:1587` (before `check_inbound`);
+  the 013-only received-141 reset runs at `:1760` (after `check_inbound`). The fix: when the peer
+  announces a reset (`peer_sent_reset` OR `reset_on_logon`), the inbound seed **must not** be
+  applied ahead of `check_inbound` — i.e. hydrate the outbound counter but leave `next_inbound` at
+  its construction value (1) on the reset branch so `check_inbound(1)` is in-sequence and the
+  existing reset path owns the post-state; apply the inbound seed only on the **non-reset** branch.
+  Equivalently, pull the received-141 reset arm forward to run before the hydrated seed gates
+  `check_inbound` when the header announces a reset. Either realization makes FR-010/INV-H5 true.
+- This is a **deliberate refinement of the 024 cause-dependent split**, not a byte-identity
+  regression of the non-hydrated baseline: for a non-hydrated session the pre-check reset on the
+  received-141 path is a *new* post-state only on the **hydrated** branch (where `next_inbound`
+  would otherwise be 37→reset→1, i.e. the received-141 post-state changes 1→2 vs. the pre-024
+  baseline's 1). The non-hydrated path (no `store_` / memory store) is unchanged byte-for-byte.
+
+*Ordering with existing knobs:* outbound hydrate runs **before** `reset_on_logon` (024 reset wins
+on the initiator); the inbound seed is applied **after** / conditionally on the Logon-gate reset
+decision (so a 013 received-141 peer reset still wins on the acceptor). *Alternative rejected:*
+hydrate in `open()` only — silently misses engine-managed sessions (the cited memory's exact trap)
+and acceptors.
+
+**Lower-bound recovery precondition (RC-1, narrows SC-004/L-029-1).** Because the Logon gate
+fatals on too-high with the knob off, a knob-off restart-after-GapFill whose peer Logon carries a
+seq **higher** than the hydrated stale lower bound **can fatal on the peer Logon** (`:1615` /
+`:2856`) — it does **not** silently recover via ResendRequest (the Logon path has no such arm).
+Lower-bound recovery without a fatal therefore requires **either** `enable_next_expected_msg_seq_num`
+(789) enabled (behind-side tolerance admits the peer Logon and the proactive resend resyncs) **or**
+a peer **reset** Logon (`141=Y`, which goes in-sequence to 1). The honest contract: knob-off
+restart-after-GapFill is recovery-correct only via a 789/reset handshake; otherwise it is a
+documented fatal-then-reconnect case (L-029-1).
 
 ### D-7 — `SeqnumManager::hydrate(next_inbound, next_outbound)` (FR-008)
 New awaitable production setter mirroring `set_next_inbound`: acquire `mutex_.async_lock()`,
 set both fields, return. The first production outbound setter. Awaitable for drain-consistency
-with the sibling setters; at cold open it is the first strand op (no contention).
+with the sibling setters; at cold open it is the first strand op (no contention). The "first
+strand op / no contention" claim is a happens-before assertion that must be **witnessed**, not
+asserted: W8 asserts `hydrate` completes-before the first `check_inbound` on both roles (New-4).
+
+### D-9 — `hydrated_` latches only after success; transient read failure stays retryable (RC-3)
+`hydrated_` is set **only after** both store reads AND `seqnum_mgr_.hydrate()` succeed — **not**
+before the awaits. A transient store-read failure disconnects (FR-006) but leaves `hydrated_ ==
+false`, so the **next** reconnect (engine-managed initiator: `open()` succeeds without emitting;
+first `drive_reconnect()` hits the read, fails, disconnects; reconnect #2 retries) re-attempts
+hydrate from the last durable value — consistent with FR-007. Re-entrancy (a second call before
+the first returns on the same strand) is handled by a strand-scoped `hydrating_` guard cleared on
+failure, **not** by pre-latching `hydrated_` (which would make a transient failure sticky and
+silently regress both counters to the in-memory `1` — the very path 029 exists to protect).
+*Rejected:* `hydrated_ = true` before the reads (Codex P2#5: sticky failure).
+
+### D-10 — non-persistent discriminator captured at `open()` (RC-3, memory-store byte-identity)
+A configured `MemoryStore` is **non-null** and its `next_seqnum(false)` posts + locks + allocates
+(`memory_store.hpp:359-378`), so `if (store_ != nullptr) read both` would add two posted reads on
+a memory-store open path — breaking the FR-005/SC-003 "memory store ⇒ zero added store reads,
+zero added allocation, byte-identical" promise. Fix: capture a **single `bool
+store_is_persistent_`** at `Session::open()` from the new `MessageStoreFactory::yields_persistent_store()`
+accessor (default `true`; `MemoryStoreFactory` → `false`) — a one-bit additive factory surface,
+NOT a 5th `MessageStore` pure-virtual — and gate hydrate's reads on it: `if
+(!store_is_persistent_) co_return ok;`. **The accessor lives on the FACTORY interface, not on the
+`MessageStore` 4-pure-virtual interface, so Article XIV.2's ≤5 cap on `MessageStore` is untouched
+(cap stays 4).** It is a non-pure `virtual bool yields_persistent_store() const noexcept`
+defaulting to `true` (persistent-by-default is the safe default: a custom store hydrates unless it
+opts out — a missed override resumes, never silently restarts-at-1); `MemoryStoreFactory` overrides
+it to `false`, `FileStoreFactory` inherits the `true` default. The flush-hook tag (`flush_hook()`)
+is **not** reused as the discriminator: its semantics are "does this store flush on *graceful
+close*", orthogonal to durability — a custom persistent store with no flush hook would be wrongly
+discriminated non-persistent → hydrate skipped → restart-starts-at-1 (the exact bug 029 fixes).
+This restores the memory-store byte-identity promise the spec actually wants **without** a 5th
+`MessageStore` pure-virtual — one additive factory accessor, automatic (no operator burden). The
+`store_ == nullptr` case is subsumed (a null store has no factory → flag stays `false`).
+*Rejected:* narrowing FR-005/SC-003 to `store_ == nullptr` only (would leave the common
+in-memory-store sessions paying two reads, contradicting the spec's "memory store" wording); a 5th
+`MessageStore` pure-virtual `is_persistent()` (burns the `MessageStore` cap headroom for a one-bit
+fact the factory already settles); the flush-hook tag (a correctness trap, see above).
+
+**Capture point (New-A):** `store_is_persistent_` is written at `open()` **inside the
+`if (cfg_.store_factory)` branch** (`session.cpp:779`, right after `make()` succeeds) —
+`store_is_persistent_ = cfg_.store_factory->yields_persistent_store();` — and otherwise stays
+`false` (the null-store path has no factory). It is set **exactly once, before the first counter
+touch**, consistently on BOTH the direct-`open()` and engine-managed-reconnect paths (`open()` runs
+once per session before either emit/accept site — the same shared-point hazard the initiator-Logon
+wiring tripped, [[feedback_initiator_logon_wire_at_shared_emit_point]]).
+
+### New-3 — hydrate feeds the 027/789 advertisement (RC-4)
+With `ensure_hydrated_()` at the top of `emit_initiator_logon_()` (before the reset block at
+`:558`), the hydrated counters feed two `:596-606` predicates: (a) `seqnums_at_one` (`:596`)
+samples `peek_outbound()`/`next_inbound_unsafe()` — a hydrate to `{42,37}` makes it **false**, so
+the `any_reset_knob && seqnums_at_one` arm does **NOT** spuriously emit `141=Y` on a resumed
+session (correct — `reset_on_logon` at `:558` runs after hydrate and still resets to `{1,1}` →
+141 emitted on the reset path); (b) `initr_next_expected` (789, `:603-606`) — when
+`enable_next_expected_msg_seq_num` is on the initiator now advertises `789 = next_inbound_unsafe()
+== <hydrated>` (the true resumed position) instead of `1`. This is behaviorally correct and is the
+one place hydrate's resumed value changes a wire field's content; it is also load-bearing for the
+only non-fatal knob-off-less recovery path (the peer tolerates our advertised resume). The
+acceptor reply 789 (`acpt_next_expected`) is fed the same way. A witness asserts a hydrated
+initiator advertises `789 = <hydrated next_inbound>` when the knob is on (W11).
 
 ### D-8 — I-3 comment reconciliation
 The unwired `session.cpp:1517` comment ("Inbound ordering (I-3 / [2e §7.6]): store(inbound)
@@ -111,3 +216,21 @@ corrected to **deliver-then-persist** so shipped code and comments agree (a
    limitation (L-029-1) acceptable, or is exact lockstep worth a 5th `MessageStore` pure-virtual?
 2. **Inbound-fatal / outbound-logged asymmetry** (D-3 / L-029-2) — accept the residual, or pull
    outbound→fatal into scope (re-opens 008/024 I-07)?
+
+## Gate A round-1 resolutions (2026-06-09)
+
+Both open items above stand as designed (lower-bound accepted; asymmetry accepted). The round-1
+review surfaced four root-cause corrections, applied here without a new `/clarify` (the 3
+clarifications D-1/D-2/D-3 stand — these are correct *application* of them against the real
+`session.cpp` control flow):
+
+- **RC-1** — Logon-path gate is not the steady-state gate: corrected acceptor-141 precedence
+  (pre-scan-gated inbound seed, D-6) + narrowed the lower-bound recovery contract (knob-off
+  restart-after-GapFill can fatal on the Logon; recovery needs 789-or-reset).
+- **RC-2** — replaced "one persist call" with the site-keyed persist disposition matrix
+  (`persist_inbound_advance_()`, data-model.md §Persist disposition matrix; resend-fill app
+  messages PERSIST, GapFill jump does NOT).
+- **RC-3** — `hydrated_` latches only after success (D-9); non-persistent discriminator
+  `store_is_persistent_` captured at `open()` (D-10) restores memory-store byte-identity.
+- **RC-4** — doc-accuracy sweep (L-024-1 not L-025-1; coverage-index S-042; Normative References;
+  spec:89 softened to last-successful-outbound-write; checklist unchecked).

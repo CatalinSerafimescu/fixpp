@@ -6,7 +6,7 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [ ] No implementation details (languages, frameworks, APIs) — **intentionally NOT met**: this is an implementation-bound *spine* slice. FRs name concrete APIs (`fromApp`/`fromAdmin`, `MessageStore`, `SeqnumManager`, `next_seqnum`, the production outbound setter) because the feature *is* a store↔session wiring change with no user-facing surface. API specifics are anchored in `contracts/seqnum-hydrate.md`; this box is left unchecked rather than falsely claiming stakeholder-level abstraction (Gate A round-1 RC-4 / Codex P3#9).
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
