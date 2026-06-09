@@ -36,7 +36,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.1 | Sequence numbers | Y | S-009 | — |
 | §4.2 | Identifying the FIX session | Y | S-016, S-020 | — |
 | §4.2.1 | The FIX session profile | Y | S-020 | — |
-| §4.2.2 | Identification of FIX session peers (CompID) | Y | S-016 | — |
+| §4.2.2 | Identification of FIX session peers (CompID) | Y | S-016, S-040 | S-040 (028): `check_comp_id=false` skips the steady-state `49`/`56` match; Logon-establishment + BeginString + 013 authz still enforced. |
 | §4.2.3 | Validation of SendingTime(52) | Y | S-019, S-039 | — |
 | §4.2.4 | Additional fields available for peer identification (SubID, LocationID) | Y | S-016 | — |
 | §4.3 | Establishing a FIX connection | Y | S-001, S-015, S-021, S-022 | — |
@@ -55,7 +55,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.3.10 | Responding to FIX session establishment request (acceptor Logon ack / Logout reject) | Y | S-001 | — |
 | §4.3.11 | Initial synchronization of messages (Logon seqnum check, ResendRequest on gap) | Y | S-014 | — |
 | §4.3.12 | Synchronization after successful logon | Y | S-014, S-031 | — |
-| §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; S-031 **FIX 4.4 parity** shipped via 027 (`implementation-parity-4.4`); FIXT.1.1 / 5.0SP2 version-gating outstanding to G4. S-018 (RefreshOnLogon) parked (T034 store-hydrate prerequisite). The named config knobs CheckCompID / validateSequenceNumbers / MaxLatency remain deferred. |
+| §4.4 | Extended features for FIX session and connection initiation | Y | S-017, S-031, S-032, S-040, S-041 | S-017 (ResetOnLogon/Logout/Disconnect) done via 024; S-031 **FIX 4.4 parity** shipped via 027 (`implementation-parity-4.4`); S-040 (`check_comp_id` knob) + S-041 (`validate_sequence_numbers` knob) shipped via 028; FIXT.1.1 / 5.0SP2 version-gating outstanding to G4. S-018 (RefreshOnLogon) parked (T034 store-hydrate prerequisite). MaxLatency knob remains deferred. |
 | §4.4.1 | Using NextExpectedMsgSeqNum(789) | Y | S-031 | **FIX 4.4 parity shipped (027)**: per-session knob; advertise 789 in Logon (both roles); honor peer 789 with proactive resend (X<N → resend [X,N-1], no ResendRequest round-trip); X>N or invalid → Logout+disconnect; default off byte-identical; behind-side tolerance (no at-logon ResendRequest suppression). Tests: `tests/session/test_next_expected_msgseqnum.cpp` + `tests/interop/happy/hp_fix44_next_expected_test.cpp`. **FIXT.1.1 / 5.0SP2 outstanding to G4** (row is versioned "5.0–5.0SP2, FIXT.1.1"; this slice is FIX 4.4 only). |
 | §4.4.2 | Using ResetSeqNumFlag(141) for 24-hour connectivity | Y | S-032 | — |
 | §4.4.3 | Using ResetSeqNumFlag(141) during connection establishment | Y | S-032 | — |
@@ -73,14 +73,14 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.6.4 | When to terminate without Logout(35=5) (invalid BeginString/CompID cases) | Y | S-016, S-020 | — |
 | §4.7 | Extended features for FIX connection termination | Y | S-031 | S-031 FIX 4.4 parity shipped via 027; FIXT/5.0 outstanding to G4. |
 | §4.7.1 | Using NextExpectedMsgSeqNum(789) on invalid MsgSeqNum(34) | Y | S-031 | **FIX 4.4 parity shipped (027)**: X>N (peer's 789 exceeds our next-outbound) → Logout+disconnect; present-but-invalid 789 (parse→0, empty, non-digit) → Logout+disconnect (evaluated before X<N compare to close the [1,N-1] amplification path). **FIXT.1.1 / 5.0SP2 outstanding to G4.** |
-| §4.8 | Message recovery | Y | S-011, S-012, S-013, S-014 | — |
+| §4.8 | Message recovery | Y | S-011, S-012, S-013, S-014, S-041 | S-041 (028): `validate_sequence_numbers=false` suppresses gap detection and recovery — no `ResendRequest`, no too-low disconnect; frames delivered without seqnum advance. |
 | §4.8.1 | Ordered message processing | Y | S-009, S-014 | — |
-| §4.8.2 | Request retransmission of messages (ResendRequest) | Y | S-005, S-024 | — |
+| §4.8.2 | Request retransmission of messages (ResendRequest) | Y | S-005, S-024, S-041 | S-041 (028): `validate_sequence_numbers=false` suppresses `ResendRequest` on a forward gap — out-of-order frame is delivered-without-advance instead of entering AwaitingResend. |
 | §4.8.3 | Responding to ResendRequest(35=2) | Y | S-005, S-014 | — |
 | §4.8.4 | Possible duplicates (PossDupFlag semantics) | Y | S-010, S-033 | S-033 → **done** (021, inbound OrigSendingTime-required enforcement, Arms C/D). S-010 → **done** (021 inbound PossDup(43) too-low tolerance Arm A/B + 022 PossResend(97) inbound witness-confirmed + AllowPosDup send-knob FR-008 `allow_pos_dup` default-strip). |
-| §4.8.5 | Gap fill process (SequenceReset-GapFill) | Y | S-006 | — |
+| §4.8.5 | Gap fill process (SequenceReset-GapFill) | Y | S-006, S-041 | S-041 (028): `validate_sequence_numbers=false` bypasses the gapfill-mode `SequenceReset(35=4, 123=Y)` intercept — `NewSeqNo` not applied; frame delivered to `fromAdmin`, counter unchanged. |
 | §4.8.5.1 | Example using SequenceReset(35=4) | Y | S-006 | — |
-| §4.8.6 | Sequence reset (hard reset, GapFillFlag=N) | Y | S-006, S-023 | — |
+| §4.8.6 | Sequence reset (hard reset, GapFillFlag=N) | Y | S-006, S-023, S-041 | S-041 (028): `validate_sequence_numbers=false` bypasses the reset-mode `SequenceReset(35=4)` intercept — `apply_inbound_sequence_reset` not called; frame delivered to `fromAdmin`, counter unchanged. |
 | §4.8.7 | Processing inbound possible duplicate messages | Y | S-010 | 021: inbound possible-duplicate processing delivered (tolerate too-low `43=Y` replay, no seqnum advance — Arm A; admin ignore / app drop(default)/redeliver(`redeliver_poss_dup`); too-low without `43=Y` stays fatal — Arm B). |
 | §4.8.8 | Processing gaps for session layer messages (admin msg gap-fill) | Y | S-014 | — |
 | §4.9 | Resending unacknowledged application message (PossResend 97) | Y | S-010 | 022: `PossResend(97)=Y` is an APPLICATION-level resend indicator — fixpp delivers it to `fromApp` (full MessageView, tag 97 readable), advances seqnum, never session-rejects for `97` (witness-only, matching QFcpp/QFJ which add no session-level handling). |

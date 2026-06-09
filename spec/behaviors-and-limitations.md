@@ -688,3 +688,83 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   on, which the current code does not do (T017 review comment annotates `:1968` as
   recovery-of-last-resort — stays active regardless of knob state). **Status: documented**
   (research D-11, data-model I-NEX-10). *(contracts C5; `session.cpp:1968`; T017 annotation.)*
+
+## Validation-compat toggles — CheckCompID & ValidateSequenceNumbers (028-validation-compat-toggles)
+
+### Behaviors
+
+- **B-028-1 — `check_comp_id=false` skips the steady-state SenderCompID/TargetCompID match;
+  BeginString, Logon-establishment CompID, and 013 authz remain strict; default byte-identical.**
+  `SessionConfig::check_comp_id` (default `true`) controls the per-message `49`/`56` equality
+  gate in the `LogonReceived/Active` inbound handler. When `false`, a frame whose
+  `SenderCompID(49)` or `TargetCompID(56)` does not match the configured pair is **accepted and
+  delivered** instead of triggering a disconnect (FR-001/FR-002). Three gates are deliberately
+  left strict regardless of the knob: (a) `BeginString(8)` mismatch still disconnects
+  (I-VCT-1); (b) the Logon-establishment CompID check in `interpret_logon` is unaffected —
+  a Logon whose `49` ≠ configured `target_comp_id` is still refused (steady-state-only scope,
+  I-VCT-6, FR-012); (c) the 013 `compid_authorization_policy` allow-list still refuses a
+  non-allow-listed principal at Logon time (I-VCT-2). Default `true` ⇒ byte-identical no-op.
+  QuickFIX-compat: QFcpp `CheckCompID=N` / QFJ `CheckCompID=N`. *(FR-001/002/003/012;
+  data-model I-VCT-1/2/6; research D-2; contracts C1; `tests/session/test_validation_compat_toggles.cpp`.)*
+
+- **B-028-2 — `validate_sequence_numbers=false` tolerates out-of-order inbound: no
+  ResendRequest on a forward gap, no disconnect on a too-low; counter advances on exact match
+  only; `SequenceReset(35=4) NewSeqNo` not applied; PossDup + `seq==0` + too-low-Heartbeat
+  carve-outs retained; default byte-identical.**
+  `SessionConfig::validate_sequence_numbers` (default `true`) controls four inbound seqnum
+  enforcement sites in the `LogonReceived/Active` handler. When `false`: (1) too-high inbound
+  (`seq > next_expected`) does NOT enter AwaitingResend and does NOT emit a `ResendRequest`
+  (site S2); the frame falls through to a deliver-without-advance path (site S4). (2) too-low
+  inbound (`seq < next_expected`) does NOT disconnect; the frame is delivered to `fromAdmin`
+  (admin `MsgType`) or `fromApp` (app `MsgType`) via `parse_and_dispatch_` — counter unchanged,
+  session stays `Active` (site S4, FR-004/005). (3) reset-mode `SequenceReset(35=4)` (site S6,
+  before the seqnum gate) — the `apply_inbound_sequence_reset` intercept is bypassed; frame
+  delivered to `fromAdmin`, counter unchanged (FR-013/I-VCT-11). (4) gapfill-mode
+  `SequenceReset(35=4, 123=Y)` (site S7, after the seqnum gate) — same bypass; `NewSeqNo` NOT
+  applied; an exact-match gapfill `35=4` that already advanced the counter by +1 via S5 does
+  NOT additionally apply `NewSeqNo`. The inbound counter advances on exact match only
+  (unchanged S5 path). Four carve-outs are retained regardless of the knob: PossDup Stage-1/
+  Stage-2 handling runs on both the exact-match and out-of-order arms (I-VCT-5); `seq==0`
+  (unparseable `MsgSeqNum`) remains fatal (I-VCT-10); too-low `Heartbeat(35=0)` is still
+  silently dropped pre-gate (N3 carve-out at site S3); Logon-time seqnum checks are unchanged
+  (steady-state-only scope, I-VCT-6, FR-012). Default `true` ⇒ byte-identical no-op.
+  QuickFIX-compat: QFJ `ValidateSequenceNumbers=N`. *(FR-004/005/006/013/012;
+  data-model I-VCT-3/4/5/10/11; research D-3; contracts C2; `tests/session/test_validation_compat_toggles.cpp`.)*
+
+### Limitations
+
+- **L-028-1 — `validate_sequence_numbers=false` disables gap detection — real gaps are silently
+  accepted and messages may be processed out of order.** With the knob off, fixpp makes no
+  attempt to detect or recover a missing message range: a forward gap simply delivers the
+  higher-seqnum frame without issuing a `ResendRequest`, and the missed messages are never
+  requested. This means the application layer may receive frames out of order or miss frames
+  entirely. This knob is intended ONLY for counterparties that are known to send out-of-order
+  frames as a deliberate protocol choice (e.g. a QuickFIX-J peer configured
+  `ValidateSequenceNumbers=N`); using it against a conformant FIX peer will hide real gaps.
+  **Status: by design** (FR-005/FR-006; research D-0/D-3; L-028-3 is the steady-state-only
+  companion). *(data-model I-VCT-3; contracts C2.2.)*
+
+- **L-028-2 — `check_comp_id=false` removes the steady-state mis-routing guard — a message
+  addressed to a different CompID pair is accepted; rely on 013 authz + transport binding.**
+  With the knob off, an inbound frame bearing any `SenderCompID(49)` / `TargetCompID(56)` pair
+  is delivered as long as it passes the strict gates (BeginString, Logon-establishment CompID,
+  013 `compid_authorization_policy`). The steady-state mis-routing guard that would normally
+  reject a cross-session frame is absent. Operators using this knob should ensure adequate
+  security via mTLS transport binding (where the 013 allow-list verifies the TLS identity ↔
+  CompID mapping) or by ensuring the network topology is point-to-point. This knob is intended
+  for counterparties known to send inconsistent CompIDs (e.g. a QuickFIX counterparty
+  configured `CheckCompID=N`). **Status: by design** (FR-002/FR-003; research D-0/D-2;
+  L-028-3 is the steady-state-only companion). *(data-model I-VCT-2; contracts C1.2.)*
+
+- **L-028-3 — Both relaxations are steady-state only — Logon establishment is unaffected by
+  either knob; a counterparty needing relaxed Logon-time checks is not supported.** The
+  `check_comp_id` and `validate_sequence_numbers` knobs apply exclusively to the
+  `LogonReceived/Active` inbound handler. The Logon-establishment paths (`NotConnected` /
+  `LogonSent`) are deliberately left strict: a Logon with a mismatched `SenderCompID(49)` is
+  still refused, and a Logon-time too-high `MsgSeqNum` still disconnects, regardless of either
+  knob. This is a deliberate divergence from QuickFIX-J, which routes Logon through the same
+  `verify()` method and therefore relaxes at Logon too (`ValidateSequenceNumbers=N` also
+  suppresses Logon-time too-high checks in QFJ). The fixpp restriction keeps Logon
+  establishment strict for safe session bring-up and avoids entangling the 013/024 reset FSM.
+  **Status: by design** (clarify Q3 / D-4; steady-state-only scope). *(data-model I-VCT-6;
+  FR-012; plan Summary "Steady-state only".)*
