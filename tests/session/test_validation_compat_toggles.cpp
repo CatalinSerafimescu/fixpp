@@ -1093,4 +1093,399 @@ TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
     }
 }
 
+// ── T012 (US3) — Default/combination/no-op witnesses ────────────────────────
+//
+// Anchors: spec.md FR-007/FR-008/FR-009, SC-003/SC-005; data-model.md
+//          I-VCT-7/I-VCT-8/I-VCT-9; contracts C3.1/C3.2/C3.3; [const §VIII.5].
+//
+// T012 witness list (tasks.md):
+//   Default_FieldsAreStrict             — US3 AS2
+//   Default_ByteIdenticalBaseline       — SC-003, I-VCT-7, C3.3
+//   Combination_Matrix_FourCells        — SC-005, FR-007, I-VCT-8, C3.1
+//   Inbound_Only_OutboundUnchanged      — FR-008, I-VCT-9, C3.2
+//   NoHeap_RelaxedDeliverPath           — [const §VIII.5], C1 remediation
+
+// T012 witness 1 — US3 AS2
+// Freshly default-constructed SessionConfig has check_comp_id==true AND
+// validate_sequence_numbers==true (both fields default strict).
+// This is a trivial compile+runtime assertion of the contract C1/C2 defaults.
+// Already GREEN: T003 set both defaults to true.
+TEST(ValidationCompatToggles, Default_FieldsAreStrict) {
+    fixpp::session::SessionConfig cfg;
+
+    EXPECT_TRUE(cfg.check_comp_id)
+        << "US3 AS2: check_comp_id must default to true (strict) per C1/FR-001";
+    EXPECT_TRUE(cfg.validate_sequence_numbers)
+        << "US3 AS2: validate_sequence_numbers must default to true (strict) per C2/FR-004";
+}
+
+// T012 witness 2 — SC-003, I-VCT-7, C3.3
+// With both knobs at default (both=true), a representative scenario is byte-identical
+// to today's strict baseline:
+//   (a) CompID mismatch at default → session Disconnected (same as CompID_Default_MismatchRejected).
+//   (b) Too-low seqnum at default → session Disconnected (same as strict today).
+//   (c) Too-high seqnum at default → ResendRequest emitted (same as strict today).
+// These are the same as the existing paired witnesses in T004/T006; we assert them
+// here to prove byte-identical default behaviour when NEITHER knob is changed from
+// the default.
+TEST(ValidationCompatToggles, Default_ByteIdenticalBaseline) {
+    // Part (a): default session + CompID mismatch → Disconnected (strict baseline).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        // Both knobs are default true (not explicitly set).
+        ASSERT_TRUE(fix->cfg.check_comp_id)
+            << "Precondition: check_comp_id must be default true";
+        ASSERT_TRUE(fix->cfg.validate_sequence_numbers)
+            << "Precondition: validate_sequence_numbers must be default true";
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Precondition: session must be Active";
+
+        const int from_app_before = app->from_app_count;
+        fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG_SENDER", "WRONG_TARGET"));
+
+        // Post-condition (SC-003/I-VCT-7/C3.3): strict baseline → Disconnected.
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "SC-003/I-VCT-7/C3.3: at both-default, CompID mismatch must disconnect "
+               "(byte-identical to pre-feature baseline)";
+        EXPECT_EQ(app->from_app_count, from_app_before)
+            << "SC-003: mismatching frame must not be delivered at default";
+    }
+
+    // Part (b): default session + too-low seqnum → Disconnected (strict baseline).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        ASSERT_TRUE(fix->cfg.validate_sequence_numbers)
+            << "Precondition: validate_sequence_numbers must be default true";
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));  // seq=1, expected=2 → too-low
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "SC-003/I-VCT-7: at default, too-low seqnum must disconnect (strict baseline)";
+    }
+
+    // Part (c): default session + too-high seqnum → ResendRequest (strict baseline).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+        fix->clear_capture();
+
+        fix->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));  // seq=5, expected=2 → too-high
+
+        EXPECT_GE(count_frames_with_msgtype(fix->capture.frames, "2"), 1)
+            << "SC-003/I-VCT-7: at default, too-high must emit ResendRequest (strict baseline)";
+    }
+}
+
+// T012 witness 3 — SC-005, FR-007, I-VCT-8, C3.1
+// All four knob combinations behave per their axis — the two knobs are independent.
+// Each cell is asserted for its DISTINGUISHING outcome (not just end-state).
+//
+// Cell 1 (both=default): CompID mismatch → Disconnected (C1.1), too-low → Disconnected (C2.1).
+// Cell 2 (check_comp_id=false, validate_sequence_numbers=true):
+//   CompID mismatch → delivered (C1.2); too-low → Disconnected (C2.1).
+// Cell 3 (check_comp_id=true, validate_sequence_numbers=false):
+//   CompID mismatch → Disconnected (C1.1); too-low → delivered (C2.2).
+// Cell 4 (both=false):
+//   CompID mismatch → delivered (C1.2); too-low → delivered (C2.2).
+TEST(ValidationCompatToggles, Combination_Matrix_FourCells) {
+    // Helper lambda: build an acceptor fixture with specified knob settings.
+    auto make_acceptor_with_knobs = [](bool check_cid, bool validate_seq,
+                                        std::shared_ptr<fixpp::session::Application> app) {
+        auto fix = std::make_unique<Fixture>();
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+        fix->cfg.reset_seqnum_policy_field =
+            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->cfg.check_comp_id = check_cid;
+        fix->cfg.validate_sequence_numbers = validate_seq;
+        if (app) fix->eng.application = app;
+
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+        return fix;
+    };
+
+    // Cell 1: both-default (check_comp_id=true, validate_sequence_numbers=true)
+    // Distinguishing outcome: CompID mismatch → Disconnected, too-low → Disconnected.
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor_with_knobs(true, true, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell1 precondition: Active after Logon";
+
+        // CompID-mismatch test: must disconnect (C1.1).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG", "WRONG"));
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Cell1 (both-default): CompID mismatch must disconnect (C1.1)";
+    }
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor_with_knobs(true, true, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+        // Too-low test: must disconnect (C2.1).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));  // seq=1, expected=2
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Cell1 (both-default): too-low must disconnect (C2.1)";
+    }
+
+    // Cell 2: check_comp_id=false, validate_sequence_numbers=true (seqnum still strict).
+    // Distinguishing outcome: CompID mismatch → delivered (C1.2), too-low → Disconnected (C2.1).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor_with_knobs(false, true, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell2 precondition: Active after Logon";
+
+        // CompID-mismatch test: must be delivered, not disconnect (C1.2).
+        const int from_app_before = app->from_app_count;
+        fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG", "WRONG"));
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell2 (check_comp_id=off, seqval=on): CompID mismatch must NOT disconnect";
+        EXPECT_GT(app->from_app_count, from_app_before)
+            << "Cell2: CompID-mismatching frame must be delivered to fromApp";
+
+        // Too-low test: seqnum still strict → Disconnected (C2.1).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));  // seq=1, expected=3 now
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Cell2: too-low must still disconnect when validate_sequence_numbers=true";
+    }
+
+    // Cell 3: check_comp_id=true, validate_sequence_numbers=false (CompID still strict).
+    // Distinguishing outcome: CompID mismatch → Disconnected (C1.1), too-low → delivered (C2.2).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor_with_knobs(true, false, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell3 precondition: Active after Logon";
+
+        // Too-low test: must be delivered, not disconnect (C2.2).
+        const int from_app_before = app->from_app_count;
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));  // seq=1, expected=2 → too-low
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell3 (check_comp_id=on, seqval=off): too-low must NOT disconnect";
+        EXPECT_GT(app->from_app_count, from_app_before)
+            << "Cell3: too-low app frame must be delivered to fromApp";
+
+        // CompID-mismatch test: CompID still strict → Disconnected (C1.1).
+        fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG", "WRONG"));
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "Cell3: CompID mismatch must still disconnect when check_comp_id=true";
+    }
+
+    // Cell 4: both-off (check_comp_id=false, validate_sequence_numbers=false).
+    // Distinguishing outcome: CompID mismatch → delivered (C1.2), too-low → delivered (C2.2).
+    {
+        auto app = std::make_shared<CountingApp028>();
+        auto fix = make_acceptor_with_knobs(false, false, app);
+        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell4 precondition: Active after Logon";
+
+        // CompID-mismatch test: must be delivered (C1.2).
+        const int from_app_before_compid = app->from_app_count;
+        fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG", "WRONG"));
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell4 (both-off): CompID mismatch must NOT disconnect";
+        EXPECT_GT(app->from_app_count, from_app_before_compid)
+            << "Cell4: CompID-mismatching frame must be delivered";
+
+        // Too-low test: must be delivered (C2.2).
+        const int from_app_before_seqlow = app->from_app_count;
+        fix->feed(make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV"));  // seq=1, expected=3 now → too-low
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "Cell4 (both-off): too-low must NOT disconnect";
+        EXPECT_GT(app->from_app_count, from_app_before_seqlow)
+            << "Cell4: too-low frame must be delivered to fromApp";
+    }
+}
+
+// T012 witness 4 — FR-008, I-VCT-9, C3.2
+// Neither knob is read on any outbound construction path; outbound frames are
+// identical regardless of knob settings.
+//
+// Strategy: establish an Active session with all four knob combinations and
+// compare the outbound Logon frame bytes. All four should produce the same
+// outbound Logon (since outbound is unaffected by either knob). We also confirm
+// the session can emit after receiving in-order frames and the outbound frame is
+// the same across settings.
+//
+// Anchor: FR-008 (both knobs govern inbound validation only), I-VCT-9.
+TEST(ValidationCompatToggles, Inbound_Only_OutboundUnchanged) {
+    // Helper: build a fresh acceptor with specified knob settings, then capture
+    // the outbound Logon-ack frame (the first outbound frame after open + Logon).
+    auto capture_outbound_logon = [](bool check_cid, bool validate_seq) {
+        auto fix = std::make_unique<Fixture>();
+        fix->cfg.role = fixpp::session::session_role::acceptor;
+        fix->cfg.sender_comp_id = "SRV";
+        fix->cfg.target_comp_id = "CLI";
+        fix->cfg.begin_string = "FIX.4.4";
+        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+        fix->cfg.executor_override = fix->ioc.get_executor();
+        fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+        fix->cfg.reset_seqnum_policy_field =
+            fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
+            fix.capture(data);
+        };
+        fix->cfg.check_comp_id = check_cid;
+        fix->cfg.validate_sequence_numbers = validate_seq;
+
+        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open_fut.get();
+        fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+        // Return copies of outbound frames (the Logon-ack and any other admin).
+        return std::vector<std::vector<std::byte>>(fix->capture.frames);
+    };
+
+    // Capture outbound frames for all four knob combinations.
+    auto frames_both_default = capture_outbound_logon(true, true);
+    auto frames_compid_off   = capture_outbound_logon(false, true);
+    auto frames_seqval_off   = capture_outbound_logon(true, false);
+    auto frames_both_off     = capture_outbound_logon(false, false);
+
+    // Post-conditions (FR-008/I-VCT-9/C3.2):
+    //   Each combination must produce the same number of outbound frames.
+    ASSERT_EQ(frames_both_default.size(), frames_compid_off.size())
+        << "I-VCT-9/C3.2: check_comp_id knob must NOT change outbound frame count";
+    ASSERT_EQ(frames_both_default.size(), frames_seqval_off.size())
+        << "I-VCT-9/C3.2: validate_sequence_numbers knob must NOT change outbound frame count";
+    ASSERT_EQ(frames_both_default.size(), frames_both_off.size())
+        << "I-VCT-9/C3.2: neither knob must change outbound frame count";
+
+    // Each outbound frame must be byte-identical across all four combinations.
+    for (std::size_t i = 0; i < frames_both_default.size(); ++i) {
+        EXPECT_EQ(frames_both_default[i], frames_compid_off[i])
+            << "I-VCT-9/C3.2: check_comp_id=off must NOT change outbound frame[" << i << "]";
+        EXPECT_EQ(frames_both_default[i], frames_seqval_off[i])
+            << "I-VCT-9/C3.2: validate_sequence_numbers=off must NOT change outbound frame["
+            << i << "]";
+        EXPECT_EQ(frames_both_default[i], frames_both_off[i])
+            << "I-VCT-9/C3.2: both-off must NOT change outbound frame[" << i << "]";
+    }
+
+    // Also assert that the SeqnumManager's outbound counter (next_outbound) is the
+    // same across all combinations (confirming our OWN outgoing seqnums are unchanged).
+    // We do this by confirming all four sessions produced the same number of outbound
+    // frames (already asserted above) AND the outbound Logon carries the same seqnum.
+    ASSERT_FALSE(frames_both_default.empty())
+        << "I-VCT-9: at least one outbound frame must be emitted (the Logon-ack)";
+
+    // Verify the outbound Logon seqnum (tag 34) is identical across all four.
+    const std::string seqnum_default = extract_tag(frames_both_default[0], 34);
+    EXPECT_EQ(seqnum_default, extract_tag(frames_compid_off[0], 34))
+        << "I-VCT-9/C3.2: check_comp_id=off must NOT change outbound seqnum (tag 34)";
+    EXPECT_EQ(seqnum_default, extract_tag(frames_seqval_off[0], 34))
+        << "I-VCT-9/C3.2: validate_sequence_numbers=off must NOT change outbound seqnum";
+    EXPECT_EQ(seqnum_default, extract_tag(frames_both_off[0], 34))
+        << "I-VCT-9/C3.2: both-off must NOT change outbound seqnum (tag 34)";
+
+    // Verify our own CompIDs (49/56) in outbound frames are unchanged.
+    const std::string sender_default = extract_tag(frames_both_default[0], 49);
+    const std::string target_default = extract_tag(frames_both_default[0], 56);
+    EXPECT_EQ(sender_default, extract_tag(frames_compid_off[0], 49))
+        << "I-VCT-9/C3.2: check_comp_id=off must NOT change our own 49 (SenderCompID)";
+    EXPECT_EQ(target_default, extract_tag(frames_compid_off[0], 56))
+        << "I-VCT-9/C3.2: check_comp_id=off must NOT change our own 56 (TargetCompID)";
+    EXPECT_EQ("SRV", sender_default) << "I-VCT-9: our outbound 49 must be SRV";
+    EXPECT_EQ("CLI", target_default) << "I-VCT-9: our outbound 56 must be CLI";
+}
+
+// T012 witness 5 — [const §VIII.5], plan IX.1, C1 remediation
+// The S4 deliver-without-advance path (validate_sequence_numbers=false + out-of-order
+// frame) performs no new global-heap allocation.
+//
+// BINDING gate: mallocnesia LD_PRELOAD interceptor wrapping the session binary.
+// The alloc_guard_count() weak symbol is replaced by mallocnesia with a live
+// counter; the _mallocnesia ctest companion in CMakeLists.txt runs this binary
+// under LD_PRELOAD via tools/check_alloc.py.
+//
+// Without LD_PRELOAD: the weak stubs are no-ops and alloc_guard_count() returns 0
+// (the test still asserts the functional post-condition; the no-heap claim is only
+// proved by the _mallocnesia ctest variant).
+//
+// [[feedback_tracking_pmr_resource_false_pass]]: a counting_resource alone is a
+// false-pass because non-PMR std::vector / global-new escapes via global malloc,
+// invisible to the PMR. The LD_PRELOAD is the binding proof.
+//
+// Warm-up: the asio per-thread recycler (cancellation_slot / promise frame) is
+// primed by a warm-up pass of the SAME path before the guard window is opened,
+// so the measured window is in steady state.
+TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
+    // ── Setup OUTSIDE the guarded window ──────────────────────────────────────
+    // Build a session with validate_sequence_numbers=false and drive to Active.
+    // All allocation (Session ctor, coroutine frames, asio internals) happens here.
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session must be Active before the guarded window";
+
+    // Pre-build the inbound frame OUTSIDE the guard window so the vector allocation
+    // for the frame bytes does not appear inside the window.
+    // We use seq=1 (too-low, expected=2) — a representative S4 too-low path.
+    const auto too_low_frame = make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV");
+
+    // Warm-up: run the S4 deliver-without-advance path several times to prime the
+    // asio per-thread recycler (cancellation_slot's thread_info_base + promise frame
+    // recycling allocates on the FIRST call on a thread; afterwards it is zero-heap).
+    // After warm-up, fromApp has been called N times; we snapshot the count.
+    constexpr int kWarmup = 8;
+    for (int i = 0; i < kWarmup; ++i) {
+        fix->feed(too_low_frame);
+        // Confirm the warm-up passes deliver the frame (session stays Active).
+        if (fix->session->state() != fixpp::session::fsm_state::Active) {
+            GTEST_FAIL() << "Warm-up: session must stay Active after too-low with "
+                         << "validate_sequence_numbers=false (iteration " << i << ")";
+        }
+    }
+
+    const int from_app_snapshot = app->from_app_count;
+
+    // ── Guarded window: one S4 deliver-without-advance invocation ────────────
+    alloc_guard_start();
+
+    fix->feed(too_low_frame);
+
+    const long heap_allocs = alloc_guard_count();
+    alloc_guard_end();
+    // ── End of guarded window ─────────────────────────────────────────────────
+
+    // Functional post-condition: frame was delivered to fromApp.
+    EXPECT_GT(app->from_app_count, from_app_snapshot)
+        << "[const §VIII.5]: S4 deliver-without-advance path must still deliver the "
+           "frame to fromApp inside the guarded window";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "[const §VIII.5]: session must stay Active after S4 deliver-without-advance";
+
+    // No-heap post-condition (binding gate = mallocnesia LD_PRELOAD, not just this
+    // assertion — see the _mallocnesia ctest companion in CMakeLists.txt).
+    EXPECT_EQ(heap_allocs, 0L)
+        << "[const §VIII.5]: S4 deliver-without-advance must not touch the global heap; "
+           "heap_allocs=" << heap_allocs
+        << "; run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so to verify. "
+        << "[[feedback_tracking_pmr_resource_false_pass]]";
+}
+
 }  // namespace
