@@ -397,4 +397,274 @@ TEST(PersistentSeqnumHydrate, SkeletonBuilds) {
     SUCCEED();
 }
 
+// ── Phase 3 (T006) — RED witnesses: US1 outbound resume ──────────────────────
+//
+// All four witnesses below are written RED-first (before T007 wires ensure_hydrated_).
+// They fail because without ensure_hydrated_(), the seqnum manager starts at 1
+// regardless of the store's persisted value.
+//
+// Anchors: spec.md SC-001, FR-003/004/006; data-model.md W1/W8/W9a/W14;
+//          contracts/seqnum-hydrate.md C2.1–C2.6; research.md D-1/D-6/D-9.
+
+// W1 — Initiator_Restart_Resumes_Outbound (SC-001, FR-003/004)
+//
+// Pre-seed the persistent store to next_outbound=42. Build a fresh initiator
+// session over that store and call open(). The emitted Logon MUST carry 34=42
+// (not 34=1). Before T007, the seqnum manager ignores the store, so 34=1 and
+// this witness FAILs.
+TEST(PersistentSeqnumHydrate, Initiator_Restart_Resumes_Outbound) {
+    // FaultStoreFactory: persistent (inherits yields_persistent_store()==true),
+    // seeded next_outbound=42 (what the store says the next outbound should be).
+    auto factory =
+        std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/1, /*seeded_outbound=*/42);
+
+    auto fix = make_initiator(factory);
+
+    // Exactly one outbound frame emitted: the Logon.
+    ASSERT_EQ(fix->capture.frames.size(), 1u) << "Expected exactly one outbound frame (Logon)";
+
+    const auto& logon_frame = fix->capture.frames[0];
+    const std::string seq_str = extract_tag(logon_frame, 34);
+    ASSERT_FALSE(seq_str.empty()) << "Logon frame missing tag 34";
+    const int seq = std::stoi(seq_str);
+
+    // Post T007: hydrate seeds next_outbound=42 → Logon emits 34=42.
+    // Pre T007 (RED): manager starts at 1, Logon emits 34=1 → FAIL.
+    EXPECT_EQ(seq, 42) << "Logon must carry 34=42 (resumed from persistent store); got 34=" << seq;
+}
+
+// W8 — Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect (INV-H3)
+//
+// Asserts that ensure_hydrated_ fires (reads the store) EXACTLY ONCE per session
+// for both initiator and acceptor, and that a second open attempt (simulating a
+// reconnect on the same session object) does NOT trigger a re-hydrate.
+//
+// Observable proxy: the FaultStore's call_count tracks next_seqnum calls.
+// ensure_hydrated_ issues exactly 2 reads (inbound=false, outbound=false) per hydrate.
+// After the first open, call_count == 2 (initiator) or 2 (acceptor).
+// The manager's next_outbound_unsafe() must NOT regress after the initial hydrate:
+// if re-hydration occurred, the manager would be reset to the store's (lower) value.
+//
+// Pre T007 (RED):
+//   - Initiator: call_count == 0 (no reads at all) → FAIL (expected 2).
+//   - Acceptor: call_count == 0 (no reads at all) → FAIL (expected 2).
+TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect) {
+    // ── Initiator arm ────────────────────────────────────────────────────────
+    {
+        auto factory = std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/1,
+                                                           /*seeded_outbound=*/42);
+        auto fix = make_initiator(factory);
+
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr) << "FaultStoreFactory must have minted a store";
+
+        // After open() + Logon emission, ensure_hydrated_ must have fired exactly
+        // once: 2 reads (next_seqnum(inbound,false) + next_seqnum(outbound,false)).
+        // Phase 3 has no persist writes, so ALL call_count increments are hydrate reads.
+        EXPECT_EQ(store->call_count, 2)
+            << "Initiator: ensure_hydrated_ must read the store exactly twice (in+out);"
+            << " call_count=" << store->call_count;
+
+        // The manager MUST reflect the hydrated outbound value.
+        const seqnum_t next_out =
+            fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        // After emitting Logon at seqnum 42, next_outbound advances to 43.
+        EXPECT_EQ(next_out, 43u)
+            << "Initiator: after emitting Logon(34=42), next_outbound must be 43; got "
+            << next_out;
+
+        // "Not on reconnect": a second open() on the SAME session object returns
+        // already-open (does NOT run ensure_hydrated_ again). The call_count stays 2
+        // and next_outbound stays 43 (not regressed to 42).
+        // We verify by checking the count doesn't change — no additional ioc.run() needed
+        // since open() on an already-open session returns immediately without suspend.
+        const int count_before = store->call_count;
+        // open() on an already-open session returns session_already_open; we swallow it.
+        auto open2_fut =
+            asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        fix->ioc.run_for(1s);
+        fix->ioc.restart();
+        (void)open2_fut;  // expected to error; we only care about the side effects.
+
+        EXPECT_EQ(store->call_count, count_before)
+            << "Initiator: a second open() (reconnect simulation) must NOT re-hydrate;"
+            << " call_count changed from " << count_before << " to " << store->call_count;
+        EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_outbound_unsafe(), next_out)
+            << "Initiator: next_outbound must not regress on a simulated reconnect";
+    }
+
+    // ── Acceptor arm ─────────────────────────────────────────────────────────
+    {
+        auto factory = std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/1,
+                                                           /*seeded_outbound=*/37);
+        auto fix = make_acceptor(factory, /*peer_logon_seq=*/1);
+
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr) << "FaultStoreFactory must have minted a store";
+
+        // After make_acceptor completes (NotConnected → Active via peer Logon),
+        // ensure_hydrated_ must have fired exactly once: 2 reads.
+        EXPECT_EQ(store->call_count, 2)
+            << "Acceptor: ensure_hydrated_ must read the store exactly twice (in+out);"
+            << " call_count=" << store->call_count;
+
+        // The acceptor reply Logon samples next_outbound BEFORE advancing.
+        // After hydrating to 37 and emitting the reply Logon at seq=37, next_outbound==38.
+        const seqnum_t next_out =
+            fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        EXPECT_EQ(next_out, 38u)
+            << "Acceptor: after emitting reply Logon(34=37), next_outbound must be 38; got "
+            << next_out;
+    }
+}
+
+// W9a — ResetOnLogon_Wins_Over_OutboundHydrate (INV-H5)
+//
+// When reset_on_logon=true, the durable reset fires inside emit_initiator_logon_()
+// AFTER ensure_hydrated_() has seeded next_outbound=42 → the reset wins, bringing
+// next_outbound back to 1. The emitted Logon carries 34=1, NOT 34=42.
+// (The outbound hydrate runs BEFORE the reset_on_logon block; the reset overwrites it.)
+//
+// Pre T007 (RED): ensure_hydrated_ is not called, so next_outbound starts at 1 and
+// reset_on_logon resets it to 1 again — the Logon emits 34=1 for the WRONG reason
+// (hydrate never ran, not because reset won). The test would accidentally pass if we
+// only checked 34=1. We also check that the store was read (call_count==2) to confirm
+// hydrate DID run and was overridden. Pre T007, call_count==0 → FAIL.
+TEST(PersistentSeqnumHydrate, ResetOnLogon_Wins_Over_OutboundHydrate) {
+    // reset_on_logon=true + persisted {in=37, out=42}.
+    auto factory =
+        std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/37, /*seeded_outbound=*/42);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    ASSERT_EQ(fix->capture.frames.size(), 1u) << "Expected exactly one outbound frame (Logon)";
+    const auto& logon_frame = fix->capture.frames[0];
+
+    // Post T007: hydrate seeds {37,42}; reset_on_logon fires and brings outbound to 1.
+    const std::string seq_str = extract_tag(logon_frame, 34);
+    ASSERT_FALSE(seq_str.empty()) << "Logon frame missing tag 34";
+    const int seq = std::stoi(seq_str);
+    EXPECT_EQ(seq, 1)
+        << "reset_on_logon must win over outbound hydrate; Logon must carry 34=1; got 34=" << seq;
+
+    // The hydrate reads MUST have fired (call_count==2) to prove "hydrate ran but reset won",
+    // not "hydrate never ran and reset happened to produce the same result".
+    // Pre T007 (RED): call_count==0 → FAIL on this check even if 34=1 accidentally matches.
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(store->call_count, 2)
+        << "ensure_hydrated_ must have run (2 reads) before reset_on_logon fired;"
+        << " call_count=" << store->call_count;
+}
+
+// W14 — HydrateReadFailure_Fatal_NoPartialSeed (SC-005, FR-006, C2.3, D-9/INV-H6)
+//
+// inject a next_seqnum(dir,false) READ failure on the hydrate path → session
+// transitions to Disconnected (fatal), manager is NOT partially seeded,
+// hydrated_ is left false.
+//
+// Split:
+//   (a) First read (inbound,false) fails → no mutation at all.
+//   (b) Second read (outbound,false) fails after the first succeeded → still no mutation.
+//
+// "No partial seed" is witnessed by asserting both manager counters remain at their
+// construction defaults (next_inbound==1, next_outbound==1).
+//
+// Pre T007 (RED): ensure_hydrated_ is not called, so:
+//   - The session does NOT go to Disconnected (stays LogonSent) → FAIL.
+//   - The call_count is 0 (no reads) → FAIL (though moot since first assertion fails).
+
+// W14(a): first read (inbound) fails → session Disconnected, manager unchanged.
+TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_FirstReadFails) {
+    // fail_on_nth_call=1: fail on the FIRST next_seqnum call (the inbound read).
+    auto factory = std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/10,
+                                                       /*seeded_outbound=*/20,
+                                                       /*fail_on_nth_call=*/1);
+    // make_initiator calls open() which triggers ensure_hydrated_ → first read fails.
+    // We cannot use make_initiator (it asserts LogonSent) — build manually.
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::initiator;
+    fix->cfg.sender_comp_id = "CLI";
+    fix->cfg.target_comp_id = "SRV";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = factory;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(2s);
+    fix->ioc.restart();
+    (void)open_fut;  // error expected; we care about the side effects.
+
+    // Post T007: hydrate fails on first read → session must be Disconnected.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "W14(a): first-read failure must transition session to Disconnected";
+
+    // No frame must have been emitted (Logon was never built/sent).
+    EXPECT_EQ(fix->capture.frames.size(), 0u)
+        << "W14(a): no frame must be emitted when hydrate fails before the Logon";
+
+    // Manager must be completely unmodified — next_inbound==1, next_outbound==1.
+    // (C2.3: "no partial seed" — mutate only after BOTH reads succeed.)
+    const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+    EXPECT_EQ(ni, 1u)
+        << "W14(a): next_inbound must remain at construction default 1 after first-read failure;"
+        << " got " << ni;
+    EXPECT_EQ(no, 1u)
+        << "W14(a): next_outbound must remain at construction default 1 after first-read failure;"
+        << " got " << no;
+}
+
+// W14(b): second read (outbound) fails after the first succeeded → manager still unchanged.
+TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_SecondReadFails) {
+    // fail_on_nth_call=2: the FIRST call succeeds (inbound read), the SECOND fails
+    // (outbound read). This proves "no partial seed" even when inbound was read OK.
+    auto factory = std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/10,
+                                                       /*seeded_outbound=*/20,
+                                                       /*fail_on_nth_call=*/2);
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::initiator;
+    fix->cfg.sender_comp_id = "CLI";
+    fix->cfg.target_comp_id = "SRV";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = factory;
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(2s);
+    fix->ioc.restart();
+    (void)open_fut;
+
+    // Post T007: hydrate fails on second read → session must be Disconnected.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "W14(b): second-read failure must transition session to Disconnected";
+
+    // No frame emitted.
+    EXPECT_EQ(fix->capture.frames.size(), 0u)
+        << "W14(b): no frame must be emitted when hydrate fails before the Logon";
+
+    // Manager must be completely unmodified — C2.3 "no partial seed".
+    // Even though the inbound read succeeded, hydrate() is not called until BOTH reads
+    // succeed; the manager stays at construction defaults.
+    const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+    EXPECT_EQ(ni, 1u)
+        << "W14(b): next_inbound must remain at construction default 1 after second-read failure;"
+        << " got " << ni;
+    EXPECT_EQ(no, 1u)
+        << "W14(b): next_outbound must remain at construction default 1 after second-read failure;"
+        << " got " << no;
+}
+
 }  // namespace

@@ -532,6 +532,81 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
     co_return fixpp::core::expected_t<void>{};
 }
 
+// 029 T007 — one-shot cold-open hydration gate (C2.1–C2.6 / INV-H3/H4/H5/H6).
+//
+// Called at:
+//   (a) the first line of emit_initiator_logon_() — before the reset_on_logon block
+//       (C2.5/C2.6: outbound hydrate runs BEFORE reset so 024 reset still wins).
+//   (b) the acceptor NotConnected inbound-Logon case, AFTER the peer_sent_reset /
+//       reset_on_logon header pre-scan and BEFORE check_inbound (C2.5).
+//
+// Phase 3 implements the OUTBOUND seed only (C2.4 split; inbound seed is Phase 4 T011).
+// At this stage hydrate() always receives next_inbound=1 (construction value) so the
+// inbound counter is not changed.  The outbound counter is loaded from the store.
+//
+// Body design (C2.1–C2.3, D-9):
+//   one-shot latch  : if (hydrated_)  co_return ok   — already done this lifetime
+//   re-entrancy     : if (hydrating_) co_return ok   — concurrent call on same strand
+//   non-persistent  : if (!store_is_persistent_) skip reads, co_return ok (INV-H4)
+//   read both       : next_seqnum(inbound,false) then next_seqnum(outbound,false)
+//   read failure    : clear hydrating_, Disconnected, no partial seed (C2.3/INV-H6)
+//   hydrate         : seqnum_mgr_.hydrate(1 [Phase-3 inbound placeholder], *out)
+//   latch           : hydrated_ = true; hydrating_ = false (set ONLY after success, D-9)
+//
+// [029 tasks T007; contracts C2.1–C2.6; data-model INV-H3..H6; research D-6/D-9/D-10]
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_() noexcept {
+    // One-shot: already hydrated this session lifetime.
+    if (hydrated_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    // Re-entrancy guard (strand-confined; a second co_await before the first returns).
+    if (hydrating_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    hydrating_ = true;
+
+    // Non-persistent skip (D-10 / C2.2 / INV-H4): memory store, null store, or any
+    // store whose factory returned yields_persistent_store()==false.
+    // No read, no mutation — byte-identical to the pre-feature baseline.
+    if (!store_is_persistent_) {
+        hydrating_ = false;
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // Read both counters from the store (C2.3).
+    // IMPORTANT: mutate the manager only after BOTH reads succeed (no partial seed).
+    auto in_r = co_await store_->next_seqnum(direction_t::inbound, false);
+    if (!in_r) {
+        hydrating_ = false;
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(in_r.error());
+    }
+    auto out_r = co_await store_->next_seqnum(direction_t::outbound, false);
+    if (!out_r) {
+        hydrating_ = false;
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(out_r.error());
+    }
+
+    // Phase 3: apply the OUTBOUND seed unconditionally.
+    // Pass the construction value 1 for inbound — the inbound seed is Phase 4 T011.
+    // [029 tasks T007: "pass construction value 1 for inbound at this stage"]
+    auto hydrate_r =
+        co_await seqnum_mgr_.hydrate(/*next_inbound=*/seqnum_min, /*next_outbound=*/*out_r);
+    if (!hydrate_r) {
+        hydrating_ = false;
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(hydrate_r.error());
+    }
+
+    // Latch success: set hydrated_ ONLY after both reads and hydrate() succeeded (D-9).
+    // hydrating_ is cleared so a future call (e.g. on a different reconnect) can proceed
+    // if hydrated_ is somehow cleared (it is not today, but the discipline is explicit).
+    hydrated_ = true;
+    hydrating_ = false;
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
 // Two call sites: open() (per-session-direct, AT open) and drive_reconnect()
 // (engine lazy-connect, POST-connect). The build/seqnum/store-emit sequence and
@@ -547,6 +622,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
     // stamp_sending_time internal helper is defined after open() in this TU;
     // use the public two-arg form from sending_time.hpp with a local buffer.
+
+    // 029 T007 — call site 1 (initiator): hydrate BEFORE the reset_on_logon block
+    // so the store-recovered outbound value is in the manager when peek_outbound()
+    // is sampled below; the reset_on_logon block then overwrites it (024 reset wins,
+    // INV-H5 / C2.6). One-shot latch makes this safe for both the direct open() and
+    // engine-managed drive_reconnect() call paths. [[feedback_initiator_logon_wire_at_shared_emit_point]]
+    // [029 tasks T007 call-site 1; contracts C2.5; data-model INV-H3/H5; research D-6]
+    {
+        auto h_r = co_await ensure_hydrated_();
+        if (!h_r) {
+            // ensure_hydrated_ already transitioned to Disconnected on failure (C2.3).
+            co_return std::unexpected(h_r.error());
+        }
+    }
 
     // 024 T007: reset_on_logon — durable reset here (the shared emission point)
     // so BOTH open() (per-session-direct, engine_managed=false) AND drive_reconnect()
@@ -1602,6 +1691,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (!rst_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
+                    }
+                }
+
+                // 029 T007 — call site 2 (acceptor): hydrate AFTER the peer_sent_reset /
+                // reset_on_logon header pre-scan (C2.5) and BEFORE check_inbound (C2.4/C2.6).
+                // Phase 3: outbound seed only; inbound seed is Phase 4 T011.
+                // The one-shot latch prevents re-hydration on reconnect (INV-H3).
+                // [029 tasks T007 call-site 2; contracts C2.4/C2.5; data-model INV-H3/H5]
+                {
+                    auto h_r = co_await ensure_hydrated_();
+                    if (!h_r) {
+                        // ensure_hydrated_ already transitioned to Disconnected (C2.3).
+                        co_return std::unexpected(h_r.error());
                     }
                 }
 
