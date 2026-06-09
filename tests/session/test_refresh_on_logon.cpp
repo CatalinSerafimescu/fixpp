@@ -74,6 +74,20 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
+// extract_tag: parse a tag value from a raw FIX frame.
+// Returns "" if the tag is not present. Mirrors 029 harness.
+static std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
+    const auto* data = reinterpret_cast<const char*>(frame.data());
+    std::string sv(data, frame.size());
+    const std::string needle = std::to_string(tag) + "=";
+    auto pos = sv.find(needle);
+    if (pos == std::string::npos) return "";
+    pos += needle.size();
+    auto end = sv.find('\x01', pos);
+    if (end == std::string::npos) return sv.substr(pos);
+    return sv.substr(pos, end - pos);
+}
+
 static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
                                              std::string_view msg_type, std::uint32_t seq,
                                              std::string_view sender, std::string_view target,
@@ -111,6 +125,17 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
+// make_logon_reset: build a Logon with 141=Y (ResetSeqNumFlag). Mirrors 029 harness.
+static std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
+                                               std::string_view s, std::string_view t,
+                                               int hbt = 30) {
+    std::string extra;
+    extra += field(98, "0");
+    extra += field(108, std::to_string(hbt));
+    extra += field(141, "Y");
+    return make_fix_frame(bs, "A", seq, s, t, extra);
+}
+
 // ── Outbound capture ──────────────────────────────────────────────────────────
 
 struct OutboundCapture {
@@ -135,10 +160,15 @@ using fixpp::session::visit_result;
 
 class FaultStore final : public MessageStore {
 public:
-    explicit FaultStore(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1)
+    // fail_on_nth_call: if nonzero, the Nth TOTAL next_seqnum call fails with
+    //   store_io_failure. Used for W7 (T033): fail the forced re-read on 2nd logon
+    //   (cold open uses calls 1+2; set fail_on_nth_call=3 to fail 2nd-logon's read).
+    explicit FaultStore(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1,
+                        int fail_on_nth_call = 0)
         : MessageStore(flush_thunk_for<FaultStore>()),
           next_inbound_(seeded_inbound),
-          next_outbound_(seeded_outbound) {}
+          next_outbound_(seeded_outbound),
+          fail_on_nth_call_(fail_on_nth_call) {}
 
     // Observable state for witnesses:
     mutable int call_count{0};  // total next_seqnum calls (reads + writes)
@@ -158,6 +188,9 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
         direction_t dir, bool increment) noexcept override {
         ++call_count;
+        if (fail_on_nth_call_ > 0 && call_count >= fail_on_nth_call_) {
+            co_return std::unexpected(fixpp::core::error::store_io_failure);
+        }
         if (increment) {
             if (dir == direction_t::inbound) {
                 ++next_inbound_;
@@ -183,18 +216,22 @@ public:
 private:
     seqnum_t next_inbound_;
     seqnum_t next_outbound_;
+    int fail_on_nth_call_{0};
 };
 
 // FaultStoreFactory: wraps FaultStore, yields_persistent_store() configurable.
-// persistent=true (default) → persistent store (used by W1/W2/W3).
-// persistent=false          → non-persistent store (used by W4 to test INV-RoL-2).
+// persistent=true (default)  → persistent store (used by W1/W2/W3/W5a/W6).
+// persistent=false           → non-persistent store (used by W4 to test INV-RoL-2).
+// fail_on_nth_call (default 0) → passed to FaultStore; used by W7 (T033) to inject
+//   a store-read failure on the 2nd logon forced re-hydrate.
 class FaultStoreFactory final : public MessageStoreFactory {
 public:
     explicit FaultStoreFactory(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1,
-                               bool persistent = true)
+                               bool persistent = true, int fail_on_nth_call = 0)
         : seeded_inbound_(seeded_inbound),
           seeded_outbound_(seeded_outbound),
-          persistent_(persistent) {}
+          persistent_(persistent),
+          fail_on_nth_call_(fail_on_nth_call) {}
 
     mutable FaultStore* last_store{nullptr};
 
@@ -204,7 +241,8 @@ public:
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
-        auto store = std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_);
+        auto store = std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_,
+                                                  fail_on_nth_call_);
         last_store = store.get();
         return store;
     }
@@ -213,7 +251,29 @@ private:
     seqnum_t seeded_inbound_;
     seqnum_t seeded_outbound_;
     bool persistent_;
+    int fail_on_nth_call_;
 };
+
+// ── strip_tag: remove a FIX tag=value\x01 span from raw bytes ─────────────────
+//
+// Used by W5a to exclude tag 52 (SendingTime) from byte-identity comparison.
+// The returned vector has the tag=value\x01 span removed; all other bytes preserved.
+static std::vector<std::byte> strip_tag(const std::vector<std::byte>& frame, int tag) {
+    const auto* data = reinterpret_cast<const char*>(frame.data());
+    const std::size_t sz = frame.size();
+    const std::string needle = std::to_string(tag) + "=";
+    std::string sv(data, sz);
+    auto pos = sv.find(needle);
+    if (pos == std::string::npos) return frame;  // tag not present; return as-is
+    auto end = sv.find('\x01', pos);
+    if (end == std::string::npos) end = sz - 1;  // no SOH; remove to end
+    // Remove [pos, end] inclusive (includes the trailing SOH)
+    std::vector<std::byte> result;
+    result.reserve(sz - (end + 1 - pos));
+    for (std::size_t i = 0; i < pos; ++i) result.push_back(frame[i]);
+    for (std::size_t i = end + 1; i < sz; ++i) result.push_back(frame[i]);
+    return result;
+}
 
 // ── MockReconnectFactory: TransportFactory returning mock_transport ────────────
 //
@@ -221,10 +281,16 @@ private:
 // make() returns a mock_transport with handshake_succeeds=true and empty inbound
 // (so async_read_some immediately returns EOF after the 2nd Logon is emitted).
 // cert_source_snapshot() returns nullptr (no cert rotation; step 2 safe with snap=null).
+//
+// last_transport: raw pointer to the most-recently created mock_transport. Remains
+// valid as long as the session holds the transport (session outlives the test scope).
+// Used by W5a to read outbound_bytes_seen() from the reconnect transport.
 
 class MockReconnectFactory final : public fixpp::transport::TransportFactory {
 public:
     std::atomic<int> make_call_count{0};
+    // Raw pointer to the last transport created. Owned by the session.
+    fixpp::transport::test::mock_transport* last_transport{nullptr};
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
         asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
@@ -233,8 +299,10 @@ public:
         fixpp::transport::test::Script script;
         script.handshake_succeeds = true;
         // Empty inbound → immediate EOF after connect+handshake.
-        return std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
-                                                                        std::move(script));
+        auto t = std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
+                                                                          std::move(script));
+        last_transport = t.get();
+        return t;
     }
 
     [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
@@ -324,14 +392,20 @@ struct ReconnectInitiatorFixture {
 
 // refresh_on_logon: true for W1/W2 (knob-on); false for W3 (knob-off byte-identity).
 // persistent: true (default) for persistent store; false for W4 (non-persistent no-op).
+// policy: bilateral_lenient (default) for W1-W4; bilateral_strict for W5a/W5b.
+// fail_on_nth_call: 0 (default) for normal stores; 3 for W7 (fail 2nd-logon re-read).
 static ReconnectInitiatorFixture make_reconnect_initiator(
     seqnum_t seeded_in, seqnum_t seeded_out,
-    bool refresh_on_logon = true, bool persistent = true) {
+    bool refresh_on_logon = true, bool persistent = true,
+    fixpp::session::reset_seqnum_policy policy =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient,
+    int fail_on_nth_call = 0) {
     ReconnectInitiatorFixture result;
     result.fix = std::make_unique<Fixture>();
     auto& fix = *result.fix;
 
-    auto store_factory = std::make_shared<FaultStoreFactory>(seeded_in, seeded_out, persistent);
+    auto store_factory = std::make_shared<FaultStoreFactory>(seeded_in, seeded_out, persistent,
+                                                             fail_on_nth_call);
     auto transport_factory = std::make_shared<MockReconnectFactory>();
     result.transport_fac = transport_factory.get();
 
@@ -346,7 +420,7 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
     fix.cfg.store_factory = store_factory;
     fix.cfg.transport_factory_override = transport_factory;
     fix.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
-    fix.cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix.cfg.reset_seqnum_policy_field = policy;
     fix.cfg.refresh_on_logon = refresh_on_logon;
     fix.cfg.transport_send = [&fix](std::span<const std::byte> data) { fix.capture(data); };
 
@@ -365,6 +439,62 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
     // Capture the FaultStore pointer for observable state assertions.
     result.store = store_factory->last_store;
     EXPECT_NE(result.store, nullptr) << "FaultStoreFactory must have minted a store";
+
+    return result;
+}
+
+// ── make_acceptor: acceptor session in NotConnected (not yet fed a Logon) ────
+//
+// Builds an acceptor, calls open() to reach NotConnected. Does NOT feed a peer Logon
+// (W6 does that explicitly). Mirrors 029's make_acceptor but leaves the session in
+// NotConnected so the test controls the peer Logon.
+//
+// refresh_on_logon: true for W6 (knob-on path at call-site 2).
+// store_factory: pre-seeded FaultStoreFactory.
+
+struct AcceptorFixture {
+    std::unique_ptr<Fixture> fix;
+    FaultStore* store{nullptr};
+};
+
+static AcceptorFixture make_acceptor_notconnected(
+    std::shared_ptr<MessageStoreFactory> store_factory, bool refresh_on_logon,
+    fixpp::session::reset_seqnum_policy policy =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient) {
+    AcceptorFixture result;
+    result.fix = std::make_unique<Fixture>();
+    auto& fix = *result.fix;
+
+    auto* raw_factory = dynamic_cast<FaultStoreFactory*>(store_factory.get());
+
+    fix.cfg.role = fixpp::session::session_role::acceptor;
+    fix.cfg.sender_comp_id = "SRV";
+    fix.cfg.target_comp_id = "CLI";
+    fix.cfg.begin_string = "FIX.4.4";
+    fix.cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix.cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix.cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix.cfg.executor_override = fix.ioc.get_executor();
+    fix.cfg.store_factory = std::move(store_factory);
+    fix.cfg.reset_seqnum_policy_field = policy;
+    fix.cfg.refresh_on_logon = refresh_on_logon;
+    fix.cfg.reset_on_logon = false;
+    fix.cfg.transport_send = [&fix](std::span<const std::byte> data) { fix.capture(data); };
+
+    fix.session = std::make_unique<fixpp::session::Session>(fix.eng, fix.cfg);
+
+    auto open_fut = asio::co_spawn(fix.ioc, fix.session->open(), asio::use_future);
+    fix.ioc.run_for(1s);
+    fix.ioc.restart();
+    (void)open_fut.get();
+
+    EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::NotConnected)
+        << "make_acceptor_notconnected: session must be in NotConnected after open()";
+
+    if (raw_factory) {
+        result.store = raw_factory->last_store;
+        EXPECT_NE(result.store, nullptr) << "FaultStoreFactory must have minted a store";
+    }
 
     return result;
 }
@@ -789,4 +919,385 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
         << "W4: 2nd Logon emits at seq=2 (no re-hydrate, outbound stayed at 2) → peek=3. "
            "Actual peek_outbound="
         << fix.session->seqnum_mgr_test_access().peek_outbound();
+}
+
+// ── Phase 4 (T030) — W5a: BilateralStrict_KnobOn_SuppressRehydrate ───────────
+//
+// FR-008 / SC-005 / INV-RoL-3: refresh_on_logon=true with bilateral_strict policy →
+//   refresh_active = cfg_.refresh_on_logon && policy != bilateral_strict = false
+//   → force=false → 029 one-shot latch fires → ZERO extra store reads on 2nd logon.
+//   Establishment is byte-identical to the knob-OFF bilateral_strict path.
+//
+// bilateral_strict always emits 141=Y. With non-1 store values but bilateral_strict
+// suppressing the re-hydrate, the 2nd Logon carries the LIVE manager's outbound seq
+// (not the store's), identical to what the knob-off path would emit.
+//
+// Direct assertions:
+//   (a) Zero extra reads on 2nd logon (call_count unchanged from cold-open N=2).
+//       Proves bilateral_strict suppresses refresh even when knob is ON (INV-RoL-3).
+//   (b) The 2nd Logon bytes (excluding tag 52 SendingTime — wall-clock volatile) are
+//       byte-identical between knob-on strict and knob-off strict sessions started from
+//       the same manager state. Both frames come from MockReconnectFactory::last_transport
+//       outbound_bytes_seen(). This directly witnesses "no NEW malformed Logon attributable
+//       to the knob": both paths emitted the same 34=<N>, 141=Y, CheckSum, etc.
+//
+// Anchors: data-model.md W5a; FR-008; SC-005; INV-RoL-3;
+//          [[feedback_witness_asserts_named_postcondition_not_proxy]](b).
+
+TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
+    using fixpp::session::reset_seqnum_policy;
+
+    // Seed store at {in=37, out=42}. bilateral_strict. refresh_on_logon=true (knob-on).
+    auto result_on = make_reconnect_initiator(
+        /*seeded_in=*/37, /*seeded_out=*/42,
+        /*refresh_on_logon=*/true, /*persistent=*/true,
+        /*policy=*/reset_seqnum_policy::bilateral_strict);
+    auto& fix_on = *result_on.fix;
+    auto* store_on = result_on.store;
+    ASSERT_NE(store_on, nullptr);
+
+    // Cold open done. bilateral_strict → cold Logon includes 141=Y and 34=42 (L-029-3 gap).
+    ASSERT_EQ(store_on->call_count, 2)
+        << "W5a precondition: cold open must issue exactly 2 store reads";
+
+    // Snapshot the live counters after cold open:
+    // next_inbound=37 (seeded, no inbound yet); peek_outbound=43 (42+1 after Logon emission).
+    const seqnum_t in_before = fix_on.session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t out_before = fix_on.session->seqnum_mgr_test_access().peek_outbound();
+
+    const int call_count_before = store_on->call_count;  // = 2 after cold open
+
+    // Drive 2nd logon (knob-ON, strict).
+    auto reconnect_fut_on = asio::co_spawn(
+        fix_on.ioc, fix_on.session->drive_reconnect(), asio::use_future);
+    fix_on.ioc.run_for(3s);
+    fix_on.ioc.restart();
+    {
+        auto rr = reconnect_fut_on.get();
+        ASSERT_TRUE(rr.has_value())
+            << "W5a vehicle (knob-on): drive_reconnect() must succeed";
+    }
+    fix_on.ioc.run_for(1s);
+    fix_on.ioc.restart();
+
+    // (a) Zero extra reads: bilateral_strict suppresses refresh even when knob is ON.
+    EXPECT_EQ(store_on->call_count, call_count_before)
+        << "W5a(a): bilateral_strict must suppress re-hydrate even with refresh_on_logon=true. "
+           "call_count must be unchanged from cold-open value "
+        << call_count_before << " got=" << store_on->call_count
+        << ". Non-zero delta means INV-RoL-3 violated.";
+
+    // Capture the bytes the knob-ON session emitted on the 2nd logon transport.
+    // last_transport points to the mock transport created by drive_reconnect().
+    ASSERT_NE(result_on.transport_fac->last_transport, nullptr)
+        << "W5a: reconnect transport must have been created";
+    const std::vector<std::byte> on_raw =
+        result_on.transport_fac->last_transport->outbound_bytes_seen();
+    ASSERT_FALSE(on_raw.empty())
+        << "W5a: knob-on strict 2nd-logon transport must have emitted at least one frame";
+
+    // --- Build knob-OFF strict session with the same starting state. ---
+    auto result_off = make_reconnect_initiator(
+        /*seeded_in=*/37, /*seeded_out=*/42,
+        /*refresh_on_logon=*/false, /*persistent=*/true,
+        /*policy=*/reset_seqnum_policy::bilateral_strict);
+    auto& fix_off = *result_off.fix;
+
+    // Bring the knob-off session to the same live counter state as knob-on after cold open.
+    fix_off.session->seqnum_mgr_test_access().set_counters_for_test(
+        /*next_inbound=*/in_before, /*next_outbound=*/out_before);
+
+    auto reconnect_fut_off = asio::co_spawn(
+        fix_off.ioc, fix_off.session->drive_reconnect(), asio::use_future);
+    fix_off.ioc.run_for(3s);
+    fix_off.ioc.restart();
+    {
+        auto rr = reconnect_fut_off.get();
+        ASSERT_TRUE(rr.has_value())
+            << "W5a vehicle (knob-off): drive_reconnect() must succeed";
+    }
+    fix_off.ioc.run_for(1s);
+    fix_off.ioc.restart();
+
+    ASSERT_NE(result_off.transport_fac->last_transport, nullptr)
+        << "W5a: knob-off reconnect transport must have been created";
+    const std::vector<std::byte> off_raw =
+        result_off.transport_fac->last_transport->outbound_bytes_seen();
+    ASSERT_FALSE(off_raw.empty())
+        << "W5a: knob-off strict 2nd-logon transport must have emitted at least one frame";
+
+    // (b) Byte-identical 2nd Logon (tag 52 excluded — wall-clock volatile).
+    // Both sessions started from {in_before, out_before}, bilateral_strict, neither
+    // re-hydrated → both must emit the identical Logon bytes (same 34=<N>, 141=Y, etc.).
+    // strip_tag(52) removes "52=<timestamp>\x01" before comparison.
+    const auto on_stripped = strip_tag(on_raw, 52);
+    const auto off_stripped = strip_tag(off_raw, 52);
+
+    EXPECT_EQ(on_stripped, off_stripped)
+        << "W5a(b): knob-on and knob-off bilateral_strict 2nd-Logon frames must be "
+           "byte-identical (excluding tag 52 SendingTime). "
+           "Non-equal means the knob influenced the strict 2nd Logon (INV-RoL-3 violated).";
+}
+
+// ── Phase 4 (T031) — W5b: BilateralStrict_KnobOff_L029_3_Gap_Witness ─────────
+//
+// L-029-3 inherited gap witness. This is NOT a correctness witness — it documents
+// the AS-IS cold-open behaviour under bilateral_strict with non-1 store outbound.
+//
+// bilateral_strict cold open: the store{out=42} is applied to the manager, then the
+// Logon is emitted with 34=42 AND 141=Y. A peer (e.g. QFcpp) that validates
+// ResetSeqNumFlag + SeqNum==1 would reject this Logon as malformed. This is an
+// inherited gap from 029, NOT fixed by 025.
+//
+// Assertion: document what the cold Logon actually carries (34 and 141 values),
+// asserting ONLY that the cold seed ran (call_count=2 after open). Does NOT assert
+// the Logon is well-formed. Clearly labeled to avoid future misreading.
+//
+// Anchors: data-model.md W5b; (L-029-3 gap); NOT a 025 FR/SC guarantee.
+
+TEST(RefreshOnLogon, W5b_BilateralStrict_KnobOff_L029_3_Gap_Witness) {
+    using fixpp::session::reset_seqnum_policy;
+
+    // knob-OFF, bilateral_strict, non-1 store {in=37, out=42}.
+    // This is the L-029-3 scenario: strict policy + non-1 outbound = potential malformed Logon.
+    auto result = make_reconnect_initiator(
+        /*seeded_in=*/37, /*seeded_out=*/42,
+        /*refresh_on_logon=*/false, /*persistent=*/true,
+        /*policy=*/reset_seqnum_policy::bilateral_strict);
+    auto& fix = *result.fix;
+    auto* store = result.store;
+    ASSERT_NE(store, nullptr);
+
+    // Cold open: the 029 one-shot hydrate ran (call_count=2), manager={37,42}.
+    // Logon emits at seq=42.
+    ASSERT_EQ(store->call_count, 2)
+        << "W5b: cold open must have issued exactly 2 store reads (in+out); got "
+        << store->call_count;
+
+    // The cold Logon is already in fix.capture.frames.back() (emitted during open()).
+    ASSERT_GE(fix.capture.frames.size(), 1u)
+        << "W5b: cold Logon must have been emitted during open()";
+    const auto& cold_logon = fix.capture.frames.back();
+
+    // Document the AS-IS cold-logon tags (L-029-3 gap documentation):
+    const std::string tag34 = extract_tag(cold_logon, 34);
+    const std::string tag141 = extract_tag(cold_logon, 141);
+
+    // Assertion: cold seed ran → 34 is NOT "1" (the store's non-1 outbound was applied).
+    // (If this fails, the cold hydrate did not run — a regression in 029 behaviour.)
+    EXPECT_NE(tag34, "1")
+        << "W5b (L-029-3 gap witness): bilateral_strict cold open with store{out=42} "
+           "must emit 34=42 (cold seed ran). Got 34=" << tag34
+        << ". If 34==1, the cold hydrate regressed.";
+
+    // Document 141 value AS-IS — bilateral_strict includes 141=Y.
+    // NOTE: We do NOT assert this is well-formed (141=Y + 34=42 may be malformed per FIX spec
+    // when used with a peer that validates ResetSeqNumFlag implies SeqNum==1).
+    // This is the L-029-3 inherited gap, tracked as a limitation, not fixed by 025.
+    // A future fix would need to either: (a) reset outbound to 1 before strict cold open, or
+    // (b) suppress 141=Y when outbound != 1 (changes the protocol behaviour).
+    (void)tag141;  // documented but not asserted — observing without prescribing
+
+    // Call-count stays at 2: no additional reads from the knob-off path.
+    EXPECT_EQ(store->call_count, 2)
+        << "W5b: call_count must remain 2 after open() (cold hydrate only, no reconnect here)";
+}
+
+// ── Phase 4 (T032) — W6: Acceptor_KnobOn_PeerResetLogon_InboundWithheld ──────
+//
+// FR-009 / SC-006 / INV-RoL-5 / contract C5.3:
+//   refresh_on_logon=true + bilateral_lenient + acceptor + store{in=37}.
+//   Peer sends Logon(34=1, 141=Y) — a reset-Logon.
+//
+// refresh_active = true (knob-on + lenient) → force=true → ensure_hydrated_ re-reads
+//   BOTH store counters (call_count=2 after hydrate, not 0).
+// withhold_inbound = peer_sent_reset(141=Y) || reset_on_logon = true || false = true
+//   → apply_inbound_seed=false → inbound seed NOT applied to manager.
+// Received 141=Y → reset_seqnums_to_one_durable → manager.next_inbound resets to 1.
+// check_inbound(34=1) → in-seq → Active.
+//
+// Key witness: the inbound seed (37) from the store does NOT pollute the manager even
+// though force=true caused the store to be re-read. The withhold takes precedence.
+// Without the withhold guard: inbound=37 applied → check_inbound(34=1) too-low → Disconnected.
+//
+// Note: this is a COLD logon (fresh acceptor, hydrated_=false). The force=true is inert
+// (latch not yet set), but the store IS read (call_count=2 proves it) and the withhold IS
+// exercised. This is a regression guard: knob-on must not break the RC-1 withhold.
+//
+// Direct assertions (per [[feedback_witness_asserts_named_postcondition_not_proxy]]):
+//   (a) call_count == 2: store was read (hydrate ran, even with withhold active).
+//   (b) session state == Active: 141=Y + seq=1 accepted without too-low fatal.
+//   (c) next_inbound == 1: reset won; the withheld store value (37) did NOT apply.
+//
+// Anchors: data-model.md W6; FR-009; SC-006; INV-RoL-5; C5.3;
+//          029 test W9b (Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFatal).
+
+TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/37, /*out=*/42);
+
+    auto result = make_acceptor_notconnected(factory, /*refresh_on_logon=*/true);
+    auto& fix = *result.fix;
+    auto* store = result.store;
+    ASSERT_NE(store, nullptr);
+
+    ASSERT_EQ(fix.session->state(), fixpp::session::fsm_state::NotConnected)
+        << "W6 precondition: acceptor must be in NotConnected before feeding peer Logon";
+
+    // Acceptor open() does NOT call ensure_hydrated_ — it only transitions to NotConnected.
+    // The hydrate runs at the NotConnected Logon handler (call-site 2) when the FIRST
+    // peer Logon arrives. So call_count==0 after open() for acceptors.
+    ASSERT_EQ(store->call_count, 0)
+        << "W6 precondition: acceptor open() must issue ZERO store reads; "
+           "ensure_hydrated_ runs at the NotConnected Logon handler, not at open(). Got "
+        << store->call_count;
+
+    // Feed peer Logon(34=1, 141=Y): reset-Logon.
+    // At call-site 2 (acceptor NotConnected Logon handler):
+    //   refresh_active = refresh_on_logon(true) && policy != bilateral_strict(true) = true
+    //   → force=true
+    //   hydrated_=false (first logon) → latch check `if (hydrated_ && !force)` NOT taken
+    //   → store is read: call_count becomes 2 (inbound + outbound reads).
+    //   apply_inbound_seed = !withhold_inbound = !(peer_sent_reset || reset_on_logon)
+    //                      = !(true || false) = false → inbound NOT seeded from store.
+    // Then: bilateral_lenient mirrors 141=Y → reset_seqnums_to_one_durable → next_inbound=1.
+    // check_inbound(34=1) → in-seq → Active.
+    fix.feed(make_logon_reset("FIX.4.4", 1, "CLI", "SRV"));
+
+    // (a) Store was read at the NotConnected Logon handler (cold hydrate with force=true).
+    // call_count == 2 (inbound read + outbound read). Note: force=true is inert here
+    // because hydrated_=false, but the store IS read (cold hydrate path runs regardless).
+    // This proves the store was available to be (wrongly) applied — the withhold guard
+    // is what prevented the 37 from being applied.
+    EXPECT_EQ(store->call_count, 2)
+        << "W6(a): store must have been read at the NotConnected Logon handler "
+           "(cold hydrate with force=true). Expected call_count=2, got "
+        << store->call_count
+        << ". If call_count==0, ensure_hydrated_ did not run at all.";
+    (void)store;  // used in all three assertions
+
+    // (b) Session must reach Active: 141=Y + seq=1 accepted, no too-low fatal.
+    EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::Active)
+        << "W6(b): acceptor must reach Active after reset-Logon(34=1,141=Y) with "
+           "refresh_on_logon=true. If Disconnected, the inbound seed (37) leaked past "
+           "the withhold guard → too-low fatal (RC-1 broken by the knob). "
+           "Actual state=" << static_cast<int>(fix.session->state());
+
+    // (c) next_inbound must equal 1: the 141=Y reset won; the withheld store value (37) did
+    // NOT apply. If next_inbound==37, the withhold failed and the reset was not applied.
+    if (fix.session->state() == fixpp::session::fsm_state::Active) {
+        const seqnum_t ni = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        EXPECT_EQ(ni, fixpp::session::seqnum_t{1})
+            << "W6(c): next_inbound must be 1 after 141=Y reset (reset won, store value 37 "
+               "withheld). Actual next_inbound=" << ni;
+    }
+}
+
+// ── Phase 4 (T033) — W7: KnobOn_StoreReadFailure_Disconnected ────────────────
+//
+// FR-006 / SC-007 / INV-RoL-6 / contract C2.5:
+//   refresh_on_logon=true + bilateral_lenient + persistent store with fail_on_nth_call=3.
+//   Cold open: calls 1+2 succeed (inbound + outbound reads) → hydrated_=true, manager set.
+//   2nd logon (drive_reconnect): force=true → latch bypassed → call 3 = inbound read = FAIL.
+//
+// Expected: session goes to Disconnected. Manager counters unchanged from cold-open state.
+// "No partial seed" (C2.5): the failed re-read must not partially overwrite the manager.
+//
+// This is the ONLY W5-W7 witness that exercises the new force path (hydrated_=true → latch
+// bypassed). W6 is cold (hydrated_=false, force inert). W5a/W5b have refresh_active=false.
+//
+// Key difference from W14 (029): manager counters after cold open are {seeded_in, seeded_out+1}
+// (the cold Logon advanced outbound). We snapshot counters after cold open and assert they
+// are unchanged after the failed 2nd logon — NOT asserting they are "1" (which would be
+// wrong here since cold open succeeded and seeded the manager from the store).
+//
+// Direct assertions:
+//   (a) drive_reconnect() returns an error (store failure propagates out).
+//   (b) Session state is Disconnected.
+//   (c) Manager counters unchanged from the post-cold-open snapshot
+//       (no partial overwrite: the failed read must not have changed the manager).
+//
+// Anchors: data-model.md W7; FR-006; SC-007; INV-RoL-6; C2.5;
+//          029 test W14 (HydrateReadFailure_Fatal_NoPartialSeed);
+//          [[feedback_witness_asserts_named_postcondition_not_proxy]].
+
+TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
+    // Store seeded at {in=37, out=42}. fail_on_nth_call=3 → 3rd total call fails.
+    // Cold open uses calls 1+2 (inbound read + outbound read) → succeeds.
+    // 2nd logon forced re-read: call 3 = inbound read → FAILS → Disconnected.
+    auto result = make_reconnect_initiator(
+        /*seeded_in=*/37, /*seeded_out=*/42,
+        /*refresh_on_logon=*/true, /*persistent=*/true,
+        /*policy=*/fixpp::session::reset_seqnum_policy::bilateral_lenient,
+        /*fail_on_nth_call=*/3);
+    auto& fix = *result.fix;
+    auto* store = result.store;
+    ASSERT_NE(store, nullptr);
+
+    // Cold open: 2 reads succeeded, hydrated_=true, manager={37,42}, Logon at 42 → out=43.
+    ASSERT_EQ(store->call_count, 2)
+        << "W7 precondition: cold open must have issued exactly 2 store reads; got "
+        << store->call_count;
+    ASSERT_EQ(fix.session->state(), fixpp::session::fsm_state::LogonSent)
+        << "W7 precondition: session must be LogonSent after successful cold open";
+
+    // Snapshot the manager counters AFTER cold open (before 2nd logon attempt).
+    // The 3rd read MUST NOT change these (no partial overwrite).
+    const seqnum_t snap_inbound =
+        fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t snap_outbound =
+        fix.session->seqnum_mgr_test_access().peek_outbound();
+
+    // Confirm cold-open snapshot matches expected values:
+    //   next_inbound = 37 (seeded, not yet advanced — no inbound frames received)
+    //   peek_outbound = 43 (seeded 42, cold Logon emitted at 42 → advanced to 43)
+    ASSERT_EQ(snap_inbound, static_cast<seqnum_t>(37))
+        << "W7 snapshot: next_inbound must be 37 after cold open";
+    ASSERT_EQ(snap_outbound, static_cast<seqnum_t>(43))
+        << "W7 snapshot: peek_outbound must be 43 after cold open (42 + Logon emission)";
+
+    // Drive the 2nd logon: force=true → latch bypassed → call 3 fails → store error.
+    // emit_initiator_logon_() returns unexpected(store_io_failure) →
+    // drive_reconnect() propagates the error.
+    auto reconnect_fut = asio::co_spawn(
+        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    fix.ioc.run_for(3s);
+    fix.ioc.restart();
+
+    // (a) drive_reconnect() must return an error (not success).
+    {
+        auto rr = reconnect_fut.get();
+        EXPECT_FALSE(rr.has_value())
+            << "W7(a): drive_reconnect() must fail when the forced re-read fails. "
+               "If it succeeded, the store failure did not propagate out of ensure_hydrated_. "
+               "(INV-RoL-6: store read failure must be fatal on the refresh path.)";
+    }
+
+    fix.ioc.run_for(1s);
+    fix.ioc.restart();
+
+    // (b) Session must be Disconnected after the store failure.
+    EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::Disconnected)
+        << "W7(b): session must be Disconnected after forced re-hydrate read failure. "
+           "Actual state=" << static_cast<int>(fix.session->state());
+
+    // (c) Manager counters must be unchanged from the cold-open snapshot.
+    // "No partial seed" (C2.5): a failed re-read must not partially overwrite the manager.
+    // The key: a failed INBOUND read (call 3) must not have already modified the manager
+    // before discovering the error. ensure_hydrated_ reads both before applying either.
+    const seqnum_t post_inbound =
+        fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t post_outbound =
+        fix.session->seqnum_mgr_test_access().peek_outbound();
+
+    EXPECT_EQ(post_inbound, snap_inbound)
+        << "W7(c): next_inbound must be unchanged from cold-open snapshot after "
+           "failed 2nd-logon re-hydrate. Snapshot=" << snap_inbound
+        << " actual=" << post_inbound
+        << ". Non-equal means the failed read partially overwrote the manager (C2.5 violated).";
+
+    EXPECT_EQ(post_outbound, snap_outbound)
+        << "W7(c): peek_outbound must be unchanged from cold-open snapshot after "
+           "failed 2nd-logon re-hydrate. Snapshot=" << snap_outbound
+        << " actual=" << post_outbound
+        << ". Non-equal means the failed read partially overwrote the manager (C2.5 violated).";
 }
