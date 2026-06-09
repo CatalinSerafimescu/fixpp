@@ -70,7 +70,11 @@ hydrate(seqnum_t next_inbound, seqnum_t next_outbound) noexcept;
 - **C3.1** PERSIST sites: after the callback/handling returns at each `check_inbound`-success site
   that advanced the manager — acceptor Logon, initiator Logon-ack, Heartbeat, TestRequest,
   ResendRequest, Logout, Reject, in-seq app, **and resend-fill replayed in-seq app** (these DO
-  persist — they advance the counter like any in-seq message).
+  persist — they advance the counter like any in-seq message). For the **terminal** sites
+  (Logout `:2462`, Reject) the persist runs **after `fromAdmin` but before**
+  `record_state_transition_(Disconnected)` — `store_` is still live and the session is in its
+  prior state when the persist runs; not persisting these is still a safe lower bound (INV-H1) but
+  the matrix persists them for QFcpp-parity (`incrNextTargetMsgSeqNum`).
 - **C3.2** ordering (INV-H2): the persist MUST follow the callback/handling — never precede it.
 - **C3.3** failure (D-3): a failed persist → `record_state_transition_(Disconnected)` +
   `std::unexpected(store_io_failure)`. Fatal.

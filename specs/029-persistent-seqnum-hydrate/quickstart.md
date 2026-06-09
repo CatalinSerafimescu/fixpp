@@ -46,6 +46,15 @@ advance it — a safe lower bound, INV-H1). Do **NOT** assert "manager unchanged
 `check_inbound` advanced before delivery, so on reconnect the in-flight message may be replayed
 (at-least-once, INV-H2), never skipped. (Split: failure on the first persist vs a later one.)
 
+## W14 — Hydrate read-failure is fatal, no partial seed (SC-005 / FR-006 / C2.3)
+Inject a `next_seqnum(dir,false)` **read** failure on the hydrate path via the fault-injecting test
+store. **Assert** the session transitions to Disconnected (fatal), the manager is **not** partially
+seeded, and `hydrated_` stays `false` so the next reconnect retries (D-9). **Split** to prove no
+partial seed: (a) fail the **first** read (`inbound,false`) → no mutation at all; (b) fail the
+**second** read (`outbound,false`) after the first succeeded → still no mutation (the manager is
+written only after both values are in hand). Distinct from W6 (the inbound **write**/persist
+failure).
+
 ## W7 — Non-persistent store no-op (SC-003 / INV-H4 / D-10)
 Construct a session with a null store AND one with a memory store (both ⇒ `store_is_persistent_ ==
 false`). **Assert** counters start 1, `ensure_hydrated_` performs **no store read** on either

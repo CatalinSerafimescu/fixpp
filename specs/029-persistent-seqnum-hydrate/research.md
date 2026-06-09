@@ -87,8 +87,12 @@ run — see D-9). Called at: (a) the **top of `emit_initiator_logon_()`** (`:542
 024 `reset_on_logon` block (`:558`) — the shared emit point covering `open()` direct AND
 engine-managed first-connect via `drive_reconnect`
 ([[feedback_initiator_logon_wire_at_shared_emit_point]]); (b) for acceptors, the
-`NotConnected` inbound-Logon case, **before** `interpret_logon` / `check_inbound` / reply
-`peek_outbound`. **One-shot ⇒ reconnect skips** — re-hydrating a live session regresses the
+`NotConnected` inbound-Logon case **after** the `peer_sent_reset` / `reset_on_logon` header
+pre-scan (`:1585-1587`) and **before** `check_inbound` (`:1596`) — the post-pre-scan placement
+is mandatory because the RC-1 inbound-seed-withhold decision (C2.4) reads `peer_sent_reset`
+(round-1 D-6 said "before `interpret_logon`" `:1530`, which is BEFORE the reset pre-scan and so
+could not see the reset flag — corrected by RC-1 to the converged C2.5 placement). **One-shot ⇒
+reconnect skips** — re-hydrating a live session regresses the
 manager to the store's lower-bound value (the 025 Gate-A **New-1** corruption). Re-hydrate-on-
 reconnect is 025 RefreshOnLogon's gated job, deliberately not here.
 

@@ -126,8 +126,11 @@ src/session/
 tests/session/
 └── test_persistent_seqnum_hydrate.cpp   # new witnesses (both roles, both directions)
 
+tests/interop/happy/
+└── hp_fix44_restart_resume_test.cpp              # +restart-resume live interop cell (in-repo)
+
 # parent harness
-research/G19-fix-fpml-iso20022/phase-9-harness/   # +restart-resume live interop cell
+research/G19-fix-fpml-iso20022/phase-9-harness/   # +counterparty (QFcpp/QFJ) restart-resume config delta (cross-repo, not a fixpp source change)
 ```
 
 **Structure Decision**: single-library layout; all changes in `session/` (manager +
