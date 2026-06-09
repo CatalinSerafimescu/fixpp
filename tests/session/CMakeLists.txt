@@ -1603,6 +1603,7 @@ add_executable(session_validation_compat_toggles
 )
 target_link_libraries(session_validation_compat_toggles PRIVATE
   fixpp_session
+  fixpp_transport
   fixpp_mock_clock
   GTest::gtest
   GTest::gtest_main

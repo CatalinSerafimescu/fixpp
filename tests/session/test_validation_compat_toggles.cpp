@@ -35,6 +35,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
@@ -42,7 +43,9 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/tls/peer_identity.hpp>
 
+#include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 
@@ -281,14 +284,268 @@ static std::unique_ptr<Fixture> make_initiator(
     return fix;
 }
 
-// ── Phase 1 (Setup) — T001 skeleton placeholder ──────────────────────────────
+// ── T004 (US1) — CompID witnesses ────────────────────────────────────────────
 //
-// This test proves the skeleton compiles, links, and runs. It is replaced by
-// real RED witnesses in T004 (US1), T006/T007 (US2), and T012 (US3).
+// RED witnesses written before T005 (session.cpp S1 split).
+// Anchors: spec.md FR-003/FR-012, data-model.md I-VCT-1/I-VCT-2/I-VCT-6,
+//          contracts C1.1/C1.2/C1.3, SC-001/SC-004/SC-007.
+//
+// Test naming follows tasks.md T004 list exactly.
 
-TEST(ValidationCompatToggles, SkeletonBuilds) {
-    // Skeleton-only — real assertions land in T004/T006/T007/T012.
-    SUCCEED();
+// T004 witness 1 — SC-001 relaxed, C1.2
+// Steady-state 49/56 mismatch with check_comp_id=false ⇒ frame delivered, no
+// disconnect. Post-condition: session stays Active AND fromApp fires once.
+// RED before T005: current S1 gate disconnects on ANY CompID mismatch.
+TEST(ValidationCompatToggles, CompID_KnobOff_MismatchAccepted) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+    // check_comp_id=false AFTER construction — must set BEFORE the test feed.
+    // NB: SessionConfig is frozen at open(); we mutate cfg_ here via the Fixture
+    // to simulate the knob being set at config time.  We rebuild the session.
+    fix->cfg.check_comp_id = false;
+    // Rebuild session with the knob off, re-establish to Active.
+    fix->session.reset();
+    auto& f = *fix;
+    f.session = std::make_unique<fixpp::session::Session>(f.eng, f.cfg);
+    auto open_fut = asio::co_spawn(f.ioc, f.session->open(), asio::use_future);
+    f.ioc.run_for(1s);
+    f.ioc.restart();
+    (void)open_fut.get();
+    fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session must be Active before the mismatching frame";
+
+    // Feed an application message with mismatching 49/56 (reversed CompIDs).
+    // Sender = "WRONG_SENDER", Target = "WRONG_TARGET" — neither matches config.
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG_SENDER", "WRONG_TARGET"));
+
+    // Post-conditions (C1.2, SC-001 relaxed):
+    //   1. Session stays Active (no disconnect).
+    //   2. Application::fromApp was called — the frame was delivered.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "C1.2/SC-001: with check_comp_id=false, a 49/56 mismatch must NOT disconnect";
+    EXPECT_GT(app->from_app_count, from_app_before)
+        << "C1.2/SC-001: with check_comp_id=false, mismatching app frame must be delivered "
+           "to fromApp";
+}
+
+// T004 witness 2 — SC-001 paired, C1.1
+// Identical mismatching frame at default (check_comp_id=true) ⇒ disconnect.
+// Already GREEN: current behavior.
+TEST(ValidationCompatToggles, CompID_Default_MismatchRejected) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
+    // cfg.check_comp_id is default true — no change needed.
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session must be Active";
+
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "WRONG_SENDER", "WRONG_TARGET"));
+
+    // Post-conditions (C1.1, SC-001 default):
+    //   1. Session is Disconnected.
+    //   2. fromApp was NOT called.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "C1.1/SC-001: at default (check_comp_id=true), a 49/56 mismatch must disconnect";
+    EXPECT_EQ(app->from_app_count, from_app_before)
+        << "C1.1/SC-001: mismatching frame must NOT be delivered when check_comp_id=true";
+}
+
+// T004 witness 3 — US1 AS3
+// Matching 49/56 with knob off ⇒ unchanged (frame delivered, session Active).
+// Already GREEN: current code lets matching CompIDs through.
+TEST(ValidationCompatToggles, CompID_KnobOff_MatchingPathUnchanged) {
+    auto app = std::make_shared<CountingApp028>();
+    // Rebuild with check_comp_id=false.
+    NullStoreFactory sf;
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->cfg.check_comp_id = false;  // knob off
+    fix->eng.application = app;
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+    fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session Active after Logon";
+
+    // Feed a frame with MATCHING CompIDs.
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV"));
+
+    // Post-conditions (US1 AS3): matching path is unchanged.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "US1 AS3: matching CompIDs with knob off must keep session Active";
+    EXPECT_GT(app->from_app_count, from_app_before)
+        << "US1 AS3: matching CompID frame must still be delivered";
+}
+
+// T004 witness 4 — I-VCT-1, C1.3
+// Mismatching BeginString(8) still disconnects with check_comp_id=false.
+// Already GREEN: current code combines begin_string + CompID in one gate;
+// after T005 begin_string stays strict; before T005 current code also disconnects.
+TEST(ValidationCompatToggles, CompID_KnobOff_BeginStringStillStrict) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->cfg.check_comp_id = false;  // knob off — CompID check skipped
+    fix->eng.application = app;
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+    fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Precondition: session Active";
+
+    // Feed a frame with WRONG BeginString but CORRECT CompIDs.
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.2", "D", 2, "CLI", "SRV"));
+
+    // Post-conditions (I-VCT-1, C1.3): BeginString is always enforced.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "I-VCT-1/C1.3: BeginString mismatch must still disconnect even with "
+           "check_comp_id=false";
+    EXPECT_EQ(app->from_app_count, from_app_before)
+        << "I-VCT-1/C1.3: wrong-BeginString frame must NOT be delivered";
+}
+
+// T004 witness 5 — I-VCT-2, SC-004, C1.3
+// 013 compid_authorization_policy non-allow-listed principal still refused at
+// Logon with check_comp_id=false.
+// Already GREEN: authz check is in the NotConnected/LogonReceived Logon path,
+// not at S1 (data-model D-4 "Untouched"). The knob does not affect it.
+//
+// Setup: mTLS security profile + allow-list with "ALLOWED_PEER" → "SRV".
+// Inject a peer identity CN=NOT_ON_LIST (not in the allow-list).
+// Feed a Logon. Expect: session Disconnected (authz refused), NOT Active.
+TEST(ValidationCompatToggles, CompID_KnobOff_AuthzAllowListStillEnforced) {
+    // We need mTLS + authorization policy + identity injection.
+    // Include required headers at call site via the support helpers already included.
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng{};
+    eng.executor = ioc.get_executor();
+
+    auto app = std::make_shared<CountingApp028>();
+    eng.application = app;
+
+    fixpp::session::CompIdAuthorizationPolicy policy;
+    policy.add_binding("ALLOWED_PEER", "CLI");  // only ALLOWED_PEER may use CompID "CLI"
+
+    fixpp::session::SessionConfig cfg;
+    cfg.role = fixpp::session::session_role::acceptor;
+    cfg.sender_comp_id = "SRV";
+    cfg.target_comp_id = "CLI";
+    cfg.begin_string = "FIX.4.4";
+    cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+    cfg.compid_authorization_policy = std::move(policy);
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.heartbeat_interval = std::chrono::seconds{30};
+    cfg.executor_override = ioc.get_executor();
+    cfg.store_factory = std::make_shared<NullStoreFactory>();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.check_comp_id = false;  // knob off — but authz must still enforce
+    std::vector<std::vector<std::byte>> captured;
+    cfg.transport_send = [&captured](std::span<const std::byte> data) {
+        captured.emplace_back(data.begin(), data.end());
+    };
+
+    fixpp::session::Session session{eng, cfg};
+
+    auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
+    ioc.run_for(1s);
+    ioc.restart();
+    (void)open_fut.get();
+
+    // Inject a peer identity that is NOT on the allow-list.
+    fixpp::tls::peer_identity bad_pid;
+    bad_pid.subject_dn = "CN=NOT_ON_LIST";
+    fixpp::test_support::inject_live_identity(session, std::move(bad_pid));
+
+    // Feed a Logon from "CLI" (matching CompID but unauthorized principal).
+    auto logon_frame = make_logon("FIX.4.4", 1, "CLI", "SRV");
+    auto feed_fut = asio::co_spawn(
+        ioc, session.on_inbound_frame(std::span<const std::byte>{logon_frame}), asio::use_future);
+    ioc.run_for(2s);
+    ioc.restart();
+    (void)feed_fut.get();
+
+    // Post-conditions (I-VCT-2, SC-004, C1.3):
+    //   Authz allow-list refused the not-on-list principal → Disconnected.
+    //   check_comp_id=false MUST NOT bypass this.
+    EXPECT_EQ(session.state(), fixpp::session::fsm_state::Disconnected)
+        << "I-VCT-2/SC-004/C1.3: 013 authz allow-list must refuse non-listed principal "
+           "even with check_comp_id=false";
+    EXPECT_EQ(app->on_logon_count, 0)
+        << "I-VCT-2/SC-004: onLogon must NOT fire when authz refuses the principal";
+}
+
+// T004 witness 6 — I-VCT-6, SC-007, FR-012
+// Logon 49 ≠ configured target_comp_id still refused (steady-state-only scope).
+// check_comp_id=false must NOT relax the Logon-establishment CompID check.
+// Already GREEN: interpret_logon validates CompIDs at NotConnected, which is
+// untouched (data-model "Untouched" / FR-012).
+TEST(ValidationCompatToggles, CompID_KnobOff_LogonTimeMismatchStillRefused) {
+    // Build a session with check_comp_id=false.
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->cfg.check_comp_id = false;  // knob off
+
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
+        << "Precondition: acceptor starts NotConnected before any Logon";
+
+    // Feed a Logon with WRONG SenderCompID (49=WRONG, not our target_comp_id="CLI").
+    fix->feed(make_logon("FIX.4.4", 1, "WRONG_PEER", "SRV"));
+
+    // Post-conditions (I-VCT-6, SC-007, FR-012):
+    //   Logon-time CompID mismatch → Disconnected regardless of check_comp_id.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "I-VCT-6/SC-007/FR-012: Logon-time CompID mismatch must refuse even with "
+           "check_comp_id=false (steady-state-only scope)";
 }
 
 }  // namespace

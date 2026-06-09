@@ -1865,10 +1865,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             auto hdr = scan_frame_header(frame);
 
             // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
-            // Any mismatch → session-fatal → Disconnected.
-            if (hdr.begin_string != cfg_.begin_string ||
-                hdr.sender_comp_id != cfg_.target_comp_id ||
-                hdr.target_comp_id != cfg_.sender_comp_id) {
+            // BeginString(8) mismatch → always session-fatal → Disconnected.
+            // SenderCompID(49)/TargetCompID(56) mismatch → fatal ONLY when
+            // cfg_.check_comp_id is true (default); skipped when false
+            // (028 T005 / S1, data-model S1, contract C1, FR-003).
+            // Steady-state only: Logon-establishment CompID check (interpret_logon
+            // at NotConnected) is untouched (FR-012 / I-VCT-6).
+            if (hdr.begin_string != cfg_.begin_string) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return fixpp::core::expected_t<void>{};
+            }
+            if (cfg_.check_comp_id &&
+                (hdr.sender_comp_id != cfg_.target_comp_id ||
+                 hdr.target_comp_id != cfg_.sender_comp_id)) {
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
