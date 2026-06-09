@@ -379,6 +379,23 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 028 live ValidationCompat interop cells — T002 (Setup) + T014 (Polish) ───
+# T002: skeleton with skip-without-counterparty guard; body is a stub for now.
+# T014: full both-role live cells for check_comp_id=false and
+#   validate_sequence_numbers=false vs a live QFcpp/QFJ counterparty.
+# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# Parent harness MUST configure the counterparty with:
+#   QFcpp/QFJ: CheckCompID=N and/or ValidateSequenceNumbers=N
+# Anchors: tasks.md T002/T014; contracts/validation-compat-toggles.md C1/C2;
+#          SC-001/SC-002/FR-001..013.
+fixpp_add_interop_test(
+    NAME interop_028_validation_compat_test
+    GROUP happy
+    LABEL "interop;028;interop-happy;polish;validation-compat;check-compid;validate-seqnums"
+    SOURCES happy/hp_fix44_validation_compat_test.cpp
+    TLS
+)
+
 # ── US4 cell_result manifest schema-check (T028) ──────────────────────────────
 # Validates cell_results.yaml against the parent gate-evaluator's result schema
 # (contracts/parent-harness-gate-contract.md): per-cell completeness, skip vs

@@ -1592,6 +1592,31 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_next_expected_msgseqnum)
 endif()
 
+# ── 028-validation-compat-toggles (S-040/S-041) — T001 Setup skeleton ────────
+# T001: skeleton + ctest target registration.
+# Real RED witnesses (T004/T006/T007/T012) are added in later phases.
+# Fixture shape mirrors test_next_expected_msgseqnum.cpp (Fixture + OutboundCapture
+# + CountingApp028; free TEST() macros not TEST_F).
+# data-model I-VCT-1..11; contracts/validation-compat-toggles.md C1/C2/C3.
+add_executable(session_validation_compat_toggles
+  test_validation_compat_toggles.cpp
+)
+target_link_libraries(session_validation_compat_toggles PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_validation_compat_toggles PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_validation_compat_toggles PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_validation_compat_toggles
+  COMMAND session_validation_compat_toggles)
+set_tests_properties(session_validation_compat_toggles PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "028;s040;s041;validation-compat-toggles;setup")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
