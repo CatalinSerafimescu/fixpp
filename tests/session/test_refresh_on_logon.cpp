@@ -325,8 +325,6 @@ public:
         const noexcept override {
         return nullptr;
     }
-
-    [[nodiscard]] bool yields_persistent_store() const noexcept { return true; }
 };
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
@@ -344,8 +342,6 @@ struct Fixture {
         ioc.restart();
         (void)fut.get();
     }
-
-    void clear_capture() { capture.frames.clear(); }
 };
 
 // ── make_initiator: basic initiator without reconnect factory ─────────────────
