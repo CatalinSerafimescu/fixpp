@@ -558,21 +558,24 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   reset is wired at the **shared** initiator-Logon emission point (`emit_initiator_logon_()`),
   so it fires for both per-session-direct `open()` and engine-managed `drive_reconnect()`
   (initial lazy-connect + reconnect). The store-failure disposition is **cause-keyed**:
-  knob-driven Logon = **fatal** (blocks `Active`); the `013`-only received-`141` path stays
-  **I-07 logged-then-proceed** (all-off byte-identical, zero regression); teardown = logged.
+  knob-driven Logon = **fatal** (blocks `Active`); the `013`-only received-`141` path is
+  **I-07 logged-then-proceed for non-persistent stores but fatal-when-persistent since 030**
+  (see B-030-2); teardown = logged.
   The acceptor handles the two reset causes via a **cause-dependent split** (mutually exclusive
   arms): the knob-driven reset (`reset_on_logon==true`) runs **before** `check_inbound`
   (`session.cpp:1559`, fatal disposition) so a fresh peer `34=1` at local-expected>1 is
   admitted; the 013-only received-`141` reset (`peer_sent_reset && !reset_on_logon`) runs
-  **after** `check_inbound` (`session.cpp:1715`, I-07 logged disposition), byte/semantics-
-  identical to pre-024 (FR-001 zero regression). The arms are mutually exclusive → exactly
+  **after** `check_inbound`. The arms are mutually exclusive → exactly
   one `store_->reset()` per path. A logout+disconnect teardown double-trigger collapses via
   a single-fire guard — each teardown also yields exactly one observable `MessageStore::reset()`
-  (`FileStore::reset()` is non-idempotent I/O). *The "single combined pre-validation decision" sketch in earlier contract prose was superseded by this verify-driven correctness
-  fix: a unified pre-check reset for the 013-only arm changes `next_inbound` 1→2, breaking
-  byte identity; /speckit-verify caught the regression; the binding requirements
-  (FR-001/SC-003) are satisfied by the cause-dependent split.*
-  **Status: shipped** (024). *(FR-001..FR-010; C2.1–C5.2; data-model disposition table.)*
+  (`FileStore::reset()` is non-idempotent I/O). *The cause-dependent split is retained for
+  admission semantics (the knob-driven reset must precede `check_inbound`). The earlier rationale
+  that the split "preserves `next_inbound`==1 byte-identity" for the 013-only arm is **superseded
+  by 030**: 030 restores the received-`141` next-expected-**inbound** to 2 (the consumed seq-1
+  reset Logon is a surviving advance — QuickFIX reset-then-increment parity), so the inbound
+  post-state is now intentionally 2 while only the OUTBOUND reply stays byte-identical at seq 1.
+  See B-030-1.*
+  **Status: shipped** (024; received-`141` inbound post-state corrected by 030). *(FR-001..FR-010; C2.1–C5.2; data-model disposition table.)*
 
 ### Limitations
 
@@ -888,3 +891,57 @@ row; see `feature-catalogue.md`.)*
   **Status: documented, DEFERRED** (Gate A D-RoL-6; data-model.md W5b L-029-3 gap-witness;
   025 INV-RoL-3; NOT closed by 025). *(contracts/refresh-knob.md C4; `session.cpp` strict-policy
   cold-open path; `tests/session/test_refresh_on_logon.cpp` W5b.)*
+
+## Received-reset inbound advance correction (030-received-reset-inbound-advance)
+
+### Feature Catalogue Rows
+
+- Amends **S-017** (received-`141` reset machinery), **S-031** (789 advertisement),
+  **S-032** (ResetSeqNumFlag(141)). No new S-row — this is a conformance correction of the
+  existing received-`141` path, found via a failed live acceptor interop cell vs QuickFIX-cpp/J.
+
+### Behaviors
+
+- **B-030-1 — A received `Logon(141=Y)` advances next-expected-**inbound** to 2 (not 1) on
+  both the acceptor and the initiator arm; the outbound reply stays seq 1.** When a peer
+  initiates a sequence reset by sending `Logon(34=1, 141=Y)` and the local `reset_on_logon`
+  knob is OFF (the "received-141" path), the consumed seq-1 reset Logon is an in-sequence
+  message: after the post-`check_inbound` durable reset, fixpp restores next-expected-inbound
+  to `seqnum_min+1` (=2) in BOTH the in-memory `SeqnumManager` (`set_next_inbound`) AND the
+  durable store (a `next_seqnum(inbound, true)` write-through → `store == manager == 2`,
+  INV-H1 equality). This matches QuickFIX-cpp/J, which **reset-then-increment** (net 2);
+  fixpp previously increment-then-reset (net 1), which left next-expected-inbound at 1 and
+  emitted a **spurious `ResendRequest`** on the peer's next genuine message at seq 2 (and,
+  with 027 enabled, advertised `789=1` instead of `2`). The correction is applied symmetrically
+  on the two separate-but-identical code paths: the acceptor `NotConnected` Logon handler and
+  the initiator Logon-ack `peer_ack_sent_reset_flag` arm (FR-009). The **OUTBOUND reply Logon
+  `MsgSeqNum` stays seq 1** (independent counter; byte-identical); only the reply `789` content
+  corrects 1→2 (acceptor-reply-specific, 027-on). The `reset_on_logon=true` knob path is
+  unchanged (already produced 2). **Status: shipped** (030). *(FR-001..FR-009; reference oracle
+  QFcpp `Session.cpp::nextLogon` reset-then-increment, QFJ `Session.java` lines 2202-2204/2215/
+  2303; `tests/session/test_reset_on_lifecycle.cpp` discriminating triple + initiator witnesses;
+  `tests/session/test_reset_seqnum_policy_matrix.cpp`, `test_next_expected_msgseqnum.cpp`,
+  `test_persistent_seqnum_hydrate.cpp` value-pins.)*
+
+- **B-030-2 — On a persistent store, a received-`141` durable-reset failure now DISCONNECTS
+  (was stay-Active); non-persistent stores keep stay-Active.** This amends the 024 FR-001/C2.6
+  I-07 "logged-then-proceed" contract for the persistent received-`141` sub-case. Rationale: a
+  swallowed (`logged`) store-reset failure on a persistent store would leave the durable counter
+  stale, and the B-030-1 persist-to-2 write-through would then advance the **stale** store
+  (N→N+1) — for any session that had received messages this yields `store > manager` (INV-H1
+  violation → silent inbound skip on restart, the 029 over-persist harm). Making the reset
+  **fatal when the store is persistent** (`store_is_persistent_ ? fatal : logged`, on both arms)
+  guarantees the reset succeeded before persist-to-2 runs, so `store == manager == 2` truly holds;
+  a reset failure disconnects, the session re-opens, re-hydrates the store at its last-good value
+  N (a valid INV-H1 lower bound), and the peer re-drives the reset — resuming with nothing skipped.
+  Non-persistent
+  stores are unaffected (the reset cannot meaningfully fail; INV-H4 makes persist-to-2 a no-op).
+  Aligns with 029 D-3 ("inbound-correctness failures are fatal") and the existing fatal knob-reset
+  sites. **Status: shipped** (030). *(FR-010; amends B-024-1; `tests/session/test_reset_on_lifecycle.cpp`
+  fault-injection witnesses + the persistent-Disconnect / non-persistent-stay-Active contract split.)*
+
+### Limitations
+
+- None specific to 030 (a conformance correction; no new deferred surface). The pre-existing
+  L-029-1 (post-GapFill bounded redundant resend) and L-029-3 (`bilateral_strict` non-1 cold-open
+  malformed Logon) are unchanged.

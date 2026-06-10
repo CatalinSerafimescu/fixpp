@@ -134,6 +134,13 @@ public:
     // once with store_io_failure, then auto-clear.
     void fail_next_reset() noexcept { fail_next_reset_ = true; }
 
+    // 030 fault-injection witness: set next_in_ to a given N>1 WITHOUT counting
+    // a reset() (mirrors reset_sync() seeding semantics — NOT an awaitable reset).
+    // Used to establish a "last-good durable value" N before injecting
+    // fail_next_reset(), so assertion (ii) store==N proves the failed reset did NOT
+    // corrupt the store (vs. the trivial store==1 a fresh StoreDouble gives).
+    void seed_inbound(seqnum_t n) noexcept { next_in_ = n; }
+
     [[nodiscard]] std::size_t stored_inbound_count() const noexcept { return inbound_.size(); }
     [[nodiscard]] std::size_t stored_outbound_count() const noexcept { return outbound_.size(); }
 

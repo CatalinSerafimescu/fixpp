@@ -224,6 +224,20 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 030 received-141 inbound-advance acceptor cell — T028 (SC-001 live close-out) ──
+# Live close-out of the conformance defect that motivated 030: fixpp ACCEPTOR with
+# reset_on_logon=FALSE vs a QFcpp/QFJ initiator sending Logon(141=Y,34=1). The
+# received-141 path nets next-expected-inbound=2 (030) with no spurious ResendRequest.
+# DISTINCT from the 024 reset_on_logon-ON acceptor cell above. Skip-without-counterparty;
+# golden capture under the Item-1 live-interop effort.
+fixpp_add_interop_test(
+    NAME interop_030_received_reset_test
+    GROUP happy
+    LABEL "interop;030;interop-happy;polish;reset;received-reset"
+    SOURCES happy/hp_fix44_received_reset_test.cpp
+    TLS
+)
+
 # ── 026 live nanos-SendingTime interop cells — T018 (initiator) + T019 (acceptor) ──
 # Both cells value-parameterized over counterparty × role in one file.
 # Cells skip-with-reason when no counterparty (FR-023); CI always green.

@@ -1435,10 +1435,12 @@ TEST(Reset, AcceptorReplyResetOnLogon_Advertises2) {
         << tag789;
 }
 
-// T010 witness 2c (I-NEX-8, D-8) — Reset table: acceptor reply, received-141-only → 789==1.
-// 013-only path: NO reset_on_logon, peer sends 141=Y. Reset fires AFTER check_inbound
-// (at `:1718`) then BEFORE build. next_inbound_unsafe()=1 at build site. [Reset table row 3]
-TEST(Reset, AcceptorReplyReceived141_Advertises1) {
+// T010 witness 2c (I-NEX-8, D-8) — Reset table: acceptor reply, received-141-only → 789==2.
+// 013-only path: NO reset_on_logon, peer sends 141=Y. Reset fires AFTER check_inbound,
+// then 030 restores next-expected-inbound to 2 (consumed seq-1 reset Logon) BEFORE build.
+// next_inbound_unsafe()=2 at the build site → reply advertises 789=2. [Reset table row 3;
+// 030 FR-004]
+TEST(Reset, AcceptorReplyReceived141_Advertises2) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -1463,8 +1465,8 @@ TEST(Reset, AcceptorReplyReceived141_Advertises1) {
 
     // Feed peer Logon at seq=1 with 141=Y (received-141-only path).
     // check_inbound(1) runs BEFORE the 013 reset (opposite of reset_on_logon).
-    // After check_inbound: next_inbound_=2. Then reset → next_inbound_=1.
-    // Build site sees next_inbound_unsafe()=1 → 789=1. [Reset table row 3]
+    // After check_inbound: next_inbound_=2. Then reset → 1, then 030 restore → 2.
+    // Build site sees next_inbound_unsafe()=2 → 789=2. [Reset table row 3; 030 FR-004]
     std::string extra;
     extra += field(98, "0");
     extra += field(108, "30");
@@ -1477,11 +1479,11 @@ TEST(Reset, AcceptorReplyReceived141_Advertises1) {
                      [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
     ASSERT_NE(it, fix->capture.frames.end()) << "Expected reply Logon";
 
-    // 789 must be 1 (post-received-141 reset, before build). [Reset table row 3]
+    // 789 must be 2 (post-received-141 reset + 030 restore-to-2, before build). [Reset row 3]
     const std::string tag789 = extract_tag(*it, 789);
-    EXPECT_EQ(tag789, "1")
-        << "Reset/AcceptorReplyReceived141: 789 must be 1 (received-141-only path, post-reset). "
-           "Got: 789="
+    EXPECT_EQ(tag789, "2")
+        << "Reset/AcceptorReplyReceived141: 789 must be 2 (received-141 path, post-reset + "
+           "030 restore-to-2 of the consumed seq-1 reset Logon; 030 FR-004). Got: 789="
         << tag789;
 }
 

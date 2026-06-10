@@ -1714,19 +1714,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return fixpp::core::expected_t<void>{};
                 }
 
-                // 024: capture peer_sent_reset before check_inbound. The reset SITE is
-                // cause-dependent (this preserves FR-001 byte-identity — a /speckit-verify
-                // finding: a single unified pre-check reset changed the 013 received-141
-                // post-state from next_inbound==1 to ==2):
+                // 024/030: capture peer_sent_reset before check_inbound. The reset SITE is
+                // cause-dependent (originally a /speckit-verify FR-001 finding; 030 then
+                // corrected the received-141 inbound post-state 1→2, so BOTH arms now end at
+                // next_inbound==2, matching QuickFIX reset-then-increment):
                 //   - knob-driven (reset_on_logon): reset BEFORE check_inbound so a fresh
                 //     peer Logon at seq=1 is admitted even when local next_inbound > 1
                 //     (Gate A note (a)); post-state next_inbound == 2 (witness 6).
-                //   - 013-only received-141 (no knob): reset AFTER check_inbound (below),
-                //     byte-identical to pre-024 — next_inbound == 1 (reset_seqnum_policy_matrix
-                //     acceptor cells; FR-017:150).
+                //   - 013-only received-141 (no knob): reset AFTER check_inbound (below), then
+                //     030 restores the consumed seq-1 reset Logon's advance → next_inbound == 2
+                //     (reset_seqnum_policy_matrix acceptor cells; FR-017:150; 030 FR-001). The
+                //     OUTBOUND reply still stays seq 1 (independent counter; 030 FR-003).
                 // The two are mutually exclusive (the post-check arm guards on !reset_on_logon),
                 // so exactly one store reset fires per path (C5.1 / witness 7).
-                // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001]
+                // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001; 030 FR-001]
                 peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
 
                 // 029 T007/T011 — call site 2 (acceptor): hydrate at the first counter
@@ -1929,20 +1930,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                             ? static_cast<int>(cfg_.heartbeat_interval->count())
                                             : 30;  // D-8 default 30 s
 
-                // 024: the 013-only received-141 reset runs HERE (after check_inbound,
-                // before the reply Logon) to keep next_inbound == 1 byte-identical to
-                // pre-024 — check_inbound advanced inbound 1->2, this rewinds it to 1 while
-                // the reply Logon consumes outbound 1->2 (reset_seqnum_policy_matrix acceptor
-                // cells: {next_inbound=1, next_outbound=2}). The knob-driven reset already ran
-                // BEFORE check_inbound; guarded on !reset_on_logon so the two are mutually
-                // exclusive — exactly one store reset per path (C5.1 / witness 7). Logged
-                // (I-07): a store failure is swallowed; the session still reaches Active
-                // (witness 5, FR-001). [024 C2.6; FR-001; FR-017:150]
                 if (peer_sent_reset && !cfg_.reset_on_logon) {
-                    auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
+                    // 030 T010 (FR-010): fatal-when-persistent so the FR-005 persist-to-2
+                    // below only runs after a known-good reset. A swallowed (logged) store
+                    // reset failure on a persistent store would let persist-to-2 advance a
+                    // stale store → store > manager (029 over-persist loss). Non-persistent
+                    // stays logged (the reset cannot meaningfully fail). Amends 024 I-07.
+                    auto rst_r = co_await reset_seqnums_to_one_durable(
+                        store_is_persistent_ ? reset_disposition::fatal
+                                             : reset_disposition::logged);
                     if (!rst_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
+                    }
+                    // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
+                    // surviving net-advance (check_inbound advanced 1->2 before this reset
+                    // rewound it). Restore next-expected-inbound to seqnum_min+1 (=2) in the
+                    // manager AND write it through to the store → store == manager == 2
+                    // (INV-H1 holds with equality; QuickFIX reset-then-increment parity).
+                    // Outbound reply stays seq 1 (independent counter). Guarded on the reset
+                    // Logon actually consumed (logon_inbound_advanced). manager-first,
+                    // store-second so a persist failure yields store < manager (safe under-
+                    // persist), never store > manager.
+                    if (logon_inbound_advanced) {
+                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
+                        if (!si_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(si_r.error());
+                        }
+                        // store 1->2 (no-op if non-persistent, INV-H4).
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
                     }
                 }
                 // FR-018: emit the reset event once, after post-reset state is consistent,
@@ -3159,14 +3177,35 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // FR-017:150: mutual reset → both sides advance to 1.
                     // FR-018: event fires AFTER post-reset state is consistent.
                     // [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor arm.
-                    auto rst_r = co_await seqnum_mgr_.reset_to_one();
+                    // 030 T015 (FR-010): consolidate the hand-rolled reset_to_one() + swallowed
+                    // store reset onto the shared reset_seqnums_to_one_durable() helper with the
+                    // fatal-when-persistent disposition (symmetric to the acceptor arm) so the
+                    // FR-005 persist-to-2 below only runs after a known-good reset. Amends 024
+                    // I-07 for the persistent received-141 sub-case.
+                    auto rst_r = co_await reset_seqnums_to_one_durable(
+                        store_is_persistent_ ? reset_disposition::fatal
+                                             : reset_disposition::logged);
                     if (!rst_r) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
-                    if (store_) {
-                        auto store_rst_r = co_await (*store_).reset();
-                        (void)store_rst_r;  // store_io_failure → logged-then-proceed (I-07)
+                    // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
+                    // surviving net-advance (check_inbound advanced 1->2 before this reset
+                    // rewound it) — identical clobber to the acceptor arm. Restore
+                    // next-expected-inbound to seqnum_min+1 (=2) in the manager AND write it
+                    // through to the store → store == manager == 2. Guarded on the ack Logon
+                    // consumed (logon_inbound_advanced_init — NOT the acceptor's
+                    // logon_inbound_advanced). manager-first, store-second (safe under-persist
+                    // on failure). No reply Logon on this arm (789 is acceptor-reply-specific).
+                    if (logon_inbound_advanced_init) {
+                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
+                        if (!si_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(si_r.error());
+                        }
+                        // store 1->2 (no-op if non-persistent, INV-H4).
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
                     }
                     // FR-018 mode mapping: bilateral_strict initiator-confirm path →
                     // WE sent 141=Y first, peer confirmed → by_peer_request=false (WE initiated).

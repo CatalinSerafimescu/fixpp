@@ -536,11 +536,14 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    // FR-017:150: after successful 141=Y reset, both sides start from 1.
-    // next_inbound_ = 1 (reset to 1; peer's next message is seq=1)
+    // FR-017:150 + 030 FR-001: after a received-141=Y reset the OUTBOUND side
+    // re-bases to 1, but the consumed seq-1 reset Logon is a surviving inbound
+    // advance, so next-expected-INBOUND is 2 (QuickFIX reset-then-increment parity).
+    // next_inbound_ = 2 (consumed the seq-1 reset Logon — 030 FR-001)
     // next_outbound_ = 2 (reply Logon consumed seq=1; next to send is seq=2)
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
-        << "bilateral_strict acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "bilateral_strict acceptor: next_inbound_ must be 2 after received-141=Y reset "
+        << "(consumed seq-1 reset Logon; 030 FR-001).";
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
         << "bilateral_strict acceptor: next_outbound_ must be 2 after successful 141=Y reset "
         << "(reply Logon consumed seq=1).";
@@ -561,8 +564,9 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
-        << "bilateral_lenient acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "bilateral_lenient acceptor: next_inbound_ must be 2 after received-141=Y reset "
+        << "(consumed seq-1 reset Logon; 030 FR-001).";
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
         << "bilateral_lenient acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
 }
@@ -586,12 +590,16 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    // FR-017:150: after mutual reset:
-    //   next_inbound_ = 1 (reset; peer's next post-reset message is seq=1)
+    // FR-017:150 + 030 FR-009: after mutual reset:
+    //   next_inbound_ = 2 (the peer's seq-1 reset-ack Logon was consumed in-sequence;
+    //     030 restores the advance on the initiator peer_ack_sent_reset_flag arm — the
+    //     identical clobber to the acceptor arm; QuickFIX reset-then-increment parity)
     //   next_outbound_ = 1 (reset; initiator's next send is seq=1)
-    // (Initiator's Logon was seq=10, pre-reset. After reset both sides restart at 1.)
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
-        << "bilateral_strict initiator: next_inbound_ must be 1 after 141=Y mutual reset.";
+    // (Initiator's Logon was seq=10, pre-reset. After reset outbound restarts at 1;
+    //  inbound nets 2 because the consumed reset-ack Logon survives the reset.)
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "bilateral_strict initiator: next_inbound_ must be 2 after 141=Y mutual reset "
+        << "(consumed seq-1 reset-ack Logon; 030 FR-009).";
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
         << "bilateral_strict initiator: next_outbound_ must be 1 after 141=Y mutual reset "
         << "(Logon was pre-reset; post-reset next outbound is seq=1).";
@@ -612,8 +620,9 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{1})
-        << "unilateral acceptor: next_inbound_ must be 1 after successful 141=Y reset.";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "unilateral acceptor: next_inbound_ must be 2 after received-141=Y reset "
+        << "(consumed seq-1 reset Logon; 030 FR-001).";
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
         << "unilateral acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
 }

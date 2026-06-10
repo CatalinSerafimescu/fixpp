@@ -158,6 +158,23 @@ public:
     }
 };
 
+// 030 T003: non-persistent variant — yields_persistent_store()==false so the
+// FR-010 fatal-when-persistent disposition does NOT apply (stays logged).
+// StoreDoubleFactory is final, so we derive from MessageStoreFactory directly
+// and duplicate the minimal factory body.
+class NonPersistentStoreDoubleFactory final : public MessageStoreFactory {
+public:
+    std::shared_ptr<StoreDouble> store = std::make_shared<StoreDouble>();
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        return std::make_unique<SharedStoreWrapper>(store);
+    }
+};
+
 // ── Fixture ────────────────────────────────────────────────────────────────────
 
 class ResetOnLifecycleTest : public ::testing::Test {
@@ -518,18 +535,24 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_SuppressesPreResetGap) {
            "got Disconnected (reset trigger not yet wired; next_inbound still 5); [C2.5]";
 }
 
-// ── Witness (5): ResetOnLogon_Off_Inbound141_StoreFailure_StillActive ─────────
+// ── Witness (5a): ResetOnLogon_Off_Received141_StoreFailure_PersistentDisconnects ─
 //
-// Zero-regression guard: ALL 024 knobs off, inbound Logon carries 141=Y,
-// store_.fail_next_reset() injected → session STILL reaches Active.
-// This characterizes the existing 013 received-141 path (I-07 logged-then-proceed).
-// The 024 fatal disposition MUST NOT bleed onto this all-off path.
+// 030 FR-010 — contract amendment of the 024 FR-001/C2.6 I-07 logged-then-proceed
+// rule for the PERSISTENT received-141 sub-case. ALL 024 knobs off, inbound Logon
+// carries 141=Y, store_.fail_next_reset() injected. The default StoreDoubleFactory
+// yields_persistent_store()==true, so under FR-010 (fatal-when-persistent) the reset
+// failure is now FATAL: the session Disconnects and the store error propagates.
+// (Was: stay-Active under 024 I-07 — see the non-persistent sibling (5b) for the
+// retained stay-Active characterization.)
 //
-// [C2.6, FR-001]
+// Rationale: a swallowed reset failure on a persistent store would leave the store
+// stale, then the FR-005 persist-to-2 would advance the stale store → store > manager
+// (the 029 over-persist loss on restart). Fatal-when-persistent guarantees persist-to-2
+// only runs after a known-good reset.
 //
-// Expected: GREEN pre-impl AND post-impl (no 024 code touches this path).
-TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Inbound141_StoreFailure_StillActive) {
-    // All 024 knobs off (default false).
+// [030 FR-010; amends 024 C2.6/FR-001 I-07]
+TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Received141_StoreFailure_PersistentDisconnects) {
+    // Default StoreDoubleFactory → yields_persistent_store()==true.
     auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
                         reset_seqnum_policy::bilateral_lenient);
     Session sess(engine, cfg);
@@ -537,24 +560,56 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Inbound141_StoreFailure_StillActiv
     // Inject a store reset failure: the next awaitable reset() call returns error.
     factory->store->fail_next_reset();
 
-    // Open acceptor + feed a Logon carrying 141=Y from the peer.
     auto r = open_sync(sess);
     ASSERT_TRUE(r.has_value()) << "open() failed";
 
-    // Feed Logon with 141=Y (the 013 received-141 path).
+    // Feed Logon with 141=Y (the received-141 path).
     auto logon = make_peer_logon(1, /*reset_seqnum=*/true);
     auto r2 = feed_sync(sess, logon);
 
-    // C2.6 / FR-001: session MUST still reach Active despite the store failure.
-    // The 013 path uses I-07 logged-then-proceed. This test must stay GREEN.
+    // 030 FR-010: persistent received-141 reset failure → fatal → Disconnected + error.
+    EXPECT_FALSE(r2.has_value())
+        << "ResetOnLogon_Off_Received141_StoreFailure_PersistentDisconnects: "
+           "on_inbound_frame must propagate the store error on a persistent store "
+           "(fatal-when-persistent); [030 FR-010]";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "ResetOnLogon_Off_Received141_StoreFailure_PersistentDisconnects: "
+           "persistent received-141 reset failure must Disconnect (was stay-Active under "
+           "024 I-07; 030 FR-010 amends that contract for the persistent sub-case)";
+}
+
+// ── Witness (5b): ResetOnLogon_Off_Received141_StoreFailure_NonPersistentStillActive ─
+//
+// The RETAINED 024 I-07 characterization for NON-persistent stores. With a
+// yields_persistent_store()==false factory, FR-010 keeps the disposition `logged`
+// (the reset cannot meaningfully fail / no durable counter), so a received-141 reset
+// "failure" does NOT disconnect — the session still reaches Active. Non-persistent
+// stores are unaffected by the 030 fatal-when-persistent amendment.
+//
+// [030 FR-010 non-persistent arm; retains 024 C2.6/FR-001 I-07 stay-Active]
+TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Received141_StoreFailure_NonPersistentStillActive) {
+    auto np_factory = std::make_shared<NonPersistentStoreDoubleFactory>();
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.store_factory = np_factory;  // override the persistent default (5b)
+    Session sess(engine, cfg);
+
+    np_factory->store->fail_next_reset();
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    auto logon = make_peer_logon(1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+
+    // 030 FR-010 non-persistent: stays logged → session reaches Active (024 I-07 retained).
     ASSERT_TRUE(r2.has_value())
-        << "ResetOnLogon_Off_Inbound141_StoreFailure_StillActive: "
-           "on_inbound_frame must return ok even when store reset fails on the 013 path; "
-           "[C2.6/FR-001 I-07 logged-then-proceed]";
+        << "ResetOnLogon_Off_Received141_StoreFailure_NonPersistentStillActive: "
+           "non-persistent received-141 reset 'failure' must NOT disconnect (logged "
+           "disposition retained for non-persistent stores); [030 FR-010 / 024 I-07]";
     EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "ResetOnLogon_Off_Inbound141_StoreFailure_StillActive: "
-           "session must reach Active on 013-only received-141 path despite store failure; "
-           "[C2.6/FR-001 zero-regression guard]";
+        << "ResetOnLogon_Off_Received141_StoreFailure_NonPersistentStillActive: "
+           "non-persistent store received-141 reset failure stays Active (024 I-07 retained)";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1528,6 +1583,480 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         EXPECT_EQ(sess_b.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
             << "ResetKnobs_NoHeapOnResetPath [window B]: next_inbound must be 1 after teardown";
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 030 US1 — Acceptor received-141 inbound-advance witnesses (T004–T009)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Bug: on the acceptor received-141 path (peer sends Logon(34=1,141=Y),
+// reset_on_logon knob OFF), check_inbound advances next-expected-inbound 1→2,
+// then reset_seqnums_to_one_durable() rewinds both counters back to 1, clobbering
+// the advance. Result: next-expected-inbound=1 instead of 2 → spurious
+// ResendRequest on peer seq-2 + reply Logon advertises 789=1 not 2 (027-on).
+//
+// Fix: after the durable reset, restore next-expected-inbound to seqnum_min+1
+// (=2) in BOTH the in-memory manager (set_next_inbound) AND the durable store
+// (one persist_inbound_advance_() write-through) → store==manager==2.
+// Guarded on logon_inbound_advanced (the reset Logon was consumed in-sequence).
+//
+// Anchors: specs/030-received-reset-inbound-advance/plan.md FR-001/005/007/010;
+//          029 INV-H1 (store ≤ manager); 027 I-NEX-1/E-OBO.
+//
+// RED reason for T004–T008: the production fix is NOT yet applied; the guard at
+// §A is absent → next_inbound stays 1 after reset.
+
+// ── Witness T004: ResetOnLogon_Off_Received141_NextInboundIsTwo ───────────────
+//
+// Acceptor, knob off, feed Logon(34=1,141=Y): after the received-141 reset,
+// next_inbound_unsafe() must be 2 (consumed the seq-1 reset Logon).
+//
+// RED today: 1 (reset clobbers the check_inbound advance; guard absent).
+// [FR-001, FR-005]
+TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Received141_NextInboundIsTwo) {
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+    ASSERT_TRUE(r2.has_value()) << "Logon(141=Y) feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
+
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
+        << "T004 (FR-001/005) RED: next_inbound must be 2 after acceptor received-141 "
+           "(consumed seq-1 reset Logon); got " << next_in
+        << " (expected 2; fix not yet applied — reset clobbers the advance)";
+}
+
+// ── Witness T005: Received141_PeerNextMsgSeq2_HarmCheck ──────────────────────
+//
+// After the received-141 reset, feed a peer Heartbeat at 34=2: must NOT trigger
+// a ResendRequest (35=2) and next_inbound must advance to 3.
+//
+// RED today: next_inbound=1 after bug → seq-2 Heartbeat is too-high → ResendRequest
+// emitted (spurious gap). [FR-002]
+TEST_F(ResetOnLifecycleTest, Received141_PeerNextMsgSeq2_HarmCheck) {
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    // Drive to Active with received-141 Logon at seq=1.
+    auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+    ASSERT_TRUE(r2.has_value()) << "Logon(141=Y) feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
+
+    // Clear outbound frames captured during Logon exchange.
+    captured_frames.clear();
+
+    // Build a peer Heartbeat (35=0) at seq=2.
+    static const auto make_peer_hb = [](std::uint32_t seq) {
+        std::string body;
+        body += "35=0\x01";
+        body += "34=" + std::to_string(seq) + "\x01";
+        body += "49=TW\x01";
+        body += "52=20240101-00:00:00.000\x01";
+        body += "56=ISLD\x01";
+        return make_fix44_frame(body);
+    };
+    auto hb = make_peer_hb(2);
+    auto r3 = feed_sync(sess, hb);
+    ASSERT_TRUE(r3.has_value()) << "Heartbeat feed must succeed";
+
+    // T005a: no ResendRequest (35=2) emitted.
+    EXPECT_FALSE(any_resend_request())
+        << "T005 (FR-002) RED: spurious ResendRequest(35=2) emitted for peer seq=2 "
+           "Heartbeat; indicates next_inbound was 1 (not 2) after received-141 reset "
+           "(fix not yet applied → seq-2 looks too-high → gap detected)";
+
+    // T005b: next_inbound advanced to 3 (consumed the seq-2 Heartbeat).
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(3))
+        << "T005 (FR-002) RED: next_inbound must be 3 after consuming seq-2 Heartbeat; "
+           "got " << next_in << " (indicates next_inbound was wrong before the Heartbeat)";
+}
+
+// ── Witness T006: Received141_AcceptorDiscriminatingTriple ────────────────────
+//
+// 027-ON. After received-141, assert the discriminating triple:
+//   (a) next_inbound_unsafe() == 2
+//   (b) reply Logon MsgSeqNum(34) == 1  (outbound counter unchanged)
+//   (c) reply Logon NextExpectedMsgSeqNum(789) == 2
+//
+// RED today: (a) and (c) both fail with value 1; (b) passes already.
+// [FR-001, FR-005, 027 I-NEX-1/E-OBO]
+TEST_F(ResetOnLifecycleTest, Received141_AcceptorDiscriminatingTriple) {
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.enable_next_expected_msg_seq_num = true;
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    // Clear any frames from open() (acceptor emits nothing until Logon arrives).
+    captured_frames.clear();
+
+    auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+    ASSERT_TRUE(r2.has_value()) << "Logon(141=Y) feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
+
+    // Find the reply Logon (35=A) in captured_frames — scan for MsgType==A.
+    const std::vector<std::byte>* reply_frame = nullptr;
+    for (const auto& f : captured_frames) {
+        if (extract_field(std::span<const std::byte>(f), 35) == "A") {
+            reply_frame = &f;
+            break;
+        }
+    }
+    ASSERT_NE(reply_frame, nullptr) << "T006: acceptor must emit a reply Logon (35=A)";
+
+    // (a) next_inbound_unsafe() == 2.
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
+        << "T006 (a) (FR-001/005) RED: next_inbound must be 2 after received-141; "
+           "got " << next_in << " (fix not yet applied)";
+
+    // (b) reply MsgSeqNum(34) == 1 (outbound counter starts at 1, unchanged).
+    auto tag34 = extract_field(std::span<const std::byte>(*reply_frame), 34);
+    ASSERT_TRUE(tag34.has_value()) << "T006: reply Logon must carry MsgSeqNum(34)";
+    EXPECT_EQ(std::string(*tag34), "1")
+        << "T006 (b) (outbound byte-identical): reply MsgSeqNum must be 1; got " << *tag34;
+
+    // (c) reply NextExpectedMsgSeqNum(789) == 2.
+    auto tag789 = extract_field(std::span<const std::byte>(*reply_frame), 789);
+    ASSERT_TRUE(tag789.has_value()) << "T006: reply Logon must carry tag 789 (027-on)";
+    EXPECT_EQ(std::string(*tag789), "2")
+        << "T006 (c) (027 I-NEX-1/E-OBO) RED: reply 789 must be 2 (next_inbound after reset+advance); "
+           "got " << *tag789 << " (fix not yet applied → 789 reads 1)";
+}
+
+// ── Witness T007: Received141_PersistentStore_InvH1_StoreEqualsManagerTwo ─────
+//
+// Persistent store (default factory). After received-141, assert DIRECTLY ON THE
+// STORE: store.current_next_inbound() == 2 AND == sess.next_inbound_unsafe().
+// (INV-H1: store ≤ manager; here equality = 2.)
+//
+// RED today: store.current_next_inbound() == 1 (store never got the write-through;
+// the reset left store=1 and no persist-to-2 ran). [029 INV-H1, FR-005]
+TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_InvH1_StoreEqualsManagerTwo) {
+    // factory is the default StoreDoubleFactory (yields_persistent_store()==true).
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+    ASSERT_TRUE(r2.has_value()) << "Logon(141=Y) feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
+
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    const seqnum_t mgr_in   = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+
+    // Assert the store value directly (not via the manager as proxy).
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+        << "T007 (029 INV-H1 / FR-005) RED: store.current_next_inbound() must be 2 "
+           "after received-141 persist-to-2; got " << store_in
+        << " (fix not yet applied → store stuck at 1 after reset)";
+
+    // INV-H1 equality: store == manager (both 2 after fix; both 1 under bug).
+    EXPECT_EQ(store_in, mgr_in)
+        << "T007 (INV-H1): store.current_next_inbound() must equal "
+           "seqnum_mgr_.next_inbound_unsafe(); store=" << store_in << " mgr=" << mgr_in;
+}
+
+// ── Witness T008: Received141_PersistentStore_ResetFailure_Disconnects_NoOverPersist
+//
+// Persistent store seeded to N=37 (last-good durable value), fail_next_reset()
+// BEFORE feeding Logon(141=Y). Under FR-010: fatal-when-persistent → reset failure
+// → Disconnected; persist-to-2 is NOT reached.
+//
+// Asserts (i) Disconnected + reset attempted once, and (ii) store stays at N=37
+// (the last-good durable value — the failed reset did NOT corrupt the store;
+// persist-to-2 not reached → store is NOT advanced to N+1=38).
+//
+// The seed to N=37 makes assertion (ii) genuinely discriminating:
+//   - fix (fatal-when-persistent): store short-circuits at fail_next_reset → stays 37.
+//   - regression (logged-swallowed): reset swallowed → restore runs → store becomes 2
+//     (or 38 if the stale-N advance ran first) — neither equals 37.
+// A trivial seed of 1 (fresh store) would not distinguish these cases.
+// [FR-010, 029 INV-H1]
+TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnects_NoOverPersist) {
+    // factory is the default StoreDoubleFactory (yields_persistent_store()==true).
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    // Seed the store to N=37 AFTER open() so the inbound seed is in the store
+    // but the manager remains at seqnum_min=1 (the acceptor withholds the inbound
+    // seed on a received-141 path anyway, but seeding after open() is the safe
+    // general pattern — see T014). Then inject a reset failure.
+    // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
+    constexpr seqnum_t N = 37u;
+    factory->store->seed_inbound(N);
+    factory->store->fail_next_reset();
+
+    auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, logon);
+
+    // (i) Session must be Disconnected (fatal-when-persistent FR-010).
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "T008 (FR-010): persistent store reset failure must Disconnect the session "
+           "(fatal-when-persistent)";
+
+    // (i) The reset was attempted exactly once (then short-circuited).
+    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        << "T008: store.reset() must have been attempted exactly once; "
+           "got " << factory->store->reset_call_count();
+
+    // (ii) Persist-to-2 must NOT have run: store retains its last-good value N=37.
+    // Fix → store stays 37 (last-good lower bound; the failed reset did not corrupt it).
+    // Over-persist regression → store would become 38 (N+1, the stale-N advance ran).
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    EXPECT_EQ(store_in, N)
+        << "T008 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
+           "reset (persist-to-2 must not run); got " << store_in;
+}
+
+// ── Witness T009: Received141_GuardSkipsWhenNoConsumedReset ──────────────────
+//
+// Guard-correctness witness: received-141 path where logon_inbound_advanced=false
+// (too-high reset Logon tolerated behind-side under 027-on, check_inbound did NOT
+// advance) → the restore+persist block is guarded on logon_inbound_advanced → does
+// NOT fire → next_inbound stays at seqnum_min (1), NOT forced to 2.
+//
+// Construction: acceptor + enable_next_expected_msg_seq_num=true (enables behind-side
+// tolerance); peer sends Logon(34=5, 141=Y) — seq=5 is too-high, hydration withholds
+// the inbound seed (next_inbound=1), check_inbound(5) is too-high → tolerated
+// (behind-side, 027-on) → logon_inbound_advanced=false → reset fires (peer_sent_reset,
+// !reset_on_logon) → restore-to-2 guard skips → next_inbound remains 1.
+//
+// This is GREEN both before AND after the hunk (the `if (logon_inbound_advanced)` guard
+// is correct in both states; the test is a guard-correctness/mutation witness).
+// [FR-001, 027 I-NEX-5; 030 guard on logon_inbound_advanced]
+TEST_F(ResetOnLifecycleTest, Received141_GuardSkipsWhenNoConsumedReset) {
+    auto cfg = make_cfg(session_role::acceptor, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.enable_next_expected_msg_seq_num = true;
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    // Peer sends Logon(34=5, 141=Y): too-high (next_inbound=1, seq=5 → behind-side
+    // tolerated under 027-on) → check_inbound did NOT advance → logon_inbound_advanced=false.
+    static const auto make_peer_logon_with_seq = [](std::uint32_t seq, bool rst) {
+        std::string body;
+        body += "35=A\x01";
+        body += "34=" + std::to_string(seq) + "\x01";
+        body += "49=TW\x01";
+        body += "52=20240101-00:00:00.000\x01";
+        body += "56=ISLD\x01";
+        body += "98=0\x01";
+        body += "108=30\x01";
+        if (rst) body += "141=Y\x01";
+        return make_fix44_frame(body);
+    };
+    auto logon_toohi = make_peer_logon_with_seq(/*seq=*/5, /*rst=*/true);
+    auto r2 = feed_sync(sess, logon_toohi);
+    // Behind-side tolerated → reaches Active.
+    ASSERT_TRUE(r2.has_value()) << "behind-side tolerated Logon feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active)
+        << "T009: behind-side tolerated Logon(34=5,141=Y) must reach Active (027-on)";
+
+    // Guard skipped: next_inbound must still be 1 (NOT set to 2 by the restore).
+    // A hypothetical unguarded restore would force it to seqnum_min+1 = 2.
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
+        << "T009 (guard on logon_inbound_advanced): next_inbound must remain 1 "
+           "when behind-side tolerated (not consumed in-sequence); got " << next_in
+           << " (if 2: restore fired without logon_inbound_advanced — guard missing)";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// T012-T014 [US2] — Initiator received-141 arm (peer_ack_sent_reset_flag)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Symmetric twin of the acceptor witnesses (T004-T008) on the SEPARATE, reachable
+// initiator Logon-ack reset arm (FR-009). Identical clobber: the peer's reset-ack
+// Logon at seq=1 advances next_inbound 1->2 (logon_inbound_advanced_init), then the
+// reset rebases to 1; 030 restores to 2. No reply Logon on this arm → no 789 clause.
+
+// ── Witness T012: Initiator_Received141Ack_NextInboundTwo_NoResend ─────────────
+//
+// Initiator, knob off, bilateral_lenient. open() → LogonSent; peer Logon-ack at
+// seq=1 carrying 141=Y → consumed → next_inbound must be 2; then a peer seq-2
+// message is accepted with NO ResendRequest. [FR-009, FR-001, FR-002]
+// RED today: initiator arm not yet fixed → next_inbound=1 → spurious ResendRequest.
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_NextInboundTwo_NoResend) {
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent) << "initiator must be LogonSent after open()";
+
+    // Peer Logon-ack at seq=1 with 141=Y (the peer_ack_sent_reset_flag arm).
+    auto ack = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack);
+    ASSERT_TRUE(r2.has_value()) << "Logon-ack(141=Y) feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
+
+    // FR-001/009: next_inbound must be 2 (consumed seq-1 reset-ack Logon).
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(2))
+        << "T012 (FR-009/001) RED: initiator next_inbound must be 2 after received-141 "
+           "Logon-ack; got " << sess.seqnum_mgr_test_access().next_inbound_unsafe()
+        << " (initiator arm fix not yet applied → reset clobbers the advance)";
+
+    // FR-002: peer's next message at seq=2 accepted in-sequence, no ResendRequest.
+    captured_frames.clear();
+    static const auto make_peer_hb = [](std::uint32_t seq) {
+        std::string body;
+        body += "35=0\x01";
+        body += "34=" + std::to_string(seq) + "\x01";
+        body += "49=TW\x01";
+        body += "52=20240101-00:00:00.000\x01";
+        body += "56=ISLD\x01";
+        return make_fix44_frame(body);
+    };
+    auto r3 = feed_sync(sess, make_peer_hb(2));
+    ASSERT_TRUE(r3.has_value()) << "seq-2 Heartbeat feed must succeed";
+    EXPECT_FALSE(any_resend_request())
+        << "T012 (FR-002) RED: spurious ResendRequest(35=2) for peer seq=2 after initiator "
+           "received-141 reset (indicates next_inbound was 1 not 2)";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(3))
+        << "T012 (FR-002): next_inbound must be 3 after consuming seq-2 Heartbeat";
+}
+
+// ── Witness T013: Initiator_Received141Ack_PersistentStore_StoreEqualsManagerTwo ─
+//
+// Persistent store. After the initiator received-141 reset, assert DIRECTLY ON THE
+// STORE: store.current_next_inbound() == 2 AND == manager (INV-H1 equality). [FR-005/009]
+// RED today: store stuck at 1 (no initiator persist-to-2).
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_StoreEqualsManagerTwo) {
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    auto ack = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack);
+    ASSERT_TRUE(r2.has_value());
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    const seqnum_t mgr_in   = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+        << "T013 (FR-005/009) RED: initiator store.current_next_inbound() must be 2 "
+           "after received-141 persist-to-2; got " << store_in;
+    EXPECT_EQ(store_in, mgr_in)
+        << "T013 (INV-H1): store must equal manager; store=" << store_in << " mgr=" << mgr_in;
+}
+
+// ── Witness T014: Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects ─
+//
+// Persistent store seeded to N=37 (last-good durable value); fail_next_reset()
+// before the ack. Under FR-010 (fatal-when-persistent) the reset failure →
+// Disconnected; persist-to-2 NOT reached → store retains N=37.
+// Symmetric to acceptor T008. [FR-010/009]
+//
+// The seed to N=37 makes assertion (ii) genuinely discriminating:
+//   - fix (fatal): store short-circuits → stays 37.
+//   - regression (logged-swallowed): restore runs → store becomes 2 (or 38) ≠ 37.
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects) {
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    // Seed the store to N=37 AFTER open(). The initiator hydrates the manager during
+    // emit_initiator_logon_() at open(); seeding BEFORE open() would set manager.next_inbound
+    // to 37, causing the peer's Logon-ack at 34=1 to read too-low (1 < 37) and fire a
+    // different fatal path — not the FR-010 received-141 path. Seeding AFTER open() keeps
+    // the manager at seqnum_min=1 while making the store non-trivially N=37, so the
+    // peer's ack at 34=1 passes check_inbound (in-sequence against manager=1), the
+    // received-141 reset block runs, fails fatally, and the store retains N=37.
+    // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
+    constexpr seqnum_t N = 37u;
+    factory->store->seed_inbound(N);
+    factory->store->fail_next_reset();
+
+    auto ack = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack);
+
+    // (i) FR-010: persistent reset failure → fatal → Disconnected + error propagated.
+    EXPECT_FALSE(r2.has_value())
+        << "T014 (FR-010): initiator persistent reset failure must propagate the error";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "T014 (FR-010): initiator persistent received-141 reset failure must Disconnect";
+
+    // (i) The reset was attempted exactly once (then short-circuited).
+    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        << "T014: store.reset() must have been attempted exactly once";
+
+    // (ii) persist-to-2 NOT reached: store retains last-good value N=37.
+    // Fix → store stays 37; over-persist regression → store becomes 38 (N+1).
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    EXPECT_EQ(store_in, N)
+        << "T014 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
+           "reset (persist-to-2 must not run); got " << store_in;
+}
+
+// ── Witness T016g: Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset ─────
+//
+// Initiator symmetric twin of T009 (FR-007/009): a peer Logon-ack carrying 141=Y
+// at a TOO-HIGH seq (34=5) under 027-on behind-side tolerance → check_inbound does
+// NOT advance → logon_inbound_advanced_init=false. The peer_ack_sent_reset_flag
+// reset still fires (rebases next_inbound→1), but the 030 restore is guarded on
+// logon_inbound_advanced_init → it does NOT fire → next_inbound stays 1 (NOT forced
+// to 2). Witnesses the initiator restore is correctly guarded (mutation: drop the
+// guard at the initiator site → this would read 2). [FR-007, FR-009, 027 I-NEX-5]
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset) {
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.enable_next_expected_msg_seq_num = true;
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent) << "initiator must be LogonSent after open()";
+
+    // Peer Logon-ack(34=5, 141=Y): too-high vs next_inbound=1 → 027 behind-side
+    // tolerance → logon_inbound_advanced_init stays false; the 141=Y reset still fires.
+    auto ack_toohi = make_peer_logon(/*seq=*/5, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack_toohi);
+    ASSERT_TRUE(r2.has_value()) << "behind-side tolerated Logon-ack feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active)
+        << "T016g: behind-side tolerated Logon-ack(34=5,141=Y) must reach Active (027-on)";
+
+    // Guard skipped: next_inbound is reset to 1 and NOT restored to 2 (nothing consumed).
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
+        << "T016g (guard on logon_inbound_advanced_init): next_inbound must remain 1 when "
+           "behind-side tolerated (not consumed in-sequence); got " << next_in
+           << " (if 2: the initiator restore fired without the guard)";
 }
 
 }  // namespace fixpp::session::test

@@ -88,6 +88,23 @@ Golden artifact names (captured by parent harness at first paired live run):
 | `happy/golden/RL-QFcpp-acc-fix44-reset-on-logon.fix` | QFcpp acceptor T017 | peer 34=1 Logon + fixpp reply Logon; admin profile {52,10} |
 | `happy/golden/RL-QFj-acc-fix44-reset-on-logon.fix` | QFj acceptor T017 | peer 34=1 Logon + fixpp reply Logon; admin profile {52,10} |
 
+### 030-received-reset-inbound-advance — received-141 acceptor cell (SC-001)
+
+The live close-out of the conformance defect that motivated 030 (found via a failed live
+acceptor cell vs QFcpp/QFJ). **Distinct from the 024 `reset_on_logon`-ON acceptor cell
+above**: here fixpp's OWN `reset_on_logon` stays **OFF** so it takes the 013-only
+received-141 path (reset AFTER `check_inbound`). 1 scenario × `counterparty ∈ {QFcpp, QFj}`
+= 2 cells.
+
+| Scenario | Driver | Cells | Clause | In-process witnesses |
+|----------|--------|-------|--------|---------------------|
+| `received_reset_acceptor` — live initiator (`ResetOnLogon=Y`) sends `141=Y` + `34=1`; fixpp acceptor with `reset_on_logon=FALSE` takes the received-141 path → next-expected-inbound nets 2, peer's `34=2` accepted with no spurious ResendRequest | `hp_fix44_received_reset_test.cpp` (T028) | QFcpp/QFj × acc (2) | SC-001 / FR-001 / FR-002 | (a) FSM Active (no disconnect on 141=Y+34=1); (b) `session_event_sequence_numbers_reset{by_peer_request=true}` in the event ring — THE discriminator (emitted only on peer 141=Y; a plain Logon emits none); (c) outbound > 1 (reply Logon sent); (d) next\_inbound == 2 — the 030 correction + no-spurious-ResendRequest harm witness (pre-030 read 1) |
+
+| Golden file | Cell | Note |
+|-------------|------|------|
+| `happy/golden/RR-QFcpp-acc-fix44-received-reset.fix` | QFcpp acceptor T028 | peer 141=Y+34=1 Logon + fixpp reply (34=1, 789=2 if 027-on) + peer 34=2 accepted, NO fixpp 35=2 ResendRequest; admin profile {52,10} |
+| `happy/golden/RR-QFj-acc-fix44-received-reset.fix` | QFj acceptor T028 | peer 141=Y+34=1 Logon + fixpp reply + peer 34=2 accepted, NO fixpp ResendRequest; admin profile {52,10} |
+
 Golden absent → `skip:golden-not-yet-captured` (per `diff_golden_or_skip` convention).
 MUST NOT be hand-fabricated.
 
