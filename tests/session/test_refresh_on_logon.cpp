@@ -265,25 +265,51 @@ private:
     int fail_on_nth_call_;
 };
 
-// ── strip_tag: remove a FIX tag=value\x01 span from raw bytes ─────────────────
+// ── parse_fix_fields: parse raw FIX bytes into ordered tag=value pairs ────────
 //
-// Used by W5a to exclude tag 52 (SendingTime) from byte-identity comparison.
-// The returned vector has the tag=value\x01 span removed; all other bytes preserved.
-static std::vector<std::byte> strip_tag(const std::vector<std::byte>& frame, int tag) {
+// Used by W5a for field-level comparison excluding volatile/derived tags.
+// Each "tag=value\x01" span in the frame yields one {tag, value} entry.
+// Field-boundary-aware: splits on '\x01' first, then finds '=' in the token.
+// This avoids the false-positive risk of substring search on "52=" matching
+// inside a value, and avoids leaving 9= / 10= stale after strip.
+using TagValue = std::pair<int, std::string>;
+
+static std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& frame) {
     const auto* data = reinterpret_cast<const char*>(frame.data());
-    const std::size_t sz = frame.size();
-    const std::string needle = std::to_string(tag) + "=";
-    std::string sv(data, sz);
-    auto pos = sv.find(needle);
-    if (pos == std::string::npos) return frame;  // tag not present; return as-is
-    auto end = sv.find('\x01', pos);
-    if (end == std::string::npos) end = sz - 1;  // no SOH; remove to end
-    // Remove [pos, end] inclusive (includes the trailing SOH)
-    std::vector<std::byte> result;
-    result.reserve(sz - (end + 1 - pos));
-    for (std::size_t i = 0; i < pos; ++i) result.push_back(frame[i]);
-    for (std::size_t i = end + 1; i < sz; ++i) result.push_back(frame[i]);
+    std::string sv(data, frame.size());
+    std::vector<TagValue> result;
+    std::size_t start = 0;
+    while (start < sv.size()) {
+        const auto soh = sv.find('\x01', start);
+        const auto end = (soh == std::string::npos) ? sv.size() : soh;
+        const auto token = sv.substr(start, end - start);
+        const auto eq = token.find('=');
+        if (eq != std::string::npos) {
+            const int tag = std::stoi(token.substr(0, eq));
+            result.emplace_back(tag, token.substr(eq + 1));
+        }
+        start = (soh == std::string::npos) ? sv.size() : soh + 1;
+    }
     return result;
+}
+
+// fields_equal_except: compare two parsed field sets for equality, ignoring
+// the listed tag IDs (typically {9, 10, 52}: BodyLength, CheckSum, SendingTime
+// — derived/volatile fields whose values shift when any other field changes).
+// Returns true iff both sets have the same tags (excluding ignored) in the same
+// order with the same values.
+static bool fields_equal_except(const std::vector<TagValue>& a, const std::vector<TagValue>& b,
+                                std::initializer_list<int> exclude) {
+    auto keep = [&](const TagValue& tv) {
+        for (int t : exclude) {
+            if (tv.first == t) return false;
+        }
+        return true;
+    };
+    std::vector<TagValue> fa, fb;
+    for (const auto& tv : a) { if (keep(tv)) fa.push_back(tv); }
+    for (const auto& tv : b) { if (keep(tv)) fb.push_back(tv); }
+    return fa == fb;
 }
 
 // ── MockReconnectFactory: TransportFactory returning mock_transport ────────────
@@ -1033,16 +1059,42 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     ASSERT_FALSE(off_raw.empty())
         << "W5a: knob-off strict 2nd-logon transport must have emitted at least one frame";
 
-    // (b) Byte-identical 2nd Logon (tag 52 excluded — wall-clock volatile).
-    // Both sessions started from {in_before, out_before}, bilateral_strict, neither
-    // re-hydrated → both must emit the identical Logon bytes (same 34=<N>, 141=Y, etc.).
-    // strip_tag(52) removes "52=<timestamp>\x01" before comparison.
-    const auto on_stripped = strip_tag(on_raw, 52);
-    const auto off_stripped = strip_tag(off_raw, 52);
+    // (b) Field-level equivalence of the 2nd Logon, excluding {9,10,52}.
+    // Tags 52 (SendingTime) is wall-clock volatile; 9 (BodyLength) and 10 (CheckSum)
+    // are derived from the body bytes including 52, so they shift when 52 differs.
+    // We parse both frames into ordered tag=value fields and compare excluding those
+    // three derived/volatile tags — asserting the load-bearing fields match.
+    // This replaces the old strip_tag(52) byte compare which left 10= stale and
+    // could produce spurious FAIL when the two sessions were stamped ms apart.
+    //
+    // Direct assertions on the key fields: 34 (MsgSeqNum) and 141 (ResetSeqNumFlag).
+    // These are the fields whose suppression W5a claims — they MUST be equal between
+    // knob-on and knob-off under bilateral_strict (neither ran the re-hydrate).
+    const auto on_fields = parse_fix_fields(on_raw);
+    const auto off_fields = parse_fix_fields(off_raw);
 
-    EXPECT_EQ(on_stripped, off_stripped)
+    // Direct 34 assertion: both must carry the same MsgSeqNum.
+    std::string on_34, off_34;
+    for (const auto& tv : on_fields) { if (tv.first == 34) { on_34 = tv.second; break; } }
+    for (const auto& tv : off_fields) { if (tv.first == 34) { off_34 = tv.second; break; } }
+    EXPECT_EQ(on_34, off_34)
+        << "W5a(b)/34: knob-on and knob-off bilateral_strict 2nd-Logon must carry "
+           "the same MsgSeqNum(34). on_34=" << on_34 << " off_34=" << off_34
+        << ". Mismatch means the knob influenced the strict 2nd Logon outbound seqnum.";
+
+    // Direct 141 assertion: bilateral_strict always emits 141=Y; both must agree.
+    std::string on_141, off_141;
+    for (const auto& tv : on_fields) { if (tv.first == 141) { on_141 = tv.second; break; } }
+    for (const auto& tv : off_fields) { if (tv.first == 141) { off_141 = tv.second; break; } }
+    EXPECT_EQ(on_141, off_141)
+        << "W5a(b)/141: knob-on and knob-off bilateral_strict 2nd-Logon must carry "
+           "the same ResetSeqNumFlag(141). on_141=" << on_141 << " off_141=" << off_141
+        << ". Mismatch means the strict suppression gate differed between knob states.";
+
+    // Full field equivalence (excluding 9, 10, 52).
+    EXPECT_TRUE(fields_equal_except(on_fields, off_fields, {9, 10, 52}))
         << "W5a(b): knob-on and knob-off bilateral_strict 2nd-Logon frames must be "
-           "byte-identical (excluding tag 52 SendingTime). "
+           "field-identical (excluding tags 9/10/52: BodyLength/CheckSum/SendingTime). "
            "Non-equal means the knob influenced the strict 2nd Logon (INV-RoL-3 violated).";
 }
 
