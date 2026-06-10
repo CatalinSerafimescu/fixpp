@@ -142,6 +142,25 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
            "consumed seq-1 reset Logon advances next-expected-inbound to 2. If 1, the 030 "
            "fix regressed and a spurious ResendRequest would be emitted for the peer's 34=2.";
 
+    // ── In-process witness (d): peer's post-reset 34=2 accepted in-sequence ─────
+    // After reaching Active with next_inbound==2 (witness b), wait for the peer's
+    // post-logon message at 34=2 to be accepted: next_inbound reaches 3.
+    // This discriminates the received-141 arm from a plain non-reset Logon:
+    //   - received-141 (030 fix): reset → next_inbound=2 → peer 34=2 accepted → 3.
+    //   - plain non-reset Logon at 34=1: next_inbound stays 2 (peer 34=2 would trigger
+    //     a spurious ResendRequest, leaving next_inbound at 2 and emitting 35=2).
+    // A spurious ResendRequest would prevent next_inbound from advancing to 3.
+    // (The parent harness configures the peer initiator with ResetOnLogon=Y, so the
+    // peer sends 141=Y + a subsequent admin message at 34=2.)
+    const bool got_seq2 = fx.run_until(
+        [&]{ auto s2 = fx.engine().lookup(id);
+             return s2 && s2->seqnum_mgr_test_access().next_inbound_unsafe()
+                             == fixpp::session::seqnum_t{3}; },
+        std::chrono::milliseconds{5000});
+    EXPECT_TRUE(got_seq2)
+        << "peer's post-reset 34=2 not accepted in-sequence (next_inbound did not reach 3) — "
+           "the received-141 arm + no-spurious-ResendRequest harm-repro is unproven in-process";
+
     // The golden assertion (received-141 exchange, no fixpp ResendRequest, peer 34=2
     // accepted, admin profile {52,10}) is performed by the parent gate against the
     // proxy capture. Golden file: happy/golden/RR-<cp>-acc-fix44-received-reset.fix
