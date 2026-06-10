@@ -58,6 +58,7 @@
 
 #include <chrono>
 #include <string>
+#include <variant>
 
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
@@ -127,6 +128,32 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
+    // ── In-process witness (b'): received-141 reset path actually ran ─────────────
+    // recent_events() exposes the in-process SessionEvent ring directly — NO
+    // Application / event sink needed (emit_event writes the ring unconditionally,
+    // session.cpp:204). The received-141 acceptor arm emits
+    // session_event_sequence_numbers_reset{by_peer_request=true} ONLY when the peer
+    // sent 141=Y (session.cpp:1969, reset_on_logon=false here). A plain non-reset
+    // Logon emits NO such event. This discriminates received-141 from a plain Logon
+    // (which would also reach Active with next_inbound==2..3 under a harness
+    // misconfiguration). Idiom mirrors test_reset_seqnum_policy_matrix.cpp:653-662.
+    {
+        bool reset_event_seen = false;
+        for (const auto& ev : s->recent_events()) {
+            if (auto* r =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+                EXPECT_TRUE(r->by_peer_request)
+                    << "received-141 cell: by_peer_request must be true (peer sent 141=Y)";
+                reset_event_seen = true;
+            }
+        }
+        EXPECT_TRUE(reset_event_seen)
+            << "no session_event_sequence_numbers_reset emitted — fixpp did NOT take the "
+               "received-141 reset path; a plain non-reset Logon would not emit this event, "
+               "so the in-process witnesses (a)/(c)/next_inbound==2/==3 are non-discriminating "
+               "without it";
+    }
+
     // ── In-process witness (c): outbound advanced past the reply Logon ───────────
     EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the reply Logon";
@@ -145,11 +172,13 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // ── In-process witness (d): peer's post-reset 34=2 accepted in-sequence ─────
     // After reaching Active with next_inbound==2 (witness b), wait for the peer's
     // post-logon message at 34=2 to be accepted: next_inbound reaches 3.
-    // This discriminates the received-141 arm from a plain non-reset Logon:
-    //   - received-141 (030 fix): reset → next_inbound=2 → peer 34=2 accepted → 3.
-    //   - plain non-reset Logon at 34=1: next_inbound stays 2 (peer 34=2 would trigger
-    //     a spurious ResendRequest, leaving next_inbound at 2 and emitting 35=2).
-    // A spurious ResendRequest would prevent next_inbound from advancing to 3.
+    // This is a harm-repro guard against the pre-030 regression: the bug clobbered
+    // next_inbound back to 1 after the received-141 reset, so the peer's 34=2 read
+    // too-high → a spurious ResendRequest was emitted, blocking next_inbound at 2.
+    // Reaching 3 proves the peer's 34=2 was accepted in-sequence (no spurious
+    // ResendRequest fired). NOTE: next_inbound==3 does NOT by itself discriminate
+    // received-141 from a plain non-reset Logon (both paths accept the peer's 34=2
+    // in-sequence) — that discrimination is the job of witness (b') above.
     // (The parent harness configures the peer initiator with ResetOnLogon=Y, so the
     // peer sends 141=Y + a subsequent admin message at 34=2.)
     const bool got_seq2 = fx.run_until(
