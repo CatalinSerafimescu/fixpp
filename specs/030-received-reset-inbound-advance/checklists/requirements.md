@@ -34,9 +34,12 @@
 - The spec is a conformance bug-fix; the domain (FIX sequence-number semantics, tag numbers
   like 141/34/789) is inherent to the requirements and is described at the behavioral level,
   not the code level. This is acceptable per the project's session-layer specs (cf. 013/024/027).
-- One assumption ("141=Y Logon carries MsgSeqNum=1") is explicitly flagged as
-  *to-be-grounded in `/speckit-clarify`* against the FIX spec text / reference engines, and is
-  declared non-load-bearing (QuickFIX-as-oracle is the binding authority). No
-  [NEEDS CLARIFICATION] marker is used because the fix does not depend on resolving it.
-- The known blast radius (5 pinned tests) is documented in the spec so the implementation phase
-  treats the flips as justified corrections, each individually re-verified, not convenience edits.
+- One assumption ("141=Y Logon carries MsgSeqNum=1") was **grounded in `/speckit-clarify` by the
+  QFcpp/QFJ source sweep** (see `spec.md` Clarifications: QuickFIX-cpp `nextLogon` reset-then-
+  increment; QuickFIX-J 2202-2204 explicitly infers `ResetSeqNumFlag` from `MsgSeqNum==1`). It is
+  no longer "to be confirmed" — next-expected-inbound = 2 after consuming the reset Logon is
+  authoritative. No [NEEDS CLARIFICATION] marker remains.
+- The known blast radius (7 pins: 6 value-pins + the merged 024 witness-(5) contract-amendment
+  split) is documented in the spec so the implementation phase treats the value flips as justified
+  corrections — each individually re-verified — and the witness split as the FR-010 / 024 I-07
+  contract amendment (persistent received-141 reset failure now disconnects), not convenience edits.
