@@ -98,7 +98,7 @@ received-141 path (reset AFTER `check_inbound`). 1 scenario × `counterparty ∈
 
 | Scenario | Driver | Cells | Clause | In-process witnesses |
 |----------|--------|-------|--------|---------------------|
-| `received_reset_acceptor` — live initiator (`ResetOnLogon=Y`) sends `141=Y` + `34=1`; fixpp acceptor with `reset_on_logon=FALSE` takes the received-141 path → next-expected-inbound nets 2, peer's `34=2` accepted with no spurious ResendRequest | `hp_fix44_received_reset_test.cpp` (T028) | QFcpp/QFj × acc (2) | SC-001 / FR-001 / FR-002 | (a) FSM Active (no disconnect on 141=Y+34=1); (b) outbound > 1 (reply Logon sent); (c) next\_inbound == 2 (the 030 correction — pre-030 this read 1 → spurious ResendRequest on 34=2) |
+| `received_reset_acceptor` — live initiator (`ResetOnLogon=Y`) sends `141=Y` + `34=1`; fixpp acceptor with `reset_on_logon=FALSE` takes the received-141 path → next-expected-inbound nets 2, peer's `34=2` accepted with no spurious ResendRequest | `hp_fix44_received_reset_test.cpp` (T028) | QFcpp/QFj × acc (2) | SC-001 / FR-001 / FR-002 | (a) FSM Active (no disconnect on 141=Y+34=1); (b) `session_event_sequence_numbers_reset{by_peer_request=true}` in the event ring — THE discriminator (emitted only on peer 141=Y; a plain Logon emits none); (c) outbound > 1 (reply Logon sent); (d) next\_inbound == 2 — the 030 correction + no-spurious-ResendRequest harm witness (pre-030 read 1) |
 
 | Golden file | Cell | Note |
 |-------------|------|------|

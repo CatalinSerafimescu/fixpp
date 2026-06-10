@@ -19,18 +19,22 @@
 //     ends at 2 and the peer's 34=2 message is accepted in-sequence (no ResendRequest).
 //
 // In-process witnesses (what this cell can assert in-process):
-//   (a) fixpp FSM reaches Active — the live counterparty's 141=Y + 34=1 Logon was
-//       accepted on the received-141 path (no too-low disconnect / Logout).
-//   (b) inbound seqnum == 2 after the Logon exchange — the consumed seq-1 reset
-//       Logon advanced next-expected-inbound to 2 (the 030 correction). Pre-030 this
-//       read 1, which then made the peer's 34=2 read too-high → spurious ResendRequest.
-//       This is THE discriminating in-process witness for SC-001/FR-001 on the live path.
-//   (c) outbound seqnum advanced past the reply Logon (acceptor sent its reply at 34=1).
+//   (a)  fixpp FSM reaches Active — the live counterparty's 141=Y + 34=1 Logon was
+//        accepted on the received-141 path (no too-low disconnect / Logout).
+//   (b') session_event_sequence_numbers_reset{by_peer_request=true} in the in-process
+//        event ring — THE discriminating witness: it is emitted ONLY when the peer sent
+//        141=Y (session.cpp:1969, reset_on_logon=false here), so it proves fixpp took
+//        the received-141 reset path. A plain non-reset Logon emits no such event.
+//   (b)  inbound seqnum == 2 after the Logon exchange — the 030 correction (the consumed
+//        seq-1 reset Logon advanced next-expected-inbound to 2). NOT a path discriminator
+//        on its own (a plain Logon also lands at 2); it is the no-spurious-ResendRequest
+//        harm witness — pre-030 this read 1, making the peer's 34=2 read too-high.
+//   (c)  outbound seqnum advanced past the reply Logon (acceptor sent its reply at 34=1).
 //
 // The end-to-end "no ResendRequest emitted + peer's 34=2 accepted" assertion is the
 // parent harness's golden-diff job (the proxy capture shows the absence of a 35=2
-// ResendRequest in the fixpp→peer stream); witness (b) is its in-process proxy
-// (next_inbound==2 ⇔ no ResendRequest was issued for the seqnum below the reset point).
+// ResendRequest in the fixpp→peer stream); witness (b)/next_inbound==2 is its in-process
+// proxy (next_inbound==2 ⇔ no ResendRequest was issued for the seqnum below the reset point).
 //
 // Value-parameterized over counterparty ∈ {quickfix-cpp, quickfix-j} (acceptor role —
 // the SC-001 subject; the initiator received-141 arm (FR-009) is witnessed in-process
