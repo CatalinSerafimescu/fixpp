@@ -22,6 +22,19 @@ Step 2 unconditionally clobbers the inbound advance from step 1. The net result 
 
 **Root cause of the regression:** in feature 024 the reset was deliberately placed *after* the inbound check to preserve byte-identity of the **outbound reply** (the reply Logon must be stamped seq 1). That rationale was correct *for the outbound side* but was over-applied: it conflated "outbound reply MsgSeqNum = 1" with "inbound next-expected = 1". Those two counters are independent; only the outbound one should be re-based to 1.
 
+## Clarifications
+
+### Session 2026-06-10
+
+No user-facing design decisions were open — the corrected behavior is fully determined by the conformance oracle. The one flagged assumption ("a `141=Y` Logon carries `MsgSeqNum=1`, and consuming it advances next-expected-inbound to 2") was **grounded by a reference-engine source sweep** rather than a user question:
+
+- Q: Is the `141=Y` Logon's `MsgSeqNum=1` (and next-expected-inbound = 2 after consuming it) the spec-mandated / reference-engine behavior, or merely a fixpp convention? → A: **Reference-engine-confirmed; treat next-expected-inbound = 2 as authoritative.**
+  - **QuickFIX-cpp** `Session.cpp::nextLogon`: on received reset, `m_state.reset()` rebases both counters to 1 (line ~206) *before* consuming the Logon; then because `resetSeqNumFlag` is set, the too-high branch is skipped and `incrNextTargetMsgSeqNum()` advances target 1→2 (line ~265). The 789 path adds +1 with the comment "incoming Logon did not increment the target SeqNum yet" (line ~710).
+  - **QuickFIX-J** `Session.java::nextLogon`: explicitly *infers* `ResetSeqNumFlag` when `MsgSeqNum == 1` — "Inferring ResetSeqNumFlag as sequence number is 1 in response to reset request" (lines 2202-2204), directly corroborating the `MsgSeqNum=1` assumption. `resetState()` rebases to 1 (line 2215); the in-sequence branch then `incrNextTargetMsgSeqNum()` 1→2 (line 2303); the 789 advertisement computes `nextTarget(1) + 1 = 2` ("we always send 2 ... we haven't inc'd for current message yet +1", lines 2269-2278).
+  - **Order is the crux**: both engines reset-*then*-increment, so the consumed reset Logon is accounted for (net = 2). fixpp increments-*then*-resets with no re-increment (net = 1) — that is the defect. The fix restores the post-reset inbound to 2, reproducing the engines' net result.
+
+This converts the spec's flagged assumption to a grounded fact; the assumption is no longer "to be confirmed".
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Acceptor accepts the peer's post-reset traffic without a spurious resend (Priority: P1)
@@ -102,6 +115,6 @@ Five existing tests currently **pin the defective value** (next-expected-inbound
 ## Assumptions
 
 - **QuickFIX-cpp/J are the conformance oracle**, grounded in the source already inspected during root-cause analysis. They (and the FIX session protocol) treat the `141=Y` Logon as a consumed in-sequence message at seq 1.
-- A `Logon` carrying `141=Y` is sent with `MsgSeqNum=1`. *(This is believed to be FIX-session-spec-mandated; to be confirmed against the spec text / reference-engine behavior during `/speckit-clarify` before being treated as load-bearing. The fix does not depend on this claim — QuickFIX-as-oracle is sufficient — but the spec should cite it correctly.)*
+- A `Logon` carrying `141=Y` is sent with `MsgSeqNum=1`, and consuming it advances next-expected-inbound to 2. **Confirmed** by the reference-engine sweep in Clarifications (QuickFIX-cpp `nextLogon` reset-then-increment; QuickFIX-J lines 2202-2204 explicitly infer the reset from `MsgSeqNum==1`).
 - The fix rides on the existing 013/024 received-141 machinery and the 029 persistence spine; no new configuration knob is introduced.
 - The acceptor role is where this is observable (initiator-side received-141 follows the same code but the live finding and primary scenario are acceptor-side).
