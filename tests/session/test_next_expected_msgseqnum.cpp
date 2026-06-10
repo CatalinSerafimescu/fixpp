@@ -629,13 +629,18 @@ TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne) {
 // seeded seq; after assign_outbound N = seeded + 1. The 789 honor runs AFTER
 // the reply Logon is emitted (RC#4 ordering).
 //
-// I-NEX-11 guard: compare X against peek_outbound() (OUTBOUND), not
-// next_inbound_unsafe() (INBOUND).
+// I-NEX-11 guard: compare X against an OUTBOUND counter, not next_inbound_unsafe()
+// (INBOUND). 031: the acceptor compares against its PRE-reply next-outbound
+// (next_outbound_ref / N_pre = the seeded value), NOT the live post-reply
+// peek_outbound() (= N_post). For X far below the boundary (X=3) the outcome is
+// identical (X < N_pre and X < N_post both ⇒ behind); the range endpoint still reads
+// the live peek_outbound() (INV-NEX-RANGE).
 
 // T008 witness 1 (I-NEX-2/3, RC#4):
 // Acceptor, knob on, store through 5, seeded outbound=6.
-// Peer Logon seq=1, 789=3 (X=3 < N-at-decision).
-// After reply Logon (seq=6, peek=7): N=7, X=3 → resend [3, eff_end=5].
+// Peer Logon seq=1, 789=3 (X=3 < N_pre-at-decision).
+// Decision against N_pre=6 (031; pre-031 against post-reply peek=7); resend range reads
+// live peek_outbound()-1 → [3, eff_end=5] (end_is_through_current caps eff_end at our_last=5).
 // Assertions:
 //   (a) At least 3 PossDup app frames at seqs 3,4,5 appear AFTER the reply Logon.
 //   (b) Zero ResendRequest(35=2) frames emitted.
@@ -769,53 +774,17 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest) {
     }
 }
 
-// T008 witness 3 (I-NEX-2):
-// X == N ⇒ no resend (both roles).
-// Acceptor: seeded outbound=4, peer sends 789=5 (X == N=5 after reply Logon).
+// T008 witness 3 (I-NEX-2): X == N ⇒ no resend (INITIATOR).
 // Initiator: seeded outbound=3, peer sends 789=3 (X == N=3).
+//
+// 031: the ACCEPTOR arm was SPLIT OUT. It fed 789=5 == N_post (the pre-031 buggy
+// post-reply reference) and asserted Active — under the comprehensive fix that is
+// too-high (789 = N_pre+1) → Logout. Its in-sync intent now lives in W1
+// (Honor.Acceptor_XeqNpre_NoResend_Establishes, 789=N_pre=4) and its 789=5 feed in
+// W3 (Honor.Acceptor_XeqNprePlus1_TooHigh_Logout). The initiator arm below stays
+// byte-identical — its peer-reply 789=target+1 already matches fixpp's post-own-Logon
+// outbound (FR-008), so it compares X==peek_outbound() and needs no change.
 TEST(Honor, XeqN_NoResend) {
-    // ── Acceptor arm ─────────────────────────────────────────────────────────
-    {
-        auto fix = std::make_unique<Fixture>();
-        fix->cfg.role = fixpp::session::session_role::acceptor;
-        fix->cfg.sender_comp_id = "SRV";
-        fix->cfg.target_comp_id = "CLI";
-        fix->cfg.begin_string = "FIX.4.4";
-        fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
-        fix->cfg.heartbeat_interval = std::chrono::seconds{30};
-        fix->cfg.executor_override = fix->ioc.get_executor();
-        fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
-        fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-        fix->cfg.enable_next_expected_msg_seq_num = true;
-        fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) {
-            fix.capture(data);
-        };
-        fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-        fix->ioc.run_for(1s);
-        fix->ioc.restart();
-        (void)open_fut.get();
-
-        // Seed outbound=4: reply Logon goes at seq=4 → peek_outbound=5=N.
-        // Peer sends 789=5 → X=5 == N=5 → no resend.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
-
-        fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 5));
-
-        ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
-
-        // No PossDup frames must be present (no resend).
-        for (const auto& f : fix->capture.frames) {
-            EXPECT_NE(extract_tag(f, 43), "Y")
-                << "XeqN acceptor: no PossDup frame expected when X==N";
-        }
-        // No ResendRequest.
-        for (const auto& f : fix->capture.frames) {
-            EXPECT_NE(extract_tag(f, 35), "2") << "XeqN acceptor: no ResendRequest expected";
-        }
-    }
-
     // ── Initiator arm ─────────────────────────────────────────────────────────
     {
         auto fix2 = std::make_unique<Fixture>();
@@ -858,6 +827,121 @@ TEST(Honor, XeqN_NoResend) {
             EXPECT_NE(extract_tag(f, 35), "2") << "XeqN initiator: no ResendRequest expected";
         }
     }
+}
+
+// ── 031 W1 (in-sync, the live-found bug) ─────────────────────────────────────
+// Acceptor with the 789 knob on, peer's INITIAL Logon advertises 789 = N_pre
+// (fixpp's PRE-reply next-outbound — the conformant in-sync value: a peer expects
+// fixpp's very next outbound message). Pre-031 fixpp compared X against the
+// POST-reply peek_outbound() (= N_post = N_pre+1), mis-classified X<N_post as
+// behind-by-one, and emitted a spurious SequenceReset-GapFill at the reply Logon's
+// own seqnum (a newly-originated duplicate-MsgSeqNum) → peer Logout-rejects.
+//
+// Discriminating witness (Gate-A directive #2; avoids the drive_to_active /
+// mis-placed-capture traps): assert (a) the reply Logon WAS emitted at 34==N_pre,
+// (b) inspecting only frames AFTER the reply, zero 35=4, zero 35=2, zero 43=Y, and
+// no further frame at 34==N_pre, (c) Active. RED on pre-031 main.
+// Anchors: spec FR-002/FR-004, SC-001/SC-003; research.md R8 W1.
+TEST(Honor, Acceptor_XeqNpre_NoResend_Establishes) {
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.enable_next_expected_msg_seq_num = true;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    // Seed outbound=4: the reply Logon goes at seq=4 (N_pre=4) → peek_outbound=5 (N_post).
+    // Peer's initial Logon advertises 789 = N_pre = 4 (the in-sync value, no +1).
+    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+    fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 4));
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "in-sync peer (789=N_pre) must reach Active";
+
+    // (a) locate the reply Logon (35=A) and confirm it was emitted at 34==N_pre==4.
+    std::size_t reply_idx = fix->capture.frames.size();
+    for (std::size_t i = 0; i < fix->capture.frames.size(); ++i) {
+        if (extract_tag(fix->capture.frames[i], 35) == "A") {
+            reply_idx = i;
+            break;
+        }
+    }
+    ASSERT_LT(reply_idx, fix->capture.frames.size()) << "reply Logon (35=A) must be emitted";
+    EXPECT_EQ(extract_tag(fix->capture.frames[reply_idx], 34), "4")
+        << "reply Logon must be at 34==N_pre==4";
+
+    // (b) inspecting ONLY frames after the reply Logon: no spurious resend, no dup-seq.
+    for (std::size_t i = reply_idx + 1; i < fix->capture.frames.size(); ++i) {
+        const auto& f = fix->capture.frames[i];
+        EXPECT_NE(extract_tag(f, 35), "4") << "in-sync: no SequenceReset-GapFill after reply Logon";
+        EXPECT_NE(extract_tag(f, 35), "2") << "in-sync: no ResendRequest after reply Logon";
+        EXPECT_NE(extract_tag(f, 43), "Y") << "in-sync: no PossDup frame after reply Logon";
+        EXPECT_NE(extract_tag(f, 34), "4")
+            << "in-sync: no newly-originated frame may re-use the reply Logon's seqnum (4)";
+    }
+}
+
+// ── 031 W3 (too-high boundary, comprehensive scope) ──────────────────────────
+// Acceptor, peer's INITIAL Logon advertises 789 = N_pre + 1 (== N_post). The peer
+// claims to have received fixpp's seq N_post, which fixpp has NOT sent yet (its
+// reply Logon is at N_pre) — a genuine sequence-integrity violation. With the
+// boundary evaluated against N_pre, this is too-high ⇒ Logout + disconnect (pre-031
+// it was mis-classified in-sync because the comparison read N_post). This is the
+// repurposed old XeqN_NoResend acceptor arm (789=5). RED on pre-031 main.
+// Anchors: spec FR-005; research.md R8 W3; QFcpp Session.cpp:230 / QFJ :2255.
+TEST(Honor, Acceptor_XeqNprePlus1_TooHigh_Logout) {
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = std::make_shared<ShortStoreFactory>(5);
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.enable_next_expected_msg_seq_num = true;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    fix->ioc.run_for(1s);
+    fix->ioc.restart();
+    (void)open_fut.get();
+
+    // Seed outbound=4 (N_pre=4, N_post=5). Peer advertises 789=5 (== N_pre+1) → too-high.
+    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+    fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 5));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "789=N_pre+1 is too-high (peer claims an unsent seq) ⇒ must be Disconnected";
+
+    // A Logout (35=5) must be emitted (the existing 027 X>N arm, boundary now at N_pre).
+    // Locate the Logout frame and assert its 58= text reports N_pre (=4), not N_post (=5).
+    // This pins: the comparison reference is next_outbound_ref==N_pre, not peek_outbound()==N_post.
+    const std::vector<std::byte>* logout_frame = nullptr;
+    for (const auto& f : fix->capture.frames) {
+        if (extract_tag(f, 35) == "5") {
+            logout_frame = &f;
+            break;
+        }
+    }
+    ASSERT_NE(logout_frame, nullptr) << "too-high 789 ⇒ Logout (35=5) + disconnect";
+    EXPECT_EQ(extract_tag(*logout_frame, 58),
+              "NextExpectedMsgSeqNum too high, expecting 4 but received 5")
+        << "Logout 58= text must report N_pre (=4), not post-reply peek_outbound() (=5)";
 }
 
 // T008 witness 4 — WalkExtraction TwoValueEnd (789-caller half):

@@ -1914,6 +1914,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Emit the acceptor reply Logon using the same admin-builder path
             // as the initiator's open() Logon. [spec.md FR-005 line 112]
+            //
+            // 031: the PRE-reply next-outbound (N_pre) the peer's 789 is compared against in
+            // the honor below (RC#4 runs honor AFTER the reply consumed a seq). Set from
+            // reply_seq inside the block (= peek_outbound() before assign_outbound, post any
+            // 141 reset), so it is correct under all paths. [FR-001/FR-007, contract C-031-CS]
+            seqnum_t n_pre_outbound = 0;
             {
                 std::array<std::byte, 256> reply_buf{};
                 std::array<char, 32> reply_time_buf{};
@@ -1983,6 +1989,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                      cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_lenient) &&
                     peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
+                n_pre_outbound = reply_seq;  // 031: capture N_pre before the reply consumes it
                 // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (`:1571`)
                 // which already advanced next_inbound_. Advertise plain next_inbound_unsafe() —
                 // NO +1 (E-OBO). Value is cause-dependent under 141 reset (data-model Reset table).
@@ -2024,7 +2031,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Delegates to honor_peer_next_expected_() — single implementation.
             // [contract C4/C6, data-model I-NEX-2/3/4/9/11, D-6/D-10]
             if (cfg_.enable_next_expected_msg_seq_num && peer_789_present) {
-                auto h789 = co_await honor_peer_next_expected_(peer_789_raw, peer_789_present);
+                // 031: compare against the PRE-reply outbound (n_pre_outbound), NOT the live
+                // post-reply peek_outbound() — the reply Logon already consumed a seq here.
+                auto h789 = co_await honor_peer_next_expected_(peer_789_raw, peer_789_present,
+                                                               n_pre_outbound);
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
@@ -3319,8 +3329,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // On X<N (resend) or X==N (no-op), returns true and we proceed to Active.
             // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
             if (cfg_.enable_next_expected_msg_seq_num && hdr.next_expected_present) {
+                // 031: the initiator emits NO reply Logon on this arm, so the comparison
+                // reference is the current peek_outbound() — byte-identical to 027 (the peer's
+                // reply 789 = target+1 already matches fixpp's post-own-Logon outbound). [FR-008]
                 auto h789 = co_await honor_peer_next_expected_(hdr.next_expected_msg_seq_num,
-                                                               hdr.next_expected_present);
+                                                               hdr.next_expected_present,
+                                                               seqnum_mgr_.peek_outbound());
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
@@ -4507,9 +4521,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
 //   unexpected(err)          — X<N resend failed; Disconnected recorded;
 //                              caller MUST co_return std::unexpected(err).
 asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected_(
-    std::string_view raw_789, bool /*present_789*/) noexcept {
+    std::string_view raw_789, bool /*present_789*/, seqnum_t next_outbound_ref) noexcept {
     const seqnum_t x789 = parse_seqnum(raw_789);
-    const seqnum_t n789 = seqnum_mgr_.peek_outbound();  // OUTBOUND (I-NEX-11)
+    // 031: compare the peer's 789 against the comparison reference (the acceptor passes
+    // its PRE-reply next-outbound; the initiator passes current peek_outbound()), NOT the
+    // live post-reply peek_outbound() — on the acceptor arm honor runs after the reply
+    // Logon consumed a seq, so peek_outbound() here is N_post = N_pre+1 and an in-sync
+    // peer (789 = N_pre) would mis-classify as behind-by-one. The resend RANGE below
+    // still reads the live peek_outbound() (INV-NEX-RANGE, :4591).
+    const seqnum_t n789 = next_outbound_ref;
     if (x789 == 0) {
         // Present-but-invalid (parse→0: empty / non-digit / overflow).
         // Evaluated FIRST (D-10): a parse→0 value must never reach the X<N branch
@@ -4587,8 +4607,12 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
     } else if (x789 < n789) {
         // X < N: proactively resend [X, N-1].
         // [contract C4/C8, I-NEX-2/3]
-        auto rr789 =
-            co_await replay_outbound_range_(x789, n789 - 1U, /*end_is_through_current=*/true);
+        // 031 INV-NEX-RANGE: the resend range endpoint reads the LIVE peek_outbound()-1
+        // (= N_pre on the acceptor arm), NOT n789-1 (= next_outbound_ref-1). Behaviorally
+        // inert at this call site (end_is_through_current=true forces eff_end=our_last,
+        // :4419-4420), but written explicitly for contract-fidelity and robustness.
+        auto rr789 = co_await replay_outbound_range_(x789, seqnum_mgr_.peek_outbound() - 1U,
+                                                     /*end_is_through_current=*/true);
         if (!rr789) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(rr789.error());

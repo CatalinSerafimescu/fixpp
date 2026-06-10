@@ -988,6 +988,11 @@ private:
     //   raw_789    — the raw string_view of tag 789's value from the inbound Logon
     //                (may be empty if tag was present but had no value).
     //   present_789 — true iff tag 789 appeared in the inbound Logon frame.
+    //   next_outbound_ref — the next-outbound seq the peer's 789 is compared against
+    //                (031): acceptor passes the PRE-reply outbound (captured before the
+    //                reply Logon consumes a seq); initiator passes current peek_outbound()
+    //                (byte-identical). The three comparisons use this; the resend RANGE
+    //                still reads the live peek_outbound() (INV-NEX-RANGE).
     //
     // Outcomes (D-10 ordering preserved: invalid-X FIRST, then X>N, then X<N):
     //   true   (continue)    — X==N (in sync), or X<N resend succeeded; caller continues.
@@ -1001,7 +1006,8 @@ private:
     // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
     // remains at each call site so the knob-off / tag-absent no-op stays visible.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>> honor_peer_next_expected_(
-        std::string_view raw_789, bool present_789) noexcept;
+        std::string_view raw_789, bool present_789,
+        fixpp::session::seqnum_t next_outbound_ref) noexcept;
 };
 
 }  // namespace fixpp::session
