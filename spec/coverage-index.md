@@ -618,9 +618,9 @@ Notes that supplement specific catalogue rows (`feature-catalogue.md`) without r
 
 ---
 
-## 029-persistent-seqnum-hydrate — (pending merge)
+## 029-persistent-seqnum-hydrate — MERGED (PR #111 squash `0b9c8b8`, 2026-06-09; gate-a-done + gate-b-done)
 
-> Closes "T034" — the inbound store-persistence gap. Ships catalogue row **S-042 → `done`** (FIX 4.4: durable inbound counter + bidirectional hydrate-on-open). Discharges the `008`-boundary prerequisite for S-018 (RefreshOnLogon); S-018 stays `backlog` until 025 ships.
+> Closes "T034" — the inbound store-persistence gap. Ships catalogue row **S-042 → `done`** (FIX 4.4: durable inbound counter + bidirectional hydrate-on-open). Discharges the `008`-boundary prerequisite for S-018 (RefreshOnLogon); S-018 shipped via **025** (PR #112 squash `357f5ab`, MERGED 2026-06-10).
 >
 > **Source units covered.**
 > - `SeqnumManager::hydrate(next_inbound, next_outbound)` — new production awaitable setter; loads both counters from the persisted store into the in-memory manager at cold open.
