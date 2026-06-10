@@ -1,1 +1,3 @@
-{"feature_directory":"specs/025-refresh-on-logon"}
+{
+  "feature_directory": "specs/030-received-reset-inbound-advance"
+}
