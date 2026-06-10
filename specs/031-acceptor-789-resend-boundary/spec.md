@@ -2,7 +2,7 @@
 
 **Feature Branch**: `031-acceptor-789-resend-boundary`
 **Created**: 2026-06-10
-**Status**: Draft
+**Status**: Gate-A-done / Ready-for-implement
 **Input**: User description: "Acceptor NextExpectedMsgSeqNum(789) resend-range boundary fix — fixpp acceptor honors the peer initiator's initial-Logon 789 against the post-reply outbound counter, emitting a spurious SequenceReset-GapFill at an already-consumed seqnum so both real engines reject and the session fails to establish. Evaluate the honor against the pre-reply outbound counter."
 
 ## Overview

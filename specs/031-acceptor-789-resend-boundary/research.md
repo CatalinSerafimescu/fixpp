@@ -165,12 +165,18 @@ internal source rebuild only.
 Per `[[feedback_witness_asserts_named_postcondition_not_proxy]]` and CHECKPOINT 8: `drive_to_active`
 alone is too weak (it passes even when the peer rejects fixpp right after Active). The acceptor
 in-sync witness MUST assert the **discriminating** postcondition directly:
-- **W1 (in-sync, the bug)**: acceptor honors peer `789 = N_pre` ⇒ fixpp emits **zero**
-  `SequenceReset` and **zero** `ResendRequest` after the reply Logon (assert on emitted frames /
-  `recent_events`), AND every emitted seq is strictly increasing (no duplicate of the reply
-  Logon's seq). Currently RED (emits the spurious GapFill at `N_pre`).
+- **W1 (in-sync, the bug)**: acceptor honors peer `789 = N_pre` ⇒ the reply Logon WAS emitted at
+  `34==N_pre`, and inspecting only frames AFTER it, fixpp emits **zero** `SequenceReset`, **zero**
+  `ResendRequest`, **zero** `43=Y`, and **no newly originated** frame re-using `34==N_pre` (assert
+  on emitted frames / `recent_events`). NOT a universal strict-monotonicity claim — the genuine-gap
+  resend (W2) legitimately carries historical seqnums (FR-004/SC-003). Currently RED (emits the
+  spurious GapFill at `N_pre`).
 - **W2 (genuine gap, non-regression)**: acceptor with outbound at `N>2`, peer `789 = X < N_pre`
-  ⇒ resend exactly `[X, N_pre]`, no `ResendRequest`. Must stay green.
+  ⇒ proactive resend of the stored gap (`[X, our_last]` PossDup/GapFill) + GapFill-through-current
+  (`NewSeqNo = peek_outbound()`), no `ResendRequest`. Must stay green. **Note (audit CHK017):** the
+  range *endpoint* arg is inert at this call site (`end_is_through_current=true` forces
+  `eff_end=our_last`, `session.cpp:4419-4420`), so W2 cannot discriminate `next_outbound_ref-1` from
+  `peek_outbound()-1` — directive #3 is enforced by code review + the live cell, not a unit RED.
 - **W3 (too-high boundary)**: peer `789 = N_pre + 1` (initial Logon) ⇒ Logout + disconnect
   (was mis-classified in-sync). Discriminates the comprehensive scope.
 - **W4 (initiator non-regression)**: `NE-*-init` unit + live ⇒ unchanged (in-sync, no resend).

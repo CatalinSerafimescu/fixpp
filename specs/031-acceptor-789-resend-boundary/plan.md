@@ -43,8 +43,10 @@ field, no new error slot, no config knob, no FSM state.
 **Storage**: none touched — this is an in-memory comparison-threshold correction; no `MessageStore`
 schema/interface/call change, no persistence change. INV-H1 / 029 hydrate untouched.
 **Testing**: GoogleTest; ASan/UBSan/TSan; coverage llvm-cov. New/amended acceptor witnesses
-(research.md R8): **W1** in-sync ⇒ zero `SequenceReset`/`ResendRequest` + strict-monotonic
-emitted seqnums (currently RED); **W2** genuine-gap ⇒ resend exactly `[X, N_pre]`, no
+(research.md R8): **W1** in-sync ⇒ reply Logon emitted at `34==N_pre`, then zero
+`SequenceReset`/`ResendRequest`/`43=Y` and no further frame at `34==N_pre` (no *newly originated*
+dup-seq frame — FR-004/SC-003; NOT a universal strict-monotonicity claim, which the genuine-gap
+resend legitimately violates) (currently RED); **W2** genuine-gap ⇒ resend exactly `[X, N_pre]`, no
 `ResendRequest` (non-regression); **W3** too-high boundary `X = N_pre+1` ⇒ Logout+disconnect;
 **W5** invalid-789 ⇒ Logout (unchanged); **W4** initiator `NE-*-init` non-regression. Live `027`
 SC-005 acceptor cell re-run vs QFcpp/QFJ, witness hardened past `drive_to_active`. — [const §VII, §IX]
