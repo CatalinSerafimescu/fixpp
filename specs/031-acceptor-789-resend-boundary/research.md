@@ -141,12 +141,18 @@ mis-classifies it as in-sync.
 The fix changes acceptor 789-honor behavior at the boundary. Candidate existing pins
 (`tests/session/test_next_expected_msgseqnum.cpp` + the interop cell), to be enumerated exactly
 during `/speckit-tasks`/`/analyze`:
-1. Any acceptor 789 in-sync test that advertised `X = N_post` (so `X == n789` already, no bug
-   hit) — unaffected. Any that advertised `X = N_pre` would have been RED in 027 (so likely
-   none exist — the bug shipped because no test hit the in-sync-at-`N_pre` boundary live).
-2. The X>N negative test (027 SC-004): if it advertised `X = N_post + k`, still Logout; if it
-   sat exactly at `N_post` it would now flip in-sync→Logout (boundary shift). Confirm the exact
-   value the pin uses.
+1. **[CORRECTED at Gate A]** `TEST(Honor, XeqN_NoResend)` acceptor arm
+   (`test_next_expected_msgseqnum.cpp:776-817`) advertises `X = N_post` (seeds `N_pre=4`, reply
+   Logon at `34=4`, feeds `789=5 == N_post`) and asserts Active + no-resend. It is **NOT
+   unaffected**: under the comprehensive fix (`R = N_pre = 4`) `X=5 > R` → **Logout**, so the pin
+   FLIPS (the 030-W9b analog — it encoded the buggy post-reply reference). Split it: W1 in-sync
+   (`789=N_pre=4`) + W3 too-high (`789=N_pre+1=5` → Logout). No pin advertised `X == N_pre` (the bug
+   shipped because nothing hit the in-sync-at-`N_pre` boundary live), so W1's in-sync arm is net-new.
+2. **[CONFIRMED at Gate A]** There is **no dedicated acceptor 789-`X>N` (too-high) pin** today; the
+   `BehindSide` "too-high" tests (`:976/:1051/:1123`) concern the peer Logon's *MsgSeqNum* (34=)
+   under formulation-A tolerance, feeding `789 = 3` (well below the boundary), NOT the 789-honor
+   threshold — unaffected. The only verdict-flipping pin is item 1; W3 (the repurposed `789=N_pre+1`
+   arm) becomes the first dedicated acceptor 789-too-high pin.
 3. The acceptor genuine-gap (X<N) resend-range test: **unchanged** (range = `[X, N_pre]`,
    R4) — must remain green (FR-003).
 4. The initiator cells (`NE-*-init` + unit): **unchanged** (R5) — non-regression.

@@ -162,4 +162,27 @@ files-of-record only as listed. Tests extend the existing `027` unit + interop s
 
 *(Runs after this plan, before `/speckit-tasks` — [const §XVII.1]. Record the convergence + sign-off here.)*
 
-- Status: ⏳ PENDING
+- Status: ✅ **CONVERGED 2026-06-11 (1 round + 1 confirm). Verdict: gate-a-done.**
+
+**Design-bundle review.** No design defect: the role-aware `next_outbound_ref` parameter is sound by
+construction and oracle-grounded; the initiator arm is byte-identical (refactor-identity, strictly
+stronger than 030's deferral); the comprehensive too-high boundary matches both engines. The single
+round-1 P1 was a **spec-prose overclaim** (FR-004/SC-003/US2 asserted universal strict-monotonicity,
+which the genuine-gap PossDup/GapFill resend legitimately violates) — fixed in `spec.md` by scoping
+the invariant to *newly originated* frames re-using a consumed seqnum.
+
+**Round tally:** R1 Codex P1=1/P2=1/P3=1 → Opus post-judging P1=1/P2=1/P3=1 (P1 fixed in-bundle; P2/P3
+banked as TDD directives). R2 Codex confirm P1=0/P2=0 → Opus P1=0 → **converged**.
+
+**Banked directives (enforced at /tasks /implement + orchestrator re-verify):**
+1. Split the existing `XeqN_NoResend` acceptor pin (it feeds `789=N_post`, flips to Logout under the
+   comprehensive fix — the 030-W9b analog) → **W1** in-sync (`789=N_pre`) + **W3** too-high (`789=N_pre+1` → Logout).
+2. **W1** asserts the reply Logon WAS emitted (`34==N_pre`) AND zero post-reply `35=4`/`35=2`/`43=Y` AND
+   no further `34==N_pre`; RED-verified on `main` BEFORE the fix (catches the capture-placement no-op).
+3. Genuine-gap range stays live `peek_outbound()-1` (= `[X, N_pre]`); do **NOT** rewrite to
+   `next_outbound_ref-1` (off-by-one on the acceptor arm); **W2** pins the endpoint.
+4. Orchestrator re-verify: the `n_pre` capture is lexically ABOVE the `:2015` reply `store_then_emit`.
+
+**Reviews:** `research/reviews/codex_031-acceptor-789-resend-boundary_gate_a_review.md` +
+`..._gate_a_2_confirm_review.md`; `opus_031-acceptor-789-resend-boundary_gate_a_adversarial_review.md`.
+**Label-evidence (local, gitignored):** `.specify/decisions/031-acceptor-789-resend-boundary-gatea.md`.
