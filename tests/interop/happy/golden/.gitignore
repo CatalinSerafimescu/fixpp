@@ -1,0 +1,7 @@
+# Live-capture sidecars are per-run artifacts written by the parent harness
+# (phase-9-harness/tools/run_interop_cell.py write_inrepo_golden). Only the
+# committed reference golden (<cell>.fix) is tracked; diff_golden_or_skip
+# compares the committed golden against this freshly-captured sidecar. On a
+# checkout with no paired live run, the sidecar is absent and the gated cell
+# skips ("capture sidecar absent") — the intended skip-without-counterparty path.
+*-capture.fix
