@@ -940,8 +940,31 @@ row; see `feature-catalogue.md`.)*
   sites. **Status: shipped** (030). *(FR-010; amends B-024-1; `tests/session/test_reset_on_lifecycle.cpp`
   fault-injection witnesses + the persistent-Disconnect / non-persistent-stay-Active contract split.)*
 
+- **B-031-1 — As an acceptor, fixpp honors a peer initiator's `NextExpectedMsgSeqNum(789)`
+  against its PRE-reply next-outbound (`N_pre`), so an in-sync peer triggers no resend and the
+  session establishes with no duplicate-sequence frame.** With the `789` knob on, the acceptor
+  emits its reply Logon first and then honors the peer's advertised `789` (the deliberate 027
+  RC#4 ordering). Because the reply Logon consumes a sequence number, the live next-outbound at
+  honor time is the **post-reply** `N_post = N_pre+1`. fixpp previously compared the peer's `789`
+  against `N_post`; a conformant in-sync peer advertises `789 = N_pre` (its expected target, no
+  `+1`), so `N_pre < N_post` mis-classified the peer as behind-by-one and emitted a spurious
+  `SequenceReset-GapFill` at the sequence number the reply Logon had just used — a duplicate-
+  `MsgSeqNum` violation that QuickFIX-cpp/J reject with a "MsgSeqNum too low" `Logout`, so the
+  session never established (live-found, invisible to in-process 027 unit tests; parallels 030).
+  The honor now compares against `N_pre` (captured before the reply consumes a seq; parameterized
+  `honor_peer_next_expected_(…, next_outbound_ref)`) for all three arms: in-sync `X==N_pre` ⇒ no
+  resend; too-high `X>N_pre` ⇒ Logout (so `X==N_pre+1` in the peer's initial Logon is correctly
+  too-high, not in-sync); genuine-gap `X<N_pre` ⇒ proactive resend `[X, N_pre]` (range unchanged,
+  reads live `peek_outbound()-1`). The **initiator** honor is byte-identical (its peer-reply
+  `789 = target+1` already matches fixpp's post-own-Logon outbound; it passes the current
+  `peek_outbound()`). Reference-engine-conformant (QFcpp `Session.cpp:228/277/687/709`; QFJ
+  `Session.java:2250/2312/2334` evaluate the decision against the pre-reply sender counter).
+  **Status: shipped** (031). *(FR-001..FR-009; `tests/session/test_next_expected_msgseqnum.cpp`
+  W1 `Acceptor_XeqNpre_NoResend_Establishes` + W3 `Acceptor_XeqNprePlus1_TooHigh_Logout`; live
+  close-out via the `NE-*-acc` interop cell vs QFcpp/QFJ.)*
+
 ### Limitations
 
-- None specific to 030 (a conformance correction; no new deferred surface). The pre-existing
+- None specific to 030/031 (both conformance corrections; no new deferred surface). The pre-existing
   L-029-1 (post-GapFill bounded redundant resend) and L-029-3 (`bilateral_strict` non-1 cold-open
   malformed Logon) are unchanged.
