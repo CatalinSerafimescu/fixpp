@@ -1999,4 +1999,39 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
         << "T014: store.reset() must have been attempted exactly once";
 }
 
+// ── Witness T016g: Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset ─────
+//
+// Initiator symmetric twin of T009 (FR-007/009): a peer Logon-ack carrying 141=Y
+// at a TOO-HIGH seq (34=5) under 027-on behind-side tolerance → check_inbound does
+// NOT advance → logon_inbound_advanced_init=false. The peer_ack_sent_reset_flag
+// reset still fires (rebases next_inbound→1), but the 030 restore is guarded on
+// logon_inbound_advanced_init → it does NOT fire → next_inbound stays 1 (NOT forced
+// to 2). Witnesses the initiator restore is correctly guarded (mutation: drop the
+// guard at the initiator site → this would read 2). [FR-007, FR-009, 027 I-NEX-5]
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset) {
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.enable_next_expected_msg_seq_num = true;
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent) << "initiator must be LogonSent after open()";
+
+    // Peer Logon-ack(34=5, 141=Y): too-high vs next_inbound=1 → 027 behind-side
+    // tolerance → logon_inbound_advanced_init stays false; the 141=Y reset still fires.
+    auto ack_toohi = make_peer_logon(/*seq=*/5, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack_toohi);
+    ASSERT_TRUE(r2.has_value()) << "behind-side tolerated Logon-ack feed must succeed";
+    ASSERT_EQ(sess.state(), fsm_state::Active)
+        << "T016g: behind-side tolerated Logon-ack(34=5,141=Y) must reach Active (027-on)";
+
+    // Guard skipped: next_inbound is reset to 1 and NOT restored to 2 (nothing consumed).
+    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
+        << "T016g (guard on logon_inbound_advanced_init): next_inbound must remain 1 when "
+           "behind-side tolerated (not consumed in-sequence); got " << next_in
+           << " (if 2: the initiator restore fired without the guard)";
+}
+
 }  // namespace fixpp::session::test
