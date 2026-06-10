@@ -1184,9 +1184,11 @@ TEST(RefreshOnLogon, W5b_BilateralStrict_KnobOff_L029_3_Gap_Witness) {
 // exercised. This is a regression guard: knob-on must not break the RC-1 withhold.
 //
 // Direct assertions (per [[feedback_witness_asserts_named_postcondition_not_proxy]]):
-//   (a) call_count == 2: store was read (hydrate ran, even with withhold active).
+//   (a) call_count == 3: cold hydrate reads (2) + the 030 persist-to-2 write-through
+//       (1 next_seqnum(inbound,true) call after the received-141 restore).
 //   (b) session state == Active: 141=Y + seq=1 accepted without too-low fatal.
-//   (c) next_inbound == 1: reset won; the withheld store value (37) did NOT apply.
+//   (c) next_inbound == 2: the reset rebased to 1, then 030 restored the consumed seq-1
+//       reset Logon's advance (the withheld store value 37 still did NOT apply — withhold intact).
 //
 // Anchors: data-model.md W6; FR-009; SC-006; INV-RoL-5; C5.3;
 //          029 test W9b (Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFatal).
@@ -1218,18 +1220,20 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
     //   → store is read: call_count becomes 2 (inbound + outbound reads).
     //   apply_inbound_seed = !withhold_inbound = !(peer_sent_reset || reset_on_logon)
     //                      = !(true || false) = false → inbound NOT seeded from store.
-    // Then: bilateral_lenient mirrors 141=Y → reset_seqnums_to_one_durable → next_inbound=1.
+    // Then: bilateral_lenient mirrors 141=Y → reset_seqnums_to_one_durable → next_inbound=1,
+    //   then 030 restores the consumed seq-1 reset Logon's advance → next_inbound=2 and
+    //   persists it (a next_seqnum(inbound,true) write-through → +1 call_count).
     // check_inbound(34=1) → in-seq → Active.
     fix.feed(make_logon_reset("FIX.4.4", 1, "CLI", "SRV"));
 
-    // (a) Store was read at the NotConnected Logon handler (cold hydrate with force=true).
-    // call_count == 2 (inbound read + outbound read). Note: force=true is inert here
-    // because hydrated_=false, but the store IS read (cold hydrate path runs regardless).
+    // (a) Store was read at the NotConnected Logon handler (cold hydrate, 2 reads) AND
+    // written once by the 030 persist-to-2 write-through after the received-141 restore →
+    // call_count == 3. (Pre-030 this was 2; the 030 persist adds one next_seqnum call.)
     // This proves the store was available to be (wrongly) applied — the withhold guard
     // is what prevented the 37 from being applied.
-    EXPECT_EQ(store->call_count, 2)
-        << "W6(a): store must have been read at the NotConnected Logon handler "
-           "(cold hydrate with force=true). Expected call_count=2, got "
+    EXPECT_EQ(store->call_count, 3)
+        << "W6(a): store must have been read at cold hydrate (2) + written by the 030 "
+           "persist-to-2 (1). Expected call_count=3, got "
         << store->call_count
         << ". If call_count==0, ensure_hydrated_ did not run at all.";
     (void)store;  // used in all three assertions
@@ -1241,13 +1245,14 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
            "the withhold guard → too-low fatal (RC-1 broken by the knob). "
            "Actual state=" << static_cast<int>(fix.session->state());
 
-    // (c) next_inbound must equal 1: the 141=Y reset won; the withheld store value (37) did
-    // NOT apply. If next_inbound==37, the withhold failed and the reset was not applied.
+    // (c) next_inbound must equal 2: the 141=Y reset rebased to 1, then 030 restored the
+    // consumed seq-1 reset Logon's advance → 2 (the withheld store value 37 still did NOT
+    // apply — if next_inbound==37 the withhold failed; if ==1 the 030 restore did not run).
     if (fix.session->state() == fixpp::session::fsm_state::Active) {
         const seqnum_t ni = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
-        EXPECT_EQ(ni, fixpp::session::seqnum_t{1})
-            << "W6(c): next_inbound must be 1 after 141=Y reset (reset won, store value 37 "
-               "withheld). Actual next_inbound=" << ni;
+        EXPECT_EQ(ni, fixpp::session::seqnum_t{2})
+            << "W6(c): next_inbound must be 2 after 141=Y reset + 030 restore (consumed seq-1 "
+               "reset Logon survives; store value 37 withheld; 030 FR-001). Actual next_inbound=" << ni;
     }
 }
 
