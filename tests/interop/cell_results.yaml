@@ -104,9 +104,12 @@ cells:
   # T028 (SC-001): live QF initiator (ResetOnLogon=Y) sends 141=Y + 34=1; fixpp acceptor
   # with reset_on_logon=FALSE takes the 013-only received-141 path → next_inbound nets 2,
   # no spurious ResendRequest. The live close-out of the defect that motivated 030.
-  # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
-  - { id: RR-QFcpp-acc-fix44-received-reset,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
-  - { id: RR-QFj-acc-fix44-received-reset,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
+  # Captured live 2026-06-10 vs running QFcpp + QFJ (ResetOnLogon=Y initiator): both
+  # PASS — fixpp acceptor reaches Active on 141=Y+34=1, recent_events emits the
+  # by_peer_request reset, next_inbound nets 2 then 3 on the peer's seq-2 Heartbeat,
+  # no spurious ResendRequest in the wire stream. Golden RR-*-acc-fix44-received-reset.fix.
+  - { id: RR-QFcpp-acc-fix44-received-reset,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
+  - { id: RR-QFj-acc-fix44-received-reset,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
 
   # ── G3 slice 2 (022-possresend-allowpossdup-send) live cells (8) ──────────────
   # T011 AllowPosDup wire-capture: default strip sends 43/122-free frame; counterparty accepts.
