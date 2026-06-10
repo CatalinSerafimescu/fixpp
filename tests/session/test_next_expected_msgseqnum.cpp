@@ -925,15 +925,23 @@ TEST(Honor, Acceptor_XeqNprePlus1_TooHigh_Logout) {
     fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 5));
 
-    EXPECT_NE(fix->session->state(), fixpp::session::fsm_state::Active)
-        << "789=N_pre+1 is too-high (peer claims an unsent seq) ⇒ must NOT reach Active";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "789=N_pre+1 is too-high (peer claims an unsent seq) ⇒ must be Disconnected";
 
     // A Logout (35=5) must be emitted (the existing 027 X>N arm, boundary now at N_pre).
-    bool saw_logout = false;
+    // Locate the Logout frame and assert its 58= text reports N_pre (=4), not N_post (=5).
+    // This pins: the comparison reference is next_outbound_ref==N_pre, not peek_outbound()==N_post.
+    const std::vector<std::byte>* logout_frame = nullptr;
     for (const auto& f : fix->capture.frames) {
-        if (extract_tag(f, 35) == "5") saw_logout = true;
+        if (extract_tag(f, 35) == "5") {
+            logout_frame = &f;
+            break;
+        }
     }
-    EXPECT_TRUE(saw_logout) << "too-high 789 ⇒ Logout (35=5) + disconnect";
+    ASSERT_NE(logout_frame, nullptr) << "too-high 789 ⇒ Logout (35=5) + disconnect";
+    EXPECT_EQ(extract_tag(*logout_frame, 58),
+              "NextExpectedMsgSeqNum too high, expecting 4 but received 5")
+        << "Logout 58= text must report N_pre (=4), not post-reply peek_outbound() (=5)";
 }
 
 // T008 witness 4 — WalkExtraction TwoValueEnd (789-caller half):
