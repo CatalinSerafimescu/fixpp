@@ -618,6 +618,20 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   contracts/refresh-knob.md C4). *(catalogue S-018; `session.cpp` `refresh_active_`
   suppression; test W5a INV-RoL-3 witness.)*
 
+- **L-025-2 — The acceptor `force=true` warm re-hydrate path at `session.cpp:1754` is not
+  reachable through the current engine and has no reachable test vehicle.** The production engine
+  (`engine.cpp:864`) constructs a **fresh** `Session` per accepted connection; `hydrated_` is set
+  at first logon and never reset, so every acceptor Logon arrives on a Session with
+  `hydrated_==false` (the force latch-bypass at `:565` is never triggered on the acceptor side).
+  A 2nd Logon received in `Active` state is dispatched to the dup-Logon-in-Active `Reject` arm,
+  not back through the `NotConnected` Logon handler. The acceptor `force` wiring is therefore
+  **dead-but-harmless**: it is correctly wired and would function if Session reuse across acceptor
+  reconnect is introduced (deferred). FR-002's per-2nd+-logon re-hydrate is witnessed for the
+  **initiator** role (W1/W2/W7); the acceptor receives the same re-hydrate semantics on each new
+  connection via the 029 cold-hydrate spine (fresh Session → fresh `ensure_hydrated_()` call on
+  the first Logon). **Status: documented, acceptor same-connection re-Logon force-bypass deferred
+  pending Session reuse.** *(data-model.md W6 scope; catalogue S-018; `session.cpp:1754`.)*
+
 ## Nanosecond-resolution SendingTime (026-nanosecond-sendingtime)
 
 ### Feature Catalogue Rows

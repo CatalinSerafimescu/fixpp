@@ -92,11 +92,25 @@ For a given logon event, the re-hydrate runs iff **all** of: `refresh_on_logon =
 | W4 | knob-on, **non-persistent** store → logon | zero store reads, byte-identical to knob-off | FR-005, SC-004 |
 | W5a | knob-**on**, **bilateral_strict**, non-1 store → **2nd logon** | re-hydrate suppressed (zero EXTRA reads beyond the 029 cold one-shot); no NEW malformed Logon attributable to the knob (establishment == knob-off strict path) | FR-008, SC-005 |
 | W5b | knob-**OFF**, **bilateral_strict**, non-1 store → **cold open** | the **L-029-3 inherited-gap witness** — documents/asserts the inherited 029 cold-open behaviour AS-IS; asserts ONLY what holds (e.g. that the cold seed runs). Does NOT assert the cold Logon is well-formed (it may carry `141=Y`+non-1). Clearly labeled "inherited 029 gap, NOT a 025 guarantee" — must not be mistaken for a correctness witness. | (L-029-3 gap; not a 025 FR/SC) |
-| W6 | knob-on, lenient, **acceptor** non-1 inbound, peer reset Logon `34=1,141=Y` | inbound seed withheld; peer `34=1` accepted; reaches Active | FR-009, SC-006 |
+| W6 | knob-on, lenient, **acceptor** non-1 inbound, **cold** logon (first connection — `hydrated_==false`), peer reset Logon `34=1,141=Y` | inbound seed withheld; peer `34=1` accepted; reaches Active. Witnesses RC-1 inbound-withhold under knob-on (force=true is inert on cold open but the store IS read and the withhold IS exercised). | FR-009, SC-006 |
 | W7 | knob-on, lenient, refresh store-**read failure** (fault-injecting store) | `Disconnected`, no partial seed, no new error slot | FR-006, SC-007 |
-| W8 | knob-on, lenient, **no-heap** under mallocnesia on the per-logon re-hydrate | zero allocations on the refresh path (non-allocating ready-awaitable store) | [const §VIII.5] |
+| W8 | knob-on, lenient, **no-heap** under mallocnesia on the per-logon re-hydrate | zero allocations on the re-hydrate **apply step** (`SeqnumManager::hydrate()`), the same proxy 029 W8 uses | [const §VIII.5] |
 | W9 (interop) | fixpp standby (lenient, knob-on) re-hydrates a primary-advanced store, logs on vs QFcpp/QFJ | resumes at the adopted counters, no fatal | [const §VII.6] |
 
+> **FR-002 (per-logon re-hydrate) coverage scope:** FR-002 is witnessed for the **initiator** role
+> only (W1/W2 warm-force via `drive_reconnect()`; W7 warm-force read-failure). The acceptor
+> force-bypass (`/*force=*/refresh_active` at `session.cpp:1754`) covers the same-connection
+> 2nd-logon edge, but that path is **not reachable through the current engine**: `engine.cpp:864`
+> constructs a fresh `Session` per accepted connection (`hydrated_` is never reset), so every
+> acceptor logon arrives on a fresh Session with `hydrated_==false` (force is then inert — the
+> cold-open path runs unconditionally). A 2nd Logon received in `Active` state is dispatched to
+> the dup-Logon-in-Active `Reject` arm, not back through the `NotConnected` Logon handler at
+> `:1754`. The acceptor `force` wiring is therefore **dead-but-harmless**: it correctly handles
+> the same-connection re-Logon edge if Session reuse across acceptor reconnect is ever introduced,
+> but the warmed acceptor latch-bypass has no reachable test vehicle today. W6 witnesses the
+> cold-acceptor RC-1 withhold (force=true inert, store IS read). See L-025-2 in
+> `spec/behaviors-and-limitations.md`.
+>
 > W3's "no re-read" assertion must check the **store read call-count** directly (a counting test
 > store), not a proxy — per [[feedback_witness_asserts_named_postcondition_not_proxy]]. **W5a**
 > asserts the 025-delta suppression: zero EXTRA reads (the re-hydrate did not run) AND no NEW
