@@ -201,6 +201,9 @@ EXPECTED_IDS = frozenset({
     "RL-QFj-init-fix44-reset-on-logon",
     "RL-QFcpp-acc-fix44-reset-on-logon",
     "RL-QFj-acc-fix44-reset-on-logon",
+    # 030 received-141 inbound-advance acceptor cell (T028 / SC-001 live close-out).
+    "RR-QFcpp-acc-fix44-received-reset",
+    "RR-QFj-acc-fix44-received-reset",
 })
 
 

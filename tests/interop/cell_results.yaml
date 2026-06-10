@@ -100,6 +100,13 @@ cells:
   - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
   - { id: RL-QFcpp-acc-fix44-reset-on-logon,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
   - { id: RL-QFj-acc-fix44-reset-on-logon,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
+  # ── G3 slice (030-received-reset-inbound-advance) received-141 acceptor cell (2) ──
+  # T028 (SC-001): live QF initiator (ResetOnLogon=Y) sends 141=Y + 34=1; fixpp acceptor
+  # with reset_on_logon=FALSE takes the 013-only received-141 path → next_inbound nets 2,
+  # no spurious ResendRequest. The live close-out of the defect that motivated 030.
+  # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
+  - { id: RR-QFcpp-acc-fix44-received-reset,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
+  - { id: RR-QFj-acc-fix44-received-reset,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "030 T028 SC-001/FR-001/FR-002" }
 
   # ── G3 slice 2 (022-possresend-allowpossdup-send) live cells (8) ──────────────
   # T011 AllowPosDup wire-capture: default strip sends 43/122-free frame; counterparty accepts.
