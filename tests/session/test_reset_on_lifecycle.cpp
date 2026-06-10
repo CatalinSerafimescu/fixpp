@@ -1779,14 +1779,19 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_InvH1_StoreEqualsManage
 
 // ── Witness T008: Received141_PersistentStore_ResetFailure_Disconnects_NoOverPersist
 //
-// Persistent store; fail_next_reset() BEFORE feeding Logon(141=Y).
-// Under FR-010: fatal-when-persistent → reset failure → Disconnected.
-// Under the BUG (logged): failure swallowed → Active, persist-to-2 runs → store=2.
+// Persistent store seeded to N=37 (last-good durable value), fail_next_reset()
+// BEFORE feeding Logon(141=Y). Under FR-010: fatal-when-persistent → reset failure
+// → Disconnected; persist-to-2 is NOT reached.
 //
-// Asserts (i) Disconnected and (ii) store.current_next_inbound() == 1 (unchanged).
+// Asserts (i) Disconnected + reset attempted once, and (ii) store stays at N=37
+// (the last-good durable value — the failed reset did NOT corrupt the store;
+// persist-to-2 not reached → store is NOT advanced to N+1=38).
 //
-// RED today on (i): session reaches Active (not Disconnected) because the logged
-// disposition swallows the failure. (ii) may also be violated if persist-to-2 ran.
+// The seed to N=37 makes assertion (ii) genuinely discriminating:
+//   - fix (fatal-when-persistent): store short-circuits at fail_next_reset → stays 37.
+//   - regression (logged-swallowed): reset swallowed → restore runs → store becomes 2
+//     (or 38 if the stale-N advance ran first) — neither equals 37.
+// A trivial seed of 1 (fresh store) would not distinguish these cases.
 // [FR-010, 029 INV-H1]
 TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnects_NoOverPersist) {
     // factory is the default StoreDoubleFactory (yields_persistent_store()==true).
@@ -1794,34 +1799,38 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
                         reset_seqnum_policy::bilateral_lenient);
     Session sess(engine, cfg);
 
-    // Inject a store reset failure BEFORE the Logon arrives.
-    factory->store->fail_next_reset();
-
     auto r = open_sync(sess);
     ASSERT_TRUE(r.has_value()) << "open() failed";
+
+    // Seed the store to N=37 AFTER open() so the inbound seed is in the store
+    // but the manager remains at seqnum_min=1 (the acceptor withholds the inbound
+    // seed on a received-141 path anyway, but seeding after open() is the safe
+    // general pattern — see T014). Then inject a reset failure.
+    // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
+    constexpr seqnum_t N = 37u;
+    factory->store->seed_inbound(N);
+    factory->store->fail_next_reset();
 
     auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
     auto r2 = feed_sync(sess, logon);
 
     // (i) Session must be Disconnected (fatal-when-persistent FR-010).
-    // RED today: session reaches Active (logged disposition swallows the failure).
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "T008 (FR-010) RED: persistent store reset failure must Disconnect the session "
-           "(fatal-when-persistent); got Active (fix not yet applied → logged swallows failure)";
+        << "T008 (FR-010): persistent store reset failure must Disconnect the session "
+           "(fatal-when-persistent)";
 
-    // (ii) Persist-to-2 must NOT have run: store counter stays at 1 (pre-reset value).
-    // CRITICAL: must assert store == 1, NOT store <= manager.
-    // Under the bug (logged): swallowed failure → restore runs → store becomes 2 == manager 2,
-    // so store <= manager would FALSELY PASS. Only "store unchanged at 1" discriminates.
-    const seqnum_t store_in = factory->store->current_next_inbound();
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(1u))
-        << "T008 (029 INV-H1 / FR-010) RED: store.current_next_inbound() must stay 1 "
-           "(persist-to-2 must not run after failed reset); got " << store_in;
-
-    // Also: the reset was attempted exactly once (then short-circuited).
+    // (i) The reset was attempted exactly once (then short-circuited).
     EXPECT_EQ(factory->store->reset_call_count(), 1u)
         << "T008: store.reset() must have been attempted exactly once; "
            "got " << factory->store->reset_call_count();
+
+    // (ii) Persist-to-2 must NOT have run: store retains its last-good value N=37.
+    // Fix → store stays 37 (last-good lower bound; the failed reset did not corrupt it).
+    // Over-persist regression → store would become 38 (N+1, the stale-N advance ran).
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    EXPECT_EQ(store_in, N)
+        << "T008 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
+           "reset (persist-to-2 must not run); got " << store_in;
 }
 
 // ── Witness T009: Received141_GuardSkipsWhenNoConsumedReset ──────────────────
@@ -1965,38 +1974,54 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_StoreEqual
 
 // ── Witness T014: Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects ─
 //
-// Persistent store; fail_next_reset() before the ack. Under FR-010 (fatal-when-
-// persistent) the reset failure → Disconnected; persist-to-2 NOT reached → store
-// counter UNCHANGED at 1 (NOT advanced to 2). Symmetric to acceptor T008. [FR-010/009]
-// ⚠ assertion (ii) asserts store == 1 (unchanged), NOT store <= manager (which would
-// false-pass under the bug: swallowed failure → restore runs → store==2==manager).
+// Persistent store seeded to N=37 (last-good durable value); fail_next_reset()
+// before the ack. Under FR-010 (fatal-when-persistent) the reset failure →
+// Disconnected; persist-to-2 NOT reached → store retains N=37.
+// Symmetric to acceptor T008. [FR-010/009]
+//
+// The seed to N=37 makes assertion (ii) genuinely discriminating:
+//   - fix (fatal): store short-circuits → stays 37.
+//   - regression (logged-swallowed): restore runs → store becomes 2 (or 38) ≠ 37.
 TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects) {
     auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
                         reset_seqnum_policy::bilateral_lenient);
     Session sess(engine, cfg);
 
-    factory->store->fail_next_reset();
-
     auto r = open_sync(sess);
     ASSERT_TRUE(r.has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    // Seed the store to N=37 AFTER open(). The initiator hydrates the manager during
+    // emit_initiator_logon_() at open(); seeding BEFORE open() would set manager.next_inbound
+    // to 37, causing the peer's Logon-ack at 34=1 to read too-low (1 < 37) and fire a
+    // different fatal path — not the FR-010 received-141 path. Seeding AFTER open() keeps
+    // the manager at seqnum_min=1 while making the store non-trivially N=37, so the
+    // peer's ack at 34=1 passes check_inbound (in-sequence against manager=1), the
+    // received-141 reset block runs, fails fatally, and the store retains N=37.
+    // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
+    constexpr seqnum_t N = 37u;
+    factory->store->seed_inbound(N);
+    factory->store->fail_next_reset();
 
     auto ack = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
     auto r2 = feed_sync(sess, ack);
 
     // (i) FR-010: persistent reset failure → fatal → Disconnected + error propagated.
     EXPECT_FALSE(r2.has_value())
-        << "T014 (FR-010) RED: initiator persistent reset failure must propagate the error";
+        << "T014 (FR-010): initiator persistent reset failure must propagate the error";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "T014 (FR-010) RED: initiator persistent received-141 reset failure must Disconnect";
+        << "T014 (FR-010): initiator persistent received-141 reset failure must Disconnect";
 
-    // (ii) persist-to-2 NOT reached: store counter unchanged at 1 (pre-reset value).
-    const seqnum_t store_in = factory->store->current_next_inbound();
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(1u))
-        << "T014 (INV-H1/FR-010) RED: store must stay 1 (persist-to-2 must not run after a "
-           "failed reset); got " << store_in;
+    // (i) The reset was attempted exactly once (then short-circuited).
     EXPECT_EQ(factory->store->reset_call_count(), 1u)
         << "T014: store.reset() must have been attempted exactly once";
+
+    // (ii) persist-to-2 NOT reached: store retains last-good value N=37.
+    // Fix → store stays 37; over-persist regression → store becomes 38 (N+1).
+    const seqnum_t store_in = factory->store->current_next_inbound();
+    EXPECT_EQ(store_in, N)
+        << "T014 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
+           "reset (persist-to-2 must not run); got " << store_in;
 }
 
 // ── Witness T016g: Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset ─────

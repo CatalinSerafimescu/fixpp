@@ -932,8 +932,9 @@ row; see `feature-catalogue.md`.)*
   violation → silent inbound skip on restart, the 029 over-persist harm). Making the reset
   **fatal when the store is persistent** (`store_is_persistent_ ? fatal : logged`, on both arms)
   guarantees the reset succeeded before persist-to-2 runs, so `store == manager == 2` truly holds;
-  a reset failure disconnects, the session re-opens, re-hydrates the (unchanged) store, and the
-  peer re-drives the reset — no inconsistent durable state is ever observable. Non-persistent
+  a reset failure disconnects, the session re-opens, re-hydrates the store at its last-good value
+  N (a valid INV-H1 lower bound), and the peer re-drives the reset — resuming with nothing skipped.
+  Non-persistent
   stores are unaffected (the reset cannot meaningfully fail; INV-H4 makes persist-to-2 a no-op).
   Aligns with 029 D-3 ("inbound-correctness failures are fatal") and the existing fatal knob-reset
   sites. **Status: shipped** (030). *(FR-010; amends B-024-1; `tests/session/test_reset_on_lifecycle.cpp`

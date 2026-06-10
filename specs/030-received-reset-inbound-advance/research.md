@@ -274,8 +274,11 @@ variant → Disconnect, NEW non-persistent sibling → stay-Active). See R-5's r
 `reset_seqnums_to_one_durable(disposition)` helper (R-7) so both arms share the scoped-fatal
 disposition — no hand-rolled copy that could drift ([[feedback_half_restructure_symmetric_api]]).
 
-**Fault-injection witness (soundness proof, both arms)**: persistent store + `fail_next_reset()`
-on the received-141 path ⇒ session **Disconnected** + store error propagated, persist-to-2 NOT
-reached, no `store > manager` ever observable. This makes the "INV-H1 holds because the reset is
-fatal" claim falsifiable — without it the claim is again unwitnessed (the 029 W9b proxy-gap lesson,
+**Fault-injection witness (soundness proof, both arms)**: persistent store seeded to N=37 +
+`fail_next_reset()` on the received-141 path ⇒ session **Disconnected** + `reset_call_count()==1`,
+persist-to-2 NOT reached → `store==37` (last-good lower bound retained; never advanced past its
+last-good durable value). The seed N>1 makes assertion (ii) genuinely discriminating (a trivial
+fresh store cannot distinguish the fatal path from successful-reset+persist; store==37 proves only
+the fatal path). This makes the "INV-H1 holds because the reset is fatal" claim falsifiable —
+without it the claim is unwitnessed (the 029 W9b proxy-gap lesson,
 [[feedback_witness_asserts_named_postcondition_not_proxy]]).

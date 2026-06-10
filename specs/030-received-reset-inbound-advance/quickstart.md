@@ -38,10 +38,12 @@ peer's seq-2 message reads too-high.
    after a known-good reset; it never advances a stale store). *(A manager-only restore leaving
    the store at 1 is WRONG — fatal-disconnect-on-restart, no ResendRequest arm on the Logon gate.)*
 
-4. **Fault-injection (FR-010 soundness proof, both arms)**: persistent store + `fail_next_reset()`
-   on the received-141 path ⇒ session **Disconnected** + store error propagated, persist-to-2 NOT
-   reached, **no `store > manager`** ever observable. (Without the fatal flip, persist-to-2 would
-   advance a stale store → `store > manager` → silent inbound skip on restart, the 029 harm.)
+4. **Fault-injection (FR-010 soundness proof, both arms)**: persistent store seeded to N=37 +
+   `fail_next_reset()` on the received-141 path ⇒ session **Disconnected** + `reset_call_count()==1`,
+   persist-to-2 NOT reached → `store==37` (last-good lower bound retained). The seed N=37 is
+   non-trivial: a fresh store (N=1) cannot distinguish the fatal path from a successful reset+persist
+   (both leave store==1); store==37 proves only the fatal path. (Without the fatal flip, persist-to-2
+   would advance a stale store → `store=N+1` → silent inbound skip on restart, the 029 harm.)
 
 5. **Guard**: a path with no consumed in-sequence reset Logon does NOT fire the restore+persist.
 
