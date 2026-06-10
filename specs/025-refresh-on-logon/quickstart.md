@@ -72,11 +72,11 @@ This is the **L-029-3 gap witness** (inherited 029 behaviour, **NOT a 025 guaran
 it cannot be mistaken for a correctness witness. The fix (e.g. a `{1,1}`-guard on `bilateral_strict`)
 is a deferred 029/024 follow-up, OUT OF 025's scope.
 
-## W6 — acceptor received-141 still wins under refresh (RC-1)
+## W6 — acceptor received-141 still wins under refresh (RC-1) (cold acceptor)
 
 ```
 acceptor; persistent store inbound {in:37}; cfg.refresh_on_logon = true; policy = bilateral_lenient;
-→ feed a peer reset Logon (34=1, 141=Y) on a 2nd logon
+→ cold first acceptor logon (hydrated_==false); feed a peer reset Logon (34=1, 141=Y)
 EXPECT inbound seed withheld; the :1925 received-141 reset establishes {1,1};
        peer 34=1 accepted (in-seq, not too-low); session reaches Active
 ```
@@ -91,12 +91,12 @@ EXPECT session transitions to Disconnected; no partial seed (manager unchanged f
        no new error slot (reuses the 029 store-failure disposition)
 ```
 
-## W8 — no-heap on the re-hydrate path
+## W8 — no-heap on the re-hydrate apply step (`SeqnumManager::hydrate()`) proxy
 
 ```
 mallocnesia / non-allocating ready-awaitable persistent store; knob on; policy = bilateral_lenient;
 → drive a 2nd logon
-EXPECT zero allocations attributable to the per-logon re-hydrate
+EXPECT zero allocations on the re-hydrate apply step (SeqnumManager::hydrate()), the same proxy 029 W8 uses (full path not witnessed)
 ```
 
 ## W9 — live interop (skip-without-counterparty)
