@@ -640,10 +640,14 @@ private:
     // ensure_hydrated_(): one-shot cold-open hydration gate (C2.1–C2.7).
     //   apply_inbound_seed: true → apply *in_r from the store; false → keep next_inbound
     //   at construction value seqnum_min (withheld on reset-Logon paths — RC-1 / C2.4).
+    //   force: when true, bypass the one-shot hydrated_ latch and re-read the store.
+    //   Used by refresh_on_logon (025) at each reconnect to adopt the store's counters
+    //   unconditionally (store-wins, up or down — INV-RoL-4).  Default false preserves
+    //   the pre-025 byte-identical cold-open behaviour.
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
     //   delivering callback at every check_inbound-success site (C3).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
-        bool apply_inbound_seed) noexcept;
+        bool apply_inbound_seed, bool force = false) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     persist_inbound_advance_() noexcept;
 

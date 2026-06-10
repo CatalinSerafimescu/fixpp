@@ -1691,6 +1691,54 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_persistent_seqnum_hydrate)
 endif()
 
+# ── 025-refresh-on-logon (S-018) — T001 Setup skeleton ──────────────────────
+# T001: skeleton + W1/W2 RED witnesses.
+# Harness mirrors test_persistent_seqnum_hydrate.cpp (029):
+#   FaultStore / FaultStoreFactory / MockReconnectFactory / Fixture
+#   make_initiator / make_reconnect_initiator helpers.
+# W1/W2: drive_reconnect() with mock transport = 2nd-logon vehicle;
+#   asserts store re-read + inbound counter = store value on 2nd logon.
+# Anchors: data-model.md W1/W2; contracts/refresh-knob.md C1/C2/C3/C4.
+add_executable(session_refresh_on_logon
+  test_refresh_on_logon.cpp
+)
+target_link_libraries(session_refresh_on_logon PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_refresh_on_logon PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_refresh_on_logon PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME session_refresh_on_logon
+  COMMAND session_refresh_on_logon)
+set_tests_properties(session_refresh_on_logon PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "025;s018;refresh-on-logon;setup")
+# T040 W8 NoHeap_RehydratePath: wire mallocnesia LD_PRELOAD so the
+# alloc_guard_count() weak symbol is replaced by the live interceptor.
+# Pattern mirrors session_persistent_seqnum_hydrate (029).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  set_property(TEST session_refresh_on_logon APPEND PROPERTY
+    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+endif()
+# T040 mallocnesia companion — runs the binary under check_alloc.py so any
+# global malloc/calloc/realloc between the guard markers causes exit(1).
+# Absent mallocnesia.so → skip; the base test is the fallback.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_refresh_on_logon_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_refresh_on_logon>"
+  )
+  set_tests_properties(session_refresh_on_logon_mallocnesia PROPERTIES
+    LABELS "025;s018;refresh-on-logon;noheap"
+    DEPENDS session_refresh_on_logon)
+endif()
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

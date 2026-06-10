@@ -558,10 +558,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
 // when false (reset-Logon path), withhold the inbound seed so the reset arm owns
 // the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
 // [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
-asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
-    bool apply_inbound_seed) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool apply_inbound_seed,
+                                                                         bool force) noexcept {
     // One-shot: already hydrated this session lifetime.
-    if (hydrated_) {
+    // force=true (025 refresh_on_logon) bypasses the latch to re-read on each reconnect.
+    if (hydrated_ && !force) {
         co_return fixpp::core::expected_t<void>{};
     }
     // Re-entrancy guard (strand-confined; a second co_await before the first returns).
@@ -656,7 +657,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // INV-H3/H5; research D-6]
     {
         const bool withhold_inbound = cfg_.reset_on_logon;
-        auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
+        // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins, up or down).
+        // Suppressed under bilateral_strict (unconditional 141=Y + non-1 seed → malformed Logon;
+        // INV-RoL-3 / FR-008 / D-RoL-3). Default false → zero delta (byte-identical pre-025).
+        const bool refresh_active =
+            cfg_.refresh_on_logon &&
+            cfg_.reset_seqnum_policy_field != fixpp::session::reset_seqnum_policy::bilateral_strict;
+        auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
+                                             /*force=*/refresh_active);
         if (!h_r) {
             // ensure_hydrated_ already transitioned to Disconnected on failure (C2.3).
             co_return std::unexpected(h_r.error());
@@ -1736,7 +1744,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // INV-H3/H5/RC-1]
                 {
                     const bool withhold_inbound = peer_sent_reset || cfg_.reset_on_logon;
-                    auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound);
+                    // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins).
+                    // Same suppression gate as call-site 1: bilateral_strict → force=false.
+                    // [025 contracts C3.1–C3.3; FR-002/008/009]
+                    const bool refresh_active =
+                        cfg_.refresh_on_logon &&
+                        cfg_.reset_seqnum_policy_field !=
+                            fixpp::session::reset_seqnum_policy::bilateral_strict;
+                    auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
+                                                         /*force=*/refresh_active);
                     if (!h_r) {
                         // ensure_hydrated_ already transitioned to Disconnected (C2.3).
                         co_return std::unexpected(h_r.error());
