@@ -114,15 +114,17 @@ Scope and conventions:
 
 ### Limitations
 
-- **L-016-1 — The session-only interop badge does NOT discharge the `[const §VII.6]`
-  business-message interop clause.** `Logon → NewOrderSingle → ExecutionReport →
-  Logout` is **not** exercised by `016`; v1.0 interop is session-layer only. This is an
-  **open v1.0-GA residual** (the one Gate-A adjudication carried in `plan.md`, R7) — the
-  business-message matrix cells are present as `deferred:app-messages` (`status: n/a`)
-  and **zero** `016` artifact claims the business flow ran. **Status: open** —
-  forward-pointer to catalogue **A-001/A-006**; revisit with the application-message
-  layer. *(FR-005/FR-027/SC-008; `tests/interop/KNOWN-LIMITATIONS.md`;
-  `tests/interop/happy/MATRIX.md` deferred rows.)*
+- **L-016-1 — RESOLVED (2026-06-11). The session-only `016` badge did NOT discharge the
+  `[const §VII.6]` business-message interop clause; `020` + live validation now do.**
+  `Logon → NewOrderSingle → ExecutionReport → Logout` was **not** exercised by `016`
+  (v1.0 interop was session-layer only — the open v1.0-GA residual carried in `plan.md`
+  R7). It is now **DISCHARGED**: the 019 `Application`-callback layer + 020 typed
+  builders are driven live `Logon→NOS→ExecRpt→Logout` vs **both** QuickFIX-J and
+  QuickFIX-cpp, both roles, by the 4 gated `BM-*-fix44-nos-execrpt` cells (`status: pass`,
+  `matrix_disposition: live`) with banked goldens (`phase-9-harness/golden/BM-*.fix`),
+  satisfying 020 SC-003. **Status: resolved** — see catalogue `[const §VII.6]` note +
+  `A-001/A-006` (which stay `backlog` only for full-field / all-version codegen coverage).
+  *(FR-005/FR-027/SC-008.)*
 
 - **L-016-2 — Live interop is all-TLS with a server-auth `one_way_ca` baseline;
   mutual-certificate mTLS is deferred to v1.1.** fixpp ships TLS-only (no plaintext

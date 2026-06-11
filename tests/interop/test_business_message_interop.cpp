@@ -85,10 +85,13 @@ static decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
 
 // ── T014: fixpp-acceptor responding Application (data-model E3) ──────────────
 //
-// Used by the fixpp-acceptor cells (both QFJ and QFcpp). When fixpp is the
-// acceptor, the counterparty-initiator sends a NewOrderSingle; this Application
-// reads it via fixpp::v44::NewOrderSingle and replies with a fully-filled
-// ExecutionReport via Engine::send called from inside fromApp.
+// Unified business Application used by BOTH roles. When fixpp is the acceptor,
+// the counterparty-initiator sends a NewOrderSingle; this Application reads it
+// via fixpp::v44::NewOrderSingle and replies with a fully-filled ExecutionReport
+// via Engine::send called from inside fromApp. When fixpp is the initiator, the
+// same fromApp captures the inbound ExecutionReport (35=8) into the er_received
+// bundle so the test can assert fidelity — one fixture, one session, no second
+// connection (the prior double-fixture design self-collided on duplicate CompIDs).
 //
 // Re-entrancy contract: Engine::send from inside fromApp is safe because 019's
 // any-thread exec-hop + keepalive + RAII send-drain handles it. The call is
@@ -113,12 +116,41 @@ public:
     std::atomic<int> er_sent{0};
     std::atomic<bool> send_ok{false};
 
-    // fromApp: receive NewOrderSingle, post a reply ExecRpt off-strand.
+    // ── Initiator-side: capture an inbound ExecutionReport (35=8) ────────────
+    std::atomic<bool> er_received{false};
+    std::mutex cap_mu;
+    char cap_exec_type{'\0'};
+    char cap_ord_status{'\0'};
+    char cap_side{'\0'};
+    std::string cap_symbol;
+    std::array<std::byte, 256> cap_arena_buf{};
+    std::pmr::monotonic_buffer_resource cap_arena{
+        cap_arena_buf.data(), cap_arena_buf.size(), std::pmr::null_memory_resource()};
+    decimal_t cap_avg_px{};
+    decimal_t cap_cum_qty{};
+    decimal_t cap_leaves_qty{};
+
+    // fromApp: respond to NewOrderSingle (acceptor) or capture ExecRpt (initiator).
     fixpp::core::expected_t<void> fromApp(
         const MessageView<access_mode::Index>& msg,
         const SessionId& /*id*/) override
     {
-        // Check MsgType — only respond to 35=D (NewOrderSingle).
+        // Initiator-side: capture an inbound ExecutionReport (35=8).
+        if (msg.msg_type() == "8") {
+            fixpp::v44::ExecutionReport er{msg};
+            std::lock_guard<std::mutex> lk{cap_mu};
+            if (auto r = er.exec_type())  cap_exec_type = *r;
+            if (auto r = er.ord_status()) cap_ord_status = *r;
+            if (auto r = er.symbol())     cap_symbol = std::string{*r};
+            if (auto r = er.side())       cap_side = *r;
+            if (auto r = er.avg_px(&cap_arena))     cap_avg_px = *r;
+            if (auto r = er.cum_qty(&cap_arena))    cap_cum_qty = *r;
+            if (auto r = er.leaves_qty(&cap_arena)) cap_leaves_qty = *r;
+            er_received.store(true, std::memory_order_release);
+            return {};
+        }
+
+        // Acceptor-side: only respond to 35=D (NewOrderSingle).
         if (msg.msg_type() != "D") {
             return {};  // ignore other app messages
         }
@@ -283,109 +315,11 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
     // via v44 accessors (initiator), or the RespondingApp's counters (acceptor).
 
     if (role == Role::fixpp_initiator) {
-        // ── fixpp-initiator: send NOS, await ExecRpt via Application ─────────
-
-        // Capture the inbound ExecRpt in fromApp via a shared atomic bundle.
-        struct ReceivedExecRpt {
-            std::atomic<bool> received{false};
-            std::mutex mu;
-            // Captured field values (strings survive the MessageView lifetime).
-            char exec_type{'\0'};
-            char ord_status{'\0'};
-            char symbol_side{'\0'};
-            std::string symbol;
-            // decimal_t values require a persistent arena.
-            std::array<std::byte, 256> arena_buf{};
-            std::pmr::monotonic_buffer_resource arena;
-
-            ReceivedExecRpt()
-                : arena{arena_buf.data(), arena_buf.size(),
-                         std::pmr::null_memory_resource()} {}
-
-            decimal_t avg_px{};
-            decimal_t cum_qty{};
-            decimal_t leaves_qty{};
-        };
-        auto received = std::make_shared<ReceivedExecRpt>();
-
-        // Override the application's fromApp to capture the ExecRpt.
-        // We replace the responding_app's fromApp behaviour for the initiator
-        // role: it should NOT try to respond, just capture.
-        class InitiatorCaptureApp : public Application {
-        public:
-            std::shared_ptr<ReceivedExecRpt> out;
-            fixpp::core::expected_t<void> fromApp(
-                const MessageView<access_mode::Index>& msg,
-                const SessionId& /*id*/) override
-            {
-                if (msg.msg_type() != "8") return {};
-                fixpp::v44::ExecutionReport er{msg};
-                std::lock_guard<std::mutex> lk{out->mu};
-                if (auto r = er.exec_type()) out->exec_type = *r;
-                if (auto r = er.ord_status()) out->ord_status = *r;
-                if (auto r = er.symbol()) out->symbol = std::string{*r};
-                if (auto r = er.side()) out->symbol_side = *r;
-                if (auto r = er.avg_px(&out->arena)) out->avg_px = *r;
-                if (auto r = er.cum_qty(&out->arena)) out->cum_qty = *r;
-                if (auto r = er.leaves_qty(&out->arena)) out->leaves_qty = *r;
-                out->received.store(true, std::memory_order_release);
-                return {};
-            }
-        };
-        auto cap_app = std::make_shared<InitiatorCaptureApp>();
-        cap_app->out = received;
-
-        // Re-register the engine config with the capture app.  We cannot change
-        // the application after start, but we set it on the EngineConfig before
-        // constructing — rebuild is not possible here. Instead, override fromApp
-        // on the already-registered responding_app.
+        // ── fixpp-initiator: send NOS on the live session, await ExecRpt ──────
         //
-        // NOTE: since we passed responding_app as ecfg.application, we can
-        // forward fromApp via pointer-swap.  Rather than doing that complexity,
-        // use the simpler pattern: the responding_app::fromApp already skips
-        // non-"D" messages. For the initiator receiving "8", it does nothing and
-        // returns {}.  We need to capture the ExecRpt.
-        //
-        // Fix: change the design slightly — use a single unified app class that
-        // handles both directions.  Given the test structure above, use a
-        // dedicated InitiatorApp for the initiator role (rebuild with a fresh fx).
-        //
-        // The cleanest approach within the existing fixture is to note that
-        // RespondingApp::fromApp already returns {} for non-"D" messages —
-        // so for the initiator role we just need to capture "8" messages.
-        // We do this by replacing the shared_ptr target (the engine was
-        // registered with ecfg.application = responding_app — the engine holds
-        // the EngineConfig by const-ref, so we cannot swap post-register).
-        //
-        // Simplest correct solution: the test body for the initiator role
-        // re-creates a fresh fixture with a capturing app (since the counterparty
-        // skip has already passed, the re-run will hit the same live peer).
-        // We use a lambda scope to keep this contained.
-
-        // ---- Re-create fixture for initiator with a capture app ----
-        fixpp::core::EngineConfig ecfg2;
-        ecfg2.application = cap_app;
-        fixpp::interop::InteropEngineFixture fx2{std::move(ecfg2)};
-
-        // Build fresh config (factory was consumed by fx; make a new one).
-        auto factory2 = hp::make_interop_tls_factory(dir);
-        ASSERT_NE(factory2, nullptr);
-        auto cfg2 = hp::make_session_config(role, "FIX.4.4", factory2,
-                                             fx2.ioc().get_executor(), *endpoint);
-        const auto id2 = SessionId::from_config(cfg2);
-        ASSERT_TRUE(fx2.engine().register_session(std::move(cfg2)).has_value());
-        fx2.start();
-
-        // Drive to Active.
-        const auto reached2 = hp::drive_to_active(fx2, id2, 5s);
-        EXPECT_EQ(reached2, fsm_state::Active)
-            << "initiator capture fixture: session did not reach Active";
-        if (reached2 != fsm_state::Active) {
-            hp::expect_graceful_stop(fx2);
-            // Stop original fixture too.
-            fx.stop_within(3s);
-            return;
-        }
+        // One fixture, one session: send a NOS via Engine::send and wait for the
+        // counterparty-acceptor's responding Application to reply with an
+        // ExecRpt, which RespondingApp::fromApp captures into er_received.
 
         // Build the NOS payload.
         std::array<std::byte, 512> nos_buf{};
@@ -409,10 +343,10 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
         // Send the NOS via Engine::send (any-thread path).
         {
             auto send_fut = asio::co_spawn(
-                fx2.ioc().get_executor(),
-                fx2.engine().send(id2, *nos_body),
+                fx.ioc().get_executor(),
+                fx.engine().send(id, *nos_body),
                 asio::use_future);
-            fx2.run_until(
+            fx.run_until(
                 [&send_fut]{ return send_fut.wait_for(0ms) == std::future_status::ready; },
                 3s);
             ASSERT_TRUE(send_fut.wait_for(0ms) == std::future_status::ready)
@@ -423,22 +357,25 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
         }
 
         // Wait for the ExecRpt to arrive in fromApp.
-        fx2.run_until(
-            [&received]{ return received->received.load(std::memory_order_acquire); },
+        fx.run_until(
+            [&responding_app]{
+                return responding_app->er_received.load(std::memory_order_acquire);
+            },
             5s);
 
-        EXPECT_TRUE(received->received.load(std::memory_order_acquire))
+        EXPECT_TRUE(responding_app->er_received.load(std::memory_order_acquire))
             << "No ExecutionReport received from counterparty within 5s";
 
-        if (received->received.load(std::memory_order_acquire)) {
+        if (responding_app->er_received.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lk{responding_app->cap_mu};
             // Fidelity assertions (FR-010/013; data-model D5; INV-3).
-            EXPECT_EQ(received->exec_type, 'F')
+            EXPECT_EQ(responding_app->cap_exec_type, 'F')
                 << "ExecType must be 'F' (Trade / fully-filled)";
-            EXPECT_EQ(received->ord_status, '2')
+            EXPECT_EQ(responding_app->cap_ord_status, '2')
                 << "OrdStatus must be '2' (Filled)";
-            EXPECT_EQ(received->symbol, "AAPL")
+            EXPECT_EQ(responding_app->cap_symbol, "AAPL")
                 << "Symbol must echo the order's Symbol";
-            EXPECT_EQ(received->symbol_side, '1')
+            EXPECT_EQ(responding_app->cap_side, '1')
                 << "Side must echo the order's Side";
 
             // Decimal value-equality (INV-3): 190.5 == 190.50, etc.
@@ -446,23 +383,26 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
             std::pmr::monotonic_buffer_resource cmp_arena{
                 cmp_arena_buf.data(), cmp_arena_buf.size(),
                 std::pmr::null_memory_resource()};
-            auto expected_qty = make_dec("100",   &cmp_arena);
-            auto expected_px  = make_dec("190.5", &cmp_arena);
+            auto expected_qty  = make_dec("100",   &cmp_arena);
+            auto expected_px   = make_dec("190.5", &cmp_arena);
             auto expected_zero = make_dec("0",     &cmp_arena);
             // CumQty == OrderQty (fully-filled).
-            EXPECT_EQ(received->cum_qty, expected_qty)
+            EXPECT_EQ(responding_app->cap_cum_qty, expected_qty)
                 << "CumQty must equal OrderQty (100)";
             // AvgPx == Price.
-            EXPECT_EQ(received->avg_px, expected_px)
+            EXPECT_EQ(responding_app->cap_avg_px, expected_px)
                 << "AvgPx must equal Price (190.5)";
             // LeavesQty == 0.
-            EXPECT_EQ(received->leaves_qty, expected_zero)
+            EXPECT_EQ(responding_app->cap_leaves_qty, expected_zero)
                 << "LeavesQty must be 0 (fully filled)";
         }
 
-        hp::expect_graceful_stop(fx2);
-        // Stop the original (unused) fixture.
-        fx.stop_within(3s);
+        // Settle: let the counterparty flush its buffered transcript tail (the
+        // inbound ExecRpt + Logout) before teardown. fixpp tears down the instant
+        // er_received flips, which can race a buffered QuickFIX-J transcript write
+        // and capture a short golden; a brief wall-clock settle makes it stable.
+        fx.run_until([]{ return false; }, 500ms);
+        hp::expect_graceful_stop(fx);
 
     } else {
         // ── fixpp-acceptor: counterparty sends NOS, we reply ExecRpt ─────────
@@ -496,6 +436,9 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
             }
         }
 
+        // Settle: let the counterparty flush its buffered transcript tail (the
+        // inbound ExecRpt + Logout) before teardown — see the initiator branch.
+        fx.run_until([]{ return false; }, 500ms);
         hp::expect_graceful_stop(fx);
     }
 }

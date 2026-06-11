@@ -26,7 +26,6 @@ CONFIGS = {"normal", "asan-ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 DEFERRED_TAGS = {
     "deferred:fixt-routing",
-    "deferred:app-messages",
     "deferred:fix8-revisit",
     "deferred:v1.1-mtls",
     # QuickFIX-cpp cannot emit a controllable too-low PossDup (Session::send()
@@ -163,8 +162,12 @@ EXPECTED_IDS = frozenset({
     "HP-QFj-acc-fix44-idle-cadence",
     # Regression cell (runs green locally)
     "HP-down-peer-stop-watchdog",
-    # Deferred rows (4)
-    "HP-business-newordersingle-execreport",
+    # G2 (020) business-message NOS→ExecRpt live cells (4)
+    "BM-QFcpp-init-fix44-nos-execrpt",
+    "BM-QFcpp-acc-fix44-nos-execrpt",
+    "BM-QFj-init-fix44-nos-execrpt",
+    "BM-QFj-acc-fix44-nos-execrpt",
+    # Deferred rows (3)
     "HP-fixt11-fix50sp2-cells",
     "HP-fix8-happy-cells",
     "HP-mutual-mtls-cells",

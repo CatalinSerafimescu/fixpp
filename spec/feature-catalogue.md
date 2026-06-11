@@ -60,7 +60,12 @@ the parent `phase-9-harness/`; local live cells skip with reason and are not
 claimed as live-paired QuickFIX evidence. The parity-row flips live in the
 parent `phases/phase-9/unit-test-parity-matrix.md`. The `[const §VII.6]`
 business-message flow (`Logon -> NewOrderSingle -> ExecutionReport -> Logout`)
-remains OPEN as a v1.0-GA residual, forward-pointing to A-001/A-006.
+is **DISCHARGED** (2026-06-11): 020's SC-003 — a typed NOS→ExecRpt round-trip
+against a live QuickFIX-J counterparty in both roles, both messages on the seam
+with matching goldens — is met by the 4 live `BM-*-fix44-nos-execrpt` cells
+(QuickFIX-J + QuickFIX-cpp, both roles; `cell_results.yaml`, goldens at
+`phase-9-harness/golden/BM-*.fix`). A-001/A-006 stay `backlog` (full-field /
+all-version codegen coverage is separately deferred — see the row note below).
 
 ### 018-interop-live-admin (tests-only, gap-fill G1)
 
@@ -77,9 +82,11 @@ S-014 / S-023** (engine send path + liveness + recovery + Reject shipped in
 = 10 G1 base cells, each with an SC-004 gate-bite negative test; goldens captured
 at first paired run in the parent `phase-9-harness/` (skip-with-reason locally).
 The `{52,10}` admin normalization profile (not the 016 default) keeps `112`/`34`/
-`122`/`123` assertable. Application-message interop (G2, `[const §VII.6]`) stays
-OUT of scope — an open v1.0-GA residual. Discharges the orthogonal 016
-verify-YELLOW sanitizer waiver (the interop ctest runs under ASan/UBSan/TSan).
+`122`/`123` assertable. Application-message interop (G2, `[const §VII.6]`) was
+out of scope for this 018 admin badge; it is now separately **DISCHARGED**
+(2026-06-11) by the 020 `BM-*-fix44-nos-execrpt` cells — see the 016 `[const §VII.6]`
+note above. 018 also discharges the orthogonal 016 verify-YELLOW sanitizer waiver
+(the interop ctest runs under ASan/UBSan/TSan).
 
 ## Wire / Encoding
 
@@ -137,7 +144,7 @@ verify-YELLOW sanitizer waiver (the interop ctest runs under ASan/UBSan/TSan).
 | A-012 | OFFICIAL | wire | CrossOrderCancelReplaceRequest (35=t) | 4.4–5.0SP2 | [FIX44] Cross Orders | backlog | — | — | — | — |
 | A-013 | OFFICIAL | wire | CrossOrderCancelRequest (35=u) | 4.4–5.0SP2 | [FIX44] Cross Orders | backlog | — | — | — | — |
 
-> **A-001 / A-006 — partial G2 interop evidence (020-g2-business-messages), NOT a closure.** 020 ships a *minimal* hand-written FIX-4.4 typed builder for NewOrderSingle (35=D) and ExecutionReport (35=8) — Limit-only NOS, fully-filled ExecRpt, minimal field set — driven live `Logon→NOS→ExecRpt→Logout` vs QuickFIX-J/cpp both roles (discharging `[const §VII.6]`). These rows **stay `backlog`**: A-001/A-006 are OFFICIAL all-version (4.0–5.0SP2) wire rows owned by codegen; full-field coverage is deferred (FR-015a, the codegen writer-emitter path) and all-protocol-version coverage (4.2/5.0SP2/FIXT.1.1) is scheduled post-v1.0 (FR-015b). See B&L `L-020-1`/`L-020-2` and `spec/coverage-index.md` A-001/A-006 gap-notes.
+> **A-001 / A-006 — partial G2 interop evidence (020-g2-business-messages), NOT a closure.** 020 ships a *minimal* hand-written FIX-4.4 typed builder for NewOrderSingle (35=D) and ExecutionReport (35=8) — Limit-only NOS, fully-filled ExecRpt, minimal field set — driven live `Logon→NOS→ExecRpt→Logout` vs QuickFIX-J/cpp both roles (discharging `[const §VII.6]`; live-validated 2026-06-11 by the 4 gated `BM-*-fix44-nos-execrpt` cells + banked goldens at `phase-9-harness/golden/BM-*.fix`). These rows **stay `backlog`**: A-001/A-006 are OFFICIAL all-version (4.0–5.0SP2) wire rows owned by codegen; full-field coverage is deferred (FR-015a, the codegen writer-emitter path) and all-protocol-version coverage (4.2/5.0SP2/FIXT.1.1) is scheduled post-v1.0 (FR-015b). See B&L `L-020-1`/`L-020-2` and `spec/coverage-index.md` A-001/A-006 gap-notes.
 
 ## Application Messages — Market Data
 

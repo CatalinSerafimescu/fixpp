@@ -120,9 +120,10 @@ MUST NOT be hand-fabricated.
 
 ## Deferred rows (present, NOT executed — `status: n/a`)
 
+> **Business-message cells PROMOTED TO LIVE (2026-06-11).** `Logon → NewOrderSingle → ExecutionReport → Logout` is now exercised live vs QuickFIX-J + QuickFIX-cpp (both roles) by the 4 `BM-*-fix44-nos-execrpt` cells in `cell_results.yaml` (`status: pass`, `matrix_disposition: live`); the §VII.6 residual (FR-027/SC-008) is discharged (020 SC-003). A-001/A-006 stay `backlog` for full-field / all-version codegen only.
+
 | Row | Tag | FR | Rationale |
 |-----|-----|----|-----------|
-| Business-message cells (Logon → NewOrderSingle → ExecutionReport → Logout) | `deferred:app-messages` | FR-005 | v1.0 scope is session-only; the §VII.6 business flow is an open v1.0-GA residual (FR-027/SC-008), not discharged by this badge. Forward pointer: A-001/A-006. |
 | FIX 5.0 SP2 / FIXT.1.1 cells (both counterparties, both roles) | `deferred:fixt-routing` | FR-003 | fixpp cannot establish a FIXT.1.1 / 5.0SP2 session today (S-020 FIXT half `implementing(4.4 only)`, S-025 `DefaultApplVerID(1137)` backlog; 005 defers FIXT logon-time semantics). Activate when FIXT routing + 1137 land. |
 | Fix8 happy-path cells | `deferred:fix8-revisit` | FR-009 | Fix8 is corpus-only at v1.0; its live disposition is revisited later from corpus findings. |
 | Mutual-certificate (client-cert) mTLS cells | `deferred:v1.1-mtls` | FR-025 | App-layer client-cert identity binding (013/014 fail-closed CompID↔cert, session profile `mtls_ca`) is the v1.1 reach. The v1.0 baseline is server-auth `one_way_ca`. |

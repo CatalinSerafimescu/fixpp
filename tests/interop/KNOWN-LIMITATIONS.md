@@ -30,11 +30,13 @@ TestRequest→Heartbeat `112` echo (both directions), idle Heartbeat cadence
 inbound-detect and outbound-answer), and session-level `Reject(35=3)` survival —
 each for **both fixpp roles** over `one_way_ca` TLS.
 
-**Scope boundary (do NOT overstate):** the badge covers **session-admin** interop
-only. **Application-message interop** (`NewOrderSingle → ExecutionReport`, the
-`[const §VII.6]` business flow / G2) is **still NOT asserted** and remains an open
-v1.0-GA residual. G1 enriches the session-layer badge; it does not extend it to
-business messages.
+**Scope boundary (do NOT overstate):** this badge covers **session-admin** interop
+only; G1 enriches the session-layer badge, it does not extend it to business
+messages. **Application-message interop** (`NewOrderSingle → ExecutionReport`, the
+`[const §VII.6]` business flow / G2) is now separately **DISCHARGED** (2026-06-11)
+by the 4 gated `BM-*-fix44-nos-execrpt` cells (020 SC-003) — see the residual
+section below. The *broader* `Application`-callback semantics (RejectLogon-from-callback,
+BusinessMessageReject, callback-exception rollback) remain out of the asserted set.
 
 ## Corpus known-limitations (FR-014 — deferred-by-design)
 
@@ -51,14 +53,18 @@ intentionally scopes out at v1.0, each with its tracking ref:
 | Configurable MaxLatency / CheckLatency knobs | quickfix-cpp `sessionHasMaxLatency` | `S-latency-knob` (latency window not a per-session knob) |
 | Configurable ResendRequestChunkSize splitting | quickfix-j#751 (corpus C-103, P3) | `S-backlog-chunked-resend` (open) |
 
-## Session-only scope residual (FR-027 / SC-008)
+## Business-message interop (FR-027 / SC-008) — DISCHARGED 2026-06-11
 
-- **`[const §VII.6]` NewOrderSingle → ExecutionReport interop clause** is **NOT
-  discharged** by this session-only badge. It remains an **open v1.0-GA residual**
-  (the one Gate-A adjudication carried in `plan.md`, R7) — the business-message
-  matrix cells are `deferred:app-messages` (FR-005). Forward pointer: corpus/matrix
-  A-001/A-006. The badge MUST state the scope is **session-layer interop**, not
-  application-message interop.
+- **`[const §VII.6]` NewOrderSingle → ExecutionReport interop clause** is now
+  **DISCHARGED**. It was an open v1.0-GA residual (the Gate-A adjudication carried
+  in `plan.md`, R7) while the matrix cells were `deferred:app-messages`; 020 + live
+  validation closed it. The 019 `Application`-callback layer + 020 typed builders
+  are driven live `Logon→NOS→ExecRpt→Logout` vs **both** QuickFIX-J and QuickFIX-cpp,
+  both roles, by the 4 gated `BM-*-fix44-nos-execrpt` cells (`status: pass`,
+  `matrix_disposition: live`; goldens `phase-9-harness/golden/BM-*.fix`), meeting
+  020 SC-003. The session-admin badge above is still scoped session-layer; this
+  clause is discharged separately by the BM cells. A-001/A-006 stay `backlog` only
+  for full-field / all-version codegen coverage (FR-015a/b).
 
 ## TLS / transport caveats
 

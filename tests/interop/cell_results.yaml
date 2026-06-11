@@ -52,8 +52,19 @@ cells:
   # ── Separate (non-matrix) regression cell — runs green locally, no counterparty
   - { id: HP-down-peer-stop-watchdog, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.4" }
 
+  # ── G2 (020-g2-business-messages) NOS→ExecRpt live cells (4) ─────────────────
+  # NewOrderSingle(35=D) → fully-filled ExecutionReport(35=8), both roles × both
+  # engines, over TLS. Discharges the §VII.6 business-message residual (FR-027/
+  # SC-008): the 019 Application-callback layer + 020 typed builders driven live
+  # vs QuickFIX-J and QuickFIX-cpp. Acceptor cells: the QF initiator originates
+  # the NOS (INTEROP_CP_SEND_NOS_ON_LOGON); initiator cells: fixpp sends, the
+  # counterparty's fromApp replies. Goldens: phase-9-harness/golden/BM-*.fix.
+  - { id: BM-QFcpp-init-fix44-nos-execrpt, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
+  - { id: BM-QFcpp-acc-fix44-nos-execrpt,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
+  - { id: BM-QFj-init-fix44-nos-execrpt,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
+  - { id: BM-QFj-acc-fix44-nos-execrpt,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
+
   # ── US1 deferred rows (present, NOT executed → status n/a) ───────────────────
-  - { id: HP-business-newordersingle-execreport, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:app-messages", deferred_reason: "v1.0 is session-only; the §VII.6 business flow is an open v1.0-GA residual (FR-027/SC-008), not discharged by the session badge.", spec_ref: "FIX-SL §VII.6" }
   - { id: HP-fixt11-fix50sp2-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fixt-routing", deferred_reason: "fixpp cannot establish a FIXT.1.1/5.0SP2 session yet (S-020 FIXT half, S-025 DefaultApplVerID(1137) backlog).", spec_ref: "FIXT.1.1 §5" }
   - { id: HP-fix8-happy-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fix8-revisit", deferred_reason: "Fix8 is corpus-only at v1.0; live disposition revisited from corpus findings (FR-009).", spec_ref: "FIX-SL §4" }
   - { id: HP-mutual-mtls-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:v1.1-mtls", deferred_reason: "Client-cert mutual-mTLS identity binding is the v1.1 reach; v1.0 baseline is server-auth one_way_ca (FR-025).", spec_ref: "FIXS §3.2/§3.4" }
