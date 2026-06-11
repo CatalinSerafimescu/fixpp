@@ -29,6 +29,12 @@ DEFERRED_TAGS = {
     "deferred:app-messages",
     "deferred:fix8-revisit",
     "deferred:v1.1-mtls",
+    # QuickFIX-cpp cannot emit a controllable too-low PossDup (Session::send()
+    # strips 43/122; no public sendRaw/AllowPosDup) and never resends an
+    # already-seen frame — so the 4 PD-QFcpp-* cells are by-design not runnable.
+    # fixpp's receive-path PossDup tolerance is proven engine-independently via
+    # the 4 PD-QFj-* cells + test_inbound_poss_dup_tolerance.cpp.
+    "deferred:qfcpp-no-possdup-injection",
 }
 
 

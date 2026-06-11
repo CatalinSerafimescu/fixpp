@@ -449,6 +449,25 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   `redeliver_poss_dup` is). **Status: deferred** (FR-008 / research.md D7 — own future
   opaque-send-hardening slice). **SUPERSEDED by 022 (B-022-1): the knob + excision shipped.**
 
+- **L-021-3 — The PossDup-replay live interop cells run against QuickFIX-J only; the
+  QuickFIX-cpp half is waived with rationale (SC-004 not claimed fully met).** Witnessing
+  fixpp's inbound PossDup tolerance live requires the counterparty to INJECT a too-low `43=Y`
+  frame on command. Only QuickFIX-J can: its public `Session.send(message, allowPosDup=true)`
+  preserves `PossDupFlag(43)`/`OrigSendingTime(122)`. QuickFIX-cpp v1.16.0 cannot —
+  `Session::send()` unconditionally strips `43`/`122`, `sendRaw` is private, there is no
+  `AllowPosDup` setting, and a too-low replay is not a behaviour a healthy QuickFIX-cpp session
+  ever produces (it resends only the gap ranges it is asked for, never an already-seen frame).
+  The four `PD-QFcpp-*` cells are therefore `deferred:qfcpp-no-possdup-injection` (status `n/a`)
+  in `tests/interop/cell_results.yaml`. fixpp's tolerance is a RECEIVE-path property — the
+  injected bytes are identical regardless of the sending engine — so it is proven LIVE against
+  QuickFIX-J 3.0.1 (the four `PD-QFj-*` cells: replay-survives + malformed-dup-rejected ×
+  initiator + acceptor, green under `normal` + `asan-ubsan`) and in-process by
+  `test_inbound_poss_dup_tolerance.cpp` / `test_inbound_poss_dup_validation.cpp`. Consequently
+  **SC-004's QuickFIX-cpp clause is waived-with-rationale, not met**; SC-001/SC-002 are
+  satisfied by the QuickFIX-J live cells + the unit suite. **Status: shipped + waived**
+  (2026-06-11, Item-1 live sweep). *(021 SC-001/SC-002/SC-004;
+  `cell_results.yaml` deferred:qfcpp-no-possdup-injection; QFcpp `Session.cpp:534-537`.)*
+
 ## PossResend(97) inbound + AllowPosDup send-path strip (022-possresend-allowpossdup-send)
 
 <!-- 022-possresend-allowpossdup-send — completes catalogue row S-010 (backlog → done) -->

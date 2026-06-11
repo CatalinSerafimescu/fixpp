@@ -82,15 +82,24 @@ cells:
   # ── G3 (021-inbound-possdup-origsendingtime) live PossDup cells (8) ──────────
   # T006 replay-survives (US1/FR-007/SC-001/SC-004): both engines × both roles.
   # T009 malformed-dup-rejected (US2/FR-007/SC-002/SC-004): both engines × both roles.
-  # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
-  - { id: PD-QFcpp-init-fix44-poss-dup-replay-survives, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
-  - { id: PD-QFcpp-acc-fix44-poss-dup-replay-survives,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
-  - { id: PD-QFj-init-fix44-poss-dup-replay-survives,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
-  - { id: PD-QFj-acc-fix44-poss-dup-replay-survives,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
-  - { id: PD-QFcpp-init-fix44-malformed-dup-rejected,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
-  - { id: PD-QFcpp-acc-fix44-malformed-dup-rejected,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
-  - { id: PD-QFj-init-fix44-malformed-dup-rejected,     config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
-  - { id: PD-QFj-acc-fix44-malformed-dup-rejected,      config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  # The fixpp inbound PossDup tolerance is driven by INJECTING a too-low 43=Y frame
+  # from the counterparty. Only QuickFIX-J can: its public send(message,
+  # allowPosDup=true) preserves 43/122. QuickFIX-cpp's Session::send() strips
+  # PossDupFlag(43)/OrigSendingTime(122) with no public sendRaw/AllowPosDup, and a
+  # too-low replay is not a behavior a healthy QFcpp session ever produces (it only
+  # resends gaps it is asked for, never an already-seen frame). The 4 PD-QFcpp-*
+  # cells are therefore deferred:qfcpp-no-possdup-injection (status n/a). fixpp's
+  # tolerance is a receive-path property (identical bytes regardless of the sending
+  # engine), proven LIVE via the 4 PD-QFj-* cells (pass, both arms × both roles) +
+  # the in-process unit tests (test_inbound_poss_dup_tolerance.cpp).
+  - { id: PD-QFcpp-init-fix44-poss-dup-replay-survives, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:qfcpp-no-possdup-injection", deferred_reason: "QuickFIX-cpp cannot emit a controllable too-low PossDup (send() strips 43/122; no public sendRaw/AllowPosDup) and never resends an already-seen frame; fixpp's receive-path tolerance is proven engine-independently via PD-QFj-* + test_inbound_poss_dup_tolerance.cpp.", spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFcpp-acc-fix44-poss-dup-replay-survives,  config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:qfcpp-no-possdup-injection", deferred_reason: "QuickFIX-cpp cannot emit a controllable too-low PossDup (send() strips 43/122; no public sendRaw/AllowPosDup) and never resends an already-seen frame; fixpp's receive-path tolerance is proven engine-independently via PD-QFj-* + test_inbound_poss_dup_tolerance.cpp.", spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFj-init-fix44-poss-dup-replay-survives,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFj-acc-fix44-poss-dup-replay-survives,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "021 US1 FR-007/SC-001/SC-004" }
+  - { id: PD-QFcpp-init-fix44-malformed-dup-rejected,   config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:qfcpp-no-possdup-injection", deferred_reason: "QuickFIX-cpp cannot emit a controllable 43=Y dup missing 122 (send() strips 43/122; no public sendRaw/AllowPosDup); fixpp's missing-OrigSendingTime reject is proven engine-independently via PD-QFj-* + test_inbound_poss_dup_tolerance.cpp.", spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFcpp-acc-fix44-malformed-dup-rejected,    config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:qfcpp-no-possdup-injection", deferred_reason: "QuickFIX-cpp cannot emit a controllable 43=Y dup missing 122 (send() strips 43/122; no public sendRaw/AllowPosDup); fixpp's missing-OrigSendingTime reject is proven engine-independently via PD-QFj-* + test_inbound_poss_dup_tolerance.cpp.", spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFj-init-fix44-malformed-dup-rejected,     config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
+  - { id: PD-QFj-acc-fix44-malformed-dup-rejected,      config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "021 US2 FR-007/SC-002/SC-004" }
 
   # ── G3 slice 3 (024-reset-refresh-on-logon) ResetOnLogon interop cells (4) ─────
   # T016 initiator (C6.1): fixpp init + reset_on_logon=true → 141=Y + 34=1 to live acceptor.
