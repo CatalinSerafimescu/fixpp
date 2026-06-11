@@ -2155,7 +2155,12 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
 // peer-SPONTANEOUS 141=Y echo + fixpp's Logon already sent at N>1 — there outbound
 // must NOT become 2. Pin case (b) before touching the baseline.
 // [L-024-2; sibling of 030/031; FIX-SL §4.1.1; [[feedback_witness_asserts_named_postcondition_not_proxy]]]
-TEST(PersistentSeqnumHydrate, DISABLED_ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo) {
+//
+// W1 wire witness (SC-002): after Active, clear captured frames, feed a peer
+// TestRequest (35=1) and assert the Heartbeat reply carries 34=2 (not a duplicate
+// 34=1). RED on main (outbound rebased to 1 after 141=Y ack → next send duplicates
+// 34=1). [FR-001/FR-003, SC-001/SC-002]
+TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo) {
     auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
     auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
 
@@ -2185,6 +2190,47 @@ TEST(PersistentSeqnumHydrate, DISABLED_ResetOnLogon_Initiator_PeerAck141_Outboun
     EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(),
               fixpp::session::seqnum_t{2})
         << "030 restored inbound to 2 on this arm; only the outbound twin is missing (L-024-2)";
+
+    // SC-002 wire witness: clear captures accumulated during Logon handshake,
+    // then feed an inbound TestRequest (35=1) → session emits a Heartbeat reply
+    // consuming the next outbound seqnum. Assert the reply carries 34=2 (no
+    // duplicate 34=1) and that no previously-emitted frame re-used 34=1.
+    // RED on main: outbound rebased to 1 → Heartbeat reply goes at 34=1
+    // (duplicate of the reset Logon). [FR-001/FR-003, SC-002]
+    fix->clear_capture();
+    // Build a peer inbound TestRequest (35=1) in-sequence at seq=2 (peer's
+    // inbound consumed: Logon seq=1 → next expected inbound for fixpp is 2, but
+    // the PEER's outbound seqnum has been reset and now sends at seq=2).
+    // "SRV"→"CLI": sender=SRV, target=CLI (peer→fixpp direction).
+    std::string test_req_extra;
+    test_req_extra += "98=0\x01";
+    test_req_extra += "108=0\x01";
+    test_req_extra += "112=TEST\x01";
+    auto test_req_frame = make_fix_frame("FIX.4.4", "1", 2, "SRV", "CLI", test_req_extra);
+    fix->feed(test_req_frame);
+
+    // Session must still be Active after the TestRequest exchange.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "session must remain Active after handling inbound TestRequest";
+
+    // The Heartbeat reply must have been emitted (exactly one post-Active frame).
+    ASSERT_GE(fix->capture.frames.size(), 1u)
+        << "a Heartbeat reply (35=0) must be emitted in response to the TestRequest";
+
+    // Assert the Heartbeat reply carries 34=2 (NOT 34=1) — the wire witness (SC-002).
+    const std::string reply_seq = extract_tag(fix->capture.frames[0], 34);
+    EXPECT_EQ(reply_seq, "2")
+        << "SC-002 wire witness: post-Active Heartbeat reply must carry 34=2; "
+           "main rebases outbound to 1 on the peer_ack_sent_reset_flag arm → "
+           "next send duplicates 34=1 (QuickFIX rejects). got 34=" << reply_seq;
+
+    // Confirm no frame in the post-Active capture carries a duplicate 34=1.
+    for (const auto& frame : fix->capture.frames) {
+        const std::string seq = extract_tag(frame, 34);
+        EXPECT_NE(seq, "1")
+            << "SC-002: no post-Active outbound frame must carry 34=1 "
+               "(that seq was consumed by the reset Logon); got duplicate 34=1";
+    }
 }
 
 // ── INV_H1_Acceptor_789BehindSide_NoOverPersist ──────────────────────────────

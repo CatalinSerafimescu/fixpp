@@ -662,3 +662,58 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
     EXPECT_TRUE(found) << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
                        << "RED: stub does not emit → FAILS RED per T017 design.";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W2 (T003): reset_on_logon initiator — by_peer_request=false (FR-006 / SC-006)
+//
+// A fresh {1,1} initiator with reset_on_logon=true and bilateral_lenient policy
+// emits its Logon with 141=Y (any_reset_knob=true + seqnums_at_one=true →
+// initr_reset_seqnum=true → latch=true). After the peer echoes 141=Y, the
+// sequence_numbers_reset event must have by_peer_request=false (fixpp initiated).
+//
+// RED on main: current code computes we_initiated=(policy==bilateral_strict) at
+// session.cpp:3224, which is false for bilateral_lenient → by_peer_request=true
+// (incorrect — fixpp sent 141=Y). Fix: we_initiated=own_logon_sent_reset_flag_
+// (the latch alone — C4 gate, distinct from C1's restore gate). [FR-006, SC-006]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ResetSeqnumPolicyMatrixTest,
+       ResetOnLogon_Initiator_BilateralLenient_PeerAck141_ByPeerRequestFalse) {
+    clear_capture();
+    // Build config: initiator, bilateral_lenient, reset_on_logon=true, fresh {1,1}.
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    cfg.reset_on_logon = true;
+    fixpp::session::Session sess(engine, cfg);
+
+    // open() emits initiator Logon with 141=Y (reset_on_logon=true + seqnums_at_one=true
+    // at {1,1}) → latch own_logon_sent_reset_flag_=true.
+    ASSERT_TRUE(run_open(sess).has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer Logon-ack echoes 141=Y at seq=1.
+    auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "W2: session must reach Active after peer 141=Y ack";
+
+    // FR-006 / SC-006 / C4: by_peer_request must be false — fixpp initiated the
+    // reset (it sent 141=Y in its Logon). The latch alone drives this, independent
+    // of reset_before_send. RED on main (we_initiated=bilateral_strict → false for
+    // bilateral_lenient → by_peer_request=true).
+    auto events = sess.recent_events();
+    bool found = false;
+    for (const auto& ev : events) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            found = true;
+            EXPECT_FALSE(r->by_peer_request)
+                << "W2 (T003): reset_on_logon initiator with bilateral_lenient: "
+                   "by_peer_request must be false — fixpp sent 141=Y (latch=true). "
+                   "RED on main: we_initiated=bilateral_strict only → returns true. "
+                   "[FR-006, SC-006, C4]";
+        }
+    }
+    EXPECT_TRUE(found)
+        << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
+}

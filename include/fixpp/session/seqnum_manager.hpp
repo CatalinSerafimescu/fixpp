@@ -132,6 +132,14 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_inbound(
         seqnum_t n) noexcept;
 
+    // set_next_outbound(n): force next_outbound_ to n for the 032 initiator
+    // peer_ack_sent_reset_flag outbound restore (Mechanism A: restore-after-reset).
+    // Mutex-guarded; production path. Only the outbound counter moves.
+    // Store persistence — when applicable — is the session's responsibility,
+    // mirroring set_next_inbound()'s split. [032 contract C1/Mechanism A]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_outbound(
+        seqnum_t n) noexcept;
+
     // drain(): required before destruction to satisfy async_mutex destructor
     // precondition. Safe to call even if no lock was ever acquired.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drain() noexcept {
