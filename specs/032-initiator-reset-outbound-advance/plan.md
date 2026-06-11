@@ -145,7 +145,7 @@ header change (no FSM state, store interface, config, codegen, C-ABI, or wire/pu
 | **VIII.5** Allocator | sequence-counter correction; no new container/frame/allocation; existing no-heap witnesses on the reset path stay green | ✅ PASS (no new alloc) |
 | **IX.1** Coverage | ≥95/85 on the new guarded restore branch — the `own_logon_sent_reset_flag_ && reset_before_send` TRUE arm AND both FALSE sub-arms (`reset_before_send` false = bilateral_strict-at-N; latch false = fresh peer-spontaneous-at-seq-1 / hydrated inbound≠1) — + the latch set at `:721` and the `by_peer_request` read at the arm | ✅ planned |
 | **IX.2** Sanitizers | ASan/UBSan/TSan on the initiator reset-echo path + amended/new tests + interop ctest | ✅ planned |
-| **X** ABI | no C-ABI/error-slot/wire/public change. Adds two **private/internal** methods (`SeqnumManager::set_next_outbound`, `Session::persist_outbound_advance_`) + one private `Session` member (`own_logon_sent_reset_flag_`) — a private header change → source rebuild; no public ABI surface (FR-009 holds: no NEW wire/error-slot/codegen/C-ABI/config) | ✅ private header change (no public ABI surface) |
+| **X** ABI | no C-ABI/error-slot/wire/public change. Adds `SeqnumManager::set_next_outbound` (**public** method on the internal `SeqnumManager`, mirroring public `set_next_inbound`) + `Session::persist_outbound_advance_` (private Session method) + one private `Session` member (`own_logon_sent_reset_flag_`) — a header change → source rebuild; no new C-ABI surface (FR-009 holds: `SeqnumManager` is awaitable-returning C++, not C-ABI-exportable; no NEW wire/error-slot/codegen/C-ABI/config) | ✅ header change (no new C-ABI surface) |
 | **XI.4** Threading | the capture + restore run on the existing session strand inside the inbound Logon handler; no new concurrency surface | ✅ PASS |
 | **FR-009** No new config surface | **no new config flag** — gated by the pre-existing reset knobs + the latched emit-time fact + the observable `n_pre_outbound == seqnum_min+1`; no behavior changes without an explicit existing knob. (Basis is FR-009's no-new-public-surface / ABI-surface constraint, NOT Article XII.5 — XII.5 is the `SecurityProfile` construction rule and SecurityProfile is not touched here.) | ✅ PASS (no new knob) |
 | **XIV.2** Pluggable ≤5 pure-virtual | `MessageStore` untouched | ✅ PASS |
@@ -252,7 +252,7 @@ specs/032-initiator-reset-outbound-advance/
 ```text
 src/session/session.cpp        # emit-site latch own_logon_sent_reset_flag_ (:721); peer_ack_sent_reset_flag arm (:3185): n_pre capture + guarded outbound restore + by_peer_request reads the latch (:3224)
 include/fixpp/session/session.hpp        # NEW: own_logon_sent_reset_flag_ member + persist_outbound_advance_() decl (private header change)
-include/fixpp/session/seqnum_manager.hpp # NEW: set_next_outbound(seqnum_t) decl (mirrors set_next_inbound; private)
+include/fixpp/session/seqnum_manager.hpp # NEW: set_next_outbound(seqnum_t) decl (public, mirrors set_next_inbound)
 src/session/seqnum_manager.cpp           # set_next_outbound body
 tests/session/test_persistent_seqnum_hydrate.cpp     # W1 (enable + EXTEND DISABLED harm test, wire 34=2) + W2/W5/W6/W8 + INV_H1_Initiator_PeerAck141_NoOverPersist re-verify
 tests/session/test_reset_seqnum_policy_matrix.cpp    # W3 peer-spontaneous + W4 bilateral_strict-at-N + W7 fresh-no-knob non-regression

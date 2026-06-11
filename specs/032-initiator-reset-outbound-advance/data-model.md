@@ -11,7 +11,7 @@ the correction.
 
 | Entity | Field | Type | Change |
 |---|---|---|---|
-| `SeqnumManager` (per session) | next-outbound | `seqnum_t` | value corrected on this arm (restore to `seqnum_min+1` when applicable) via a **new private/internal** `set_next_outbound(seqnum_t)` setter mirroring `set_next_inbound` (no existing outbound setter — RC2 storage half); private header change, no public/wire/C-ABI surface |
+| `SeqnumManager` (per session) | next-outbound | `seqnum_t` | value corrected on this arm (restore to `seqnum_min+1` when applicable) via a **new public** `set_next_outbound(seqnum_t)` method on the internal `SeqnumManager`, mirroring the merged-030 public `set_next_inbound` twin (no existing outbound setter — RC2 storage half); header change, no new C-ABI surface |
 | `Session` (per session) | `own_logon_sent_reset_flag_` | `bool` | **NEW private strand-confined member** — latches the literal emit-time `initr_reset_seqnum` value (`session.cpp:721`) when the initiator Logon is built; read on the `peer_ack_sent_reset_flag` arm; consumed + cleared one-shot after the Logon-ack. Private member only (no public/wire/C-ABI surface) |
 | `SeqnumManager` (per session) | next-inbound | `seqnum_t` | UNCHANGED — `030` already restores it to `2` on this arm |
 | `MessageStore` (if persistent) | durable outbound | `seqnum_t` | written through a **new private** `Session::persist_outbound_advance_()` (mirroring `029`'s `persist_inbound_advance_()`; no existing outbound-persist path) to match the corrected manager value; `030` fatal-when-persistent disposition; INV-H1 (`store ≤ manager`) preserved (equality at `2`) |
