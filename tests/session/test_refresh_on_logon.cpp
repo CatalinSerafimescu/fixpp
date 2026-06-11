@@ -1451,3 +1451,135 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
         << ". Run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so for the binding proof. "
            "[[feedback_tracking_pmr_resource_false_pass]]";
 }
+
+// ── T005 W-latch-lifecycle: cross-reconnect stale-latch proof ────────────────
+//
+// Contract RC1 / C4 unconditional-assign invariant: own_logon_sent_reset_flag_
+// is ALWAYS overwritten at every emit_initiator_logon_() call, not set
+// conditionally. A stale latch from connection-1 must not survive into
+// connection-2 when connection-2's initr_reset_seqnum is false.
+//
+// Scenario (stale-latch corner case):
+//   Connection-1 (open()):
+//     - reset_on_disconnect=true, bilateral_lenient, fresh {1,1}
+//     - seqnums_at_one=true, any_reset_knob=true → initr_reset_seqnum=true
+//     - latch=true; Logon(141=Y, 34=1) emitted; outbound→2
+//   Peer responds WITHOUT 141=Y (bilateral_lenient accepts):
+//     - Session→Active; latch stays TRUE (C1 arm never fired)
+//   Connection-2 (drive_reconnect()):
+//     - seqnums {inbound=2, outbound=2} → seqnums_at_one=false
+//     - initr_reset_seqnum=false
+//     - With the shipped UNCONDITIONAL assign: latch=false
+//     - With a buggy CONDITIONAL (if initr_reset_seqnum) assign: latch stays TRUE
+//   Peer sends 141=Y at seq=2:
+//     - Shipped: latch=false → C1 skipped → we_initiated=false → by_peer_request=true
+//     - Buggy:   latch=true  → C1 fires spuriously → by_peer_request=false
+//
+// Discriminating assertion: by_peer_request=true on connection-2 peer 141=Y.
+//
+// Anchors: 032 contract C4/RC1 (unconditional-assign invariant), FR-006, W-latch-lifecycle.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng;
+    eng.executor = ioc.get_executor();
+
+    OutboundCapture capture;
+    auto transport_factory = std::make_shared<MockReconnectFactory>();
+
+    fixpp::session::SessionConfig cfg;
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.sender_comp_id = "CLI";
+    cfg.target_comp_id = "SRV";
+    cfg.begin_string = "FIX.4.4";
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.heartbeat_interval = std::chrono::seconds{0};
+    cfg.executor_override = ioc.get_executor();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.reset_on_logon = false;
+    cfg.reset_on_disconnect = true;   // sets any_reset_knob=true; does NOT reset at emit
+    cfg.transport_factory_override = transport_factory;
+    cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
+    cfg.transport_send = [&capture](std::span<const std::byte> data) { capture(data); };
+
+    auto session = std::make_unique<fixpp::session::Session>(eng, cfg);
+
+    // ── Connection 1: open() → latch=true ────────────────────────────────────
+    // Fresh {1,1}: seqnums_at_one=true, any_reset_knob=true → initr_reset_seqnum=true
+    // → latch=true. Logon(141=Y, 34=1) emitted; outbound→2.
+    {
+        auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_TRUE(fut.get().has_value()) << "T005: open() must succeed";
+    }
+    ASSERT_EQ(session->state(), fixpp::session::fsm_state::LogonSent)
+        << "T005 precondition: session in LogonSent after open()";
+
+    // Peer responds WITHOUT 141=Y at seq=1. bilateral_lenient accepts — session→Active.
+    // The peer_ack_sent_reset_flag arm does NOT fire → latch stays TRUE (stale).
+    {
+        auto logon_no_reset = make_logon("FIX.4.4", 1, "SRV", "CLI");
+        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(logon_no_reset), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        (void)fut.get();
+    }
+    ASSERT_EQ(session->state(), fixpp::session::fsm_state::Active)
+        << "T005 precondition: bilateral_lenient must accept peer Logon without 141=Y → Active";
+
+    // ── Connection 2: drive_reconnect() → unconditional assign clears latch ──
+    // seqnums: inbound=2 (peer Logon at seq=1 advanced it), outbound=2 (Logon 34=1 advanced it).
+    // seqnums_at_one = (2==1 && 2==1) = false → initr_reset_seqnum=false.
+    // RC1 unconditional assign: latch=false.
+    // Buggy conditional-set: latch stays TRUE from connection-1.
+    {
+        auto fut = asio::co_spawn(ioc, session->drive_reconnect(), asio::use_future);
+        ioc.run_for(2s);
+        ioc.restart();
+        auto rr = fut.get();
+        ASSERT_TRUE(rr.has_value())
+            << "T005 vehicle: drive_reconnect() must succeed (mock transport). "
+               "If this fails, emit_initiator_logon_() was never reached and the witness is invalid.";
+    }
+    ASSERT_EQ(session->state(), fixpp::session::fsm_state::LogonSent)
+        << "T005 precondition: session in LogonSent after drive_reconnect()";
+
+    // ── Feed peer 141=Y Logon at seq=2 on connection-2 ───────────────────────
+    // Peer's outbound is at seq=2 (peer sent seq=1 in connection-1).
+    // With shipped RC1 (latch=false): by_peer_request=true.
+    // With buggy conditional-set (latch=true stale): by_peer_request=false.
+    {
+        auto logon_with_reset = make_logon_reset("FIX.4.4", 2, "SRV", "CLI");
+        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(logon_with_reset), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        (void)fut.get();
+    }
+    ASSERT_EQ(session->state(), fixpp::session::fsm_state::Active)
+        << "T005: peer 141=Y on connection-2 must complete → Active";
+
+    // ── Discriminating assertion ──────────────────────────────────────────────
+    // by_peer_request=true iff latch was correctly cleared by the unconditional
+    // assign on connection-2 (RC1). With a stale-latch (buggy conditional-set),
+    // latch=true → we_initiated=true → by_peer_request=false → FAILS RED.
+    auto events = session->recent_events();
+    bool found = false;
+    for (const auto& ev : events) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            found = true;
+            EXPECT_TRUE(r->by_peer_request)
+                << "T005 W-latch-lifecycle: peer-spontaneous 141=Y on connection-2 must "
+                   "yield by_peer_request=true. With the RC1 unconditional assign, the latch "
+                   "is overwritten to false on connection-2 (initr_reset_seqnum=false). "
+                   "A buggy conditional-set leaves latch=true (stale from connection-1), "
+                   "which sets we_initiated=true → by_peer_request=false. "
+                   "[032 contract C4/RC1, FR-006, W-latch-lifecycle]";
+        }
+    }
+    EXPECT_TRUE(found)
+        << "T005 W-latch-lifecycle: sequence_numbers_reset event must be emitted when "
+           "peer sends 141=Y in connection-2.";
+}

@@ -620,7 +620,7 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   → `done`). *(Clarifications Q3; contract C7.1; catalogue S-018.)*
 
 - **L-024-2 — A `reset_on_logon=true` INITIATOR rebases its OUTBOUND seqnum 2→1 on the
-  peer's `141=Y` echo (live-found, OPEN — 030/031-class fix-feature pending).** A fixpp
+  peer's `141=Y` echo (live-found, RESOLVED — 032).** A fixpp
   initiator with `reset_on_logon=true` resets to `{1,1}`, emits `Logon(141=Y, 34=1)`
   (outbound advances 1→2), then receives the peer's Logon ack which — per QuickFIX-cpp
   and QuickFIX-J — echoes `141=Y`. fixpp's initiator Logon-ack handler treats that echo
@@ -634,16 +634,20 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   (`test_reset_on_lifecycle.cpp:390`) asserts the correct `peek_outbound()==2` but never
   processes a peer `141=Y` echo; the divergence surfaces only on the first live run
   (`RL-{QFcpp,QFj}-init-fix44-reset-on-logon`, both engines fail identically). The
-  ACCEPTOR cells (`RL-*-acc`) are unaffected (030-fixed) and live-green. **Status: open**
-  — deferred to a 030/031-class fix-feature (the initiator Logon-ack arm must skip the
-  reset when the echo confirms fixpp's own `141=Y`, mirroring the acceptor inbound
-  restore); the 2 init interop cells are `deferred:initiator-141echo-outbound-rebase`.
-  **RED harm test committed** (DISABLED, seeds the 032 fix-feature):
+  ACCEPTOR cells (`RL-*-acc`) are unaffected (030-fixed) and live-green. **Status: RESOLVED
+  (032-initiator-reset-outbound-advance).** The initiator `peer_ack_sent_reset_flag` arm now
+  restores OUTBOUND to 2 after the echo-confirmed reset (Mechanism A: restore-after-reset — the
+  outbound twin of 030's inbound restore, `set_next_outbound(seqnum_min+1)` +
+  `persist_outbound_advance_`, fatal-when-persistent) iff fixpp itself emitted the reset Logon at
+  seq 1 (latched emit-time fact `own_logon_sent_reset_flag_` AND `reset_before_send`). The
+  skip-the-reset alternative this entry originally speculated was **rejected at Gate A** (unsound
+  for a fresh `bilateral_strict`-at-`{1,1}` initiator whose only durable reset on the path is this
+  ack-arm reset). The harm test is now live:
   `tests/session/test_persistent_seqnum_hydrate.cpp` →
-  `DISABLED_ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo` (asserts
-  `peek_outbound()==2`; RED on main = 1; documents the Gate-A design axis +
-  the case-(b) discriminator).
-  *(`src/session/session.cpp:3185`; sibling of 030/031; found 2026-06-11.)*
+  `ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo` (asserts `peek_outbound()==2` + the SC-002
+  wire witness `34=2`, no duplicate `34=1`); the 2 init interop cells flip from
+  `deferred:initiator-141echo-outbound-rebase` to pass. See B-032-1.
+  *(`src/session/session.cpp:3185`; sibling of 030/031; found 2026-06-11, fixed 032.)*
 
 ## RefreshOnLogon — per-logon re-hydrate knob (025-refresh-on-logon)
 
@@ -1017,6 +1021,27 @@ row; see `feature-catalogue.md`.)*
   **Status: shipped** (031). *(FR-001..FR-009; `tests/session/test_next_expected_msgseqnum.cpp`
   W1 `Acceptor_XeqNpre_NoResend_Establishes` + W3 `Acceptor_XeqNprePlus1_TooHigh_Logout`; live
   close-out via the `NE-*-acc` interop cell vs QFcpp/QFJ.)*
+
+- **B-032-1 — As an initiator, fixpp restores its OUTBOUND seqnum to 2 (not 1) when the peer
+  echoes fixpp's own `141=Y`, so it carries one post-logon frame at `34=2` with no duplicate
+  `34=1`.** A `reset_on_logon`/`reset_on_logout`/`reset_on_disconnect` initiator that reset before
+  sending emits `Logon(141=Y, 34=1)` (outbound 1→2); a conformant peer (QFcpp/QFJ) echoes `141=Y`
+  in its Logon ack. fixpp's `peer_ack_sent_reset_flag` arm reset-rewinds both counters to 1; 030
+  restored the inbound twin but outbound regressed 2→1 → the next frame duplicated `34=1` →
+  QFcpp/QFJ reject "MsgSeqNum too low" (L-024-2, live-found). The arm now restores outbound to 2
+  (`set_next_outbound(seqnum_min+1)` + `persist_outbound_advance_`, manager-first/store-second,
+  fatal-when-persistent — the outbound twin of B-030-1) gated on BOTH a latched emit-time fact
+  (`own_logon_sent_reset_flag_` = fixpp actually emitted `141=Y`, which carries the inbound-at-1
+  conjunct) AND `reset_before_send` (fixpp's Logon went at post-reset seq 1). The reset-event
+  `by_peer_request` now keys on the latch ALONE — correcting the prior `bilateral_strict`-only
+  classification for non-strict reset-knob initiators. Restore (latch && reset-before-send) and
+  label (latch alone) are DISTINCT gates that diverge on `bilateral_strict`-at-N (latch true, no
+  restore). Covers all reset knobs via the emit-time latch; acceptor / knob-off / peer-spontaneous
+  / `bilateral_strict`-at-N outbound unchanged (byte-identical). Reference-engine-conformant
+  (QuickFIX reset-then-increment). **Status: shipped** (032). *(FR-001/FR-003/FR-005/FR-006/FR-007;
+  `tests/session/test_persistent_seqnum_hydrate.cpp` W1 + W5/W6/W8,
+  `test_reset_seqnum_policy_matrix.cpp` W2/W3/W4b/W7, `test_refresh_on_logon.cpp` cross-reconnect
+  latch witness; live close-out via the `RL-*-init` interop cell vs QFcpp/QFJ.)*
 
 ### Limitations
 

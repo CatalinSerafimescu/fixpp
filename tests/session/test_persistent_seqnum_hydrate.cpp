@@ -201,18 +201,24 @@ public:
     //   Used for W14 (hydrate READ failure injection).
     // fail_on_nth_write: if nonzero, the Nth WRITE (increment=true, inbound) call fails.
     //   Used for W6 (persist write failure injection). Counted independently from reads.
+    // fail_on_nth_outbound_write: if nonzero, the Nth WRITE (increment=true, outbound)
+    //   call fails. Used for T014 W5 (outbound persist failure injection).
     explicit FaultStore(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1,
-                        int fail_on_nth_call = 0, int fail_on_nth_write = 0)
+                        int fail_on_nth_call = 0, int fail_on_nth_write = 0,
+                        int fail_on_nth_outbound_write = 0)
         : MessageStore(flush_thunk_for<FaultStore>()),
           next_inbound_(seeded_inbound),
           next_outbound_(seeded_outbound),
           fail_on_nth_call_(fail_on_nth_call),
-          fail_on_nth_write_(fail_on_nth_write) {}
+          fail_on_nth_write_(fail_on_nth_write),
+          fail_on_nth_outbound_write_(fail_on_nth_outbound_write) {}
 
     // Observable state for witnesses:
-    mutable int call_count{0};    // total next_seqnum calls (read + write)
-    mutable int write_count{0};   // inbound write (increment=true) call count
-    seqnum_t durable_inbound{1};  // last persisted inbound counter (after increment)
+    mutable int call_count{0};     // total next_seqnum calls (read + write)
+    mutable int write_count{0};    // inbound write (increment=true) call count
+    mutable int outbound_write_count{0};  // outbound write (increment=true) call count
+    seqnum_t durable_inbound{1};   // last persisted inbound counter (after increment)
+    seqnum_t durable_outbound{1};  // last persisted outbound counter (after increment)
 
     // W3 hook: if set, called BEFORE updating durable_inbound in next_seqnum(inbound,true).
     // Receives the CURRENT durable_inbound (pre-persist value) — which should equal
@@ -255,7 +261,14 @@ public:
                 durable_inbound = next_inbound_;
                 co_return next_inbound_ - 1U;  // return the pre-increment value
             } else {
+                ++outbound_write_count;
+                // T014 W5: outbound write failure injection.
+                if (fail_on_nth_outbound_write_ > 0 &&
+                    outbound_write_count >= fail_on_nth_outbound_write_) {
+                    co_return std::unexpected(fixpp::core::error::store_io_failure);
+                }
                 ++next_outbound_;
+                durable_outbound = next_outbound_;
                 co_return next_outbound_ - 1U;
             }
         } else {
@@ -267,6 +280,7 @@ public:
         next_inbound_ = 1;
         next_outbound_ = 1;
         durable_inbound = 1;
+        durable_outbound = 1;
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -277,8 +291,9 @@ public:
 private:
     seqnum_t next_inbound_;
     seqnum_t next_outbound_;
-    int fail_on_nth_call_;   // 0 = never fail on total-call count (W14)
-    int fail_on_nth_write_;  // 0 = never fail on write count (W6)
+    int fail_on_nth_call_;            // 0 = never fail on total-call count (W14)
+    int fail_on_nth_write_;           // 0 = never fail on inbound write count (W6)
+    int fail_on_nth_outbound_write_;  // 0 = never fail on outbound write count (T014 W5)
 };
 
 // FaultStoreFactory: wraps a FaultStore for use with SessionConfig.
@@ -287,11 +302,13 @@ private:
 class FaultStoreFactory final : public MessageStoreFactory {
 public:
     explicit FaultStoreFactory(seqnum_t seeded_inbound = 1, seqnum_t seeded_outbound = 1,
-                               int fail_on_nth_call = 0, int fail_on_nth_write = 0)
+                               int fail_on_nth_call = 0, int fail_on_nth_write = 0,
+                               int fail_on_nth_outbound_write = 0)
         : seeded_inbound_(seeded_inbound),
           seeded_outbound_(seeded_outbound),
           fail_on_nth_call_(fail_on_nth_call),
-          fail_on_nth_write_(fail_on_nth_write) {}
+          fail_on_nth_write_(fail_on_nth_write),
+          fail_on_nth_outbound_write_(fail_on_nth_outbound_write) {}
 
     // The last store minted by make() — for observable state in witnesses.
     mutable FaultStore* last_store{nullptr};
@@ -303,8 +320,9 @@ public:
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
-        auto store = std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_,
-                                                  fail_on_nth_call_, fail_on_nth_write_);
+        auto store =
+            std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_, fail_on_nth_call_,
+                                         fail_on_nth_write_, fail_on_nth_outbound_write_);
         last_store = store.get();
         return store;
     }
@@ -314,6 +332,7 @@ private:
     seqnum_t seeded_outbound_;
     int fail_on_nth_call_;
     int fail_on_nth_write_;
+    int fail_on_nth_outbound_write_;
 };
 
 // NonPersistentFaultStoreFactory: same as FaultStoreFactory but overrides
@@ -2412,6 +2431,224 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
            "Pre-fix RED: durable_inbound=3. Post-fix GREEN: durable_inbound=1. "
            "durable="
         << store->durable_inbound;
+}
+
+// ── T004 W8: hydrated initiator latch counterexample (RC1 guard) ─────────────
+//
+// A hydrated initiator seeded {next_inbound=37, next_outbound=1} with
+// reset_on_logout=true and reset_on_logon=false. Because next_inbound==37≠1 at
+// emit time, seqnums_at_one=false → initr_reset_seqnum=false → latch=false.
+// Fixpp emits its Logon WITHOUT 141=Y.
+//
+// The peer then spontaneously sends a Logon with 141=Y at seq=37 (in-sequence
+// against manager=37). bilateral_lenient accepts this without requiring we sent
+// 141=Y first.
+//
+// Expected post-conditions:
+//   - outbound STAYS at post-reset baseline (NOT restored to 2): latch=false →
+//     restore gate (C1) skipped. The reset rewinds outbound to 1; no restore.
+//   - by_peer_request=true: latch=false → we_initiated=false → by_peer_request=true.
+//   - Session reaches Active.
+//
+// This is GREEN-on-main (main has no restore path at all) and GREEN on the shipped
+// fix. It discriminates ONLY against the rejected reconstruction gate
+// `we_initiated := (any_reset_knob && reset_before_send)` — T010a(b) mutation —
+// which would misclassify this row as fixpp-initiated because any_reset_knob=true
+// (reset_on_logout is set) and reset_before_send=true (outbound was 1 at emit →
+// n_pre_outbound=2 == seqnum_min+1). The latched emit-time fact (false: inbound≠1
+// at emit → seqnums_at_one=false) is the ONLY gate that correctly rejects the
+// reconstruction. [032 contract C4, FR-005/FR-006, research R3, W8]
+//
+// NOTE: feed at seq=37 (in-seq for the hydrated manager=37). seq=1 would be
+// too-low → fatal → wrong path.
+// [[feedback_witness_asserts_named_postcondition_not_proxy]] (distinct seed from asserted)
+TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y) {
+    // Store seeded {in=37, out=1}: manager hydrates to next_inbound=37 after open().
+    // reset_on_logout=true, reset_on_logon=false, bilateral_lenient.
+    // seqnums_at_one = (next_outbound==1 && next_inbound==1) = false (next_inbound=37≠1)
+    // → initr_reset_seqnum=false → latch=false.
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/37, /*out=*/1);
+
+    auto manual_fix = std::make_unique<Fixture>();
+    manual_fix->cfg.role = fixpp::session::session_role::initiator;
+    manual_fix->cfg.sender_comp_id = "CLI";
+    manual_fix->cfg.target_comp_id = "SRV";
+    manual_fix->cfg.begin_string = "FIX.4.4";
+    manual_fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    manual_fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    manual_fix->cfg.heartbeat_interval = std::chrono::seconds{0};
+    manual_fix->cfg.executor_override = manual_fix->ioc.get_executor();
+    manual_fix->cfg.store_factory = factory;
+    manual_fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    manual_fix->cfg.reset_on_logon = false;
+    manual_fix->cfg.reset_on_logout = true;  // reset_on_logout=true: any_reset_knob=true
+    manual_fix->cfg.transport_send = [&f = *manual_fix](std::span<const std::byte> data) {
+        f.capture(data);
+    };
+    manual_fix->session =
+        std::make_unique<fixpp::session::Session>(manual_fix->eng, manual_fix->cfg);
+
+    auto open_fut = asio::co_spawn(manual_fix->ioc, manual_fix->session->open(), asio::use_future);
+    manual_fix->ioc.run_for(2s);
+    manual_fix->ioc.restart();
+    (void)open_fut.get();
+
+    ASSERT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "T004 W8 precondition: initiator must be LogonSent after open()";
+
+    // Verify the initiator did NOT send 141=Y in its Logon (latch=false evidence).
+    // The outbound Logon is the first captured frame.
+    ASSERT_GE(manual_fix->capture.frames.size(), 1u) << "T004: expected outbound Logon frame";
+    {
+        const auto& logon_frame = manual_fix->capture.frames[0];
+        const auto* data = reinterpret_cast<const char*>(logon_frame.data());
+        const std::string sv(data, logon_frame.size());
+        EXPECT_EQ(sv.find("141=Y"), std::string::npos)
+            << "T004 W8 precondition: hydrated {37,1} initiator must NOT emit 141=Y "
+               "(seqnums_at_one=false → initr_reset_seqnum=false → latch=false)";
+    }
+
+    // Feed peer spontaneous Logon with 141=Y at seq=37 (in-sequence).
+    // bilateral_lenient: peer-spontaneous 141=Y is accepted without requiring fixpp to have
+    // sent it first.
+    manual_fix->feed(make_logon_reset("FIX.4.4", 37, "SRV", "CLI"));
+
+    // Session must reach Active.
+    EXPECT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::Active)
+        << "T004 W8: session must reach Active after peer-spontaneous 141=Y (bilateral_lenient)";
+
+    // C4: by_peer_request=true (latch=false → we_initiated=false).
+    {
+        auto events = manual_fix->session->recent_events();
+        bool found = false;
+        for (const auto& ev : events) {
+            if (const auto* r =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+                found = true;
+                EXPECT_TRUE(r->by_peer_request)
+                    << "T004 W8: hydrated {37,1} with reset_on_logout=true — latch=false "
+                       "(inbound≠1 at emit → seqnums_at_one=false) → by_peer_request must "
+                       "be true. A reconstruction gate (any_reset_knob && reset_before_send) "
+                       "would yield false here — RC1 counterexample. [032 contract C4, W8]";
+            }
+        }
+        EXPECT_TRUE(found)
+            << "T004 W8: sequence_numbers_reset event must be emitted on peer-spontaneous arm.";
+    }
+
+    // C1: outbound NOT restored to 2 (latch=false → restore gate skipped).
+    // After the reset, outbound rewinds to 1. No restore means it stays 1.
+    // A reconstruction gate would restore to 2 — the RC1 wrong behavior.
+    EXPECT_EQ(manual_fix->session->seqnum_mgr_test_access().next_outbound_unsafe(),
+              fixpp::session::seqnum_t{1})
+        << "T004 W8: hydrated {37,1} initiator — latch=false → outbound MUST stay 1 "
+           "after peer-spontaneous 141=Y (no restore). RC1 reconstruction would "
+           "restore to 2. [032 contract C1, FR-005, W8]";
+}
+
+// ── T014 W5/W6: persistent store interaction on the outbound restore arm ──────
+//
+// W5 — persistent-store outbound write failure → fatal-when-persistent (Disconnected).
+// W6 — persistent-store success → store_outbound == manager_outbound (INV-H1 outbound).
+//
+// Stimulus: reset_on_logon=true initiator {in=1, out=1} — latch=true, Logon at seq=1
+//           → n_pre_outbound==2 == seqnum_min+1 → restore gate fires.
+//
+// W5 seed: fail_on_nth_outbound_write=1 (first outbound write = persist_outbound_advance_
+//          fails) → reset_seqnums_to_one_durable already succeeded (store.reset() ran)
+//          → persist_outbound_advance_ fails → fatal → Disconnected.
+// W6 seed: no failure; the arm calls:
+//   1. reset_seqnums_to_one_durable() → store.reset() → durable_outbound=1
+//   2. set_next_outbound(2) → manager=2
+//   3. persist_outbound_advance_() → next_seqnum(outbound,true) → durable_outbound=2
+//   After Active: durable_outbound==2==manager (INV-H1).
+//   Discriminating: if persist did NOT fire → durable_outbound stays 1 (post-reset
+//   base) ≠ 2 → FAIL. The 1-vs-2 gap is naturally falsifying.
+//   [[feedback_witness_asserts_named_postcondition_not_proxy]]: note that the arm's
+//   own store.reset() clears any pre-set sentinel, so the post-reset base (1) IS the
+//   discriminating seed — a separately injected sentinel would be overwritten.
+//
+// NOTE: Seed inbound=1 (so Logon-ack seq=1 is in-sequence) and outbound=1 (so
+// emit_initiator_logon_ emits at seq=1 → n_pre_outbound=2 → restore_before_send=true).
+// [032 contract C1/C3, FR-007, INV-H1]
+TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
+    // W5: fail_on_nth_outbound_write=1 → first outbound write fails → Disconnected.
+    // The FaultStore initial durable_outbound=1 (not the sentinel — the sentinel applies
+    // to the discriminating check, not the initial value).
+    // Seed {in=1, out=1} so Logon emits at seq=1 (latch=true, restore_before_send=true).
+    auto factory = std::make_shared<FaultStoreFactory>(
+        /*seeded_inbound=*/1, /*seeded_outbound=*/1,
+        /*fail_on_nth_call=*/0, /*fail_on_nth_write=*/0,
+        /*fail_on_nth_outbound_write=*/1);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "T014 W5 precondition: initiator must be LogonSent after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+
+    // Feed peer Logon-ack with 141=Y at seq=1 (in-seq → restore gate fires).
+    fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
+
+    // W5: outbound persist failure → fatal-when-persistent → Disconnected.
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "T014 W5: persist_outbound_advance_() failure on a persistent store must be "
+           "fatal → Disconnected. [032 contract C3, FR-007, 030 fatal-when-persistent]";
+}
+
+TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
+    // W6: no failure injection. After Active, assert INV-H1:
+    //   durable_outbound == manager.next_outbound (equality at 2)
+    //   never durable_outbound > manager.next_outbound.
+    //
+    // Sentinel: seed outbound=1 so the store starts next_outbound_=1.
+    // After persist_outbound_advance_() fires, next_outbound_ becomes 2 and
+    // durable_outbound is updated to 2. The manager also has next_outbound=2.
+    // We use a large seeded_inbound value to confirm we're testing the right arm:
+    // {in=1, out=1} → after hydration manager starts at {1,1}; reset_on_logon=true
+    // resets to {1,1} again (no-op), Logon emits at seq=1 → n_pre_outbound=2 → restore fires.
+    auto factory = std::make_shared<FaultStoreFactory>(
+        /*seeded_inbound=*/1, /*seeded_outbound=*/1,
+        /*fail_on_nth_call=*/0, /*fail_on_nth_write=*/0,
+        /*fail_on_nth_outbound_write=*/0);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "T014 W6 precondition: initiator must be LogonSent after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+
+    // Feed peer Logon-ack with 141=Y at seq=1.
+    // The arm runs: reset_seqnums_to_one_durable() → store.reset() → durable_outbound=1,
+    // then set_next_outbound(2) → manager=2, then persist_outbound_advance_() → durable=2.
+    fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "T014 W6: session must reach Active after peer 141=Y ack";
+
+    // INV-H1 (outbound): store.durable_outbound == manager.next_outbound after restore.
+    const seqnum_t manager_no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+
+    // Manager must be 2 (set_next_outbound(seqnum_min+1) = set_next_outbound(2)).
+    EXPECT_EQ(manager_no, fixpp::session::seqnum_t{2})
+        << "T014 W6: manager.next_outbound must be 2 after restore "
+           "(set_next_outbound(seqnum_min+1)). [032 contract C1, FR-001/FR-003]";
+
+    // Store must equal manager (INV-H1 outbound equality: persist ran → durable=2).
+    // If persist did not fire: durable stays 1 (post-reset base from store.reset()) ≠ 2
+    // → this assertion FAILS. Naturally falsifying (no external sentinel needed because
+    // store.reset() on the arm already resets durable_outbound to 1 before persist).
+    EXPECT_EQ(store->durable_outbound, fixpp::session::seqnum_t{2})
+        << "T014 W6 (INV-H1 outbound): durable_outbound must be 2 after "
+           "persist_outbound_advance_(). If persist did not fire, "
+           "durable=1 (post-reset base) ≠ 2 → FAIL. [032 contract C3, INV-H1, FR-007]";
+
+    // INV-H1: never over-persist (store ≤ manager).
+    EXPECT_LE(store->durable_outbound, manager_no)
+        << "T014 W6 (INV-H1): store.durable_outbound must be ≤ manager.next_outbound. "
+           "[INV-H1, 032 contract C3]";
 }
 
 }  // namespace
