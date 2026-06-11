@@ -210,6 +210,24 @@ EXPECTED_IDS = frozenset({
     # 030 received-141 inbound-advance acceptor cell (T028 / SC-001 live close-out).
     "RR-QFcpp-acc-fix44-received-reset",
     "RR-QFj-acc-fix44-received-reset",
+    # G3 live feature cells registered at Item-1 (2026-06-11): 026 nanos (4) /
+    # 027+031 NextExpectedMsgSeqNum (4) / 028 validation-compat non-regression (8).
+    "NST-QFcpp-init-fix44-nanos-sendingtime",
+    "NST-QFcpp-acc-fix44-nanos-sendingtime",
+    "NST-QFj-init-fix44-nanos-sendingtime",
+    "NST-QFj-acc-fix44-nanos-sendingtime",
+    "NE-QFcpp-init-fix44-next-expected",
+    "NE-QFcpp-acc-fix44-next-expected",
+    "NE-QFj-init-fix44-next-expected",
+    "NE-QFj-acc-fix44-next-expected",
+    "VC-QFcpp-init-fix44-check-compid",
+    "VC-QFcpp-acc-fix44-check-compid",
+    "VC-QFj-init-fix44-check-compid",
+    "VC-QFj-acc-fix44-check-compid",
+    "VC-QFcpp-init-fix44-validate-seqnums",
+    "VC-QFcpp-acc-fix44-validate-seqnums",
+    "VC-QFj-init-fix44-validate-seqnums",
+    "VC-QFj-acc-fix44-validate-seqnums",
 })
 
 

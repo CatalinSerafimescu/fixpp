@@ -132,3 +132,32 @@ cells:
   - { id: PR-QFcpp-acc-fix44-poss-resend-deliver,         config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
   - { id: PR-QFj-init-fix44-poss-resend-deliver,          config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
   - { id: PR-QFj-acc-fix44-poss-resend-deliver,           config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
+
+  # ── G3 live feature cells registered at Item-1 (2026-06-11) ───────────────────
+  # These live cells existed in the gtest + shim from the 026/027/028 merges but
+  # were never registered in this gate manifest (only 021's PD + 030's RR rows
+  # pre-existed) — a manifest-completeness gap, now closed. All proven live-green
+  # vs running QFcpp + QFJ: NST/NE carry committed goldens; VC are in-process B1
+  # witnesses driven by the cp_heartbeat_on_logon harness nudge. NB the 8 VC cells
+  # are knob-off NON-REGRESSION (session stays Active + delivers a normal frame);
+  # the DIRECT mismatch witness (wrong CompID / out-of-order) is a separate cell
+  # under active development. See phase-9-harness/INTEROP-COVERAGE-REPORT.md.
+  # 026 nanosecond SendingTime(52) — both roles × both engines (4).
+  - { id: NST-QFcpp-init-fix44-nanos-sendingtime, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "026 SendingTime nanos precision (S-039)" }
+  - { id: NST-QFcpp-acc-fix44-nanos-sendingtime,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "026 SendingTime nanos precision (S-039)" }
+  - { id: NST-QFj-init-fix44-nanos-sendingtime,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "026 SendingTime nanos precision (S-039)" }
+  - { id: NST-QFj-acc-fix44-nanos-sendingtime,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "026 SendingTime nanos precision (S-039)" }
+  # 027/031 NextExpectedMsgSeqNum(789) — both roles × both engines (4).
+  - { id: NE-QFcpp-init-fix44-next-expected, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "027 SC-005 / 031 acceptor 789 boundary (S-031)" }
+  - { id: NE-QFcpp-acc-fix44-next-expected,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "027 SC-005 / 031 acceptor 789 boundary (S-031)" }
+  - { id: NE-QFj-init-fix44-next-expected,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "027 SC-005 / 031 acceptor 789 boundary (S-031)" }
+  - { id: NE-QFj-acc-fix44-next-expected,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "027 SC-005 / 031 acceptor 789 boundary (S-031)" }
+  # 028 validation-compat knob-off NON-REGRESSION — both knobs × both roles × both engines (8).
+  - { id: VC-QFcpp-init-fix44-check-compid,     config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US1 SC-001 non-regression (S-040; mismatch unit-proven)" }
+  - { id: VC-QFcpp-acc-fix44-check-compid,      config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US1 SC-001 non-regression (S-040; mismatch unit-proven)" }
+  - { id: VC-QFj-init-fix44-check-compid,       config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US1 SC-001 non-regression (S-040; mismatch unit-proven)" }
+  - { id: VC-QFj-acc-fix44-check-compid,        config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US1 SC-001 non-regression (S-040; mismatch unit-proven)" }
+  - { id: VC-QFcpp-init-fix44-validate-seqnums, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US2 SC-002 non-regression (S-041; out-of-order unit-proven)" }
+  - { id: VC-QFcpp-acc-fix44-validate-seqnums,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US2 SC-002 non-regression (S-041; out-of-order unit-proven)" }
+  - { id: VC-QFj-init-fix44-validate-seqnums,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US2 SC-002 non-regression (S-041; out-of-order unit-proven)" }
+  - { id: VC-QFj-acc-fix44-validate-seqnums,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "028 US2 SC-002 non-regression (S-041; out-of-order unit-proven)" }
