@@ -148,10 +148,10 @@ cells:
   - { id: APDS-QFcpp-acc-fix44-allow-pos-dup-strip-send,  config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
   - { id: APDS-QFj-init-fix44-allow-pos-dup-strip-send,   config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
   - { id: APDS-QFj-acc-fix44-allow-pos-dup-strip-send,    config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
-  - { id: PR-QFcpp-init-fix44-poss-resend-deliver,        config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
-  - { id: PR-QFcpp-acc-fix44-poss-resend-deliver,         config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
-  - { id: PR-QFj-init-fix44-poss-resend-deliver,          config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
-  - { id: PR-QFj-acc-fix44-poss-resend-deliver,           config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
+  - { id: PR-QFcpp-init-fix44-poss-resend-deliver,        config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
+  - { id: PR-QFcpp-acc-fix44-poss-resend-deliver,         config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
+  - { id: PR-QFj-init-fix44-poss-resend-deliver,          config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
+  - { id: PR-QFj-acc-fix44-poss-resend-deliver,           config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
 
   # ── G3 live feature cells registered at Item-1 (2026-06-11) ───────────────────
   # These live cells existed in the gtest + shim from the 026/027/028 merges but
