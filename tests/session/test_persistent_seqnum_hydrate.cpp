@@ -2134,6 +2134,59 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
         << store->durable_inbound << " manager=" << manager_ni;
 }
 
+// ── L-024-2 RED harm test — initiator outbound rebase on the peer's 141=Y echo ─
+//
+// LIVE-FOUND BUG (RL-{QFcpp,QFj}-init, both engines, 2026-06-11). A reset_on_logon
+// =true INITIATOR resets to {1,1}, emits Logon(141=Y) at 34=1 (outbound advances
+// 1→2), then receives the peer's Logon ack — which QuickFIX-cpp AND QuickFIX-J
+// echo with 141=Y. The peer_ack_sent_reset_flag arm (session.cpp:3185) calls
+// reset_seqnums_to_one_durable(), which rebases BOTH counters to 1, so OUTBOUND
+// regresses 2→1. The next outbound frame would carry a duplicate MsgSeqNum=1 (both
+// real engines reject "MsgSeqNum too low"). 030 restored the INBOUND twin on this
+// exact arm (session.cpp:3210, logon_inbound_advanced_init → set_next_inbound(2))
+// but left the OUTBOUND twin unfixed. This asserts the CORRECT outbound==2 → RED
+// on main (gets 1). DISABLED so it does not break ctest pending the 032 fix-feature.
+//
+// DESIGN AXIS for the 032 Gate A (do NOT assume "symmetric outbound restore" — 030's
+// first prototype was a half-fix): restore-outbound-after-reset vs. skip the
+// redundant ack-arm reset entirely when the echo confirms fixpp's OWN 141=Y (the
+// reset already ran at open()). The latter dodges the store-reset I/O + the INV-H1
+// lower-bound question, but must not regress CASE (b): reset_on_logon=false + a
+// peer-SPONTANEOUS 141=Y echo + fixpp's Logon already sent at N>1 — there outbound
+// must NOT become 2. Pin case (b) before touching the baseline.
+// [L-024-2; sibling of 030/031; FIX-SL §4.1.1; [[feedback_witness_asserts_named_postcondition_not_proxy]]]
+TEST(PersistentSeqnumHydrate, DISABLED_ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo) {
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    // Precondition: reset_on_logon emitted Logon(141=Y) at 34=1 → outbound advanced to 2.
+    ASSERT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(),
+              fixpp::session::seqnum_t{2})
+        << "precondition: a reset_on_logon initiator emits its Logon at 34=1, so the next "
+           "outbound is 2 (matches the merged ResetOnLogon_Initiator_ResetsAndEmits141 unit)";
+
+    // Peer Logon-ack echoes 141=Y at seq=1 (in-seq → check_inbound advances 1→2, then
+    // the peer_ack_sent_reset_flag arm reset-rewinds both counters to 1).
+    fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "session must reach Active after the peer's 141=Y echo";
+
+    // HARM (RED on main = got 1): outbound must stay 2 — the Logon already consumed seq
+    // 1, so the next send is 2. main rebases it to 1, so the next outbound frame would
+    // duplicate 34=1 (QuickFIX-cpp + QuickFIX-J both reject). The 030 inbound restore at
+    // session.cpp:3210 has no outbound twin.
+    EXPECT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(),
+              fixpp::session::seqnum_t{2})
+        << "L-024-2: reset_on_logon initiator must keep outbound==2 after the peer's 141=Y "
+           "echo; main rebases to 1 → next send duplicates 34=1. peek_outbound="
+        << fix->session->seqnum_mgr_test_access().peek_outbound();
+
+    // The inbound IS correctly restored by 030 — proves we reached the right arm.
+    EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
+        << "030 restored inbound to 2 on this arm; only the outbound twin is missing (L-024-2)";
+}
+
 // ── INV_H1_Acceptor_789BehindSide_NoOverPersist ──────────────────────────────
 //
 // Acceptor with persistent store {in=2, out=1} + enable_next_expected_msg_seq_num=true.

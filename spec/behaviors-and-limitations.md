@@ -638,6 +638,11 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   — deferred to a 030/031-class fix-feature (the initiator Logon-ack arm must skip the
   reset when the echo confirms fixpp's own `141=Y`, mirroring the acceptor inbound
   restore); the 2 init interop cells are `deferred:initiator-141echo-outbound-rebase`.
+  **RED harm test committed** (DISABLED, seeds the 032 fix-feature):
+  `tests/session/test_persistent_seqnum_hydrate.cpp` →
+  `DISABLED_ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo` (asserts
+  `peek_outbound()==2`; RED on main = 1; documents the Gate-A design axis +
+  the case-(b) discriminator).
   *(`src/session/session.cpp:3185`; sibling of 030/031; found 2026-06-11.)*
 
 ## RefreshOnLogon — per-logon re-hydrate knob (025-refresh-on-logon)
