@@ -78,14 +78,15 @@ durable reset; its only durable reset on the whole path is the ack-arm reset Mec
 (`src/session/session.cpp:3185` `peer_ack_sent_reset_flag` block) + the emit site (`:721`) where the
 latch is set. Reused existing helpers: `seqnum_mgr_.peek_outbound()` (capture `n_pre_outbound`),
 `reset_seqnums_to_one_durable` (`:505`, `030` fatal-when-persistent disposition unchanged), `seqnum_min`
-constant. **NEW private/internal methods** (no existing outbound twin — verified against
-`seqnum_manager.hpp`/`.cpp` + `session.hpp`): `SeqnumManager::set_next_outbound(seqnum_t)` (mirrors
-`set_next_inbound`; there is NO existing `set_next_outbound`) + `Session::persist_outbound_advance_()`
-(mirrors `029`'s `persist_inbound_advance_()`; there is NO existing outbound-persist path —
-`assign_outbound` advances in-memory but does NOT persist). The `by_peer_request` classification
-(`:3224`) reads the latched `own_logon_sent_reset_flag_` (a new private `Session` member) instead of the
+constant. **NEW methods** (no existing outbound twin — verified against
+`seqnum_manager.hpp`/`.cpp` + `session.hpp`): `SeqnumManager::set_next_outbound(seqnum_t)` (**public**
+method on the internal `SeqnumManager`, mirroring the merged-030 public `set_next_inbound`; there is NO
+existing `set_next_outbound`) + `Session::persist_outbound_advance_()` (private Session method, mirrors
+`029`'s `persist_inbound_advance_()`; there is NO existing outbound-persist path — `assign_outbound`
+advances in-memory but does NOT persist). The `by_peer_request` classification (`:3224`) reads the
+latched `own_logon_sent_reset_flag_` (a new private `Session` member) instead of the
 `bilateral_strict`-only `we_initiated`. No new deps, no codegen, no wire field, no new error slot, no
-config knob, no FSM state, no PUBLIC/C-ABI surface.
+config knob, no FSM state, no new C-ABI surface.
 **Storage**: `MessageStore` interface UNCHANGED (4 pure-virtual cap preserved). The restore writes the
 corrected outbound counter via the NEW private `persist_outbound_advance_()` (`030` fatal-when-persistent
 disposition); INV-H1 (store ≤ manager) and the `029` hydrate spine are preserved — `store_outbound ==
@@ -125,12 +126,12 @@ and `bilateral_strict`-at-`N` paths **byte-identical**.
 **Scale/Scope**: one emit-time latch (`own_logon_sent_reset_flag_` set at `:721`, cleared one-shot on
 the arm) + one `n_pre_outbound` capture + one guarded outbound restore (new `set_next_outbound` +
 `persist_outbound_advance_`) + the `by_peer_request` read switched to the latch on the initiator arm
-(~14–20 effective LoC + comments + the two private method bodies, symmetric to `030`'s inbound restore);
+(~14–20 effective LoC + comments + the two method bodies, symmetric to `030`'s inbound restore);
 net-new/amended witnesses in `tests/session/test_persistent_seqnum_hydrate.cpp` +
 `tests/session/test_reset_seqnum_policy_matrix.cpp` + re-verified `030` pins in
 `tests/session/test_reset_on_lifecycle.cpp` + `tests/session/test_refresh_on_logon.cpp` (W6); a
-blast-radius pin set (R4) confirmed at /analyze under a clean-build FULL ctest. Private session/manager
-header change (no FSM state, store interface, config, codegen, C-ABI, or wire/public change).
+blast-radius pin set (R4) confirmed at /analyze under a clean-build FULL ctest. Header change (no FSM
+state, store interface, config, codegen, new C-ABI, or wire/public change).
 
 ## Constitution Check
 
@@ -176,14 +177,16 @@ corrected. The mechanism is resolved (A) at Gate A; see below.
    existing outbound twin: `SeqnumManager` has `assign_outbound`/`hydrate`/`reset_to_one`/`set_next_inbound`
    only (NO `set_next_outbound`); `Session` has `persist_inbound_advance_` only (NO
    `persist_outbound_advance_`; `assign_outbound` advances in-memory but does NOT persist). The fix ADDS
-   two narrowly-scoped **private/internal** methods, named as /tasks deliverables: (a)
-   `SeqnumManager::set_next_outbound(seqnum_t)` mirroring `set_next_inbound`'s shape (force in-memory;
-   store write is the caller's responsibility); (b) `Session::persist_outbound_advance_()` mirroring
-   `029`'s `persist_inbound_advance_()`. Failure disposition = the `030` **fatal-when-persistent** now
-   (store failure on a persistent store → `Disconnected` + propagate; INV-H4 no-op on null/non-persistent).
-   These are private header changes (source rebuild), NOT a public/wire/C-ABI surface — FR-009 holds;
-   the Constitution-Check X row is reconciled accordingly. INV-H1 (`store_outbound ≤ manager_outbound`;
-   equality at `2` a surviving net-advance, not over-persist) confirmed.
+   two narrowly-scoped methods, named as /tasks deliverables: (a)
+   `SeqnumManager::set_next_outbound(seqnum_t)` — **public** method on the internal `SeqnumManager`,
+   mirroring the merged-030 public `set_next_inbound`'s shape (force in-memory; store write is the
+   caller's responsibility); (b) `Session::persist_outbound_advance_()` — **private** Session method,
+   mirroring `029`'s `persist_inbound_advance_()`. Failure disposition = the `030` **fatal-when-persistent**
+   now (store failure on a persistent store → `Disconnected` + propagate; INV-H4 no-op on
+   null/non-persistent). These are header changes (source rebuild), NOT a new C-ABI/wire/public surface
+   — FR-009 holds; the Constitution-Check X row is reconciled accordingly. INV-H1
+   (`store_outbound ≤ manager_outbound`; equality at `2` a surviving net-advance, not over-persist)
+   confirmed.
 3. **Blast-radius pin set (R4) — WIDENED (Codex #6 + New-P2).** Enumerate exactly at
    `/speckit-tasks`/`/analyze` under a **clean-build FULL ctest** (not incremental — the `030` close-out
    undercounted by 2 pins on this same arm). The set now spans FOUR test files, not two:
@@ -268,9 +271,11 @@ suites.
 ## Complexity Tracking
 
 > No constitution violations. The mechanism is resolved to A (restore-after-reset; research.md R4); it
-> introduces one private latch member + two private setter/persist methods mirroring the `030` inbound
-> twin — no new public abstraction. It captures the emit-time fact, then conditionally threads the
-> corrected counter back through the new private setters, exactly as `030` did for the inbound twin.
+> introduces one private latch member + `SeqnumManager::set_next_outbound` (public method on the
+> internal `SeqnumManager`, mirroring the merged-030 public `set_next_inbound`) +
+> `Session::persist_outbound_advance_` (private Session method), mirroring the `030` inbound twin —
+> no new C-ABI abstraction. It captures the emit-time fact, then conditionally threads the corrected
+> counter back through the new setter, exactly as `030` did for the inbound twin.
 
 ## Gate A
 
