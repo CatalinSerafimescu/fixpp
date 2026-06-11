@@ -8,6 +8,5 @@
 - **Cross-session state + lessons:** project memory `project_*_merged` / `feedback_*` notes (index in `MEMORY.md`).
 
 **Live deferred work** (everything else in the old registry is DISCHARGED or tracked in the catalogue / B&L above):
-- **015 down-peer cause #2** — a mid-connect `transport::async_connect` is not promptly cancelled by `cancellation_type::total` (~30 s teardown latency on a never-established initiator). Real, bounded, Gate-A-class concurrency change; tracked in `spec/behaviors-and-limitations.md` (L2). Cause #1 (busy-spin) fixed in 016.
 - **Deferred session-recovery (catalogue row 400)** — upgrade 010 F4 cells "2"/"4" (ResendRequest / SequenceReset) from Reject→Process; largely shipped via 013 + S-023; residual = traceability-marker confirm at the v1.0 gate.
 <!-- SPECKIT END -->

@@ -74,12 +74,15 @@ intentionally scopes out at v1.0, each with its tracking ref:
 - **Mutual-certificate (client-cert) mTLS is `deferred:v1.1-mtls`** — the app-layer
   client-cert ↔ CompID identity binding (013/014 fail-closed, session profile
   `mtls_ca`) is the v1.1 reach, not part of the v1.0 badge.
-- **Down-peer initiator teardown (L2 carry-forward, from 015).** An initiator aimed
-  at a never-accepting peer is not promptly torn down by `Engine::stop()` on the
-  mid-connect path (a single connect timeout runs to completion before cancellation
-  re-checks). The `016` down-peer watchdog cell (`HP-down-peer-stop-watchdog`)
-  pins the bounded-stop contract on the policy-wired path (T008/FR-028); the
-  unbounded mid-connect case is tracked in `spec/behaviors-and-limitations.md` (L2).
+- **Down-peer initiator teardown (from 015) — RESOLVED (2026-06-11; fixed in 016,
+  T008/T016).** An initiator aimed at a never-accepting peer IS promptly torn down by
+  `Engine::stop()` on the mid-connect path: an OUT cancellation-state filter maps
+  `stop()`'s `cancellation_type::total` to `terminal` on the in-flight `async_connect`,
+  so it aborts without waiting out the connect timeout. The `016` down-peer watchdog
+  cell (`HP-down-peer-stop-watchdog`, ctest #316) pins the bounded-stop contract —
+  `stop()` returns in ~32 ms against the 30 s `connect_timeout` on a SYN-black-holed
+  peer. Both halves (cause #1 busy-spin policy + cause #2 in-flight connect-cancel) are
+  discharged; see `spec/behaviors-and-limitations.md` L-015-2.
 
 ## Session-reject vs peer-disconnect divergence (018 US4 / T021)
 

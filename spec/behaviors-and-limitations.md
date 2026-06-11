@@ -63,15 +63,23 @@ Scope and conventions:
   **Status: deferred** (needs fresh-Session-per-reconnect or a lifecycle re-open redesign
   — its own future feature). *(data-model E-1a; Clarifications 2026-05-31.)*
 
-- **L-015-2 — An initiator pointed at a DOWN peer is not promptly torn down.** The
-  per-session reconnect FSM uses a default `ReconnectPolicy{}` with an **empty schedule**
-  (0 backoff) ⇒ an unbounded busy-spin at ~100% CPU on repeated connect failure; and an
-  in-flight `async_connect` is not promptly cancelled by total-cancel (~30 s, a single
-  connect timeout). A *mid-connect, never-established* initiator therefore does not stop
-  promptly. **Established** sessions stop cleanly (B-015-2). **Status: follow-up** —
-  Deferred-work registry "015 down-peer initiator teardown"; fix = a `SessionConfig`
-  reconnect-policy field wired in `open()` + a bounded/cancellable engine connect.
-  *(`src/session/session.cpp:93`; a 012-transport `async_connect`-cancellation concern.)*
+- **L-015-2 — An initiator pointed at a DOWN peer IS promptly torn down (RESOLVED
+  2026-06-11; both halves fixed in 016, PR #93 `52d4180`).** Historically the
+  per-session reconnect FSM used a default `ReconnectPolicy{}` with an **empty schedule**
+  (0 backoff) ⇒ an unbounded busy-spin at ~100% CPU on repeated connect failure (**cause #1**);
+  and an in-flight `async_connect` was not cancelled by total-cancel, so a
+  *mid-connect, never-established* initiator blocked `Engine::stop()` until the 30 s
+  connect timeout ran to completion (**cause #2**). **Both are fixed.** Cause #1:
+  `resolve_reconnect_policy()` defaults to `ReconnectPolicy::defaults_quickfix_compat`
+  (non-zero backoff — `src/session/session.cpp:103-117`). Cause #2: an OUT
+  cancellation-state filter maps any accepted cancellation to `terminal` on the in-flight
+  connect (`src/transport/asio_tls_transport.cpp:912-927`), so `stop()`'s
+  `cancellation_type::total` promptly aborts it. **Proof:** the `DownPeerWatchdog` cell
+  (`tests/interop/happy/hp_down_peer_stop_watchdog_test.cpp`, ctest #316) aims an
+  initiator at a SYN-black-holed peer (RFC 5737 `192.0.2.1:9`) and asserts `stop()`
+  returns in <1.5 s against the 30 s `connect_timeout` — measured ~32 ms.
+  **Established** sessions stop cleanly (B-015-2). *(012-transport
+  `async_connect`-cancellation; [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].)*
 
 - **L-015-3 — Bounded below the Phase-5 service wrapper (scope).** No config-file
   parsing, no `Application` user-callback ecosystem, no store/log factory abstractions,
