@@ -175,4 +175,22 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
     co_return fixpp::core::expected_t<void>{};
 }
 
+// ── set_next_outbound ────────────────────────────────────────────────────────
+//
+// Acquire the mutex, set next_outbound_ to n. Called by the 032 initiator
+// peer_ack_sent_reset_flag outbound restore (Mechanism A). Only the outbound
+// counter moves; mirrors set_next_inbound(). [032 contract C1/Mechanism A]
+
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_outbound(
+    seqnum_t n) noexcept {
+    auto lk_result = co_await mutex_.async_lock();
+    if (!lk_result) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
+    auto lk = std::move(*lk_result);
+
+    next_outbound_ = n;
+    co_return fixpp::core::expected_t<void>{};
+}
+
 }  // namespace fixpp::session

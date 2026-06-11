@@ -635,6 +635,14 @@ private:
     bool hydrating_ = false;
     bool store_is_persistent_ = false;
 
+    // 032-initiator-reset-outbound-advance: latched emit-time fact that fixpp
+    // actually emitted 141=Y in its initiator Logon (= initr_reset_seqnum at
+    // session.cpp:721). Unconditionally assigned on every initiator-Logon emit
+    // (overwrites false when no 141=Y → stale-across-reconnect is structurally
+    // impossible). Consumed one-shot on the peer_ack_sent_reset_flag arm.
+    // Strand-confined; additive POD bool; no new include. [contract C4, data-model]
+    bool own_logon_sent_reset_flag_ = false;
+
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
     // ensure_hydrated_(): one-shot cold-open hydration gate (C2.1–C2.7).
@@ -646,10 +654,14 @@ private:
     //   the pre-025 byte-identical cold-open behaviour.
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
     //   delivering callback at every check_inbound-success site (C3).
+    // persist_outbound_advance_(): site-keyed durable outbound +1, mirroring
+    //   persist_inbound_advance_() for the 032 outbound restore path (C3 / FR-007).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
         bool apply_inbound_seed, bool force = false) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     persist_inbound_advance_() noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    persist_outbound_advance_() noexcept;
 
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().

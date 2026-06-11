@@ -630,6 +630,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
     co_return fixpp::core::expected_t<void>{};
 }
 
+// 032 T009 — durable outbound advance (C3 / FR-007).
+// Mirrors persist_inbound_advance_() for the 032 initiator outbound-restore path.
+// Skips when store_is_persistent_==false (INV-H4 / C3.5).
+// Failure → Disconnected (D-3 / C3.3 / fatal-when-persistent, 030 disposition).
+// [032 tasks T009; contracts C3/FR-007; data-model INV-H1]
+asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance_() noexcept {
+    if (!store_is_persistent_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    auto r = co_await store_->next_seqnum(direction_t::outbound, /*increment=*/true);
+    if (!r) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(fixpp::core::error::store_io_failure);
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
 // Two call sites: open() (per-session-direct, AT open) and drive_reconnect()
 // (engine lazy-connect, POST-connect). The build/seqnum/store-emit sequence and
@@ -721,6 +738,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     const bool initr_reset_seqnum =
         (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
         (any_reset_knob && seqnums_at_one);
+    // 032 T007: unconditionally latch the emit-time 141=Y fact. Overwrites to false
+    // when fixpp does NOT emit 141=Y — ensures a stale latch cannot survive across
+    // reconnects (this is the shared open()/drive_reconnect() emit point).
+    // [032 contract C4, data-model, RC1 unconditional-assign invariant]
+    own_logon_sent_reset_flag_ = initr_reset_seqnum;
     // 027 T013 I-NEX-1: advertise next_inbound_unsafe() when knob is on (plain, NO +1).
     // Absent (nullopt) when knob is off ⇒ byte-identical baseline. [contract C2, I-NEX-7]
     const std::optional<fixpp::session::seqnum_t> initr_next_expected =
@@ -3183,6 +3205,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
                 }
                 if (peer_ack_sent_reset_flag) {
+                    // 032 T010(a): snapshot + one-shot clear the latch BEFORE the first
+                    // co_await. All logic below uses the local (independent of
+                    // reset/persist success — RC1 unconditional-assign invariant).
+                    // [032 contract C4, data-model, RC1]
+                    const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
+                    own_logon_sent_reset_flag_ = false;
+                    // 032 T010(b): capture pre-reset outbound BEFORE reset_seqnums_to_one_durable.
+                    // reset_before_send := (n_pre_outbound == seqnum_min+1) means fixpp's own
+                    // Logon consumed the first post-reset seq (seq=1). [032 contract C1]
+                    const seqnum_t n_pre_outbound = seqnum_mgr_.peek_outbound();
                     // RC#C-1 (gate-b/r2): reset live counters + store before event.
                     // FR-017:150: mutual reset → both sides advance to 1.
                     // FR-018: event fires AFTER post-reset state is consistent.
@@ -3217,12 +3249,33 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto p_r = co_await persist_inbound_advance_();
                         if (!p_r) co_return std::unexpected(p_r.error());
                     }
-                    // FR-018 mode mapping: bilateral_strict initiator-confirm path →
-                    // WE sent 141=Y first, peer confirmed → by_peer_request=false (WE initiated).
-                    // bilateral_lenient / unilateral: WE did NOT send 141=Y, peer sent it →
-                    // by_peer_request=true (peer initiated).
-                    const bool we_initiated =
-                        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict);
+                    // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.
+                    // Guarded on BOTH: latch (fixpp sent 141=Y) AND reset_before_send (fixpp's
+                    // Logon consumed seq=1 post-reset). The two conjuncts are REQUIRED:
+                    //   - latch alone: bilateral_strict-at-N has latch=true but n_pre=N+1>2;
+                    //     reset is NOT before-send → restore would be wrong.
+                    //   - reset_before_send alone: peer-spontaneous-at-seq-1 has n_pre=1+1=2
+                    //     but latch=false → restore would incorrectly advance to 2.
+                    // manager-first, store-second; fatal-when-persistent (030 disposition).
+                    // [032 contract C1/Mechanism A, FR-001/FR-003/FR-007, INV-H1]
+                    if (own_logon_sent_reset_flag && n_pre_outbound == seqnum_min + 1) {
+                        auto so_r = co_await seqnum_mgr_.set_next_outbound(seqnum_min + 1);
+                        if (!so_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(so_r.error());
+                        }
+                        // store 1->2 (no-op if non-persistent, INV-H4).
+                        auto po_r = co_await persist_outbound_advance_();
+                        if (!po_r) co_return std::unexpected(po_r.error());
+                    }
+                    // 032 T010(d): FR-018 mode mapping — use the latch alone (C4 gate).
+                    // by_peer_request=false iff fixpp sent 141=Y (own_logon_sent_reset_flag).
+                    // C4 (latch alone) and C1 (latch && reset_before_send) are DISTINCT:
+                    // bilateral_strict-at-N has latch=true, reset_before_send=false →
+                    // by_peer_request=false (fixpp initiated) but no outbound restore.
+                    // The pre-032 code used (policy==bilateral_strict) which was wrong for
+                    // reset_on_logon initiators with non-strict policy. [032 contract C4, FR-006]
+                    const bool we_initiated = own_logon_sent_reset_flag;
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
                         .by_peer_request = !we_initiated});
                 }

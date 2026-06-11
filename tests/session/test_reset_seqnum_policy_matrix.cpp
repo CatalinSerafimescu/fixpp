@@ -603,6 +603,31 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
         << "bilateral_strict initiator: next_outbound_ must be 1 after 141=Y mutual reset "
         << "(Logon was pre-reset; post-reset next outbound is seq=1).";
+
+    // T013 W4b — label-side of the C4/C1 divergence [032 contract C4, FR-006, SC-006]:
+    // This is the UNIQUE row where latch=true AND reset_before_send=false.
+    // C4 keys on the latch ALONE: by_peer_request=false (fixpp sent 141=Y) even though
+    // the restore gate (C1) did NOT fire (reset_before_send false → outbound stays 1).
+    // Without this assertion, an implementer collapsing C4 into C1 would pass W4 but
+    // would emit by_peer_request=true on this row — undetected. [032 T010(d)]
+    {
+        auto events = sess.recent_events();
+        bool found = false;
+        for (const auto& ev : events) {
+            if (const auto* r =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+                found = true;
+                EXPECT_FALSE(r->by_peer_request)
+                    << "T013 W4b: bilateral_strict initiator at seq N>1 — latch=true, "
+                       "reset_before_send=false; C4 (label=latch alone) must yield "
+                       "by_peer_request=false. A C4/C1 collapse would yield true here. "
+                       "[032 contract C4, FR-006, SC-006]";
+            }
+        }
+        EXPECT_TRUE(found)
+            << "T013 W4b: sequence_numbers_reset event must be emitted on the "
+               "peer_ack_sent_reset_flag arm (bilateral_strict initiator).";
+    }
 }
 
 TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
@@ -661,4 +686,202 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
     }
     EXPECT_TRUE(found) << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
                        << "RED: stub does not emit → FAILS RED per T017 design.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W2 (T003): reset_on_logon initiator — by_peer_request=false (FR-006 / SC-006)
+//
+// A fresh {1,1} initiator with reset_on_logon=true and bilateral_lenient policy
+// emits its Logon with 141=Y (any_reset_knob=true + seqnums_at_one=true →
+// initr_reset_seqnum=true → latch=true). After the peer echoes 141=Y, the
+// sequence_numbers_reset event must have by_peer_request=false (fixpp initiated).
+//
+// RED on main: current code computes we_initiated=(policy==bilateral_strict) at
+// session.cpp:3224, which is false for bilateral_lenient → by_peer_request=true
+// (incorrect — fixpp sent 141=Y). Fix: we_initiated=own_logon_sent_reset_flag_
+// (the latch alone — C4 gate, distinct from C1's restore gate). [FR-006, SC-006]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ResetSeqnumPolicyMatrixTest,
+       ResetOnLogon_Initiator_BilateralLenient_PeerAck141_ByPeerRequestFalse) {
+    clear_capture();
+    // Build config: initiator, bilateral_lenient, reset_on_logon=true, fresh {1,1}.
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    cfg.reset_on_logon = true;
+    fixpp::session::Session sess(engine, cfg);
+
+    // open() emits initiator Logon with 141=Y (reset_on_logon=true + seqnums_at_one=true
+    // at {1,1}) → latch own_logon_sent_reset_flag_=true.
+    ASSERT_TRUE(run_open(sess).has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer Logon-ack echoes 141=Y at seq=1.
+    auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "W2: session must reach Active after peer 141=Y ack";
+
+    // FR-006 / SC-006 / C4: by_peer_request must be false — fixpp initiated the
+    // reset (it sent 141=Y in its Logon). The latch alone drives this, independent
+    // of reset_before_send. RED on main (we_initiated=bilateral_strict → false for
+    // bilateral_lenient → by_peer_request=true).
+    auto events = sess.recent_events();
+    bool found = false;
+    for (const auto& ev : events) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            found = true;
+            EXPECT_FALSE(r->by_peer_request)
+                << "W2 (T003): reset_on_logon initiator with bilateral_lenient: "
+                   "by_peer_request must be false — fixpp sent 141=Y (latch=true). "
+                   "RED on main: we_initiated=bilateral_strict only → returns true. "
+                   "[FR-006, SC-006, C4]";
+        }
+    }
+    EXPECT_TRUE(found)
+        << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T011 W3 (US2): peer-spontaneous 141=Y at N>1 — outbound UNCHANGED + by_peer_request=true
+//
+// reset_on_logon=false, fixpp Logon pre-seeded at seq N>1 (outbound seeded to 10 before
+// open()), fixpp sends no 141=Y (seqnums_at_one=false → latch=false); peer sends 141=Y
+// under a tolerant (bilateral_lenient) policy.
+//
+// Expected: outbound UNCHANGED from post-open baseline (next_outbound==11 after
+// consuming seq=10), by_peer_request=true (latch=false → we_initiated=false).
+//
+// Anchors: 032 contracts C1/C4, FR-005, SC-004, W3.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef FIXPP_TEST_HOOKS
+TEST_F(ResetSeqnumPolicyMatrixTest,
+       PeerSpontaneous_Initiator_NonReset_Logon_AtNGt1_OutboundUnchanged) {
+    clear_capture();
+    // Build: initiator, bilateral_lenient, reset_on_logon=false.
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    cfg.reset_on_logon = false;
+    fixpp::session::Session sess(engine, cfg);
+
+    // Pre-seed outbound to 10 before open() so the Logon goes at seq=10.
+    // Inbound stays at 1 (peer will send Logon-ack seq=1).
+    // seqnums_at_one = (outbound==1 && inbound==1) = false → latch=false.
+    sess.seqnum_mgr_test_access().set_counters_for_test(/*inbound=*/1, /*outbound=*/10);
+
+    ASSERT_TRUE(run_open(sess).has_value());
+    // open() consumed seq=10 → next_outbound_=11.
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Capture baseline outbound after open().
+    const auto baseline_outbound = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    ASSERT_EQ(baseline_outbound, fixpp::session::seqnum_t{11})
+        << "T011 precondition: open() at seq=10 → next_outbound==11";
+
+    // Peer spontaneously sends Logon-ack WITH 141=Y at seq=1.
+    // bilateral_lenient accepts this without requiring we sent 141=Y.
+    auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "T011 W3: session must reach Active after peer-spontaneous 141=Y";
+
+    // C1 (outbound unchanged): latch=false → restore gate skipped.
+    // After the reset, next_outbound rewinds to 1. The baseline was 11, so if
+    // the restore wrongly fired it would be 2; if it correctly did NOT fire, it is 1.
+    // The reset itself sets outbound to 1; no restore means it stays 1.
+    // W3: outbound must be UNCHANGED from the post-reset baseline (1),
+    // i.e. the peer-spontaneous path must NOT advance outbound to 2.
+    const auto post_outbound = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    EXPECT_EQ(post_outbound, fixpp::session::seqnum_t{1})
+        << "T011 W3: peer-spontaneous 141=Y at N>1 (latch=false) — outbound must "
+           "rewind to 1 (reset) and NOT be restored to 2. "
+           "[032 contract C1, FR-005, SC-004, W3]";
+
+    // C4 (by_peer_request=true): latch=false → we_initiated=false → by_peer_request=true.
+    auto events = sess.recent_events();
+    bool found = false;
+    for (const auto& ev : events) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            found = true;
+            EXPECT_TRUE(r->by_peer_request)
+                << "T011 W3: peer-spontaneous 141=Y — latch=false → by_peer_request "
+                   "must be true. [032 contract C4, FR-006, SC-004]";
+        }
+    }
+    EXPECT_TRUE(found)
+        << "T011 W3: sequence_numbers_reset event must be emitted on the "
+           "peer_ack_sent_reset_flag arm.";
+}
+#endif  // FIXPP_TEST_HOOKS
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T012 W7 (US2): fresh, no reset knob, lenient — peer spontaneous 141=Y at seq=1
+//   outbound MUST stay 1 (NOT restored to 2) + by_peer_request=true.
+//
+// This is the load-bearing latch discriminator (W7). A `reset_before_send`-alone
+// gate (no latch conjunct) would restore to 2 because n_pre_outbound==seqnum_min+1
+// (=2) is true (Logon went at seq=1). The latch=false (no reset knob, fresh {1,1})
+// is the conjunct that prevents the wrong restore.
+//
+// RED under mutation (a) from T010a: `own_logon_sent_reset_flag &&` removed →
+// restore fires on reset_before_send alone → outbound becomes 2 → FAIL.
+// GREEN under the shipped latch design (latch=false → restore skipped).
+//
+// Anchors: 032 contracts C1/C4, FR-005, W7 (the latch discriminator).
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ResetSeqnumPolicyMatrixTest,
+       FreshNoKnob_Initiator_BilateralLenient_PeerSpontaneous141Y_OutboundStaysOne) {
+    clear_capture();
+    // Build: initiator, bilateral_lenient, reset_on_logon=false (no reset knob).
+    // Fresh {1,1} → seqnums_at_one=true but any_reset_knob=false → initr_reset_seqnum=false
+    // → latch=false. Logon goes at seq=1 (bilateral_lenient, not bilateral_strict → no 141=Y).
+    auto cfg = make_cfg(fixpp::session::session_role::initiator,
+                        fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    cfg.reset_on_logon = false;
+    fixpp::session::Session sess(engine, cfg);
+
+    // open() at {1,1} bilateral_lenient: initr_reset_seqnum=false → latch=false.
+    // Logon goes at seq=1 → n_pre_outbound==2 at the arm (outbound advanced 1→2).
+    ASSERT_TRUE(run_open(sess).has_value());
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+
+    // Peer spontaneously sends Logon at seq=1 WITH 141=Y (bilateral_lenient accepts it).
+    auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
+    feed(sess, logon_ack_reset);
+
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "T012 W7: session must reach Active after peer-spontaneous 141=Y";
+
+    // C1 (restore gate): latch=false → restore skipped → outbound stays 1 (post-reset).
+    // reset_before_send IS true (n_pre_outbound==2 == seqnum_min+1), but latch=false
+    // means the FULL conjunct is false → no restore.
+    // A reset_before_send-alone gate would restore to 2 → WRONG.
+    // The shipped latch design keeps outbound at 1 → CORRECT.
+    auto events = sess.recent_events();
+    bool found = false;
+    for (const auto& ev : events) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            found = true;
+            EXPECT_TRUE(r->by_peer_request)
+                << "T012 W7: fresh no-knob bilateral_lenient — latch=false → "
+                   "by_peer_request must be true. [032 contract C4, FR-006, W7]";
+        }
+    }
+    EXPECT_TRUE(found)
+        << "T012 W7: sequence_numbers_reset event must be emitted when peer sends 141=Y.";
+
+    // The definitive W7 assertion: outbound must be 1 (no restore), not 2.
+    // Without #ifdef FIXPP_TEST_HOOKS we assert indirectly via the event label;
+    // under FIXPP_TEST_HOOKS we also check the counter directly.
+#ifdef FIXPP_TEST_HOOKS
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(),
+              fixpp::session::seqnum_t{1})
+        << "T012 W7 counter assertion: fresh no-knob peer-spontaneous-at-seq-1 "
+           "(latch=false) — outbound MUST stay 1 after the reset; restore_before_send "
+           "alone would wrongly set it to 2. [032 contract C1, FR-005, W7]";
+#endif  // FIXPP_TEST_HOOKS
 }
