@@ -116,10 +116,19 @@ cells:
   # T016 initiator (C6.1): fixpp init + reset_on_logon=true → 141=Y + 34=1 to live acceptor.
   # T017 acceptor (C6.2): live init sends 141=Y + 34=1 → fixpp acceptor resets before validation.
   # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
-  - { id: RL-QFcpp-init-fix44-reset-on-logon, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
-  - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
-  - { id: RL-QFcpp-acc-fix44-reset-on-logon,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
-  - { id: RL-QFj-acc-fix44-reset-on-logon,    config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
+  # 024 ResetOnLogon — ACCEPTOR cells now live-green both engines (2026-06-11,
+  # goldens banked, 030-fixed acceptor path). The INITIATOR cells are deferred:
+  # the first-ever live run found a real fixpp bug — a reset_on_logon=true initiator
+  # rebases its OUTBOUND seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185
+  # peer_ack_sent_reset_flag → reset_seqnums_to_one_durable; 030 fixed the inbound
+  # twin at :3360 but not the outbound), so the next send would duplicate 34=1.
+  # Unit-confirmed (ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2),
+  # engine-independent (QFcpp + QFj fail identically). 030/031-class fix-feature;
+  # see L-024-2.
+  - { id: RL-QFcpp-init-fix44-reset-on-logon, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:initiator-141echo-outbound-rebase", deferred_reason: "First live run found a fixpp bug: a reset_on_logon=true initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185 reset_seqnums_to_one_durable; 030 fixed only the inbound twin), so the next send duplicates 34=1. Unit ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2; engine-independent. Deferred to a 030/031-class fix-feature; see L-024-2.", spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:initiator-141echo-outbound-rebase", deferred_reason: "First live run found a fixpp bug: a reset_on_logon=true initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185 reset_seqnums_to_one_durable; 030 fixed only the inbound twin), so the next send duplicates 34=1. Unit ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2; engine-independent. Deferred to a 030/031-class fix-feature; see L-024-2.", spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  - { id: RL-QFcpp-acc-fix44-reset-on-logon,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
+  - { id: RL-QFj-acc-fix44-reset-on-logon,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
   # ── G3 slice (030-received-reset-inbound-advance) received-141 acceptor cell (2) ──
   # T028 (SC-001): live QF initiator (ResetOnLogon=Y) sends 141=Y + 34=1; fixpp acceptor
   # with reset_on_logon=FALSE takes the 013-only received-141 path → next_inbound nets 2,

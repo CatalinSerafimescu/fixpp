@@ -619,6 +619,27 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   (`refresh_on_logon=true`) was shipped by 025 (S-018). **Status: discharged** (025, S-018
   → `done`). *(Clarifications Q3; contract C7.1; catalogue S-018.)*
 
+- **L-024-2 — A `reset_on_logon=true` INITIATOR rebases its OUTBOUND seqnum 2→1 on the
+  peer's `141=Y` echo (live-found, OPEN — 030/031-class fix-feature pending).** A fixpp
+  initiator with `reset_on_logon=true` resets to `{1,1}`, emits `Logon(141=Y, 34=1)`
+  (outbound advances 1→2), then receives the peer's Logon ack which — per QuickFIX-cpp
+  and QuickFIX-J — echoes `141=Y`. fixpp's initiator Logon-ack handler treats that echo
+  as a peer-requested reset (`session.cpp:3185`, `peer_ack_sent_reset_flag` arm) and calls
+  `reset_seqnums_to_one_durable()`, which rebases BOTH counters to 1 — so **outbound
+  regresses 2→1** and the next outbound frame would carry a duplicate `MsgSeqNum=1` (the
+  031 duplicate-seqnum hazard; both real engines would reject it). 030 restored the
+  INBOUND twin on this arm (`session.cpp:3360`) but left the outbound twin unfixed; the
+  echo of fixpp's *own* reset should not trigger a second reset at all. **Invisible to
+  in-process units** — the merged unit `ResetOnLogon_Initiator_ResetsAndEmits141`
+  (`test_reset_on_lifecycle.cpp:390`) asserts the correct `peek_outbound()==2` but never
+  processes a peer `141=Y` echo; the divergence surfaces only on the first live run
+  (`RL-{QFcpp,QFj}-init-fix44-reset-on-logon`, both engines fail identically). The
+  ACCEPTOR cells (`RL-*-acc`) are unaffected (030-fixed) and live-green. **Status: open**
+  — deferred to a 030/031-class fix-feature (the initiator Logon-ack arm must skip the
+  reset when the echo confirms fixpp's own `141=Y`, mirroring the acceptor inbound
+  restore); the 2 init interop cells are `deferred:initiator-141echo-outbound-rebase`.
+  *(`src/session/session.cpp:3185`; sibling of 030/031; found 2026-06-11.)*
+
 ## RefreshOnLogon — per-logon re-hydrate knob (025-refresh-on-logon)
 
 ### Feature Catalogue Rows
