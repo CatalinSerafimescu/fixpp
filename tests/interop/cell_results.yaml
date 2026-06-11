@@ -144,10 +144,10 @@ cells:
   # T011 AllowPosDup wire-capture: default strip sends 43/122-free frame; counterparty accepts.
   # T012 PossResend deliver: counterparty sends 97=Y; fixpp delivers to fromApp; session Active.
   # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
-  - { id: APDS-QFcpp-init-fix44-allow-pos-dup-strip-send, config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
-  - { id: APDS-QFcpp-acc-fix44-allow-pos-dup-strip-send,  config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
-  - { id: APDS-QFj-init-fix44-allow-pos-dup-strip-send,   config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
-  - { id: APDS-QFj-acc-fix44-allow-pos-dup-strip-send,    config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
+  - { id: APDS-QFcpp-init-fix44-allow-pos-dup-strip-send, config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
+  - { id: APDS-QFcpp-acc-fix44-allow-pos-dup-strip-send,  config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
+  - { id: APDS-QFj-init-fix44-allow-pos-dup-strip-send,   config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
+  - { id: APDS-QFj-acc-fix44-allow-pos-dup-strip-send,    config: normal, kind: thorny, status: pass, matrix_disposition: live, priority: P2, spec_ref: "022 T011 C5/SC-005/FR-010" }
   - { id: PR-QFcpp-init-fix44-poss-resend-deliver,        config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
   - { id: PR-QFcpp-acc-fix44-poss-resend-deliver,         config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
   - { id: PR-QFj-init-fix44-poss-resend-deliver,          config: normal, kind: thorny, status: "skip:counterparty-unavailable", matrix_disposition: live, priority: P2, spec_ref: "022 T012 C5/SC-001/SC-005/FR-010" }
