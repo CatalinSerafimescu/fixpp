@@ -65,8 +65,10 @@ behavior contract.
 - **A (the design)**: restore-after-reset — `reset_seqnums_to_one_durable` then, if `restore_outbound`
   (`own_logon_sent_reset_flag_ && reset_before_send`), `set_next_outbound(seqnum_min+1)` +
   `persist_outbound_advance_()` (manager-first, store-second; `030` fatal-when-persistent disposition).
-  These are NEW private session/manager methods (no existing outbound setter or outbound-persist path) —
-  a private header change, NOT a public/wire/error-slot/C-ABI/config surface (FR-009 holds).
+  `Session::persist_outbound_advance_` is a NEW private Session method; `SeqnumManager::set_next_outbound`
+  is a NEW **public** method on the internal `SeqnumManager` class, mirroring the merged-030 public
+  `set_next_inbound` twin. No new wire/error-slot/codegen/**C-ABI**/config surface (FR-009 holds —
+  `SeqnumManager` is awaitable-returning C++, not C-ABI-exportable; no external caller).
 - **B (DROPPED)**: skip `reset_seqnums_to_one_durable` — unsound for the fresh `bilateral_strict`-at-`{1,1}`
   row (whose only durable reset on the path is this ack-arm reset; the open-time reset gate
   `session.cpp:681` fires on `reset_on_logon` only). See research.md R4.

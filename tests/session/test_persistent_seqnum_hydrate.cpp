@@ -2602,12 +2602,15 @@ TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
     //   durable_outbound == manager.next_outbound (equality at 2)
     //   never durable_outbound > manager.next_outbound.
     //
-    // Sentinel: seed outbound=1 so the store starts next_outbound_=1.
-    // After persist_outbound_advance_() fires, next_outbound_ becomes 2 and
-    // durable_outbound is updated to 2. The manager also has next_outbound=2.
-    // We use a large seeded_inbound value to confirm we're testing the right arm:
-    // {in=1, out=1} → after hydration manager starts at {1,1}; reset_on_logon=true
-    // resets to {1,1} again (no-op), Logon emits at seq=1 → n_pre_outbound=2 → restore fires.
+    // Seed {in=1, out=1}: after hydration manager starts at {1,1}; reset_on_logon=true
+    // resets to {1,1} again (no-op at the in-memory level), Logon emits at seq=1 →
+    // n_pre_outbound=2 → restore fires.
+    //
+    // Discriminator: the arm's store.reset() drives durable_outbound to the post-reset base 1,
+    // then persist_outbound_advance_() advances it to 2. The assertion checks durable_outbound==2.
+    // If persist does NOT fire, durable stays 1 (post-reset base) ≠ 2 → FAIL.
+    // An external sentinel would be wiped by store.reset(); the post-reset base {1→2} IS the
+    // falsifying discriminator — no external sentinel needed.
     auto factory = std::make_shared<FaultStoreFactory>(
         /*seeded_inbound=*/1, /*seeded_outbound=*/1,
         /*fail_on_nth_call=*/0, /*fail_on_nth_write=*/0,

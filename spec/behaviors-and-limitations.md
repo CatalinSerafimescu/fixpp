@@ -634,8 +634,8 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   (`test_reset_on_lifecycle.cpp:390`) asserts the correct `peek_outbound()==2` but never
   processes a peer `141=Y` echo; the divergence surfaces only on the first live run
   (`RL-{QFcpp,QFj}-init-fix44-reset-on-logon`, both engines fail identically). The
-  ACCEPTOR cells (`RL-*-acc`) are unaffected (030-fixed) and live-green. **Status: RESOLVED
-  (032-initiator-reset-outbound-advance).** The initiator `peer_ack_sent_reset_flag` arm now
+  ACCEPTOR cells (`RL-*-acc`) are unaffected (030-fixed) and live-green. **Status: RESOLVED —
+  unit+wire proven; live close-out pending (T021).** The initiator `peer_ack_sent_reset_flag` arm now
   restores OUTBOUND to 2 after the echo-confirmed reset (Mechanism A: restore-after-reset — the
   outbound twin of 030's inbound restore, `set_next_outbound(seqnum_min+1)` +
   `persist_outbound_advance_`, fatal-when-persistent) iff fixpp itself emitted the reset Logon at
@@ -645,8 +645,9 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   ack-arm reset). The harm test is now live:
   `tests/session/test_persistent_seqnum_hydrate.cpp` →
   `ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo` (asserts `peek_outbound()==2` + the SC-002
-  wire witness `34=2`, no duplicate `34=1`); the 2 init interop cells flip from
-  `deferred:initiator-141echo-outbound-rebase` to pass. See B-032-1.
+  wire witness `34=2`, no duplicate `34=1`); the 2 init interop cells are **expected to flip** from
+  `deferred:initiator-141echo-outbound-rebase` to pass once the live cell is run (T021/SC-003 live
+  close-out PENDING — separate live-interop session, same pattern as 030/031). See B-032-1.
   *(`src/session/session.cpp:3185`; sibling of 030/031; found 2026-06-11, fixed 032.)*
 
 ## RefreshOnLogon — per-logon re-hydrate knob (025-refresh-on-logon)
@@ -1041,7 +1042,8 @@ row; see `feature-catalogue.md`.)*
   (QuickFIX reset-then-increment). **Status: shipped** (032). *(FR-001/FR-003/FR-005/FR-006/FR-007;
   `tests/session/test_persistent_seqnum_hydrate.cpp` W1 + W5/W6/W8,
   `test_reset_seqnum_policy_matrix.cpp` W2/W3/W4b/W7, `test_refresh_on_logon.cpp` cross-reconnect
-  latch witness; live close-out via the `RL-*-init` interop cell vs QFcpp/QFJ.)*
+  latch witness; live close-out via the `RL-*-init` interop cell vs QFcpp/QFJ **PENDING —
+  T021/SC-003 deferred, same pattern as 030/031**.)*
 
 ### Limitations
 

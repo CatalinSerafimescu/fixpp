@@ -149,21 +149,21 @@ primitive** that sets outbound to `2` and persists. Verified against
 exposes exactly `assign_outbound()` (read-then-advance in-memory, does NOT persist), `hydrate(in, out)`,
 `reset_to_one()`, `set_next_inbound(n)` — **there is no `set_next_outbound`**. And
 `include/fixpp/session/session.hpp` has `persist_inbound_advance_()` (added by `029`) but **no
-`persist_outbound_advance_`**. The fix therefore ADDS a narrowly-scoped, private/internal outbound
-restore primitive, mirroring the `030` inbound twin:
-- `SeqnumManager::set_next_outbound(seqnum_t)` — a private/internal outbound setter mirroring
-  `set_next_inbound`'s shape (force the in-memory counter; store write is the caller's responsibility,
-  same split as `reset_to_one`/`set_next_inbound`), **and**
-- `Session::persist_outbound_advance_()` — a durable outbound write mirroring `029`'s
-  `persist_inbound_advance_()`.
+`persist_outbound_advance_`**. The fix therefore ADDS a narrowly-scoped outbound restore primitive, mirroring the `030` inbound twin:
+- `SeqnumManager::set_next_outbound(seqnum_t)` — a **public** method on the internal `SeqnumManager`,
+  mirroring the merged-030 public `set_next_inbound` twin's shape (force the in-memory counter; store
+  write is the caller's responsibility, same split as `reset_to_one`/`set_next_inbound`), **and**
+- `Session::persist_outbound_advance_()` — a **private** Session method, a durable outbound write
+  mirroring `029`'s `persist_inbound_advance_()`.
 - Failure disposition: the durable write follows the **`030` fatal-when-persistent** contract NOW (not
   deferred) — a store failure on a persistent store records `Disconnected` and propagates the error;
   no-op (INV-H4) on a null/non-persistent store.
 
-These are **private session/manager methods** (header change → source rebuild) — NOT a new public/wire/
-error-slot/C-ABI/config surface. FR-009's no-new-public-surface claim still holds; the no-`surface`-change
-phrasing in the plan's Constitution Check is reconciled to acknowledge the private header addition. The
-exact method names are confirmed at /tasks via codegraph; the SHAPE + failure disposition are fixed here.
+These are header changes (source rebuild) — NOT a new public/wire/error-slot/C-ABI/config surface.
+FR-009's no-new-C-ABI-surface claim holds: `SeqnumManager` is awaitable-returning C++, not
+C-ABI-exportable; no external caller. The no-`surface`-change phrasing in the plan's Constitution Check
+is reconciled to acknowledge the header addition. The exact method names are confirmed at /tasks via
+codegraph; the SHAPE + failure disposition are fixed here.
 
 **Why Mechanism B is dropped (Codex #2 / RC2).** Mechanism B's premise — "counters are already `{2,2}`
 because open() reset them, so skip the ack-arm reset" — is **false** for the fresh `bilateral_strict`
