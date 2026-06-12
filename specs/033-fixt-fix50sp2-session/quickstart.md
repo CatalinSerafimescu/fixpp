@@ -6,11 +6,22 @@ How to configure, exercise, and validate the feature.
 
 ```cpp
 fixpp::session::SessionConfig c;
-c.begin_string = "FIXT.1.1";              // transport version
-c.default_appl_ver_id = /* FIX.5.0SP2 */; // negotiated application version (E3)
+c.begin_string = "FIXT.1.1";                                  // transport version
+c.default_appl_ver_id = fixpp::dict::application_version::v50sp2;  // std::optional<application_version> (E3)
 // optional credentials:
 // c.username = "...";  c.password = "...";
 // ... existing fields (comp ids, dictionary/registry, transport, etc.)
+```
+
+Retrieve the negotiated application version from a `fromApp` handler (FR-005 / SC-006):
+
+```cpp
+auto s = engine.lookup(sid);                            // existing Engine::lookup spine
+auto vp = s->negotiated_version_profile();              // NEW accessor — {vt11, default_appl=negotiated}
+// The fixpp session delivers app messages dict-free and never reifies (R4). A downstream
+// consumer that chooses to reify uses vp (the negotiated default dictionary). Note: reify
+// honors a present ApplVerID(1128) per its normal rules — opting into per-message override is
+// the consumer's choice, outside 033's session scope (S-026). 033 exposes only the negotiated default.
 ```
 
 - `begin_string == "FIXT.1.1"` + `default_appl_ver_id` set ⇒ FIXT session (`is_fixt()`).
@@ -21,8 +32,10 @@ c.default_appl_ver_id = /* FIX.5.0SP2 */; // negotiated application version (E3)
 
 - **Outbound Logon** carries `8=FIXT.1.1` + `1137` (+ optional `553`/`554`) — both initiator and acceptor
   reply (C1).
-- **Inbound Logon** must carry `1137`; missing ⇒ `Reject(35=3, 373=1)` (C4); unserviceable version ⇒
-  refuse (C5). The negotiated version selects the application dictionary for inbound app messages (C3).
+- **Inbound Logon** must carry `1137`; missing ⇒ `Reject(35=3, 373=RequiredTagMissing=1)` (C4);
+  present-but-unserviceable version ⇒ `Reject(35=3, 371=1137, 373=ValueIsIncorrect=5)` then refuse (C5).
+  The negotiated version is recorded + exposed (`negotiated_version_profile()`) so downstream reify
+  call-sites select the application dictionary (C3); session-layer delivery to `fromApp` stays dict-free.
 - `Password(554)` is redacted in logs/transcripts/goldens (C8).
 
 ## Validate (unit)
@@ -44,15 +57,25 @@ the 032 close-out pattern):
 
 ```sh
 cd research/G19-fix-fpml-iso20022/phase-9-harness
-# capture goldens (2-pass), then verify flag-free:
-python3 tools/run_interop_cell.py <FIXT-cell-id> --config normal --update-goldens   # x2
-python3 tools/run_interop_cell.py <FIXT-cell-id> --config normal                    # expect: pass, golden match
+# capture goldens (2-pass), then verify flag-free (example: one of the 8 cells):
+python3 tools/run_interop_cell.py HP-fixt50sp2-qfcpp-init --config normal --update-goldens   # x2
+python3 tools/run_interop_cell.py HP-fixt50sp2-qfcpp-init --config normal                    # expect: pass, golden match
 ```
 
-Cell families (both roles × QFcpp/QFJ): a FIX.5.0SP2 family and a FIXT-carrying-FIX.4.4 family;
-counterparty configured with a FIXT.1.1 transport dictionary + the matching application dictionary
-(exact cell ids + configs registered at /tasks/implement). After they pass, flip the manifest from
-`deferred:fixt-routing` to live and bank goldens (C10).
+**The 8 cells** (2 dialect families × 2 roles × {QFcpp, QFJ}):
+
+| family | role | QFcpp cell | QFJ cell |
+|--------|------|-----------|----------|
+| FIX.5.0SP2 | fixpp initiator | `HP-fixt50sp2-qfcpp-init` | `HP-fixt50sp2-qfj-init` |
+| FIX.5.0SP2 | fixpp acceptor | `HP-fixt50sp2-qfcpp-acc` | `HP-fixt50sp2-qfj-acc` |
+| FIXT-carrying-4.4 | fixpp initiator | `HP-fixt44-qfcpp-init` | `HP-fixt44-qfj-init` |
+| FIXT-carrying-4.4 | fixpp acceptor | `HP-fixt44-qfcpp-acc` | `HP-fixt44-qfj-acc` |
+
+**Counterparty config templates**: `TransportDataDictionary=FIXT11.xml`;
+`AppDataDictionary=FIX50SP2.xml` (50sp2 family) / `FIX44.xml` (4.4 family);
+`DefaultApplVerID=9` (50sp2) / `6` (4.4). Exact cell ids/paths registered at /tasks/implement. After they
+pass, flip the manifest from `deferred:fixt-routing` to live and bank goldens (C10). `Password(554)` is
+redacted by `run_interop_cell.py`'s shared tag-554 redactor before any golden is written (C8).
 
 ## Done when
 

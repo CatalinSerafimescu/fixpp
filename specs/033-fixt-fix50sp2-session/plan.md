@@ -34,21 +34,31 @@ negotiated application version through Logon build/parse and wire the profile in
    `1137` (+ optional `553`/`554`); return them to the caller. When `BeginString==FIXT.1.1` and `1137`
    is absent → session-level `Reject(35=3)` `SessionRejectReason=RequiredTagMissing(1)`, no
    establishment (FR-004) — reusing the existing missing-`98` reject pattern (`session.cpp:2370+`).
-4. **Negotiated version state**: store the peer's declared `DefaultApplVerID` in strand-confined session
-   state; resolve it to an `application_version` via `version_profile::resolve_application_version`
-   (`version_profile.hpp:111`). If unserviceable (no dictionary for that ApplVerID) → refuse
-   establishment (FR-004a).
+4. **Negotiated version state + serviceability**: store the peer's declared `DefaultApplVerID` in
+   strand-confined session state; resolve it to an `application_version` via
+   `version_profile::resolve_application_version` (`version_profile.hpp:111`, wire→C++). Test
+   serviceability against the engine-built `version_registry` (threaded to the Session — `EngineConfig::dictionaries`
+   → `build_version_registry`, `engine_config.hpp:211`): `registry.get(resolved)` returning
+   `dict_no_dictionary_for_application_version` (or an unparseable `1137`) ⇒ unserviceable ⇒
+   `Reject(35=3, 371=1137, 373=ValueIsIncorrect(5))` then no Active (FR-004a — distinct from the
+   missing-tag `RequiredTagMissing(1)`; research R2).
 5. **Negotiated version exposure (NOT a new routing gate)**: the session delivers inbound application
    messages to `fromApp` as dict-free wire views **today, for every version** (`parse_and_dispatch_`,
    `session.cpp:238-265`; no `dict::reify` in `src/session/` — research.md R4). So FR-005 is realized by
-   **recording + exposing** the negotiated `application_version`; wherever an app message is reified
-   (outside the session), the negotiated `version_profile` (`session=vt11`, `default_appl=`negotiated) is
-   used. Admin frames keep the FIXT.1.1 session layer. No session-layer reify/validation gate is added →
-   app-message handling is byte-for-byte the FIX.4.x path (zero regression). Per-message `ApplVerID(1128)`
-   is **tolerated, not routed** (S-026 deferred, FR-010).
-6. **Credentials**: surface parsed `553`/`554` to the existing CompID/authz seam (`session.cpp:1849-1916`);
-   **no new validation policy** (FR-008); leave the seam ready for a config-gated future validation
-   feature (FR-008a). Redact `554` in logs/transcripts/goldens (FR-011).
+   **recording + exposing** the negotiated `application_version` via a NEW
+   `Session::negotiated_version_profile() const → dict::version_profile` accessor, reachable from a
+   `fromApp` handler through the EXISTING `Engine::lookup(SessionId)→shared_ptr<Session>` spine
+   (`engine.hpp:294`). Wherever an app message is reified (outside the session), the negotiated
+   `version_profile` (`session=vt11`, `default_appl=`negotiated) is used. Admin frames keep the FIXT.1.1
+   session layer. No session-layer reify/validation gate is added → app-message handling is byte-for-byte
+   the FIX.4.x path (zero regression). Per-message `ApplVerID(1128)` is **tolerated, not routed** (S-026
+   deferred, FR-010). SC-006's W5 asserts the accessor returns the per-cell version (New-1, discriminating).
+6. **Credentials**: surface parsed `553`/`554` as a `logon_credentials` value to a NEW default-accept
+   `CompIdAuthorizationPolicy::authorize_logon(asserted_compid, logon_credentials)` seam fired on the
+   establishment path **independently of mTLS** — the existing `authorize(peer_identity, compid)` seam
+   (`session.cpp:1849-1916`) is mTLS-gated and takes no credentials (research R6). **No new validation
+   policy** (FR-008); FR-008a's future config-gated validation knob attaches to `authorize_logon`. Redact
+   `554` in logs/transcripts/goldens via a shared tag-554 redactor (FR-011).
 7. **Interop**: un-defer `HP-fixt11-fix50sp2-cells`; add a FIX.5.0SP2 cell family and a representative
    FIXT.1.1-carrying-FIX.4.4 cell family, both roles × both engines (SC-004/SC-006).
 
@@ -86,7 +96,7 @@ codegen change (dictionaries already ship), NO new C-ABI export, NO new MessageS
 | Article | Gate | Status |
 |---------|------|--------|
 | **II** Language | C++23/Clang, no new deps | ✅ PASS |
-| **VI** Spec coverage | Flips **S-020** (FIXT half: backlog/deferred → done), lands **S-025** (`DefaultApplVerID`) and **S-022** (`Username`/`Password`) backlog → done; **S-026** stays deferred (tolerate-only, FR-010). `spec.md` carries Normative References (`[FIX-SL §4.2.1/§4.3.7/§4.3]`, FIXT.1.1 §5) per §VI.5. Whether 553/554 + 1137 need their own catalogue rows (vs amending S-020/S-022/S-025) decided at /tasks Polish — see §VI delta below. | ⚠ RESOLVED (delta specified) |
+| **VI** Spec coverage | Flips **S-020** (FIXT half: backlog/deferred → done), lands **S-025** (`DefaultApplVerID`) and **S-022** (`Username`/`Password`) backlog → done; **S-026** stays deferred (tolerate-only, FR-010). `spec.md` carries a `## Normative References` section with the four exact catalogue refs: S-020 `[FIX-SL §4.2.1] The FIX session profile`, S-022 `[FIX-SL §4.3] Establishing a FIX connection`, S-025 `[FIX-SL §4.3.7] Specifying application version`, S-026 `[FIX-SL §5.3.5] Explicit application version per message` — per §VI.5 (added Gate A round 1; the earlier vague "FIXT.1.1 §5" wording dropped). Whether 553/554 + 1137 need their own catalogue rows (vs amending S-020/S-022/S-025) decided at /tasks Polish — see §VI delta below. | ✅ PASS (Normative References present) |
 | **VII** Testing/TDD | RED-first witnesses per user story (research.md R8): W1 FIXT Logon round-trip (8=FIXT.1.1 + 1137 emitted/parsed both roles) ⇒ Active; W2 missing-1137 ⇒ Reject(35=3,373=1) no-establish; W3 unserviceable ApplVerID ⇒ refuse (FR-004a); W4 FIX.4.x byte-identical regression guard (no 1137 emitted, wire unchanged); W5 4.4-over-FIXT establishes (version-general, SC-006); W6 553/554 emit+parse+surface; W7 554 redaction in transcript/log. | ✅ planned |
 | **VII.6** Interop | un-defer `HP-fixt11-fix50sp2-cells`; live 5.0SP2 + 4.4-over-FIXT cells both roles × QFcpp/QFJ; goldens banked; manifest flipped from `deferred:fixt-routing` (SC-004) | ✅ planned |
 | **VIII.5** Allocator | Logon build appends a few optional fields (existing builder arena); inbound parse is the existing dict-free scanner; profile construction is a 4-byte value. Confirm no new heap on the establishment path; reuse existing no-alloc witnesses. | ⚠ confirm at verify |
@@ -138,16 +148,18 @@ specs/033-fixt-fix50sp2-session/
 ### Source Code (repository root = library submodule)
 
 ```text
-include/fixpp/session/session_config.hpp   # NEW: default_appl_ver_id (+ optional credential config); FIXT predicate
-src/session/admin_messages.cpp             # build_logon: emit 1137 (+553/554) after 108; interpret_logon: read 1137/553/554 + return struct
+include/fixpp/session/session_config.hpp   # NEW: default_appl_ver_id = std::optional<dict::application_version> (+ optional credential config); FIXT predicate
+include/fixpp/dict/version_profile.hpp     # NEW: inverse render helper application_version → wire 1137 string (ABSENT today; res. R3 / data-model E3)
+include/fixpp/session/compid_authorization_policy.hpp  # NEW: authorize_logon(asserted_compid, logon_credentials) default-accept seam + logon_credentials value (redacting password) — res. R6 / FR-008/008a
+src/session/admin_messages.cpp             # build_logon: emit 1137 (via render helper) (+553/554) after 108; interpret_logon: read 1137/553/554 + return struct
 include/fixpp/session/admin_messages.hpp   # interpret_logon return-struct extension (heartbt + appl_ver_id + creds)
-src/session/session.cpp                    # initiator Logon emit (:752) + acceptor reply (:~1937) thread app version; inbound arm: store negotiated version, missing-1137 reject (mirror :2370+), unserviceable-version refuse, surface creds to authz (:1849+), build app version_profile for routing
-include/fixpp/session/session.hpp          # NEW: strand-confined negotiated-application-version member
-src/dictionary/...                         # (likely no change — dictionaries ship; confirm registry wiring per research R2)
-tests/session/test_fixt_logon_establishment.cpp   # NEW: W1/W2/W3/W4/W5 (build/parse/reject/refuse/4.4-over-FIXT/regression)
-tests/session/test_fixt_credentials.cpp           # NEW: W6/W7 (553/554 emit+parse+surface; 554 redaction)
+src/session/session.cpp                    # initiator Logon emit (:752) + acceptor reply (:~1937) thread app version; inbound arm: store negotiated version, missing-1137 → Reject 373=1 (mirror :2370+), unserviceable-version → Reject 371=1137/373=5, surface creds to authorize_logon (independent of the :1849+ mTLS-gated authorize)
+include/fixpp/session/session.hpp          # NEW: strand-confined negotiated-application-version member + version_registry const& handle; NEW negotiated_version_profile() const accessor
+include/fixpp/dict/version_registry.hpp / engine.hpp  # thread the engine-built version_registry (EngineConfig::dictionaries → build_version_registry, engine_config.hpp:211) to each Session (engine-lifetime ref) — res. R2
+tests/session/test_fixt_logon_establishment.cpp   # NEW: W1/W2/W3/W4/W5 (build/parse; W2 missing→373=1; W3 unserviceable→371=1137/373=5 frame; W4 4.4 byte-identical; W5 negotiated_version_profile().default_appl per version)
+tests/session/test_fixt_credentials.cpp           # NEW: W6/W7 (553/554 emit+parse+surface via authorize_logon; 554 redaction)
 tests/interop/happy/hp_fixt_fix50sp2_test.cpp     # NEW: live cells (5.0SP2 + 4.4-over-FIXT, both roles) — confirm exact path at /tasks
-phase-9-harness/...                        # un-defer + register FIXT cells; counterparty FIXT/5.0SP2 + FIXT/4.4 configs
+phase-9-harness/...                        # register the 8 cells (HP-fixt50sp2-{qfcpp,qfj}-{init,acc} + HP-fixt44-{qfcpp,qfj}-{init,acc}); counterparty FIXT11.xml transport + FIX50SP2.xml/FIX44.xml app, DefaultApplVerID=9/6; tools/run_interop_cell.py shared tag-554 redactor; flip manifest off deferred:fixt-routing
 ```
 
 **Structure Decision**: extend the existing 005 establishment path + the shipped version layer in place;
@@ -166,4 +178,15 @@ credentials; new interop cell family. No new modules beyond test files.
 
 *(Runs after this plan, before `/speckit-tasks` — [const §XVII.1]. Record convergence + sign-off here.)*
 
-- _Pending._
+- Round 1 applied 2026-06-12: Codex P1=3 P2=5 P3=1; Opus post-judging P1=3 P2=6 P3=2; rewrite addresses root causes RC1 (Normative References + false-attestation), RC2 (pin exposure/serviceability/credential/type mechanisms to existing surfaces), RC3 (name redaction + live-cell sites). Reviews: research/reviews/codex_033-fixt-fix50sp2-session_gate_a_review.md, research/reviews/opus_033-fixt-fix50sp2-session_gate_a_adversarial_review.md.
+- Round 2 applied 2026-06-12: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=1; rewrite addresses F1 (scope the 1128-no-switch guarantee to the dict-free session layer — has_per_message_override gates nothing in reify, so the fix is doc-only, NOT a flag flip or new reify mode), F2 (narrow C2 to build_logon establishment frames), F3 (grep-sweep 2 stale "existing authorization path" → authorize_logon). Reviews: research/reviews/codex_033-fixt-fix50sp2-session_gate_a_2_review.md, research/reviews/opus_033-fixt-fix50sp2-session_gate_a_2_adversarial_review.md.
+
+### Round 2 — disagreements
+
+- **F1 remedy correction (Codex's *first* suggested fix was a no-op — NOT applied literally).** Codex's diagnosis (exposed `has_per_message_override=true` vs the "1128 never switches" guarantee) is upheld, but its literal remedy "set `has_per_message_override=false`" was rejected: source verification (`src/dictionary/version_profile.cpp::resolve_application_version` + `src/dictionary/reify.cpp:215-223`) confirms the flag is read by **zero** resolution lines — `1128`/`1137` is honored whenever present regardless of the flag. Flipping it gates nothing. The applied fix is doc-only: the no-switch guarantee (FR-010 / INV-FIXT-3 / C9) is re-scoped to the **session layer** (which delivers app messages dict-free and never reifies → never selects a dictionary, so never switches one); the per-message-override claim was dropped from the exposed-profile shorthand and the `has_per_message_override` field re-described as a documentation-only descriptor not consulted by resolution. Preserves data-model E1 "reused unchanged"; the HEAVY default-only-reify path (new dict surface, contradicts E1) was explicitly rejected.
+- **F3 scope (sweep needle).** Only `spec.md:22` and `spec.md:137` carried the stale "existing authorization path" phrasing. The three remaining `authorize(peer_identity, compid)` references (`spec.md:28`, FR-008 at `spec.md:104`, `plan.md:58`) are load-bearing **contrast** refs (they name the existing mTLS-gated seam to justify the NEW `authorize_logon`) and were intentionally left untouched. Final sweep needle = the literal stale phrase "authorization path", not "authoriz".
+
+### Round 1 — disagreements
+
+- No Codex finding was overturned (no `Disagree`). Codex P2#6 (`default_appl_ver_id` type/render) was a factual **correction**, not a disagreement: Codex's two examples were backwards. The wire `ApplVerID` values for `v44`→`"6"` and `v50sp2`→`"9"` actually **coincide** with intuition and do NOT prove the divergence; the real divergences are enum `v40`→wire `"2"` and enum `v50`→wire `"7"`. The conclusion (pin the type as `std::optional<dict::application_version>` + add the absent inverse render helper) is adopted with the corrected examples (research R3 / data-model E3): emit tests use `v50sp2`→`1137=9`, `v44`→`1137=6`, `v50`→`1137=7` (divergent, the discriminating case), invalid/`Unknown`→fail before Logon.
+- Opus New-2 (P3, NOT a defect): BeginString length-agnostic emit, distinct SessionId keying per family, and the permissive `interpret_logon default: break` scanner all HOLD for FIXT — recorded as confirmed-safe in research R9; NOT over-corrected.
