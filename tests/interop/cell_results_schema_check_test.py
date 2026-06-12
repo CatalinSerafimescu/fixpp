@@ -34,12 +34,6 @@ DEFERRED_TAGS = {
     # fixpp's receive-path PossDup tolerance is proven engine-independently via
     # the 4 PD-QFj-* cells + test_inbound_poss_dup_tolerance.cpp.
     "deferred:qfcpp-no-possdup-injection",
-    # First live run of the 024 reset_on_logon INITIATOR cells found a real fixpp
-    # bug: the initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo
-    # (session.cpp:3185; 030 fixed only the inbound twin) → next send duplicates
-    # 34=1. The 2 RL-*-init cells are deferred to a 030/031-class fix-feature; the
-    # 2 RL-*-acc cells pass live (030-fixed acceptor path). See L-024-2.
-    "deferred:initiator-141echo-outbound-rebase",
 }
 
 
