@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>  // dict::application_version — T016/033
 #include <fixpp/session/seqnum.hpp>
 #include <optional>
 #include <span>
@@ -40,18 +41,43 @@ namespace fixpp::session {
 //               (e.g. "20240101-00:00:00.000") for tag 52.
 // reset_seqnum: when true, emits ResetSeqNumFlag(141)=Y.
 //   bilateral_strict mode sets this to request mutual seqnum reset [FR-017].
+// default_appl_ver_id: when set (FIXT sessions only), emits DefaultApplVerID(1137)
+//   after 108, before 141 (data-model E4 / FR-002). Rendered via
+//   render_appl_ver_id(); an Unknown value is propagated as an error (no garbage
+//   on wire). When nullopt (FIX.4.x path), no 1137 is emitted — byte-identical.
+//   [033 T016; data-model E4; contracts/fixt-logon-establishment.md C1/C2]
 // FR-002/FR-003/RC#4: kBeginStringDefault + kSendingTimePlaceholder REMOVED.
 // RC#C (gate-b/r1): added reset_seqnum parameter for 141=Y support [FR-017].
+// 033 T022 (US2): optional Username(553)/Password(554) params — emitted after 1137,
+//   before 141, when set (data-model E4). Absent (nullopt) ⇒ no 553/554 emitted
+//   ⇒ FIX.4.x callers pass nullopt and remain byte-identical (INV-FIXT-1/W4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum = false,
-    std::optional<seqnum_t> next_expected_seq = std::nullopt) noexcept;
+    std::optional<seqnum_t> next_expected_seq = std::nullopt,
+    std::optional<fixpp::dict::application_version> default_appl_ver_id = std::nullopt,
+    std::optional<std::string_view> username = std::nullopt,
+    std::optional<std::string_view> password = std::nullopt) noexcept;
+
+// 033 T007 / data-model E5 — interpret_logon return type extension.
+// Carries the validated HeartBtInt plus optional FIXT-specific fields scanned
+// from the inbound Logon frame. All string_view members are views INTO the
+// caller-supplied `frame` span (zero-copy, no heap — [const §VIII.5]).
+// [033 data-model.md E5; research R2; FR-003/FR-004/FR-008a]
+struct logon_interpret_result {
+    int heartbt_int;                                      // validated HeartBtInt(108) value
+    std::optional<std::string_view> default_appl_ver_id;  // raw wire value of tag 1137, if present
+    std::optional<std::string_view> username;             // raw wire value of tag 553, if present
+    std::optional<std::string_view> password;             // raw wire value of tag 554, if present
+};
 
 // Interpret an inbound Logon frame; validate BeginString/CompID/HeartBtInt.
-// Returns the negotiated HeartBtInt on success.
-// PLACEHOLDER — body lands T024/T025 (Phase 3 / US1).
-[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+// Returns logon_interpret_result on success (heartbt_int + optional FIXT fields).
+// The optional string_view fields are views into `frame`; callers must not
+// extend them beyond the frame's lifetime.
+// [033 T007 / data-model E5; 005 T021]
+[[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin) noexcept;
 

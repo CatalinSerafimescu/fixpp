@@ -36,6 +36,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -71,6 +72,8 @@ namespace fixpp::session {
 struct CompIdAuthorizationPolicy::impl {
     std::pmr::memory_resource* mr;
     std::map<std::string, std::vector<std::string>> bindings;
+    // FR-008a / 033 US2: optional logon validator (default null = accept-all).
+    CompIdAuthorizationPolicy::logon_validator_fn logon_validator;
 
     explicit impl(std::pmr::memory_resource* r) : mr{r ? r : std::pmr::get_default_resource()} {}
 
@@ -326,6 +329,43 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
 [[nodiscard]] bool CompIdAuthorizationPolicy::has_principal(
     std::string_view principal) const noexcept {
     return impl_->bindings.contains(std::string{principal});
+}
+
+// ── FR-008a / 033 US2 — credential authorization seam ─────────────────────────
+//
+// authorize_logon: default-accept unless a validator has been installed via
+// set_logon_validator(). The validator is the FR-008a future validation knob.
+// Independent of the mTLS-gated authorize() seam (research R6 / contracts C7).
+//
+// noexcept contract: this function is declared noexcept. A user-installed
+// logon_validator may throw; the throw is absorbed here (try/catch returns false,
+// treating any exception as a reject). Callers MUST NOT add a try/catch around
+// this call site — it would be inert across the noexcept boundary.
+// [gate-b/r1 FQ-2; 033 T021; contracts C7; research R6; FR-008/FR-008a; data-model E5]
+
+[[nodiscard]] bool CompIdAuthorizationPolicy::authorize_logon(
+    std::string_view asserted_compid, logon_credentials const& creds) const noexcept {
+    if (impl_->logon_validator) {
+        // Validator installed: delegate to it. A throwing validator is converted
+        // to a reject (returns false) here, keeping noexcept honest. Any throw
+        // that crossed the noexcept boundary would invoke std::terminate — the
+        // old comment claiming "callers guard with try/catch" was INCORRECT:
+        // terminate fires inside the noexcept frame before any caller frame.
+        // [gate-b/r1 FQ-2; [const §X.5] noexcept convention]
+        try {
+            return impl_->logon_validator(asserted_compid, creds);
+        } catch (...) {
+            // Throwing validator → treat as reject. The session arm routes
+            // a false return to Disconnected without process termination.
+            return false;
+        }
+    }
+    // Default: accept (FR-008a deferred; future validation knob attaches here).
+    return true;
+}
+
+void CompIdAuthorizationPolicy::set_logon_validator(logon_validator_fn validator) {
+    impl_->logon_validator = std::move(validator);
 }
 
 }  // namespace fixpp::session

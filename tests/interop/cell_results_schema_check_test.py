@@ -25,7 +25,8 @@ KINDS = {"happy", "thorny", "parity"}
 CONFIGS = {"normal", "asan-ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 DEFERRED_TAGS = {
-    "deferred:fixt-routing",
+    # deferred:fixt-routing RETIRED 2026-06-12 (033 US3): the 8 FIXT.1.1
+    # establishment cells are live (HP-*-fixt11-{fix50sp2,fix44}-logon-hb-logout).
     "deferred:fix8-revisit",
     "deferred:v1.1-mtls",
     # QuickFIX-cpp cannot emit a controllable too-low PossDup (Session::send()
@@ -34,12 +35,6 @@ DEFERRED_TAGS = {
     # fixpp's receive-path PossDup tolerance is proven engine-independently via
     # the 4 PD-QFj-* cells + test_inbound_poss_dup_tolerance.cpp.
     "deferred:qfcpp-no-possdup-injection",
-    # First live run of the 024 reset_on_logon INITIATOR cells found a real fixpp
-    # bug: the initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo
-    # (session.cpp:3185; 030 fixed only the inbound twin) → next send duplicates
-    # 34=1. The 2 RL-*-init cells are deferred to a 030/031-class fix-feature; the
-    # 2 RL-*-acc cells pass live (030-fixed acceptor path). See L-024-2.
-    "deferred:initiator-141echo-outbound-rebase",
 }
 
 
@@ -173,8 +168,17 @@ EXPECTED_IDS = frozenset({
     "BM-QFcpp-acc-fix44-nos-execrpt",
     "BM-QFj-init-fix44-nos-execrpt",
     "BM-QFj-acc-fix44-nos-execrpt",
-    # Deferred rows (3)
-    "HP-fixt11-fix50sp2-cells",
+    # 033 FIXT.1.1 establishment live cells (8) — was the deferred:fixt-routing
+    # placeholder HP-fixt11-fix50sp2-cells; retired 2026-06-12 (033 US3 SC-004/006).
+    "HP-QFcpp-init-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFcpp-acc-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFcpp-init-fixt11-fix44-logon-hb-logout",
+    "HP-QFcpp-acc-fixt11-fix44-logon-hb-logout",
+    "HP-QFj-init-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFj-init-fixt11-fix44-logon-hb-logout",
+    "HP-QFj-acc-fixt11-fix44-logon-hb-logout",
+    # Deferred rows (2)
     "HP-fix8-happy-cells",
     "HP-mutual-mtls-cells",
     # US2 thorny corpus P1 (7)

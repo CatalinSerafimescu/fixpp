@@ -79,6 +79,17 @@ struct counter_guard {
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)},
       engine_cfg_{std::move(cfg)},
+      // 033 T006: build the engine-lifetime application version registry from
+      // engine_cfg_.dictionaries. Always succeeds for a well-formed EngineConfig;
+      // an empty dictionaries list yields an empty registry (any get() returns
+      // dict_no_dictionary_for_application_version). Sessions hold a const*
+      // handle to this member. build_version_registry returns expected_t but always
+      // holds a value (version_registry{dictionaries} constructor is noexcept);
+      // .value() is safe and never throws here. Initialized before
+      // engine_trace_ctx_snapshot_ to match declaration order in engine.hpp
+      // (avoids -Wreorder under CI's -Werror).
+      // [033 data-model.md E2; research R2 threading; engine_config.hpp:211]
+      app_version_registry_{fixpp::core::build_version_registry(engine_cfg_).value()},
       // 017 owned amendment #2: seed the engine-level trace_context snapshot
       // from EngineConfig::engine_trace_context at construction time.
       // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
@@ -861,7 +872,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // On open() failure, close the transport and exit the loop (fatal).
         // T013: hold the session locally until the control-strand publish —
         // do NOT write entry.session directly from the session strand.
-        auto local_session = std::make_shared<Session>(engine_cfg, entry.config);
+        // 033 T006: pass &engine.app_version_registry_ so the Session can
+        // check application version serviceability at inbound FIXT Logon.
+        auto local_session =
+            std::make_shared<Session>(engine_cfg, entry.config, &engine.app_version_registry_);
         {
             auto res = co_await local_session->open();
             if (!res.has_value()) {
@@ -1006,7 +1020,10 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
 
     // Step 1: engine-managed lazy-connect — defer the at-open Logon (T016(d)).
     entry.config.engine_managed = true;
-    auto local_session = std::make_shared<Session>(engine_cfg, entry.config);
+    // 033 T006: pass &engine.app_version_registry_ so the Session can check
+    // application version serviceability at inbound FIXT Logon.
+    auto local_session =
+        std::make_shared<Session>(engine_cfg, entry.config, &engine.app_version_registry_);
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await local_session->open();

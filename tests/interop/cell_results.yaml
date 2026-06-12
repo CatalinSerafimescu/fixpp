@@ -64,8 +64,21 @@ cells:
   - { id: BM-QFj-init-fix44-nos-execrpt,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
   - { id: BM-QFj-acc-fix44-nos-execrpt,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
 
+  # ── 033 FIXT.1.1 establishment live cells (8) — was deferred:fixt-routing ─────
+  # SC-004/SC-006: both engines × both roles × {FIX.5.0SP2 (1137=9), FIX.4.4-over-
+  # FIXT (1137=6)}. Live-proven 2026-06-12 (033 US3 T027); goldens banked under
+  # phase-9-harness/golden/ (1137 locked literal). The fixt-routing deferral is
+  # retired (S-020 FIXT half / S-025 DefaultApplVerID now done — 033).
+  - { id: HP-QFcpp-init-fixt11-fix50sp2-logon-hb-logout, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFcpp-acc-fixt11-fix50sp2-logon-hb-logout,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFcpp-init-fixt11-fix44-logon-hb-logout,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFcpp-acc-fixt11-fix44-logon-hb-logout,     config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFj-init-fixt11-fix50sp2-logon-hb-logout,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFj-init-fixt11-fix44-logon-hb-logout,      config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFj-acc-fixt11-fix44-logon-hb-logout,       config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+
   # ── US1 deferred rows (present, NOT executed → status n/a) ───────────────────
-  - { id: HP-fixt11-fix50sp2-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fixt-routing", deferred_reason: "fixpp cannot establish a FIXT.1.1/5.0SP2 session yet (S-020 FIXT half, S-025 DefaultApplVerID(1137) backlog).", spec_ref: "FIXT.1.1 §5" }
   - { id: HP-fix8-happy-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fix8-revisit", deferred_reason: "Fix8 is corpus-only at v1.0; live disposition revisited from corpus findings (FR-009).", spec_ref: "FIX-SL §4" }
   - { id: HP-mutual-mtls-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:v1.1-mtls", deferred_reason: "Client-cert mutual-mTLS identity binding is the v1.1 reach; v1.0 baseline is server-auth one_way_ca (FR-025).", spec_ref: "FIXS §3.2/§3.4" }
 
@@ -116,17 +129,14 @@ cells:
   # T016 initiator (C6.1): fixpp init + reset_on_logon=true → 141=Y + 34=1 to live acceptor.
   # T017 acceptor (C6.2): live init sends 141=Y + 34=1 → fixpp acceptor resets before validation.
   # Skip:counterparty-unavailable locally (FR-023); golden capture deferred to first paired run.
-  # 024 ResetOnLogon — ACCEPTOR cells now live-green both engines (2026-06-11,
-  # goldens banked, 030-fixed acceptor path). The INITIATOR cells are deferred:
-  # the first-ever live run found a real fixpp bug — a reset_on_logon=true initiator
-  # rebases its OUTBOUND seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185
-  # peer_ack_sent_reset_flag → reset_seqnums_to_one_durable; 030 fixed the inbound
-  # twin at :3360 but not the outbound), so the next send would duplicate 34=1.
-  # Unit-confirmed (ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2),
-  # engine-independent (QFcpp + QFj fail identically). 030/031-class fix-feature;
-  # see L-024-2.
-  - { id: RL-QFcpp-init-fix44-reset-on-logon, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:initiator-141echo-outbound-rebase", deferred_reason: "First live run found a fixpp bug: a reset_on_logon=true initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185 reset_seqnums_to_one_durable; 030 fixed only the inbound twin), so the next send duplicates 34=1. Unit ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2; engine-independent. Deferred to a 030/031-class fix-feature; see L-024-2.", spec_ref: "024 T016 C6.1/SC-005/FR-010" }
-  - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:initiator-141echo-outbound-rebase", deferred_reason: "First live run found a fixpp bug: a reset_on_logon=true initiator rebases its outbound seqnum 2->1 on the peer's 141=Y echo (session.cpp:3185 reset_seqnums_to_one_durable; 030 fixed only the inbound twin), so the next send duplicates 34=1. Unit ResetOnLogon_Initiator_ResetsAndEmits141 expects outbound==2; engine-independent. Deferred to a 030/031-class fix-feature; see L-024-2.", spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  # 024 ResetOnLogon — ACCEPTOR cells live-green both engines (2026-06-11, goldens
+  # banked, 030-fixed acceptor path). The INITIATOR cells were deferred on the first
+  # live run (a fixpp bug: a reset_on_logon=true initiator rebased its OUTBOUND seqnum
+  # 2->1 on the peer's 141=Y echo; see L-024-2). RESOLVED by 032 (PR #115, merged
+  # 2026-06-12): now live-green both engines (goldens banked 2026-06-12), closing the
+  # 032 T021/SC-003 live close-out.
+  - { id: RL-QFcpp-init-fix44-reset-on-logon, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
+  - { id: RL-QFj-init-fix44-reset-on-logon,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T016 C6.1/SC-005/FR-010" }
   - { id: RL-QFcpp-acc-fix44-reset-on-logon,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
   - { id: RL-QFj-acc-fix44-reset-on-logon,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "024 T017 C6.2/SC-005/FR-010" }
   # ── G3 slice (030-received-reset-inbound-advance) received-141 acceptor cell (2) ──

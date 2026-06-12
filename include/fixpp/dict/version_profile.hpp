@@ -140,4 +140,37 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 // `dict_field_not_present` slot; the 6 new slots (23..28) are exactly the
 // RC#1 + D-10 set in data-model.md "Error mapping" (spec Assumption A6).
 
+// ─── 033 ADDITION — inverse render helper (data-model.md E3 / research R3) ──
+// application_version → wire ApplVerID(1137) string, the inverse of
+// resolve_application_version (wire→C++). MUST use this table; never reuse the
+// C++ enum index (which diverges: v40→"2" not "1", v50→"7" not "6", etc.).
+// Returns `std::unexpected` for application_version::Unknown or any out-of-range
+// value — no garbage string reaches the wire.
+// Inline/constexpr — no out-of-line compilation unit required; the view points
+// into static literal storage (no lifetime hazard).
+[[nodiscard]] inline core::expected_t<std::string_view> render_appl_ver_id(
+    application_version v) noexcept {
+    switch (v) {
+        case application_version::v40:
+            return std::string_view{"2"};
+        case application_version::v41:
+            return std::string_view{"3"};
+        case application_version::v42:
+            return std::string_view{"4"};
+        case application_version::v43:
+            return std::string_view{"5"};
+        case application_version::v44:
+            return std::string_view{"6"};
+        case application_version::v50:
+            return std::string_view{"7"};
+        case application_version::v50sp1:
+            return std::string_view{"8"};
+        case application_version::v50sp2:
+            return std::string_view{"9"};
+        case application_version::Unknown:
+            break;
+    }
+    return std::unexpected{core::error::dict_unknown_appl_ver_id};
+}
+
 }  // namespace fixpp::dict

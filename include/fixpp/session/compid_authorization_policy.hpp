@@ -14,11 +14,13 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <string_view>
 
 #include "fixpp/core/error.hpp"  // error enum + expected_t<T>
+#include "fixpp/session/logon_credentials.hpp"  // logon_credentials — T021/033 US2
 #include "fixpp/tls/peer_identity.hpp"
 
 namespace fixpp::session {
@@ -84,6 +86,37 @@ public:
     // Accessor — true if at least one binding exists for the given principal
     // value. Operator audit helper; NOT for hot-path use.
     [[nodiscard]] bool has_principal(std::string_view principal) const noexcept;
+
+    // ── FR-008a / 033 US2 — credential authorization seam ────────────────────
+    //
+    // authorize_logon: called on the acceptor inbound-Logon establishment path
+    // independently of mTLS (fired whether or not the TLS-gated `authorize` ran).
+    // Default implementation: ACCEPT (returns true). No credential validation in
+    // v1.0 (FR-008a deferred); this seam is the attach point for the future
+    // config-gated validation knob.
+    //
+    // asserted_compid: peer's SenderCompID(49) from the inbound Logon.
+    // creds: parsed Username(553)/Password(554), or both absent when not sent.
+    //
+    // [033 research R6; contracts C7; data-model E5; FR-008/FR-008a]
+    [[nodiscard]] bool authorize_logon(std::string_view asserted_compid,
+                                       logon_credentials const& creds) const noexcept;
+    // noexcept: a throwing logon_validator is caught INSIDE authorize_logon and
+    // converted to a reject (returns false → Disconnected). The validator is NOT
+    // required to be noexcept — the conversion happens at the noexcept boundary
+    // here, keeping std::terminate from firing. Callers MUST NOT wrap this call
+    // in a try/catch: it is inert across the noexcept boundary.
+    // [gate-b/r1 FQ-2; [const §X.5] noexcept convention]
+
+    // set_logon_validator: install the future FR-008a validation knob.
+    // The callable is invoked by authorize_logon() instead of the default-accept.
+    // Signature: bool(std::string_view asserted_compid, logon_credentials const& creds).
+    // Returns true → accept; false → reject (causes Disconnected in the session arm).
+    // Setting nullptr restores default-accept behaviour.
+    // NOT noexcept — the validator may be set at config-build time, not on the hot path.
+    // [033 T021; FR-008a future validation knob; research R6]
+    using logon_validator_fn = std::function<bool(std::string_view, logon_credentials const&)>;
+    void set_logon_validator(logon_validator_fn validator);
 
 private:
     // Storage: std::pmr::unordered_map<std::pmr::string,

@@ -62,6 +62,10 @@ class TracerProvider;  // 017 T012: tracer_override field ([2d §4.5])
 // [const §XV.9] verified safe in Gate A (New-5): fix_time.hpp is mutex-free
 // chrono; it pulls no std::mutex into the session.hpp awaitable closure.
 #include <fixpp/core/fix_time.hpp>
+// 033 T003 — application_version enum for default_appl_ver_id field (E3).
+// [const §XV.9] verified safe: version_profile.hpp includes only <cstdint>,
+// <string_view>, <type_traits>, <fixpp/core/error.hpp> — no std::mutex.
+#include <fixpp/dict/version_profile.hpp>
 
 namespace fixpp::transport {
 class TransportFactory;  // [2d §4.5] forward decl per [2h App D §D.2] sign-off; the actual
@@ -425,6 +429,35 @@ struct SessionConfig {
     // 021/022/024/026/027 knobs (those default false; this defaults true).
     // No new include: primitive bool, §XV.9 N/A (data-model E1).
     bool validate_sequence_numbers = true;
+
+    // ── 033 T003 / data-model E3 — FIXT.1.1 / FIX 5.0 SP2 config extensions ──
+    //
+    // default_appl_ver_id: the default application version this side advertises in
+    //   DefaultApplVerID(1137) on every outbound FIXT.1.1 Logon (initiator + acceptor
+    //   reply). REQUIRED when begin_string=="FIXT.1.1"; unset => FIX.4.x path (byte-
+    //   identical, INV-FIXT-1 / SC-002). Type: dict::application_version enum (NOT a
+    //   raw wire string) — prevents "1137" index-reuse bugs (version_profile.hpp:117-132).
+    //   An Unknown or missing value with begin_string=="FIXT.1.1" fails before Logon.
+    //   [033 data-model.md E3; research R2/R3; FR-001/FR-003]
+    std::optional<fixpp::dict::application_version> default_appl_ver_id;
+
+    // username / password: optional FIX Logon credentials emitted as
+    //   Username(553) / Password(554) in the outbound Logon when set.
+    //   Parsed and surfaced inbound (E5 / FR-008a); Password is REDACTED in logs
+    //   (INV-FIXT-4 / FR-011). Validation of inbound credentials is deferred to a
+    //   future config-gated feature (Clarify 2026-06-12 FR-008a); these fields
+    //   cover the parse+surface slice only.
+    //   [033 data-model.md E3; FR-008a; INV-FIXT-4]
+    std::optional<std::string> username;
+    std::optional<std::string> password;
+
+    // FIXT session predicate: true iff begin_string=="FIXT.1.1" AND
+    // default_appl_ver_id is set (E3 / FR-001). Must hold for the engine to emit
+    // 1137 on the outbound Logon and to enforce its presence inbound (FR-004/FR-004a).
+    // FIX.4.x sessions return false — no FIXT-only field is emitted (INV-FIXT-1).
+    [[nodiscard]] bool is_fixt() const noexcept {
+        return begin_string == "FIXT.1.1" && default_appl_ver_id.has_value();
+    }
 };
 
 // FR-001 / D-1 — hygiene gate: SessionConfig must be copy-constructible so

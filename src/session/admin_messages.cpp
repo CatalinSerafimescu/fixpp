@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/writer.hpp>
@@ -76,8 +77,9 @@ namespace {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
-    std::string_view sending_time, bool reset_seqnum,
-    std::optional<seqnum_t> next_expected_seq) noexcept {
+    std::string_view sending_time, bool reset_seqnum, std::optional<seqnum_t> next_expected_seq,
+    std::optional<fixpp::dict::application_version> default_appl_ver_id,
+    std::optional<std::string_view> username, std::optional<std::string_view> password) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -146,6 +148,37 @@ namespace {
         }
     }
 
+    // 1137=DefaultApplVerID — emitted for FIXT sessions only (when default_appl_ver_id is set).
+    // Data-model E4: ordered after 108 (HeartBtInt), before 141 (ResetSeqNumFlag).
+    // Rendered via render_appl_ver_id(); an Unknown value is propagated as an error (no
+    // garbage on wire — [const §VIII.5] zero-alloc, no heap).
+    // FIX.4.x callers pass nullopt → no field emitted → byte-identical (INV-FIXT-1 / SC-002).
+    // [033 T016; data-model E4; contracts/fixt-logon-establishment.md C1/C2; FR-002]
+    if (default_appl_ver_id.has_value()) {
+        auto rendered = fixpp::dict::render_appl_ver_id(*default_appl_ver_id);
+        if (!rendered) {
+            return std::unexpected(rendered.error());
+        }
+        if (auto r = w.append_raw(1137, sv_to_bytes(*rendered)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 553=Username + 554=Password — emitted for FIXT sessions when configured.
+    // Data-model E4: ordered after 1137, before 141 (regardless of 141 presence).
+    // FIX.4.x callers pass nullopt → no 553/554 emitted → byte-identical (W4/INV-FIXT-1).
+    // [033 T022; data-model E4; contracts C1/C2; FR-007; INV-FIXT-1]
+    if (username.has_value()) {
+        if (auto r = w.append_raw(553, sv_to_bytes(*username)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    if (password.has_value()) {
+        if (auto r = w.append_raw(554, sv_to_bytes(*password)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
     // 141=Y (ResetSeqNumFlag) — emitted only when reset_seqnum=true.
     // RC#C (gate-b/r1): bilateral_strict callers set this to request mutual reset.
     // [spec.md FR-017; Clarifications Q1=A]
@@ -180,14 +213,16 @@ namespace {
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // / begin matches the on-wire field order).
-[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+[[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    // Parse using the dict-free Iter mode: no heap, no dictionary required.
+    // Parse using the dict-free SOH-delimited scanner: no heap, no dictionary required.
     // Fields of interest:
     //   8=BeginString, 35=MsgType (must be "A"), 49=SenderCompID, 56=TargetCompID,
     //   108=HeartBtInt.
+    // 033 T007: additionally scan tag 1137 (DefaultApplVerID), 553 (Username),
+    //   554 (Password) — purely additive, no validation here (session arm handles it).
     // We skip 34, 52, 98 for this validation step.
 
     // Build a framer view over the raw bytes (no framing validation needed here;
@@ -204,6 +239,11 @@ namespace {
     std::string_view target_found;
     int heartbt_int_found = -1;
     bool has_heartbt = false;
+    // 033 T007 / data-model E5: optional FIXT fields scanned as string_view views
+    // into `frame` (zero-copy; caller frame outlives this function).
+    std::optional<std::string_view> default_appl_ver_id_found;
+    std::optional<std::string_view> username_found;
+    std::optional<std::string_view> password_found;
 
     // Simple SOH-delimited field scanner (no heap, no library dependency).
     const std::byte SOH{0x01};
@@ -266,6 +306,18 @@ namespace {
                         has_heartbt = true;
                     }
                     break;
+                // 033 T007 / data-model E5: scan FIXT Logon fields as views into frame
+                // (zero-copy; no validation here — session arm enforces missing-1137 /
+                // unserviceable-1137 / 553+554 surface logic).
+                case 1137:
+                    default_appl_ver_id_found = val;
+                    break;
+                case 553:
+                    username_found = val;
+                    break;
+                case 554:
+                    password_found = val;
+                    break;
                 default:
                     break;
             }
@@ -315,7 +367,8 @@ namespace {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
-    return heartbt_int_found;
+    return logon_interpret_result{.heartbt_int=heartbt_int_found, .default_appl_ver_id=default_appl_ver_id_found, .username=username_found,
+                                  .password=password_found};
 }
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────

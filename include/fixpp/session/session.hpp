@@ -61,6 +61,13 @@ class Transport;
 struct handshake_result;
 }  // namespace fixpp::transport
 
+namespace fixpp::dict {
+// 033 T006: non-owning handle for the engine-built application-version registry.
+// Forward-declared to keep session.hpp free of version_registry.hpp's includes
+// ([const §XV.9] — full def in session.cpp via version_registry.hpp include).
+class version_registry;
+}  // namespace fixpp::dict
+
 namespace fixpp::session {
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
@@ -93,7 +100,14 @@ public:
     // potentially-throwing copy would call std::terminate on any thrown
     // copy — UB-class hazard. Matches the close() precedent below (NOT
     // noexcept because std::make_shared allocates).
-    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg);
+    // 033 T006: app_version_registry is a non-owning nullable handle to the
+    // engine-built dict::version_registry (data-model E2 serviceability check at
+    // inbound FIXT Logon). Default null = no registry (test construction path;
+    // FIX.4.x sessions that never consult the registry). The Engine passes
+    // &engine.app_version_registry_ — its lifetime spans all Sessions.
+    // [033 data-model.md E2; research R2 threading; T006]
+    Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg,
+            const fixpp::dict::version_registry* app_version_registry = nullptr);
 
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -291,6 +305,18 @@ public:
     // DEFERRED comment from 013 RESOLVED. [FR-032; data-model §E-3; T017/T018]
     [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
         std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept;
+
+    // 033 T008 / data-model E2 — negotiated FIXT application version profile.
+    // Strand-confined accessor; valid (non-Unknown) only after a FIXT session has
+    // reached Active and set negotiated_appl_version_ at inbound-Logon parse.
+    // Returns {session=vt11, default_appl=negotiated_appl_version_, ...} for FIXT
+    // sessions; returns {session=Unknown, default_appl=Unknown, ...} for FIX.4.x
+    // sessions (negotiated_appl_version_ stays Unknown — no FIXT negotiation).
+    // Return by value (dict::version_profile is 4 bytes, trivially copyable) —
+    // no [[clang::lifetimebound]] needed.
+    // Reachable from fromApp via Engine::lookup(SessionId)→shared_ptr<Session>.
+    // [033 data-model.md E2; FR-005; SC-006/W5; INV-FIXT-2]
+    [[nodiscard]] fixpp::dict::version_profile negotiated_version_profile() const noexcept;
 
     // The per-session strand callback-dispatch path (FR-008 / I-05 / T021):
     // every application callback ({onLogon,onLogout,toAdmin,fromAdmin,toApp,
@@ -642,6 +668,25 @@ private:
     // impossible). Consumed one-shot on the peer_ack_sent_reset_flag arm.
     // Strand-confined; additive POD bool; no new include. [contract C4, data-model]
     bool own_logon_sent_reset_flag_ = false;
+
+    // ── 033 T008 / data-model E2 — negotiated FIXT application version ────────
+    // Set once at inbound FIXT Logon parse (after 1137 resolves and is verified
+    // serviceable — FR-004/FR-004a). Strand-confined (single-writer on the session
+    // strand, [const §XI.4]). Stays Unknown for FIX.4.x sessions throughout their
+    // lifetime. Exposed via negotiated_version_profile() (public).
+    // [033 data-model.md E2; INV-FIXT-2]
+    fixpp::dict::application_version negotiated_appl_version_ =
+        fixpp::dict::application_version::Unknown;
+
+    // ── 033 T006 / data-model E2 — engine-built application version registry ──
+    // Non-owning nullable handle to the Engine's engine-lifetime version_registry.
+    // Null when Session is constructed without an engine (test paths, FIX.4.x
+    // sessions that never need serviceability checks).
+    // Captured in the Session ctor; never swapped mid-session.
+    // The full type is forward-declared above; version_registry.hpp is included
+    // only in session.cpp ([const §XV.9] — avoids dragging any dict internals
+    // into the awaitable closure). [033 data-model.md E2; research R2 threading]
+    const fixpp::dict::version_registry* app_version_registry_ = nullptr;
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //

@@ -343,6 +343,16 @@ private:
     // NO Application& (FR-013 / Gate A New-2).
     fixpp::core::EngineConfig engine_cfg_;
 
+    // 033 T006 — engine-lifetime application version registry built once from
+    // engine_cfg_.dictionaries at construction (always succeeds for a well-formed
+    // EngineConfig; an empty dictionaries list yields an empty registry — any
+    // subsequent get() returns dict_no_dictionary_for_application_version).
+    // Sessions hold a non-owning const* handle; the registry outlives all Sessions
+    // because Engine::stop() drains+joins Sessions before the Engine destructs.
+    // type: dict::version_registry (complete type via engine_config.hpp include).
+    // [033 data-model.md E2; research R2 threading; T006]
+    fixpp::dict::version_registry app_version_registry_;
+
     // 017 owned amendment #2: engine-held trace_context snapshot seeded at
     // construction from EngineConfig::engine_trace_context ([2k App D §D.2]).
     // The helper TYPE (core::detail::trace_context_snapshot — seqlock/atomic

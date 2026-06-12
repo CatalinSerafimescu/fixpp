@@ -1050,3 +1050,73 @@ row; see `feature-catalogue.md`.)*
 - None specific to 030/031 (both conformance corrections; no new deferred surface). The pre-existing
   L-029-1 (post-GapFill bounded redundant resend) and L-029-3 (`bilateral_strict` non-1 cold-open
   malformed Logon) are unchanged.
+
+---
+
+## FIXT.1.1 / FIX 5.0 SP2 Session Establishment (033-fixt-fix50sp2-session)
+
+### Behaviors
+
+**B-033-1 — FIXT.1.1 / FIX 5.0 SP2 session establishment (transport/application version decoupling).**
+When `SessionConfig::version` selects a FIXT.1.1 profile, the session layer emits `BeginString=FIXT.1.1`
+and enforces the transport/application version split. Both roles (initiator and acceptor) emit
+`DefaultApplVerID(1137)` on the outbound Logon (FR-001/FR-002); the acceptor requires and validates the
+peer's `1137` field (FR-003/FR-004). The `negotiated_version_profile()` accessor on `Session` exposes
+the negotiated application version after establishment (FR-005). The implementation is version-general:
+any application-layer `ApplVerID` enum value accepted for `1137` is valid; acceptors reject only values
+they are not configured to service (FR-004a, acceptor-scoped only). When FIXT.1.1 is **not** configured,
+the FIX.4.x path is byte-identical — no wire change, no protocol divergence (FR-009/SC-002). *(FR-001
+through FR-006, FR-009; `tests/session/test_fixt_logon_establishment.cpp` W1/W2/W3/W4/W5/W8.)*
+
+**B-033-2 — Optional `Username(553)`/`Password(554)` on FIXT Logon; surfaced to `authorize_logon` seam.**
+When `SessionConfig::logon_credentials` contains a username and/or password, the session layer emits
+`Username(553)` and `Password(554)` on the outbound Logon (FR-006/FR-007). Inbound `553`/`554` are
+parsed and surfaced to the registered `CompIdAuthorizationPolicy::authorize_logon(asserted_compid,
+logon_credentials)` callback (FR-007/FR-008). The default policy implementation is accept-all; the seam
+is independent of the mTLS `verify_peer` path. A credential-free FIXT Logon (no `553`/`554` received)
+is accepted normally — credentials are optional per FIX-SL §4.3. `Password(554)` is redacted via the
+shared `redact_tag554` utility before any persistence operation (W7). *(FR-006, FR-007, FR-008;
+`tests/session/test_fixt_credentials.cpp` W6/W7.)*
+
+### Limitations
+
+**L-033-1 — Per-message `ApplVerID(1128)` routing (S-026) deferred.** Inbound `ApplVerID(1128)` is
+tolerated (not rejected) when present on application messages (FR-010, witness W8). However, per-message
+routing — using `1128` to select a message-type-specific application-layer version and dispatch
+accordingly — is **not implemented** in this feature. It remains in `backlog` as a follow-on feature.
+Operators relying on per-message versioning via `1128` should implement routing at the `fromApp` level.
+
+**L-033-2 — Acceptor-side credential validation/rejection deferred (FR-008a).** The `authorize_logon`
+seam is wired and surfaces parsed `553`/`554` values to the registered policy. However, the default
+`CompIdAuthorizationPolicy` implementation is accept-all: no built-in credential database, no
+configuration-driven reject path. Acceptors that need to reject Logons based on credential mismatch must
+supply a custom `CompIdAuthorizationPolicy` implementation. A built-in config-gated validation/rejection
+path is a committed future feature (FR-008a).
+
+**L-033-3 — Initiator-side unserviceable-`1137` dispose deferred.** FR-004a (unserviceable application
+version → `Reject` + Disconnect, NOT a Logout message) is acceptor-scoped only in this feature. An initiator that receives a peer
+Logon advertising an `1137` value it cannot service has no automatic disposal path in 033; the
+application's `authorize_logon` / `fromAdmin` hooks must handle this case explicitly if needed.
+
+**L-033-4 — `Password(554)` redaction wired at unit-golden + interop-golden; production
+logger/tap/transcript wiring is a forward obligation.** The `redact_tag554` utility is wired at the
+unit-test golden layer (W7) and (US3 T026, 2026-06-12) at the interop-golden layer — a Python
+`_redact_tag554` twin in `run_interop_cell.py`'s `normalize_transcript` AND `_transcript_to_inrepo_golden`
+(no-op for the credential-free happy cells, but fail-closed at both persistence sites). Production
+session-logger, tap-consumer, and transport-transcript wiring of the redactor is deferred — those
+surfaces are no-hook stubs in 033 (see L-017-* for the logger/tap framework limitations).
+
+**L-033-5 — Acceptor establishment requires the negotiated application version to have a registered
+application dictionary in the engine `version_registry` (operator footgun, live-found US3).** Per
+FR-004a/C5, an inbound FIXT Logon whose `DefaultApplVerID(1137)` resolves to a version with **no**
+application dictionary in `EngineConfig::dictionaries` is refused with `Reject(35=3, 371=1137, 373=5)` and
+does not reach Active — this is spec-correct (no silent mis-versioned establishment). The consequence,
+surfaced only by the live US3 acceptor cells: an acceptor configured with `default_appl_ver_id=v50sp2`
+but whose engine has **no** FIX50SP2 dictionary registered **silently rejects every FIXT Logon** (the
+serviceability gate consults the registry, NOT the session's own configured default). An operator must
+register, in the engine config, the application dictionary for every application version the acceptor is
+configured to speak. **Open question for Gate-B adjudication:** should establishment treat the acceptor's
+own `cfg.default_appl_ver_id` as serviceable-by-construction (self-register / fall back to the configured
+default) so the registry need only carry *additional* serviceable versions? Deferred to Gate B — no
+production change made in 033 (the interop fixture was corrected to register v44+v50sp2 dictionaries,
+mirroring a real FIXT-acceptor deployment).
