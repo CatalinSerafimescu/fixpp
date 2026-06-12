@@ -933,6 +933,39 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // gate-b/r1 FQ-3 (finding #3): credential delimiter injection validation.
+    //
+    // username/password are copied verbatim into append_raw() in build_logon
+    // (admin_messages.cpp:171-180) with no SOH/= validation. A configured value
+    // containing SOH (\x01) or '=' can inject arbitrary FIX fields. This is the
+    // known feedback_delimiter_injection_verbatim_field_copy anti-pattern.
+    //
+    // Floor: reject any byte < 0x20 (incl. SOH \x01) or '=' (0x3D) in
+    // username/password when set. Fail-closed at open()-time before any emission.
+    // FIX.4.x paths are NOT bypassed: these fields are version-agnostic and
+    // build_logon conditionally emits 553/554 for any config that sets them.
+    // Clean/absent credentials never trip this guard → W4 byte-identical preserved.
+    // [feedback_delimiter_injection_verbatim_field_copy; FR-007; data-model E3]
+    {
+        auto is_invalid_cred_byte = [](unsigned char c) noexcept -> bool {
+            return c < 0x20u || c == static_cast<unsigned char>('=');
+        };
+        if (cfg_.username.has_value()) {
+            for (unsigned char c : *cfg_.username) {
+                if (is_invalid_cred_byte(c)) {
+                    co_return std::unexpected(error::invalid_session_config);
+                }
+            }
+        }
+        if (cfg_.password.has_value()) {
+            for (unsigned char c : *cfg_.password) {
+                if (is_invalid_cred_byte(c)) {
+                    co_return std::unexpected(error::invalid_session_config);
+                }
+            }
+        }
+    }
+
     // ── Executor binding — the single executor_not_serialised enforcement
     // point (slot 48 / FR-009 / I-06): make_session_executor wraps
     // make_strand under per_session_strand, carries the bare attested
