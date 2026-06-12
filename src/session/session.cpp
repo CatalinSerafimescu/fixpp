@@ -911,6 +911,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // gate-b/r1 FQ-1 (findings #1 + #2): FIXT.1.1 config validation.
+    //
+    // #1 (P1): begin_string=="FIXT.1.1" with no default_appl_ver_id → is_fixt()
+    //    returns false, so the session silently routes to the FIX.4.x path and emits
+    //    a FIXT.1.1 Logon with no 1137 field — a malformed wire frame. Enforcing here
+    //    fails-closed before any observable state mutation.
+    //    [session_config.hpp:440; data-model.md E3; FR-001/FR-003]
+    //
+    // #2 (P2-defensive): begin_string=="FIXT.1.1" with is_fixt()=true but
+    //    app_version_registry_==nullptr → the acceptor serviceability gate at
+    //    inbound Logon (session.cpp:1986) is skipped. Structurally unreachable in
+    //    production (engine always passes non-null), but the test-ctor default is null.
+    //    Closing here at open()-time is cheaper than carrying a documented fail-open.
+    //    [session_config.hpp:440; data-model.md E3; FR-004/FR-004a]
+    //
+    // Tested against begin_string directly (NOT is_fixt()) — is_fixt() encodes the
+    // default_appl_ver_id half but would MISS the begin_string-without-default case.
+    if (cfg_.begin_string == "FIXT.1.1" &&
+        (!cfg_.default_appl_ver_id.has_value() || app_version_registry_ == nullptr)) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
     // ── Executor binding — the single executor_not_serialised enforcement
     // point (slot 48 / FR-009 / I-06): make_session_executor wraps
     // make_strand under per_session_strand, carries the bare attested

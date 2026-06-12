@@ -1068,6 +1068,85 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
     }
 }
 
+// ── FQ-1 Gate B r1 — open()-time FIXT config validation witnesses ────────────
+//
+// (a) Initiator: begin_string=="FIXT.1.1" + default_appl_ver_id UNSET → open()
+//     returns invalid_session_config, no Logon emitted, no Active.
+//     Isolates the "default_appl_ver_id" OR-arm of the guard.
+//     Registry is NON-null (FixtSetup) so only the missing-version arm fires.
+//
+// (b) Acceptor: begin_string=="FIXT.1.1" + default_appl_ver_id SET + null registry
+//     (test-ctor path, omit 3rd arg) → open() returns invalid_session_config.
+//     Isolates the "registry==nullptr" OR-arm of the guard.
+//
+// Both must FAIL (open() succeeds and emits garbage) before the fix;
+// PASS after.  [FQ-1; FR-003; data-model E3; session_config.hpp:440]
+
+TEST(FixtOpenValidation, FQ1a_MissingDefaultApplVerId_ReturnsInvalidConfig_NoLogon) {
+    // Use a non-null registry so only the default_appl_ver_id arm can trip.
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    // Explicitly clear default_appl_ver_id — isolates the missing-version arm.
+    cfg.default_appl_ver_id = std::nullopt;
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
+
+    // Pass non-null registry so the registry arm does NOT fire.
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync(s.ioc, [&] { return sess.open(); });
+
+    // Must return an error (invalid_session_config).
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail for FIXT.1.1 + unset default_appl_ver_id (FQ-1a)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Error must be invalid_session_config, not: "
+        << static_cast<int>(result.error());
+
+    // No Logon must have been emitted.
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (FQ-1a)";
+
+    // Session must NOT be Active.
+    EXPECT_NE(sess.state(), fsm_state::Active)
+        << "Session must NOT reach Active on invalid config (FQ-1a)";
+}
+
+TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
+    // Acceptor: default_appl_ver_id SET, but registry is null (test-ctor default).
+    // Isolates the registry==nullptr OR-arm of the guard.
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
+
+    // Omit 3rd argument → app_version_registry_ == nullptr (test-ctor path).
+    fixpp::session::Session sess(s.engine, cfg /*, no registry */);
+    auto result = run_sync(s.ioc, [&] { return sess.open(); });
+
+    // Must return an error.
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail for FIXT.1.1 acceptor with null registry (FQ-1b)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Error must be invalid_session_config, not: "
+        << static_cast<int>(result.error());
+
+    // No frame emitted.
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (FQ-1b)";
+
+    // Not Active.
+    EXPECT_NE(sess.state(), fsm_state::Active)
+        << "Session must NOT reach Active on null registry (FQ-1b)";
+}
+
 }  // namespace fixpp_fixt_inbound
 
 }  // namespace
