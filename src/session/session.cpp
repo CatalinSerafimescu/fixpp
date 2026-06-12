@@ -100,6 +100,28 @@ std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig
     return std::pmr::get_default_resource();
 }
 
+// 033: the FIXT-only Logon fields (DefaultApplVerID(1137) + optional Username(553)/
+// Password(554)) derived from SessionConfig — all-nullopt for a non-FIXT session, so a
+// FIX.4.x Logon emit is byte-identical (INV-FIXT-1 / SC-002 / W4). Shared by the initiator
+// emit and the acceptor reply (each advertises its OWN config; R1/FR-002). The string_views
+// point into cfg.username/password (Session-lifetime) — valid for the synchronous build_logon
+// call at the use site.
+struct logon_fixt_fields {
+    std::optional<fixpp::dict::application_version> default_appl_ver_id;
+    std::optional<std::string_view> username;
+    std::optional<std::string_view> password;
+};
+[[nodiscard]] logon_fixt_fields derive_logon_fixt_fields(const SessionConfig& cfg) noexcept {
+    if (!cfg.is_fixt()) {
+        return {};
+    }
+    return logon_fixt_fields{
+        cfg.default_appl_ver_id,
+        cfg.username.has_value() ? std::optional<std::string_view>{*cfg.username} : std::nullopt,
+        cfg.password.has_value() ? std::optional<std::string_view>{*cfg.password} : std::nullopt,
+    };
+}
+
 // 016 T008 — resolve the per-session reconnect policy. An operator-supplied policy
 // wins; otherwise default to the QuickFIX-compat shape (single 30 s interval,
 // unbounded) which has a NON-ZERO backoff — replacing the prior hard-coded empty
@@ -776,27 +798,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         cfg_.enable_next_expected_msg_seq_num
             ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
             : std::nullopt;
-    // 033 T017: thread FIXT DefaultApplVerID(1137) into the initiator Logon emit.
-    // is_fixt() guards FIX.4.x callers (cfg_.begin_string!="FIXT.1.1") → nullopt
-    // → no 1137 emitted → byte-identical (INV-FIXT-1 / SC-002 / FR-002).
-    // Each side advertises its OWN configured default_appl_ver_id (R1).
-    const std::optional<fixpp::dict::application_version> initr_default_appl =
-        cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
-    // 033 T023 (US2): thread configured Username(553)/Password(554) into the Logon emit.
-    // is_fixt() guards FIX.4.x callers → nullopt → byte-identical (INV-FIXT-1/W4).
-    // cfg_.username/password are optional<std::string>; convert to optional<string_view>.
-    const std::optional<std::string_view> initr_username =
-        (cfg_.is_fixt() && cfg_.username.has_value())
-            ? std::optional<std::string_view>{*cfg_.username}
-            : std::nullopt;
-    const std::optional<std::string_view> initr_password =
-        (cfg_.is_fixt() && cfg_.password.has_value())
-            ? std::optional<std::string_view>{*cfg_.password}
-            : std::nullopt;
+    // 033 T017/T023: thread the FIXT-only Logon fields (1137 + optional 553/554) into the
+    // initiator emit — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1 / SC-002 / W4).
+    const auto initr_fixt = derive_logon_fixt_fields(cfg_);
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
-        initr_next_expected, initr_default_appl, initr_username, initr_password);
+        initr_next_expected, initr_fixt.default_appl_ver_id, initr_fixt.username,
+        initr_fixt.password);
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -1975,9 +1984,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [033 contracts/fixt-logon-establishment.md C4/C5; data-model.md E2; FR-004/FR-004a;
             //  research R2/R7; INV-FIXT-2]
             if (cfg_.is_fixt() && app_version_registry_) {
-                // (a) 1137 absent → Reject(35=3, 373=1 RequiredTagMissing) + Disconnected.
-                // [C4; R7; research.md R7: missing-1137 uses RequiredTagMissing(1)]
+                // Determine the conformant disposition for the peer's DefaultApplVerID(1137):
+                //   (a) absent           → Reject 373=1 RequiredTagMissing  (C4/FR-004; R7)
+                //   (c) unserviceable    → Reject 373=5 ValueIsIncorrect    (C5/FR-004a; R2)
+                //   (d) serviceable      → record negotiated_appl_version_   (C3/E2; INV-FIXT-2)
+                // Both reject arms carry RefTagID(371)=1137 and differ ONLY in 373 — emitted by
+                // the single parameterized block below (W2 asserts 373=1; W3 asserts 373=5+371=1137).
+                std::optional<int> reject_reason;
                 if (!result->default_appl_ver_id.has_value()) {
+                    reject_reason = 1;  // RequiredTagMissing
+                } else {
+                    const fixpp::dict::version_profile vt11_profile{
+                        fixpp::dict::session_version::vt11,
+                        fixpp::dict::application_version::Unknown, false, 0};
+                    auto resolved =
+                        fixpp::dict::resolve_application_version(vt11_profile,
+                                                                 *result->default_appl_ver_id);
+                    const bool serviceable =
+                        resolved.has_value() && app_version_registry_->get(*resolved).has_value();
+                    if (!serviceable) {
+                        reject_reason = 5;  // ValueIsIncorrect
+                    } else {
+                        // (d) Set-once (FSM NotConnected gate → once per session).
+                        negotiated_appl_version_ = *resolved;
+                    }
+                }
+
+                if (reject_reason.has_value()) {
+                    // Session-level Reject(35=3, 371=1137, 373=*reject_reason) + Disconnected.
+                    // toAdmin hook fires before store_then_emit (mirrors the reply-Logon path;
+                    // [[feedback_admin_emit_bypasses_fire_to_admin]] — do NOT route through the
+                    // fire_to_admin_-less emit_session_reject_ helper).
                     const auto rj_st52 =
                         effective_clock_
                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
@@ -1988,17 +2025,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     auto rj_r = fixpp::session::build_reject(
                         std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
                         cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
-                        1137,  // RefTagID = 1137 (DefaultApplVerID — the missing required tag)
+                        1137,  // RefTagID = 1137 (DefaultApplVerID)
                         "A",   // RefMsgType = Logon
-                        1,     // SessionRejectReason = 1 (RequiredTagMissing)
-                        cfg_.begin_string, rj_st52.value);
+                        *reject_reason, cfg_.begin_string, rj_st52.value);
                     if (rj_r) {
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(assign_r.error());
                         }
-                        // 033: toAdmin hook — mirrors acceptor reply Logon pattern.
                         if (!fire_to_admin_(*rj_r)) {
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -2009,62 +2044,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-
-                // (b) 1137 present: resolve + serviceability check.
-                // resolve_application_version maps the wire string to application_version enum.
-                // app_version_registry_->get() checks if we have a dictionary for it.
-                // [C5; R2: Resolve + serviceability check]
-                const fixpp::dict::version_profile vt11_profile{
-                    fixpp::dict::session_version::vt11,
-                    fixpp::dict::application_version::Unknown, false, 0};
-                auto resolved =
-                    fixpp::dict::resolve_application_version(vt11_profile,
-                                                             *result->default_appl_ver_id);
-                bool serviceable = false;
-                if (resolved.has_value()) {
-                    auto dict_r = app_version_registry_->get(*resolved);
-                    serviceable = dict_r.has_value();
-                }
-
-                if (!serviceable) {
-                    // (c) Unserviceable → Reject(35=3, 371=1137, 373=5 ValueIsIncorrect).
-                    // DISTINCT from (a): 373=5 vs 373=1. [C5; R2]
-                    const auto rj_st52 =
-                        effective_clock_
-                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-                            : SendingTimeStamp{};
-                    const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-                    const seqnum_t rj_ref = parse_seqnum(scan_frame_header(frame).msg_seq_num);
-                    std::array<std::byte, 512> rj_buf{};
-                    auto rj_r = fixpp::session::build_reject(
-                        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                        cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
-                        1137,  // RefTagID = 1137 (DefaultApplVerID — the unserviceable field)
-                        "A",   // RefMsgType = Logon
-                        5,     // SessionRejectReason = 5 (ValueIsIncorrect)
-                        cfg_.begin_string, rj_st52.value);
-                    if (rj_r) {
-                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                        if (!assign_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(assign_r.error());
-                        }
-                        // 033: toAdmin hook — mirrors acceptor reply Logon pattern.
-                        if (!fire_to_admin_(*rj_r)) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                        }
-                        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
-                        (void)emit_r;  // I-07
-                    }
-                    record_state_transition_(fsm_state::Disconnected);
-                    co_return fixpp::core::expected_t<void>{};
-                }
-
-                // (d) Serviceable: record the negotiated application version (C3/E2).
-                // Set-once (protected by FSM NotConnected gate — only runs once per session).
-                // [033 data-model.md E2 (negotiated_appl_version_); INV-FIXT-2]
-                negotiated_appl_version_ = *resolved;
             }
 
             // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
@@ -2185,26 +2164,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     cfg_.enable_next_expected_msg_seq_num
                         ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
                         : std::nullopt;
-                // 033 T017: thread FIXT DefaultApplVerID(1137) into the acceptor reply Logon.
-                // is_fixt() guards FIX.4.x sessions → nullopt → byte-identical (INV-FIXT-1).
-                // Acceptor advertises its OWN configured default_appl_ver_id (FR-002 / R1).
-                const std::optional<fixpp::dict::application_version> acpt_default_appl =
-                    cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
-                // 033 T023 (US2): thread configured credentials into the acceptor reply Logon.
-                // is_fixt() guards FIX.4.x sessions → nullopt → byte-identical (INV-FIXT-1/W4).
-                const std::optional<std::string_view> acpt_username =
-                    (cfg_.is_fixt() && cfg_.username.has_value())
-                        ? std::optional<std::string_view>{*cfg_.username}
-                        : std::nullopt;
-                const std::optional<std::string_view> acpt_password =
-                    (cfg_.is_fixt() && cfg_.password.has_value())
-                        ? std::optional<std::string_view>{*cfg_.password}
-                        : std::nullopt;
+                // 033 T017/T023: thread the FIXT-only Logon fields (1137 + optional 553/554) into
+                // the acceptor reply — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1/W4);
+                // the acceptor advertises its OWN config (FR-002 / R1).
+                const auto acpt_fixt = derive_logon_fixt_fields(cfg_);
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
                     reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
-                    acpt_default_appl, acpt_username, acpt_password);
+                    acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.

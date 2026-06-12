@@ -82,7 +82,6 @@ struct logon_credentials {
     std::size_t pos = 0;
     while (pos < frame.size()) {
         // Find the next 554 field boundary.
-        std::size_t field_start = 0;  // position of '\x01' (or 0 for frame-start)
         std::size_t val_start = 0;    // position of the first byte of the value
 
         // Check mid-frame occurrence first (SOH-anchored).
@@ -101,12 +100,10 @@ struct logon_credentials {
 
         if (has_start) {
             // Frame-start match (only possible when pos==0, so always first).
-            field_start = 0;
-            val_start   = kStartTag.size();  // past "554="
+            val_start = kStartTag.size();  // past "554="
         } else {
             // Mid-frame match.
-            field_start = mid;
-            val_start   = mid + kMidTag.size();  // past "\x01554="
+            val_start = mid + kMidTag.size();  // past "\x01554="
         }
 
         // Append frame bytes up to and including "554=" (but not the value).
