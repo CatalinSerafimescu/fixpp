@@ -196,6 +196,7 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <cstdio>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
@@ -210,6 +211,7 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -738,6 +740,125 @@ TEST(FixtCredentials, W7_GoldenFixture_RedactedLogon) {
     // Extra assertion: clear sentinel absent.
     EXPECT_EQ(got.find("SENTINEL-W7-golden"), std::string::npos)
         << "Clear password sentinel must be absent in golden output";
+}
+
+// ── FQ-2 Gate B r1 — authorize_logon throw-safety ────────────────────────────
+//
+// A user-installed logon_validator that THROWS must NOT terminate the process.
+// The noexcept boundary inside authorize_logon must absorb the throw and return
+// false (→ Disconnected), keeping noexcept honest.
+//
+// Pre-fix: the thrown exception crosses the noexcept boundary → std::terminate.
+// Post-fix: the session reaches Disconnected (not Active), no crash.
+//
+// [compid_authorization_policy.cpp:345; FR-008a; [const §X.5]; FQ-2]
+
+TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    // Install a logon_validator that throws a std::runtime_error.
+    fixpp::session::CompIdAuthorizationPolicy policy;
+    policy.set_logon_validator(
+        [](std::string_view, fixpp::session::logon_credentials const&) -> bool {
+            throw std::runtime_error("intentional-throw-FQ2");
+        });
+
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    acpt_cfg.compid_authorization_policy = std::move(policy);
+    std::vector<std::byte> acpt_out;
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        acpt_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    run_sync_creds(s.ioc, [&] { return acceptor.open(); });
+
+    // Send a credentialed inbound FIXT Logon to trigger authorize_logon.
+    auto logon = make_fixt_logon_frame_with_creds(
+        "FIXT.1.1", 1, "TW", "ISLD", 30, "9",
+        /*username=*/"attacker", /*password=*/"boom");
+
+    // Pre-fix: this call terminates the process via std::terminate.
+    // Post-fix: it returns normally (the throw is absorbed inside authorize_logon).
+    auto r = run_sync_creds(s.ioc, [&] {
+        return acceptor.on_inbound_frame(
+            std::span<const std::byte>{logon.data(), logon.size()});
+    });
+
+    // The session must NOT be Active — a throwing validator must reject.
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "A throwing logon_validator must NOT allow the session to reach Active (FQ-2)";
+
+    // The session must be Disconnected (false return → Disconnected path).
+    EXPECT_EQ(acceptor.state(), fixpp::session::fsm_state::Disconnected)
+        << "A throwing logon_validator must cause Disconnected state (FQ-2)";
+}
+
+// ── FQ-3 Gate B r1 — credential SOH/control-char injection ───────────────────
+//
+// Configured username/password containing SOH (\x01) or '=' can inject
+// arbitrary FIX fields into the outbound Logon. Both values must be validated
+// at open()-time (invalid_session_config) before any emission.
+//
+// Pre-fix: open() succeeds and the injected field appears on the wire.
+// Post-fix: open() returns invalid_session_config, no frame emitted.
+//
+// [feedback_delimiter_injection_verbatim_field_copy; FQ-3; FR-007]
+
+TEST(FixtCredentials, FQ3a_PasswordWithSOH_ReturnsInvalidConfig_NoWireEmit) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.password = std::string("p") + "\x01" + "113=x";  // SOH injection: would forge tag 113 on the wire
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+
+    // Must reject — credential contains a SOH delimiter.
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when password contains SOH (FQ-3a)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Error must be invalid_session_config for SOH-containing password; "
+        << "got: " << static_cast<int>(result.error());
+
+    // No wire frame emitted.
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (FQ-3a)";
+
+    // Verify the injected tag does NOT appear on the wire (belt-and-suspenders:
+    // if open() correctly rejected, emitted is empty and this trivially holds).
+    std::string wire(reinterpret_cast<const char*>(emitted.data()), emitted.size());
+    EXPECT_EQ(wire.find(std::string("\x01") + "113=x"), std::string::npos)
+        << "Injected field must NOT appear on the wire (FQ-3a)";
+}
+
+TEST(FixtCredentials, FQ3b_UsernameWithSOH_ReturnsInvalidConfig_NoWireEmit) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.username = std::string("u") + "\x01" + "554=x";  // SOH injection: would forge tag 554 on the wire
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when username contains SOH (FQ-3b)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Error must be invalid_session_config for SOH-containing username; "
+        << "got: " << static_cast<int>(result.error());
+
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (FQ-3b)";
 }
 
 }  // namespace fixpp_fixt_creds

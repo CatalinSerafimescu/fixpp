@@ -337,20 +337,28 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
 // set_logon_validator(). The validator is the FR-008a future validation knob.
 // Independent of the mTLS-gated authorize() seam (research R6 / contracts C7).
 //
-// noexcept contract: the callable may throw; callers must tolerate this.
-// Since the session arm will catch any throw and disconnect, the noexcept
-// annotation is intentionally relaxed here — see session.cpp T023 usage.
-// [033 T021; contracts C7; research R6; FR-008/FR-008a; data-model E5]
+// noexcept contract: this function is declared noexcept. A user-installed
+// logon_validator may throw; the throw is absorbed here (try/catch returns false,
+// treating any exception as a reject). Callers MUST NOT add a try/catch around
+// this call site — it would be inert across the noexcept boundary.
+// [gate-b/r1 FQ-2; 033 T021; contracts C7; research R6; FR-008/FR-008a; data-model E5]
 
 [[nodiscard]] bool CompIdAuthorizationPolicy::authorize_logon(
     std::string_view asserted_compid, logon_credentials const& creds) const noexcept {
     if (impl_->logon_validator) {
-        // Validator installed: delegate to it. Any throw from the validator is
-        // caught by the noexcept frame → std::terminate; callers on the session
-        // strand guard with try/catch per [const §X.5] noexcept convention.
-        // For now: let it propagate (matches pattern of authorize() above).
-        // This is acceptable: the validator is config-build-time, not hot-path.
-        return impl_->logon_validator(asserted_compid, creds);
+        // Validator installed: delegate to it. A throwing validator is converted
+        // to a reject (returns false) here, keeping noexcept honest. Any throw
+        // that crossed the noexcept boundary would invoke std::terminate — the
+        // old comment claiming "callers guard with try/catch" was INCORRECT:
+        // terminate fires inside the noexcept frame before any caller frame.
+        // [gate-b/r1 FQ-2; [const §X.5] noexcept convention]
+        try {
+            return impl_->logon_validator(asserted_compid, creds);
+        } catch (...) {
+            // Throwing validator → treat as reject. The session arm routes
+            // a false return to Disconnected without process termination.
+            return false;
+        }
     }
     // Default: accept (FR-008a deferred; future validation knob attaches here).
     return true;

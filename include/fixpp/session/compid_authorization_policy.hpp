@@ -101,9 +101,12 @@ public:
     // [033 research R6; contracts C7; data-model E5; FR-008/FR-008a]
     [[nodiscard]] bool authorize_logon(std::string_view asserted_compid,
                                        logon_credentials const& creds) const noexcept;
-    // noexcept: the default-accept path is noexcept. A user-installed validator
-    // MUST be noexcept at the call site; if it throws, std::terminate fires
-    // (matching [const §X.5] noexcept convention for runtime use).
+    // noexcept: a throwing logon_validator is caught INSIDE authorize_logon and
+    // converted to a reject (returns false → Disconnected). The validator is NOT
+    // required to be noexcept — the conversion happens at the noexcept boundary
+    // here, keeping std::terminate from firing. Callers MUST NOT wrap this call
+    // in a try/catch: it is inert across the noexcept boundary.
+    // [gate-b/r1 FQ-2; [const §X.5] noexcept convention]
 
     // set_logon_validator: install the future FR-008a validation knob.
     // The callable is invoked by authorize_logon() instead of the default-accept.
