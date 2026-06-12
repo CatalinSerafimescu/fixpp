@@ -48,12 +48,17 @@ namespace fixpp::session {
 //   [033 T016; data-model E4; contracts/fixt-logon-establishment.md C1/C2]
 // FR-002/FR-003/RC#4: kBeginStringDefault + kSendingTimePlaceholder REMOVED.
 // RC#C (gate-b/r1): added reset_seqnum parameter for 141=Y support [FR-017].
+// 033 T022 (US2): optional Username(553)/Password(554) params — emitted after 1137,
+//   before 141, when set (data-model E4). Absent (nullopt) ⇒ no 553/554 emitted
+//   ⇒ FIX.4.x callers pass nullopt and remain byte-identical (INV-FIXT-1/W4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum = false,
     std::optional<seqnum_t> next_expected_seq = std::nullopt,
-    std::optional<fixpp::dict::application_version> default_appl_ver_id = std::nullopt) noexcept;
+    std::optional<fixpp::dict::application_version> default_appl_ver_id = std::nullopt,
+    std::optional<std::string_view> username = std::nullopt,
+    std::optional<std::string_view> password = std::nullopt) noexcept;
 
 // 033 T007 / data-model E5 — interpret_logon return type extension.
 // Carries the validated HeartBtInt plus optional FIXT-specific fields scanned

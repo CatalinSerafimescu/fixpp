@@ -782,10 +782,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // Each side advertises its OWN configured default_appl_ver_id (R1).
     const std::optional<fixpp::dict::application_version> initr_default_appl =
         cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
+    // 033 T023 (US2): thread configured Username(553)/Password(554) into the Logon emit.
+    // is_fixt() guards FIX.4.x callers → nullopt → byte-identical (INV-FIXT-1/W4).
+    // cfg_.username/password are optional<std::string>; convert to optional<string_view>.
+    const std::optional<std::string_view> initr_username =
+        (cfg_.is_fixt() && cfg_.username.has_value())
+            ? std::optional<std::string_view>{*cfg_.username}
+            : std::nullopt;
+    const std::optional<std::string_view> initr_password =
+        (cfg_.is_fixt() && cfg_.password.has_value())
+            ? std::optional<std::string_view>{*cfg_.password}
+            : std::nullopt;
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
-        initr_next_expected, initr_default_appl);
+        initr_next_expected, initr_default_appl, initr_username, initr_password);
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -2056,6 +2067,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 negotiated_appl_version_ = *resolved;
             }
 
+            // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
+            // Fired on the acceptor inbound-Logon path INDEPENDENTLY of mTLS
+            // (the existing mTLS-gated authorize() at :~1910+ is unrelated to credentials).
+            // Default implementation: accept. A future FR-008a validator may reject here.
+            // `result` is always valid here (invalid result returned early at :~1730).
+            // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
+            {
+                fixpp::session::logon_credentials creds;
+                if (result->username.has_value()) {
+                    creds.username = std::string{*result->username};
+                }
+                if (result->password.has_value()) {
+                    creds.password = std::string{*result->password};
+                }
+                // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
+                if (!cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds)) {
+                    // Future: emit an authorization-failed event. For 033 (default-accept
+                    // validator), this path is unreachable unless a custom validator rejects.
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+            }
+
             // Valid Logon + in-seq: transition to LogonReceived, then emit
             // the acceptor's own Logon reply and transition to Active.
             // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
@@ -2156,11 +2190,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Acceptor advertises its OWN configured default_appl_ver_id (FR-002 / R1).
                 const std::optional<fixpp::dict::application_version> acpt_default_appl =
                     cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
+                // 033 T023 (US2): thread configured credentials into the acceptor reply Logon.
+                // is_fixt() guards FIX.4.x sessions → nullopt → byte-identical (INV-FIXT-1/W4).
+                const std::optional<std::string_view> acpt_username =
+                    (cfg_.is_fixt() && cfg_.username.has_value())
+                        ? std::optional<std::string_view>{*cfg_.username}
+                        : std::nullopt;
+                const std::optional<std::string_view> acpt_password =
+                    (cfg_.is_fixt() && cfg_.password.has_value())
+                        ? std::optional<std::string_view>{*cfg_.password}
+                        : std::nullopt;
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
                     reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
-                    acpt_default_appl);
+                    acpt_default_appl, acpt_username, acpt_password);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.

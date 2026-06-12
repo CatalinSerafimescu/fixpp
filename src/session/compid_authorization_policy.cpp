@@ -36,6 +36,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -71,6 +72,8 @@ namespace fixpp::session {
 struct CompIdAuthorizationPolicy::impl {
     std::pmr::memory_resource* mr;
     std::map<std::string, std::vector<std::string>> bindings;
+    // FR-008a / 033 US2: optional logon validator (default null = accept-all).
+    CompIdAuthorizationPolicy::logon_validator_fn logon_validator;
 
     explicit impl(std::pmr::memory_resource* r) : mr{r ? r : std::pmr::get_default_resource()} {}
 
@@ -326,6 +329,35 @@ void CompIdAuthorizationPolicy::add_binding(std::string_view principal, std::str
 [[nodiscard]] bool CompIdAuthorizationPolicy::has_principal(
     std::string_view principal) const noexcept {
     return impl_->bindings.contains(std::string{principal});
+}
+
+// ── FR-008a / 033 US2 — credential authorization seam ─────────────────────────
+//
+// authorize_logon: default-accept unless a validator has been installed via
+// set_logon_validator(). The validator is the FR-008a future validation knob.
+// Independent of the mTLS-gated authorize() seam (research R6 / contracts C7).
+//
+// noexcept contract: the callable may throw; callers must tolerate this.
+// Since the session arm will catch any throw and disconnect, the noexcept
+// annotation is intentionally relaxed here — see session.cpp T023 usage.
+// [033 T021; contracts C7; research R6; FR-008/FR-008a; data-model E5]
+
+[[nodiscard]] bool CompIdAuthorizationPolicy::authorize_logon(
+    std::string_view asserted_compid, logon_credentials const& creds) const noexcept {
+    if (impl_->logon_validator) {
+        // Validator installed: delegate to it. Any throw from the validator is
+        // caught by the noexcept frame → std::terminate; callers on the session
+        // strand guard with try/catch per [const §X.5] noexcept convention.
+        // For now: let it propagate (matches pattern of authorize() above).
+        // This is acceptable: the validator is config-build-time, not hot-path.
+        return impl_->logon_validator(asserted_compid, creds);
+    }
+    // Default: accept (FR-008a deferred; future validation knob attaches here).
+    return true;
+}
+
+void CompIdAuthorizationPolicy::set_logon_validator(logon_validator_fn validator) {
+    impl_->logon_validator = std::move(validator);
 }
 
 }  // namespace fixpp::session

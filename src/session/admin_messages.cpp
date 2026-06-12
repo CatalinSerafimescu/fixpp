@@ -79,7 +79,9 @@ namespace {
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum,
     std::optional<seqnum_t> next_expected_seq,
-    std::optional<fixpp::dict::application_version> default_appl_ver_id) noexcept {
+    std::optional<fixpp::dict::application_version> default_appl_ver_id,
+    std::optional<std::string_view> username,
+    std::optional<std::string_view> password) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -160,6 +162,21 @@ namespace {
             return std::unexpected(rendered.error());
         }
         if (auto r = w.append_raw(1137, sv_to_bytes(*rendered)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 553=Username + 554=Password — emitted for FIXT sessions when configured.
+    // Data-model E4: ordered after 1137, before 141 (regardless of 141 presence).
+    // FIX.4.x callers pass nullopt → no 553/554 emitted → byte-identical (W4/INV-FIXT-1).
+    // [033 T022; data-model E4; contracts C1/C2; FR-007; INV-FIXT-1]
+    if (username.has_value()) {
+        if (auto r = w.append_raw(553, sv_to_bytes(*username)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    if (password.has_value()) {
+        if (auto r = w.append_raw(554, sv_to_bytes(*password)); !r) {
             return std::unexpected(r.error());
         }
     }

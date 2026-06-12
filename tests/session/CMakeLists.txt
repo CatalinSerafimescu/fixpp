@@ -1766,11 +1766,14 @@ set_tests_properties(session_fixt_logon_establishment PROPERTIES
 
 # T002: credentials test target.
 # T009/T010: logon_credentials operator<< redaction + redact_tag554 utility.
-# RED when logon_credentials.hpp absent; green after T010 creates the header.
+# T019/T020 (US2 W6/W7): credential emission, seam capture, redaction witnesses.
+# Requires fixpp_session + fixpp_mock_clock for W6/W7 (added at US2 phase).
 add_executable(session_fixt_credentials
   test_fixt_credentials.cpp
 )
 target_link_libraries(session_fixt_credentials PRIVATE
+  fixpp_session
+  fixpp_mock_clock
   GTest::gtest
   GTest::gtest_main
 )

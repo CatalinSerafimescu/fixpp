@@ -82,8 +82,8 @@ struct logon_credentials {
     std::size_t pos = 0;
     while (pos < frame.size()) {
         // Find the next 554 field boundary.
-        std::size_t field_start;  // position of '\x01' (or 0 for frame-start)
-        std::size_t val_start;    // position of the first byte of the value
+        std::size_t field_start = 0;  // position of '\x01' (or 0 for frame-start)
+        std::size_t val_start = 0;    // position of the first byte of the value
 
         // Check mid-frame occurrence first (SOH-anchored).
         auto mid = frame.find(kMidTag, pos);
