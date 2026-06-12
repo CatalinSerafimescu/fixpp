@@ -116,9 +116,9 @@ struct logon_fixt_fields {
         return {};
     }
     return logon_fixt_fields{
-        cfg.default_appl_ver_id,
-        cfg.username.has_value() ? std::optional<std::string_view>{*cfg.username} : std::nullopt,
-        cfg.password.has_value() ? std::optional<std::string_view>{*cfg.password} : std::nullopt,
+        .default_appl_ver_id=cfg.default_appl_ver_id,
+        .username=cfg.username.has_value() ? std::optional<std::string_view>{*cfg.username} : std::nullopt,
+        .password=cfg.password.has_value() ? std::optional<std::string_view>{*cfg.password} : std::nullopt,
     };
 }
 
@@ -141,7 +141,7 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
     : engine_(engine),
       cfg_(cfg),
       session_arena_(resolve_session_arena(engine, cfg)),
-      reconnect_fsm_(
+      app_version_registry_(app_version_registry), reconnect_fsm_(
           cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
           resolve_reconnect_policy(cfg, session_arena_),  // 016 T008: was empty
                                                           // ReconnectPolicy{} (busy-spin)
@@ -155,7 +155,7 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
     // null for test/FIX.4.x paths that don't need serviceability checks).
     // Assignment in body (not member-init) to match declaration order in session.hpp
     // (app_version_registry_ is declared after reconnect_fsm_'s logical grouping).
-    app_version_registry_ = app_version_registry;
+    
 }
 
 // D-23: release any per-session Clock state (system_clock_source's reusable
@@ -184,11 +184,11 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 // [033 data-model.md E2; FR-005; SC-006/W5; INV-FIXT-2]
 fixpp::dict::version_profile Session::negotiated_version_profile() const noexcept {
     if (negotiated_appl_version_ == fixpp::dict::application_version::Unknown) {
-        return fixpp::dict::version_profile{fixpp::dict::session_version::Unknown,
-                                            fixpp::dict::application_version::Unknown, false, 0};
+        return fixpp::dict::version_profile{.session=fixpp::dict::session_version::Unknown,
+                                            .default_appl=fixpp::dict::application_version::Unknown, .has_per_message_override=false, ._reserved=0};
     }
-    return fixpp::dict::version_profile{fixpp::dict::session_version::vt11,
-                                        negotiated_appl_version_, false, 0};
+    return fixpp::dict::version_profile{.session=fixpp::dict::session_version::vt11,
+                                        .default_appl=negotiated_appl_version_, .has_per_message_override=false, ._reserved=0};
 }
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
@@ -1989,17 +1989,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 //   (c) unserviceable    → Reject 373=5 ValueIsIncorrect    (C5/FR-004a; R2)
                 //   (d) serviceable      → record negotiated_appl_version_   (C3/E2; INV-FIXT-2)
                 // Both reject arms carry RefTagID(371)=1137 and differ ONLY in 373 — emitted by
-                // the single parameterized block below (W2 asserts 373=1; W3 asserts 373=5+371=1137).
+                // the single parameterized block below (W2 asserts 373=1; W3 asserts
+                // 373=5+371=1137).
                 std::optional<int> reject_reason;
                 if (!result->default_appl_ver_id.has_value()) {
                     reject_reason = 1;  // RequiredTagMissing
                 } else {
                     const fixpp::dict::version_profile vt11_profile{
-                        fixpp::dict::session_version::vt11,
-                        fixpp::dict::application_version::Unknown, false, 0};
-                    auto resolved =
-                        fixpp::dict::resolve_application_version(vt11_profile,
-                                                                 *result->default_appl_ver_id);
+                        .session=fixpp::dict::session_version::vt11,
+                        .default_appl=fixpp::dict::application_version::Unknown, .has_per_message_override=false, ._reserved=0};
+                    auto resolved = fixpp::dict::resolve_application_version(
+                        vt11_profile, *result->default_appl_ver_id);
                     const bool serviceable =
                         resolved.has_value() && app_version_registry_->get(*resolved).has_value();
                     if (!serviceable) {
@@ -3531,11 +3531,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [033 contracts C3; data-model E2; FR-004a; research R1]
             if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
                 const fixpp::dict::version_profile vt11_profile{
-                    fixpp::dict::session_version::vt11,
-                    fixpp::dict::application_version::Unknown, false, 0};
-                auto resolved =
-                    fixpp::dict::resolve_application_version(vt11_profile,
-                                                             *result->default_appl_ver_id);
+                    .session=fixpp::dict::session_version::vt11, .default_appl=fixpp::dict::application_version::Unknown,
+                    .has_per_message_override=false, ._reserved=0};
+                auto resolved = fixpp::dict::resolve_application_version(
+                    vt11_profile, *result->default_appl_ver_id);
                 if (resolved.has_value()) {
                     // Set-once: negotiated_appl_version_ starts Unknown; set here.
                     negotiated_appl_version_ = *resolved;

@@ -72,9 +72,11 @@ struct logon_credentials {
 // This function is the single canonical redaction site; T024 (US2) wires it
 // into logger/transcript sites and T026 (US3) wires it into the golden writer.
 [[nodiscard]] inline std::string redact_tag554(std::string const& frame) {
-    constexpr std::string_view kMidTag   = "\x01" "554=";  // SOH + tag + '='
-    constexpr std::string_view kStartTag = "554=";          // at frame position 0
-    constexpr std::string_view kMask     = "***";
+    constexpr std::string_view kMidTag =
+        "\x01"
+        "554=";                                     // SOH + tag + '='
+    constexpr std::string_view kStartTag = "554=";  // at frame position 0
+    constexpr std::string_view kMask = "***";
 
     std::string result;
     result.reserve(frame.size());
@@ -82,15 +84,14 @@ struct logon_credentials {
     std::size_t pos = 0;
     while (pos < frame.size()) {
         // Find the next 554 field boundary.
-        std::size_t val_start = 0;    // position of the first byte of the value
+        std::size_t val_start = 0;  // position of the first byte of the value
 
         // Check mid-frame occurrence first (SOH-anchored).
         auto mid = frame.find(kMidTag, pos);
 
         // Check frame-start occurrence only when pos==0.
-        bool has_start = (pos == 0) &&
-                         (frame.size() >= kStartTag.size()) &&
-                         (frame.compare(0, kStartTag.size(), kStartTag) == 0);
+        bool has_start = (pos == 0) && (frame.size() >= kStartTag.size()) &&
+                         (frame.starts_with(kStartTag));
 
         if (!has_start && mid == std::string::npos) {
             // No more 554 fields — copy the rest and stop.

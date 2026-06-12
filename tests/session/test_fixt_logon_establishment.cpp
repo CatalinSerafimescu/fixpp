@@ -55,17 +55,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
-#include <functional>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
-#include <memory_resource>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -77,6 +68,14 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_security_profile.hpp"
 #include "support/store_double.hpp"
@@ -165,14 +164,14 @@ TEST(RenderApplVerId, RoundTrip_AllValues) {
     // Symmetry: render then resolve must recover the original application_version
     // (every non-Unknown value must round-trip through the inverse pair).
     using fixpp::dict::resolve_application_version;
-    using fixpp::dict::version_profile;
     using fixpp::dict::session_version;
+    using fixpp::dict::version_profile;
 
     const version_profile kProfile{session_version::vt11, application_version::v50sp2, true, 0};
 
     constexpr application_version kAll[] = {
-        application_version::v40,   application_version::v41,  application_version::v42,
-        application_version::v43,   application_version::v44,  application_version::v50,
+        application_version::v40,    application_version::v41,    application_version::v42,
+        application_version::v43,    application_version::v44,    application_version::v50,
         application_version::v50sp1, application_version::v50sp2,
     };
     for (auto v : kAll) {
@@ -277,20 +276,24 @@ TEST(BuildLogonFixt, W4_Fix44_ByteIdentical_NoFIXTTags) {
     // [feedback_witness_asserts_named_postcondition_not_proxy (b)]
     EXPECT_EQ(frame, kFix44LogonBaseline)
         << "FIX.4.4 Logon frame must be byte-identical to the pre-033 baseline\n"
-        << "  got (escaped):  " << [&]() {
-               std::string esc;
-               for (char c : frame) {
-                   if (c == '\x01') esc += "\\x01";
-                   else esc += c;
-               }
-               return esc;
-           }()
-        << "\n  want (escaped): "
-        << [&]() {
+        << "  got (escaped):  " <<
+        [&]() {
+            std::string esc;
+            for (char c : frame) {
+                if (c == '\x01')
+                    esc += "\\x01";
+                else
+                    esc += c;
+            }
+            return esc;
+        }()
+        << "\n  want (escaped): " << [&]() {
                std::string esc;
                for (char c : kFix44LogonBaseline) {
-                   if (c == '\x01') esc += "\\x01";
-                   else esc += c;
+                   if (c == '\x01')
+                       esc += "\\x01";
+                   else
+                       esc += c;
                }
                return esc;
            }();
@@ -311,18 +314,16 @@ TEST(BuildLogonFixt, W4_Fix44_ByteIdentical_NoFIXTTags) {
 TEST(BuildLogonFixt, W1EmitHalf_V50sp2_Carries1137After108) {
     // Cell: FIXT session, DefaultApplVerID=v50sp2 → wire "9"
     std::array<std::byte, 512> buf{};
-    auto result = fixpp::session::build_logon(
-        std::span<std::byte>(buf),
-        /*seq=*/1,
-        /*sender_comp_id=*/"SENDER",
-        /*target_comp_id=*/"TARGET",
-        /*begin_string=*/"FIXT.1.1",
-        /*heartbt_int=*/30,
-        /*sending_time=*/"20240101-00:00:00.000",
-        /*reset_seqnum=*/false,
-        /*next_expected_seq=*/std::nullopt,
-        /*default_appl_ver_id=*/application_version::v50sp2
-    );
+    auto result = fixpp::session::build_logon(std::span<std::byte>(buf),
+                                              /*seq=*/1,
+                                              /*sender_comp_id=*/"SENDER",
+                                              /*target_comp_id=*/"TARGET",
+                                              /*begin_string=*/"FIXT.1.1",
+                                              /*heartbt_int=*/30,
+                                              /*sending_time=*/"20240101-00:00:00.000",
+                                              /*reset_seqnum=*/false,
+                                              /*next_expected_seq=*/std::nullopt,
+                                              /*default_appl_ver_id=*/application_version::v50sp2);
     ASSERT_TRUE(result.has_value()) << "build_logon FIXT v50sp2 must succeed";
 
     const std::string frame = bytes_to_string(*result);
@@ -344,8 +345,7 @@ TEST(BuildLogonFixt, W1EmitHalf_V50sp2_Carries1137After108) {
     ASSERT_NE(pos_108, std::string::npos) << "108=30 must appear in frame";
     const auto pos_1137 = frame.find(kSoh + "1137=9" + kSoh);
     ASSERT_NE(pos_1137, std::string::npos) << "1137=9 must appear in frame";
-    EXPECT_LT(pos_108, pos_1137)
-        << "1137 must appear AFTER 108 in the wire frame (data-model E4)";
+    EXPECT_LT(pos_108, pos_1137) << "1137 must appear AFTER 108 in the wire frame (data-model E4)";
 
     // (4) Contiguous: 108\x01 immediately followed by 1137= (no field between them).
     // This is the ordering-adjacent check (data-model E4: "ordered after 108, before 141").
@@ -358,18 +358,16 @@ TEST(BuildLogonFixt, W1EmitHalf_V44_Carries1137Wire6) {
     // Cell: FIXT session, DefaultApplVerID=v44 → wire "6"
     // Proves render_appl_ver_id is actually consulted (not a hardcoded "9").
     std::array<std::byte, 512> buf{};
-    auto result = fixpp::session::build_logon(
-        std::span<std::byte>(buf),
-        /*seq=*/1,
-        /*sender_comp_id=*/"SENDER",
-        /*target_comp_id=*/"TARGET",
-        /*begin_string=*/"FIXT.1.1",
-        /*heartbt_int=*/30,
-        /*sending_time=*/"20240101-00:00:00.000",
-        /*reset_seqnum=*/false,
-        /*next_expected_seq=*/std::nullopt,
-        /*default_appl_ver_id=*/application_version::v44
-    );
+    auto result = fixpp::session::build_logon(std::span<std::byte>(buf),
+                                              /*seq=*/1,
+                                              /*sender_comp_id=*/"SENDER",
+                                              /*target_comp_id=*/"TARGET",
+                                              /*begin_string=*/"FIXT.1.1",
+                                              /*heartbt_int=*/30,
+                                              /*sending_time=*/"20240101-00:00:00.000",
+                                              /*reset_seqnum=*/false,
+                                              /*next_expected_seq=*/std::nullopt,
+                                              /*default_appl_ver_id=*/application_version::v44);
     ASSERT_TRUE(result.has_value()) << "build_logon FIXT v44 must succeed";
 
     const std::string frame = bytes_to_string(*result);
@@ -499,8 +497,7 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 </fix>
 )xml";
 
-[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict(
-    std::string_view xml) {
+[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict(std::string_view xml) {
     constexpr std::size_t kBufSize = 64u * 1024u;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
@@ -520,9 +517,8 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 // Build a FIXT Logon frame with optional 1137 field.
 // If default_appl_ver_id is non-empty, appends "1137=<value>\x01" after 108.
 [[nodiscard]] std::vector<std::byte> make_fixt_logon_frame(
-    std::string_view begin_string, std::uint32_t msg_seq_num,
-    std::string_view sender_comp_id, std::string_view target_comp_id,
-    int heartbt_int, std::string_view default_appl_ver_id = "",
+    std::string_view begin_string, std::uint32_t msg_seq_num, std::string_view sender_comp_id,
+    std::string_view target_comp_id, int heartbt_int, std::string_view default_appl_ver_id = "",
     std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=A\x01";
@@ -560,10 +556,11 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 
 // Build a minimal app message (Heartbeat) with optional ApplVerID(1128) field.
 // Used for W8: verifies dict-free delivery of inbound app messages.
-[[nodiscard]] std::vector<std::byte> make_heartbeat_frame_1128(
-    std::string_view begin_string, std::uint32_t msg_seq_num,
-    std::string_view sender_comp_id, std::string_view target_comp_id,
-    std::string_view appl_ver_id = "") {
+[[nodiscard]] std::vector<std::byte> make_heartbeat_frame_1128(std::string_view begin_string,
+                                                               std::uint32_t msg_seq_num,
+                                                               std::string_view sender_comp_id,
+                                                               std::string_view target_comp_id,
+                                                               std::string_view appl_ver_id = "") {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -722,8 +719,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
 
     // Verify initiator's Logon carries 1137 (C1 / T016/T017 already assert this,
     // but we need the wire value for feeding the acceptor).
-    EXPECT_TRUE(wire_has_tag(init_frame_out, 1137))
-        << "Initiator FIXT Logon must carry 1137 (C1)";
+    EXPECT_TRUE(wire_has_tag(init_frame_out, 1137)) << "Initiator FIXT Logon must carry 1137 (C1)";
 
     // Feed initiator's Logon to acceptor.
     // The acceptor sees the peer (TW→ISLD) Logon with 1137=9 (v50sp2).
@@ -810,14 +806,17 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
         << "Acceptor must emit a Reject frame when 1137 is missing (C4/R7)";
 
     // Find the 35=3 Reject in the emitted frame.
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
-    EXPECT_NE(wire.find("\x01" "35=3\x01"), std::string::npos)
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
         << "Emitted frame must be a Reject (35=3) for missing 1137; "
         << "got: " << wire;
 
     // 373=1 (RequiredTagMissing) — discriminates from W3's 373=5.
-    EXPECT_NE(wire.find("\x01" "373=1\x01"), std::string::npos)
+    EXPECT_NE(wire.find("\x01"
+                        "373=1\x01"),
+              std::string::npos)
         << "Reject must carry 373=1 (RequiredTagMissing) for missing 1137 (C4); "
         << "got: " << wire;
 }
@@ -865,26 +864,33 @@ TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActi
     ASSERT_FALSE(acpt_frame_out.empty())
         << "Acceptor must emit a Reject frame when 1137 is unserviceable (C5)";
 
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
-    EXPECT_NE(wire.find("\x01" "35=3\x01"), std::string::npos)
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
         << "Emitted frame must be a Reject (35=3) for unserviceable 1137; "
         << "got: " << wire;
 
     // (c) 373=5 (ValueIsIncorrect) — DISTINCT from W2's 373=1.
     // This is the primary discriminator: 373=5 proves the unserviceable path
     // rather than the missing path.
-    EXPECT_NE(wire.find("\x01" "373=5\x01"), std::string::npos)
+    EXPECT_NE(wire.find("\x01"
+                        "373=5\x01"),
+              std::string::npos)
         << "Reject must carry 373=5 (ValueIsIncorrect) for unserviceable 1137 (C5); "
         << "got: " << wire;
 
     // (d) 371=1137 (RefTagID) — identifies which field was unserviceable.
-    EXPECT_NE(wire.find("\x01" "371=1137\x01"), std::string::npos)
+    EXPECT_NE(wire.find("\x01"
+                        "371=1137\x01"),
+              std::string::npos)
         << "Reject must carry 371=1137 (RefTagID=DefaultApplVerID) (C5); "
         << "got: " << wire;
 
     // Confirm 373=5 and NOT 373=1 (non-overlap with W2).
-    EXPECT_EQ(wire.find("\x01" "373=1\x01"), std::string::npos)
+    EXPECT_EQ(wire.find("\x01"
+                        "373=1\x01"),
+              std::string::npos)
         << "Unserviceable path must emit 373=5, NOT 373=1 (W3 vs W2 discriminator); "
         << "got: " << wire;
 }

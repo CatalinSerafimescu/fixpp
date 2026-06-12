@@ -66,10 +66,10 @@ namespace fixpp::session {
 // caller-supplied `frame` span (zero-copy, no heap — [const §VIII.5]).
 // [033 data-model.md E5; research R2; FR-003/FR-004/FR-008a]
 struct logon_interpret_result {
-    int heartbt_int;                              // validated HeartBtInt(108) value
+    int heartbt_int;                                      // validated HeartBtInt(108) value
     std::optional<std::string_view> default_appl_ver_id;  // raw wire value of tag 1137, if present
-    std::optional<std::string_view> username;     // raw wire value of tag 553, if present
-    std::optional<std::string_view> password;     // raw wire value of tag 554, if present
+    std::optional<std::string_view> username;             // raw wire value of tag 553, if present
+    std::optional<std::string_view> password;             // raw wire value of tag 554, if present
 };
 
 // Interpret an inbound Logon frame; validate BeginString/CompID/HeartBtInt.

@@ -22,10 +22,9 @@
 
 #include <gtest/gtest.h>
 
+#include <fixpp/session/logon_credentials.hpp>
 #include <sstream>
 #include <string>
-
-#include <fixpp/session/logon_credentials.hpp>
 
 namespace {
 
@@ -50,8 +49,7 @@ TEST(LogonCredentials, OperatorStream_RedactsPassword) {
         << "operator<< leaked the clear password: " << s;
 
     // The username MUST appear (not redacted).
-    EXPECT_NE(s.find("alice"), std::string::npos)
-        << "operator<< suppressed the username: " << s;
+    EXPECT_NE(s.find("alice"), std::string::npos) << "operator<< suppressed the username: " << s;
 
     // The mask token MUST appear (proves the password slot was handled).
     EXPECT_NE(s.find("***"), std::string::npos)
@@ -147,9 +145,7 @@ TEST(RedactTag554, NoTag554_FrameUnchanged) {
     EXPECT_EQ(redacted, frame);
 }
 
-TEST(RedactTag554, EmptyFrame) {
-    EXPECT_EQ(redact_tag554(""), "");
-}
+TEST(RedactTag554, EmptyFrame) { EXPECT_EQ(redact_tag554(""), ""); }
 
 TEST(RedactTag554, Tag554AtFrameStart) {
     // Edge case: 554 is the very first field (no preceding SOH).
@@ -165,7 +161,9 @@ TEST(RedactTag554, Tag554AtFrameStart) {
 
 TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
     // 554 value reaches end-of-string without a trailing SOH.
-    std::string frame = "8=FIXT.1.1\x01" "554=mysecret";
+    std::string frame =
+        "8=FIXT.1.1\x01"
+        "554=mysecret";
 
     std::string redacted = redact_tag554(frame);
     EXPECT_EQ(redacted.find("mysecret"), std::string::npos);
@@ -196,13 +194,6 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -216,6 +207,12 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace fixpp_fixt_creds {
 
@@ -263,8 +260,7 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
 )xml";
 
 // Same as in establishment test — make a shared dict.
-[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict_creds(
-    std::string_view xml) {
+[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict_creds(std::string_view xml) {
     constexpr std::size_t kBufSize = 64u * 1024u;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
@@ -283,9 +279,8 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
 
 // Build a FIXT Logon frame with optional 553/554/1137 fields.
 [[nodiscard]] std::vector<std::byte> make_fixt_logon_frame_with_creds(
-    std::string_view begin_string, std::uint32_t msg_seq_num,
-    std::string_view sender_comp_id, std::string_view target_comp_id,
-    int heartbt_int, std::string_view default_appl_ver_id = "",
+    std::string_view begin_string, std::uint32_t msg_seq_num, std::string_view sender_comp_id,
+    std::string_view target_comp_id, int heartbt_int, std::string_view default_appl_ver_id = "",
     std::string_view username = "", std::string_view password = "",
     std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
@@ -439,16 +434,24 @@ TEST(FixtCredentials, W6a_ConfiguredCreds_EmittedOnOutboundLogon) {
     std::string wire = span_to_str(init_frame_out);
 
     // (a-1) 553=alice must be present.
-    EXPECT_NE(wire.find("\x01" "553=alice\x01"), std::string::npos)
+    EXPECT_NE(wire.find("\x01"
+                        "553=alice\x01"),
+              std::string::npos)
         << "Outbound Logon with configured username must carry 553=alice; got: " << wire;
 
     // (a-2) 554=s3cr3t-sentinel-W6a must be present on the wire (plaintext to peer).
-    EXPECT_NE(wire.find("\x01" "554=s3cr3t-sentinel-W6a\x01"), std::string::npos)
+    EXPECT_NE(wire.find("\x01"
+                        "554=s3cr3t-sentinel-W6a\x01"),
+              std::string::npos)
         << "Outbound Logon with configured password must carry 554=<password>; got: " << wire;
 
     // (a-3) 553 must appear after 1137= (ordering: 1137 before 553, before 554, before 141).
-    const auto pos_1137 = wire.find("\x01" "1137=");
-    const auto pos_553 = wire.find("\x01" "553=");
+    const auto pos_1137 = wire.find(
+        "\x01"
+        "1137=");
+    const auto pos_553 = wire.find(
+        "\x01"
+        "553=");
     ASSERT_NE(pos_1137, std::string::npos) << "1137 must be present";
     ASSERT_NE(pos_553, std::string::npos) << "553 must be present";
     EXPECT_LT(pos_1137, pos_553)
@@ -549,13 +552,12 @@ TEST(FixtCredentials, W6c_InboundCreds_SurfacedToAuthorizeLogon) {
     run_sync_creds(s.ioc, [&] { return acceptor.open(); });
 
     // Build an inbound FIXT Logon WITH 553/554.
-    auto logon = make_fixt_logon_frame_with_creds(
-        "FIXT.1.1", 1, "TW", "ISLD", 30, "9",
-        /*username=*/"charlie", /*password=*/"sentinel-W6c-xyzzy");
+    auto logon =
+        make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9",
+                                         /*username=*/"charlie", /*password=*/"sentinel-W6c-xyzzy");
 
     auto r = run_sync_creds(s.ioc, [&] {
-        return acceptor.on_inbound_frame(
-            std::span<const std::byte>{logon.data(), logon.size()});
+        return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
     ASSERT_TRUE(r.has_value()) << "on_inbound_frame must succeed for valid Logon";
 
@@ -570,8 +572,7 @@ TEST(FixtCredentials, W6c_InboundCreds_SurfacedToAuthorizeLogon) {
     // Verify the captured credentials are EXACTLY what was in the inbound Logon.
     ASSERT_TRUE(captured_username.has_value())
         << "authorize_logon must receive a populated username (C7)";
-    EXPECT_EQ(*captured_username, "charlie")
-        << "authorize_logon received wrong username";
+    EXPECT_EQ(*captured_username, "charlie") << "authorize_logon received wrong username";
 
     ASSERT_TRUE(captured_password.has_value())
         << "authorize_logon must receive a populated password (C7)";
@@ -594,8 +595,7 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
 
     fixpp::session::CompIdAuthorizationPolicy policy;
     policy.set_logon_validator(
-        [&](std::string_view /*compid*/,
-            fixpp::session::logon_credentials const& creds) -> bool {
+        [&](std::string_view /*compid*/, fixpp::session::logon_credentials const& creds) -> bool {
             ++authorize_logon_call_count;
             received_empty_creds = !creds.username.has_value() && !creds.password.has_value();
             return true;
@@ -614,8 +614,7 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
     auto logon = make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
 
     auto r = run_sync_creds(s.ioc, [&] {
-        return acceptor.on_inbound_frame(
-            std::span<const std::byte>{logon.data(), logon.size()});
+        return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
     ASSERT_TRUE(r.has_value());
 
@@ -653,35 +652,32 @@ TEST(FixtCredentials, W7_OutboundLogonWith554_RedactedBeforeCapture) {
     // Build a raw outbound Logon frame via build_logon with 553+554.
     // Uses the build_logon API directly (T022 extension).
     std::array<std::byte, 512> buf{};
-    auto r = fixpp::session::build_logon(
-        std::span<std::byte>(buf),
-        /*seq=*/1,
-        /*sender_comp_id=*/"SENDER",
-        /*target_comp_id=*/"TARGET",
-        /*begin_string=*/"FIXT.1.1",
-        /*heartbt_int=*/30,
-        /*sending_time=*/"20240101-00:00:00.000",
-        /*reset_seqnum=*/false,
-        /*next_expected_seq=*/std::nullopt,
-        /*default_appl_ver_id=*/application_version::v50sp2,
-        /*username=*/"user1",
-        /*password=*/"SENTINEL-W7-xyzzy");
+    auto r = fixpp::session::build_logon(std::span<std::byte>(buf),
+                                         /*seq=*/1,
+                                         /*sender_comp_id=*/"SENDER",
+                                         /*target_comp_id=*/"TARGET",
+                                         /*begin_string=*/"FIXT.1.1",
+                                         /*heartbt_int=*/30,
+                                         /*sending_time=*/"20240101-00:00:00.000",
+                                         /*reset_seqnum=*/false,
+                                         /*next_expected_seq=*/std::nullopt,
+                                         /*default_appl_ver_id=*/application_version::v50sp2,
+                                         /*username=*/"user1",
+                                         /*password=*/"SENTINEL-W7-xyzzy");
     ASSERT_TRUE(r.has_value()) << "build_logon with creds must succeed";
 
     const std::string raw = span_to_str(*r);
 
     // The raw frame carries the sentinel password (it must be on the wire for auth).
     ASSERT_NE(raw.find("SENTINEL-W7-xyzzy"), std::string::npos)
-        << "build_logon must emit the password clear on the wire (for peer auth); got: "
-        << raw;
+        << "build_logon must emit the password clear on the wire (for peer auth); got: " << raw;
 
     // Site (1)+(2): apply redact_tag554 as a persistence/logging interceptor.
     const std::string redacted = redact_tag554(raw);
 
     // The clear password must be ABSENT after redaction.
     EXPECT_EQ(redacted.find("SENTINEL-W7-xyzzy"), std::string::npos)
-        << "redact_tag554 must elide the clear password value (INV-FIXT-4); redacted: "
-        << redacted;
+        << "redact_tag554 must elide the clear password value (INV-FIXT-4); redacted: " << redacted;
 
     // The redaction marker must be PRESENT.
     EXPECT_NE(redacted.find("554=***"), std::string::npos)

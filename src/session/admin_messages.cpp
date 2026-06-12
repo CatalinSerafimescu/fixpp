@@ -77,11 +77,9 @@ namespace {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
-    std::string_view sending_time, bool reset_seqnum,
-    std::optional<seqnum_t> next_expected_seq,
+    std::string_view sending_time, bool reset_seqnum, std::optional<seqnum_t> next_expected_seq,
     std::optional<fixpp::dict::application_version> default_appl_ver_id,
-    std::optional<std::string_view> username,
-    std::optional<std::string_view> password) noexcept {
+    std::optional<std::string_view> username, std::optional<std::string_view> password) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -369,8 +367,8 @@ namespace {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
-    return logon_interpret_result{heartbt_int_found, default_appl_ver_id_found, username_found,
-                                  password_found};
+    return logon_interpret_result{.heartbt_int=heartbt_int_found, .default_appl_ver_id=default_appl_ver_id_found, .username=username_found,
+                                  .password=password_found};
 }
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────
