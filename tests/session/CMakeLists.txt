@@ -1739,6 +1739,48 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     DEPENDS session_refresh_on_logon)
 endif()
 
+# ── 033-fixt-fix50sp2-session — T002 Setup + T004/T005 Foundational ──────────
+# T002: create RED test targets + ctest registration so `ctest -R fixt` works.
+# T004/T005: render_appl_ver_id (application_version → wire 1137 string) unit
+#   tests.  RED when helper absent (compile/link error naming render_appl_ver_id);
+#   green after T005 adds the inline helper to version_profile.hpp.
+# No session/transport/clock libs needed — tests cover only the dict helper and
+# the logon_credentials/redactor utilities (header-only).
+# Pattern mirrors session_next_expected_msgseqnum (027): target, link, discovery.
+add_executable(session_fixt_logon_establishment
+  test_fixt_logon_establishment.cpp
+)
+target_link_libraries(session_fixt_logon_establishment PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_fixt_logon_establishment PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_fixt_logon_establishment
+  COMMAND session_fixt_logon_establishment)
+set_tests_properties(session_fixt_logon_establishment PROPERTIES
+  LABELS "033;s020;s025;fixt-logon-establishment;foundational")
+
+# T002: credentials test target.
+# T009/T010: logon_credentials operator<< redaction + redact_tag554 utility.
+# RED when logon_credentials.hpp absent; green after T010 creates the header.
+add_executable(session_fixt_credentials
+  test_fixt_credentials.cpp
+)
+target_link_libraries(session_fixt_credentials PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_fixt_credentials PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_fixt_credentials
+  COMMAND session_fixt_credentials)
+set_tests_properties(session_fixt_credentials PROPERTIES
+  LABELS "033;s022;fixt-credentials;foundational")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
