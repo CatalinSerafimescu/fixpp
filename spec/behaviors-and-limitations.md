@@ -1094,7 +1094,7 @@ supply a custom `CompIdAuthorizationPolicy` implementation. A built-in config-ga
 path is a committed future feature (FR-008a).
 
 **L-033-3 — Initiator-side unserviceable-`1137` dispose deferred.** FR-004a (unserviceable application
-version → `Reject` + Logout) is acceptor-scoped only in this feature. An initiator that receives a peer
+version → `Reject` + Disconnect, NOT a Logout message) is acceptor-scoped only in this feature. An initiator that receives a peer
 Logon advertising an `1137` value it cannot service has no automatic disposal path in 033; the
 application's `authorize_logon` / `fromAdmin` hooks must handle this case explicitly if needed.
 
