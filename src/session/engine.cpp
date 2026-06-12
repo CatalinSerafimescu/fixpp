@@ -79,19 +79,21 @@ struct counter_guard {
 Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
     : exec_{std::move(exec)},
       engine_cfg_{std::move(cfg)},
-      // 017 owned amendment #2: seed the engine-level trace_context snapshot
-      // from EngineConfig::engine_trace_context at construction time.
-      // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
-      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
       // 033 T006: build the engine-lifetime application version registry from
       // engine_cfg_.dictionaries. Always succeeds for a well-formed EngineConfig;
       // an empty dictionaries list yields an empty registry (any get() returns
       // dict_no_dictionary_for_application_version). Sessions hold a const*
       // handle to this member. build_version_registry returns expected_t but always
       // holds a value (version_registry{dictionaries} constructor is noexcept);
-      // .value() is safe and never throws here.
+      // .value() is safe and never throws here. Initialized before
+      // engine_trace_ctx_snapshot_ to match declaration order in engine.hpp
+      // (avoids -Wreorder under CI's -Werror).
       // [033 data-model.md E2; research R2 threading; engine_config.hpp:211]
       app_version_registry_{fixpp::core::build_version_registry(engine_cfg_).value()},
+      // 017 owned amendment #2: seed the engine-level trace_context snapshot
+      // from EngineConfig::engine_trace_context at construction time.
+      // contracts/adjacent-amendments.md §2 / [2k App D §D.2].
+      engine_trace_ctx_snapshot_{engine_cfg_.engine_trace_context},
       // T003 (E-0/D0/INV-0): control strand — single serialization domain for all
       // engine-global state. Constructed once over exec_. INV-0: distinct from
       // every per-session strand (each SessionEntry::session_strand is separate).
