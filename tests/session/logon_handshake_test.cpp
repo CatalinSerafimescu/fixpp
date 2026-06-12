@@ -393,7 +393,7 @@ TEST_F(LogonHandshakeTest, InterpretLogonValidFrameReturnsHeartBtInt) {
     );
     ASSERT_TRUE(result.has_value())
         << "interpret_logon() returned error for valid frame; T021 not wired";
-    EXPECT_EQ(*result, 30) << "interpret_logon() returned wrong HeartBtInt";
+    EXPECT_EQ(result->heartbt_int, 30) << "interpret_logon() returned wrong HeartBtInt";
 }
 
 // T9b: interpret_logon() — BeginString mismatch returns error.

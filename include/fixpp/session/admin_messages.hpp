@@ -48,10 +48,24 @@ namespace fixpp::session {
     std::string_view sending_time, bool reset_seqnum = false,
     std::optional<seqnum_t> next_expected_seq = std::nullopt) noexcept;
 
+// 033 T007 / data-model E5 — interpret_logon return type extension.
+// Carries the validated HeartBtInt plus optional FIXT-specific fields scanned
+// from the inbound Logon frame. All string_view members are views INTO the
+// caller-supplied `frame` span (zero-copy, no heap — [const §VIII.5]).
+// [033 data-model.md E5; research R2; FR-003/FR-004/FR-008a]
+struct logon_interpret_result {
+    int heartbt_int;                              // validated HeartBtInt(108) value
+    std::optional<std::string_view> default_appl_ver_id;  // raw wire value of tag 1137, if present
+    std::optional<std::string_view> username;     // raw wire value of tag 553, if present
+    std::optional<std::string_view> password;     // raw wire value of tag 554, if present
+};
+
 // Interpret an inbound Logon frame; validate BeginString/CompID/HeartBtInt.
-// Returns the negotiated HeartBtInt on success.
-// PLACEHOLDER — body lands T024/T025 (Phase 3 / US1).
-[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+// Returns logon_interpret_result on success (heartbt_int + optional FIXT fields).
+// The optional string_view fields are views into `frame`; callers must not
+// extend them beyond the frame's lifetime.
+// [033 T007 / data-model E5; 005 T021]
+[[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin) noexcept;
 

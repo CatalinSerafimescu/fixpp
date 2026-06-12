@@ -180,14 +180,16 @@ namespace {
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // / begin matches the on-wire field order).
-[[nodiscard]] fixpp::core::expected_t<int> interpret_logon(
+[[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    // Parse using the dict-free Iter mode: no heap, no dictionary required.
+    // Parse using the dict-free SOH-delimited scanner: no heap, no dictionary required.
     // Fields of interest:
     //   8=BeginString, 35=MsgType (must be "A"), 49=SenderCompID, 56=TargetCompID,
     //   108=HeartBtInt.
+    // 033 T007: additionally scan tag 1137 (DefaultApplVerID), 553 (Username),
+    //   554 (Password) — purely additive, no validation here (session arm handles it).
     // We skip 34, 52, 98 for this validation step.
 
     // Build a framer view over the raw bytes (no framing validation needed here;
@@ -204,6 +206,11 @@ namespace {
     std::string_view target_found;
     int heartbt_int_found = -1;
     bool has_heartbt = false;
+    // 033 T007 / data-model E5: optional FIXT fields scanned as string_view views
+    // into `frame` (zero-copy; caller frame outlives this function).
+    std::optional<std::string_view> default_appl_ver_id_found;
+    std::optional<std::string_view> username_found;
+    std::optional<std::string_view> password_found;
 
     // Simple SOH-delimited field scanner (no heap, no library dependency).
     const std::byte SOH{0x01};
@@ -266,6 +273,18 @@ namespace {
                         has_heartbt = true;
                     }
                     break;
+                // 033 T007 / data-model E5: scan FIXT Logon fields as views into frame
+                // (zero-copy; no validation here — session arm enforces missing-1137 /
+                // unserviceable-1137 / 553+554 surface logic).
+                case 1137:
+                    default_appl_ver_id_found = val;
+                    break;
+                case 553:
+                    username_found = val;
+                    break;
+                case 554:
+                    password_found = val;
+                    break;
                 default:
                     break;
             }
@@ -315,7 +334,8 @@ namespace {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
-    return heartbt_int_found;
+    return logon_interpret_result{heartbt_int_found, default_appl_ver_id_found, username_found,
+                                  password_found};
 }
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────

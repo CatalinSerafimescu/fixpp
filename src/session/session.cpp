@@ -56,6 +56,10 @@
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
+// 033 T006/T008: version_registry + version_profile full definitions.
+// Not in session.hpp (fwd-decl only there per [const §XV.9] closure guard).
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/version_registry.hpp>
 
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
@@ -110,7 +114,8 @@ fixpp::transport::ReconnectPolicy resolve_reconnect_policy(const SessionConfig& 
 }
 }  // namespace
 
-Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg)
+Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& cfg,
+                 const fixpp::dict::version_registry* app_version_registry)
     : engine_(engine),
       cfg_(cfg),
       session_arena_(resolve_session_arena(engine, cfg)),
@@ -123,6 +128,12 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
     // reconnect_fsm_ owns AwaitingResend state (FR-009 per data-model §E-1).
+    //
+    // 033 T006: capture the engine-built application version registry (nullable;
+    // null for test/FIX.4.x paths that don't need serviceability checks).
+    // Assignment in body (not member-init) to match declaration order in session.hpp
+    // (app_version_registry_ is declared after reconnect_fsm_'s logical grouping).
+    app_version_registry_ = app_version_registry;
 }
 
 // D-23: release any per-session Clock state (system_clock_source's reusable
@@ -140,6 +151,22 @@ Session::~Session() {
 
 std::pmr::memory_resource* Session::session_arena() const noexcept {
     return session_arena_;  // I-18: frozen at ctor, never null, never swapped
+}
+
+// 033 T008 / data-model E2 — negotiated FIXT application version profile.
+// Returns {session=vt11, default_appl=negotiated_appl_version_} for FIXT
+// sessions where negotiated_appl_version_ has been set at inbound-Logon.
+// Returns {session=Unknown, default_appl=Unknown} for FIX.4.x sessions or
+// FIXT sessions not yet past inbound-Logon (negotiated_appl_version_==Unknown).
+// Strand-confined; return by value (4-byte trivially copyable).
+// [033 data-model.md E2; FR-005; SC-006/W5; INV-FIXT-2]
+fixpp::dict::version_profile Session::negotiated_version_profile() const noexcept {
+    if (negotiated_appl_version_ == fixpp::dict::application_version::Unknown) {
+        return fixpp::dict::version_profile{fixpp::dict::session_version::Unknown,
+                                            fixpp::dict::application_version::Unknown, false, 0};
+    }
+    return fixpp::dict::version_profile{fixpp::dict::session_version::vt11,
+                                        negotiated_appl_version_, false, 0};
 }
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
