@@ -1958,6 +1958,104 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
             }
 
+            // 033 T018 — FIXT acceptor: validate DefaultApplVerID(1137) (C4/C5).
+            // Gate: only for FIXT sessions AND when the serviceability registry is set.
+            // FIX.4.x sessions (is_fixt()==false) pass through byte-identical (INV-FIXT-1).
+            // [033 contracts/fixt-logon-establishment.md C4/C5; data-model.md E2; FR-004/FR-004a;
+            //  research R2/R7; INV-FIXT-2]
+            if (cfg_.is_fixt() && app_version_registry_) {
+                // (a) 1137 absent → Reject(35=3, 373=1 RequiredTagMissing) + Disconnected.
+                // [C4; R7; research.md R7: missing-1137 uses RequiredTagMissing(1)]
+                if (!result->default_appl_ver_id.has_value()) {
+                    const auto rj_st52 =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                    const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                    const seqnum_t rj_ref = parse_seqnum(scan_frame_header(frame).msg_seq_num);
+                    std::array<std::byte, 512> rj_buf{};
+                    auto rj_r = fixpp::session::build_reject(
+                        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
+                        1137,  // RefTagID = 1137 (DefaultApplVerID — the missing required tag)
+                        "A",   // RefMsgType = Logon
+                        1,     // SessionRejectReason = 1 (RequiredTagMissing)
+                        cfg_.begin_string, rj_st52.value);
+                    if (rj_r) {
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        if (!assign_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(assign_r.error());
+                        }
+                        // 033: toAdmin hook — mirrors acceptor reply Logon pattern.
+                        if (!fire_to_admin_(*rj_r)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
+                        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                        (void)emit_r;  // I-07: store-side errors logged-then-proceed
+                    }
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                // (b) 1137 present: resolve + serviceability check.
+                // resolve_application_version maps the wire string to application_version enum.
+                // app_version_registry_->get() checks if we have a dictionary for it.
+                // [C5; R2: Resolve + serviceability check]
+                const fixpp::dict::version_profile vt11_profile{
+                    fixpp::dict::session_version::vt11,
+                    fixpp::dict::application_version::Unknown, false, 0};
+                auto resolved =
+                    fixpp::dict::resolve_application_version(vt11_profile,
+                                                             *result->default_appl_ver_id);
+                bool serviceable = false;
+                if (resolved.has_value()) {
+                    auto dict_r = app_version_registry_->get(*resolved);
+                    serviceable = dict_r.has_value();
+                }
+
+                if (!serviceable) {
+                    // (c) Unserviceable → Reject(35=3, 371=1137, 373=5 ValueIsIncorrect).
+                    // DISTINCT from (a): 373=5 vs 373=1. [C5; R2]
+                    const auto rj_st52 =
+                        effective_clock_
+                            ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                            : SendingTimeStamp{};
+                    const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                    const seqnum_t rj_ref = parse_seqnum(scan_frame_header(frame).msg_seq_num);
+                    std::array<std::byte, 512> rj_buf{};
+                    auto rj_r = fixpp::session::build_reject(
+                        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                        cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
+                        1137,  // RefTagID = 1137 (DefaultApplVerID — the unserviceable field)
+                        "A",   // RefMsgType = Logon
+                        5,     // SessionRejectReason = 5 (ValueIsIncorrect)
+                        cfg_.begin_string, rj_st52.value);
+                    if (rj_r) {
+                        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                        if (!assign_r) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(assign_r.error());
+                        }
+                        // 033: toAdmin hook — mirrors acceptor reply Logon pattern.
+                        if (!fire_to_admin_(*rj_r)) {
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                        }
+                        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                        (void)emit_r;  // I-07
+                    }
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                // (d) Serviceable: record the negotiated application version (C3/E2).
+                // Set-once (protected by FSM NotConnected gate — only runs once per session).
+                // [033 data-model.md E2 (negotiated_appl_version_); INV-FIXT-2]
+                negotiated_appl_version_ = *resolved;
+            }
+
             // Valid Logon + in-seq: transition to LogonReceived, then emit
             // the acceptor's own Logon reply and transition to Active.
             // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
@@ -3413,6 +3511,25 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // symmetrically; the per-config peer-identity test seam is removed in
             // production AND tests (T020/T021, SC-006/FR-009). Both roles bind a
             // real identity — no asymmetry remains. [FR-008/009; data-model §E-2; C2]
+
+            // 033 T018 — FIXT initiator: read peer 1137 from Logon-ack; record
+            // negotiated_appl_version_. FR-004a: initiator does NOT refuse on any
+            // value — record whatever the peer advertises. No reject on this arm.
+            // Gate: is_fixt() — registry present is not required (FR-004a is acceptor-only).
+            // [033 contracts C3; data-model E2; FR-004a; research R1]
+            if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
+                const fixpp::dict::version_profile vt11_profile{
+                    fixpp::dict::session_version::vt11,
+                    fixpp::dict::application_version::Unknown, false, 0};
+                auto resolved =
+                    fixpp::dict::resolve_application_version(vt11_profile,
+                                                             *result->default_appl_ver_id);
+                if (resolved.has_value()) {
+                    // Set-once: negotiated_appl_version_ starts Unknown; set here.
+                    negotiated_appl_version_ = *resolved;
+                }
+                // Unknown wire value → leave Unknown (cannot map to application_version).
+            }
 
             // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).
             // [gate-b/r1 FQ-1: mirror acceptor ordering at :1827-1831 — C6/C8/D-0]

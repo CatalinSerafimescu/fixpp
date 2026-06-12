@@ -1752,6 +1752,7 @@ add_executable(session_fixt_logon_establishment
 )
 target_link_libraries(session_fixt_logon_establishment PRIVATE
   fixpp_session
+  fixpp_mock_clock
   GTest::gtest
   GTest::gtest_main
 )
