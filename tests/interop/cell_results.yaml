@@ -64,8 +64,21 @@ cells:
   - { id: BM-QFj-init-fix44-nos-execrpt,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
   - { id: BM-QFj-acc-fix44-nos-execrpt,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "020 US2/US3 FR-010/011/012" }
 
+  # ── 033 FIXT.1.1 establishment live cells (8) — was deferred:fixt-routing ─────
+  # SC-004/SC-006: both engines × both roles × {FIX.5.0SP2 (1137=9), FIX.4.4-over-
+  # FIXT (1137=6)}. Live-proven 2026-06-12 (033 US3 T027); goldens banked under
+  # phase-9-harness/golden/ (1137 locked literal). The fixt-routing deferral is
+  # retired (S-020 FIXT half / S-025 DefaultApplVerID now done — 033).
+  - { id: HP-QFcpp-init-fixt11-fix50sp2-logon-hb-logout, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFcpp-acc-fixt11-fix50sp2-logon-hb-logout,  config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFcpp-init-fixt11-fix44-logon-hb-logout,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFcpp-acc-fixt11-fix44-logon-hb-logout,     config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFj-init-fixt11-fix50sp2-logon-hb-logout,   config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
+  - { id: HP-QFj-init-fixt11-fix44-logon-hb-logout,      config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  - { id: HP-QFj-acc-fixt11-fix44-logon-hb-logout,       config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+
   # ── US1 deferred rows (present, NOT executed → status n/a) ───────────────────
-  - { id: HP-fixt11-fix50sp2-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fixt-routing", deferred_reason: "fixpp cannot establish a FIXT.1.1/5.0SP2 session yet (S-020 FIXT half, S-025 DefaultApplVerID(1137) backlog).", spec_ref: "FIXT.1.1 §5" }
   - { id: HP-fix8-happy-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fix8-revisit", deferred_reason: "Fix8 is corpus-only at v1.0; live disposition revisited from corpus findings (FR-009).", spec_ref: "FIX-SL §4" }
   - { id: HP-mutual-mtls-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:v1.1-mtls", deferred_reason: "Client-cert mutual-mTLS identity binding is the v1.1 reach; v1.0 baseline is server-auth one_way_ca (FR-025).", spec_ref: "FIXS §3.2/§3.4" }
 

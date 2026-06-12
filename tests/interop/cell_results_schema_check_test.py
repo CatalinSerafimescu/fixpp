@@ -25,7 +25,8 @@ KINDS = {"happy", "thorny", "parity"}
 CONFIGS = {"normal", "asan-ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 DEFERRED_TAGS = {
-    "deferred:fixt-routing",
+    # deferred:fixt-routing RETIRED 2026-06-12 (033 US3): the 8 FIXT.1.1
+    # establishment cells are live (HP-*-fixt11-{fix50sp2,fix44}-logon-hb-logout).
     "deferred:fix8-revisit",
     "deferred:v1.1-mtls",
     # QuickFIX-cpp cannot emit a controllable too-low PossDup (Session::send()
@@ -167,8 +168,17 @@ EXPECTED_IDS = frozenset({
     "BM-QFcpp-acc-fix44-nos-execrpt",
     "BM-QFj-init-fix44-nos-execrpt",
     "BM-QFj-acc-fix44-nos-execrpt",
-    # Deferred rows (3)
-    "HP-fixt11-fix50sp2-cells",
+    # 033 FIXT.1.1 establishment live cells (8) — was the deferred:fixt-routing
+    # placeholder HP-fixt11-fix50sp2-cells; retired 2026-06-12 (033 US3 SC-004/006).
+    "HP-QFcpp-init-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFcpp-acc-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFcpp-init-fixt11-fix44-logon-hb-logout",
+    "HP-QFcpp-acc-fixt11-fix44-logon-hb-logout",
+    "HP-QFj-init-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout",
+    "HP-QFj-init-fixt11-fix44-logon-hb-logout",
+    "HP-QFj-acc-fixt11-fix44-logon-hb-logout",
+    # Deferred rows (2)
     "HP-fix8-happy-cells",
     "HP-mutual-mtls-cells",
     # US2 thorny corpus P1 (7)

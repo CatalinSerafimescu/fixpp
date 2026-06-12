@@ -1098,9 +1098,25 @@ version → `Reject` + Logout) is acceptor-scoped only in this feature. An initi
 Logon advertising an `1137` value it cannot service has no automatic disposal path in 033; the
 application's `authorize_logon` / `fromAdmin` hooks must handle this case explicitly if needed.
 
-**L-033-4 — `Password(554)` redaction wired at unit-golden + (US3) interop-golden; production
+**L-033-4 — `Password(554)` redaction wired at unit-golden + interop-golden; production
 logger/tap/transcript wiring is a forward obligation.** The `redact_tag554` utility is wired at the
-unit-test golden layer (W7) and will be applied at the interop-golden layer when US3 live cells are run
-(T025-T028). Production session-logger, tap-consumer, and transport-transcript wiring of the redactor
-is deferred — those surfaces are no-hook stubs in 033 (see L-017-* for the logger/tap framework
-limitations).
+unit-test golden layer (W7) and (US3 T026, 2026-06-12) at the interop-golden layer — a Python
+`_redact_tag554` twin in `run_interop_cell.py`'s `normalize_transcript` AND `_transcript_to_inrepo_golden`
+(no-op for the credential-free happy cells, but fail-closed at both persistence sites). Production
+session-logger, tap-consumer, and transport-transcript wiring of the redactor is deferred — those
+surfaces are no-hook stubs in 033 (see L-017-* for the logger/tap framework limitations).
+
+**L-033-5 — Acceptor establishment requires the negotiated application version to have a registered
+application dictionary in the engine `version_registry` (operator footgun, live-found US3).** Per
+FR-004a/C5, an inbound FIXT Logon whose `DefaultApplVerID(1137)` resolves to a version with **no**
+application dictionary in `EngineConfig::dictionaries` is refused with `Reject(35=3, 371=1137, 373=5)` and
+does not reach Active — this is spec-correct (no silent mis-versioned establishment). The consequence,
+surfaced only by the live US3 acceptor cells: an acceptor configured with `default_appl_ver_id=v50sp2`
+but whose engine has **no** FIX50SP2 dictionary registered **silently rejects every FIXT Logon** (the
+serviceability gate consults the registry, NOT the session's own configured default). An operator must
+register, in the engine config, the application dictionary for every application version the acceptor is
+configured to speak. **Open question for Gate-B adjudication:** should establishment treat the acceptor's
+own `cfg.default_appl_ver_id` as serviceable-by-construction (self-register / fall back to the configured
+default) so the registry need only carry *additional* serviceable versions? Deferred to Gate B — no
+production change made in 033 (the interop fixture was corrected to register v44+v50sp2 dictionaries,
+mirroring a real FIXT-acceptor deployment).

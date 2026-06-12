@@ -134,6 +134,18 @@ fixpp_add_interop_test(
     SOURCES happy/hp_fix44_logon_hb_logout_test.cpp
     TLS
 )
+# ── 033 FIXT.1.1 / FIX 5.0 SP2 live establishment cell (US3, SC-004) ──────────
+# Structural twin of the fix44 logon-hb-logout driver; only the SessionConfig
+# version axis differs (begin_string=FIXT.1.1 + default_appl_ver_id=v50sp2). Live
+# cell: skip-with-reason when no counterparty (FR-023). Parent harness runs a
+# QuickFIX SSL acceptor configured FIXT.1.1/FIX50SP2 (configs/*-fixt50sp2.cfg.in).
+fixpp_add_interop_test(
+    NAME interop_hp_fixt50sp2_logon_hb_logout_test
+    GROUP happy
+    LABEL "interop;033;interop-happy;us3;fixt;fix50sp2"
+    SOURCES happy/hp_fixt50sp2_logon_hb_logout_test.cpp
+    TLS
+)
 fixpp_add_interop_test(
     NAME interop_hp_down_peer_stop_watchdog_test
     GROUP happy
