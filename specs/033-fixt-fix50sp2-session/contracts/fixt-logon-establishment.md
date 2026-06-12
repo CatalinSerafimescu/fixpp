@@ -90,7 +90,7 @@ research.md R8). "FIXT session" ⇔ `SessionConfig::is_fixt()` (`begin_string=="
 - **Given** QFcpp/QFJ configured for FIXT.1.1/FIX.5.0SP2 (and a FIXT/FIX.4.4 variant), **when** the
   un-deferred cells run with fixpp as initiator and acceptor against each engine, **then** each
   establishes and matches a banked golden; the manifest no longer carries `deferred:fixt-routing`.
-  *(SC-004/SC-006)*
+  *(FR-012/SC-004/SC-006)*
 - **The 8 concrete cells** (2 dialect families × 2 roles × {QFcpp, QFJ}):
   `HP-fixt50sp2-qfcpp-init`, `HP-fixt50sp2-qfcpp-acc`, `HP-fixt50sp2-qfj-init`, `HP-fixt50sp2-qfj-acc`,
   `HP-fixt44-qfcpp-init`, `HP-fixt44-qfcpp-acc`, `HP-fixt44-qfj-init`, `HP-fixt44-qfj-acc`.

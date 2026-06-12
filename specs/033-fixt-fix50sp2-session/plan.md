@@ -27,7 +27,7 @@ negotiated application version through Logon build/parse and wire the profile in
    `begin_string == "FIXT.1.1"`, the session is a FIXT session; when unset, FIX.4.x behaviour is
    byte-identical (FR-009/SC-002).
 2. **Outbound Logon** (`build_logon`, `admin_messages.cpp:76-179`): emit `DefaultApplVerID(1137)` after
-   `108` on **every** outbound Logon (initiator emit `session.cpp:752`; acceptor reply `session.cpp:~1937`)
+   `108` on **every** outbound Logon (initiator emit `session.cpp:752`; acceptor reply `session.cpp:~2023`)
    — each side advertises its own default (matches QFcpp `Session.cpp:674/701`). Optionally emit
    `Username(553)`/`Password(554)` when configured.
 3. **Inbound Logon** (`interpret_logon`, `admin_messages.cpp:183-319`, a dict-free byte scanner): read
@@ -79,8 +79,10 @@ FIXT, both roles, QFcpp + QFJ) in the parent `phase-9-harness`. — [const §VII
 in the parent `phase-9-harness`.
 **Project Type**: single C++ library (`fixpp`) + tests + interop-harness extension.
 **Performance Goals**: no hot-path regression; FIXT path adds a few optional fields to Logon
-build/parse (cold establishment path) and one profile construction per inbound app message routed
-through the existing resolver. FIX.4.x path untouched.
+build/parse (cold establishment path) only. The inbound app-message steady-state path is unchanged —
+the session delivers dict-free wire views to `fromApp` and never reifies (research R4); a profile is
+constructed only when a downstream reify call-site reads `negotiated_version_profile()`. FIX.4.x path
+untouched.
 **Constraints**: `noexcept`/`expected_t` preserved; FIX.4.x wire output byte-identical when FIXT not
 configured (SC-002); `Password(554)` never emitted clear-text into any persisted artifact (FR-011); no
 new include into the `session.hpp` awaitable closure ([const §XV.9], confirm at verify).
@@ -99,6 +101,7 @@ codegen change (dictionaries already ship), NO new C-ABI export, NO new MessageS
 | **VI** Spec coverage | Flips **S-020** (FIXT half: backlog/deferred → done), lands **S-025** (`DefaultApplVerID`) and **S-022** (`Username`/`Password`) backlog → done; **S-026** stays deferred (tolerate-only, FR-010). `spec.md` carries a `## Normative References` section with the four exact catalogue refs: S-020 `[FIX-SL §4.2.1] The FIX session profile`, S-022 `[FIX-SL §4.3] Establishing a FIX connection`, S-025 `[FIX-SL §4.3.7] Specifying application version`, S-026 `[FIX-SL §5.3.5] Explicit application version per message` — per §VI.5 (added Gate A round 1; the earlier vague "FIXT.1.1 §5" wording dropped). Whether 553/554 + 1137 need their own catalogue rows (vs amending S-020/S-022/S-025) decided at /tasks Polish — see §VI delta below. | ✅ PASS (Normative References present) |
 | **VII** Testing/TDD | RED-first witnesses per user story (research.md R8): W1 FIXT Logon round-trip (8=FIXT.1.1 + 1137 emitted/parsed both roles) ⇒ Active; W2 missing-1137 ⇒ Reject(35=3,373=1) no-establish; W3 unserviceable ApplVerID ⇒ refuse (FR-004a); W4 FIX.4.x byte-identical regression guard (no 1137 emitted, wire unchanged); W5 4.4-over-FIXT establishes (version-general, SC-006); W6 553/554 emit+parse+surface; W7 554 redaction in transcript/log. | ✅ planned |
 | **VII.6** Interop | un-defer `HP-fixt11-fix50sp2-cells`; live 5.0SP2 + 4.4-over-FIXT cells both roles × QFcpp/QFJ; goldens banked; manifest flipped from `deferred:fixt-routing` (SC-004) | ✅ planned |
+| **VII.7** Fuzz (parser-touching) | `interpret_logon` gains `case 1137:/553:/554:` scanner arms → parser-touching per §VII item 7 ("new parser-touching code without a fuzz harness is a Gate B blocker"). The inbound admin-parse path is already driven by `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, so this is a **seed/corpus extension** (the 027 T026 pattern), NOT a new harness: add FIXT Logon variants (`1137` present/missing/malformed + optional `553`/`554`). Tracked as tasks.md **T036**; verify via `/speckit-verify` fuzz smoke ≥10 min. *(Added analyze D1 — the row was omitted in the round-1 plan.)* | ✅ planned (T036) |
 | **VIII.5** Allocator | Logon build appends a few optional fields (existing builder arena); inbound parse is the existing dict-free scanner; profile construction is a 4-byte value. Confirm no new heap on the establishment path; reuse existing no-alloc witnesses. | ⚠ confirm at verify |
 | **IX.1** Coverage | ≥95/85 on the new branches: 1137 emit (FIXT vs FIX.4.x), 1137 parse + missing→reject, version resolve + unserviceable→refuse, 553/554 emit/parse, redaction | ✅ planned |
 | **IX.2** Sanitizers | ASan/UBSan/TSan on the FIXT establishment unit suites + interop ctest | ✅ planned |
@@ -153,7 +156,7 @@ include/fixpp/dict/version_profile.hpp     # NEW: inverse render helper applicat
 include/fixpp/session/compid_authorization_policy.hpp  # NEW: authorize_logon(asserted_compid, logon_credentials) default-accept seam + logon_credentials value (redacting password) — res. R6 / FR-008/008a
 src/session/admin_messages.cpp             # build_logon: emit 1137 (via render helper) (+553/554) after 108; interpret_logon: read 1137/553/554 + return struct
 include/fixpp/session/admin_messages.hpp   # interpret_logon return-struct extension (heartbt + appl_ver_id + creds)
-src/session/session.cpp                    # initiator Logon emit (:752) + acceptor reply (:~1937) thread app version; inbound arm: store negotiated version, missing-1137 → Reject 373=1 (mirror :2370+), unserviceable-version → Reject 371=1137/373=5, surface creds to authorize_logon (independent of the :1849+ mTLS-gated authorize)
+src/session/session.cpp                    # initiator Logon emit (:752) + acceptor reply (:~2023) thread app version; inbound arm: store negotiated version, missing-1137 → Reject 373=1 (mirror :2370+), unserviceable-version → Reject 371=1137/373=5, surface creds to authorize_logon (independent of the :1849+ mTLS-gated authorize)
 include/fixpp/session/session.hpp          # NEW: strand-confined negotiated-application-version member + version_registry const& handle; NEW negotiated_version_profile() const accessor
 include/fixpp/dict/version_registry.hpp / engine.hpp  # thread the engine-built version_registry (EngineConfig::dictionaries → build_version_registry, engine_config.hpp:211) to each Session (engine-lifetime ref) — res. R2
 tests/session/test_fixt_logon_establishment.cpp   # NEW: W1/W2/W3/W4/W5 (build/parse; W2 missing→373=1; W3 unserviceable→371=1137/373=5 frame; W4 4.4 byte-identical; W5 negotiated_version_profile().default_appl per version)
