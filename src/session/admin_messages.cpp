@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/writer.hpp>
@@ -77,7 +78,8 @@ namespace {
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum,
-    std::optional<seqnum_t> next_expected_seq) noexcept {
+    std::optional<seqnum_t> next_expected_seq,
+    std::optional<fixpp::dict::application_version> default_appl_ver_id) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
     fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
@@ -142,6 +144,22 @@ namespace {
             return std::unexpected(fixpp::core::error::wire_field_value_truncated);
         }
         if (auto r = w.append_raw(108, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 1137=DefaultApplVerID — emitted for FIXT sessions only (when default_appl_ver_id is set).
+    // Data-model E4: ordered after 108 (HeartBtInt), before 141 (ResetSeqNumFlag).
+    // Rendered via render_appl_ver_id(); an Unknown value is propagated as an error (no
+    // garbage on wire — [const §VIII.5] zero-alloc, no heap).
+    // FIX.4.x callers pass nullopt → no field emitted → byte-identical (INV-FIXT-1 / SC-002).
+    // [033 T016; data-model E4; contracts/fixt-logon-establishment.md C1/C2; FR-002]
+    if (default_appl_ver_id.has_value()) {
+        auto rendered = fixpp::dict::render_appl_ver_id(*default_appl_ver_id);
+        if (!rendered) {
+            return std::unexpected(rendered.error());
+        }
+        if (auto r = w.append_raw(1137, sv_to_bytes(*rendered)); !r) {
             return std::unexpected(r.error());
         }
     }

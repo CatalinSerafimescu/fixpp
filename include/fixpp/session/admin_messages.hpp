@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>  // dict::application_version — T016/033
 #include <fixpp/session/seqnum.hpp>
 #include <optional>
 #include <span>
@@ -40,13 +41,19 @@ namespace fixpp::session {
 //               (e.g. "20240101-00:00:00.000") for tag 52.
 // reset_seqnum: when true, emits ResetSeqNumFlag(141)=Y.
 //   bilateral_strict mode sets this to request mutual seqnum reset [FR-017].
+// default_appl_ver_id: when set (FIXT sessions only), emits DefaultApplVerID(1137)
+//   after 108, before 141 (data-model E4 / FR-002). Rendered via
+//   render_appl_ver_id(); an Unknown value is propagated as an error (no garbage
+//   on wire). When nullopt (FIX.4.x path), no 1137 is emitted — byte-identical.
+//   [033 T016; data-model E4; contracts/fixt-logon-establishment.md C1/C2]
 // FR-002/FR-003/RC#4: kBeginStringDefault + kSendingTimePlaceholder REMOVED.
 // RC#C (gate-b/r1): added reset_seqnum parameter for 141=Y support [FR-017].
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum = false,
-    std::optional<seqnum_t> next_expected_seq = std::nullopt) noexcept;
+    std::optional<seqnum_t> next_expected_seq = std::nullopt,
+    std::optional<fixpp::dict::application_version> default_appl_ver_id = std::nullopt) noexcept;
 
 // 033 T007 / data-model E5 — interpret_logon return type extension.
 // Carries the validated HeartBtInt plus optional FIXT-specific fields scanned

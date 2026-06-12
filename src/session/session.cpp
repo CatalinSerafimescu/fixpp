@@ -776,10 +776,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         cfg_.enable_next_expected_msg_seq_num
             ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
             : std::nullopt;
+    // 033 T017: thread FIXT DefaultApplVerID(1137) into the initiator Logon emit.
+    // is_fixt() guards FIX.4.x callers (cfg_.begin_string!="FIXT.1.1") → nullopt
+    // → no 1137 emitted → byte-identical (INV-FIXT-1 / SC-002 / FR-002).
+    // Each side advertises its OWN configured default_appl_ver_id (R1).
+    const std::optional<fixpp::dict::application_version> initr_default_appl =
+        cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
-        initr_next_expected);
+        initr_next_expected, initr_default_appl);
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -2047,10 +2053,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     cfg_.enable_next_expected_msg_seq_num
                         ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
                         : std::nullopt;
+                // 033 T017: thread FIXT DefaultApplVerID(1137) into the acceptor reply Logon.
+                // is_fixt() guards FIX.4.x sessions → nullopt → byte-identical (INV-FIXT-1).
+                // Acceptor advertises its OWN configured default_appl_ver_id (FR-002 / R1).
+                const std::optional<fixpp::dict::application_version> acpt_default_appl =
+                    cfg_.is_fixt() ? cfg_.default_appl_ver_id : std::nullopt;
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
-                    reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected);
+                    reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
+                    acpt_default_appl);
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
