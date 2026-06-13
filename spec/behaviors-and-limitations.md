@@ -1130,18 +1130,29 @@ so the **Tier-4 release-gate B&L back-fill** (REMAINING-WORK item 9) can relocat
 proper 008 section. Code-fix follow-ups (credential masking, toAdmin coverage, GapFill 43=Y/122,
 file_store offload) are tracked in `REMAINING-WORK.md` "Fable review findings (2026-06-13)", NOT here.
 
-**L-033-6 — `Password(554)` on the outbound Logon is persisted in cleartext by a configured persistent
-message store (at-rest exposure).** When a FIXT session has `SessionConfig::logon_credentials.password`
-set AND a persistent `store_factory` is configured, the built outbound Logon frame is written verbatim
-to the store via `store_then_emit`→`file_store write_frame` (the durable-before-transmit I-3 path) on
-both the initiator emit and the acceptor reply — the cleartext password sits on disk for the life of the
-store file. `redact_tag554` is NOT applied at this boundary (it has zero production call-sites). It is the
-session's OWN credential (not the peer's), is never re-emitted (admin frames fold into a SequenceReset-
-GapFill on resend), and reaches no log/OTel/metric sink. Industry parity (QuickFIX-cpp/J FileStore behaves
-identically; FIX-SL treats 553/554 as legacy and recommends TLS). **Operator mitigation:** protect the
-store path with filesystem permissions; prefer mTLS identity over 553/554. A store-boundary same-length
-mask is tracked as a fix in REMAINING-WORK (F-c). *(Fable `5.2`; `session.cpp:835`/`:2248`,
-`file_store.cpp:503`.)*
+**B-034-1 — `Password(554)` on the outbound Logon is MASKED before persistence (at-rest exposure
+mitigated).** *(was L-033-6; fixed by 034-credential-store-redaction.)* When a FIXT session has
+`SessionConfig::logon_credentials.password` set AND any `store_factory` is configured, the `554` value is
+overwritten in place with a same-length `'*'` run **before** the frame enters the message store, at the
+single store-entry boundary `Session::store_then_emit` — so every store backend (FileStore, MemoryStore,
+null) persists the masked frame on both the initiator emit and the acceptor reply, and no cleartext
+password is at rest. The **wire** frame is transmitted unmasked (the peer still authenticates). The mask is
+same-length (preserves `9=` BodyLength + the store's per-record CRC), zero-alloc (coroutine-frame copy),
+and scoped to `35=A` only (the never-replayed-verbatim class). This is deliberate hardening **beyond**
+reference-engine parity (QuickFIX-cpp/J FileStore persist the cleartext password). The embedded FIX `10=`
+checksum of the stored frame is intentionally stale (stored frames are never re-validated as FIX nor
+replayed). **Residual operator note:** the masked value length still reveals the original password length;
+protect the store path with filesystem permissions and prefer mTLS identity over 553/554. *(034 FR-001..009;
+`session.cpp` `store_then_emit`; witnesses `tests/session/test_credential_store_redaction.cpp`.)*
+
+**L-034-1 — the at-rest mask relies on admin Logon frames never being replayed verbatim (forward
+constraint).** The safety of masking the stored `35=A` Logon rests on the invariant that stored admin
+frames are folded into a `SequenceReset-GapFill` on resend (`session.cpp` resend store-walk) and never
+retransmitted byte-for-byte — so the masked stored copy can never reach the wire. **If a future feature
+ever introduces verbatim admin-frame replay, it MUST re-derive the credential from configuration, not from
+the (now-masked) store** — replaying the masked bytes would put `554=****` on the wire and break peer
+authentication. App (non-admin) frames ARE replayed verbatim, which is precisely why 034's masking is
+gated to `MsgType=A` only. *(034 R4/R7 / INV-034-3/5.)*
 
 **L-015-5 — the deprecated `one_way_ca` TLS profile performs no peer-identity binding.** The `one_way_ca`
 profile accepts any peer certificate that chains to the configured trust anchor — it does NOT bind the
