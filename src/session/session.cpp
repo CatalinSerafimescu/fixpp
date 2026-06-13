@@ -30,6 +30,7 @@
 #include <coroutine>  // NOLINT(misc-include-cleaner) — IWYU: coroutine_handle via awaitable machinery
 #include <cstddef>
 #include <cstdint>
+#include <cstring>  // 034: std::memcpy for the masked-frame coroutine-frame copy
 #include <expected>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
 #include <fixpp/core/engine_config.hpp>
@@ -40,6 +41,7 @@
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/admin_messages.hpp>         // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
+#include <fixpp/session/logon_credentials.hpp>      // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
@@ -963,6 +965,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
                     co_return std::unexpected(error::invalid_session_config);
                 }
             }
+        }
+    }
+
+    // 034 T007 (C3): credential-length guard — role-independent, at the shared
+    // open() validation point (before any observable mutation). The masked-Logon
+    // persist path (store_then_emit, T006) copies the frame into a
+    // kMaxMaskableLogonBytes (== build_logon's logon_buf/reply_buf capacity)
+    // coroutine-frame array. build_logon ALREADY fails-closed
+    // (wire_frame_too_large) when its output exceeds that buffer, so the T006
+    // over-bound branch is already production-unreachable; this guard surfaces
+    // the same ceiling at CONFIG time for the credential case and — by validating
+    // cfg_.username/password regardless of role — keeps the bound-exactness
+    // argument (and therefore the dead over-bound branch) symmetric across BOTH
+    // initiator open() AND acceptor reply-Logon, not just the initiator
+    // ([[feedback_symmetric_api_claim_unreachable_arm]]; C3 / FR-004). The check
+    // is a sufficient-condition floor: credentials whose combined length alone
+    // cannot leave room for the fixed Logon overhead can never produce a
+    // maskable (≤ kMaxMaskableLogonBytes) Logon. Clean/absent credentials never
+    // trip it → W4 byte-identical preserved.
+    {
+        const std::size_t cred_len = (cfg_.username.has_value() ? cfg_.username->size() : 0u) +
+                                     (cfg_.password.has_value() ? cfg_.password->size() : 0u);
+        if (cred_len >= Session::kMaxMaskableLogonBytes) {
+            co_return std::unexpected(error::invalid_session_config);
         }
     }
 
@@ -4398,15 +4424,57 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
+    // 034 T006 (C2 / R4): credential redaction at the single store boundary.
+    // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
+    // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
+    //
+    // Gate order matters (R4): cheap 554-presence scan FIRST — the overwhelming
+    // majority of outbound frames carry no 554, so they take the no-copy / no-
+    // alloc path and `span_to_store` stays == `frame` (byte-identical, FR-007).
+    // Only if a genuine 554 is present do we confirm MsgType(35)=="A". That
+    // MsgType=A gate is the LOAD-BEARING safety boundary, not belt-and-suspenders:
+    // admin Logon frames are folded into a SequenceReset-GapFill on resend (never
+    // replayed verbatim), so the masked stored copy can never reach the wire;
+    // app frames ARE replayed verbatim from stored bytes, so masking a non-admin
+    // 554 would put the mask on the wire on resend → peer desync. Masking is a
+    // synchronous transform that completes BEFORE the co_await store, so I-3
+    // (durable-before-transmit) and the noexcept/cancellation handling below are
+    // unchanged. [FR-001/002/006/009; INV-034-1/2/3/5; data-model E2; research R4]
+    std::span<const std::byte> span_to_store = frame;  // default: today's behavior
+    bool skip_store = false;
+    std::array<std::byte, kMaxMaskableLogonBytes> mask_buf{};  // coroutine-frame copy
+    if (fixpp::session::frame_has_genuine_tag554(frame) && scan_frame_header(frame).msg_type == "A") {
+        if (frame.size() > kMaxMaskableLogonBytes) {
+            // Over-bound: FAIL CLOSED — never persist cleartext. Skip the store
+            // write for this frame (logged-then-proceed, I-07, mirroring the
+            // existing store-error absorption below); the original frame is still
+            // transmitted in Step 2. Wire-safe: a skipped 35=A store is wire-
+            // identical to a stored one (admin→GapFill on resend, session.cpp
+            // resend store-walk). Production-UNREACHABLE — kMaxMaskableLogonBytes
+            // == build_logon's logon_buf/reply_buf capacity (session.cpp:755,2145)
+            // and build_logon already fails-closed (wire_frame_too_large) above
+            // it; the T007 open()-time credential-length guard adds config-time
+            // defense for both roles. This branch is reachable ONLY via the
+            // FIXPP_TEST_LOGON_MASK_BOUND fault-injection seam (T010 earns its
+            // BRDA). [C2 step-2 / R3 / I-07; [[feedback_symmetric_api_claim_unreachable_arm]]]
+            skip_store = true;
+        } else {
+            std::memcpy(mask_buf.data(), frame.data(), frame.size());
+            (void)fixpp::session::mask_tag554_same_length_inplace(
+                std::span<std::byte>{mask_buf.data(), frame.size()});
+            span_to_store = std::span<const std::byte>{mask_buf.data(), frame.size()};
+        }
+    }
+
     // Step 1: store (durable-before-transmit).
-    if (store_) {
+    if (store_ && !skip_store) {
         // F5 (Round-A drift): wrap co_await store_->store() in try/catch to absorb
         // asio::system_error{operation_aborted} thrown by the store awaitable on
         // cancellation. Without this, the throw propagates out of the noexcept
         // store_then_emit frame → std::terminate.
         // [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
         try {
-            auto store_r = co_await store_->store(stamped_seq, frame, direction_t::outbound);
+            auto store_r = co_await store_->store(stamped_seq, span_to_store, direction_t::outbound);
             (void)store_r;  // store errors → logged-then-proceed (I-07)
         } catch (const asio::system_error& e) {
             if (e.code() == asio::error::operation_aborted) {

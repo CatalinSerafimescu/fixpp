@@ -126,6 +126,36 @@ struct logon_credentials {
     return result;
 }
 
+// ── frame_has_genuine_tag554 ─────────────────────────────────────────────────
+//
+// Detection-only sibling of mask_tag554_same_length_inplace (034 / C2 / R4).
+// Returns true iff `frame` carries at least one genuine SOH-delimited 554 field
+// (SAME anchoring rule as the masker: `\x01554=` mid-frame, or `554=` at offset
+// 0; a `554=` substring inside another field's value is NOT a match). Const,
+// zero-alloc, noexcept. Used by the persist-path maskability gate
+// (Session::store_then_emit) so the overwhelming majority of outbound frames —
+// which carry no 554 — are detected and stored as-is with no copy.
+[[nodiscard]] inline bool frame_has_genuine_tag554(std::span<const std::byte> frame) noexcept {
+    constexpr std::byte kSoh = std::byte{0x01};
+    constexpr std::byte k5 = std::byte{'5'};
+    constexpr std::byte k4 = std::byte{'4'};
+    constexpr std::byte kEq = std::byte{'='};
+    const std::size_t n = frame.size();
+
+    // Frame-start occurrence: "554=" at offset 0.
+    if (n >= 4 && frame[0] == k5 && frame[1] == k5 && frame[2] == k4 && frame[3] == kEq) {
+        return true;
+    }
+    // Mid-frame occurrence: SOH + "554=".
+    for (std::size_t i = 0; i + 5 <= n; ++i) {
+        if (frame[i] == kSoh && frame[i + 1] == k5 && frame[i + 2] == k5 &&
+            frame[i + 3] == k4 && frame[i + 4] == kEq) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ── mask_tag554_same_length_inplace ──────────────────────────────────────────
 //
 // Same-length, zero-allocation in-place masker for the FIX Password(554) field
