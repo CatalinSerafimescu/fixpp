@@ -65,10 +65,11 @@ specs/034-credential-store-redaction/
 
 ```text
 include/fixpp/session/
-└── logon_credentials.hpp        # + mask_tag554_same_length_inplace(std::span<std::byte>) — span, zero-alloc, sibling of redact_tag554
+├── logon_credentials.hpp        # + mask_tag554_same_length_inplace(std::span<std::byte>) — span, zero-alloc, sibling of redact_tag554
+└── session.hpp                  # + static constexpr kMaxMaskableLogonBytes (FIXPP_TEST_HOOKS-gated test-seam; no public surface)
 
 src/session/
-└── session.cpp                  # store_then_emit: guarded copy→mask→store the masked span; transmit the original frame
+└── session.cpp                  # store_then_emit: guarded copy→mask→store the masked span; transmit the original frame; + role-independent open()-time credential-length guard
 
 tests/session/
 └── test_credential_store_redaction.cpp   # NEW — on-disk store-byte witness + no-op + alloc-gate cells
@@ -81,8 +82,10 @@ specs/033-fixt-fix50sp2-session/tasks.md  # dated correction note on the T024/T0
 ```
 
 **Structure Decision**: Single-library, in-place. The masker is an inline header utility beside the
-existing `redact_tag554` (same module, same ownership). The only production `.cpp` change is a guarded
-branch in `store_then_emit`. No layering change (`tools/check_layers.py` unaffected — session-internal).
+existing `redact_tag554` (same module, same ownership). The production `.cpp` change is a guarded branch
+in `store_then_emit` plus the role-independent `open()`-time credential-length guard; the only production
+header change is the `FIXPP_TEST_HOOKS`-gated `kMaxMaskableLogonBytes` constant in `session.hpp` (no
+public/exported surface — Art. X preserved). No layering change (`tools/check_layers.py` unaffected — session-internal).
 
 ## Phase 0 — Research
 
