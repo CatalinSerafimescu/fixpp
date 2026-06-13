@@ -1211,10 +1211,10 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
 //   (a) NO cleartext persisted — the over-bound frame's seq is absent from the store.
 //   (b) the WIRE frame still carries the real cleartext 554 (transmit is unconditional).
 // Postcondition (c) — a resend over the skipped seq yields a SequenceReset-GapFill,
-// not a masked verbatim replay — is NOT new behavior: an absent store slot folds
-// into a GapFill in the existing resend store-walk (session.cpp:4744-4770, confirmed
-// at design time), and the MsgType=A admin→GapFill classification is exercised by
-// T009_NonLogon. Not re-proven here to avoid over-investing in dead-branch coverage.
+// not a masked verbatim replay — is NOT new behavior 034 introduces: in the resend
+// store-walk a stored `35=A` (admin) or absent slot is classified non-app at
+// session.cpp:4815-4818 and folded into a GapFill run at :4835-4841. Not re-proven
+// here to avoid over-investing in dead-branch coverage. T010 proves (a)+(b) only.
 //
 // Anchors: contracts/store-redaction.md C2 step-2 / I-07; research R3; session.hpp
 //          store_then_emit_test_access; plan ## Gate A (mechanism deviation note).
