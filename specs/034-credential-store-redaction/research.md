@@ -73,6 +73,15 @@ rides on the admin→GapFill fold, not on the seqnum stamp.) The durable outboun
 cell — advanced via `persist_outbound_advance_` → `store_->next_seqnum` (`session.cpp:691`), untouched by
 skipping a frame **store** — so there is no durable counter hole either.
 
+> **Implementation correction (2026-06-13):** the `FIXPP_TEST_LOGON_MASK_BOUND` compile-override
+> seam described above could **not** be realized — `kMaxMaskableLogonBytes` is consumed inside
+> `store_then_emit`, which is compiled into `libfixpp_session` *without* the test define, so a define on
+> a test target cannot reach it. The dead `#if` arm was collapsed to a plain `static constexpr 256`, and
+> the over-bound branch instead earns its BRDA via a `FIXPP_TEST_HOOKS` **frame-injection** accessor
+> (`store_then_emit_test_access`) that feeds a hand-crafted >256-byte `35=A` frame to the real branch
+> against the real bound. Same `FIXPP_TEST_HOOKS` gate, same zero-production-surface outcome,
+> mutation-proven. See `plan.md ## Gate A` deviation #1.
+
 **Rationale**: The store's own `max_frame_bytes` is 256 KiB (`file_store.hpp:109`) — far too large to copy
 into the coroutine frame unconditionally. But only **Logon** frames carry `554`, and Logons are small;
 bounding the *maskable copy* (not all frames) to the `build_logon` ceiling keeps it in the coroutine frame

@@ -105,8 +105,8 @@ description: "Task list — 034-credential-store-redaction"
 | FR-001 mask 554 before persistence | T006 | T005 ×3 (disk/acceptor/in-mem) |
 | FR-002 wire unmasked | T006 Step 2 | T008 |
 | FR-003 same-length mask | T003 masker | masker A/B/G + T005 (same-length `'*'` run) |
-| FR-004 both roles | T006 + T007 | T005 Acceptor |
-| FR-005 Username not masked / no-554 unchanged | masker (554-only) | masker C/E + T009 credential-free |
+| FR-004 both roles | T006 + T007 | T005 Acceptor + T007_OversizedCredential reject (init + acceptor) |
+| FR-005 Username not masked / no-554 unchanged | masker (554-only) | masker C/E + T009 credential-free + T011 (`553=alice` survives) |
 | FR-006 scope outbound 35=A | MsgType=A gate (T006) | T009 NonLogon_WithGenuine554 |
 | FR-007 no-op credential-free byte-identical | T006 default path | T009 |
 | FR-008 zero-alloc | T006 (`std::array`+memcpy+in-place) | T011 — **by-construction primary** (mallocnesia gate inert in debug, REMAINING-WORK #13) |
@@ -121,7 +121,9 @@ description: "Task list — 034-credential-store-redaction"
 | SC-004 same alloc count | T011 — **by-construction** (mallocnesia inert; honest per plan ## Gate A dev #2) |
 | SC-005 stored record same length + retrievable valid | masker preserves `9=`/CRC + T005 |
 
-**9 contract witnesses:** all present + GREEN — Persisted(T005), Wire(T008), Acceptor(T005), NonLogon_WithGenuine554(T009), CredentialFree+NonLogon(T009 split), InMemoryStore(T005), OverBound(T010, mutation-proven), StorePath_NoNewAllocation(T011), Masker_unit(7 cells A–G).
+**9 contract witnesses:** all present + GREEN — Persisted(T005), Wire(T008), Acceptor(T005), NonLogon_WithGenuine554(T009), CredentialFree+NonLogon(T009 split), InMemoryStore(T005), OverBound(T010, mutation-proven), StorePath_NoNewAllocation(T011), Masker_unit(8 cells A–H). **18 cells total.**
+
+**`/simplify` round (2026-06-13, 3 agents + Opus triage):** core security claims independently confirmed (R7 single-replay-path chokepoint, masker/detector agreement, no OOB, wire unmasked). Applied: **T007 open()-guard reject witness (both roles)** — the previously-uncovered guard branch + T010's load-bearing reachability premise; **masker H** (multi-554 loop); **FR-005 `553` survival** assertion (T011); doc-drift sweep (research R3 / contracts C2 → frame-injection seam); INV-034-2→5 comment. Declined w/ reason: shared-helper extraction (net-neutral simplicity, surgical), `mask_buf{}` removal (sanitizer-safety + `rp_buf{}` precedent).
 
 **Catalogue:** S-022 amended (at-rest half); no new FIX row (§VI). B&L B-034-1/L-034-1; coverage-index 034 ledger.
 

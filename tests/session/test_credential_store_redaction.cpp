@@ -232,6 +232,23 @@ TEST(Masker_SameLength_FieldAnchored_unit, G_FrameStartOccurrence_Masked) {
     EXPECT_EQ(buf[10], before[10]) << "trailing SOH must be unchanged";
 }
 
+TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
+    // The masker is a multi-match loop; a malformed frame with TWO genuine
+    // \x01554= fields must have BOTH values masked (guards a break-after-first
+    // regression — a single real Logon carries one 554, but the utility is general).
+    auto buf = make_buf("\x01""554=aaa\x01""58=mid\x01""554=bbbb\x01""49=S\x01");
+    bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
+    EXPECT_TRUE(result) << "two genuine 554 fields → must return true";
+
+    // Layout: \x01(0) 554=(1..4) aaa(5..7) \x01(8) 58=mid(9..14) \x01(15)
+    //         554=(16..19) bbbb(20..23) \x01(24) 49=S(25..28) \x01(29)
+    EXPECT_TRUE(all_stars(buf.data() + 5, buf.data() + 8)) << "first 554 value must be masked";
+    EXPECT_TRUE(all_stars(buf.data() + 20, buf.data() + 24)) << "second 554 value must be masked";
+    // The interleaved 58= field (not a 554) must be untouched.
+    std::string s(reinterpret_cast<const char*>(buf.data()), buf.size());
+    EXPECT_NE(s.find("58=mid"), std::string::npos) << "interleaved non-554 field must survive";
+}
+
 }  // namespace
 
 // ── Phase 3 (T005/T008/T009): session-level store-masking + wire-clarity witnesses
@@ -1013,7 +1030,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // the msg_type == "A" gate fired and skipped masking for non-Logon frames.
     EXPECT_NE(stored_str.find(std::string(kCleartext)), std::string::npos)
         << "Stored non-Logon frame must contain cleartext '554=" << kCleartext
-        << "' — masking must be SKIPPED for msg_type != 'A' (T009/INV-034-2)";
+        << "' — masking must be SKIPPED for msg_type != 'A' (T009/INV-034-5)";
 
     // Wire and stored must be byte-identical (no masking, no transformation).
     EXPECT_EQ(std::vector<std::byte>(stored_bytes.begin(), stored_bytes.end()), init_wire_out)
@@ -1026,6 +1043,62 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     asio::co_spawn(pool.get_executor(), initiator.close(fixpp::session::close_mode::terminal),
                    asio::use_future)
         .get();
+}
+
+// ── T007 / open()-time credential-length guard (both roles) ──────────────────
+//
+// OversizedCredential_OpenRejects_{Initiator,Acceptor}
+//
+// The T007 guard (session.cpp, search "034 T007") rejects a config whose
+// username+password combined length >= kMaxMaskableLogonBytes (256), failing
+// open() with invalid_session_config before any wire emission. This guard is the
+// load-bearing premise for T010's "the over-bound branch is production-
+// unreachable" rationale, so it needs a direct REJECT witness (it is also a
+// production branch that must earn its BRDA). Asserted for BOTH roles — both
+// validate their OWN cfg_ creds at open() (FR-004 / [[feedback_symmetric_api_claim_unreachable_arm]]).
+// A 300-byte all-'x' password is FQ-3-clean (no SOH / '=' / control bytes) so it
+// trips ONLY the length guard, not the 033 injection floor.
+TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Initiator) {
+    asio::thread_pool pool{2};
+    fixpp::core::EngineConfig engine;
+    engine.executor = pool.get_executor();
+    engine.clock = make_mock_clock(pool.get_executor());
+    engine.max_store_memory_per_session = 1ULL << 30;
+    auto dict = make_fix50sp2_dict();
+    version_registry registry{{dict}};
+
+    std::vector<std::byte> wire_out;
+    auto cfg = make_fixt_initiator_cfg(pool.get_executor());
+    cfg.password = std::string(300, 'x');  // > kMaxMaskableLogonBytes, FQ-3-clean
+    cfg.transport_send = [&](std::span<const std::byte> f) { wire_out.assign(f.begin(), f.end()); };
+
+    Session initiator{engine, cfg, &registry};
+    auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+
+    ASSERT_FALSE(r.has_value()) << "open() must reject an oversized credential (T007)";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
+        << "oversized credential must fail with invalid_session_config";
+    EXPECT_TRUE(wire_out.empty()) << "no Logon may be emitted when open() rejects (T007)";
+}
+
+TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
+    asio::thread_pool pool{2};
+    fixpp::core::EngineConfig engine;
+    engine.executor = pool.get_executor();
+    engine.clock = make_mock_clock(pool.get_executor());
+    engine.max_store_memory_per_session = 1ULL << 30;
+    auto dict = make_fix50sp2_dict();
+    version_registry registry{{dict}};
+
+    auto cfg = make_fixt_acceptor_cfg(pool.get_executor());
+    cfg.password = std::string(300, 'x');  // > kMaxMaskableLogonBytes, FQ-3-clean
+
+    Session acceptor{engine, cfg, &registry};
+    auto r = asio::co_spawn(pool.get_executor(), acceptor.open(), asio::use_future).get();
+
+    ASSERT_FALSE(r.has_value()) << "acceptor open() must reject an oversized credential (T007/FR-004)";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
+        << "oversized credential must fail with invalid_session_config (acceptor arm)";
 }
 
 // ── T010 / fault-injection (over-bound fail-closed) ───────────────────────────
@@ -1193,6 +1266,9 @@ TEST(NoHeap, StorePath_NoNewAllocation) {
     std::string masked_str(reinterpret_cast<const char*>(mask_buf.data()), n);
     EXPECT_EQ(masked_str.find("s3cr3t-T011-sentinel"), std::string::npos)
         << "masked copy must not contain the cleartext password";
+    // FR-005: Username(553) is an identity, NOT a secret — it MUST survive the mask.
+    EXPECT_NE(masked_str.find("553=alice"), std::string::npos)
+        << "Username(553) must NOT be masked (FR-005); masked copy: " << masked_str;
 
     // Under mallocnesia: a nonzero count means the mask step touched the heap.
     const long heap_allocs = alloc_guard_count();

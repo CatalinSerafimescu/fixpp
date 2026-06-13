@@ -38,8 +38,11 @@ new byte-utility. No public/exported API changes (Article X — no ABI surface).
      `session.cpp:691`), untouched by skipping a frame store — no durable counter hole. *(`kMaxMaskableLogonBytes`
      is bound to the `build_logon` builder's maximum output capacity; combined with the C3 `open()`
      credential-length guard this branch is **production-unreachable** for any frame that survives the
-     MsgType=A gate — covered dead defensive code, **test-coverable via the injected-bound seam**, see the
-     fault-injection witness.)*
+     MsgType=A gate — covered dead defensive code, **test-coverable via the frame-injection seam**, see the
+     fault-injection witness.)* *(Impl correction 2026-06-13: the BRDA is earned by a `FIXPP_TEST_HOOKS`
+     `store_then_emit_test_access` accessor that injects a hand-crafted >256-byte `35=A` frame into the
+     real branch — NOT the originally-proposed `FIXPP_TEST_LOGON_MASK_BOUND` compile override, which could
+     not reach `store_then_emit` in `libfixpp_session`. See `plan.md ## Gate A` deviation #1 / research R3.)*
    - Else copy `frame` into a coroutine-frame `std::array<std::byte, kMaxMaskableLogonBytes>`, call
      `mask_tag554_same_length_inplace(span(buf, frame.size()))`, and `co_await store_->store(stamped_seq,
      span(buf, frame.size()), outbound)`.
