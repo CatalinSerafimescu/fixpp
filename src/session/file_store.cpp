@@ -77,7 +77,7 @@
 
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
-#include <asio/error.hpp>   // asio::error::operation_aborted — T012 durable catch
+#include <asio/error.hpp>  // asio::error::operation_aborted — T012 durable catch
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -181,9 +181,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 }
 
 // fdatasync wrapper — mirrors OsFile::datasync.
-[[nodiscard]] static bool raw_datasync(int fd) noexcept {
-    return ::fdatasync(fd) == 0;
-}
+[[nodiscard]] static bool raw_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
 
 #else  // _WIN32
 
@@ -208,9 +206,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     return true;
 }
 
-[[nodiscard]] static bool raw_datasync(HANDLE h) noexcept {
-    return FlushFileBuffers(h) != 0;
-}
+[[nodiscard]] static bool raw_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
 
 #endif  // _WIN32
 
@@ -1006,36 +1002,32 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     // Build frame record header (mirrors write_frame:557–563).
     RecordHeader frame_hdr{};
     frame_hdr.kind = static_cast<std::uint8_t>(RecordKind::frame);
-    frame_hdr.dir  = static_cast<std::uint8_t>(dir);
-    frame_hdr.seq  = seq;
-    frame_hdr.len  = static_cast<std::uint32_t>(frame_span.size());
-    frame_hdr.crc32 = compute_record_crc32(
-        frame_hdr,
-        reinterpret_cast<const std::uint8_t*>(frame_span.data()),
-        static_cast<std::uint32_t>(frame_span.size()));
+    frame_hdr.dir = static_cast<std::uint8_t>(dir);
+    frame_hdr.seq = seq;
+    frame_hdr.len = static_cast<std::uint32_t>(frame_span.size());
+    frame_hdr.crc32 =
+        compute_record_crc32(frame_hdr, reinterpret_cast<const std::uint8_t*>(frame_span.data()),
+                             static_cast<std::uint32_t>(frame_span.size()));
 
     // Pre-compute post-increment counter values (NOT applied to impl_ until
     // success in Region 3 — avoids leaving counters advanced on I/O failure).
-    const seqnum_t ni = (dir == direction_t::inbound)
-                            ? impl_->next_inbound + 1
-                            : impl_->next_inbound;
-    const seqnum_t no = (dir == direction_t::outbound)
-                            ? impl_->next_outbound + 1
-                            : impl_->next_outbound;
+    const seqnum_t ni =
+        (dir == direction_t::inbound) ? impl_->next_inbound + 1 : impl_->next_inbound;
+    const seqnum_t no =
+        (dir == direction_t::outbound) ? impl_->next_outbound + 1 : impl_->next_outbound;
 
     // Build counter record header + payload (mirrors write_counter:532–542).
     CounterPayload counter_pl{};
-    counter_pl.next_inbound  = ni;
+    counter_pl.next_inbound = ni;
     counter_pl.next_outbound = no;
     RecordHeader counter_hdr{};
     counter_hdr.kind = static_cast<std::uint8_t>(RecordKind::counter);
-    counter_hdr.dir  = 0xFF;
-    counter_hdr.seq  = 0;
-    counter_hdr.len  = static_cast<std::uint32_t>(kCounterPayloadSize);
-    counter_hdr.crc32 = compute_record_crc32(
-        counter_hdr,
-        reinterpret_cast<const std::uint8_t*>(&counter_pl),
-        static_cast<std::uint32_t>(kCounterPayloadSize));
+    counter_hdr.dir = 0xFF;
+    counter_hdr.seq = 0;
+    counter_hdr.len = static_cast<std::uint32_t>(kCounterPayloadSize);
+    counter_hdr.crc32 =
+        compute_record_crc32(counter_hdr, reinterpret_cast<const std::uint8_t*>(&counter_pl),
+                             static_cast<std::uint32_t>(kCounterPayloadSize));
 
     // Flush-policy decision (mirrors :900–914); index sizes are strand-only.
     const auto policy_kind = impl_->cfg.policy.which;
@@ -1081,8 +1073,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     try {
         io_ok = co_await offload_to(
             impl_->cfg.file_io_executor,
-            [raw_fd, frame_hdr, frame_span, frame_off, frame_pad,
-             counter_hdr, counter_pl, counter_off, do_flush, probe_fn]() -> bool {
+            [raw_fd, frame_hdr, frame_span, frame_off, frame_pad, counter_hdr, counter_pl,
+             counter_off, do_flush, probe_fn]() -> bool {
                 // Call the test probe (if installed) BEFORE the first pwrite so the
                 // test can confirm the syscall ran on a pool thread ≠ strand thread.
                 // In production probe_fn is nullptr; the branch is dead-code-eliminated.
@@ -1098,7 +1090,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                 // pwrite frame payload.
                 if (!frame_span.empty()) {
                     if (!raw_pwrite_all(raw_fd, frame_span.data(), frame_span.size(),
-                                        static_cast<off_t>(frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                                        static_cast<off_t>(
+                                            frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
                         return false;
                     }
                 }
@@ -1107,7 +1100,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                     const std::uint8_t zeros[8]{};
                     if (!raw_pwrite_all(
                             raw_fd, zeros, frame_pad,
-                            static_cast<off_t>(frame_off + static_cast<std::int64_t>(kHeaderSize + frame_span.size())))) {
+                            static_cast<off_t>(frame_off + static_cast<std::int64_t>(
+                                                               kHeaderSize + frame_span.size())))) {
                         return false;
                     }
                 }
@@ -1117,8 +1111,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                     return false;
                 }
                 // pwrite counter payload.
-                if (!raw_pwrite_all(raw_fd, &counter_pl, kCounterPayloadSize,
-                                    static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                if (!raw_pwrite_all(
+                        raw_fd, &counter_pl, kCounterPayloadSize,
+                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
                     return false;
                 }
                 // datasync: linearisation point (FR-003 / C2). Blocks until durable.
@@ -1152,20 +1147,20 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
 
     // Push index entry (mirrors write_frame:583–590, stripped of pwrite).
     IndexEntry ie;
-    ie.seq        = seq;
-    ie.dir        = dir;
+    ie.seq = seq;
+    ie.dir = dir;
     ie.file_offset = frame_off;
-    ie.len        = static_cast<std::uint32_t>(frame_span.size());
+    ie.len = static_cast<std::uint32_t>(frame_span.size());
     auto& idx = (dir == direction_t::inbound) ? impl_->inbound_index : impl_->outbound_index;
     idx.push_back(ie);
 
     // Set in-memory counters to the pre-computed post-increment values.
-    impl_->next_inbound  = ni;
+    impl_->next_inbound = ni;
     impl_->next_outbound = no;
 
     // Advance write_pos past both records.
-    impl_->write_pos = counter_off +
-                       static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
+    impl_->write_pos =
+        counter_off + static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
 
     // guard releases mutex here — CS complete.
     co_return fixpp::core::expected_t<void>{};
@@ -1331,17 +1326,16 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         const seqnum_t no = impl_->next_outbound;
 
         CounterPayload counter_pl{};
-        counter_pl.next_inbound  = ni;
+        counter_pl.next_inbound = ni;
         counter_pl.next_outbound = no;
         RecordHeader counter_hdr{};
         counter_hdr.kind = static_cast<std::uint8_t>(RecordKind::counter);
-        counter_hdr.dir  = 0xFF;
-        counter_hdr.seq  = 0;
-        counter_hdr.len  = static_cast<std::uint32_t>(kCounterPayloadSize);
-        counter_hdr.crc32 = compute_record_crc32(
-            counter_hdr,
-            reinterpret_cast<const std::uint8_t*>(&counter_pl),
-            static_cast<std::uint32_t>(kCounterPayloadSize));
+        counter_hdr.dir = 0xFF;
+        counter_hdr.seq = 0;
+        counter_hdr.len = static_cast<std::uint32_t>(kCounterPayloadSize);
+        counter_hdr.crc32 =
+            compute_record_crc32(counter_hdr, reinterpret_cast<const std::uint8_t*>(&counter_pl),
+                                 static_cast<std::uint32_t>(kCounterPayloadSize));
 
         const std::int64_t counter_off = impl_->write_pos;
         const auto raw_fd = impl_->file.fd_value();
@@ -1353,7 +1347,8 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         //
         // T012 — unconditional operation_aborted→durable catch (FR-004 / C3).
         // Same rationale as store(): any operation_aborted at this await post-dates
-        // linearisation; treat as durable success. [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
+        // linearisation; treat as durable success.
+        // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
         bool io_ok = false;
         try {
             io_ok = co_await offload_to(
@@ -1369,7 +1364,8 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                     }
                     // pwrite counter payload.
                     if (!raw_pwrite_all(raw_fd, &counter_pl, kCounterPayloadSize,
-                                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(
+                                                                             kHeaderSize)))) {
                         return false;
                     }
                     // datasync: linearisation point (counter-record pwrite + datasync).
@@ -1453,76 +1449,75 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     std::optional<OsFile> new_file_opt;
     try {
         new_file_opt = co_await offload_to(
-        impl_->cfg.file_io_executor,
-        [path, hash, probe_fn]() -> std::optional<OsFile> {
-            if (probe_fn) {
-                probe_fn(std::this_thread::get_id());
-            }
+            impl_->cfg.file_io_executor, [path, hash, probe_fn]() -> std::optional<OsFile> {
+                if (probe_fn) {
+                    probe_fn(std::this_thread::get_id());
+                }
 
 #ifndef _WIN32
-            // ── Linux atomic-rename path ─────────────────────────────────────
-            const std::string tmp_path = path + ".reset.tmp";
+                // ── Linux atomic-rename path ─────────────────────────────────────
+                const std::string tmp_path = path + ".reset.tmp";
 
-            // Open tmp file (O_RDWR | O_CREAT | O_TRUNC)
-            OsFile tmp_file;
-            if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
-                return std::nullopt;
-            }
+                // Open tmp file (O_RDWR | O_CREAT | O_TRUNC)
+                OsFile tmp_file;
+                if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
+                    return std::nullopt;
+                }
 
-            // Write sentinel + initial counter to tmp file using a local tmp_impl.
-            {
-                FileStoreImpl tmp_impl;
-                tmp_impl.expected_hash = hash;
-                tmp_impl.file = std::move(tmp_file);
-                tmp_impl.write_pos = 0;
-                tmp_impl.next_inbound = seqnum_min;
-                tmp_impl.next_outbound = seqnum_min;
+                // Write sentinel + initial counter to tmp file using a local tmp_impl.
+                {
+                    FileStoreImpl tmp_impl;
+                    tmp_impl.expected_hash = hash;
+                    tmp_impl.file = std::move(tmp_file);
+                    tmp_impl.write_pos = 0;
+                    tmp_impl.next_inbound = seqnum_min;
+                    tmp_impl.next_outbound = seqnum_min;
 
-                if (!tmp_impl.initialise_fresh()) {
-                    // Move file back so it closes properly, then unlink tmp.
+                    if (!tmp_impl.initialise_fresh()) {
+                        // Move file back so it closes properly, then unlink tmp.
+                        tmp_file = std::move(tmp_impl.file);
+                        ::unlink(tmp_path.c_str());
+                        return std::nullopt;
+                    }
+                    // tmp_file.datasync() is called inside initialise_fresh()
                     tmp_file = std::move(tmp_impl.file);
+                }
+
+                // Close tmp file before rename (required on some POSIX implementations)
+                tmp_file = OsFile{};  // destructs: close()
+
+                // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
+                if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
                     ::unlink(tmp_path.c_str());
                     return std::nullopt;
                 }
-                // tmp_file.datasync() is called inside initialise_fresh()
-                tmp_file = std::move(tmp_impl.file);
-            }
 
-            // Close tmp file before rename (required on some POSIX implementations)
-            tmp_file = OsFile{};  // destructs: close()
+                // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
+                {
+                    const std::filesystem::path log_fs_path{path};
+                    const auto dir_fs_path = log_fs_path.parent_path();
+                    const std::string dir_path =
+                        dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+                    const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
+                    if (dir_fd < 0) {
+                        return std::nullopt;
+                    }
+                    const int fsync_rc = ::fsync(dir_fd);
+                    ::close(dir_fd);
+                    if (fsync_rc != 0) {
+                        return std::nullopt;
+                    }
+                }
 
-            // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
-            if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
-                ::unlink(tmp_path.c_str());
-                return std::nullopt;
-            }
-
-            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
-            {
-                const std::filesystem::path log_fs_path{path};
-                const auto dir_fs_path = log_fs_path.parent_path();
-                const std::string dir_path =
-                    dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
-                const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
-                if (dir_fd < 0) {
+                // Re-open the live log (it was replaced by rename; advisory lock must be re-taken)
+                OsFile new_file;
+                if (!new_file.open(path.c_str())) {
                     return std::nullopt;
                 }
-                const int fsync_rc = ::fsync(dir_fd);
-                ::close(dir_fd);
-                if (fsync_rc != 0) {
+                if (!new_file.try_lock()) {
                     return std::nullopt;
                 }
-            }
-
-            // Re-open the live log (it was replaced by rename; advisory lock must be re-taken)
-            OsFile new_file;
-            if (!new_file.open(path.c_str())) {
-                return std::nullopt;
-            }
-            if (!new_file.try_lock()) {
-                return std::nullopt;
-            }
-            return new_file;
+                return new_file;
 
 #else
             // ── Windows atomic-rename path ────────────────────────────────────
@@ -1564,7 +1559,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             }
             return new_file;
 #endif
-        });
+            });
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
             throw;  // Unexpected (OOM, etc.) — propagate.
@@ -1648,9 +1643,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
     const auto raw_fd = impl_->file.fd_value();
     const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
-    const bool io_ok = co_await offload_to(
-        impl_->cfg.file_io_executor,
-        [raw_fd, probe_fn]() -> bool {
+    const bool io_ok =
+        co_await offload_to(impl_->cfg.file_io_executor, [raw_fd, probe_fn]() -> bool {
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
