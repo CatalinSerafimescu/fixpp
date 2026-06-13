@@ -29,6 +29,7 @@
 
 namespace {
 
+using fixpp::session::frame_has_genuine_tag554;
 using fixpp::session::mask_tag554_same_length_inplace;
 
 // ── helper ───────────────────────────────────────────────────────────────────
@@ -265,6 +266,28 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
     // The interleaved 58= field (not a 554) must be untouched.
     std::string s(reinterpret_cast<const char*>(buf.data()), buf.size());
     EXPECT_NE(s.find("58=mid"), std::string::npos) << "interleaved non-554 field must survive";
+}
+
+TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
+    // Directly exercises frame_has_genuine_tag554 — the detection sibling that
+    // store_then_emit's maskability gate calls before masking. Covers all three
+    // detection arms: (a) "554=" at frame offset 0, (b) field-anchored mid-frame
+    // \x01554=, (c) a 554 that is NOT field-anchored (decoy inside a value) → false.
+    auto at_start = make_buf("554=secret\x01");
+    EXPECT_TRUE(frame_has_genuine_tag554(std::span<const std::byte>{at_start}))
+        << "offset-0 '554=' must be detected";
+
+    auto mid = make_buf(
+        "8=FIXT.1.1\x01"
+        "554=secret\x01");
+    EXPECT_TRUE(frame_has_genuine_tag554(std::span<const std::byte>{mid}))
+        << "mid-frame field-anchored \\x01554= must be detected";
+
+    auto decoy = make_buf(
+        "8=FIXT.1.1\x01"
+        "58=x554=y\x01");
+    EXPECT_FALSE(frame_has_genuine_tag554(std::span<const std::byte>{decoy}))
+        << "a non-field-anchored 554 inside a free-text value must NOT be detected";
 }
 
 }  // namespace
