@@ -106,7 +106,7 @@ include/fixpp/core/
 └── error.hpp            # NO new variant — mid-walk-reset reuses store_io_failure; add a compile/enum guard
                          #   asserting the store_* set stays at exactly 10 (FR-021 freeze, :165–230)
 
-src/core/ | src/session/
+src/session/
 └── engine.cpp           # FR-007: confirm/strengthen that Engine::stop() drains every Session-reachable store-awaiting
                          #   coroutine before returning, so the app-owned pool join is safe (stop() at engine.cpp:1184–1333)
 
