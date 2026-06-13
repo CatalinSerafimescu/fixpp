@@ -236,6 +236,16 @@ fixpp_add_store_test(store_pmr_poison_retrieve SOURCES
   test_store_pmr_poison_retrieve.cpp
 )
 
+# 034-credential-store-redaction — masker unit (Phase 2) + disk-byte / no-op /
+# fault-injection witnesses (Phases 3-6). Uses Session + FileStore fixtures, so
+# it mirrors the flush-test registration (FSM double + mock clock + support dir).
+fixpp_add_store_test(credential_store_redaction SOURCES
+  test_credential_store_redaction.cpp
+  _fixtures_/test_double_fsm.cpp
+  EXTRA_LIBS fixpp_mock_clock
+  EXTRA_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/support"
+)
+
 # T038 — seam 18: session shutdown ordering (I-22 / SC-005)
 fixpp_add_store_test(store_shutdown_ordering SOURCES
   test_store_shutdown_ordering.cpp

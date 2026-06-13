@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <string>
 
 namespace fixpp::session {
@@ -123,6 +124,95 @@ struct logon_credentials {
     }
 
     return result;
+}
+
+// ── mask_tag554_same_length_inplace ──────────────────────────────────────────
+//
+// Same-length, zero-allocation in-place masker for the FIX Password(554) field
+// (034-credential-store-redaction / E1 / FR-003 / FR-008).
+//
+// Scans `frame` for every genuine SOH-delimited `554` field (same anchoring rule
+// as redact_tag554: `\x01554=` mid-frame, or `554=` at offset 0). For each
+// match, overwrites the value bytes (from just past `554=` up to the next `\x01`
+// or end-of-frame) with `'*'` (0x2A) in place, preserving the byte count exactly.
+//
+// Returns `true` iff at least one genuine 554 field was found (even if the value
+// extent was empty — zero bytes to overwrite still counts as a match). Returns
+// `false` when no genuine 554 field exists, leaving the buffer unmodified.
+//
+// Invariants (E1):
+//   I-E1-1 (length): frame.size() unchanged; no byte outside a 554 value modified.
+//   I-E1-2 (idempotent): masking an already-masked frame is a no-op ('*' stays '*').
+//   I-E1-3 (zero-alloc/noexcept): no heap allocation; no exceptions.
+//   I-E1-4 (delimiter-safe): 554 value bytes cannot contain SOH or '=' (033 FQ-3
+//     injection floor), so the value extent is unambiguous.
+[[nodiscard]] inline bool mask_tag554_same_length_inplace(
+    std::span<std::byte> frame) noexcept {
+    // Field-boundary needles (byte literals — no implicit char→byte narrowing).
+    // Mid-frame: SOH + '5' + '5' + '4' + '='  (5 bytes)
+    // Frame-start: '5' + '5' + '4' + '='       (4 bytes)
+    static constexpr std::byte kMid[5] = {std::byte{0x01}, std::byte{'5'},
+                                           std::byte{'5'},  std::byte{'4'},
+                                           std::byte{'='}};
+    static constexpr std::byte kStart[4] = {std::byte{'5'}, std::byte{'5'},
+                                             std::byte{'4'}, std::byte{'='}};
+    static constexpr std::size_t kMidLen   = 5;
+    static constexpr std::size_t kStartLen = 4;
+    static constexpr std::byte   kSoh      = std::byte{0x01};
+    static constexpr std::byte   kStar     = std::byte{0x2A};  // '*'
+
+    const std::size_t n = frame.size();
+    bool masked = false;
+    std::size_t pos = 0;
+
+    while (pos < n) {
+        std::size_t val_start = 0;  // index of first value byte (just past '=')
+
+        // Check frame-start occurrence (only valid when pos == 0).
+        bool has_start_match = (pos == 0) && (n >= kStartLen) &&
+                               (frame[0] == kStart[0]) && (frame[1] == kStart[1]) &&
+                               (frame[2] == kStart[2]) && (frame[3] == kStart[3]);
+
+        // Search for mid-frame occurrence '\x01554='.
+        std::size_t mid_pos = std::string_view::npos;
+        if (!has_start_match) {
+            for (std::size_t i = pos; i + kMidLen <= n; ++i) {
+                if (frame[i]     == kMid[0] && frame[i + 1] == kMid[1] &&
+                    frame[i + 2] == kMid[2] && frame[i + 3] == kMid[3] &&
+                    frame[i + 4] == kMid[4]) {
+                    mid_pos = i;
+                    break;
+                }
+            }
+        }
+
+        if (!has_start_match && mid_pos == std::string_view::npos) {
+            // No more genuine 554 fields — done.
+            break;
+        }
+
+        // A genuine field was detected (even if empty value).
+        masked = true;
+
+        if (has_start_match) {
+            val_start = kStartLen;  // past "554="
+        } else {
+            val_start = mid_pos + kMidLen;  // past "\x01554="
+        }
+
+        // Overwrite value bytes up to the next SOH or end-of-frame with '*'.
+        std::size_t val_end = val_start;
+        while (val_end < n && frame[val_end] != kSoh) {
+            frame[val_end] = kStar;
+            ++val_end;
+        }
+
+        // Resume from val_end (the terminating SOH, if present, is kept as the
+        // anchor for the next mid-frame needle search — mirrors redact_tag554).
+        pos = val_end;
+    }
+
+    return masked;
 }
 
 }  // namespace fixpp::session

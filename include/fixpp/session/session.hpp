@@ -940,6 +940,23 @@ private:
     // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4]
     std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
 
+    // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
+    // Upper bound for the coroutine-frame copy used in the masked-Logon persist
+    // path (store_then_emit, T006). Bound to the build_logon builder's actual
+    // maximum output capacity (session.cpp:755 logon_buf / session.cpp:2145
+    // reply_buf — both 256 bytes), so the over-bound branch in T006 is
+    // provably dead for any frame that survives the MsgType=A gate.
+    // NOT a public SessionConfig/ctor/template param (Art. X / non-template class).
+    // Overridable ONLY via the FIXPP_TEST_HOOKS compile-gated seam: define
+    // FIXPP_TEST_LOGON_MASK_BOUND to a smaller value in a FIXPP_TEST_HOOKS build
+    // to drive the dead over-bound branch (fault-injection for T010 BRDA coverage).
+    // [034 data-model.md E1 / research R3 / contracts/store-redaction.md C2]
+#if defined(FIXPP_TEST_HOOKS) && defined(FIXPP_TEST_LOGON_MASK_BOUND)
+    static constexpr std::size_t kMaxMaskableLogonBytes = FIXPP_TEST_LOGON_MASK_BOUND;
+#else
+    static constexpr std::size_t kMaxMaskableLogonBytes = 256;
+#endif
+
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
