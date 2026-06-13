@@ -55,11 +55,12 @@ generous. Add an **`open()`-time credential-length guard** (extending the 033 FQ
 that the configured `username`+`password` lengths cannot produce a Logon exceeding that capacity — combined
 with the bound being the builder's own ceiling, the over-bound branch becomes **provably dead defensive
 code** for any frame that survives the MsgType=A gate. To keep that dead branch covered without a §IX.1
-waiver, `kMaxMaskableLogonBytes` is a **test-only / internal compile-time bound** — overridable solely
-through the existing `FIXPP_TEST_HOOKS` compile-gated seam (`[const §XV.9]`; precedent: the
-`static constexpr kRpBufSize` in the same `store_then_emit` function), **NOT** a public `SessionConfig`
-knob, public constructor parameter, or template parameter on `Session` (which is a non-template class) —
-so a fault-injection cell can drive a small-bound case with **zero production ABI/config surface**
+waiver, `kMaxMaskableLogonBytes` is a **fixed `static constexpr 256`** (the `build_logon` ceiling; NOT
+overridable — no `FIXPP_TEST_HOOKS` compile-gated bound override exists). It is **NOT** a public
+`SessionConfig` knob, public constructor parameter, or template parameter on `Session` (which is a
+non-template class). The dead over-bound branch earns BRDA via a `FIXPP_TEST_HOOKS`-gated
+**frame-injection** accessor (`store_then_emit_test_access()`) that injects a hand-crafted >256-byte
+`35=A` frame against the real bound — **zero production ABI/config surface**
 (Art. X preserved). See the contracts witness table. If, defensively, a
 to-be-masked frame still exceeds the bound at runtime, **fail closed**: do not persist the cleartext —
 skip the store write for that frame (logged-then-proceed, I-07, consistent with the existing admin

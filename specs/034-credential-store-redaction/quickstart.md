@@ -41,7 +41,7 @@ cleartext password after a credentialed logon.
 - New byte-utility + the `store_then_emit` branch at 100% DA/BRDA (Article IX §1). The over-bound
   fail-closed branch is production-unreachable (C3 open()-guard + `build_logon`-capacity bound) but is
   covered by the `OverBound_SmallBoundSeam_SkipStoreButTransmit` fault-injection cell driving the
-  injected-bound test seam — so it earns BRDA rather than needing a §IX.1 waiver.
+  **frame-injection test seam** (`store_then_emit_test_access()`, a >256-byte `35=A` frame against the real bound) — so it earns BRDA rather than needing a §IX.1 waiver.
 
 ## What "done" looks like
 
