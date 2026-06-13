@@ -20,10 +20,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/session/logon_credentials.hpp>
 #include <span>
 #include <vector>
-
-#include <fixpp/session/logon_credentials.hpp>
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "_fixtures_/test_double_fsm.hpp"
@@ -77,7 +76,9 @@ bool all_stars(const std::byte* begin, const std::byte* end) {
 TEST(Masker_SameLength_FieldAnchored_unit, A_MasksGenuineField_StarRun) {
     // Minimal frame: just the \x01554=secret\x01 sequence (mid-frame occurrence).
     // The 554 value "secret" is 6 bytes; after masking it must be "******".
-    auto buf = make_buf("\x01""554=secret\x01");
+    auto buf = make_buf(
+        "\x01"
+        "554=secret\x01");
     const std::size_t orig_size = buf.size();
 
     // Save a copy to compare untouched regions.
@@ -90,8 +91,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, A_MasksGenuineField_StarRun) {
     // (a) The value bytes [after "554=", before the trailing SOH] must be '*'.
     // Offset breakdown: \x01(0), 5(1), 5(2), 4(3), =(4), v0(5)..v5(10), \x01(11)
     // Value extent: indices 5..10 inclusive (6 bytes).
-    EXPECT_TRUE(all_stars(buf.data() + 5, buf.data() + 11))
-        << "value extent must be entirely '*'";
+    EXPECT_TRUE(all_stars(buf.data() + 5, buf.data() + 11)) << "value extent must be entirely '*'";
 
     // (b) frame.size() unchanged; no byte outside the value extent changed.
     EXPECT_EQ(buf.size(), orig_size) << "span extent must not change";
@@ -113,7 +113,11 @@ TEST(Masker_SameLength_FieldAnchored_unit, A_MasksGenuineField_StarRun) {
 TEST(Masker_SameLength_FieldAnchored_unit, B_FrameSizeUnchanged_NoByteOutsideValueModified) {
     // Full FIX-like frame with 554 in the middle.
     // "8=FIX.4.2\x0149=S\x01554=pass\x0156=T\x01"
-    auto buf = make_buf("8=FIX.4.2\x01""49=S\x01""554=pass\x01""56=T\x01");
+    auto buf = make_buf(
+        "8=FIX.4.2\x01"
+        "49=S\x01"
+        "554=pass\x01"
+        "56=T\x01");
     auto before = buf;
     const std::size_t orig_size = buf.size();
 
@@ -127,15 +131,13 @@ TEST(Masker_SameLength_FieldAnchored_unit, B_FrameSizeUnchanged_NoByteOutsideVal
     // the SOH is at index 14), then "554=" at 15..18, "pass" at 19..22, SOH at 23.
     // Value extent: indices 19..22 inclusive (4 bytes).
     const std::size_t val_start = 19;
-    const std::size_t val_end   = 23;  // exclusive
+    const std::size_t val_end = 23;  // exclusive
 
     for (std::size_t i = 0; i < orig_size; ++i) {
         if (i >= val_start && i < val_end) {
-            EXPECT_EQ(buf[i], std::byte{0x2A})
-                << "value byte at index " << i << " must be '*'";
+            EXPECT_EQ(buf[i], std::byte{0x2A}) << "value byte at index " << i << " must be '*'";
         } else {
-            EXPECT_EQ(buf[i], before[i])
-                << "non-value byte at index " << i << " must be unchanged";
+            EXPECT_EQ(buf[i], before[i]) << "non-value byte at index " << i << " must be unchanged";
         }
     }
 }
@@ -144,7 +146,10 @@ TEST(Masker_SameLength_FieldAnchored_unit, C_DecoyInFreeTextUntouched) {
     // Frame where "554=" appears inside tag 58 (free text), not as a real field.
     // The decoy is: \x0158=foo554=bar\x01
     // No real \x01554= or leading "554=" exists.
-    auto buf = make_buf("\x01""58=foo554=bar\x01""49=S\x01");
+    auto buf = make_buf(
+        "\x01"
+        "58=foo554=bar\x01"
+        "49=S\x01");
     auto before = buf;
 
     bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
@@ -158,7 +163,9 @@ TEST(Masker_SameLength_FieldAnchored_unit, C_DecoyInFreeTextUntouched) {
 
 TEST(Masker_SameLength_FieldAnchored_unit, D_Idempotent_SecondPassByteStable) {
     // (I-E1-2): masking an already-masked frame is a no-op.
-    auto buf = make_buf("\x01""554=abc\x01");
+    auto buf = make_buf(
+        "\x01"
+        "554=abc\x01");
     auto before_first = buf;
 
     bool r1 = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
@@ -184,7 +191,10 @@ TEST(Masker_SameLength_FieldAnchored_unit, D_Idempotent_SecondPassByteStable) {
 
 TEST(Masker_SameLength_FieldAnchored_unit, E_NoGenuine554_ReturnsFalse_NoChange) {
     // Frame with no 554 field at all.
-    auto buf = make_buf("8=FIX.4.2\x01""35=A\x01""49=SENDER\x01");
+    auto buf = make_buf(
+        "8=FIX.4.2\x01"
+        "35=A\x01"
+        "49=SENDER\x01");
     auto before = buf;
 
     bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
@@ -198,7 +208,10 @@ TEST(Masker_SameLength_FieldAnchored_unit, E_NoGenuine554_ReturnsFalse_NoChange)
 TEST(Masker_SameLength_FieldAnchored_unit, F_EmptyValue_ReturnsTrueByteUnchanged) {
     // Empty value: \x01554=\x01 — zero value bytes. Must return true; no bytes
     // are overwritten (zero-length overwrite), but the field was found (I-E1).
-    auto buf = make_buf("\x01""554=\x01""49=S\x01");
+    auto buf = make_buf(
+        "\x01"
+        "554=\x01"
+        "49=S\x01");
     auto before = buf;
 
     bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
@@ -206,14 +219,15 @@ TEST(Masker_SameLength_FieldAnchored_unit, F_EmptyValue_ReturnsTrueByteUnchanged
     EXPECT_TRUE(result) << "empty value: field was found, must return true";
     // Frame must be byte-for-byte unchanged (nothing to overwrite).
     for (std::size_t i = 0; i < buf.size(); ++i) {
-        EXPECT_EQ(buf[i], before[i])
-            << "byte " << i << " must be unchanged (empty value)";
+        EXPECT_EQ(buf[i], before[i]) << "byte " << i << " must be unchanged (empty value)";
     }
 }
 
 TEST(Masker_SameLength_FieldAnchored_unit, G_FrameStartOccurrence_Masked) {
     // 554 at offset 0 (no leading SOH): "554=secret\x01rest"
-    auto buf = make_buf("554=secret\x01""49=S\x01");
+    auto buf = make_buf(
+        "554=secret\x01"
+        "49=S\x01");
     auto before = buf;
 
     bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
@@ -222,8 +236,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, G_FrameStartOccurrence_Masked) {
 
     // "554=" is 4 bytes (indices 0..3), value is indices 4..9 (6 bytes "secret"),
     // then SOH at index 10.
-    EXPECT_TRUE(all_stars(buf.data() + 4, buf.data() + 10))
-        << "value extent must be all '*'";
+    EXPECT_TRUE(all_stars(buf.data() + 4, buf.data() + 10)) << "value extent must be all '*'";
 
     // Prefix "554=" (indices 0..3) and SOH (index 10) unchanged.
     for (std::size_t i = 0; i < 4; ++i) {
@@ -236,7 +249,12 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
     // The masker is a multi-match loop; a malformed frame with TWO genuine
     // \x01554= fields must have BOTH values masked (guards a break-after-first
     // regression — a single real Logon carries one 554, but the utility is general).
-    auto buf = make_buf("\x01""554=aaa\x01""58=mid\x01""554=bbbb\x01""49=S\x01");
+    auto buf = make_buf(
+        "\x01"
+        "554=aaa\x01"
+        "58=mid\x01"
+        "554=bbbb\x01"
+        "49=S\x01");
     bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
     EXPECT_TRUE(result) << "two genuine 554 fields → must return true";
 
@@ -260,7 +278,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
 //   T009 (US3/P3) — no-op path: credential-free Logon and non-Logon-with-554 are
 //     stored byte-for-byte identical to the transmitted frame (no masking occurs).
 //
-// Harness: asio::thread_pool{2} + pool.get_executor() for session + FileStore I/O.
+// Harness: asio::thread_pool{2} + sx for session + FileStore I/O.
 // FIXT sessions (is_fixt() == true) are the only sessions that carry 554 in their
 // Logon; the 3-arg Session(engine, cfg, &registry) ctor is required by the
 // FQ-1 open()-time FIXT validation gate.
@@ -271,6 +289,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
+#include <asio/strand.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <cstring>
@@ -322,10 +341,10 @@ using fixpp::dict::version_registry;
 using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
+using fixpp::session::fsm_state;
 using fixpp::session::MemoryStore;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
-using fixpp::session::fsm_state;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 using fixpp::store_test::byte_collecting_visitor;
@@ -430,13 +449,10 @@ std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::any_io_executor e
 // Builds a minimal FIXT.1.1 Logon with optional 1137/553/554 fields.
 // sending_time defaults to the UTC epoch ("19700101-00:00:00.000") so that
 // it passes the SendingTime latency check (mock_clock is seeded at utc_time_point{}).
-[[nodiscard]] std::vector<std::byte> make_fixt_logon(std::string_view sender_comp_id,
-                                                      std::string_view target_comp_id,
-                                                      std::uint32_t seq = 1,
-                                                      std::string_view dav_id = "9",
-                                                      std::string_view username = "",
-                                                      std::string_view password = "",
-                                                      std::string_view sending_time = "19700101-00:00:00.000") {
+[[nodiscard]] std::vector<std::byte> make_fixt_logon(
+    std::string_view sender_comp_id, std::string_view target_comp_id, std::uint32_t seq = 1,
+    std::string_view dav_id = "9", std::string_view username = "", std::string_view password = "",
+    std::string_view sending_time = "19700101-00:00:00.000") {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -455,7 +471,10 @@ std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::any_io_executor e
         body += "554=" + std::string(password) + "\x01";
     }
 
-    std::string hdr = "8=FIXT.1.1\x01" "9=" + std::to_string(body.size()) + "\x01";
+    std::string hdr =
+        "8=FIXT.1.1\x01"
+        "9=" +
+        std::to_string(body.size()) + "\x01";
     std::string full = hdr + body;
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
@@ -474,8 +493,7 @@ std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::any_io_executor e
 [[nodiscard]] std::string bytes_as_str(std::span<const std::byte> b) {
     std::string s;
     s.resize(b.size());
-    for (std::size_t i = 0; i < b.size(); ++i)
-        s[i] = static_cast<char>(b[i]);
+    for (std::size_t i = 0; i < b.size(); ++i) s[i] = static_cast<char>(b[i]);
     return s;
 }
 
@@ -490,9 +508,8 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view /*sender*/, std::string_view /*target*/,
-        std::pmr::memory_resource* mr, std::size_t max_bytes,
-        asio::any_io_executor /*exec*/) noexcept override {
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* mr,
+        std::size_t max_bytes, asio::any_io_executor /*exec*/) noexcept override {
         (void)mr;
         (void)max_bytes;
         MemoryStore::Config mcfg;
@@ -507,14 +524,12 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
 //
 // Scans ALL files in the given directory for a needle byte string.
 // Returns true iff the needle appears in ANY file.
-[[nodiscard]] bool disk_bytes_contain(const std::filesystem::path& dir,
-                                       std::string_view needle) {
+[[nodiscard]] bool disk_bytes_contain(const std::filesystem::path& dir, std::string_view needle) {
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
         if (!entry.is_regular_file()) continue;
         std::ifstream f(entry.path(), std::ios::binary);
         if (!f) continue;
-        std::string content((std::istreambuf_iterator<char>(f)),
-                            std::istreambuf_iterator<char>());
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         if (content.find(needle) != std::string::npos) return true;
     }
     return false;
@@ -524,14 +539,13 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
 //
 // Counts total occurrences of needle across ALL files in the directory.
 [[nodiscard]] std::size_t disk_bytes_count(const std::filesystem::path& dir,
-                                            std::string_view needle) {
+                                           std::string_view needle) {
     std::size_t count = 0;
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
         if (!entry.is_regular_file()) continue;
         std::ifstream f(entry.path(), std::ios::binary);
         if (!f) continue;
-        std::string content((std::istreambuf_iterator<char>(f)),
-                            std::istreambuf_iterator<char>());
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         std::size_t pos = 0;
         while ((pos = content.find(needle, pos)) != std::string::npos) {
             ++count;
@@ -561,6 +575,13 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
     static_assert(kSentinel.size() == 20u, "sentinel length");
 
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
     auto dir = unique_store_dir("t005_disk");
 
     FileStore::Config fcfg;
@@ -568,18 +589,18 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
     fcfg.sender_comp_id = "INITR";
     fcfg.target_comp_id = "ACCEPTR";
     fcfg.max_frame_bytes = 4096;
-    fcfg.file_io_executor = pool.get_executor();
+    fcfg.file_io_executor = sx;
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
     version_registry registry{{dict}};
 
     std::vector<std::byte> wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     init_cfg.password = std::string(kSentinel);
     init_cfg.store_factory = std::make_unique<FileStoreFactory>(fcfg);
     init_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -588,7 +609,7 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
 
     {
         Session initiator{engine, init_cfg, &registry};
-        auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+        auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
         ASSERT_TRUE(r.has_value()) << "open() must succeed for a configured FIXT initiator";
     }
     // Session destructs here — advisory lock released, FileStore flushed.
@@ -612,6 +633,9 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
         << " stars must be present in disk files (T005/INV-034-1/2)";
 
     std::filesystem::remove_all(dir);
+    // Drain+join workers before the strand/session locals destruct
+    // (TSan teardown-race fix; mirrors the engine's join-before-teardown).
+    pool.join();
 }
 
 // ── T005 / US1 / P1 (acceptor variant) ───────────────────────────────────────
@@ -633,6 +657,13 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
     static_assert(kAcceptorPwd.size() == 18u, "sentinel length");
 
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
     auto dir = unique_store_dir("t005_acceptor");
 
     FileStore::Config fcfg;
@@ -640,18 +671,18 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
     fcfg.sender_comp_id = "ACCEPTR";
     fcfg.target_comp_id = "INITR";
     fcfg.max_frame_bytes = 4096;
-    fcfg.file_io_executor = pool.get_executor();
+    fcfg.file_io_executor = sx;
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
     version_registry registry{{dict}};
 
     std::vector<std::byte> acpt_wire_out;
-    auto acpt_cfg = make_fixt_acceptor_cfg(pool.get_executor());
+    auto acpt_cfg = make_fixt_acceptor_cfg(sx);
     acpt_cfg.password = std::string(kAcceptorPwd);
     acpt_cfg.store_factory = std::make_unique<FileStoreFactory>(fcfg);
     acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -660,17 +691,15 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
 
     {
         Session acceptor{engine, acpt_cfg, &registry};
-        auto open_r =
-            asio::co_spawn(pool.get_executor(), acceptor.open(), asio::use_future).get();
+        auto open_r = asio::co_spawn(sx, acceptor.open(), asio::use_future).get();
         ASSERT_TRUE(open_r.has_value()) << "Acceptor open() must succeed";
 
         // Feed a valid inbound FIXT Logon from the peer (INITR → ACCEPTR).
         auto peer_logon = make_fixt_logon("INITR", "ACCEPTR", 1, "9");
-        auto inb_r = asio::co_spawn(
-                         pool.get_executor(),
-                         acceptor.on_inbound_frame(
-                             std::span<const std::byte>{peer_logon.data(), peer_logon.size()}),
-                         asio::use_future)
+        auto inb_r = asio::co_spawn(sx,
+                                    acceptor.on_inbound_frame(std::span<const std::byte>{
+                                        peer_logon.data(), peer_logon.size()}),
+                                    asio::use_future)
                          .get();
         ASSERT_TRUE(inb_r.has_value()) << "Acceptor on_inbound_frame must succeed for valid Logon";
         EXPECT_EQ(acceptor.state(), fsm_state::Active) << "Acceptor must reach Active";
@@ -679,8 +708,7 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
         // the Session destructs. Without close(), the detached loop outlives the
         // stack session — UAF visible under ASan.
         // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
-        asio::co_spawn(pool.get_executor(), acceptor.close(fixpp::session::close_mode::terminal),
-                       asio::use_future)
+        asio::co_spawn(sx, acceptor.close(fixpp::session::close_mode::terminal), asio::use_future)
             .get();
     }
     // Session destructs — FileStore flushed, liveness loop drained.
@@ -703,6 +731,7 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
         << " stars must be present on disk (T005 acceptor)";
 
     std::filesystem::remove_all(dir);
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T005 / US1 / P1 (MemoryStore variant) ────────────────────────────────────
@@ -724,10 +753,17 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     static_assert(kSentinel.size() == 17u, "sentinel length");
 
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
@@ -737,7 +773,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     CapturingMemStoreFactory* factory_raw = factory.get();
 
     std::vector<std::byte> wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     init_cfg.password = std::string(kSentinel);
     init_cfg.store_factory = std::move(factory);
     init_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -745,31 +781,27 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed";
 
     // Pre-check: wire carries cleartext.
     ASSERT_FALSE(wire_out.empty()) << "Initiator must emit a Logon";
     std::string wire_str = bytes_as_str(wire_out);
-    ASSERT_NE(wire_str.find(kSentinel), std::string::npos)
-        << "Wire must carry cleartext password";
+    ASSERT_NE(wire_str.find(kSentinel), std::string::npos) << "Wire must carry cleartext password";
 
     // Retrieve the stored frame via the captured MemoryStore pointer.
     ASSERT_NE(factory_raw->last_store, nullptr) << "Factory must have minted a store";
     MemoryStore* store = factory_raw->last_store;
 
     byte_collecting_visitor visitor;
-    auto ret_r = asio::co_spawn(
-                     pool.get_executor(),
-                     store->retrieve(1, 0, direction_t::outbound, visitor),
-                     asio::use_future)
-                     .get();
+    auto ret_r =
+        asio::co_spawn(sx, store->retrieve(1, 0, direction_t::outbound, visitor), asio::use_future)
+            .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
     ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one outbound frame must be stored";
 
     const auto& stored_bytes = visitor.entries()[0].bytes;
-    std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()),
-                           stored_bytes.size());
+    std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()), stored_bytes.size());
 
     // (a) Cleartext sentinel absent from stored bytes.
     EXPECT_EQ(stored_str.find(kSentinel), std::string::npos)
@@ -781,6 +813,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     EXPECT_NE(stored_str.find(masked_val), std::string::npos)
         << "Masked form '554=' + " << kSentinel.size()
         << " stars must appear in retrieved bytes (T005/INV-034-4)";
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T008 / US2 / P2 ───────────────────────────────────────────────────────────
@@ -804,17 +837,24 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     // For wire-only test, use io_context + run_for to keep things simple.
     // No FileStore I/O: no pool hang risk.
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
     version_registry registry{{dict}};
 
     std::vector<std::byte> wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     init_cfg.password = std::string(kSentinel);
     // No store_factory — no FileStore involved (wire-only).
     init_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -822,7 +862,7 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed for a FIXT initiator with password";
 
     ASSERT_FALSE(wire_out.empty()) << "Initiator must emit a Logon at open()";
@@ -838,6 +878,7 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     EXPECT_EQ(wire_str.find(masked_val), std::string::npos)
         << "Wire Logon must NOT contain masked form (masking is store-only, not wire): "
         << wire_str;
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T009 / US3 / P3 ───────────────────────────────────────────────────────────
@@ -858,10 +899,17 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
 
 TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWire) {
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
@@ -871,7 +919,7 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
     CapturingMemStoreFactory* factory_raw = factory.get();
 
     std::vector<std::byte> wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     // NO credentials — password and username left unset.
     init_cfg.store_factory = std::move(factory);
     init_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -879,7 +927,7 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed for a credential-free FIXT initiator";
 
     ASSERT_FALSE(wire_out.empty()) << "Initiator must emit a Logon at open()";
@@ -894,11 +942,9 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
     MemoryStore* store = factory_raw->last_store;
 
     byte_collecting_visitor visitor;
-    auto ret_r = asio::co_spawn(
-                     pool.get_executor(),
-                     store->retrieve(1, 0, direction_t::outbound, visitor),
-                     asio::use_future)
-                     .get();
+    auto ret_r =
+        asio::co_spawn(sx, store->retrieve(1, 0, direction_t::outbound, visitor), asio::use_future)
+            .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
     ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one outbound frame stored";
 
@@ -909,6 +955,7 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
         << "Stored frame must be same length as wire frame (byte-identical path)";
     EXPECT_EQ(stored_bytes, wire_out)
         << "Stored frame must be byte-identical to wire frame when no 554 is present (T009)";
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T009 / US3 / P3 (non-Logon variant) ─────────────────────────────────────
@@ -932,10 +979,17 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
 
 TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
@@ -946,7 +1000,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     CapturingMemStoreFactory* factory_raw = factory.get();
 
     std::vector<std::byte> init_wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     // No credentials on the initiator — Logon has no 554.
     init_cfg.store_factory = std::move(factory);
     init_cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -957,8 +1011,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     Session initiator{engine, init_cfg, &registry};
 
     // Step 1: open initiator (emits Logon, stays LogonSent).
-    auto init_open_r =
-        asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto init_open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
     ASSERT_TRUE(init_open_r.has_value()) << "Initiator open() must succeed";
     ASSERT_FALSE(init_wire_out.empty()) << "Initiator must emit a Logon";
 
@@ -966,11 +1019,10 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // Sender and target are from the acceptor's perspective: 49=ACCEPTR, 56=INITR.
     auto peer_reply = make_fixt_logon("ACCEPTR", "INITR", 1, "9");
 
-    auto inb_r = asio::co_spawn(
-                     pool.get_executor(),
-                     initiator.on_inbound_frame(
-                         std::span<const std::byte>{peer_reply.data(), peer_reply.size()}),
-                     asio::use_future)
+    auto inb_r = asio::co_spawn(sx,
+                                initiator.on_inbound_frame(std::span<const std::byte>{
+                                    peer_reply.data(), peer_reply.size()}),
+                                asio::use_future)
                      .get();
     ASSERT_TRUE(inb_r.has_value()) << "on_inbound_frame must succeed for valid reply Logon";
     ASSERT_EQ(initiator.state(), fsm_state::Active) << "Initiator must reach Active";
@@ -990,12 +1042,12 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     payload_bytes.reserve(payload.size());
     for (char c : payload) payload_bytes.push_back(static_cast<std::byte>(c));
 
-    auto send_r = asio::co_spawn(
-                      pool.get_executor(),
-                      initiator.send(std::span<const std::byte>{payload_bytes.data(),
-                                                                 payload_bytes.size()}),
-                      asio::use_future)
-                      .get();
+    auto send_r =
+        asio::co_spawn(
+            sx,
+            initiator.send(std::span<const std::byte>{payload_bytes.data(), payload_bytes.size()}),
+            asio::use_future)
+            .get();
     ASSERT_TRUE(send_r.has_value()) << "send() must succeed in Active state";
 
     // Wire frame captures the business message.
@@ -1013,17 +1065,14 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // The store has seq 1 (Logon) and seq 2 (business message).
     // Retrieve from seq 2 to get only the business message.
     byte_collecting_visitor visitor;
-    auto ret_r = asio::co_spawn(
-                     pool.get_executor(),
-                     store->retrieve(2, 0, direction_t::outbound, visitor),
-                     asio::use_future)
-                     .get();
+    auto ret_r =
+        asio::co_spawn(sx, store->retrieve(2, 0, direction_t::outbound, visitor), asio::use_future)
+            .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
     ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one frame starting at seq 2";
 
     const auto& stored_bytes = visitor.entries()[0].bytes;
-    std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()),
-                           stored_bytes.size());
+    std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()), stored_bytes.size());
 
     // Key assertion: stored bytes CONTAIN the cleartext (masking was SKIPPED for non-Logon).
     // This is the discriminating check: stored_str.find(cleartext) != npos proves
@@ -1040,9 +1089,9 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // Session destructs. Without close(), the detached loop outlives the stack
     // session — UAF visible under ASan.
     // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
-    asio::co_spawn(pool.get_executor(), initiator.close(fixpp::session::close_mode::terminal),
-                   asio::use_future)
+    asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T007 / open()-time credential-length guard (both roles) ──────────────────
@@ -1055,50 +1104,67 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
 // load-bearing premise for T010's "the over-bound branch is production-
 // unreachable" rationale, so it needs a direct REJECT witness (it is also a
 // production branch that must earn its BRDA). Asserted for BOTH roles — both
-// validate their OWN cfg_ creds at open() (FR-004 / [[feedback_symmetric_api_claim_unreachable_arm]]).
-// A 300-byte all-'x' password is FQ-3-clean (no SOH / '=' / control bytes) so it
-// trips ONLY the length guard, not the 033 injection floor.
+// validate their OWN cfg_ creds at open() (FR-004 /
+// [[feedback_symmetric_api_claim_unreachable_arm]]). A 300-byte all-'x' password is FQ-3-clean (no
+// SOH / '=' / control bytes) so it trips ONLY the length guard, not the 033 injection floor.
 TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Initiator) {
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
     auto dict = make_fix50sp2_dict();
     version_registry registry{{dict}};
 
     std::vector<std::byte> wire_out;
-    auto cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto cfg = make_fixt_initiator_cfg(sx);
     cfg.password = std::string(300, 'x');  // > kMaxMaskableLogonBytes, FQ-3-clean
     cfg.transport_send = [&](std::span<const std::byte> f) { wire_out.assign(f.begin(), f.end()); };
 
     Session initiator{engine, cfg, &registry};
-    auto r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
 
     ASSERT_FALSE(r.has_value()) << "open() must reject an oversized credential (T007)";
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
         << "oversized credential must fail with invalid_session_config";
     EXPECT_TRUE(wire_out.empty()) << "no Logon may be emitted when open() rejects (T007)";
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
     auto dict = make_fix50sp2_dict();
     version_registry registry{{dict}};
 
-    auto cfg = make_fixt_acceptor_cfg(pool.get_executor());
+    auto cfg = make_fixt_acceptor_cfg(sx);
     cfg.password = std::string(300, 'x');  // > kMaxMaskableLogonBytes, FQ-3-clean
 
     Session acceptor{engine, cfg, &registry};
-    auto r = asio::co_spawn(pool.get_executor(), acceptor.open(), asio::use_future).get();
+    auto r = asio::co_spawn(sx, acceptor.open(), asio::use_future).get();
 
-    ASSERT_FALSE(r.has_value()) << "acceptor open() must reject an oversized credential (T007/FR-004)";
+    ASSERT_FALSE(r.has_value())
+        << "acceptor open() must reject an oversized credential (T007/FR-004)";
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
         << "oversized credential must fail with invalid_session_config (acceptor arm)";
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 
 // ── T010 / fault-injection (over-bound fail-closed) ───────────────────────────
@@ -1134,10 +1200,17 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     constexpr std::string_view kSentinel = "overbound-T010-sentinel";
 
     asio::thread_pool pool{2};
+    // Single per-session strand over the 2-thread pool: all session interaction
+    // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // "close() is called from within the session's serialisation domain"). Mirrors
+    // production's per-session-strand-over-engine-pool; preserves real multi-thread
+    // coverage (handlers still hop across both pool threads, serialised by the strand).
+    asio::any_io_executor sx = asio::make_strand(pool);
 
     fixpp::core::EngineConfig engine;
-    engine.executor = pool.get_executor();
-    engine.clock = make_mock_clock(pool.get_executor());
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
     engine.max_store_memory_per_session = 1ULL << 30;
 
     auto dict = make_fix50sp2_dict();
@@ -1147,7 +1220,7 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     CapturingMemStoreFactory* factory_raw = factory.get();
 
     std::vector<std::byte> wire_out;
-    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    auto init_cfg = make_fixt_initiator_cfg(sx);
     // No configured creds — the over-bound frame carries its own 554; open() emits
     // a small credential-free Logon (seq 1) that is irrelevant to this cell.
     init_cfg.store_factory = std::move(factory);
@@ -1156,7 +1229,7 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto open_r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_NE(factory_raw->last_store, nullptr);
     MemoryStore* store = factory_raw->last_store;
@@ -1183,7 +1256,7 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     constexpr fixpp::session::seqnum_t kInjSeq = 2;
     wire_out.clear();  // capture only the injected frame's transmit
     auto inj_r = asio::co_spawn(
-                     pool.get_executor(),
+                     sx,
                      initiator.store_then_emit_test_access(
                          kInjSeq, std::span<const std::byte>{over_bytes.data(), over_bytes.size()}),
                      asio::use_future)
@@ -1192,7 +1265,8 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
         << "store_then_emit must return ok on the skip-store-but-transmit path (I-07)";
 
     // (b) Wire frame carries the over-bound frame verbatim — cleartext 554 intact.
-    ASSERT_FALSE(wire_out.empty()) << "over-bound frame must still be transmitted (fail-closed ≠ drop)";
+    ASSERT_FALSE(wire_out.empty())
+        << "over-bound frame must still be transmitted (fail-closed ≠ drop)";
     std::string wire_str = bytes_as_str(wire_out);
     EXPECT_NE(wire_str.find(kSentinel), std::string::npos)
         << "Wire frame must carry the real cleartext 554 on the over-bound path (T010 b)";
@@ -1201,10 +1275,10 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
 
     // (a) NO cleartext persisted — the injected seq is absent from the store (skip_store).
     byte_collecting_visitor visitor;
-    auto ret_r = asio::co_spawn(pool.get_executor(),
-                                store->retrieve(kInjSeq, kInjSeq, direction_t::outbound, visitor),
-                                asio::use_future)
-                     .get();
+    auto ret_r =
+        asio::co_spawn(sx, store->retrieve(kInjSeq, kInjSeq, direction_t::outbound, visitor),
+                       asio::use_future)
+            .get();
     // retrieve over [kInjSeq,kInjSeq] must find NOTHING (the frame was never stored).
     EXPECT_TRUE(!ret_r.has_value() || visitor.entries().empty())
         << "Over-bound frame must NOT be persisted — seq " << kInjSeq
@@ -1213,14 +1287,14 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     // Belt-and-suspenders: the sentinel must not appear anywhere the store could
     // hand back. (MemoryStore holds only seq 1 — the credential-free open() Logon.)
     byte_collecting_visitor all;
-    (void)asio::co_spawn(pool.get_executor(),
-                         store->retrieve(1, 0, direction_t::outbound, all), asio::use_future)
+    (void)asio::co_spawn(sx, store->retrieve(1, 0, direction_t::outbound, all), asio::use_future)
         .get();
     for (const auto& e : all.entries()) {
         std::string s(reinterpret_cast<const char*>(e.bytes.data()), e.bytes.size());
         EXPECT_EQ(s.find(kSentinel), std::string::npos)
             << "No stored frame may contain the over-bound cleartext (T010 a)";
     }
+    pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
 #endif  // FIXPP_TEST_HOOKS
 
