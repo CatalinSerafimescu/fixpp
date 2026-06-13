@@ -41,7 +41,7 @@
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/admin_messages.hpp>         // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
-#include <fixpp/session/logon_credentials.hpp>      // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
+#include <fixpp/session/logon_credentials.hpp>  // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
@@ -985,8 +985,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // maskable (≤ kMaxMaskableLogonBytes) Logon. Clean/absent credentials never
     // trip it → W4 byte-identical preserved.
     {
-        const std::size_t cred_len = (cfg_.username.has_value() ? cfg_.username->size() : 0u) +
-                                     (cfg_.password.has_value() ? cfg_.password->size() : 0u);
+        const std::size_t cred_len = (cfg_.username.has_value() ? cfg_.username->size() : 0U) +
+                                     (cfg_.password.has_value() ? cfg_.password->size() : 0U);
         if (cred_len >= Session::kMaxMaskableLogonBytes) {
             co_return std::unexpected(error::invalid_session_config);
         }
@@ -4443,7 +4443,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     std::span<const std::byte> span_to_store = frame;  // default: today's behavior
     bool skip_store = false;
     std::array<std::byte, kMaxMaskableLogonBytes> mask_buf{};  // coroutine-frame copy
-    if (fixpp::session::frame_has_genuine_tag554(frame) && scan_frame_header(frame).msg_type == "A") {
+    if (fixpp::session::frame_has_genuine_tag554(frame) &&
+        scan_frame_header(frame).msg_type == "A") {
         if (frame.size() > kMaxMaskableLogonBytes) {
             // Over-bound: FAIL CLOSED — never persist cleartext. Skip the store
             // write for this frame (logged-then-proceed, I-07, mirroring the
@@ -4474,7 +4475,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // store_then_emit frame → std::terminate.
         // [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
         try {
-            auto store_r = co_await store_->store(stamped_seq, span_to_store, direction_t::outbound);
+            auto store_r =
+                co_await store_->store(stamped_seq, span_to_store, direction_t::outbound);
             (void)store_r;  // store errors → logged-then-proceed (I-07)
         } catch (const asio::system_error& e) {
             if (e.code() == asio::error::operation_aborted) {

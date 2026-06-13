@@ -148,8 +148,8 @@ struct logon_credentials {
     }
     // Mid-frame occurrence: SOH + "554=".
     for (std::size_t i = 0; i + 5 <= n; ++i) {
-        if (frame[i] == kSoh && frame[i + 1] == k5 && frame[i + 2] == k5 &&
-            frame[i + 3] == k4 && frame[i + 4] == kEq) {
+        if (frame[i] == kSoh && frame[i + 1] == k5 && frame[i + 2] == k5 && frame[i + 3] == k4 &&
+            frame[i + 4] == kEq) {
             return true;
         }
     }
@@ -176,20 +176,18 @@ struct logon_credentials {
 //   I-E1-3 (zero-alloc/noexcept): no heap allocation; no exceptions.
 //   I-E1-4 (delimiter-safe): 554 value bytes cannot contain SOH or '=' (033 FQ-3
 //     injection floor), so the value extent is unambiguous.
-[[nodiscard]] inline bool mask_tag554_same_length_inplace(
-    std::span<std::byte> frame) noexcept {
+[[nodiscard]] inline bool mask_tag554_same_length_inplace(std::span<std::byte> frame) noexcept {
     // Field-boundary needles (byte literals — no implicit char→byte narrowing).
     // Mid-frame: SOH + '5' + '5' + '4' + '='  (5 bytes)
     // Frame-start: '5' + '5' + '4' + '='       (4 bytes)
-    static constexpr std::byte kMid[5] = {std::byte{0x01}, std::byte{'5'},
-                                           std::byte{'5'},  std::byte{'4'},
-                                           std::byte{'='}};
-    static constexpr std::byte kStart[4] = {std::byte{'5'}, std::byte{'5'},
-                                             std::byte{'4'}, std::byte{'='}};
-    static constexpr std::size_t kMidLen   = 5;
+    static constexpr std::byte kMid[5] = {std::byte{0x01}, std::byte{'5'}, std::byte{'5'},
+                                          std::byte{'4'}, std::byte{'='}};
+    static constexpr std::byte kStart[4] = {std::byte{'5'}, std::byte{'5'}, std::byte{'4'},
+                                            std::byte{'='}};
+    static constexpr std::size_t kMidLen = 5;
     static constexpr std::size_t kStartLen = 4;
-    static constexpr std::byte   kSoh      = std::byte{0x01};
-    static constexpr std::byte   kStar     = std::byte{0x2A};  // '*'
+    static constexpr std::byte kSoh = std::byte{0x01};
+    static constexpr std::byte kStar = std::byte{0x2A};  // '*'
 
     const std::size_t n = frame.size();
     bool masked = false;
@@ -199,17 +197,16 @@ struct logon_credentials {
         std::size_t val_start = 0;  // index of first value byte (just past '=')
 
         // Check frame-start occurrence (only valid when pos == 0).
-        bool has_start_match = (pos == 0) && (n >= kStartLen) &&
-                               (frame[0] == kStart[0]) && (frame[1] == kStart[1]) &&
-                               (frame[2] == kStart[2]) && (frame[3] == kStart[3]);
+        bool has_start_match = (pos == 0) && (n >= kStartLen) && (frame[0] == kStart[0]) &&
+                               (frame[1] == kStart[1]) && (frame[2] == kStart[2]) &&
+                               (frame[3] == kStart[3]);
 
         // Search for mid-frame occurrence '\x01554='.
         std::size_t mid_pos = std::string_view::npos;
         if (!has_start_match) {
             for (std::size_t i = pos; i + kMidLen <= n; ++i) {
-                if (frame[i]     == kMid[0] && frame[i + 1] == kMid[1] &&
-                    frame[i + 2] == kMid[2] && frame[i + 3] == kMid[3] &&
-                    frame[i + 4] == kMid[4]) {
+                if (frame[i] == kMid[0] && frame[i + 1] == kMid[1] && frame[i + 2] == kMid[2] &&
+                    frame[i + 3] == kMid[3] && frame[i + 4] == kMid[4]) {
                     mid_pos = i;
                     break;
                 }
