@@ -950,11 +950,10 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                                                                 std::span<const std::byte> frame
                                                                 [[clang::lifetimebound]],
                                                                 direction_t dir) noexcept {
-    // RC#4: capture session executor BEFORE any hop so we can rebind after I/O.
-    // this_coro::executor reflects the executor the caller used for co_spawn;
-    // after the file_io_executor hop below, this_coro::executor returns the
-    // I/O executor — NOT the original session executor. Capturing now preserves
-    // the correct return destination per [2d §4.5] D.1 strand contract.
+    // Capture the session executor for the leading pump-break post below. (035:
+    // the offload uses nested co_spawn(use_awaitable), which resumes on this
+    // spawning executor — there is no longer a file_io_executor hop to rebind
+    // from; session_ex now serves only the leading post.)
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive awaitable_thread::pump() chain
@@ -1129,15 +1128,17 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                 return true;
             });
     } catch (const asio::system_error& e) {
-        if (e.code() == asio::error::operation_aborted) {
-            // Post-dates linearisation: syscall completed durably; resume on strand.
-            // Fall through with io_ok=true so Region 3 applies the correct mutations.
-#ifdef FIXPP_TEST_HOOKS
-            g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-#endif
-            io_ok = true;
+        if (e.code() != asio::error::operation_aborted) {
+            throw;  // Only operation_aborted is handled; anything else is unexpected
+                    // and propagates (noexcept coroutine → terminate). Consistent
+                    // with next_seqnum()/reset().
         }
-        // Non-operation_aborted system_error (e.g. OOM) propagates naturally.
+        // operation_aborted post-dates linearisation: the syscall completed durably.
+        // Fall through with io_ok=true so Region 3 applies the correct mutations.
+#ifdef FIXPP_TEST_HOOKS
+        g_catch_fired.fetch_add(1, std::memory_order_relaxed);
+#endif
+        io_ok = true;
     }
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
@@ -1292,7 +1293,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
 asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direction_t dir,
                                                                           bool increment) noexcept {
-    // RC#4: capture session executor before any hop.
+    // Capture the session executor for the leading pump-break post below (035: no
+    // offload rebind hop remains — nested co_spawn resumes on this executor).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1374,12 +1376,13 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                     return raw_datasync(raw_fd);
                 });
         } catch (const asio::system_error& e) {
-            if (e.code() == asio::error::operation_aborted) {
-#ifdef FIXPP_TEST_HOOKS
-                g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-#endif
-                io_ok = true;  // Post-dates linearisation: durable success.
+            if (e.code() != asio::error::operation_aborted) {
+                throw;  // Only operation_aborted is handled; anything else propagates.
             }
+#ifdef FIXPP_TEST_HOOKS
+            g_catch_fired.fetch_add(1, std::memory_order_relaxed);
+#endif
+            io_ok = true;  // Post-dates linearisation: durable success.
         }
 
         // ── Region 3: STRAND — advance write_pos on success (mutex still held) ──
@@ -1395,7 +1398,8 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
 // ── FileStore::reset() ────────────────────────────────────────────────────────
 
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
-    // RC#4: capture session executor before any hop.
+    // Capture the session executor for the leading pump-break post below (035: no
+    // offload rebind hop remains — nested co_spawn resumes on this executor).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1429,7 +1433,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 
     // ── Region 1: STRAND — capture values for the lambda (mutex held) ─────────
     const std::string path = impl_->log_path_;
-    const FileStore::Config cfg = impl_->cfg;
     const std::uint32_t hash = impl_->expected_hash;
     const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
@@ -1437,7 +1440,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     //
     // Returns the opened+locked new OsFile on success, std::nullopt on any failure.
     // The lambda touches NO impl_ field — it uses only the captured copies.
-    // Capture list: [path, cfg, hash, probe_fn] — exactly as required by brief.
+    // Capture list: [path, hash, probe_fn] — only what initialise_fresh needs
+    // (expected_hash via hash; the tmp file is opened from path). cfg is NOT read on
+    // the reset path, so it is not captured (avoids a heavy FileStore::Config copy).
     //
     // T012 — unconditional operation_aborted→durable catch (FR-004 / C3).
     // Any operation_aborted at this await post-dates linearisation; treat as durable
@@ -1449,7 +1454,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     try {
         new_file_opt = co_await offload_to(
         impl_->cfg.file_io_executor,
-        [path, cfg, hash, probe_fn]() -> std::optional<OsFile> {
+        [path, hash, probe_fn]() -> std::optional<OsFile> {
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
@@ -1467,7 +1472,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             // Write sentinel + initial counter to tmp file using a local tmp_impl.
             {
                 FileStoreImpl tmp_impl;
-                tmp_impl.cfg = cfg;
                 tmp_impl.expected_hash = hash;
                 tmp_impl.file = std::move(tmp_file);
                 tmp_impl.write_pos = 0;
@@ -1532,7 +1536,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             }
             {
                 FileStoreImpl tmp_impl;
-                tmp_impl.cfg = cfg;
                 tmp_impl.expected_hash = hash;
                 tmp_impl.file = std::move(tmp_file);
                 tmp_impl.write_pos = 0;
