@@ -1,6 +1,20 @@
+<!--
+Sync Impact Report — v0.1 → v0.2 (2026-06-13)
+  Bump: MINOR (scoped exemption added to a banned pattern; not backwards-incompatible, not a perf-budget tightening → not v-major per Article XX §4).
+  Modified principles:
+    - Article XV §1 (Banned: per-message hot-path heap alloc) — appended a "Scope & §XV.4 exemption" sub-clause: permits a single bounded O(1) coroutine frame per offloaded durable-I/O op on the §XV.4 FileStore offload path (the cross-executor completion frame is routable to neither HALO nor PMR). MemoryStore stays zero-alloc; per-field / unbounded / in-memory-path allocation still banned.
+    - Article XI §6 (Coroutine frame allocation) — appended a cross-ref to the §XV.1 scope limit.
+  Added sections: none. Removed sections: none.
+  Rationale: harmonises §XV.1 with §XV.4 (mandated async-journal offload) and §XI.6 (HALO-first/PMR-fallback) for the empirically-forced case where a cross-executor offload completion frame can fall back to neither. Discovered at Gate A of feature 035-filestore-io-offload; empirical basis research/G19-fix-fpml-iso20022/research/probes/cospawn_probe*.cpp.
+  Templates / dependents reviewed:
+    - plan-template.md Constitution Check — ✅ no change needed (gate is article-by-article; the §XV.1 row now reads against the scoped text).
+    - spec-template.md / tasks-template.md — ✅ no change (no mandatory-section change).
+  Process: Article XX requires a Codex Gate A review on this amendment + a decisions-log entry; the Gate A is folded into the 035 re-review (the amendment exists only to unblock 035). User-signed-off wording 2026-06-13.
+  Follow-up: none deferred.
+-->
 # fixpp Constitution
 
-> **Status:** user-signed-off v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
+> **Status:** user-signed-off v0.2 (2026-06-13) — amends Article XV §1 + XI §6 (FileStore §XV.4-offload bounded-frame exemption; user-signed-off, Gate A folded into feature 035). Base v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
 > **Authority:** This document is project-wide non-negotiables. Every `/specify`, `/plan`, ADR, and PR must satisfy it. Conflicts are resolved by amending the constitution first (Article XX) — never by silently violating an article.
 > **Citation form:** other documents cite articles as `[const §Roman.arabic]` (e.g., `[const §VIII.3]`).
 
@@ -148,7 +162,7 @@
 3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0 algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. **Plain `std::mutex` is banned in any header that includes `asio::awaitable<...>`.** Enforced by clang-tidy custom check or grep gate.
 4. **Application threading default: per-session strand.** Users who say nothing get callbacks serialised per session, never on the I/O thread. Custom executors are opt-in (per SYNTHESIS §3.2 Q6c).
 5. **Hot-path lock policy: per-session policy with hard-coded callsite caps.** Default = mutex. Spin opt-in via session config. Store-write path always uses mutex regardless of policy (SYNTHESIS §3.2 Q8).
-6. **Coroutine frame allocation: HALO-first.** PMR fallback per-awaiter where HALO doesn't fire. No global compiler-version pin (Article II §4).
+6. **Coroutine frame allocation: HALO-first.** PMR fallback per-awaiter where HALO doesn't fire. No global compiler-version pin (Article II §4). *(Limit — see §XV.1 scope: a cross-executor offload completion frame falls back to neither HALO nor PMR; §XV.1 permits a single bounded O(1) such frame per durable-I/O op on the §XV.4 FileStore offload path.)*
 7. **Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
 ---
@@ -207,6 +221,7 @@
 The following patterns are **prohibited** in `fixpp` source code. Each is rooted in a real failure mode observed in surveyed implementations.
 
 1. **Heap-allocate per message or per field on the hot path.** Use zero-copy views; arena/PMR for the rare materialise cases.
+   **Scope & §XV.4 exemption (amended v0.2, 2026-06-13).** The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message. The **durable-store async-journal offload mandated by §XV.4** (FileStore offloading `pwrite`/`fdatasync`/`rename` to a `file_io_executor`) is exempt to **a single bounded O(1) coroutine frame per offloaded I/O op**: a genuine cross-executor offload must `co_await` its completion inside an `asio::awaitable`, and that completion frame is routable to **neither HALO** (cannot fire across executors) **nor a PMR arena** (the Asio awaitable frame is opaque to the bound allocator) — so it is unavoidably one global-heap frame per op. The exemption is **strictly scoped**: O(1) frames/op only (the compliant fix is a *reduction* — 1 frame/op vs the prior inert offload's 4); it does **not** permit per-field, unbounded/growing, or in-memory-path allocation, nor any allocation on `MemoryStore::store`. This harmonises §XV.1 with §XV.4 and §XI.6 (whose "PMR fallback per-awaiter" presumes a fallback that does not exist for this cross-executor frame). Empirical basis: Gate-A probes `research/G19-fix-fpml-iso20022/research/probes/cospawn_probe*.cpp` (feature 035).
 2. **Thread-per-session blocking I/O.** Use ASIO async I/O; multiplex N sessions onto M executor threads.
 3. **Coarse global session lock.** Per-session state; lock-free queue between I/O and app thread.
 4. **Synchronous disk I/O on every send** (e.g., QuickFIX `FileStore` flush per write). Async journal with background flush; sync-on-failover is opt-in.
