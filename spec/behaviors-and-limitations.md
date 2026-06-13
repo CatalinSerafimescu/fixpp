@@ -681,11 +681,11 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   contracts/refresh-knob.md C4). *(catalogue S-018; `session.cpp` `refresh_active_`
   suppression; test W5a INV-RoL-3 witness.)*
 
-- **L-025-2 — The acceptor `force=true` warm re-hydrate path at `session.cpp:1754` is not
+- **L-025-2 — The acceptor `force=true` warm re-hydrate path at `session.cpp:1885` is not
   reachable through the current engine and has no reachable test vehicle.** The production engine
-  (`engine.cpp:864`) constructs a **fresh** `Session` per accepted connection; `hydrated_` is set
+  (`engine.cpp:877`) constructs a **fresh** `Session` per accepted connection; `hydrated_` is set
   at first logon and never reset, so every acceptor Logon arrives on a Session with
-  `hydrated_==false` (the force latch-bypass at `:565` is never triggered on the acceptor side).
+  `hydrated_==false` (the force latch-bypass at `:614` is never triggered on the acceptor side).
   A 2nd Logon received in `Active` state is dispatched to the dup-Logon-in-Active `Reject` arm,
   not back through the `NotConnected` Logon handler. The acceptor `force` wiring is therefore
   **dead-but-harmless**: it is correctly wired and would function if Session reuse across acceptor
@@ -693,7 +693,7 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   **initiator** role (W1/W2/W7); the acceptor receives the same re-hydrate semantics on each new
   connection via the 029 cold-hydrate spine (fresh Session → fresh `ensure_hydrated_()` call on
   the first Logon). **Status: documented, acceptor same-connection re-Logon force-bypass deferred
-  pending Session reuse.** *(data-model.md W6 scope; catalogue S-018; `session.cpp:1754`.)*
+  pending Session reuse.** *(data-model.md W6 scope; catalogue S-018; `session.cpp:1885`.)*
 
 ## Nanosecond-resolution SendingTime (026-nanosecond-sendingtime)
 
@@ -1120,3 +1120,58 @@ own `cfg.default_appl_ver_id` as serviceable-by-construction (self-register / fa
 default) so the registry need only carry *additional* serviceable versions? Deferred to Gate B — no
 production change made in 033 (the interop fixture was corrected to register v44+v50sp2 dictionaries,
 mirroring a real FIXT-acceptor deployment).
+
+## Fable assessment follow-ups (out-of-band, 2026-06-13)
+
+These rows document **already-shipped behavior** surfaced by the independent Fable review pass
+(`research/G19-fix-fpml-iso20022/fable-assessments/`). They were added out-of-band (no feature cycle)
+because the underlying behavior is accepted-as-shipped for v1.0 (no code fix). Per-feature IDs are kept
+so the **Tier-4 release-gate B&L back-fill** (REMAINING-WORK item 9) can relocate the `008` rows into a
+proper 008 section. Code-fix follow-ups (credential masking, toAdmin coverage, GapFill 43=Y/122,
+file_store offload) are tracked in `REMAINING-WORK.md` "Fable review findings (2026-06-13)", NOT here.
+
+**L-033-6 — `Password(554)` on the outbound Logon is persisted in cleartext by a configured persistent
+message store (at-rest exposure).** When a FIXT session has `SessionConfig::logon_credentials.password`
+set AND a persistent `store_factory` is configured, the built outbound Logon frame is written verbatim
+to the store via `store_then_emit`→`file_store write_frame` (the durable-before-transmit I-3 path) on
+both the initiator emit and the acceptor reply — the cleartext password sits on disk for the life of the
+store file. `redact_tag554` is NOT applied at this boundary (it has zero production call-sites). It is the
+session's OWN credential (not the peer's), is never re-emitted (admin frames fold into a SequenceReset-
+GapFill on resend), and reaches no log/OTel/metric sink. Industry parity (QuickFIX-cpp/J FileStore behaves
+identically; FIX-SL treats 553/554 as legacy and recommends TLS). **Operator mitigation:** protect the
+store path with filesystem permissions; prefer mTLS identity over 553/554. A store-boundary same-length
+mask is tracked as a fix in REMAINING-WORK (F-c). *(Fable `5.2`; `session.cpp:835`/`:2248`,
+`file_store.cpp:503`.)*
+
+**L-015-5 — the deprecated `one_way_ca` TLS profile performs no peer-identity binding.** The `one_way_ca`
+profile accepts any peer certificate that chains to the configured trust anchor — it does NOT bind the
+certificate to a CN/SAN/CompID. (This is distinct from the default `verify_peer` path, where CompID↔TLS-
+identity binding IS fully enforced per feature 015.) Operators MUST use an identity-binding profile for
+production; `one_way_ca` is for transport-encryption-only / migration scenarios. *(Fable `5.1`; `src/tls/`
+profile path.)*
+
+**B-008-1 — the FileStore log grows monotonically until a reset epoch (size disk accordingly).** FileStore
+is append-only with no compaction, rotation, or size cap: each outbound message appends ≈ `payload + 64 B`
+(frame record + post-frame counter + assign-outbound counter) and each inbound advance appends a 24 B
+counter record. The only reclamation is a reset epoch (`reset_on_logon`/`reset_on_logout`/
+`reset_on_disconnect` — all default `false` — or a bilateral `141=Y`). Default config ⇒ growth is monotone
+for the durable session lifetime (restart re-scans the full log). At 1k msg/s @ 512 B that is ≈ 50 GB/day.
+fixpp has no `SessionTime`-driven daily auto-reset, so the conventional daily bound must be arranged
+externally. **Operator action:** size disk for one reset epoch of traffic and enable a reset knob or arrange
+external EOD resets. *(Fable `5.4`; `file_store.cpp:503-543`, `file_store_factory.cpp:174`.)*
+
+**L-008-1 — the FileStore in-RAM offset index is uncapped and re-materialized at restart.** Alongside the
+on-disk log, FileStore keeps a per-record in-RAM index (`inbound_index`/`outbound_index`, ≈ 24 B per
+retained outbound frame) with no cap, spill, or eviction, rebuilt in full from a log scan at restart. A
+week-long 1k msg/s session ⇒ ≈ 14 GB of index in RAM. Unlike QuickFIX/J's `FileStoreMaxCachedMsgs`
+(default 10 000, disk-fallback), this index is mandatory and unbounded. Bounding/paging it is a post-v1.0
+item (REMAINING-WORK F-f). *(Fable `5.4`; `file_store.cpp:439-442`/`:532-539`.)*
+
+**L-008-2 — a bounded `MemoryStore` past capacity keeps transmitting but stops retaining (silent resend
+loss).** The default `MemoryStore` is `capacity_policy::bounded` (a fixed ctor slab, no eviction — `evict_oldest`
+is deliberately unrepresentable per [const §XV.15]). When the per-direction cap is hit, `store()` returns
+`store_capacity_exhausted`; `store_then_emit` is logged-then-proceed (I-07), so messages keep going on the
+wire but are no longer retained — a later peer `ResendRequest` folds them into a SequenceReset-GapFill,
+so the peer's application-level recovery silently loses them. FIX-legal, but operators trading memory for
+replay completeness should size the cap deliberately. *(Fable `5.4`; `memory_store.hpp:160-166`,
+`session.cpp` `store_then_emit`.)*
