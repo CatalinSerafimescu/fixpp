@@ -54,15 +54,19 @@ handling of `store_then_emit` are unchanged (masking adds no suspension point).
 
 ## C3 — `open()`-time credential-length guard (extends 033 FQ-1)
 
-**Given** a `SessionConfig` with FIXT credentials, `open()` (the FIXT-config validation site) rejects /
-fails configuration if the configured `username` + `password` (plus fixed Logon overhead) could produce a
-Logon frame exceeding `kMaxMaskableLogonBytes`. The guard validates `cfg.logon_credentials`
-**independent of role** — both initiator and acceptor sessions configure their own creds at `open()`,
-emitted from `session.cpp:835` (initiator Logon) and `:2248` (acceptor reply Logon) respectively — so the
-bound-exactness argument (and therefore the dead-over-bound branch) holds for the acceptor reply Logon too,
-not just the initiator (FR-004 both roles; avoids the [[feedback_symmetric_api_claim_unreachable_arm]]
-footgun). This makes C2 step-2's over-bound branch production-unreachable for both roles (keeps masking
-always on the zero-alloc coroutine-frame path).
+**Given** a `SessionConfig` with FIXT credentials, `open()` (the FIXT-config validation site) is a
+**sufficient-condition floor**: it rejects configuration when `username.size() + password.size() >=
+kMaxMaskableLogonBytes` (256). This is a one-directional credential-length check — it does NOT account for
+fixed Logon overhead. The **primary** proof that C2 step-2's over-bound branch is production-unreachable is
+`build_logon`'s fail-closed: both callers cap their output buffer at 256 bytes (`logon_buf`/`reply_buf`),
+and `build_logon` returns `std::unexpected(wire_frame_too_large)` when the frame would exceed that buffer,
+aborting to `Disconnected` before `store_then_emit` is reached. The open()-guard surfaces the same ceiling
+at config-validation time for the credential case, providing a fast-fail path for obviously-oversized
+credentials. The guard validates `cfg.logon_credentials` **independent of role** — both initiator and
+acceptor sessions configure their own creds at `open()`, emitted from `session.cpp:835` (initiator Logon)
+and `:2248` (acceptor reply Logon) respectively — so the dead-over-bound-branch argument is symmetric
+across BOTH roles (FR-004 both roles; avoids the [[feedback_symmetric_api_claim_unreachable_arm]]
+footgun).
 
 ## C4 — Documentation contract (FR-010)
 
@@ -82,6 +86,6 @@ always on the zero-alloc coroutine-frame path).
 | `NonLogon_WithGenuine554_StoredUnchanged` | a `35`≠`A` frame carrying `\x01554=secret\x01` → stored **unchanged** (MsgType=A gate, not 554-absence, excludes it) | INV-034-5 / FR-006 / RC2 |
 | `CredentialFreeLogon_And_NonLogon_StoredByteIdentical` | credential-free Logon + a non-Logon frame stored == pre-change bytes | US3 / FR-007 / SC-003 |
 | `InMemoryStore_CredentialedLogon_AlsoMasked` | credentialed Logon in a MemoryStore is masked (uniform backend) | clarification / INV-034-4 |
-| `OverBound_SmallBoundSeam_SkipStoreButTransmit` (fault-injection, injected small `kMaxMaskableLogonBytes`) | drives the dead over-bound branch via the test-seam bound; asserts (a) **no cleartext persisted**, (b) the **wire frame still carries the real 554**, (c) a resend over that seqnum → **GapFill** (not a masked verbatim replay) | C2 step-2 / I-07 / N1 (earns the over-bound BRDA) |
+| `OverBound_SmallBoundSeam_SkipStoreButTransmit` (fault-injection, injected small `kMaxMaskableLogonBytes`) | drives the dead over-bound branch via the test-seam bound; asserts (a) **no cleartext persisted**, (b) the **wire frame still carries the real 554**. *(c) a resend over that seqnum → GapFill (not a masked verbatim replay) is **inherited** from `tests/session/test_recovery_admin_span_gapfill.cpp`: `AllAdminSpanCollapsesToSingleGapFill` + `SingleAdminSpanEmitsExactlyOneGapFill` prove that an all-admin resend span (including `35=A`, an admin type) collapses to a single `SequenceReset(4)` / `GapFillFlag(123)=Y` — not re-proven inside T010 per the T010 comment lines 1213-1217.)* | C2 step-2 / I-07 / N1 (earns the over-bound BRDA) |
 | `StorePath_NoNewAllocation` (mallocnesia + counting-resource) | persist path allocates the same as baseline | SC-004 / FR-008 |
 | `Masker_SameLength_FieldAnchored_unit` | `mask_tag554_same_length_inplace`: same length, only genuine 554 masked, decoy `554=` in free-text untouched; **called twice → asserts byte-stability on the second pass** (idempotence I-E1-2) | C1 / I-E1-* |
