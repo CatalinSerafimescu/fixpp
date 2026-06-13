@@ -1,0 +1,106 @@
+# Implementation Plan: Credential redaction at the message-store boundary
+
+**Branch**: `034-credential-store-redaction` | **Date**: 2026-06-13 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `specs/034-credential-store-redaction/spec.md`
+
+## Summary
+
+Mask the `Password(554)` value before an outbound Logon (`35=A`) frame is handed to the message
+store, while transmitting the original unmasked frame on the wire. The mask is applied **once**, at
+the single store-entry boundary (`Session::store_then_emit`), so every store backend and any future
+store inherits it (FR-009). The mask is a **same-length, in-place** substitution of the 554 value
+bytes into a **stack-local copy** (zero heap allocation, `[const §VIII.5]`); the caller's original
+`frame` span is transmitted untouched. No new wire field, error slot, config knob, codegen, C-ABI, or
+store interface change — this is a behavior-only hardening internal to the session layer.
+
+## Technical Context
+
+**Language/Version**: C++23 (Clang 22 local == CI per `[const Art.II §2]`)
+**Primary Dependencies**: standalone Asio (coroutines), existing `MessageStore` interface, existing FIX framer
+**Storage**: existing `MessageStore` implementations (`FileStore`, `MemoryStore`, null) — **unchanged**
+**Testing**: GoogleTest (session unit tests); on-disk store-byte witness; mallocnesia / counting-resource alloc gate
+**Target Platform**: Linux (Tier-1); platform-agnostic byte logic
+**Project Type**: single library (`fixpp`)
+**Performance Goals**: zero added heap allocation on the persist path; O(frame) single scan, only for 554-bearing Logons
+**Constraints**: `[const §VIII.5]` zero-alloc persistence; same-length mask (preserve `9=` BodyLength + store offsets/CRC); wire frame byte-identical
+**Scale/Scope**: ~1 new inline byte-utility + a guarded branch in `store_then_emit`; ~1 new unit-test file. Est. < 80 LoC production.
+
+## Constitution Check
+
+*GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design.*
+
+| Article | Relevance | Disposition |
+|---|---|---|
+| **Appendix A — mandatory triggers** | This is a **security** feature | All four controls REQUIRED: `/clarify` ✓ (done, 1 Q), `/analyze` (step 6), Codex Gate A, **user `/plan` sign-off**. |
+| **XVI §3 — `/clarify` mandatory before `/plan`** (security trigger) | Yes | ✓ completed before this plan. |
+| **VIII §5 — zero-alloc persistence** | Masking sits on the persist path | Same-length mask into a **stack** buffer; no heap. Witnessed by the alloc gate (SC-004). PASS-by-design. |
+| **XII — Security & TLS / credential handling** | Removes an at-rest cleartext-secret exposure | Aligns; deliberate hardening beyond reference-engine parity. No app-layer crypto introduced (`[const §XV.10]` untouched). |
+| **IX §1 — coverage / sanitizers** | New byte logic | New code fully covered (DA/BRDA); ASan/UBSan/TSan over the new unit + touched session tests. |
+| **X — ABI** | No public type/signature change | No new exported symbol; `store_then_emit` is internal. PASS. |
+| **XI — Concurrency** | Masking runs inside the `noexcept` `store_then_emit` awaitable, async-mutex held throughout | Pure synchronous byte work before `co_await store`; no new suspension, no `std::mutex`. PASS. |
+| **VI — 100% FIX rule / catalogue** | No new FIX message/field | No catalogue *row* add; updates B&L + corrects 033 disposition note (FR-010). |
+| **XV — banned patterns** | — | None triggered (no sync-hot-path logging, no drop-oldest, no app-layer crypto). |
+
+**No new surface**: no wire field, no error-taxonomy slot, no codegen, no C-ABI, no `SessionConfig` field, no `MessageStore` pure-virtual. Gate-clean.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/034-credential-store-redaction/
+├── plan.md              # This file
+├── research.md          # Phase 0 — design decisions
+├── data-model.md        # Phase 1 — masker contract + stored-frame invariant
+├── quickstart.md        # Phase 1 — the on-disk witness recipe
+├── contracts/
+│   └── store-redaction.md   # internal contract: masker signature + store-boundary behavior
+├── checklists/
+│   └── requirements.md  # spec-quality checklist (done)
+└── tasks.md             # /speckit-tasks output (NOT created here)
+```
+
+### Source Code (repository root)
+
+```text
+include/fixpp/session/
+└── logon_credentials.hpp        # + mask_tag554_same_length_inplace(std::span<std::byte>) — span, zero-alloc, sibling of redact_tag554
+
+src/session/
+└── session.cpp                  # store_then_emit: guarded copy→mask→store the masked span; transmit the original frame
+
+tests/session/
+└── test_credential_store_redaction.cpp   # NEW — on-disk store-byte witness + no-op + alloc-gate cells
+
+spec/
+├── behaviors-and-limitations.md # L-033-6 limitation → mitigation; (FR-010)
+└── feature-catalogue.md / coverage-index.md  # traceability row for 034
+
+specs/033-fixt-fix50sp2-session/tasks.md  # dated correction note on the T024/T020 "no production frame persistence" claim (no history rewrite)
+```
+
+**Structure Decision**: Single-library, in-place. The masker is an inline header utility beside the
+existing `redact_tag554` (same module, same ownership). The only production `.cpp` change is a guarded
+branch in `store_then_emit`. No layering change (`tools/check_layers.py` unaffected — session-internal).
+
+## Phase 0 — Research
+
+See [research.md](./research.md). Resolves: where to mask (single boundary), how to mask same-length
+zero-alloc, stack-buffer sizing & the >bound fallback, MsgType gating, CRC/`10=` consistency, and what
+`retrieve()` returns.
+
+## Phase 1 — Design & Contracts
+
+- [data-model.md](./data-model.md) — the masker function contract; the stored-frame invariant
+  (masked-at-rest, same-length, never-replayed); the wire/store divergence proof.
+- [contracts/store-redaction.md](./contracts/store-redaction.md) — masker signature + the
+  `store_then_emit` masking behavior contract (pre/post-conditions, no-op cases).
+- [quickstart.md](./quickstart.md) — the P1 witness recipe (open FIXT session w/ password + FileStore,
+  read store-file bytes from disk, assert password absent + same-length mask present).
+
+## Complexity Tracking
+
+No constitution violations to justify. The single non-trivial choice (stack-buffer sizing vs the
+256 KiB store max-frame) is resolved in research by **bounding the maskable copy to a Logon-sized stack
+buffer + an `open()`-time credential-length guard**, not by allocating — kept minimal per the Karpathy
+"simplest thing" rule.
