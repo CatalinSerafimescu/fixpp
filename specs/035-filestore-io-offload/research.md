@@ -2,36 +2,40 @@
 
 **Feature**: `035-filestore-io-offload` | **Date**: 2026-06-13
 
-All six decisions below are grounded in (a) the shipped `file_store.cpp` code (file:line from the
-implementation map), (b) the approved design `.specify/2e-msgstore.md` §4.3.2/§6.1.4/§6.5, and (c) a
-standalone asio probe (sources saved at `research/probes/cospawn_probe{,2,3}.cpp`) run against the
-project's own asio (`asio6e6c781a0fee4`). The probe verdicts are reproducible.
+All seven decisions below are grounded in (a) the shipped `file_store.cpp` code (file:line from the
+implementation map), (b) the approved design `.specify/2e-msgstore.md` §4.3.2/§6.1.4/§6.5 and the amended
+`[const §XV.1]` v0.2 §XV.4-offload exemption (`constitution.md:224`), and (c) a standalone asio probe
+(sources saved at `research/probes/cospawn_probe{,2,3,4}.cpp`) run against the project's own asio
+(`asio6e6c781a0fee4`). The probe verdicts are reproducible.
 
 ---
 
 ## Decision 1 — Offload mechanism + the per-op allocation (THE Gate-A decision)
 
-**Decision**: Replace each inert `co_await asio::post(file_io_executor, use_awaitable)` (sites
-`file_store.cpp:824` store, `:1015` next_seqnum, `:1068` reset) with the **nested-`co_spawn` shape**:
+**Decision**: Replace each inert `co_await asio::post(file_io_executor, use_awaitable)` (write/reset sites
+`file_store.cpp:824` store, `:1015` next_seqnum, `:1068` reset, plus `flush_for_session_close`'s blocking
+`datasync` at `:1252` — Decision 7) with the **nested-`co_spawn` shape**:
 `co_await asio::co_spawn(impl_->cfg.file_io_executor, raw_syscall_coro(by-value args), use_awaitable)`,
-where `raw_syscall_coro` performs **only** the blocking syscall and returns its result. Accept the
-single small per-op coroutine-frame allocation this incurs on the FileStore I/O path; it is **not** a
-`[const §XV.1]` violation in context (see disposition).
+where `raw_syscall_coro` performs **only** the blocking syscall and returns its result. The single
+bounded ~48 B coroutine frame this incurs per offloaded op is **compliant by the [const §XV.1] v0.2
+exemption** (see disposition), not an accepted violation. (`retrieve()`'s `:942` inert post is **removed**,
+not converted — its `pread` stays on the session strand; see Decision 4.)
 
 **Empirical basis** (probe, 5000 warm iterations, global `operator new` counted):
 
 | Mechanism | body-on-pool | resume-on-strand | global `new`/op | arena-routable? |
 |---|---|---|---|---|
-| inert `post(pool, use_awaitable)` (shipped) | **NO** (runs on strand) | n/a | — | — |
+| inert `post(pool, use_awaitable)` + paired rebind (shipped) | **NO** (runs on strand) | n/a | **4.001** | — |
 | nested `co_spawn(pool, fn, use_awaitable)` | **YES** 5000/5000 | **YES** 5000/5000 | **1.001** (~48 B) | **no** |
 | `co_spawn` + `bind_allocator(arena, …)` | YES | YES | 1.001 | **no** (frame is PMR-opaque) |
 | hand-rolled `async_initiate` (2 posts) | YES | YES | 2.001 | no (in the toy probe) |
 
-**Why the allocation cannot be routed away**: the ~48 B/op is the **child coroutine frame**, allocated
-by the C++ coroutine machinery via the awaitable promise's `operator new`. asio's `awaitable<>` promise
-does **not** route that through the completion token's associated allocator — confirmed by the probe
-(`bind_allocator` left global `new` at 1.001, custom allocator never called) **and independently by the
-project's own `cancellable_dispatch` header** (`include/fixpp/core/cancellable_dispatch.hpp:33–42`):
+**Why the allocation cannot be routed away** (this is the structural §XV.1↔§XV.4 tension the v0.2
+amendment was written to resolve): the ~48 B/op is the **child coroutine frame**, allocated by the C++
+coroutine machinery via the awaitable promise's `operator new`. asio's `awaitable<>` promise does **not**
+route that through the completion token's associated allocator — confirmed by the probe (`bind_allocator`
+left global `new` at 1.001, custom allocator never called) **and independently by the project's own
+`cancellable_dispatch` header** (`include/fixpp/core/cancellable_dispatch.hpp:33–42`):
 > *"When HALO does NOT fire (e.g., cross-thread dispatch …) the coroutine frame is allocated by asio's
 > default frame allocator; in that case the PMR arena is used for the DISPATCH NODE and the
 > SLOT-OBSERVATION FLAG — not the coroutine frame itself (asio::awaitable<> frame alloc is opaque to the
@@ -41,45 +45,52 @@ HALO (coroutine-frame elision) is what gives the **in-strand** session hot path 
 property; it **cannot fire for a genuine cross-thread offload** (the strand→pool→strand control flow is
 non-deterministic to the compiler). So *any* real FileStore offload — by `co_spawn`, by the existing
 `cancellable_dispatch`, or by a hand-rolled awaiter — incurs at least one PMR-opaque frame allocation per
-cross-thread op. **This is the same cost the shipped TLS cert-signing offload already pays and Gate A
-already accepted.**
+cross-thread op. That frame is routable to **neither** HALO (cannot fire cross-executor) **nor** a PMR
+arena (the asio awaitable frame is opaque to the bound allocator) — the precise condition under which
+§XV.4's *mandated* async-journal offload structurally collides with §XV.1's per-message zero-alloc bar.
+This collision is why the constitution was **amended** (v0.2, 2026-06-13); it is not a violation the bundle
+elects to tolerate.
 
-**`[const §XV.1]` disposition** (PASS — the fix is a strict allocation **improvement**, grounded in
-verbatim primaries + an apples-to-apples probe, not a gloss):
+**`[const §XV.1]` disposition** (COMPLIANT — by the v0.2 §XV.4-offload exemption):
 
-- **§XV.1 verbatim** (`constitution.md:209`): *"**Heap-allocate per message or per field on the hot
-  path.** Use zero-copy views; arena/PMR for the rare materialise cases."* — it is **hot-path-scoped**
-  (not categorical), and it prescribes arena/PMR as the remedy. **§XV.4 verbatim** (`:212`):
-  *"Synchronous disk I/O on every send … Async journal with background flush; sync-on-failover is
-  opt-in."* — a **separate** banned item, the one this feature fixes.
-- **Apples-to-apples probe** (`research/probes/cospawn_probe4.cpp`, 5000 warm iters, global `new`/op):
-  the **currently-shipped** `co_await asio::post(file_io_executor, use_awaitable)` + paired rebind that
-  `FileStore::store` uses today costs **4.001 global `new`/op** (two inert posts), and its body never
-  reaches a pool thread (`on_other = 0/5000` — the inert bug). The nested-`co_spawn` fix costs
-  **1.001 global `new`/op** and runs genuinely on the pool (`on_other = 5000/5000`).
-- **Precedent (concrete, not assumed)**: the merged-and-008-alloc-gate-passing `FileStore::store`
-  **already allocates ~4 global `new`/op**. The 008 seam-14 alloc gate (`tests/perf/test_store_alloc_guard.cpp`)
-  gates **zero** global heap on **`MemoryStore::store`** (Test 1) and on **`FileStore::retrieve`**
-  (Test 2) — there is **no** zero-global-alloc gate on `FileStore::store`, and the merged 4/op store
-  path passes. So §XV.1's "hot path" **operationally excludes `FileStore::store`** (else the merged gate
-  would already fail). The fix is therefore a **strict 4×→1× reduction**, not a regression — it *cannot*
-  be a §XV.1 violation it improves on.
+- **§XV.1 v0.2 exemption** (`constitution.md:224`, *"Scope & §XV.4 exemption (amended v0.2,
+  2026-06-13)"*): the "hot path" of the per-message alloc ban is the latency-critical **in-memory** path
+  (parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation); the **durable-store
+  async-journal offload mandated by §XV.4** (FileStore offloading `pwrite`/`fdatasync`/`rename` to a
+  `file_io_executor`) is **explicitly exempt to a single bounded O(1) coroutine frame per offloaded I/O
+  op**, because that completion frame is routable to neither HALO nor a PMR arena (above). The exemption is
+  strictly scoped: O(1) frames/op only, no per-field / unbounded / in-memory-path allocation, and **zero**
+  on `MemoryStore::store`. The amendment cross-refs §XI.6 (whose "PMR fallback per-awaiter" presumed a
+  fallback that does not exist for this cross-executor frame). The nested-`co_spawn` design at exactly
+  **1 frame/op** therefore falls squarely inside the exemption — **compliant by the amendment**, not an
+  accepted violation.
+- **The amendment took the constitutional-authority fork, not a self-grant.** The prior Gate-A round
+  rejected the per-op frame's *justifications* (the "no-gate ⇒ excluded", "4→1 vs a live D-18 bug", and
+  "TLS-handshake precedent" arguments — none of which a Gate-A rewrite could use to bless a per-message
+  global-heap alloc). The resolution was an explicit §XV.1 amendment routed through constitutional
+  authority (`/speckit-constitution`, user-signed-off v0.2), which removed the structural conflict at its
+  source. This feature is now compliant *because the rule changed*, not because the old carve-out was
+  re-argued.
+- **Empirical basis** (`research/probes/cospawn_probe4.cpp`, 5000 warm iters, global `new`/op; cited in
+  the amendment text): the **currently-shipped** `co_await asio::post(file_io_executor, use_awaitable)` +
+  paired rebind that `FileStore::store` uses today costs **4.001 global `new`/op** and its body never
+  reaches a pool thread (`on_other = 0/5000` — the inert D-18 bug); the nested-`co_spawn` fix costs
+  **1.001 global `new`/op** and runs genuinely on the pool (`on_other = 5000/5000`). The 4→1 reduction is
+  a factual improvement, **not** the compliance argument (which is the exemption above).
 - **Idiom is project-blessed**: `src/transport/asio_tls_transport.hpp:45–51` records the D-18 rule
   verbatim — *"To pin a coroutine body to a different executor, use nested `co_spawn(other_exec, fn,
   use_awaitable)` … ALL Transport coroutines must be co_spawn'd on `exec_`."* The fix applies the same
-  blessed pattern to FileStore.
-- **Alloc gate for this feature**: assert `FileStore::store` global `new`/op **≤ the shipped baseline
-  (i.e., strictly fewer; target 1/op)** via the seam-14 harness, and keep **`MemoryStore` at zero**
-  (unchanged). The remaining 1 frame alloc/op is PMR-opaque (asio awaitable frame; `bind_allocator`
-  can't route it — probe v2/v3) and dominated by the `fdatasync` (~150 µs) already on the path; routing
-  it to `store_arena` would require a custom-promise coroutine or a persistent worker and is **not
-  pursued** (the fix already improves the merged baseline; Karpathy "simplest correct thing").
+  blessed mechanism to FileStore.
+- **Alloc gate for this feature** (asserts the exemption bound, not "≤ baseline"): assert
+  `FileStore::store` (and the other offloaded ops) allocate **≤ 1 coroutine frame/op — O(1), the §XV.1
+  v0.2 exemption ceiling** — on the offload path via the seam-14 harness, and assert **`MemoryStore::store`
+  global `new`/op == 0** (unchanged). The 1 frame/op is PMR-opaque (asio awaitable frame; `bind_allocator`
+  can't route it — probe v2/v3) and dominated by the `fdatasync` (~150 µs) already on the path.
 
-**Fallback if Gate A rejects the per-op frame** (design sketch, not chosen): a **persistent per-store
-I/O worker** — spawn one long-lived coroutine on `file_io_executor` at `open_log()`, fed by a bounded
-single-producer handoff; store/next_seqnum/reset enqueue a syscall request + completion and await. Zero
-per-op frame, at the cost of a worker lifecycle, a handoff primitive, and its own teardown ordering. Held
-in reserve; recommend against unless Gate A insists, per the Karpathy "simplest correct thing" rule.
+**Persistent-worker alternative — empirically rejected.** A long-lived per-store I/O worker fed by a
+bounded handoff was prototyped; it measured **worse** (≈10 global `new`/op — the handoff request/completion
+nodes), not the "zero per-op frame" it was first assumed to give, and adds a worker lifecycle + its own
+teardown ordering. The v0.2 amendment removes any need for it. Not pursued.
 
 **Alternatives rejected**: (a) `bind_allocator` on `co_spawn` — empirically does not route the frame.
 (b) hand-rolled `async_initiate` two-post — strictly worse (2 allocs) and reimplements what `co_spawn`
@@ -90,25 +101,39 @@ Gate B as a constitutional violation a doc cannot bless.
 
 ## Decision 2 — Cancellation under a non-interruptible syscall (FR-004 / SC-006)
 
-**Decision**: Keep the **single cancellation checkpoint where it already is — the `async_mutex` acquire**
-(`file_store.cpp:794` store, `:998` next_seqnum, `:1050` reset; `async_lock()` returns
-`unexpected{sync_lock_aborted}` when the slot is signalled before acquisition). Once past the mutex, the
-offloaded syscall runs to **durable completion uninterruptibly** (a `pwrite`/`fdatasync` on a worker
-thread is not an asio suspension point). Therefore:
-- cancellation **before** the linearisation point ⇒ it was observed at mutex-acquire ⇒ `store_cancelled`,
-  no state change (no `co_spawn` issued, no syscall). Matches §6.1.4 + FR-020.
-- cancellation **after** the offload began ⇒ the syscall completes durably ⇒ normal success with durable
-  state. Matches §6.1.4 + FR-020.
+**Decision**: There are **two** cancellation observation points before linearisation, not one. A real
+cross-thread offload re-opens a window the inert post hid: cancellation can arrive **after** the writer
+mutex is held and the child is enqueued but **before** the pool picks the child up and the syscall begins
+— at which point no linearisation has occurred, so the result MUST be `store_cancelled` with **no state
+change**. The contract is therefore:
 
-**Open item to verify empirically before/at implement (RED test first)**: what
-`co_await asio::co_spawn(pool, fn, use_awaitable)` does when the **outer slot is already signalled** at
-the suspension point — does it (i) reap before dispatching the child (child never runs) or (ii) run the
-child and surface `operation_aborted` on resume? Either is contract-safe **provided** a durable success is
-not lost: if (ii) and the syscall already linearised, the thrown `operation_aborted` MUST be caught and
+1. **Checkpoint (i) — `async_mutex` acquire** (`file_store.cpp:794` store, `:998` next_seqnum, `:1050`
+   reset; `async_lock()` returns `unexpected{sync_lock_aborted}` when the slot is signalled before
+   acquisition). Cancellation observed here ⇒ `store_cancelled`, no `co_spawn` issued, no syscall, no
+   state change.
+2. **Checkpoint (ii) — child pickup on the `file_io_executor`, before the syscall begins.** Cancellation
+   observed here (slot signalled after the child is enqueued but before the pool starts the syscall) ⇒
+   `store_cancelled`, **no durable effect** — the syscall never ran. This matches 2e §4.3.2
+   (*"cancellation aborts pending I/O at the next `file_io_executor` scheduling point"*) and the
+   `cancellable_dispatch` three-case reaper shape (reap-before-pickup / reaped-after-pickup-pre-syscall /
+   ran-to-completion).
+
+Once the syscall **has begun**, it runs to **durable completion uninterruptibly** (a `pwrite`/`fdatasync`
+on a worker thread is not an asio suspension point); cancellation is then observed, if at all, only when
+the outer await resumes on the strand, linearised at the durable transition — **never** a torn or partial
+durable state, and a durable success is **never** lost. The linearisation point itself is unchanged
+(`fdatasync` return / counter-`pwrite` / dir-`fsync`); only the *number of pre-linearisation checkpoints*
+changes (1 → 2).
+
+If the runtime, on an already-signalled outer slot, runs the child and surfaces `operation_aborted`
+post-linearisation rather than reaping it pre-syscall, the thrown `operation_aborted` MUST be caught and
 converted to the durable result (the `[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]`
-try/catch pattern). Because the mutex-acquire is the only checkpoint and the child is issued only after
-the mutex is held, case (i) is expected and the try/catch is then defensive, not load-bearing — but the
-test decides, and the code follows the test.
+try/catch pattern). This defensive catch sits at the outer `co_await` and never converts a *pre-syscall*
+abort (checkpoint (ii)) into a false durable success — the reaper distinguishes the two by whether the
+syscall ran. A **deterministic** test for the checkpoint-(ii) "cancel-after-enqueue-before-pickup"
+sub-case is required: a **stalled/saturated `file_io_executor`** (child enqueued but not yet picked up),
+fire `total` cancellation, assert no syscall ran, no state change, result `store_cancelled` (quickstart
+Recipe C).
 
 **`co_spawn` cancellation-type trap**: `asio::co_spawn` defaults to **terminal-only** cancellation and
 silently filters `cancellation_type::total` (`[[feedback_asio_cospawn_total_cancellation_default]]`).
@@ -182,28 +207,60 @@ join counter → UAF when the store is torn down mid-write). Because each store 
 loops and in-flight `send` coroutines before returning (steps 3 at `:1303–1329`), every in-flight
 FileStore offload completes before `stop()` returns. The `file_io_executor` pool is **application-owned**
 (passed via `EngineConfig::file_io_executor`, `engine_config.hpp:160` — the engine does **not** join it),
-so the contract is: **after `Engine::stop()` returns, no FileStore pool work is in flight; the application
-may then join the pool.** This feature documents that contract (operator docs / B&L) and proves it with a
-shutdown-ordering seam: in-flight offloaded `store()` + `Engine::stop()` under ASan/TSan, asserting no UAF
-and no use-of-joined-pool. **Verify**: that draining the `send` coroutine truly awaits the nested
+so the contract is correctly scoped to **Session/Engine-reachable** store work: **after `Engine::stop()`
+returns, no Session/Engine-reachable FileStore offload work is in flight; the application may then join the
+pool.** `stop()` cannot drain a **direct** (non-Session) `FileStore` call made by a test-double or a custom
+user outside the `send` path — for those, the **caller obligation** is that the `file_io_executor` MUST
+outlive all outstanding store awaitables. This feature documents both: the Session-reachable drain
+guarantee, **and** a misuse note for direct FileStore use (operator docs / B&L). The positive
+shutdown-ordering seam proves `stop()` returns only **after** Session-reachable nested
+`co_spawn(use_awaitable)` work completes (in-flight offloaded `store()` + `Engine::stop()` under ASan/TSan,
+no UAF, no use-of-joined-pool). **Verify**: draining the `send` coroutine truly awaits the nested
 `co_spawn` to completion (it does, since `store()`'s outer `co_await` does not return until the child
 completes) — covered by the seam.
 
 ---
 
-## Decision 6 — The leading "pump-break" posts (vestigial check)
+## Decision 6 — The leading "pump-break" posts (resolved)
 
-**Decision**: Investigate (do not blindly retain) the leading `co_await asio::post(session_ex,
-use_awaitable)` at `file_store.cpp:787` (store), `:991` (next_seqnum), `:1043` (reset). Their stated
-purpose is to "break the recursive awaitable_thread pump chain" (RC#4). With the offload restructured to
-nested `co_spawn`, determine whether they are still required or are vestigial compensation for the inert
-pattern. If vestigial, remove them (a `/simplify` / Gate-A target if left in). If load-bearing (e.g., they
-guarantee the method starts on the strand before acquiring the async_mutex), retain with a comment citing
-why. Resolved at implement against a focused test; recorded in the Gate-B notes if it turns out to be a
-mechanism deviation. The **paired rebind posts** (`:830/843/851/859/869` store, `:946/953` retrieve,
-`:1020/1025/1030` next_seqnum, the many in reset) are **removed** by the restructure — with nested
-`co_spawn(use_awaitable)` the resume-to-strand **is** the `co_await` completion; there is no separate
-rebind post (this corrects the plan's "post-syscall rebind" phrasing — there is no such separate step).
+**Decision**: The leading `co_await asio::post(session_ex, use_awaitable)` at `file_store.cpp:787`
+(store), `:991` (next_seqnum), `:1043` (reset) are **retained, load-bearing**, with a one-line comment
+citing why. They are **not** vestigial compensation for the inert offload: their purpose is to break the
+recursive `awaitable_thread` pump chain (RC#4) **and** to guarantee the method body starts on the session
+strand before it acquires the `async_mutex` — which is exactly the precondition Decision 2 relies on
+(checkpoint (i) is the mutex-acquire **on the strand**; the child `co_spawn` is issued only after the
+mutex is held on the strand). Removing them would silently re-point the Decision-2 checkpoint reasoning,
+so they stay. This is settled at Gate A (not deferred): they are orthogonal to the offload frame (they
+post on the *session* executor, where HALO applies and the pump-break post is not a global-heap frame on
+the cross-executor path), so they do not bear on the §XV.1 exemption count. A focused test at implement
+asserts the method enters on the strand before mutex-acquire; any deviation is a Gate-B note.
+
+The **paired rebind posts** (`:830/843/851/859/869` store, `:946/953` retrieve, `:1020/1025/1030`
+next_seqnum, the many in reset) are **removed** by the restructure — with nested `co_spawn(use_awaitable)`
+the resume-to-strand **is** the `co_await` completion; there is no separate rebind post (this corrects any
+"post-syscall rebind" phrasing — there is no such separate step).
+
+---
+
+## Decision 7 — `flush_for_session_close()` blocking `datasync` (the missed 5th site)
+
+**Decision**: `FileStore::flush_for_session_close()` performs a **blocking** `impl_->file.datasync()`
+(`file_store.cpp:1252`, inside the coroutine at `:1239–1257`) on the **session close strand** — genuine
+FileStore disk I/O that 2e §4.3.2 frames as `file_io_executor` work, and which blocks the close strand
+under `commit_batched`/`commit_interval` (where the drain has buffered frames to flush). It is **not** a
+§XV.4 *every-send* violation (it is a bounded one-shot at graceful close), but it is in-scope for this
+feature's stated goal that no FileStore disk syscall blocks a session strand. **Offload its `datasync` via
+the same nested-`co_spawn` mechanism** (only the raw `datasync()` runs in the nested lambda; the
+`open_ok` check and the `store_io_failure` mapping stay on the strand). So the offloaded write/reset/close
+set is **store, next_seqnum, reset, flush_for_session_close (4 sites)**; `retrieve`'s read stays on the
+strand (Decision 4).
+
+Taxonomy is clean: the existing failure mapping already returns `store_io_failure` on a failed
+`datasync()` (and `error.hpp:190`'s comment enumerates `flush_for_session_close()` faults), so no new error
+variant is introduced — the same variant the mid-walk-reset reuse pins (Decision 4). The shutdown-ordering
+seam (Decision 5 / SC-007) is extended to cover **graceful close** (`Session::close(graceful)` →
+`flush_for_session_close`) under `commit_batched`, asserting the close-flush is offloaded and drained
+before `Engine::stop()` returns.
 
 ---
 

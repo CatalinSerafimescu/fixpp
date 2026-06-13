@@ -35,7 +35,7 @@ offload_to(asio::any_io_executor pool_ex, Syscall fn);   // = co_await co_spawn(
 - `Syscall fn` is a small callable capturing **only by value** the raw syscall arguments (the `OsFile`
   handle/fd, an offset, a `std::span` into an already-populated buffer). It touches **no** `impl_` field.
 - The body runs on `pool_ex`; the outer `co_await` resumes on the session strand (probe-confirmed).
-- One ~48 B PMR-opaque frame allocation per call (Decision 1) — accepted on the FileStore path.
+- One ~48 B PMR-opaque frame allocation per call (Decision 1) — **permitted by the `[const §XV.1]` v0.2 §XV.4-offload exemption** (≤1 bounded O(1) frame/op on the FileStore offload path); `MemoryStore::store` stays zero.
 - `use_awaitable` (joined), never `detached` (Decision 5).
 
 ## 3. Per-method execution map (after the change)
@@ -45,7 +45,8 @@ offload_to(asio::any_io_executor pool_ex, Syscall fn);   // = co_await co_spawn(
 | `store` | acquire mutex (`:794`); seqnum check; deep-copy → `store_scratch_` (`:820`); counter incr (`:835–839`); `write_pos` update (`:846`); release mutex (`:871`) | `write_frame` `pwrite` (+pad); counter-record `pwrite`; `datasync` (`commit_per_message`) | `fdatasync` return (`:850`) |
 | `next_seqnum(_, true)` | acquire mutex (`:998`); overflow check; counter incr (`:1012`); `write_pos` update (`:1023`); release (`:1032`) | counter-record `pwrite` (`:1018`); `datasync` (`:1024`) | counter `pwrite` (`:1018`) |
 | `reset` | acquire mutex (`:1050`); **`impl_->file = std::move(new_file)` (`:1149`)**; **`generation_++`**; index clear + counter reset (`:1205–1210`); release (`:1217`) | tmp open; `initialise_fresh` (sentinel+counter `pwrite` + `fdatasync`); close tmp; `rename` (`:1108`); parent-dir `fsync` (`:1120–1136`) [Win: `MoveFileExW`] — all against a **local** `OsFile`, not `impl_->file` | parent-dir `fsync` (`:1129`) / `MoveFileExW` (`:1180`) |
-| `retrieve` | acquire mutex (`:908`); index snapshot + **`generation_` snapshot**; release (`:933`); **`pread` per frame (stays on strand)**; **re-check `generation_`**; `visitor.on_frame` `co_await` (`:957`) | — (read path not offloaded, per Clarifications) | per-frame visitor resume (read-only; no durable transition) |
+| `retrieve` | acquire mutex (`:908`); index snapshot + **`generation_` snapshot**; release (`:933`); **`pread` per frame (stays on strand)**; **re-check `generation_`**; `visitor.on_frame` `co_await` (`:957`) | — (read path not offloaded, per Clarifications; the `:942` inert post is **removed**) | per-frame visitor resume (read-only; no durable transition) |
+| `flush_for_session_close` | `open_ok` check (`:1241`); error-map/return | `datasync` (`:1252`) | `datasync` return |
 
 ## 4. The retrieve generation-guard invariant (FR-006 / I-03)
 
@@ -60,8 +61,11 @@ for each entry in snapshot:
 
 Because `reset()` mutates `impl_->file` and `generation_` only on the strand, and `retrieve`'s `pread`
 also runs on the strand, the read and the swap never physically overlap; the guard closes the **logical**
-window opened by the `on_frame` suspension. (The existing FR-017 gap detection for concurrent `store()`
-index growth is retained and unaffected.)
+window opened by the `on_frame` suspension. The `generation_` re-check and the `pread` that follows it are
+**atomic on the session strand** — there is **no `co_await` between them**, so a `reset()` cannot land in
+that gap (the only suspension point is the `visitor.on_frame()` `co_await` *after* the read). An
+implementer MUST NOT insert a suspension point between the re-check and the read. (The existing FR-017 gap
+detection for concurrent `store()` index growth is retained and unaffected.)
 
 ## 5. Error-variant decision (FR-021 freeze) — PINNED
 
