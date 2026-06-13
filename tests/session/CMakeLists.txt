@@ -304,6 +304,42 @@ fixpp_add_store_test(store_file_coverage_uplift SOURCES
   _fixtures_/test_double_fsm.cpp
 )
 
+# ── 035-filestore-io-offload test registrations (T001 Setup) ─────────────────
+# Three new test targets: thread-id offload witnesses (US1/US2, SC-001/002),
+# per-method cancellation contract (US2, SC-004), and real-pool concurrency +
+# TSan/ASan witness (US3, SC-005). All use fixpp_add_store_test so the TSan
+# suppressions file is wired consistently (asio any_executor refcount fence).
+# Sanitizer preset selection is toolchain-level; all three targets build under
+# all presets unconditionally (same pattern as store_file_crash_survival above).
+# RED test cells are added in Phase 3 (T005), Phase 4 (T008/T009), and Phase 5
+# (T013) respectively. These skeleton targets compile with a single Smoke test.
+
+# T001/T005: thread-id offload witnesses + saturation/deadlock edge cases.
+# FIXPP_TEST_HOOKS exposes the g_offload_syscall_tid / _entered / _done probes
+# written by the offloaded lambda; required for SC-001 / SC-002 thread-id cells.
+fixpp_add_store_test(store_file_offload_thread SOURCES
+  test_file_store_offload_thread.cpp
+)
+target_compile_definitions(store_file_offload_thread PRIVATE FIXPP_TEST_HOOKS)
+
+# T001/T009: FileStore per-method cancellation contract (binary §6.1.4).
+# FIXPP_TEST_HOOKS exposes install_store_offload_probe — needed for arm (b)
+# mid-syscall witnesses and the no-wedge cell (same as store_file_offload_thread).
+fixpp_add_store_test(store_file_cancellation SOURCES
+  test_file_store_cancellation.cpp
+)
+target_compile_definitions(store_file_cancellation PRIVATE FIXPP_TEST_HOOKS)
+
+# T001/T013: real-pool concurrent store/retrieve/reset TSan+ASan witness.
+# This target is the PRIMARY TSan gate for the 035 feature (the inert offload
+# made the concurrency surface dormant; making it genuine is the whole risk).
+# FIXPP_TEST_HOOKS exposes read_and_reset_retrieve_pread_count() and
+# read_and_reset_catch_fired() for the T013/T015 generation-guard witnesses.
+fixpp_add_store_test(store_file_concurrent_tsan SOURCES
+  test_file_store_concurrent_tsan.cpp
+)
+target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
+
 # ── 005-session-establishment-fsm seam registrations (T007/T009) ─────────────
 # Seam #13: seqnum_t consumer/build check (T007 red → T008 green).
 # Seam #9:  fix_time format↔parse roundtrip corpus (T009 red → T011 green).

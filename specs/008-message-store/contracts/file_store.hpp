@@ -17,6 +17,12 @@
 // FileStores per design-doc §4.3.2 line 669; FR-024 / I-13 / research D-7).
 // flush_for_session_close() is engine-internal, dispatched via
 // has_flush_for_session_close concept (I-17 / FR-028).
+//
+// 035 correction (2026-06-14): At 008 Gate-A the file_io_executor field
+// existed but the shipped offload idiom (co_await asio::post(file_io_executor,
+// use_awaitable)) was inert (012 D-18); pwrite/fdatasync ran on the session
+// strand, violating [const §XV.4]. Corrected by 035-filestore-io-offload via
+// genuine co_spawn(file_io_executor, syscall_lambda, use_awaitable).
 #pragma once
 
 #include <chrono>
@@ -83,6 +89,8 @@ public:
         std::size_t               max_frame_bytes   = 256 * 1024;
 
         // Executor for the file-I/O work (§4.3.2).
+        // 035 (2026-06-14): the blocking syscalls now genuinely run on this
+        // executor via co_spawn (was inert post at 008, 012 D-18).
         asio::any_io_executor     file_io_executor;
 
         // PMR resource for store-owned scratch.

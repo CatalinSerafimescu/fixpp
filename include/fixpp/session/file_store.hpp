@@ -49,6 +49,7 @@
 #include <memory_resource>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace fixpp::session {
 
@@ -111,6 +112,25 @@ public:
         // Executor for the file-I/O work (§4.3.2).
         // REQUIRED at construction per [2e §4.3.2]:665. FileStoreFactory::make()
         // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
+        //
+        // CALLER OBLIGATION for direct (non-Session) FileStore use (FR-007 / C5):
+        //   When FileStore is driven directly — outside Engine/Session ownership —
+        //   the executor's underlying pool MUST outlive ALL outstanding store
+        //   awaitables before the pool is joined or destroyed. Each store(), reset(),
+        //   next_seqnum(increment=true), and flush_for_session_close() call uses
+        //   `co_await offload_to(file_io_executor, ...)` (use_awaitable — joined,
+        //   never detached), so the store method only returns AFTER the pool work
+        //   completes. A direct caller MUST:
+        //     1. co_await every store/flush call to completion,
+        //     2. THEN call pool.stop() + pool.join(),
+        //     3. THEN destroy the FileStore.
+        //
+        //   Engine::stop() satisfies this obligation automatically for Session-owned
+        //   stores (role loops are tracked by outstanding_counter_; Step 3 of stop()
+        //   spin-waits until every role loop — and thus every in-flight store
+        //   co_await — completes before Step 5 clears the registry). stop() does NOT
+        //   and cannot drain store awaitables from direct (non-Session) calls made
+        //   outside Engine ownership.
         asio::any_io_executor file_io_executor;
 
         // PMR resource for store-owned scratch.
@@ -177,5 +197,23 @@ private:
 static_assert(static_cast<std::uint8_t>(FileStorePolicy::kind::commit_per_message) == 0);
 static_assert(static_cast<std::uint8_t>(FileStorePolicy::kind::commit_batched) == 1);
 static_assert(static_cast<std::uint8_t>(FileStorePolicy::kind::commit_interval) == 2);
+
+// ── 035 test-seam: offload probe ─────────────────────────────────────────────
+// Install a thread-id probe called from inside store()'s offloaded lambda.
+// The probe receives the std::thread::id of the pool thread executing the
+// syscall, enabling SC-001 / SC-002 witnesses in test_file_store_offload_thread.
+// Pass nullptr to disable (production default). Thread-safe: atomic store/load.
+// Compiled unconditionally in file_store.cpp; declaration gated so production
+// callers without FIXPP_TEST_HOOKS do not accidentally call this seam.
+#ifdef FIXPP_TEST_HOOKS
+void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept;
+// Read and reset the T012 catch-fired diagnostic counter (T009 arm (b) verification).
+int read_and_reset_catch_fired() noexcept;
+// Read and reset the T015 retrieve pread-attempt counter.
+// Returns the number of read_frame_payload() calls in retrieve()'s walk since
+// the last reset. Discriminates guard-before-pread (==1) from stale-pread-failed
+// (==2) in the MidWalkReset generation-guard witness.
+int read_and_reset_retrieve_pread_count() noexcept;
+#endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

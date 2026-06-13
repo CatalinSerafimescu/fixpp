@@ -768,6 +768,15 @@ enum class error : std::uint8_t {
                                   //   → C-ABI reserved (future mapping)
 };
 
+// ── 035-filestore-io-offload: FR-021 store_* error-set freeze guard ──────────
+// The store_* set is EXACTLY 10 contiguous variants: store_io_failure(56) …
+// store_cancelled(65). An accidental 11th variant (inserted or appended) that
+// shifts either endpoint will break this assertion.  See data-model §5.
+static_assert(static_cast<int>(error::store_io_failure) == 56 &&
+                  static_cast<int>(error::store_cancelled) == 65,
+              "FR-021: store_* error set frozen at 10 variants (56–65); "
+              "see 035-filestore-io-offload data-model §5");
+
 template <class T>
 using expected_t = std::expected<T, error>;
 
