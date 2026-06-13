@@ -92,6 +92,7 @@
 // file_store.hpp gated by FIXPP_TEST_HOOKS so production callers cannot reach it.
 // The counter only increments inside #ifdef FIXPP_TEST_HOOKS catch arms, so it
 // stays at 0 in production builds (the increment is dead-code-eliminated).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_catch_fired{0};
 
 // T015 retrieve pread-attempt counter — counts each call to read_frame_payload()
@@ -100,6 +101,7 @@ static std::atomic<int> g_catch_fired{0};
 // (declaration in file_store.hpp gated by FIXPP_TEST_HOOKS).
 // Purpose: discriminate "generation guard fired before pread" (count==1 on 2-frame
 // retrieve interrupted after frame 1) from "stale pread failed at EOF" (count==2).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_retrieve_pread_count{0};
 
 namespace fixpp::session {
@@ -163,7 +165,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 #ifndef _WIN32
 
 // pwrite_all with EINTR loop — mirrors OsFile::pwrite_all.
-[[nodiscard]] static bool raw_pwrite_all(int fd, const void* buf, std::size_t n,
+[[nodiscard]] bool raw_pwrite_all(int fd, const void* buf, std::size_t n,
                                          off_t offset) noexcept {
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
@@ -181,11 +183,11 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 }
 
 // fdatasync wrapper — mirrors OsFile::datasync.
-[[nodiscard]] static bool raw_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
+[[nodiscard]] bool raw_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
 
 #else  // _WIN32
 
-[[nodiscard]] static bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
+[[nodiscard]] bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
                                          std::int64_t offset) noexcept {
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
@@ -206,7 +208,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     return true;
 }
 
-[[nodiscard]] static bool raw_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
+[[nodiscard]] bool raw_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
 
 #endif  // _WIN32
 
@@ -224,6 +226,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 // Thread-safe: written ONCE by the test (before pool spawns) and read under the
 // offload lambda (pool thread). The atomic store/load provides the necessary
 // synchronization without a separate mutex.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<void (*)(std::thread::id) noexcept> g_store_offload_probe{nullptr};
 
 }  // namespace
