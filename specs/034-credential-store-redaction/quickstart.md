@@ -38,11 +38,14 @@ cleartext password after a credentialed logon.
 ## Sanitizer / coverage
 
 - New unit (`test_credential_store_redaction.cpp`) + touched session tests under ASan/UBSan/TSan green.
-- New byte-utility + the `store_then_emit` branch at 100% DA/BRDA (Article IX §1), or §IX.1-justified.
+- New byte-utility + the `store_then_emit` branch at 100% DA/BRDA (Article IX §1). The over-bound
+  fail-closed branch is production-unreachable (C3 open()-guard + `build_logon`-capacity bound) but is
+  covered by the `OverBound_SmallBoundSeam_SkipStoreButTransmit` fault-injection cell driving the
+  injected-bound test seam — so it earns BRDA rather than needing a §IX.1 waiver.
 
 ## What "done" looks like
 
-- All seven witnesses in `contracts/store-redaction.md` pass.
+- All nine witnesses in `contracts/store-redaction.md` pass.
 - `/speckit-verify` matrix green; feature-completeness audit (tasks ↔ FR/SC ↔ catalogue) 100%.
 - B&L L-033-6 flipped to mitigation + forward-constraint limitation added; 033 tasks.md dated correction
   note added; 034 catalogue/coverage-index rows added.

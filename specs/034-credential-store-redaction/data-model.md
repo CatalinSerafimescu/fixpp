@@ -34,9 +34,12 @@ The `MessageStore` schema is **unchanged**. The new invariant on the *content* o
 - INV-034-3 **(wire untouched)**: the bytes transmitted on the wire equal the original unmasked frame.
 - INV-034-4 **(uniform across backends)**: holds for every store backend (FileStore, MemoryStore, null);
   masking is applied before the store call, not inside a backend (research R1/clarification).
-- INV-034-5 **(no-op when nothing to protect)**: a frame with no genuine `554` field — i.e. every non-Logon
-  frame and every credential-free Logon — is passed to the store **byte-identical** to today (no copy, no
-  mask). FR-007 / SC-003.
+- INV-034-5 **(no-op when nothing to protect)**: non-Logon frames are stored **byte-identical** even if they
+  contain a genuine `554` field — the **MsgType=A gate, not 554-absence, is what excludes them**. The gate is
+  the load-bearing safety boundary: it confines masking to the never-replayed-verbatim class (admin → GapFill),
+  because app frames ARE replayed verbatim from stored bytes (`session.cpp:4758-4763`), so masking a non-admin
+  554 would put the mask on the wire on resend → peer-observable desync (research R4). Credential-free Logons
+  are also stored byte-identical, here via 554-absence (no copy, no mask). FR-007 / SC-003.
 
 ## State / lifecycle
 

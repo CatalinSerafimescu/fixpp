@@ -31,7 +31,8 @@ count** (no length change). Operates on a mutable span; returns nothing (or a bo
 
 **Rationale**: The existing `redact_tag554` (`logon_credentials.hpp:74`) **allocates a `std::string`** and
 **collapses the value to the 3-byte literal `"***"`** — both disqualifying here: it violates FR-008
-(zero-alloc, `[const §VIII.5]`) and FR-003 (same length → `9=` BodyLength, store offsets, and store record
+(zero-alloc — self-imposed persist-path discipline aligned with `[const §XV.1]` per-message heap
+avoidance, not a §VIII.5 parse→fromApp mandate) and FR-003 (same length → `9=` BodyLength, store offsets, and store record
 CRC stay valid). A separate same-length in-place masker is required; the two share the *field-detection rule*
 (documented as a shared invariant) but not the rewrite mechanics.
 
@@ -40,30 +41,53 @@ CRC stay valid). A separate same-length in-place masker is required; the two sha
   would need a full re-frame; far more complex than a same-length overwrite.
 - *Generalize to a multi-tag redactor*: rejected (YAGNI) — only `554` is in scope (FR-005).
 
-## R3 — Stack-buffer sizing and the over-bound case
+## R3 — Buffer sizing and the over-bound case
 
-**Decision**: Copy the frame into a **stack-local `std::array<std::byte, kMaxMaskableLogonBytes>`** only
-when masking is needed (R4), mask the copy, and pass `std::span(buf.data(), frame.size())` to `store_`.
-`kMaxMaskableLogonBytes` is a small fixed bound comfortably above any conformant FIXT Logon
-(credentialed Logons are a few hundred bytes; bound set generously, e.g. 4 KiB). Add an **`open()`-time
-guard** (extending the 033 FQ-1 FIXT-config validation) that the configured `username`+`password` lengths
-cannot produce a Logon exceeding the bound — making the over-bound case structurally unreachable for the
-maskable (Logon) frame. If, defensively, a to-be-masked frame still exceeds the bound at runtime, **fail
-closed**: do not persist the cleartext — skip the store write for that frame (logged-then-proceed, I-07)
-rather than leak. (A Logon that is never stored is recoverable via the normal Logon re-emit; the session
-is not desynchronised because the seqnum was already stamped and the wire frame is still sent.)
+**Decision**: Copy the frame into a **coroutine-frame-resident `std::array<std::byte,
+kMaxMaskableLogonBytes>`** only when masking is needed (R4), mask the copy, and pass
+`std::span(buf.data(), frame.size())` to `store_`. The buffer lives across `co_await store_->store(...)`,
+so it is part of the existing `store_then_emit` coroutine frame — it enlarges that frame by
+≤`kMaxMaskableLogonBytes`, adding **zero new allocations** (SC-004 count basis unchanged; precedent: the
+resend path already places `std::array<std::byte, kRpBufSize> rp_buf` in the same coroutine frame,
+`session.cpp:4758`, with no PMR witness). `kMaxMaskableLogonBytes` is bound to the **`build_logon`
+builder's actual maximum output capacity** (not a hand-picked round number), so it is exact rather than
+generous. Add an **`open()`-time credential-length guard** (extending the 033 FQ-1 FIXT-config validation)
+that the configured `username`+`password` lengths cannot produce a Logon exceeding that capacity — combined
+with the bound being the builder's own ceiling, the over-bound branch becomes **provably dead defensive
+code** for any frame that survives the MsgType=A gate. To keep that dead branch covered without a §IX.1
+waiver, `kMaxMaskableLogonBytes` is a **test-only / internal compile-time bound** — overridable solely
+through the existing `FIXPP_TEST_HOOKS` compile-gated seam (`[const §XV.9]`; precedent: the
+`static constexpr kRpBufSize` in the same `store_then_emit` function), **NOT** a public `SessionConfig`
+knob, public constructor parameter, or template parameter on `Session` (which is a non-template class) —
+so a fault-injection cell can drive a small-bound case with **zero production ABI/config surface**
+(Art. X preserved). See the contracts witness table. If, defensively, a
+to-be-masked frame still exceeds the bound at runtime, **fail closed**: do not persist the cleartext —
+skip the store write for that frame (logged-then-proceed, I-07, consistent with the existing admin
+store-error model at `session.cpp:4417-4420`) rather than leak; the wire frame is still transmitted.
+
+This skip-store-but-transmit fall-through is **wire-safe**: admin frames are folded into a
+`SequenceReset-GapFill` on resend whether or not they were stored (`session.cpp:4744-4770`), so for a
+`35=A` Logon a skipped store is **wire-identical** to a stored one — both emit GapFill on resend, never a
+verbatim replay. (The earlier "the seqnum was already stamped" reasoning is wrong and dropped; wire-safety
+rides on the admin→GapFill fold, not on the seqnum stamp.) The durable outbound **counter** is a separate
+cell — advanced via `persist_outbound_advance_` → `store_->next_seqnum` (`session.cpp:691`), untouched by
+skipping a frame **store** — so there is no durable counter hole either.
 
 **Rationale**: The store's own `max_frame_bytes` is 256 KiB (`file_store.hpp:109`) — far too large to copy
-onto the stack unconditionally. But only **Logon** frames carry `554`, and Logons are small; bounding the
-*maskable copy* (not all frames) keeps it on the stack with zero alloc. The `open()` guard turns the
-over-bound branch into dead-but-safe defensive code.
+into the coroutine frame unconditionally. But only **Logon** frames carry `554`, and Logons are small;
+bounding the *maskable copy* (not all frames) to the `build_logon` ceiling keeps it in the coroutine frame
+with zero new alloc, and makes the over-bound branch dead-but-safe defensive code.
 
 **Alternatives considered**:
 - *Mutate the original buffer in place, store, then restore before transmit*: rejected — `frame` is a
   `const` span owned by the caller; const-cast + restore is fragile across the `co_await store` suspension
   and the noexcept/cancellation paths (a throw/cancel mid-store could leave the buffer masked → masked wire
-  frame). A stack copy is simpler and has no restore-ordering hazard.
+  frame). A coroutine-frame copy is simpler and has no restore-ordering hazard.
 - *Heap-allocate the masked copy*: rejected — violates FR-008.
+- *Fatal-no-transmit on over-bound (transition to `Disconnected`)*: rejected — it would fracture the
+  existing admin store-error model (`store_then_emit` absorbs non-abort store errors and still transmits,
+  I-07 at `session.cpp:4417-4420`) for no wire-safety gain, since skip-store-but-transmit is already
+  wire-identical to store-then-transmit for an admin Logon (admin→GapFill, above).
 
 ## R4 — Gate: only a genuine `554`-bearing Logon (`35=A`) is masked
 
@@ -72,11 +96,19 @@ contains a genuine SOH-delimited `554=` field. Cheap pre-check order: first `mem
 (common frames have none → O(n) reject, no copy); if found, confirm `35=A` via a small header scan
 (mirrors the existing `interpret_logon` MsgType scan, `admin_messages.cpp:237-286/:344`).
 
-**Rationale**: FR-006 scopes masking to outbound `35=A`. In practice `554` is only ever emitted by fixpp on
-a Logon (single build site), so the `35=A` gate is belt-and-suspenders, but it keeps the behavior precisely
-spec-aligned and prevents a future non-Logon `554`-like field from being silently rewritten. The 554-absent
-fast path (the overwhelming majority of outbound frames) does **no copy and no allocation** — FR-007 / SC-003
-byte-identical no-op falls straight out.
+**Rationale**: FR-006 scopes masking to outbound `35=A`. The `35=A` gate is the **load-bearing safety
+boundary**, not belt-and-suspenders: it confines masking to the **never-replayed-verbatim** class. Admin
+frames are folded into a `SequenceReset-GapFill` on resend (`session.cpp:4744-4770`), so a masked stored
+Logon never reaches the wire — whereas **app frames ARE replayed verbatim** from stored bytes
+(`build_replay_frame` → `transmit_async`, `session.cpp:4758-4763`). If masking ever applied to a non-admin
+frame carrying a genuine `554`, a resend of that app frame would put the **mask on the wire** → peer-observable
+desync. The 554-absent fast path (the overwhelming majority of outbound frames) does **no copy and no
+allocation** — FR-007 / SC-003 byte-identical no-op falls straight out.
+
+**Alternative considered and rejected — "mask any genuine 554 on any outbound frame"**: rejected as
+**unsafe**, not "simpler defense-in-depth". Masking app frames (which are replayed verbatim) would mask
+the on-the-wire copy on resend → peer-observable mismatch. The MsgType=A gate is precisely what excludes
+the verbatim-replayed class; FR-006 stays Logon-only.
 
 ## R5 — Store CRC and the FIX `10=` checksum
 
@@ -85,7 +117,8 @@ byte-identical no-op falls straight out.
 is self-consistent — `retrieve()` validates and returns the masked frame normally (FR-003 / SC-005). The
 embedded FIX `10=` checksum of the stored frame is **not** recomputed and therefore no longer matches the
 masked body; this is **accepted and documented**: stored frames are never re-validated as FIX and never
-replayed (admin → `SequenceReset-GapFill`), so a stale `10=` in the at-rest copy is inert. `9=` BodyLength
+replayed (admin → `SequenceReset-GapFill`, `session.cpp:4744-4770`), so a stale `10=` in the at-rest copy is
+inert. `9=` BodyLength
 **does** stay valid (same-length mask), so the record remains structurally well-formed.
 
 **Rationale**: Recomputing `10=` would (a) require extra work and (b) gain nothing — nobody checksums the

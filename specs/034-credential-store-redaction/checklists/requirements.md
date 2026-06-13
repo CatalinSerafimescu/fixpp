@@ -32,7 +32,7 @@
 ## Notes
 
 - Validation passed on first iteration. The spec references FIX protocol field tags
-  (`554`, `553`, `35=A`) and one constitution clause (`[const §VIII.5]`) — these are
+  (`554`, `553`, `35=A`) and one constitution clause (`[const §XV.1]`) — these are
   domain/protocol facts and a project-wide constraint, not implementation details, and
   are consistent with the house style of prior specs in this repo.
 - Zero `[NEEDS CLARIFICATION]` markers: scope is tightly bounded by the source assessment
