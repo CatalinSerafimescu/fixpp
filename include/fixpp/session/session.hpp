@@ -469,6 +469,18 @@ public:
     // that is in-flight when close() calls seqnum_mgr_.drain(). NOT for
     // production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
     [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
+
+    // TEST-ONLY accessor: drive store_then_emit directly with a caller-supplied
+    // frame (034 T010 fault-injection). The over-bound branch in store_then_emit
+    // (frame.size() > kMaxMaskableLogonBytes) is production-unreachable because
+    // build_logon caps its output at kMaxMaskableLogonBytes; this accessor lets a
+    // test feed a hand-crafted >kMaxMaskableLogonBytes 35=A frame to exercise the
+    // fail-closed skip-store-but-transmit branch against the REAL bound, earning
+    // its BRDA with zero production surface. NOT for production use. [§XV.9; T010]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit_test_access(
+        seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
+        return store_then_emit(stamped_seq, frame);
+    }
 #endif
 
     // 015 T011 — Engine-internal acceptor attach primitive.
@@ -944,18 +956,21 @@ private:
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist
     // path (store_then_emit, T006). Bound to the build_logon builder's actual
     // maximum output capacity (session.cpp:755 logon_buf / session.cpp:2145
-    // reply_buf — both 256 bytes), so the over-bound branch in T006 is
-    // provably dead for any frame that survives the MsgType=A gate.
+    // reply_buf — both 256 bytes), so the over-bound branch in T006 is provably
+    // dead for any frame that survives the MsgType=A gate (build_logon already
+    // fails-closed with wire_frame_too_large above this size, and T007's
+    // open()-time credential-length guard adds config-time defense for both roles).
     // NOT a public SessionConfig/ctor/template param (Art. X / non-template class).
-    // Overridable ONLY via the FIXPP_TEST_HOOKS compile-gated seam: define
-    // FIXPP_TEST_LOGON_MASK_BOUND to a smaller value in a FIXPP_TEST_HOOKS build
-    // to drive the dead over-bound branch (fault-injection for T010 BRDA coverage).
-    // [034 data-model.md E1 / research R3 / contracts/store-redaction.md C2]
-#if defined(FIXPP_TEST_HOOKS) && defined(FIXPP_TEST_LOGON_MASK_BOUND)
-    static constexpr std::size_t kMaxMaskableLogonBytes = FIXPP_TEST_LOGON_MASK_BOUND;
-#else
+    //
+    // The dead over-bound branch earns its BRDA via store_then_emit_test_access()
+    // (FIXPP_TEST_HOOKS, below): a test feeds a hand-crafted >256-byte 35=A frame
+    // directly into store_then_emit, exercising the real branch against this real
+    // bound. (An earlier design proposed a FIXPP_TEST_LOGON_MASK_BOUND compile
+    // override; that could not reach this constant — store_then_emit is compiled
+    // into libfixpp_session WITHOUT the test define — so frame-injection through
+    // the FIXPP_TEST_HOOKS accessor is the working seam for the same BRDA outcome.)
+    // [034 data-model.md E1 / research R3 / contracts/store-redaction.md C2; plan ## Gate A]
     static constexpr std::size_t kMaxMaskableLogonBytes = 256;
-#endif
 
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed

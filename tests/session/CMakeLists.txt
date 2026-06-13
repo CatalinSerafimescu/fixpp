@@ -239,12 +239,34 @@ fixpp_add_store_test(store_pmr_poison_retrieve SOURCES
 # 034-credential-store-redaction — masker unit (Phase 2) + disk-byte / no-op /
 # fault-injection witnesses (Phases 3-6). Uses Session + FileStore fixtures, so
 # it mirrors the flush-test registration (FSM double + mock clock + support dir).
+# FIXPP_TEST_HOOKS exposes store_then_emit_test_access() for the T010 over-bound
+# fault-injection cell (frame-injection seam; methods-only, no Session layout change).
 fixpp_add_store_test(credential_store_redaction SOURCES
   test_credential_store_redaction.cpp
   _fixtures_/test_double_fsm.cpp
   EXTRA_LIBS fixpp_mock_clock
   EXTRA_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/support"
 )
+target_compile_definitions(credential_store_redaction PRIVATE FIXPP_TEST_HOOKS)
+
+# T011 alloc gate — dual-gate per [[feedback_tracking_pmr_resource_false_pass]]:
+# the NoHeap.StorePath_NoNewAllocation cell runs in the base target (weak no-op
+# hooks); the _mallocnesia variant re-runs ONLY that cell under LD_PRELOAD via
+# check_alloc.py so a global-heap escape in the copy+mask window aborts.
+# GTEST_FILTER isolates the NoHeap cell (the FileStore/thread-pool cells need not
+# run under interception). Absent mallocnesia.so → skip (base test is the fallback).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME credential_store_redaction_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:credential_store_redaction>"
+  )
+  set_tests_properties(credential_store_redaction_mallocnesia PROPERTIES
+    ENVIRONMENT "GTEST_FILTER=NoHeap.*"
+    LABELS "034;credential-store-redaction;alloc_guard"
+    DEPENDS credential_store_redaction)
+endif()
 
 # T038 — seam 18: session shutdown ordering (I-22 / SC-005)
 fixpp_add_store_test(store_shutdown_ordering SOURCES

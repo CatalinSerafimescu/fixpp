@@ -256,6 +256,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, G_FrameStartOccurrence_Masked) {
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <cstring>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -283,6 +284,18 @@ TEST(Masker_SameLength_FieldAnchored_unit, G_FrameStartOccurrence_Masked) {
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+
+// mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
+// Must be at file scope for the LD_PRELOAD override to bind. (T011 alloc gate;
+// mirrors the NoHeap pattern in test_next_expected_msgseqnum.cpp.)
+extern "C" {
+// NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
+__attribute__((weak)) void alloc_guard_start() {}
+// NOLINTNEXTLINE(misc-use-anonymous-namespace)
+__attribute__((weak)) void alloc_guard_end() {}
+// NOLINTNEXTLINE(misc-use-anonymous-namespace)
+__attribute__((weak)) long alloc_guard_count() { return 0; }
+}
 
 namespace fixpp_redaction_session {
 
@@ -1015,54 +1028,177 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
         .get();
 }
 
-// ── T010 / fault-injection — BLOCKED (CMake seam not configured) ──────────────
+// ── T010 / fault-injection (over-bound fail-closed) ───────────────────────────
 //
 // OverBound_SmallBoundSeam_SkipStoreButTransmit
 //
-// This test requires:
-//   - target_compile_definitions(credential_store_redaction PRIVATE
-//       FIXPP_TEST_HOOKS FIXPP_TEST_LOGON_MASK_BOUND=<small>)
-//   in tests/session/CMakeLists.txt for the credential_store_redaction target.
+// The over-bound branch in store_then_emit (frame.size() > kMaxMaskableLogonBytes
+// → skip_store = true) is production-UNREACHABLE: build_logon caps its output at
+// kMaxMaskableLogonBytes (256) and fails-closed above it, and the T007 open()-guard
+// rejects oversized credentials. So `build_logon`-produced frames can never trip it.
 //
-// Currently NOT set in the CMakeLists.txt (lines 242-247 define the target without
-// FIXPP_TEST_HOOKS or FIXPP_TEST_LOGON_MASK_BOUND). The over-bound branch
-// (session.cpp:4447-4460) is production-UNREACHABLE without the seam.
+// To earn the branch's BRDA we feed a HAND-CRAFTED >256-byte 35=A frame carrying a
+// genuine \x01554= directly into store_then_emit via the FIXPP_TEST_HOOKS accessor
+// store_then_emit_test_access() — exercising the REAL branch against the REAL 256
+// bound with zero production surface. (An earlier design used a
+// FIXPP_TEST_LOGON_MASK_BOUND compile override; that constant lives in
+// store_then_emit, compiled into libfixpp_session WITHOUT the test define, so it
+// could not be reached from a test target — frame-injection is the working seam.)
 //
-// BLOCKER: CMake seam injection needed. Report per brief's escape hatch.
-// The user is expected to add the compile definitions to the target and then
-// the test body below can be un-guarded.
-#if defined(FIXPP_TEST_HOOKS) && defined(FIXPP_TEST_LOGON_MASK_BOUND)
+// Asserts the two NEW behaviors:
+//   (a) NO cleartext persisted — the over-bound frame's seq is absent from the store.
+//   (b) the WIRE frame still carries the real cleartext 554 (transmit is unconditional).
+// Postcondition (c) — a resend over the skipped seq yields a SequenceReset-GapFill,
+// not a masked verbatim replay — is NOT new behavior: an absent store slot folds
+// into a GapFill in the existing resend store-walk (session.cpp:4744-4770, confirmed
+// at design time), and the MsgType=A admin→GapFill classification is exercised by
+// T009_NonLogon. Not re-proven here to avoid over-investing in dead-branch coverage.
+//
+// Anchors: contracts/store-redaction.md C2 step-2 / I-07; research R3; session.hpp
+//          store_then_emit_test_access; plan ## Gate A (mechanism deviation note).
+#ifdef FIXPP_TEST_HOOKS
 TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmit) {
-    // (a) Wire frame transmitted despite skip_store = true.
-    // (b) Store has no entry for the over-bound Logon (seq 1 absent).
-    // (c) Sequence number was still consumed (next outbound == 2 after the Logon).
-    //
-    // Implementation: configure FIXPP_TEST_LOGON_MASK_BOUND to a very small value
-    // (e.g., 64 bytes) so the Logon frame (header + body + checksum) exceeds it,
-    // triggering skip_store = true.
-    //
-    // TODO: implement when CMake seam is configured.
-    GTEST_SKIP() << "T010: CMake seam FIXPP_TEST_HOOKS/FIXPP_TEST_LOGON_MASK_BOUND not set";
-}
-#endif  // FIXPP_TEST_HOOKS && FIXPP_TEST_LOGON_MASK_BOUND
+    constexpr std::string_view kSentinel = "overbound-T010-sentinel";
 
-// ── T011 / alloc — BLOCKED (mallocnesia LD_PRELOAD not configured) ────────────
+    asio::thread_pool pool{2};
+
+    fixpp::core::EngineConfig engine;
+    engine.executor = pool.get_executor();
+    engine.clock = make_mock_clock(pool.get_executor());
+    engine.max_store_memory_per_session = 1ULL << 30;
+
+    auto dict = make_fix50sp2_dict();
+    version_registry registry{{dict}};
+
+    auto factory = std::make_unique<CapturingMemStoreFactory>();
+    CapturingMemStoreFactory* factory_raw = factory.get();
+
+    std::vector<std::byte> wire_out;
+    auto init_cfg = make_fixt_initiator_cfg(pool.get_executor());
+    // No configured creds — the over-bound frame carries its own 554; open() emits
+    // a small credential-free Logon (seq 1) that is irrelevant to this cell.
+    init_cfg.store_factory = std::move(factory);
+    init_cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire_out.assign(f.begin(), f.end());
+    };
+
+    Session initiator{engine, init_cfg, &registry};
+    auto open_r = asio::co_spawn(pool.get_executor(), initiator.open(), asio::use_future).get();
+    ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
+    ASSERT_NE(factory_raw->last_store, nullptr);
+    MemoryStore* store = factory_raw->last_store;
+
+    // Craft a >256-byte 35=A frame with a genuine \x01554= field (padded via tag 58).
+    std::string over;
+    over += "8=FIXT.1.1\x01";
+    over += "35=A\x01";
+    over += "49=INITR\x01";
+    over += "56=ACCEPTR\x01";
+    over += "34=2\x01";  // SOH here is the field-boundary preceding 554
+    over += "554=" + std::string(kSentinel) + "\x01";
+    over += "58=" + std::string(280, 'X') + "\x01";  // padding → total well over 256
+    ASSERT_GT(over.size(), 256u) << "test invariant: frame must exceed the 256 mask bound";
+
+    std::vector<std::byte> over_bytes;
+    over_bytes.reserve(over.size());
+    for (char c : over) over_bytes.push_back(static_cast<std::byte>(c));
+
+    // Inject at the store's NEXT expected outbound seq (open() stored the Logon at
+    // seq 1), so that if skip_store were (wrongly) false the store would ACCEPT the
+    // write — otherwise an out-of-order seq would be rejected by the store anyway
+    // and the "absent" assertion would pass spuriously (not discriminate skip_store).
+    constexpr fixpp::session::seqnum_t kInjSeq = 2;
+    wire_out.clear();  // capture only the injected frame's transmit
+    auto inj_r = asio::co_spawn(
+                     pool.get_executor(),
+                     initiator.store_then_emit_test_access(
+                         kInjSeq, std::span<const std::byte>{over_bytes.data(), over_bytes.size()}),
+                     asio::use_future)
+                     .get();
+    ASSERT_TRUE(inj_r.has_value())
+        << "store_then_emit must return ok on the skip-store-but-transmit path (I-07)";
+
+    // (b) Wire frame carries the over-bound frame verbatim — cleartext 554 intact.
+    ASSERT_FALSE(wire_out.empty()) << "over-bound frame must still be transmitted (fail-closed ≠ drop)";
+    std::string wire_str = bytes_as_str(wire_out);
+    EXPECT_NE(wire_str.find(kSentinel), std::string::npos)
+        << "Wire frame must carry the real cleartext 554 on the over-bound path (T010 b)";
+    EXPECT_EQ(wire_out.size(), over_bytes.size())
+        << "Wire frame must be the original over-bound frame byte-for-byte";
+
+    // (a) NO cleartext persisted — the injected seq is absent from the store (skip_store).
+    byte_collecting_visitor visitor;
+    auto ret_r = asio::co_spawn(pool.get_executor(),
+                                store->retrieve(kInjSeq, kInjSeq, direction_t::outbound, visitor),
+                                asio::use_future)
+                     .get();
+    // retrieve over [kInjSeq,kInjSeq] must find NOTHING (the frame was never stored).
+    EXPECT_TRUE(!ret_r.has_value() || visitor.entries().empty())
+        << "Over-bound frame must NOT be persisted — seq " << kInjSeq
+        << " must be absent from the store (fail-closed, no cleartext at rest) (T010 a)";
+
+    // Belt-and-suspenders: the sentinel must not appear anywhere the store could
+    // hand back. (MemoryStore holds only seq 1 — the credential-free open() Logon.)
+    byte_collecting_visitor all;
+    (void)asio::co_spawn(pool.get_executor(),
+                         store->retrieve(1, 0, direction_t::outbound, all), asio::use_future)
+        .get();
+    for (const auto& e : all.entries()) {
+        std::string s(reinterpret_cast<const char*>(e.bytes.data()), e.bytes.size());
+        EXPECT_EQ(s.find(kSentinel), std::string::npos)
+            << "No stored frame may contain the over-bound cleartext (T010 a)";
+    }
+}
+#endif  // FIXPP_TEST_HOOKS
+
+// ── T011 — alloc gate: the masking step adds zero heap allocation ─────────────
 //
 // StorePath_NoNewAllocation
 //
-// This test requires the dual-gate from anti-pattern library:
-//   1. counting_resource (PMR in-band audit)
-//   2. tools/mallocnesia/libmallocnesia.so LD_PRELOAD (global malloc interception)
+// Honest scope (mirrors NoHeap.Emit789Append in test_next_expected_msgseqnum.cpp):
+// the NEW synchronous surface this feature adds on the persist path is the
+// copy-into-coroutine-frame + mask_tag554_same_length_inplace step (T006). The
+// store call itself is unchanged (same store_->store(...), only the span pointer
+// differs), so its allocation profile is inherited baseline and out of scope here.
+// We measure ONLY the new memcpy+mask between mallocnesia guard markers, with all
+// buffer/setup allocation done OUTSIDE the window.
 //
-// The fixpp_add_store_test CMake helper explicitly does NOT wire LD_PRELOAD
-// (cmake/fixpp_store_test.cmake comment: "perf/ LD_PRELOAD wiring is deferred to
-// D-17 /gate-a re-touch; this helper does NOT handle LD_PRELOAD").
-//
-// A counting_resource-only test would be a FALSE-PASS gate per the anti-pattern
-// library: non-PMR std::vector<> in the store path escapes via global new, and
-// counting_resource would not detect it.
-//
-// BLOCKER: Separate CMake target with TSAN_OPTIONS + ENVIRONMENT LD_PRELOAD needed.
-// Report per brief's escape hatch.
+// The _mallocnesia ctest variant (CMakeLists.txt) re-runs this binary under
+// LD_PRELOAD via tools/check_alloc.py so any global-heap escape in the window
+// aborts. [SC-004 / FR-008; [const §XV.1]; [[feedback_tracking_pmr_resource_false_pass]]]
+TEST(NoHeap, StorePath_NoNewAllocation) {
+    // ── Setup OUTSIDE the guarded window (legitimate allocation) ─────────────
+    // A representative credentialed FIXT Logon frame, on the stack.
+    auto frame = make_fixt_logon("INITR", "ACCEPTR", 1, "9", /*username=*/"alice",
+                                 /*password=*/"s3cr3t-T011-sentinel");
+    const std::size_t n = frame.size();
+    ASSERT_LE(n, 256u) << "test invariant: a normal credentialed Logon fits the mask bound";
+
+    // The coroutine-frame copy buffer store_then_emit uses (kMaxMaskableLogonBytes).
+    std::array<std::byte, 256> mask_buf{};
+
+    // ── Guarded window: only the new memcpy + mask step ──────────────────────
+    alloc_guard_start();
+
+    std::memcpy(mask_buf.data(), frame.data(), n);
+    const bool masked =
+        fixpp::session::mask_tag554_same_length_inplace(std::span<std::byte>{mask_buf.data(), n});
+
+    alloc_guard_end();
+
+    ASSERT_TRUE(masked) << "the representative Logon carries a 554 → must mask";
+
+    // Post-condition: the masked copy holds no cleartext (sanity; the real
+    // redaction witnesses are T005).
+    std::string masked_str(reinterpret_cast<const char*>(mask_buf.data()), n);
+    EXPECT_EQ(masked_str.find("s3cr3t-T011-sentinel"), std::string::npos)
+        << "masked copy must not contain the cleartext password";
+
+    // Under mallocnesia: a nonzero count means the mask step touched the heap.
+    const long heap_allocs = alloc_guard_count();
+    EXPECT_EQ(heap_allocs, 0L)
+        << "the copy+mask step must not touch the global heap; heap_allocs=" << heap_allocs
+        << "; [SC-004 / FR-008 / [[feedback_tracking_pmr_resource_false_pass]]]";
+}
 
 }  // namespace fixpp_redaction_session
