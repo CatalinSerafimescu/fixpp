@@ -108,9 +108,15 @@ public:
         // file itself has no size limit other than fs free space.
         std::size_t max_frame_bytes = std::size_t{256} * 1024;
 
-        // Executor for the file-I/O work (§4.3.2).
+        // Executor reserved for file-I/O offload (§4.3.2).
         // REQUIRED at construction per [2e §4.3.2]:665. FileStoreFactory::make()
         // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
+        // FR-024 NOTE (amended 2026-06-13): this executor is currently RESERVED
+        // but UNUSED — file I/O executes on the caller's (session) executor. The
+        // original `co_await asio::post(file_io_executor)` offload was inert (only
+        // the completion handler ran there; the body resumed on the spawn
+        // executor) and was excised. The field is retained so a future real
+        // offload (nested co_spawn per D-18) needs no API change.
         asio::any_io_executor file_io_executor;
 
         // PMR resource for store-owned scratch.

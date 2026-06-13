@@ -1186,3 +1186,19 @@ wire but are no longer retained — a later peer `ResendRequest` folds them into
 so the peer's application-level recovery silently loses them. FIX-legal, but operators trading memory for
 replay completeness should size the cap deliberately. *(Fable `5.4`; `memory_store.hpp:160-166`,
 `session.cpp` `store_then_emit`.)*
+
+**L-008-3 — `FileStore` disk I/O runs on the session strand; a slow disk can stall protocol liveness.**
+The FR-024 contract promised `FileStore` would post `pwrite`/`fdatasync`/`rename` to a dedicated
+`file_io_executor` and rebind to the session strand on completion. The as-shipped implementation never met
+this: it used `co_await asio::post(file_io_executor, use_awaitable)`, an inert idiom (only the completion
+handler runs on the target executor; the coroutine body — and the blocking I/O — resumes on the spawn
+executor — the exact pattern 012 banned, D-18). The dead hops were excised (branch
+`fix/file-store-offload-honesty`, 2026-06-13) and **FR-024 amended**: disk I/O executes on the caller's
+(session) executor. Consequence: a slow-disk `fdatasync` (e.g. `commit_per_message` policy on a saturated
+or remote filesystem) blocks the session strand for its duration, delaying heartbeats / the read pump /
+FSM progress on that session. No correctness impact (the writer mutex serialises store ops regardless; the
+hop was strictly safer single-strand execution). `FileStore::Config::file_io_executor` is retained as a
+REQUIRED-but-currently-RESERVED field so a future real offload (nested `co_spawn` per D-18) needs no API
+change. Operators on slow/remote storage should prefer `commit_batched`/`commit_interval` or a fast local
+device. *(Fable `3-lifecycle-audit.md` #6; `file_store.cpp` `store`/`retrieve`/`next_seqnum`/`reset`;
+008 spec FR-024 CORRECTION 2026-06-13; deferred real-offload = REMAINING-WORK F-b Option A.)*

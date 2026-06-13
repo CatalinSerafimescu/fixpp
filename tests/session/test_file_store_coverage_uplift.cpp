@@ -26,8 +26,11 @@
 
 #include <array>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
@@ -475,6 +478,70 @@ TEST(FileStoreCoverageUplift, FactoryRejectsCommitInterval) {
     }
 
     pool.join();
+    fs::remove_all(dir);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FR-024 honesty witness (branch fix/file-store-offload-honesty, 2026-06-13):
+//   FileStore disk I/O executes on the CALLER's (session) executor — NOT on
+//   file_io_executor. The original `co_await asio::post(file_io_executor,
+//   use_awaitable)` offload was inert (D-18: only the completion handler ran
+//   there; the body bounced back to the spawn executor) and was excised.
+//
+//   Witness: point file_io_executor at a SEPARATE io_context that is NEVER run,
+//   drive store()+retrieve() on a different (serviced) io_context, and assert
+//   both complete. Under the pre-excision code the operations would park on the
+//   unserviced file_io_executor and never finish (flags stay false). After
+//   excision the I/O runs entirely on the caller's strand, so they complete.
+//   Hang-safe: the driver is pumped with a bounded run_for() budget, so a
+//   regression (re-introduced offload) parks the op and the test FAILS fast
+//   on the false flags rather than hanging CI.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(FileStoreCoverageUplift, DiskIoRunsOnCallerExecutorNotFileIoExecutor) {
+    auto dir = unique_store_dir("no_offload");
+
+    asio::io_context driver;          // serviced via driver.run()
+    asio::io_context unused_file_io;  // intentionally NEVER run
+
+    // Build a store whose file_io_executor points at the unserviced context.
+    fixpp::session::FileStore::Config cfg;
+    cfg.directory = dir;
+    cfg.sender_comp_id = "SENDER";
+    cfg.target_comp_id = "TARGET";
+    cfg.max_frame_bytes = 4096;
+    // Default policy = commit_per_message → exercises the datasync path too.
+    cfg.file_io_executor = unused_file_io.get_executor();
+    FileStoreFactory factory{cfg};
+    auto r = factory.make("SENDER", "TARGET", nullptr, 1ULL << 30,
+                          unused_file_io.get_executor());
+    ASSERT_TRUE(r.has_value());
+    auto store = std::move(*r);
+
+    const auto frame = make_test_frame(1, direction_t::outbound);
+    bool stored = false;
+    bool retrieved = false;
+
+    asio::co_spawn(
+        driver.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto s = co_await store->store(
+                1, std::span<const std::byte>(frame), direction_t::outbound);
+            stored = s.has_value();
+            CollectVisitor v;
+            auto rr = co_await store->retrieve(1, 0, direction_t::outbound, v);
+            retrieved = rr.has_value() && v.frames.size() == 1 && v.frames[0] == frame;
+            co_return;
+        },
+        asio::detached);
+
+    // Only the driver is serviced; unused_file_io.run() is never called. A
+    // bounded budget guarantees the test fails fast (not hangs) on a regression.
+    driver.run_for(std::chrono::seconds(2));
+
+    EXPECT_TRUE(stored) << "store() did not complete on the caller executor — the "
+                           "file_io_executor offload was NOT excised";
+    EXPECT_TRUE(retrieved) << "retrieve() did not complete on the caller executor";
+
     fs::remove_all(dir);
 }
 

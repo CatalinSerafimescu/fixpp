@@ -772,18 +772,18 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                                                                 std::span<const std::byte> frame
                                                                 [[clang::lifetimebound]],
                                                                 direction_t dir) noexcept {
-    // RC#4: capture session executor BEFORE any hop so we can rebind after I/O.
-    // this_coro::executor reflects the executor the caller used for co_spawn;
-    // after the file_io_executor hop below, this_coro::executor returns the
-    // I/O executor — NOT the original session executor. Capturing now preserves
-    // the correct return destination per [2d §4.5] D.1 strand contract.
+    // Capture the caller's (session) executor for the leading recursive-pump-break
+    // post below. File I/O runs on THIS executor: the FR-024 file_io_executor
+    // offload is NOT implemented (amended 2026-06-13). The prior
+    // `co_await asio::post(file_io_executor)` hop was inert — only the completion
+    // handler ran on file_io_executor; the coroutine body resumed on the spawn
+    // (session) executor — so there is no executor hop and nothing to rebind.
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive awaitable_thread::pump() chain
     // (same rationale as MemoryStore — synchronous fast-path of async_lock
-    // causes unbounded stack growth in tight coroutine loops).
-    // Note: this post re-uses session_ex (which equals this_coro::executor here);
-    // the leading-post pattern is correct and is PRESERVED per RC#4 brief.
+    // causes unbounded stack growth in tight coroutine loops). This post
+    // re-uses session_ex (which equals this_coro::executor here).
     co_await asio::post(session_ex, asio::use_awaitable);
 
     if (!impl_->open_ok) {
@@ -810,8 +810,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     }
 
     // Deep-copy frame bytes into the store (pwrite to file).
-    // T041: post I/O work to file_io_executor. Mutex is held throughout
-    // (the post does NOT release the mutex — we remain in CS).
+    // FR-024 NOTE (amended 2026-06-13): the pwrite + datasync below execute on
+    // the caller's (session) executor — the file_io_executor offload is not
+    // implemented. The writer mutex is held throughout (we remain in CS).
     {
         // RC#6: use PMR-backed store_scratch_ instead of per-call global-heap alloc.
         // store_scratch_ is reserved at ctor with cfg.max_frame_bytes capacity, so
@@ -820,14 +821,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         impl_->store_scratch_.assign(frame.begin(), frame.end());
         const auto policy_kind = impl_->cfg.policy.which;
 
-        // Post the actual pwrite + datasync to file_io_executor (I-13).
-        co_await asio::post(impl_->cfg.file_io_executor, asio::use_awaitable);
-
-        // Execute I/O on file_io_executor thread while still holding mutex.
         if (!impl_->write_frame(seq, dir, std::span<const std::byte>(impl_->store_scratch_))) {
-            // RC#4: rebind back to session executor before co_return so the caller
-            // continuation runs on the correct strand.
-            co_await asio::post(session_ex, asio::use_awaitable);
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
 
@@ -840,7 +834,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
 
         // Write counter record before datasync.
         if (!impl_->write_counter(impl_->write_pos, impl_->next_inbound, impl_->next_outbound)) {
-            co_await asio::post(session_ex, asio::use_awaitable);
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->write_pos += static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
@@ -848,7 +841,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         // Flush based on policy. Linearisation point for store() is here (I-06).
         if (policy_kind == FileStorePolicy::kind::commit_per_message) {
             if (!impl_->file.datasync()) {
-                co_await asio::post(session_ex, asio::use_awaitable);
                 co_return std::unexpected(fixpp::core::error::store_io_failure);
             }
         } else if (policy_kind == FileStorePolicy::kind::commit_batched) {
@@ -856,17 +848,11 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             const std::size_t bs = impl_->cfg.policy.batch_size;
             if (bs > 0 && (total % bs) == 0) {
                 if (!impl_->file.datasync()) {
-                    co_await asio::post(session_ex, asio::use_awaitable);
                     co_return std::unexpected(fixpp::core::error::store_io_failure);
                 }
             }
         }
         // commit_interval: periodic flush (timer/co_spawn, deferred US4).
-
-        // RC#4: hop back to the session executor before releasing the mutex and
-        // returning. Visitor callbacks and the awaitable completion now run on
-        // the caller's strand, satisfying [2d §4.5] D.1.
-        co_await asio::post(session_ex, asio::use_awaitable);
     }
     // guard releases mutex here — CS complete.
 
@@ -878,8 +864,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
     seqnum_t begin, seqnum_t end, direction_t dir,
     retrieve_visitor& visitor [[clang::lifetimebound]]) noexcept {
-    // RC#4: capture session executor before any hop (same rationale as store()).
-    const auto session_ex = co_await asio::this_coro::executor;
+    // FR-024 NOTE (amended 2026-06-13): the per-frame disk read below runs on the
+    // caller's (session) executor — the file_io_executor offload is not
+    // implemented, so there is no executor hop and no session_ex to capture.
 
     // T041/US3: validate inputs before mutex acquisition.
     if (!impl_->open_ok) {
@@ -938,19 +925,12 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
     // N4: use retrieve_scratch_ (PMR-backed, reserved to max_frame_bytes at
     // open_log()) instead of a per-call local std::vector<std::byte>.
     for (const auto& ie : snap) {
-        // Post to file_io_executor for the disk read (I-13 / T041).
-        co_await asio::post(impl_->cfg.file_io_executor, asio::use_awaitable);
+        // The disk read runs on the caller's (session) executor (FR-024 note
+        // above), WITHOUT the writer mutex (I-03) so the visitor can issue
+        // concurrent store() calls.
         if (!impl_->read_frame_payload(ie, impl_->retrieve_scratch_)) {
-            // RC#4: rebind before returning so the caller continuation runs on the
-            // session strand, not the file-I/O executor.
-            co_await asio::post(session_ex, asio::use_awaitable);
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
-        // RC#4: return to the session executor using the pre-captured session_ex.
-        // The original code used `co_await this_coro::executor` here which, after
-        // the file_io_executor hop above, returns file_io_executor — a no-op hop
-        // that leaves visitor callbacks on the wrong strand ([2d §4.5] D.1 bug).
-        co_await asio::post(session_ex, asio::use_awaitable);
 
         fixpp::core::expected_t<visit_result> vr{visit_result::cont};
         try {
@@ -984,7 +964,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
 asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direction_t dir,
                                                                           bool increment) noexcept {
-    // RC#4: capture session executor before any hop.
+    // Capture the caller's (session) executor for the leading pump-break post
+    // below. File I/O runs on this executor (FR-024 offload not implemented).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1011,23 +992,17 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         }
         ++counter;
 
-        // Post I/O to file_io_executor while still holding mutex.
-        co_await asio::post(impl_->cfg.file_io_executor, asio::use_awaitable);
-
+        // FR-024 NOTE (amended 2026-06-13): the counter pwrite + datasync run on
+        // the caller's (session) executor — file_io_executor offload not
+        // implemented. Mutex held throughout.
         // Write counter record to disk. Linearisation point: counter-record pwrite.
         if (!impl_->write_counter(impl_->write_pos, impl_->next_inbound, impl_->next_outbound)) {
-            // RC#4: rebind before returning.
-            co_await asio::post(session_ex, asio::use_awaitable);
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->write_pos += static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
         if (!impl_->file.datasync()) {
-            co_await asio::post(session_ex, asio::use_awaitable);
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
-
-        // RC#4: hop back to session executor before releasing mutex and returning.
-        co_await asio::post(session_ex, asio::use_awaitable);
     }
     // guard releases mutex here.
     co_return fixpp::core::expected_t<seqnum_t>{current};
@@ -1036,7 +1011,8 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
 // ── FileStore::reset() ────────────────────────────────────────────────────────
 
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
-    // RC#4: capture session executor before any hop.
+    // Capture the caller's (session) executor for the leading pump-break post
+    // below. File I/O runs on this executor (FR-024 offload not implemented).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1064,8 +1040,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     // On any failure the live log is the source of truth; the tmp is left
     // or was never written. restart_scan() at next open unlinks stale .reset.tmp.
 
-    // Post I/O to file_io_executor.
-    co_await asio::post(impl_->cfg.file_io_executor, asio::use_awaitable);
+    // FR-024 NOTE (amended 2026-06-13): the reset I/O (tmp write, datasync,
+    // rename, parent-dir fsync, re-open) runs on the caller's (session) executor
+    // — the file_io_executor offload is not implemented. Mutex held throughout.
 
 #ifndef _WIN32
     // ── Linux atomic-rename path ─────────────────────────────────────────────
@@ -1074,7 +1051,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     // Open tmp file (O_WRONLY | O_CREAT | O_TRUNC)
     OsFile tmp_file;
     if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
-        co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
@@ -1094,7 +1070,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             tmp_file = std::move(tmp_impl.file);
             // Unlink tmp on failure
             ::unlink(tmp_path.c_str());
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         // tmp_file.datasync() is called inside initialise_fresh()
@@ -1107,7 +1082,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
     if (::rename(tmp_path.c_str(), impl_->log_path_.c_str()) != 0) {
         ::unlink(tmp_path.c_str());
-        co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
@@ -1123,14 +1097,12 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
         if (dir_fd < 0) {
             // Cannot open parent directory — rename durability cannot be guaranteed.
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         const int fsync_rc = ::fsync(dir_fd);
         ::close(dir_fd);
         if (fsync_rc != 0) {
             // fsync(dir_fd) failed — rename is NOT durable; report failure.
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
     }
@@ -1139,11 +1111,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     {
         OsFile new_file;
         if (!new_file.open(impl_->log_path_.c_str())) {
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         if (!new_file.try_lock()) {
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->file = std::move(new_file);
@@ -1156,7 +1126,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     std::wstring wide_live(impl_->log_path_.begin(), impl_->log_path_.end());
     OsFile tmp_file;
     if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
-        co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
     {
@@ -1170,7 +1139,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         if (!tmp_impl.initialise_fresh()) {
             tmp_file = std::move(tmp_impl.file);
             DeleteFileW(wide_tmp.c_str());
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         tmp_file = std::move(tmp_impl.file);
@@ -1180,17 +1148,14 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         DeleteFileW(wide_tmp.c_str());
-        co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
     {
         OsFile new_file;
         if (!new_file.open(wide_live.c_str())) {
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         if (!new_file.try_lock()) {
-            co_await asio::post(session_ex, asio::use_awaitable);  // RC#4
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->file = std::move(new_file);
@@ -1208,11 +1173,6 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                                                  record_disk_size(kCounterPayloadSize));
     impl_->next_inbound = seqnum_min;
     impl_->next_outbound = seqnum_min;
-
-    // RC#4: rebind to the session executor before releasing the mutex and returning.
-    // All state mutations above happen on file_io_executor; completion must resume
-    // on session_ex per [2d §4.5] D.1.
-    co_await asio::post(session_ex, asio::use_awaitable);
 
     // guard releases mutex here.
     co_return fixpp::core::expected_t<void>{};
