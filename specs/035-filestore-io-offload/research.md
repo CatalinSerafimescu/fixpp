@@ -44,18 +44,36 @@ non-deterministic to the compiler). So *any* real FileStore offload — by `co_s
 cross-thread op. **This is the same cost the shipped TLS cert-signing offload already pays and Gate A
 already accepted.**
 
-**`[const §XV.1]` disposition** (PASS, with rationale — Gate A to bless):
-- §XV.1 bans *per-message heap allocation on the **hot path***. The zero-alloc bar is **witnessed on
-  `MemoryStore::store`** (008 FR-033 "MemoryStore::store zero-allocator-calls") and the parse→fromApp
-  strand chain — the latency-sensitive in-memory paths. There is **no** 008 SC requiring
-  `FileStore::store` to perform zero global allocations.
-- `FileStore::store` under `commit_per_message` already performs a `pwrite` + `fdatasync` (~150 µs NVMe
-  floor, §6.6). One fixed ~48 B frame allocation (sub-µs, immediately freed, bounded O(1) per op — not
-  unbounded growth) is in the noise and is **not** the latency-spike/fragmentation pattern §XV.1 targets.
-- Precedent: the cross-thread TLS offload accepts the identical PMR-opaque frame alloc; FileStore is no
-  worse than the established, Gate-A-approved baseline.
-- The alloc gate for `FileStore::store` (mallocnesia / `check_alloc.py`) therefore asserts **bounded
-  O(1) per op** (one frame alloc), not zero — and asserts **zero on `MemoryStore`** (unchanged).
+**`[const §XV.1]` disposition** (PASS — the fix is a strict allocation **improvement**, grounded in
+verbatim primaries + an apples-to-apples probe, not a gloss):
+
+- **§XV.1 verbatim** (`constitution.md:209`): *"**Heap-allocate per message or per field on the hot
+  path.** Use zero-copy views; arena/PMR for the rare materialise cases."* — it is **hot-path-scoped**
+  (not categorical), and it prescribes arena/PMR as the remedy. **§XV.4 verbatim** (`:212`):
+  *"Synchronous disk I/O on every send … Async journal with background flush; sync-on-failover is
+  opt-in."* — a **separate** banned item, the one this feature fixes.
+- **Apples-to-apples probe** (`research/probes/cospawn_probe4.cpp`, 5000 warm iters, global `new`/op):
+  the **currently-shipped** `co_await asio::post(file_io_executor, use_awaitable)` + paired rebind that
+  `FileStore::store` uses today costs **4.001 global `new`/op** (two inert posts), and its body never
+  reaches a pool thread (`on_other = 0/5000` — the inert bug). The nested-`co_spawn` fix costs
+  **1.001 global `new`/op** and runs genuinely on the pool (`on_other = 5000/5000`).
+- **Precedent (concrete, not assumed)**: the merged-and-008-alloc-gate-passing `FileStore::store`
+  **already allocates ~4 global `new`/op**. The 008 seam-14 alloc gate (`tests/perf/test_store_alloc_guard.cpp`)
+  gates **zero** global heap on **`MemoryStore::store`** (Test 1) and on **`FileStore::retrieve`**
+  (Test 2) — there is **no** zero-global-alloc gate on `FileStore::store`, and the merged 4/op store
+  path passes. So §XV.1's "hot path" **operationally excludes `FileStore::store`** (else the merged gate
+  would already fail). The fix is therefore a **strict 4×→1× reduction**, not a regression — it *cannot*
+  be a §XV.1 violation it improves on.
+- **Idiom is project-blessed**: `src/transport/asio_tls_transport.hpp:45–51` records the D-18 rule
+  verbatim — *"To pin a coroutine body to a different executor, use nested `co_spawn(other_exec, fn,
+  use_awaitable)` … ALL Transport coroutines must be co_spawn'd on `exec_`."* The fix applies the same
+  blessed pattern to FileStore.
+- **Alloc gate for this feature**: assert `FileStore::store` global `new`/op **≤ the shipped baseline
+  (i.e., strictly fewer; target 1/op)** via the seam-14 harness, and keep **`MemoryStore` at zero**
+  (unchanged). The remaining 1 frame alloc/op is PMR-opaque (asio awaitable frame; `bind_allocator`
+  can't route it — probe v2/v3) and dominated by the `fdatasync` (~150 µs) already on the path; routing
+  it to `store_arena` would require a custom-promise coroutine or a persistent worker and is **not
+  pursued** (the fix already improves the merged baseline; Karpathy "simplest correct thing").
 
 **Fallback if Gate A rejects the per-op frame** (design sketch, not chosen): a **persistent per-store
 I/O worker** — spawn one long-lived coroutine on `file_io_executor` at `open_log()`, fed by a bounded
@@ -137,13 +155,16 @@ cannot physically overlap; the generation check covers the **logical** hazard th
 each `visitor.on_frame()` `co_await` (`:957`), during which a `reset()` can run and swap/truncate the log,
 making the snapshot's offsets stale.
 
-**Clean-failure error**: prefer reusing an existing variant over growing the C-ABI taxonomy. **OPEN /
-Phase-0→Gate-A check**: 008 FR-021 froze the error set at 10 variants for the C-ABI. Adding
-`store_reset_during_retrieve` may breach that freeze. Options, in preference order: (1) reuse
-`store_seqnum_gap` (semantically: the requested range is no longer retrievable) or the
-`store_visitor`/`store_invalid_range` family; (2) reuse `store_io_failure`; (3) only if no existing
-variant fits, add an internal (non-C-ABI-exported) variant. The exact choice is resolved against
-`include/fixpp/core/error.hpp` at design close and recorded in data-model.md. (Reachability note: under
+**Clean-failure error**: 008 FR-021 freezes the store error set at **exactly 10** `store_*` variants
+(`error.hpp:165–230`), so a new `store_reset_during_retrieve` is **out** (breaching FR-021 is itself a
+Gate-A blocker). **Decision: reuse `store_io_failure` (56)** — a `retrieve()` read whose live handle was
+swapped/truncated by a concurrent `reset()` is an I/O-state failure of the read. This deliberately does
+**NOT** reuse `store_seqnum_gap` (57, "retrieve over a never-persisted gap"): keeping the two distinct
+prevents a reset-race from masquerading as a logical gap and masking a real gap bug (advisor note). The
+discriminating test asserts the reset-race path yields `store_io_failure`, while the FR-017 logical-gap
+path keeps yielding `store_seqnum_gap`. (Gate-A-confirmable; if Gate A prefers, the alternative is to
+make the interleave structurally impossible — rejected here because it would force holding the mutex
+across the visitor `co_await`, violating FR-017.) (Reachability note: under
 the real session FSM a `reset()` mid-resend is not expected to occur — `reset()` happens at logon, not
 during a resend walk — so this guard is primarily defensive against the **test-double** driving the two
 concurrently; it is witnessed there, per the 008 scripted-test-double seam pattern, avoiding an

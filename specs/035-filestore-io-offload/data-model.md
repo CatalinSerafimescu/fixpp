@@ -53,7 +53,7 @@ offload_to(asio::any_io_executor pool_ex, Syscall fn);   // = co_await co_spawn(
 g0 := generation_            // sampled inside the mutex, with the index snapshot
 for each entry in snapshot:
     if generation_ != g0:    // a reset() ran on the strand during a prior on_frame() suspension
-        return <clean-failure error>   // never read against the swapped/truncated log
+        return store_io_failure   // (§5) never read against the swapped/truncated log; distinct from store_seqnum_gap
     pread(entry) on the strand
     co_await visitor.on_frame(...)      // suspension point — a reset() may interleave here
 ```
@@ -63,13 +63,15 @@ also runs on the strand, the read and the swap never physically overlap; the gua
 window opened by the `on_frame` suspension. (The existing FR-017 gap detection for concurrent `store()`
 index growth is retained and unaffected.)
 
-## 5. Error-variant decision (FR-021 freeze)
+## 5. Error-variant decision (FR-021 freeze) — PINNED
 
-The clean-failure value for a mid-walk `reset()` **reuses an existing `fixpp::core::error` variant** to
-respect the 008 FR-021 10-variant C-ABI freeze — first choice `store_seqnum_gap` (the snapshotted range is
-no longer retrievable), resolved against `include/fixpp/core/error.hpp` at design close. No new
-C-ABI-exported variant is added unless none fits (then an internal, non-exported variant). The chosen
-variant is pinned here and in contracts/ before `/speckit-tasks`.
+008 FR-021 freezes the store error set at **exactly 10** `store_*` variants (`error.hpp:165–230`); a new
+variant is out (breaching FR-021 is a Gate-A blocker). The mid-walk-`reset()` clean-failure value is
+**`store_io_failure` (56)** — a read whose live handle was swapped/truncated by a concurrent `reset()` is
+an I/O-state failure of the read. It is deliberately **not** `store_seqnum_gap` (57), so a reset-race
+cannot masquerade as a logical never-persisted gap (which would mask a real gap bug). The discriminating
+test asserts: reset-race → `store_io_failure`; FR-017 logical gap → `store_seqnum_gap`. No new
+C-ABI-exported variant; no group-mapping change. (Gate-A-confirmable.)
 
 ## 6. Unchanged data
 

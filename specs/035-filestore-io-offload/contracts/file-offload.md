@@ -59,8 +59,9 @@ NOT install a cancellation path that swallows `cancellation_type::total` and wed
   session strand (Clarifications). All `impl_` mutation is strand-confined ⇒ `impl_` is single-threaded
   ⇒ no data race on `impl_` or the live handle (TSan-clean, SC-005).
 - A `reset()` that interleaves a `retrieve()` walk (at an `on_frame` suspension) is detected via the
-  `generation_` guard (data-model §4): the walk fails cleanly with the reused error variant; it never
-  reads through a swapped/truncated handle.
+  `generation_` guard (data-model §4): the walk fails cleanly with `store_io_failure` (distinct from
+  `store_seqnum_gap`, so a reset-race can't masquerade as a logical gap — data-model §5); it never reads
+  through a swapped/truncated handle.
 
 **Witness**: real 4-thread `asio::thread_pool` `file_io_executor`; concurrent `store`/`retrieve`/`reset`
 under TSan + ASan; zero reports; the FR-017 gap-detection still holds; the generation guard fires under a
