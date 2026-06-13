@@ -81,7 +81,7 @@ unchanged.
 ```text
 specs/035-filestore-io-offload/
 ├── plan.md              # This file
-├── research.md          # Phase 0 — the 6 design decisions
+├── research.md          # Phase 0 — the 7 design decisions
 ├── data-model.md        # Phase 1 — FileStoreImpl delta + the offload-helper + generation-guard contract
 ├── quickstart.md        # Phase 1 — the thread-id offload witness + TSan concurrent-pool recipe
 ├── contracts/
@@ -114,10 +114,10 @@ tests/session/
 ├── test_file_store_offload_thread.cpp   # NEW — thread-id probe: syscall on pool thread ≠ strand thread (SC-001/002), per method;
 │                                        #   + single-thread-pool variant: syscall thread ≠ strand thread, no deadlock (spec edge case)
 ├── test_file_store_cancellation.cpp     # NEW — FileStore per-method cancellation contract (SC-004), the FileStore twin of the
-│                                        #   MemoryStore-only test_store_cancellation_contract.cpp; covers the THREE sub-cases:
-│                                        #   (a) cancel queued-not-picked-up on a stalled/saturated executor → store_cancelled, no syscall (checkpoint ii);
-│                                        #   (b) cancel after child pickup but before fdatasync returns → runs to durable completion;
-│                                        #   (c) co_spawn terminal-only default while Engine::stop() emits total — must not swallow total + wedge
+│                                        #   MemoryStore-only test_store_cancellation_contract.cpp; covers the TWO sub-cases (binary §6.1.4):
+│                                        #   (a) cancel at mutex-acquire (before the offload is issued) → store_cancelled, no syscall, 0 state change;
+│                                        #   (b) cancel mid-syscall (in-syscall hook) → runs to durable completion, NOT store_cancelled (unconditional catch);
+│                                        #   plus: co_spawn terminal-only default while Engine::stop() emits total — must not swallow total + wedge
 ├── test_file_store_concurrent_tsan.cpp  # NEW — real 4-thread pool: store/retrieve/reset overlap, TSan/ASan clean, mid-walk-reset detection (SC-005)
 └── test_store_shutdown_ordering.cpp     # EXTEND — in-flight offloaded FileStore store() AND flush_for_session_close (graceful
                                          #   close under commit_batched) at Engine::stop() (SC-007)
@@ -145,14 +145,14 @@ See [research.md](./research.md) — all seven decisions resolved, the allocatio
 1. **`co_spawn` allocation discipline (§XV.1) — THE Gate-A decision, resolved by the v0.2 amendment.** Per-call nested `co_spawn` costs **one ~48 B PMR-opaque frame/op** (cannot be arena-routed; HALO can't fire cross-thread) — the structural §XV.1↔§XV.4 tension that **forced the v0.2 constitution amendment** (`constitution.md:224`). The design at **1 frame/op** is **compliant by the §XV.1 v0.2 §XV.4-offload exemption** (≤1 bounded O(1) frame/op on the FileStore offload path), with `MemoryStore::store` zero-alloc preserved. The persistent-worker alternative was **empirically rejected** (measured ≈10/op — *worse*, not the assumed zero; the amendment removes any need for it).
 2. **The offload idiom** — nested `co_spawn(file_io_executor, fn, use_awaitable)`; **probe-confirmed** body-on-pool + resume-on-strand (5000/5000). The file-local helper captures only POD syscall args.
 3. **Strand-confined mutation boundary** — only the `OsFile` syscall runs in the nested lambda; every `impl_->…` mutation (incl. reset's `file = std::move`, `:1149`) stays outer on the strand.
-4. **Cancellation** (FR-004 / SC-006) — **two** pre-linearisation checkpoints: (i) the `async_mutex` acquire, and (ii) child pickup on the `file_io_executor` before the syscall begins (cancel-after-enqueue-before-pickup → `store_cancelled`, no durable effect — 2e §4.3.2). Past the syscall start it runs to durable completion uninterruptibly (linearisation unchanged); defensive `operation_aborted` try/catch on the outer await. Deterministic stalled-executor test for sub-case (ii).
+4. **Cancellation** (FR-004 / SC-006) — the **binary** §6.1.4 contract: a **single** pre-linearisation observation point, the `async_mutex` acquire (cancel there → `store_cancelled`, no syscall, no state change). Once the mutex is held and the child is `co_spawn`'d, the syscall runs to durable completion uninterruptibly (linearisation unchanged); a post-linearisation `operation_aborted` at the outer await is caught and **unconditionally** returned as the durable result (no false-cancel on a persisted frame). No second checkpoint / no bespoke reaper.
 5. **Mid-walk-`reset()` detection** — a `FileStoreImpl` generation counter bumped by `reset()`, snapshotted + re-checked by `retrieve()`; clean-failure **reuses `store_io_failure`** (no new variant — FR-021 10-variant freeze preserved).
 6. **Teardown ordering** (FR-007) — nested `co_spawn` is `use_awaitable` (joined, NOT detached); `Engine::stop()` drain proves Session-reachable pool work completes before return; the pool is app-owned (caller obligation: executor outlives outstanding store awaitables; misuse note for direct non-Session FileStore use). Also: the paired rebind posts are **removed** by the restructure (the `co_await` completion IS the resume-to-strand — no separate rebind); the leading pump-break posts (`:787/991/1043`) are **retained, load-bearing** (they keep method entry on the strand before mutex-acquire — Decision 2's precondition; orthogonal to the offload frame).
 7. **`flush_for_session_close` datasync** (Decision 7) — the blocking `datasync` (`:1252`) on the close strand is offloaded via the same nested-`co_spawn`; failure still maps to `store_io_failure`. The shutdown-ordering seam is extended to graceful close under `commit_batched`.
 
 ## Phase 1 — Design & Contracts
 
-- [data-model.md](./data-model.md) — the `FileStoreImpl` store-generation field; the offload-helper signature; the per-method linearisation points (unchanged from §6.1.4: store@`fdatasync`, next_seqnum@counter-pwrite, reset@dir-`fsync`/`MoveFileExW`); the retrieve generation-guard invariant.
+- [data-model.md](./data-model.md) — the `FileStoreImpl` store-generation field; the offload-helper signature; the per-method linearisation points (unchanged from §6.1.4: store@`fdatasync`, next_seqnum@counter-record `pwrite` + `datasync` (`:1024`), reset@dir-`fsync`/`MoveFileExW`); the retrieve generation-guard invariant.
 - [contracts/file-offload.md](./contracts/file-offload.md) — the nested-`co_spawn` offload contract (pre/post: syscall-on-pool, mutation-on-strand, mutex-held-by-outer), the cancellation-result contract per method, and the teardown drain-before-join contract.
 - [quickstart.md](./quickstart.md) — the thread-id witness recipe (real pool, probe captured inside the syscall window) + the TSan concurrent-pool recipe.
 
@@ -161,7 +161,8 @@ See [research.md](./research.md) — all seven decisions resolved, the allocatio
 No constitution violations to justify: the feature *removes* a §XV.4 violation, and its one per-op frame
 is **compliant by the §XV.1 v0.2 §XV.4-offload exemption** (the structural §XV.1↔§XV.4 tension was resolved
 at the constitutional layer, not carved out in this bundle). The two non-trivial choices — (a) the
-cancellation try/catch + second checkpoint to preserve durable success, and (b) the store-generation guard
+unconditional `operation_aborted`→durable try/catch to preserve durable success on a post-linearisation
+abort, and (b) the store-generation guard
 for mid-walk-reset — are the minimum needed for correctness under a *real* offload; both are forced by
 making the dormant concurrency surface live, not added speculatively. The `co_spawn`-allocation question
 (Phase-0 decision 1) is settled against the §XV.1 v0.2 exemption ceiling (≤1 O(1) frame/op).
@@ -171,3 +172,4 @@ making the dormant concurrency surface live, not added speculatively. The `co_sp
 | Round | Outcome |
 |---|---|
 | Round 1 (2026-06-13) | Codex P1=3/P2=4/P3=1; Opus post-judging P1=1/P2=7/P3=2; structural §XV.1 P1 resolved by constitution v0.2 amendment (§XV.1 §XV.4-offload exemption); P2s addressed in this convergence rewrite. Reviews: `research/reviews/{codex,opus}_035-filestore-io-offload_gate_a*.md`. |
+| Round 2 (2026-06-13) | Codex P1=0/P2=3/P3=2; Opus post-judging P1=0/P2=4/P3=3 (§XV.1 P1 confirmed resolved). Rewrite #2 applies the **binary-cancellation simplification** (§6.1.4 single mutex-acquire checkpoint; drop the two-checkpoint model; retain + make the `operation_aborted`→durable try/catch unconditional; pin `co_spawn` as final no-reaper shape) + the §6.1.4/§6.2.1 per-method re-derivation (`next_seqnum` linearisation = counter-record `pwrite` + `datasync` `:1024`; `flush_for_session_close` pulled out of C1's mutex precondition and C3's cancellation table — non-cancellable, no-mutex, `store_io_failure`-only) + US3 prose → logical stale-snapshot. Reviews: `research/reviews/{codex,opus}_035-filestore-io-offload_gate_a_2*.md`. |

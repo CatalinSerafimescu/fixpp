@@ -11,8 +11,12 @@ implementation must satisfy and the seams test it. It realizes the approved `.sp
 For each FileStore method that performs blocking disk I/O (`store`, `next_seqnum(_, true)`, `reset`, and
 `flush_for_session_close` — the graceful-close `datasync`, `file_store.cpp:1252`):
 
-- **Pre**: invoked on the session strand; the writer mutex (`impl_->mutex_`) is held by the outer
-  coroutine for the duration of the offloaded op.
+- **Pre** (`store` / `next_seqnum(_, true)` / `reset`): invoked on the session strand; the writer mutex
+  (`impl_->mutex_`) is held by the outer coroutine for the duration of the offloaded op.
+- **Pre** (`flush_for_session_close`): invoked on the session **close** strand at graceful close,
+  **after** ordinary store awaitables drain, **outside** the phase-1 cancellable in-flight set;
+  **no writer mutex**; **never** surfaces `store_cancelled` (only `store_io_failure` on a flush error) —
+  the graceful-close durability seam per 2e §6.2.1:1025 (`file_store.cpp:1239–1257` has no `async_lock()`).
 - **Behaviour**: the blocking syscall(s) execute on `impl_->cfg.file_io_executor`; the awaitable resumes
   on the session strand.
 - **Post**: the syscall's effect is realized on disk; every `impl_` field mutation happened on the
@@ -35,31 +39,42 @@ algorithm are byte-unchanged.
 
 ## C3 — Cancellation contract per method (FR-004 / SC-006 / §6.1.4)
 
-**Two** pre-linearisation cancellation checkpoints (not one): (i) the `async_mutex` acquire, and (ii)
-child pickup on the `file_io_executor` **before the syscall begins**.
+Per the authoritative §6.1.4 (`:990–1006`) the per-method contract is **binary** — there is **one**
+cancellation observation point, the `async_mutex` acquire (on the strand, before any `co_spawn` is
+issued). It governs `store`, `next_seqnum(_, true)`, and `reset` (each mutex-guarded). It does **not**
+govern `flush_for_session_close` (see the carve-out below).
 
 | When cancellation wins | Result | State |
 |---|---|---|
-| **(i)** at mutex-acquire (no `co_spawn` issued) | `store_cancelled` | no change |
-| **(ii)** after the child is enqueued but **before** the pool starts the syscall (no linearisation has occurred) | `store_cancelled` | **no durable effect** |
-| **after** the syscall has begun (runs to completion uninterruptibly) | normal success | durable |
+| at/before mutex-acquire (no `co_spawn` issued, no syscall) | `store_cancelled` | no change |
+| after the mutex is held and the child is issued (syscall runs to durable completion, uninterruptibly) | normal success | durable |
 
-The offloaded syscall is not an asio suspension point, so once begun it cannot be interrupted mid-call; a
-durable success is never lost. Checkpoint (ii) matches 2e §4.3.2 (*"cancellation aborts pending I/O at the
-next `file_io_executor` scheduling point"*) and the `cancellable_dispatch` three-case reaper
-(reap-before-pickup / reaped-after-pickup-pre-syscall / ran-to-completion). If the runtime, on an
-already-signalled outer slot, runs the child and surfaces `operation_aborted` post-linearisation, the
-implementation MUST catch it and return the durable result
-(`[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]`); the reaper distinguishes a *pre-syscall*
-abort (→ `store_cancelled`) from a *post-linearisation* one (→ durable) by whether the syscall ran. The
-nested `co_spawn` MUST NOT install a cancellation path that swallows `cancellation_type::total` and wedges
-teardown (`[[feedback_asio_cospawn_total_cancellation_default]]`).
+Once the mutex is held and the child is `co_spawn`'d, the offloaded syscall is not an asio suspension
+point, so it cannot be interrupted mid-call: it runs to **durable completion**, and cancellation is
+observed (if at all) only when the outer `co_await` resumes on the strand, linearised at the durable
+transition — never a torn/partial state, and a durable success is never lost (the §XV.15-safe direction:
+queued-then-run-to-completion leaves the counter and FSM consistent and a later peer `ResendRequest`
+honourable).
+
+**Retained — `operation_aborted`→durable try/catch, simplified to UNCONDITIONAL**
+(`[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]`): since the only observation point is the
+mutex-acquire, any `operation_aborted` surfaced at the *outer* await necessarily post-dates linearisation
+(the syscall is non-interruptible and has already run to durable completion). The implementation MUST
+**unconditionally** catch it and return the durable success — it MUST NOT return `store_cancelled` for a
+frame that is on disk (a false-cancel on durable state is the `[const §XV.15]`-adjacent silent-loss
+class). The nested `co_spawn` MUST NOT install a cancellation path that swallows `cancellation_type::total`
+and wedges teardown (`[[feedback_asio_cospawn_total_cancellation_default]]`).
+
+**Carve-out — `flush_for_session_close` is NOT in this cancellation table.** Per 2e §6.2.1:1025 it is the
+graceful-close durability seam: it runs to completion outside the cancellable in-flight set and **never**
+surfaces `store_cancelled` (a flush error maps only to `store_io_failure`). It is offloaded (the offload
+helper still applies) but it is **not cancellable**.
 
 **Witness**: the FileStore per-method cancellation seam (the existing
-`test_store_cancellation_contract.cpp` is MemoryStore-only — `:44–52`) covering all three sub-cases: fire
-at mutex-acquire → `store_cancelled` + 0 state change; fire **after enqueue but before pickup on a
-stalled/saturated executor** → `store_cancelled` + 0 state change, no syscall ran (deterministic
-checkpoint-(ii) test); fire after the syscall began → normal + durable. Mutation-proven discriminating.
+`test_store_cancellation_contract.cpp` is MemoryStore-only — `:44–52`) covering both sub-cases: fire
+at mutex-acquire → `store_cancelled` + 0 state change; fire while the syscall is mid-flight (a
+deterministic in-syscall hook) → normal + durable, **not** `store_cancelled` (proves a durable success is
+never lost, exercising the retained unconditional catch). Mutation-proven discriminating.
 
 ## C4 — Concurrency contract (FR-005 / FR-006 / I-03)
 

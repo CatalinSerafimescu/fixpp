@@ -45,18 +45,16 @@ syscalls on a non-strand thread and 5000/5000 resumes back on the strand.
 
 ## Recipe C — cancellation contract (SC-004)
 
-For each of `store`, `next_seqnum(_, true)`, `reset`, exercise the **three** sub-cases (the FileStore twin
+For each of `store`, `next_seqnum(_, true)`, `reset`, exercise the **two** sub-cases (the FileStore twin
 of the MemoryStore-only `test_store_cancellation_contract.cpp`):
 
-1. **Checkpoint (i) — at mutex-acquire**: fire the slot before the method acquires the writer mutex →
+1. **At mutex-acquire**: fire the slot before the method acquires the writer mutex →
    assert `store_cancelled` + 0 state change (no `co_spawn` issued, no syscall).
-2. **Checkpoint (ii) — queued-not-picked-up** (the new hard case): use a **stalled / saturated**
-   `file_io_executor` so the child is enqueued but not yet picked up; fire `cancellation_type::total`
-   before pickup → assert **no syscall ran**, **0 state change**, result `store_cancelled`. Requires a
-   deterministic hook for the child-not-picked-up state.
-3. **Child-in-syscall / after-linearisation**: let the child pickup and enter the syscall (a deterministic
-   child-entered-syscall hook), fire after → assert normal completion + durable state (the syscall is not
-   interruptible mid-call; a durable success is never lost).
+2. **Mid-syscall / after-linearisation** (the unconditional-durable witness): let the child pick up and
+   enter the syscall, then fire cancellation **while the syscall is mid-flight** (a deterministic
+   in-syscall hook) → assert the op completes **durable, NOT `store_cancelled`** (the syscall is not
+   interruptible mid-call; a durable success is never lost — this exercises the retained unconditional
+   `operation_aborted`→durable catch).
 
 Also assert the `co_spawn` terminal-only default does **not** swallow `total` and wedge while
 `Engine::stop()` emits `total` (`[[feedback_asio_cospawn_total_cancellation_default]]`).

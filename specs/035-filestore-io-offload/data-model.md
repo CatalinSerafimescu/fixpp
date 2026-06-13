@@ -31,6 +31,12 @@ asio::awaitable<std::invoke_result_t<Syscall>>
 offload_to(asio::any_io_executor pool_ex, Syscall fn);   // = co_await co_spawn(pool_ex, run(fn), use_awaitable)
 ```
 
+This plain `co_spawn(pool_ex, run(fn), use_awaitable)` is the **final, intended shape**: it deliberately
+carries **no** cancellation path beyond the outer `co_await` — no slot/flag reaper, no bespoke
+cross-executor cancellation machinery. `co_spawn` defaults to terminal-only cancellation and filters
+`cancellation_type::total`; that is benign-by-design here because teardown drains by **awaiting completion**
+(Decision 5), not by cancelling the in-flight syscall. An implementer MUST NOT bolt a reaper onto it.
+
 **Invariants**:
 - `Syscall fn` is a small callable capturing **only by value** the raw syscall arguments (the `OsFile`
   handle/fd, an offset, a `std::span` into an already-populated buffer). It touches **no** `impl_` field.
@@ -43,10 +49,10 @@ offload_to(asio::any_io_executor pool_ex, Syscall fn);   // = co_await co_spawn(
 | Method | On the strand (outer coroutine) | On `file_io_executor` (nested lambda) | Linearisation point (unchanged) |
 |---|---|---|---|
 | `store` | acquire mutex (`:794`); seqnum check; deep-copy → `store_scratch_` (`:820`); counter incr (`:835–839`); `write_pos` update (`:846`); release mutex (`:871`) | `write_frame` `pwrite` (+pad); counter-record `pwrite`; `datasync` (`commit_per_message`) | `fdatasync` return (`:850`) |
-| `next_seqnum(_, true)` | acquire mutex (`:998`); overflow check; counter incr (`:1012`); `write_pos` update (`:1023`); release (`:1032`) | counter-record `pwrite` (`:1018`); `datasync` (`:1024`) | counter `pwrite` (`:1018`) |
+| `next_seqnum(_, true)` | acquire mutex (`:998`); overflow check; counter incr (`:1012`); `write_pos` update (`:1023`); release (`:1032`) | counter-record `pwrite` (`:1018`); `datasync` (`:1024`) | counter-record `pwrite` + `datasync` (`:1024`) |
 | `reset` | acquire mutex (`:1050`); **`impl_->file = std::move(new_file)` (`:1149`)**; **`generation_++`**; index clear + counter reset (`:1205–1210`); release (`:1217`) | tmp open; `initialise_fresh` (sentinel+counter `pwrite` + `fdatasync`); close tmp; `rename` (`:1108`); parent-dir `fsync` (`:1120–1136`) [Win: `MoveFileExW`] — all against a **local** `OsFile`, not `impl_->file` | parent-dir `fsync` (`:1129`) / `MoveFileExW` (`:1180`) |
 | `retrieve` | acquire mutex (`:908`); index snapshot + **`generation_` snapshot**; release (`:933`); **`pread` per frame (stays on strand)**; **re-check `generation_`**; `visitor.on_frame` `co_await` (`:957`) | — (read path not offloaded, per Clarifications; the `:942` inert post is **removed**) | per-frame visitor resume (read-only; no durable transition) |
-| `flush_for_session_close` | `open_ok` check (`:1241`); error-map/return | `datasync` (`:1252`) | `datasync` return |
+| `flush_for_session_close` | `open_ok` check (`:1241`); error-map/return | `datasync` (`:1252`) | `datasync` return — **offloaded but not cancellable**: graceful-close seam, **no writer mutex**, **never** `store_cancelled` (only `store_io_failure`); outside the C3 cancellation table (2e §6.2.1) |
 
 ## 4. The retrieve generation-guard invariant (FR-006 / I-03)
 

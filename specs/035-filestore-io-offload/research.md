@@ -101,39 +101,39 @@ Gate B as a constitutional violation a doc cannot bless.
 
 ## Decision 2 — Cancellation under a non-interruptible syscall (FR-004 / SC-006)
 
-**Decision**: There are **two** cancellation observation points before linearisation, not one. A real
-cross-thread offload re-opens a window the inert post hid: cancellation can arrive **after** the writer
-mutex is held and the child is enqueued but **before** the pool picks the child up and the syscall begins
-— at which point no linearisation has occurred, so the result MUST be `store_cancelled` with **no state
-change**. The contract is therefore:
+**Decision**: Per the authoritative §6.1.4 (`:990–1006`) the per-method cancellation contract is **binary**,
+with a **single** pre-linearisation observation point — the `async_mutex` acquire. (§4.3.2:690's "abort
+pending I/O at the next `file_io_executor` scheduling point" is a descriptive bullet in an argument list,
+not a per-method result contract; it is satisfied by treating the mutex-acquire — on the strand, before
+any `co_spawn` is issued — as that scheduling point: cancel observed there ⇒ no child issued ⇒ no I/O
+pending ⇒ nothing to abort.) The contract is therefore:
 
-1. **Checkpoint (i) — `async_mutex` acquire** (`file_store.cpp:794` store, `:998` next_seqnum, `:1050`
+1. **At the `async_mutex` acquire** (`file_store.cpp:794` store, `:998` next_seqnum, `:1050`
    reset; `async_lock()` returns `unexpected{sync_lock_aborted}` when the slot is signalled before
    acquisition). Cancellation observed here ⇒ `store_cancelled`, no `co_spawn` issued, no syscall, no
    state change.
-2. **Checkpoint (ii) — child pickup on the `file_io_executor`, before the syscall begins.** Cancellation
-   observed here (slot signalled after the child is enqueued but before the pool starts the syscall) ⇒
-   `store_cancelled`, **no durable effect** — the syscall never ran. This matches 2e §4.3.2
-   (*"cancellation aborts pending I/O at the next `file_io_executor` scheduling point"*) and the
-   `cancellable_dispatch` three-case reaper shape (reap-before-pickup / reaped-after-pickup-pre-syscall /
-   ran-to-completion).
+2. **After the mutex is held and the child is `co_spawn`'d**, the syscall runs to **durable completion**
+   uninterruptibly (a `pwrite`/`fdatasync` on a worker thread is not an asio suspension point);
+   cancellation is observed (if at all) only at the outer resume, linearised at the durable transition ⇒
+   normal success, durable. This queued-then-run-to-completion direction is the **safe**,
+   §XV.15-conformant one: the frame is durable-but-not-yet-transmitted (the FSM has not called
+   `transport::async_write`), so the counter and FSM stay consistent and a later peer `ResendRequest` is
+   honourable — no silent loss.
 
-Once the syscall **has begun**, it runs to **durable completion uninterruptibly** (a `pwrite`/`fdatasync`
-on a worker thread is not an asio suspension point); cancellation is then observed, if at all, only when
-the outer await resumes on the strand, linearised at the durable transition — **never** a torn or partial
-durable state, and a durable success is **never** lost. The linearisation point itself is unchanged
-(`fdatasync` return / counter-`pwrite` / dir-`fsync`); only the *number of pre-linearisation checkpoints*
-changes (1 → 2).
+A bespoke cross-executor reaper is **not** built: the project's `cancellable_dispatch` is
+`session_executor`-bound (it reaps after a single `dispatch(bind_executor(...))` hop and pulls its arena
+via `session_arena_of`) and does **not** drop into FileStore's strand→pool→strand round-trip against a bare
+`any_io_executor` pool; and the authoritative §6.1.4 contract never asked for a second checkpoint. The
+linearisation point itself is unchanged (`fdatasync` return / counter-record `pwrite` + `datasync` /
+dir-`fsync`).
 
-If the runtime, on an already-signalled outer slot, runs the child and surfaces `operation_aborted`
-post-linearisation rather than reaping it pre-syscall, the thrown `operation_aborted` MUST be caught and
-converted to the durable result (the `[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]`
-try/catch pattern). This defensive catch sits at the outer `co_await` and never converts a *pre-syscall*
-abort (checkpoint (ii)) into a false durable success — the reaper distinguishes the two by whether the
-syscall ran. A **deterministic** test for the checkpoint-(ii) "cancel-after-enqueue-before-pickup"
-sub-case is required: a **stalled/saturated `file_io_executor`** (child enqueued but not yet picked up),
-fire `total` cancellation, assert no syscall ran, no state change, result `store_cancelled` (quickstart
-Recipe C).
+If the runtime, on an already-signalled outer slot, runs the child and surfaces `operation_aborted` at the
+outer await, the thrown `operation_aborted` MUST be caught and **unconditionally** converted to the durable
+result (the `[[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]` try/catch pattern). Because the
+only observation point is the mutex-acquire, any `operation_aborted` seen at the outer await necessarily
+post-dates linearisation (the syscall is non-interruptible and has already run to durable completion), so
+the catch is **unconditional** — it MUST NOT return `store_cancelled` for a frame that is already on disk
+(a false-cancel on durable state is the `[const §XV.15]`-adjacent silent-loss class).
 
 **`co_spawn` cancellation-type trap**: `asio::co_spawn` defaults to **terminal-only** cancellation and
 silently filters `cancellation_type::total` (`[[feedback_asio_cospawn_total_cancellation_default]]`).
@@ -255,6 +255,12 @@ the same nested-`co_spawn` mechanism** (only the raw `datasync()` runs in the ne
 set is **store, next_seqnum, reset, flush_for_session_close (4 sites)**; `retrieve`'s read stays on the
 strand (Decision 4).
 
+**It is offloaded but NOT cancellable.** Per 2e §6.2.1:1025 `flush_for_session_close()` is the
+graceful-close durability seam: it runs to completion **outside** the cancellable in-flight set, holds
+**no writer mutex**, and **never** surfaces `store_cancelled` (only `store_io_failure` on a flush error).
+It is therefore **pulled out of the C3 cancellation table entirely** — it gets the genuine offload helper
+but is not in the per-method cancellation contract.
+
 Taxonomy is clean: the existing failure mapping already returns `store_io_failure` on a failed
 `datasync()` (and `error.hpp:190`'s comment enumerates `flush_for_session_close()` faults), so no new error
 variant is introduced — the same variant the mid-walk-reset reuse pins (Decision 4). The shutdown-ordering
@@ -272,6 +278,6 @@ before `Engine::stop()` returns.
   snapshots-under-mutex-then-releases (FR-017). `[const §XI.5]` / §XV.9 preserved.
 - The public `MessageStore` / `retrieve_visitor` / factory signatures, `EngineConfig`/`FileStore::Config`
   fields, the wire, and `MemoryStore` — all unchanged (FR-009).
-- The per-method linearisation points (§6.1.4): store@`fdatasync` return, next_seqnum@counter-`pwrite`,
-  reset@parent-dir-`fsync`/`MoveFileExW`. The offload moves *where* the syscall runs, not *when* it
-  linearises.
+- The per-method linearisation points (§6.1.4): store@`fdatasync` return,
+  next_seqnum@counter-record `pwrite` + `datasync` (`:1024`), reset@parent-dir-`fsync`/`MoveFileExW`. The
+  offload moves *where* the syscall runs, not *when* it linearises.
