@@ -67,17 +67,18 @@ blocking syscall on a worker thread is not an asio suspension point and cannot b
 mid-call). Both are required for the implementation to actually match the approved design.
 
 **Independent Test**: For each of `store`, `next_seqnum(_, true)`, `reset`: (a) assert the blocking
-syscall runs on a pool thread; (b) fire the cancellation slot **before** the linearisation point and
-assert the awaitable completes with `store_cancelled` and zero state change; (c) fire **after** the
-linearisation point and assert normal completion with the state durable. These are the FileStore
-specialisations of the existing per-method cancellation seam (which today exercises `MemoryStore`).
+syscall runs on a pool thread; (b) fire the cancellation slot **at the `async_mutex` acquire, before the
+offload is issued** and assert the awaitable completes with `store_cancelled`, no syscall runs, and zero
+state change; (c) fire **after the offload is issued / mid-syscall** and assert normal completion with the
+state durable, never `store_cancelled`. These are the FileStore specialisations of the existing per-method
+cancellation seam (which today exercises `MemoryStore`).
 
 **Acceptance Scenarios**:
 
 1. **Given** a `FileStore`, **When** `next_seqnum(outbound, true)` or `reset()` is invoked, **Then** its blocking disk work runs on the `file_io_executor` and the completion rebinds to the session strand.
 2. **Given** a `store()` cancelled **before the offload is issued** (at the `async_mutex` acquire, no `co_spawn` issued), **Then** the awaitable completes with `store_cancelled`, no syscall runs, and there is no durable record.
 3. **Given** a `store()` whose offload has been issued (the mutex is held and the syscall is running on the pool), **When** cancellation fires, **Then** the syscall runs to durable completion uninterruptibly and the awaitable completes with normal success and a durable record (cancellation observed at resume is converted to the durable result, never `store_cancelled`).
-4. **Given** `reset()` cancelled before its `rename` linearisation point, **Then** no state change occurs and the awaitable completes with `store_cancelled`; cancelled after, the reset is durable.
+4. **Given** `reset()` cancelled **at the `async_mutex` acquire (before the offload is issued, no `co_spawn`)**, **Then** no syscall runs, there is no state change, and the awaitable completes with `store_cancelled`. **Given** `reset()`'s offload has been issued (the mutex is held and the `rename`/dir-`fsync` chain is running on the pool), **When** cancellation fires, **Then** the chain runs to durable completion, the reset is durable, and the awaitable completes with normal success — never `store_cancelled`.
 
 ### User Story 3 - Concurrent store / retrieve / reset on a real pool cannot corrupt the log or tear the file handle (Priority: P2)
 
@@ -171,7 +172,7 @@ surfaces are unchanged; assert no public header signature in the store interface
 - **SC-001**: For `FileStore::store` under `commit_per_message`, the blocking `pwrite`/`fdatasync` is observed executing on a `file_io_executor` pool thread distinct from the session-strand thread (thread-id probe captured inside the syscall window), in **100%** of stores — i.e., the session strand performs **zero** disk syscalls on the send path.
 - **SC-002**: With a durable write in flight on the pool, an independent unit of work queued on the session strand completes **before** the in-flight `fdatasync` returns (the strand is demonstrably not blocked for the flush duration), in a deterministic instrumented test.
 - **SC-003**: Durability is preserved — a `FileStore` host SIGKILL'd after N successful `commit_per_message` `store()` calls returns all N frames on restart with **0%** loss (008 SC-002 continues to pass unchanged).
-- **SC-004**: The per-method cancellation-result contract holds for `FileStore`: for `store`, `next_seqnum(_, true)`, and `reset`, cancellation before the linearisation point yields `store_cancelled` with **0** state change and cancellation after yields normal completion with durable state (008 SC-006 extended to FileStore, not only MemoryStore).
+- **SC-004**: The per-method cancellation-result contract holds for `FileStore`: for `store`, `next_seqnum(_, true)`, and `reset`, cancellation **at the `async_mutex` acquire (before the offload is issued)** yields `store_cancelled` with **0** state change, and cancellation **after the offload is issued (mid-syscall)** yields normal completion with durable state, never `store_cancelled` (008 SC-006 extended to FileStore, not only MemoryStore).
 - **SC-005**: Under TSan + ASan, concurrent `store` / `retrieve` / `reset` on one `FileStore` over a real multi-thread `file_io_executor` produces **zero** TSan reports on the store's internal state and the live log handle, and **zero** torn reads, across the full seam run.
 - **SC-006**: `MemoryStore` behaviour and all wire/error/config/public-signature surfaces are **byte-for-byte / signature-for-signature identical** to pre-feature (the existing 008 MemoryStore and interface seams pass unchanged; no public store signature diff).
 - **SC-007**: Engine teardown with in-flight offloaded I/O (a `store()` and a graceful-close `flush_for_session_close` under `commit_batched`) produces **no** UAF and **no** use-of-joined-pool under ASan/TSan: `Engine::stop()` returns only after every Session-reachable offload completes, verified by a shutdown-ordering seam (the app-owned pool is then safe to join).
