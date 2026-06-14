@@ -4850,8 +4850,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq, cfg_.sender_comp_id,
             cfg_.target_comp_id, new_seqno, cfg_.begin_string, st52_sr.value);
         if (!gf) {
-            co_return true;
-        }  // build failure treated as no-op
+            // Build failure (buffer too small for configured CompIDs) — fail closed.
+            // Mirrors build_logon fail-closed precedent (session.cpp:811-821): an outbound
+            // admin frame that cannot be constructed must NOT report success. Silent
+            // success here would leave the peer's ResendRequest silently unfilled (data-loss).
+            co_return false;
+        }
         // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
         if (!fire_to_admin_(*gf)) {
