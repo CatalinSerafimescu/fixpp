@@ -27,7 +27,7 @@ The loop copies every stored field except a skip set, then unconditionally appen
 | Aspect | Before (today) | After (037) |
 |--------|----------------|-------------|
 | Skip set in copy loop | `{9, 10}` | `{9, 10, 43, 122}` |
-| `52 → orig_sending_time` capture | before append (inside loop) | **unchanged** — stays before the widened skip; `52` is not in the skip set |
+| `52 → orig_sending_time` capture | separate `if (tag==52)` during normal iteration | **unchanged** — `52` is not in the (widened) skip set, so the capture is unaffected; it already runs before the appended `122` |
 | Unconditional append of `43=Y` | ✓ | ✓ (unchanged) |
 | Unconditional append of `122 = captured 52` | ✓ | ✓ (unchanged) |
 | **Default config (`allow_pos_dup=false`)** stored frame | clean (send-path strips caller 43/122) → output has one 43 + one 122 | **byte-identical** (skip set never matches → no behavior change) |

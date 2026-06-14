@@ -41,23 +41,28 @@ Assert: build_replay_frame output == the pre-037 expected bytes, byte-for-byte. 
 
 DEFECT 1 changes every fixpp-emitted GapFill. The in-process witness is `tests/interop/happy/hp_fix44_recovery_outbound_answer_test.cpp` (fixpp emits the GapFill, `49=FIXPP_INIT`), golden-compared.
 
-**Required profile switch (the load-bearing golden change):** that test compares the GapFill under the `{52,10}` admin profile (`golden_diff.hpp:54`). The new `122` *equals* `52` (a live wall-clock timestamp) → comparing it verbatim is non-deterministic. Switch the GapFill comparison to the **already-existing `{52,10,122}` profile** (`golden_diff.hpp:60-76`), then re-bake the golden. `43=Y` is deterministic and stays compared verbatim. The synthetic `123`-mutation gate-bite cells (`:95-107`) remain valid.
+**Required profile switch (the load-bearing golden change):** that test compares the GapFill under `admin_profile_excluded_tags()` (`{52,10}`, `golden_diff.hpp:52`). The new `122` *equals* `52` (a live wall-clock timestamp) → comparing it verbatim is non-deterministic. Switch the GapFill comparison to the **already-existing `poss_dup_profile_excluded_tags()`** (`{52,10,122}`, `golden_diff.hpp:69`), then re-bake the golden. `43=Y` is deterministic and stays compared verbatim. The synthetic `123`-mutation gate-bite cells (`:95-107`) remain valid.
 
 ```
-profile:    GapFill golden compare  {52,10}  →  {52,10,122}   (profile already exists in golden_diff.hpp)
-re-bake:    hp_fix44_recovery_outbound_answer golden(s); diff must show ONLY the added 43=Y/122 on the 35=4 frame
-candidates: also inspect phase-9-harness/golden/*.fix containing a fixpp-emitted 35=4 (sender 49=<our CompID>):
+profile:    GapFill golden compare  admin_profile_excluded_tags() {52,10}
+            → poss_dup_profile_excluded_tags() {52,10,122}   (symbol already exists in golden_diff.hpp:69)
+re-bake:    the LIBRARY-LOCAL golden for hp_fix44_recovery_outbound_answer, under
+            library/tests/interop/happy/golden/  (the test resolves golden_ref = "happy/golden/" + cell_id + ".fix",
+            test line :148) — NOT the phase-9-harness/ tree.
+            diff must show ONLY the added 43=Y/122 on the 35=4 frame.
+candidates: SEPARATELY, the live-cell goldens live in the sibling phase-9-harness/golden/ tree (a sibling of
+            library/, NOT under the library root). Inspect *.fix there for a fixpp-emitted 35=4 (sender 49=<our CompID>):
             HP-{QFcpp,QFj}-init-fix44-disconnect-reconnect-noreset, RL-{QFcpp,QFj}-init-fix44-reset-on-logon,
             030 RR-* received-reset / resend goldens; re-bake only the fixpp-emitted ones (received GapFills unchanged).
 ```
 
 ## Live re-run (SC-004)
 
-Re-run the QFcpp + QFJ resend / received-reset interop cells (both roles) and confirm the peers ACCEPT the now-`43=Y` GapFill and the session reaches steady state (no reject, no disconnect). Both engines emit this frame themselves, so acceptance is expected — but it is verified, not assumed.
+Re-run the **QuickFIX-J** in-process recovery-outbound cell (`hp_fix44_recovery_outbound_answer`, both roles — it `GTEST_SKIP()`s non-QFJ counterparties at `:166-171`) plus any live QFJ resend / received-reset cell, and confirm the peer ACCEPTS the now-`43=Y` GapFill and the session reaches steady state (no reject, no disconnect). QFJ emits this frame itself, so acceptance is expected — but it is verified, not assumed. The **QuickFIX-cpp arm is waived** (L-021-3 precedent): QFcpp's resend choreography cannot be induced into the fixpp-emitted-GapFill path on command, and the in-process witness skips it; byte-level GapFill conformance for QFcpp is covered by the unit cells + the re-baked golden.
 
 ```
-cd phase-9-harness && <run_interop_cell.py for the resend/received-reset cells, both engines, both roles>
-expect: green; engine-log-seam golden compare matches the re-baked goldens.
+cd phase-9-harness && <run_interop_cell.py for the QFJ resend/received-reset cells, both roles>
+expect: green; engine-log-seam golden compare matches the re-baked goldens. (QFcpp arm: n/a, waived per L-021-3.)
 ```
 
 ## Sanitizers / coverage (Article IX §1)
@@ -73,6 +78,6 @@ No alloc gate needed beyond the existing builder gates — the Writer is null_me
 
 - Cells 1–3 pass; the honesty asserts (C-4) are present and discriminating.
 - Re-baked goldens diff shows ONLY the added GapFill 43/122.
-- Live QFcpp/QFJ resend cells green, both roles.
+- Live QFJ resend cell green, both roles (QFcpp arm waived per L-021-3).
 - ASan/UBSan green; coverage of changed lines complete.
 - No public signature/error/config/codegen/C-ABI change (FR-007) — confirmed by `git diff` of headers (doc-comment only).

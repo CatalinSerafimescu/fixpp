@@ -6,9 +6,9 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [N/A] No implementation details (languages, frameworks, APIs) — intentionally N/A for a wire-conformance technical spec: it necessarily names FIX tags (`43`/`122`/`35=4`/`123`), the two builders (`build_sequence_reset_gapfill` / `build_replay_frame`), and `file:line` anchors as the domain vocabulary required for the requirements to be testable (see Notes).
 - [x] Focused on user value and business needs
-- [x] Written for non-technical stakeholders
+- [N/A] Written for non-technical stakeholders — intentionally N/A: the audience is a FIX-conformance implementer/reviewer; the spec is written at the wire-tag level by design.
 - [x] All mandatory sections completed
 
 ## Requirement Completeness
@@ -27,7 +27,7 @@
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
-- [x] No implementation details leak into specification
+- [N/A] No implementation details leak into specification — intentionally N/A (same rationale as Content Quality): wire-tag / builder / file:line references are the deliberate domain vocabulary of this conformance spec, not leakage.
 
 ## Notes
 

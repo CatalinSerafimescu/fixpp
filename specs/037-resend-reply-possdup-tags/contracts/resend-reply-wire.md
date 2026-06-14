@@ -12,7 +12,7 @@ When `replay_outbound_range_` emits a `SequenceReset`-GapFill to cover a range o
 4. Retains, unchanged, every field it carried before 037: `8`, `35=4`, `34`, `49`, `52`, `56`, `36`, `123`, and the recomputed `9`/`10`.
 5. Field order is unconstrained for interop (peers parse map-based); the implementation appends `43`/`122` after `123`.
 
-Rationale: a GapFill's `34` is at/below the peer's expected number; `43=Y` marks it a legitimate duplicate so the peer does not kill the session for a too-low sequence number, and `122` is the conditionally-required companion (a strict `RequiresOrigSendingTime` peer rejects `43=Y` without `122`).
+Rationale: a GapFill's `34` is at/below the peer's expected number; `43=Y` marks it a legitimate duplicate so the peer does not kill the session for a too-low sequence number. `122` is emitted with it by **emit-parity** (both QFcpp and QFJ stamp `122 = SendingTime` on every GapFill they generate) plus FIX grammar correctness (`122` is `43=Y`'s conditionally-required companion). Note: a SequenceReset(`35=4`) is *exempt* from the inbound `122`-required check (QFJ `validatePossDup` guards it behind `if (!MsgType.SEQUENCE_RESET…)`), so a strict peer does **not** reject a GapFill missing `122` — the `122` is for parity/well-formedness, not to dodge a reject.
 
 ## C-2 — Replayed application frame
 
