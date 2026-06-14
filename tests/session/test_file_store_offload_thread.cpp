@@ -77,7 +77,7 @@
 // We store it atomically here so the strand-side assertions can read it
 // after store() returns.
 static std::atomic<std::thread::id> g_offload_syscall_tid{std::thread::id{}};
-static std::atomic<bool>            g_offload_syscall_entered{false};
+static std::atomic<bool> g_offload_syscall_entered{false};
 
 namespace {
 
@@ -101,20 +101,24 @@ namespace fs = std::filesystem;
 class FileStoreOffloadThreadTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        pool_  = std::make_unique<asio::thread_pool>(4);
-        // Long-lived strand — same object reused for every co_spawn below.
-        // See [[feedback_strand_in_any_executor_refcount_race]]: do NOT create
-        // a new strand per co_spawn (that causes a TSan refcount-delete race).
-        strand_exec_ = asio::make_strand(pool_->get_executor());
+        pool_ = std::make_unique<asio::thread_pool>(4);  // file_io_executor
+        // The session "strand" MUST run on a thread DISTINCT from the file_io_executor
+        // pool, otherwise the offload (co_spawn'd onto pool_ while the strand coroutine
+        // is suspended at the co_await) can run on the very pool thread that happened to
+        // service the strand — making syscall_tid == strand_tid_ and spuriously failing
+        // the "syscall ran off the strand" assertion (~1-in-4 under load; a CI ASan flake).
+        // Production mirrors this: the session executor and the file pool are separate.
+        // Long-lived 1-thread strand pool, one strand reused for every co_spawn
+        // ([[feedback_strand_in_any_executor_refcount_race]] — no per-co_spawn strand).
+        strand_pool_ = std::make_unique<asio::thread_pool>(1);
+        strand_exec_ = asio::make_strand(strand_pool_->get_executor());
         dir_ = unique_store_dir("offload_thread");
 
         // Capture the strand thread-id by posting a unit to strand_exec_.
         // We wait synchronously here so the tid is ready before any test body.
         std::promise<std::thread::id> p;
         auto f = p.get_future();
-        asio::post(strand_exec_, [&p] {
-            p.set_value(std::this_thread::get_id());
-        });
+        asio::post(strand_exec_, [&p] { p.set_value(std::this_thread::get_id()); });
         strand_tid_ = f.get();
     }
 
@@ -123,15 +127,19 @@ protected:
             pool_->stop();
             pool_->join();
         }
+        if (strand_pool_) {
+            strand_pool_->stop();
+            strand_pool_->join();
+        }
         std::filesystem::remove_all(dir_);
     }
 
     FileStore::Config make_config(FileStorePolicy policy = {}) const {
         FileStore::Config cfg;
-        cfg.directory  = dir_;
+        cfg.directory = dir_;
         cfg.sender_comp_id = "SENDER";
         cfg.target_comp_id = "TARGET";
-        cfg.policy     = policy;
+        cfg.policy = policy;
         cfg.max_frame_bytes = 4096;
         cfg.file_io_executor = pool_->get_executor();
         return cfg;
@@ -150,49 +158,44 @@ protected:
                 if (!ms) {
                     co_return nullptr;
                 }
-                co_return std::unique_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                co_return std::unique_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
             },
             asio::use_future);
         return fut.get();
     }
 
     // Store one frame on the strand_exec_. Returns true on success.
-    bool store_one(FileStore& store, seqnum_t seq = 1,
-                   direction_t dir = direction_t::outbound) {
+    bool store_one(FileStore& store, seqnum_t seq = 1, direction_t dir = direction_t::outbound) {
         auto frame = make_test_frame(seq, dir);
         auto fut = asio::co_spawn(
             strand_exec_,
-            [&store, seq, dir, frame = std::move(frame)]() mutable
-                -> asio::awaitable<bool> {
-                auto r = co_await store.store(
-                    seq, std::span<const std::byte>(frame), dir);
+            [&store, seq, dir, frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+                auto r = co_await store.store(seq, std::span<const std::byte>(frame), dir);
                 co_return r.has_value();
             },
             asio::use_future);
         return fut.get();
     }
 
-    std::unique_ptr<asio::thread_pool> pool_;
-    asio::any_io_executor               strand_exec_;
-    std::thread::id                     strand_tid_;
-    std::filesystem::path               dir_;
+    std::unique_ptr<asio::thread_pool> pool_;  // file_io_executor (4 threads)
+    std::unique_ptr<asio::thread_pool>
+        strand_pool_;  // session strand (1 thread, distinct from pool_)
+    asio::any_io_executor strand_exec_;
+    std::thread::id strand_tid_;
+    std::filesystem::path dir_;
 };
 
 // ── Helper: install the thread-id probe and reset probe state ─────────────────
 static void install_tid_probe() {
     g_offload_syscall_tid.store(std::thread::id{}, std::memory_order_relaxed);
     g_offload_syscall_entered.store(false, std::memory_order_relaxed);
-    fixpp::session::install_store_offload_probe(
-        [](std::thread::id tid) noexcept {
-            g_offload_syscall_tid.store(tid, std::memory_order_release);
-            g_offload_syscall_entered.store(true, std::memory_order_release);
-        });
+    fixpp::session::install_store_offload_probe([](std::thread::id tid) noexcept {
+        g_offload_syscall_tid.store(tid, std::memory_order_release);
+        g_offload_syscall_entered.store(true, std::memory_order_release);
+    });
 }
 
-static void uninstall_tid_probe() {
-    fixpp::session::install_store_offload_probe(nullptr);
-}
+static void uninstall_tid_probe() { fixpp::session::install_store_offload_probe(nullptr); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SC-001: the blocking syscall runs on a pool thread, NOT the strand thread.
@@ -211,10 +214,8 @@ TEST_F(FileStoreOffloadThreadTest, Store_Syscall_OnPoolThread_NotStrand) {
     // store() co_spawned on the strand — mimics the production call site.
     auto fut = asio::co_spawn(
         strand_exec_,
-        [s = store.get(), frame = std::move(frame)]() mutable
-            -> asio::awaitable<bool> {
-            auto r = co_await s->store(
-                1, std::span<const std::byte>(frame), direction_t::outbound);
+        [s = store.get(), frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+            auto r = co_await s->store(1, std::span<const std::byte>(frame), direction_t::outbound);
             co_return r.has_value();
         },
         asio::use_future);
@@ -258,10 +259,8 @@ TEST_F(FileStoreOffloadThreadTest, Store_SingleThreadPool_OffloadGenuine_NoDeadl
     auto frame = make_test_frame(1, direction_t::outbound);
     auto fut = asio::co_spawn(
         strand_exec_,
-        [s = store.get(), frame = std::move(frame)]() mutable
-            -> asio::awaitable<bool> {
-            auto r = co_await s->store(
-                1, std::span<const std::byte>(frame), direction_t::outbound);
+        [s = store.get(), frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+            auto r = co_await s->store(1, std::span<const std::byte>(frame), direction_t::outbound);
             co_return r.has_value();
         },
         asio::use_future);
@@ -271,8 +270,7 @@ TEST_F(FileStoreOffloadThreadTest, Store_SingleThreadPool_OffloadGenuine_NoDeadl
     ASSERT_TRUE(ok) << "store() deadlocked or failed on 1-thread pool";
 
     auto syscall_tid = g_offload_syscall_tid.load(std::memory_order_acquire);
-    ASSERT_NE(syscall_tid, std::thread::id{})
-        << "Thread-id hook never written — probe not called";
+    ASSERT_NE(syscall_tid, std::thread::id{}) << "Thread-id hook never written — probe not called";
 
     EXPECT_NE(syscall_tid, strand_tid_)
         << "Syscall ran on the strand — 1-thread pool offload not genuine";
@@ -318,10 +316,8 @@ TEST_F(FileStoreOffloadThreadTest, Store_SaturatedPool_Suspends_NotBlocks) {
     auto frame = make_test_frame(1, direction_t::outbound);
     auto store_fut = asio::co_spawn(
         strand_exec_,
-        [s = store.get(), frame = std::move(frame)]() mutable
-            -> asio::awaitable<bool> {
-            auto r = co_await s->store(
-                1, std::span<const std::byte>(frame), direction_t::outbound);
+        [s = store.get(), frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+            auto r = co_await s->store(1, std::span<const std::byte>(frame), direction_t::outbound);
             co_return r.has_value();
         },
         asio::use_future);
@@ -331,9 +327,7 @@ TEST_F(FileStoreOffloadThreadTest, Store_SaturatedPool_Suspends_NotBlocks) {
     // We use a shared_future so only the main thread calls wait_for.
     std::promise<bool> strand_marker_ran;
     auto strand_marker_shared = strand_marker_ran.get_future().share();
-    asio::post(strand_exec_, [p = std::move(strand_marker_ran)]() mutable {
-        p.set_value(true);
-    });
+    asio::post(strand_exec_, [p = std::move(strand_marker_ran)]() mutable { p.set_value(true); });
 
     // Wait for the strand marker to confirm the strand is NOT blocked.
     // If store() is blocking the strand, this wait_for will time out.
@@ -341,11 +335,9 @@ TEST_F(FileStoreOffloadThreadTest, Store_SaturatedPool_Suspends_NotBlocks) {
     bool marker_ran = (status == std::future_status::ready) && strand_marker_shared.get();
     bool timed_out = (status == std::future_status::timeout);
 
-    EXPECT_TRUE(marker_ran)
-        << "Strand marker did NOT run while store() was in-flight — "
-           "store() is blocking the strand thread (not suspending)";
-    EXPECT_FALSE(timed_out)
-        << "Strand marker timed out — strand may be blocked";
+    EXPECT_TRUE(marker_ran) << "Strand marker did NOT run while store() was in-flight — "
+                               "store() is blocking the strand thread (not suspending)";
+    EXPECT_FALSE(timed_out) << "Strand marker timed out — strand may be blocked";
 
     // Release latch so store() can complete (or if already released on timeout).
     latch.store(false, std::memory_order_release);
@@ -368,7 +360,7 @@ TEST_F(FileStoreOffloadThreadTest, Store_StrandProgresses_BeforeSyscallReturns) 
     install_tid_probe();
 
     // Result: did the strand marker run before store() returned?
-    std::promise<bool>  strand_marker_promise;
+    std::promise<bool> strand_marker_promise;
     auto strand_marker_fut = strand_marker_promise.get_future();
     // Signal for when the marker has run
     std::atomic<bool> marker_ran{false};
@@ -378,10 +370,8 @@ TEST_F(FileStoreOffloadThreadTest, Store_StrandProgresses_BeforeSyscallReturns) 
     // Spawn store() on the strand.
     auto store_fut = asio::co_spawn(
         strand_exec_,
-        [s = store.get(), frame = std::move(frame)]() mutable
-            -> asio::awaitable<bool> {
-            auto r = co_await s->store(
-                1, std::span<const std::byte>(frame), direction_t::outbound);
+        [s = store.get(), frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+            auto r = co_await s->store(1, std::span<const std::byte>(frame), direction_t::outbound);
             co_return r.has_value();
         },
         asio::use_future);
@@ -395,8 +385,7 @@ TEST_F(FileStoreOffloadThreadTest, Store_StrandProgresses_BeforeSyscallReturns) 
     auto poster_thread = std::thread([&] {
         // Wait for syscall to enter — with a 5s timeout.
         // g_offload_syscall_entered is set by the probe installed above.
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (!g_offload_syscall_entered.load(std::memory_order_acquire)) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 // Entered never fired (inert code or hook not called).
@@ -424,20 +413,17 @@ TEST_F(FileStoreOffloadThreadTest, Store_StrandProgresses_BeforeSyscallReturns) 
     // If the syscall-entered hook was never triggered (probe not installed or
     // not wired), the cell cannot be evaluated → skip with informative message.
     if (!g_offload_syscall_entered.load()) {
-        GTEST_SKIP()
-            << "In-syscall hook never triggered — probe not installed or "
-               "offload lambda does not call probe_fn. "
-               "This cell turns GREEN once T006 wires the genuine co_spawn offload.";
+        GTEST_SKIP() << "In-syscall hook never triggered — probe not installed or "
+                        "offload lambda does not call probe_fn. "
+                        "This cell turns GREEN once T006 wires the genuine co_spawn offload.";
     }
 
     bool marker_completed =
-        (strand_marker_fut.wait_for(std::chrono::seconds(5)) ==
-         std::future_status::ready) &&
+        (strand_marker_fut.wait_for(std::chrono::seconds(5)) == std::future_status::ready) &&
         strand_marker_fut.get();
 
-    EXPECT_TRUE(marker_completed)
-        << "Strand marker did NOT run before store() returned — "
-           "strand is being blocked by the fdatasync";
+    EXPECT_TRUE(marker_completed) << "Strand marker did NOT run before store() returned — "
+                                     "strand is being blocked by the fdatasync";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
