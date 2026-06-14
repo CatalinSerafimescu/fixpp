@@ -2503,8 +2503,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (assign_r) {
                                 // 036 T007: ARM-1 — toAdmin before transmit (FR-001/FR-002).
-                                // Best-effort: throw still disconnects but no co_return here
-                                // (session returns ok after this block regardless).
+                                // Best-effort: success arm falls through to co_return ok below;
+                                // throw arm co_returns app_callback_threw + Disconnected.
                                 if (!fire_to_admin_(*rj_r)) {
                                     record_state_transition_(fsm_state::Disconnected);
                                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -2987,8 +2987,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto assign_r = co_await seqnum_mgr_.assign_outbound();
                             if (assign_r) {
                                 // 036 T011: ARM-1 — toAdmin before transmit (FR-001/FR-002).
-                                // Best-effort: throw still disconnects (session disconnects
-                                // regardless after this block).
+                                // Best-effort: success arm falls through; session disconnects
+                                // from Logout processing regardless. Throw arm co_returns
+                                // app_callback_threw + Disconnected.
                                 if (!fire_to_admin_(*rj_r)) {
                                     record_state_transition_(fsm_state::Disconnected);
                                     co_return std::unexpected(fixpp::core::error::app_callback_threw);

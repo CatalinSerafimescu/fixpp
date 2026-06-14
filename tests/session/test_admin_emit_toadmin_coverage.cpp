@@ -357,6 +357,22 @@ static std::size_t count_frames_with_type(const std::vector<std::vector<std::byt
     return n;
 }
 
+// Count engine-originated ADMINISTRATIVE frames (FIX admin set A/0/1/2/3/4/5)
+// emitted in [start, end) of the capture window. 35=j is an APP frame → excluded.
+// Used by C3/SC-001 exact-count cross-check: admin frames on wire must equal toAdmin_delta.
+static std::size_t count_admin_frames_in_window(
+    const std::vector<std::vector<std::byte>>& frames, std::size_t start) {
+    static constexpr std::string_view kAdminSet[] = {"A", "0", "1", "2", "3", "4", "5"};
+    std::size_t n = 0;
+    for (std::size_t i = start; i < frames.size(); ++i) {
+        const auto mt = extract_msg_type(frames[i]);
+        for (auto a : kAdminSet) {
+            if (mt == a) { ++n; break; }
+        }
+    }
+    return n;
+}
+
 // Check whether any captured frame is 35=3 AND 373=<reason>.
 static bool any_reject_with_reason(const std::vector<std::vector<std::byte>>& frames,
                                    std::string_view reason) {
@@ -537,11 +553,6 @@ protected:
     seqnum_t store_persisted_inbound_seqnum() const {
         return store_factory->last_store ? store_factory->last_store->durable_inbound : 0;
     }
-
-    // Shorthand for outbound write count (0 on veto path).
-    int store_outbound_write_count() const {
-        return store_factory->last_store ? store_factory->last_store->outbound_write_count : -1;
-    }
 };
 
 // ── Fixture for T005 — no-app (engine.application == nullptr) ────────────────
@@ -662,6 +673,13 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
         << "(delta=" << toAdmin_delta
         << "; toAdmin_before=" << toAdmin_before
         << "; toAdmin_now=" << app->toAdmin_calls << ")";
+
+    // C3/SC-001 exact-count cross-check: admin frames on wire in the provocation window
+    // must equal toAdmin_delta. A future emit site added WITHOUT fire_to_admin_ would
+    // add a wire frame without a toAdmin call, passing EXPECT_GE but failing this.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -735,6 +753,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // Feed Heartbeat with stale SendingTime → Q3 triggers Reject + Logout + Disconnect.
     // seq=2 (next-expected after Logon).
@@ -758,6 +777,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     EXPECT_EQ(toAdmin_delta, 2)
         << "toAdmin must fire for both Reject AND Logout in Q3 path "
         << "(delta=" << toAdmin_delta << "; expected 2)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -787,6 +811,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // Feed SequenceReset Reset-mode (123 absent), NewSeqNo=10.
     // seq=2 (next-expected after Logon); Reset mode bypasses seqnum gate.
@@ -813,6 +838,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     EXPECT_EQ(toAdmin_delta, 1)
         << "toAdmin must fire exactly once for the SeqReset veto Reject "
         << "(delta=" << toAdmin_delta << "; expected 1)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -839,6 +869,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // PossDup Heartbeat: 43=Y, NO 122 field → Arm C (RequiredTagMissing).
     // seq=2 (next-expected after Logon).
@@ -859,6 +890,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
     EXPECT_EQ(toAdmin_delta, 1)
         << "toAdmin must fire once for 021 ArmC Reject "
         << "(delta=" << toAdmin_delta << "; expected 1)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -885,6 +921,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // PossDup Heartbeat: 43=Y, 122=GARBAGE (unparseable) → RC#1 → Arm C Reject.
     auto frame = build_possdup_heartbeat(2, kTarget, kSender, /*absent_122=*/false,
@@ -904,6 +941,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
     EXPECT_EQ(toAdmin_delta, 1)
         << "toAdmin must fire once for 021 RC#1 Reject "
         << "(delta=" << toAdmin_delta << "; expected 1)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -929,6 +971,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // PossDup Heartbeat: 43=Y, 122=2030 (future > 52=2024-01-01) → Arm D.
     auto frame = build_possdup_heartbeat(2, kTarget, kSender, /*absent_122=*/false,
@@ -951,6 +994,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
     EXPECT_EQ(toAdmin_delta, 2)
         << "toAdmin must fire for both Reject AND Logout in 021 ArmD "
         << "(delta=" << toAdmin_delta << "; expected 2)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -986,6 +1034,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // Feed Logout from peer.
     // Active path: (1) emits confirming Logout (fire_to_admin_ at :2903 fires toAdmin),
@@ -1011,6 +1060,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     EXPECT_EQ(toAdmin_delta, 2)
         << "toAdmin must fire for confirming Logout AND veto Reject "
         << "(delta=" << toAdmin_delta << "; expected 2)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1050,6 +1104,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // SequenceReset Reset-mode (123 absent), NewSeqNo=1 < next-expected=2.
     // Reset mode bypasses the seqnum gate (its own MsgSeqNum is ignored for
@@ -1078,6 +1133,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     EXPECT_EQ(toAdmin_delta, 1)
         << "toAdmin must fire once for the NewSeqNo-too-low Reject "
         << "(delta=" << toAdmin_delta << "; expected 1)";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1132,6 +1192,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
         << "(delta=" << toAdmin_delta
         << "; toAdmin_before=" << toAdmin_before
         << "; toAdmin_now=" << app->toAdmin_calls << ")";
+
+    // C3/SC-001 exact-count cross-check.
+    EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
+              static_cast<std::size_t>(toAdmin_delta))
+        << "exact-count: admin frames on wire in the window must equal toAdmin_delta (C3/SC-001)";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1481,7 +1546,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 //   toApp_calls == 1               (toApp fires before veto decision)
 //   no 35=j on wire               (suppressed — not stored/emitted)
 //   session Active                 (stays alive; BMR veto is not a fatal event)
-//   outbound_write_count == 0      (no outbound seqnum consumed)
+//   peek_outbound() unchanged      (no outbound seqnum consumed; discriminated by T027)
 //   durable_inbound == before + 1  (CRITICAL INV-COV-5: persist fires despite veto)
 //
 // The persist-on-veto assertion is the discriminating witness: an impl that

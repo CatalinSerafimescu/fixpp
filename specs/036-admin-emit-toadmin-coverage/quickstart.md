@@ -46,7 +46,7 @@ Each cell drives the session to exactly the state that provokes one emit, captur
 | `Reject_021ArmC_Malformed122` | inbound PossDup with malformed `122` (Arm C) → `:2599` | `toAdmin_calls == 1` |
 | `Reject_021RC1_Malformed122` | RC#1 malformed-122 → `:2644` | `toAdmin_calls == 1` |
 | `Reject_021ArmD` | 021 Arm D → `:2675` reject + `:2696` logout | `toAdmin_calls == 2` |
-| `Reject_LogoutVeto` | `fromAdmin` veto on inbound `35=5` → `:2946` | `toAdmin_calls == 1` |
+| `Reject_LogoutVeto` | `fromAdmin` veto on inbound `35=5` → `:2946` | `toAdmin_calls == 2` (confirming Logout at `:2903` + veto Reject at `:2953`) |
 | `Reject_SeqResetNewSeqNoTooLow` | inbound `35=4` `NewSeqNo` < expected → `:4576` | `toAdmin_calls == 1` |
 | `Logout_Guard3LogonAckSendingTime` | initiator LogonSent, peer Logon-ack with stale/absent `52=` → `:3368` | `toAdmin_calls == 1`, one `35=5` |
 | `BMR_ToApp_Observed` | Active, `fromApp` rejects an inbound app msg → `:3249` | `toApp_calls == 1`, `toAdmin_calls == 0`, one `35=j` on wire |
