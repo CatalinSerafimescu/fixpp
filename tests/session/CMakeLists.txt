@@ -495,6 +495,19 @@ add_threading_test(session_admin_builder_distinct_now admin_builder_distinct_now
 add_threading_test(session_admin_emit_mixed_path admin_emit_mixed_path_test.cpp)
 target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOKS)
 
+# ── 036-admin-emit-toadmin-coverage T004/T013 (Invocation 1) ────────────────
+# Vertical-slice proof: wire fire_to_admin_ at emit_session_reject_ (T015) and
+# Guard-3 Logout (T023). FIXPP_TEST_HOOKS needed for US3 BMR cells (T027/T028):
+# seqnum_mgr_test_access().peek_outbound() witnesses no outbound seqnum consumed on veto.
+# Cells: EmitSessionReject_FromAdminVeto (T004) + Logout_Guard3LogonAckSendingTime (T013).
+# Anchors: spec.md FR-001/FR-002; plan.md ARM-1; session.cpp:331/1728/3368.
+add_threading_test(session_admin_emit_toadmin_coverage test_admin_emit_toadmin_coverage.cpp)
+# FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() for the T027/T028 BMR outbound-seqnum
+# discriminating witness (INV-COV-5 parity; C2: assign_outbound only on !suppressed).
+target_compile_definitions(session_admin_emit_toadmin_coverage PRIVATE FIXPP_TEST_HOOKS)
+set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
+  LABELS "036;us1;us2;toadmin_coverage")
+
 # T021 — Initiator transport-throw witness (FR-009 / SC-007).
 # Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
 # Exercises Session::open() when transport.send() throws during Logon emit;

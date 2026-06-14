@@ -1225,3 +1225,23 @@ restart, `FileStoreFactory::make()` reopens the now-fresh live log (the renamed 
 disk). Operators with aggressive fd-limit settings who observe `store_io_failure` after a session
 reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; `src/session/file_store.cpp:1678-1688`;
 witness `tests/session/test_file_store_cancellation.cpp:750-797`.)*
+
+**B-036-1 — `toAdmin` now fires for EVERY engine-originated administrative frame; `toApp` for the
+engine-originated `BusinessMessageReject(35=j)`.** This amends the 019 FR-008 contract from partial
+to full coverage. Which outbound engine emits invoke which `Application` callback:
+- **`toAdmin` (inspect-only, not vetoable; a throw → `app_callback_threw` + Disconnected):** the
+  complete engine-originated `Reject(35=3)` family — the shared `emit_session_reject_` helper
+  (fromAdmin-veto + no-`Application` unknown-MsgType rejects), the established-session SendingTime
+  Reject, the inbound-`SequenceReset`/`Logout` veto Rejects, the malformed-`OrigSendingTime(122)`
+  Rejects (021 Arm C / RC#1 / Arm D), the `SequenceReset`-`NewSeqNo`-too-low Reject, the FIXT-1137
+  Logon Reject — and **every** engine-originated `Logout(35=5)` including the initiator
+  Logon-acknowledgement Guard-3 Logout (the last admin emit that previously bypassed observation).
+- **`toApp` (vetoable; `app_do_not_send` → drop + stay Active + no outbound seqnum consumed; a throw
+  → terminal close):** the engine-originated `BusinessMessageReject(35=j)` — `35=j` is an application
+  message (outside the FIX admin set A/0/1/2/3/4/5), so it routes through `toApp`, matching
+  QuickFIX-cpp/J `sendRaw`. A `toApp` veto suppresses the `35=j` but the rejected inbound message's
+  durable sequence advance is **still persisted** (no restart reprocessing).
+With no `Application` registered every site is a byte-for-byte no-op. *(036 FR-001..FR-008; amends
+019 FR-008; `src/session/session.cpp` ARM-1 reject/logout sites + ARM-2 BMR site; witness
+`tests/session/test_admin_emit_toadmin_coverage.cpp` — exact-count `toAdmin_calls ==
+admin-frames-on-wire` + per-site throw + BMR veto-persist cells.)*
