@@ -162,13 +162,11 @@ TEST(ResendReplyPossDup, Cell1_GapFill_Carries_43Y_And_122_EqOwn52) {
         << "Cell1: 122 (OrigSendingTime) must equal 52 (own SendingTime) per FR-002/D-1";
 
     // (5) Standard field set present. [FR-003]
-    EXPECT_TRUE(field_value(frame,   8).has_value()) << "Tag 8 (BeginString) must be present";
+    // (8/52/36 presence is subsumed by the EXPECT_EQ value checks below; 123 by the
+    //  ASSERT_EQ at the honesty step. Only 34/49/56 need an explicit presence check.)
     EXPECT_TRUE(field_value(frame,  34).has_value()) << "Tag 34 (MsgSeqNum) must be present";
     EXPECT_TRUE(field_value(frame,  49).has_value()) << "Tag 49 (SenderCompID) must be present";
-    EXPECT_TRUE(field_value(frame,  52).has_value()) << "Tag 52 (SendingTime) must be present";
     EXPECT_TRUE(field_value(frame,  56).has_value()) << "Tag 56 (TargetCompID) must be present";
-    EXPECT_TRUE(field_value(frame,  36).has_value()) << "Tag 36 (NewSeqNo) must be present";
-    EXPECT_TRUE(field_value(frame, 123).has_value()) << "Tag 123 (GapFillFlag) must be present";
     EXPECT_EQ(field_value(frame,   8), kBeginString) << "Tag 8 must match begin_string param";
     EXPECT_EQ(field_value(frame,  52), kSendingTime) << "Tag 52 must match sending_time param";
     EXPECT_EQ(field_value(frame,  36), "10")         << "Tag 36 must match new_seqno=10";
