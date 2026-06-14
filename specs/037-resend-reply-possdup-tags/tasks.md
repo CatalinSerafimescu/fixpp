@@ -28,7 +28,7 @@ Single library `fixpp`: production in `src/session/`, tests in `tests/session/` 
 
 - [X] T001 Create the new test file `tests/session/test_resend_reply_possdup.cpp` with a resend-reply fixture that can (a) drive `replay_outbound_range_` to emit a GapFill (or call `build_sequence_reset_gapfill` directly with a known `sending_time`) and (b) store an outbound app frame then replay it via `build_replay_frame`, capturing emitted bytes via an in-memory transport sink. Reuse the 013 resend fixtures + the 022 W7 retain test as shape references. Add a small field-occurrence helper (`count_tag(frame, tag)` + `field_value(frame, tag)`) for the assertions.
 - [X] T002 [P] Register `tests/session/test_resend_reply_possdup.cpp` in the session test CMake target (`tests/session/CMakeLists.txt`) so it builds and is ctest-discovered.
-- [ ] T003 [P] Capture the **pre-037 default-path replay byte oracle**: with `allow_pos_dup=false`, store a normal app frame and snapshot `build_replay_frame`'s output bytes — the FR-006/SC-003 byte-identity oracle for T015. Record the capture in the test header comment.
+- [X] T003 [P] Capture the **pre-037 default-path replay byte oracle**: with `allow_pos_dup=false`, store a normal app frame and snapshot `build_replay_frame`'s output bytes — the FR-006/SC-003 byte-identity oracle for T015. Record the capture in the test header comment. [Oracle captured 2026-06-14; frozen as `kOracle[117]` in Cell 3 inside `test_send_allow_pos_dup_strip.cpp`.]
 
 **Checkpoint**: test file compiles + links; the byte oracle is captured.
 
@@ -77,14 +77,14 @@ Single library `fixpp`: production in `src/session/`, tests in `tests/session/` 
 
 ### Tests (write first — must FAIL / pin)
 
-- [ ] T012 [P] [US2] In `tests/session/test_resend_reply_possdup.cpp`, add **Cell 2 (retain dedup)**: `allow_pos_dup=true`; store an app frame already carrying `43=Y` and `122=<t>` with `t != stored 52`; FIRST assert the STORED frame contains `43` AND `122` (honesty, C-4); replay; assert `count_tag(43)==1`, `count_tag(122)==1`, `field_value(122)==stored field_value(52)` (NOT t). Source-read → confirm RED (today duplicates 43/122).
-- [ ] T013 [P] [US2] Add **Cell 3 (default byte-identity)**: `allow_pos_dup=false`; store a normal app frame; assert `build_replay_frame` output == the T003 pre-037 oracle, byte-for-byte (INV-4). This must stay GREEN before AND after T014 (non-regression).
-- [ ] T014 [US2] Build + run T012 (RED) and T013 (GREEN baseline).
+- [X] T012 [P] [US2] **Cell 2 (retain dedup)**: `allow_pos_dup=true`; store an app frame already carrying `43=Y` and `122=<t>` with `t != stored 52`; FIRST assert the STORED frame contains `43` AND `122` (honesty, C-4); replay; assert `count_boundary_tag(43)==1`, `count_boundary_tag(122)==1`, `extract_field(122)==stored s52` (NOT t). Confirmed RED (count==2 for both) before T015. [PLACEMENT NOTE: Cell 2 and Cell 3 placed in `tests/session/test_send_allow_pos_dup_strip.cpp` (not `test_resend_reply_possdup.cpp`) — `build_replay_frame` is anonymous-namespace-internal to `session.cpp` and can only be driven through the `AllowPosDupStripTest` fixture; orchestrator decision.]
+- [X] T013 [P] [US2] **Cell 3 (default byte-identity)**: `allow_pos_dup=false`; store a normal app frame; assert `build_replay_frame` output == the T003 pre-037 oracle, byte-for-byte (INV-4). Confirmed GREEN both before and after T015 (non-regression). [Same placement as T012: `test_send_allow_pos_dup_strip.cpp`.]
+- [X] T014 [US2] Build + run T012 (RED — count==2 for both 43 and 122; 122 value wrong "20200101..." vs stored 52 "20240101...") and T013 (GREEN baseline).
 
 ### Implementation
 
-- [ ] T015 [US2] In `src/session/session.cpp` `build_replay_frame` copy loop, widen the skip predicate at `:1652` from `if (tag == 9 || tag == 10) continue;` to `if (tag == 9 || tag == 10 || tag == 43 || tag == 122) continue;`. The `if (tag == 52) orig_sending_time = …` capture (`:1653-1656`) is a SEPARATE `if` that runs during normal iteration (52 is not in the skip set) → leave it untouched; the unconditional append of `43=Y` (`:1659-1665`) + `122=<captured 52>` (`:1666-1671`) is unchanged.
-- [ ] T016 [US2] Build + run T012 → GREEN; re-run T013 → still GREEN (default path byte-identical). Re-run T004/Cell 1 → still GREEN (no cross-impact).
+- [X] T015 [US2] In `src/session/session.cpp` `build_replay_frame` copy loop, widened the skip predicate from `if (tag == 9 || tag == 10) continue;` to `if (tag == 9 || tag == 10 || tag == 43 || tag == 122) continue;  // 9/10 recomputed; 43/122 re-added below (037 FR-004 dedup)`. One-line change. `if (tag == 52) orig_sending_time = …` (SEPARATE `if`) left untouched; unconditional append of `43=Y` + `122=<captured 52>` unchanged.
+- [X] T016 [US2] Build + run T012 → GREEN; re-run T013 → still GREEN (byte-identical); full session suite 71/71 PASSED including W7/Cell1/all existing tests. No regressions.
 
 **Checkpoint**: retain-case dedup shipped + witnessed; default path proven byte-identical.
 

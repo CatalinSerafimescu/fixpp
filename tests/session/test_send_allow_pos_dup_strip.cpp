@@ -260,6 +260,32 @@ protected:
     static bool frame_has_boundary_tag(const std::vector<std::byte>& frame, std::uint16_t tag) {
         return extract_field(std::span<const std::byte>(frame), tag).has_value();
     }
+
+    // Helper: count SOH-anchored occurrences of <tag>= in frame bytes.
+    // Matches SOH + <tag-digits> + '=' only, so tag 43 does not match 143/430
+    // and tag 122 does not match 123/1220. [037 FR-004 dedup; INV-3/INV-4]
+    static std::size_t count_boundary_tag(const std::vector<std::byte>& frame,
+                                          std::uint16_t tag) noexcept {
+        // Build the needle: SOH + decimal digits of tag + '='
+        char needle[16];
+        int nlen = std::snprintf(needle, sizeof(needle), "\x01%u=", static_cast<unsigned>(tag));
+        if (nlen <= 0) return 0;
+        const std::size_t needle_len = static_cast<std::size_t>(nlen);
+        std::size_t count = 0;
+        const std::size_t n = frame.size();
+        for (std::size_t i = 0; i + needle_len <= n; ++i) {
+            bool match = true;
+            for (std::size_t j = 0; j < needle_len; ++j) {
+                if (static_cast<unsigned char>(frame[i + j]) !=
+                    static_cast<unsigned char>(needle[j])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) ++count;
+        }
+        return count;
+    }
 };
 
 // ── W1: Strip default ────────────────────────────────────────────────────────────
@@ -900,6 +926,185 @@ TEST_F(AllowPosDupStripTest, W8_NoHeap_Scaffold_SendSucceeds_NoPmrAllocDuringSen
     // T010 NOTE: The binding no-heap gate runs this send under the mallocnesia
     // LD_PRELOAD interceptor. Zero global-heap allocs expected across the
     // scanner+excision+copy path. [C2.6; INV-4; feedback_tracking_pmr_resource_false_pass]
+}
+
+// ── Cell 2 (T012/US2): Retain dedup — replayed retain frame carries exactly one 43/122 ──
+//
+// FR-004: replayed frame MUST carry exactly one 43 and exactly one 122.
+// FR-005: the single 122 MUST equal the stored 52 (NOT the caller-supplied 122=t).
+// C-4 honesty: first prove the STORED frame under allow_pos_dup=true DOES carry both tags.
+//
+// Today RED: copy loop copies stored 43+122, then unconditional append re-adds → count==2.
+// After T015 (skip widening): stored 43+122 skipped, unconditional append adds exactly one → GREEN.
+//
+// [037 FR-004; FR-005; INV-3; contracts C-4; anti-pattern feedback_witness_asserts_named_postcondition_not_proxy]
+TEST_F(AllowPosDupStripTest, Cell2_RetainCase_ReplayDedups43And122) {
+    auto cfg = make_cfg(/*allow_pos_dup=*/true);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    // Payload with caller-supplied 43=Y and 122=t where t != stored 52.
+    // The mock clock stamps 52=20240101-00:00:00.000. We use 122=20200101-00:00:00.000
+    // (clearly different) so extract_field(122) can only equal s52 after dedup, never the
+    // caller value. [FR-005: 122=stored 52, not caller-supplied t]
+    const char kPayloadStr[] =
+        "35=D\x01"
+        "11=ORDDUP\x01"
+        "43=Y\x01"
+        "122=20200101-00:00:00.000\x01"
+        "54=1\x01";
+    auto payload = to_payload(kPayloadStr);
+
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    run_ioc();
+    auto result = fut.get();
+
+    ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
+    ASSERT_FALSE(captured_frames.empty()) << "A frame must be emitted";
+
+    const auto& send_frame = captured_frames.back();
+
+    // C-4 HONESTY: under allow_pos_dup=true the stored frame MUST retain 43 AND 122.
+    // (If these fail, the dedup test is untested — the stored frame was already clean.)
+    ASSERT_TRUE(frame_has_boundary_tag(send_frame, 43))
+        << "Cell2 honesty: allow_pos_dup=true must retain 43 in the sent/stored frame [C-4]";
+    ASSERT_TRUE(frame_has_boundary_tag(send_frame, 122))
+        << "Cell2 honesty: allow_pos_dup=true must retain 122 in the sent/stored frame [C-4]";
+
+    // Capture the stored 52 dynamically — this is what the replayed 122 MUST equal.
+    // Copy to std::string immediately; send_frame reference becomes dangling after clear().
+    const auto s52_sv = extract_field(std::span<const std::byte>(send_frame), 52);
+    ASSERT_TRUE(s52_sv.has_value()) << "Sent frame must carry tag 52 (SendingTime)";
+    const std::string s52{*s52_sv};
+
+    // Find the seqnum so we can request exactly this message in the resend.
+    const auto tag34_opt = extract_field(std::span<const std::byte>(send_frame), 34);
+    ASSERT_TRUE(tag34_opt.has_value()) << "Sent frame must carry tag 34 (MsgSeqNum)";
+    const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+
+    // Clear, then drive a ResendRequest for this message.
+    // NOTE: send_frame reference is now dangling (cleared); use s52 (std::string) below.
+    captured_frames.clear();
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    // Find the replayed frame (has 43=Y).
+    const std::vector<std::byte>* replayed = nullptr;
+    for (const auto& f : captured_frames) {
+        if (frame_has_boundary_tag(f, 43)) {
+            replayed = &f;
+            break;
+        }
+    }
+    ASSERT_NE(replayed, nullptr) << "Cell2: expected a replayed frame with 43= after ResendRequest";
+
+    // FR-004: exactly one 43, exactly one 122 in the replayed frame.
+    // RED today: count==2 because copy loop copies stored 43/122 AND append re-adds.
+    EXPECT_EQ(count_boundary_tag(*replayed, 43), std::size_t{1})
+        << "Cell2: replayed frame must carry exactly one 43 (dedup); [037 FR-004; INV-3]";
+    EXPECT_EQ(count_boundary_tag(*replayed, 122), std::size_t{1})
+        << "Cell2: replayed frame must carry exactly one 122 (dedup); [037 FR-004; INV-3]";
+
+    // FR-005: the single 122 must equal stored 52 (NOT the caller-supplied 122=20200101...).
+    EXPECT_EQ(extract_field(std::span<const std::byte>(*replayed), 122), s52)
+        << "Cell2: replayed 122 must equal stored 52 (NOT caller-supplied t); [037 FR-005]";
+}
+
+// ── Cell 3 (T013/US2): Default-path byte-identity — replay byte-identical to pre-037 oracle ──
+//
+// FR-006/INV-4: on the default configuration (allow_pos_dup=false), stored frames
+// never contain caller 43/122 (the strip removes them at send time). The T015 skip
+// widening is therefore INERT on this path: the copy loop skips stored 43/122 that
+// are not present, so the replayed bytes are bit-for-bit identical to pre-T015 output.
+//
+// T003 oracle: captured empirically from a pre-T015 build (see below) and frozen.
+// This test MUST be GREEN both before and after T015 — it is the non-regression guard.
+//
+// Payload (no 43/122 in caller data): 35=D / 11=ORDXXX / 54=1
+// Mock clock: 2024-01-01 00:00:00.000 UTC (1704067200 epoch seconds, as set in SetUp).
+// Session: FIX.4.4, sender=ISLD, target=TW, seqnum=2 (Logon=1, this send=2).
+//
+// [037 FR-006; INV-4; spec §US2 scenario 2; T003 byte oracle]
+TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
+    auto cfg = make_cfg(/*allow_pos_dup=*/false);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    // Shared payload: no 43/122 → default path; strip is a no-op.
+    const char kPayloadStr[] =
+        "35=D\x01"
+        "11=ORDXXX\x01"
+        "54=1\x01";
+    auto payload = to_payload(kPayloadStr);
+
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    run_ioc();
+    auto result = fut.get();
+
+    ASSERT_TRUE(result.has_value()) << "Cell3: send must succeed";
+    ASSERT_FALSE(captured_frames.empty());
+
+    const auto& send_frame = captured_frames.back();
+    const auto tag34_opt = extract_field(std::span<const std::byte>(send_frame), 34);
+    ASSERT_TRUE(tag34_opt.has_value());
+    const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+
+    captured_frames.clear();
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    // Find the replayed frame.
+    const std::vector<std::byte>* replayed = nullptr;
+    for (const auto& f : captured_frames) {
+        if (frame_has_boundary_tag(f, 43)) {
+            replayed = &f;
+            break;
+        }
+    }
+    ASSERT_NE(replayed, nullptr) << "Cell3: expected a replayed frame after ResendRequest";
+
+    // T003 byte oracle: captured empirically from a pre-T015 build on 2026-06-14.
+    // Deterministic because:
+    //   - mock_clock stamps fixed UTC 2024-01-01T00:00:00.000 (1704067200 epoch s)
+    //   - seqnum 2 (Logon=1 → this app send=2); ResendRequest arrives as inbound seq 2
+    //   - fixed session params: sender=ISLD, target=TW, BeginString=FIX.4.4
+    // Wire content: 8=FIX.4.4\x01 9=95\x01 35=D\x01 34=2\x01 49=ISLD\x01
+    //               52=20240101-00:00:00.000\x01 56=TW\x01 11=ORDXXX\x01 54=1\x01
+    //               43=Y\x01 122=20240101-00:00:00.000\x01 10=223\x01
+    // [037 FR-006; INV-4; T003 oracle frozen 2026-06-14]
+    static const unsigned char kOracle[] = {
+        0x38, 0x3D, 0x46, 0x49, 0x58, 0x2E, 0x34, 0x2E, 0x34, 0x01,  // 8=FIX.4.4 SOH
+        0x39, 0x3D, 0x39, 0x35, 0x01,                                  // 9=95 SOH
+        0x33, 0x35, 0x3D, 0x44, 0x01,                                  // 35=D SOH
+        0x33, 0x34, 0x3D, 0x32, 0x01,                                  // 34=2 SOH
+        0x34, 0x39, 0x3D, 0x49, 0x53, 0x4C, 0x44, 0x01,               // 49=ISLD SOH
+        0x35, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31, 0x30,   // 52=20240101
+        0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x30,   // -00:00:00
+        0x2E, 0x30, 0x30, 0x30, 0x01,                                  // .000 SOH
+        0x35, 0x36, 0x3D, 0x54, 0x57, 0x01,                            // 56=TW SOH
+        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,   // 11=ORDXXX SOH
+        0x35, 0x34, 0x3D, 0x31, 0x01,                                  // 54=1 SOH
+        0x34, 0x33, 0x3D, 0x59, 0x01,                                  // 43=Y SOH
+        0x31, 0x32, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31,   // 122=20240101
+        0x30, 0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30,   // 01-00:00:0
+        0x30, 0x2E, 0x30, 0x30, 0x30, 0x01,                            // 0.000 SOH
+        0x31, 0x30, 0x3D, 0x32, 0x32, 0x33, 0x01,                      // 10=223 SOH
+    };
+    static constexpr std::size_t kOracleLen = sizeof(kOracle);
+
+    // FR-006/INV-4: byte-for-byte identity with the pre-T015 oracle.
+    // After T015 the skip widening is INERT on this path (no stored 43/122 to skip)
+    // so the output is unchanged — this is the non-regression guard.
+    ASSERT_EQ(replayed->size(), kOracleLen)
+        << "Cell3: replayed frame size must match oracle [037 INV-4]";
+    for (std::size_t idx = 0; idx < kOracleLen; ++idx) {
+        EXPECT_EQ(static_cast<unsigned char>((*replayed)[idx]), kOracle[idx])
+            << "Cell3: byte mismatch at index " << idx << " [037 FR-006; INV-4]";
+        if (static_cast<unsigned char>((*replayed)[idx]) != kOracle[idx]) break;
+    }
 }
 
 }  // namespace fixpp::session::test
