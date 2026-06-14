@@ -506,7 +506,21 @@ add_threading_test(session_admin_emit_toadmin_coverage test_admin_emit_toadmin_c
 # discriminating witness (INV-COV-5 parity; C2: assign_outbound only on !suppressed).
 target_compile_definitions(session_admin_emit_toadmin_coverage PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
-  LABELS "036;us1;us2;toadmin_coverage")
+  LABELS "036;us1;us2;us3;bmr;toadmin_coverage;toapp")
+
+# SC-002 static enumeration gate (T041) — gate-b/r1 FQ-1.
+# Parses src/session/session.cpp and asserts every build_reject( / build_logout(
+# site has fire_to_admin_( between the builder and its store_then_emit(, and
+# every build_business_message_reject( site has ->toApp( in the same interval.
+# Exits 1 (prints offending line) if any admin emit site is unwired — catches a
+# FUTURE unwired site even when the dynamic scenario cells pass.
+# Anchors: spec.md SC-002/FR-001/FR-005; tasks.md T041; research.md Decision-1.
+add_test(NAME session_admin_emit_observation_gate
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_admin_emit_observation.py"
+    "${CMAKE_SOURCE_DIR}/src/session/session.cpp"
+)
+set_tests_properties(session_admin_emit_observation_gate PROPERTIES
+  LABELS "036;sc002;static_gate")
 
 # T021 — Initiator transport-throw witness (FR-009 / SC-007).
 # Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
