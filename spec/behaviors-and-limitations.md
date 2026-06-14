@@ -1186,3 +1186,42 @@ wire but are no longer retained — a later peer `ResendRequest` folds them into
 so the peer's application-level recovery silently loses them. FIX-legal, but operators trading memory for
 replay completeness should size the cap deliberately. *(Fable `5.4`; `memory_store.hpp:160-166`,
 `session.cpp` `store_then_emit`.)*
+
+## 035-filestore-io-offload (2026-06-14)
+
+**B-035-1 — `FileStore` disk I/O (`pwrite`/`fdatasync`/`rename`/`fsync`) now runs genuinely off the
+session strand via `file_io_executor` (prior `[const §XV.4]` violation corrected).** From the initial
+008-message-store delivery until 035-filestore-io-offload, the `FileStore::store(commit_per_message)`
+path violated `[const §XV.4]` (the "no synchronous disk I/O on every send" rule): the shipped offload
+idiom — `co_await asio::post(file_io_executor, use_awaitable)` — was inert (012 D-18). The `post` with
+`use_awaitable` moved only the post-completion handler; the coroutine body, including the blocking
+`pwrite` and `fdatasync`, resumed on the session strand and executed there synchronously. Under
+`commit_per_message` this means every outbound message caused the session strand to block for the
+duration of an `fdatasync` (~100 µs–10 ms on NVMe). As of **035-filestore-io-offload (PR #119)**,
+all four disk-I/O sites in `FileStore` (`store()` pwrite/fdatasync, `next_seqnum()` pwrite/fdatasync,
+`reset()` tmp-open/initialise/rename/parent-fsync, `flush_for_session_close()` fdatasync) run on the
+`file_io_executor` thread pool via genuine `co_await asio::co_spawn(file_io_executor, syscall_lambda,
+asio::use_awaitable)`. The outer `co_await` resumes on the session strand; the blocking syscalls are
+pinned to the pool thread. `MemoryStore` is unaffected (zero-alloc, strand-only — unchanged). The
+`FileStore` offload carries exactly one bounded O(1) `co_spawn` frame (~48 B, PMR-opaque global heap)
+per disk op, permitted by the `[const §XV.1]` v0.2 §XV.4-offload exemption (`constitution.md:224`).
+This is the project's deliberate `[const §XV.4]` async-journal posture (no strand block) — **not**
+reference-engine parity: QuickFIX-cpp / QuickFIX-J perform **synchronous** FileStore flushes on the
+calling thread (see `spec.md:186`); the async offload is a deliberate divergence, not a conformance
+fix. [gate-b/r2 R#2: corrected PR #118→#119; replaced "parity with reference-engine behavior" with
+the correct deliberate-divergence statement matching spec.md:186.]
+*(035 FR-001..FR-007, FR-010; `src/session/file_store.cpp`; witnesses
+`tests/session/test_file_store_offload_thread.cpp` + `test_file_store_cancellation.cpp` +
+`test_file_store_concurrent_tsan.cpp`.)*
+
+**L-035-2 — Post-rename reopen/lock failure in `FileStore::reset()` poisons the current store until
+process restart.** During `reset()`, the live log is atomically replaced by a fresh log via
+`rename(tmp, live)`. If the subsequent `open()`/`try_lock()` of the newly-named file fails (e.g.,
+fd-limit exhaustion, permission race), the old fd names a now-unlinked inode; to avoid writing frames
+that would vanish on restart, the store **fails closed**: it releases the stale fd
+(`impl_->file = OsFile{}`), sets `open_ok = false`, and all further ops (`store`/`next_seqnum`/
+`retrieve`/`reset`) return `store_io_failure`. The only recovery is to **restart the process**: on
+restart, `FileStoreFactory::make()` reopens the now-fresh live log (the renamed file persists on
+disk). Operators with aggressive fd-limit settings who observe `store_io_failure` after a session
+reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; `src/session/file_store.cpp:1678-1688`;
+witness `tests/session/test_file_store_cancellation.cpp:750-797`.)*

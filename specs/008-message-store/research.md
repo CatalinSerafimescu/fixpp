@@ -162,6 +162,15 @@ This preserves the design-doc §4.4 Config-only factory CTOR (no `EngineConfig&`
 
 `EngineConfig` exposes the default `file_io_executor` (typically a 4-thread `asio::thread_pool` shared across all `FileStore`s in the engine, per design-doc §4.3.2 line 669); a single per-`FileStore`-instance configuration is one valid operating mode (no cross-thread races on the log file handle within one store), not the frozen contract. The session strand `co_await`s a completion that runs on `file_io_executor`; completions rebind to the session strand via `[2d §6.5]` `cancellable_dispatch`. The cancellation slot composes the same way.
 
+> **035 correction (2026-06-14):** The preceding two sentences were aspirational at 008 Gate-A.
+> The shipped 008 offload idiom (`co_await asio::post(file_io_executor, use_awaitable)`) was
+> inert (012 D-18): the coroutine body — including the blocking `pwrite`/`fdatasync` — resumed
+> on the session strand, not on `file_io_executor`. `cancellable_dispatch` was consequently also
+> inert on these paths. The `[const §XV.4]` violation was corrected by **035-filestore-io-offload**
+> (2026-06-14) via genuine `co_spawn(file_io_executor, …, use_awaitable)`. See also line ~440
+> (Integration patterns `cancellable_dispatch` note) below and `spec/behaviors-and-limitations.md`
+> B-035-1 for the full historical record.
+
 **Rationale:**
 
 - Cross-thread races on the log file handle (the file descriptor / `HANDLE` is shared between `pwrite` and `fdatasync`) are avoided within a single store either by a per-instance executor or by a shared pool whose work-stealing serialises the per-handle operations through the store's writer mutex — `[2e §10] Q10` records the EngineConfig-default-pool shape as DECIDED at design-doc §4.3.2.
@@ -438,6 +447,14 @@ Also: verify the `MALLOCNESIA_MAX_ALLOCS` env knob is left unset (so the default
 
 - **006-async-mutex `async_mutex::lock_async()` cancellation surface.** Per `[2f §4.5]` `sync_lock_aborted` is the variant when cancellation wins the CAS-arbitration race; the 2e mutex contract per FR-015 / FR-016 / FR-020 / `[2e §6.1.4]` composes: if the writer-mutex `lock_async()` is cancelled before the method's linearisation point, the awaitable returns `store_cancelled` (mapped from the layered `sync_lock_aborted` at the method-level surface). The PR #73 contract: the cancellation slot fires through both layers atomically.
 - **007 `cancellable_dispatch`.** Per `[2d §6.5]` returns `asio::awaitable<expected_t<void>>` with the deterministic three-case contract (dispatched + ran; cancelled before dispatch; OOM at node alloc). 2e uses it on every `file_io_executor → session_strand` completion handoff (`FileStore::store`, `FileStore::reset`, `FileStore::flush_for_session_close`). The node is allocated from `session_arena` per `[2d §6.5]`.
+> **035 correction (2026-06-14):** The `cancellable_dispatch` claim above was aspirational at 008
+> Gate-A. The shipped 008 idiom (`co_await asio::post(file_io_executor, use_awaitable)`) was
+> inert (012 D-18) — the completion handler moved but the coroutine body stayed on the session
+> strand. `cancellable_dispatch` therefore had no observable effect on these paths. Feature
+> **035-filestore-io-offload** replaced the inert post with genuine `co_spawn`, eliminating the
+> `[const §XV.4]` violation; `cancellable_dispatch` was not introduced (the 035 design uses the
+> `co_spawn`'s terminal-only cancellation + an `operation_aborted`→durable catch instead). See
+> `spec/behaviors-and-limitations.md` B-035-1.
 - **007 `session_executor`.** Per `[2d §4.8]`, the engine binds all MessageStore method invocations to the session strand via `session_executor`; this feature consumes the type unchanged. The `session_ptr()` member is used to look up the per-session trace context (`co_await fixpp::current_trace_context`) in `[const §XIII.3]`-compliant code paths.
 - **007 `Session::session_arena()`.** Per `[2d §4.5]` / `[2f Appendix D §D.1]` the engine-internal accessor returns the per-session PMR resource. `MemoryStore` MAY use it for the per-session slab; `FileStore` uses it for the `cancellable_dispatch` node + the `pwrite` buffer copy.
 - **001 `core::error` / `expected_t<T>`.** The hot-path `expected_t<T>` model from `[arch §5.3]`; this feature appends 10 variants.
