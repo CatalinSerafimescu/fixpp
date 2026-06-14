@@ -522,6 +522,15 @@ add_test(NAME session_admin_emit_observation_gate
 set_tests_properties(session_admin_emit_observation_gate PROPERTIES
   LABELS "036;sc002;static_gate")
 
+# ── 037-resend-reply-possdup-tags T001/T004 (Cell 1) ─────────────────────────
+# Direct builder unit test: build_sequence_reset_gapfill → assert 43=Y + 122=<own 52>.
+# No Session/io_context/mock_clock required — pure free-function call + field walk.
+# T001: test file; T004: Cell 1 assertions; T005: confirmed RED; T008: confirmed GREEN.
+# Anchors: spec.md FR-001/FR-002/FR-003; plan.md T004; tasks.md §Phase 3.
+add_threading_test(session_resend_reply_possdup test_resend_reply_possdup.cpp)
+set_tests_properties(session_resend_reply_possdup PROPERTIES
+  LABELS "037;us1;possdup;gapfill")
+
 # T021 — Initiator transport-throw witness (FR-009 / SC-007).
 # Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
 # Exercises Session::open() when transport.send() throws during Logon emit;

@@ -162,7 +162,8 @@ struct logon_interpret_result {
 // ── SequenceReset (35=4) — GapFill mode ──────────────────────────────────────
 // FR-009, [FIX-SL §4.4]. 013 recovery sub-protocol (reply to inbound ResendRequest).
 //
-// Build an outbound SequenceReset with GapFillFlag(123)=Y and NewSeqNo(36).
+// Build an outbound SequenceReset with GapFillFlag(123)=Y, NewSeqNo(36),
+// PossDupFlag(43)=Y, and OrigSendingTime(122)=sending_time (own 52). [FR-001/FR-002]
 // begin_string: negotiated FIX version string for tag 8 (FR-002/RC#4).
 // sending_time: pre-formatted UTCTimestamp from effective_clock.now() (FR-003/RC#4).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_sequence_reset_gapfill(

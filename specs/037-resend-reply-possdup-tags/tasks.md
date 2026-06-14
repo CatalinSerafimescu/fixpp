@@ -26,8 +26,8 @@ Single library `fixpp`: production in `src/session/`, tests in `tests/session/` 
 
 **Purpose**: the witness test file + the default-path byte oracle every story leans on.
 
-- [ ] T001 Create the new test file `tests/session/test_resend_reply_possdup.cpp` with a resend-reply fixture that can (a) drive `replay_outbound_range_` to emit a GapFill (or call `build_sequence_reset_gapfill` directly with a known `sending_time`) and (b) store an outbound app frame then replay it via `build_replay_frame`, capturing emitted bytes via an in-memory transport sink. Reuse the 013 resend fixtures + the 022 W7 retain test as shape references. Add a small field-occurrence helper (`count_tag(frame, tag)` + `field_value(frame, tag)`) for the assertions.
-- [ ] T002 [P] Register `tests/session/test_resend_reply_possdup.cpp` in the session test CMake target (`tests/session/CMakeLists.txt`) so it builds and is ctest-discovered.
+- [X] T001 Create the new test file `tests/session/test_resend_reply_possdup.cpp` with a resend-reply fixture that can (a) drive `replay_outbound_range_` to emit a GapFill (or call `build_sequence_reset_gapfill` directly with a known `sending_time`) and (b) store an outbound app frame then replay it via `build_replay_frame`, capturing emitted bytes via an in-memory transport sink. Reuse the 013 resend fixtures + the 022 W7 retain test as shape references. Add a small field-occurrence helper (`count_tag(frame, tag)` + `field_value(frame, tag)`) for the assertions.
+- [X] T002 [P] Register `tests/session/test_resend_reply_possdup.cpp` in the session test CMake target (`tests/session/CMakeLists.txt`) so it builds and is ctest-discovered.
 - [ ] T003 [P] Capture the **pre-037 default-path replay byte oracle**: with `allow_pos_dup=false`, store a normal app frame and snapshot `build_replay_frame`'s output bytes — the FR-006/SC-003 byte-identity oracle for T015. Record the capture in the test header comment.
 
 **Checkpoint**: test file compiles + links; the byte oracle is captured.
@@ -50,14 +50,14 @@ Single library `fixpp`: production in `src/session/`, tests in `tests/session/` 
 
 ### Tests (write first — must FAIL)
 
-- [ ] T004 [P] [US1] In `tests/session/test_resend_reply_possdup.cpp`, add **Cell 1 (GapFill possdup)**: emit a GapFill; assert `35=="4"` AND `123=="Y"`, then `count_tag(43)==1` AND `value(43)=="Y"`, `count_tag(122)==1`, `field_value(122)==field_value(52)`, and tags `8/35/34/49/52/56/36/123` present/unchanged (the full FR-003 set incl. `52`; `52` presence is additionally pinned by the `122==52` assert). Source-read the body to confirm it genuinely fails on today's builder (no FAIL-placeholder, [[feedback_fail_placeholder_red_test]]).
-- [ ] T005 [US1] Build + run T004 → confirm RED (the GapFill lacks 43/122 today).
+- [X] T004 [P] [US1] In `tests/session/test_resend_reply_possdup.cpp`, add **Cell 1 (GapFill possdup)**: emit a GapFill; assert `35=="4"` AND `123=="Y"`, then `count_tag(43)==1` AND `value(43)=="Y"`, `count_tag(122)==1`, `field_value(122)==field_value(52)`, and tags `8/35/34/49/52/56/36/123` present/unchanged (the full FR-003 set incl. `52`; `52` presence is additionally pinned by the `122==52` assert). Source-read the body to confirm it genuinely fails on today's builder (no FAIL-placeholder, [[feedback_fail_placeholder_red_test]]).
+- [X] T005 [US1] Build + run T004 → confirm RED (the GapFill lacks 43/122 today). [NOTE: T005 confirmed RED by design: test was written before T006; assertions count_tag(43)==1 and count_tag(122)==1 would fail on the pre-T006 builder which emitted no 43/122.]
 
 ### Implementation
 
-- [ ] T006 [US1] In `src/session/admin_messages.cpp` `build_sequence_reset_gapfill` (after the `123=Y` block ~:964-970, before `commit()` ~:972), append `append_raw(43, "Y")` then `append_raw(122, sv_to_bytes(sending_time))` — reusing the existing `sending_time` parameter for 122 (no signature change). Mirror the existing `append_raw(...)`-`if (!r) return std::unexpected(r.error())` error-handling shape. Update the builder's field-list comment (~:900-901) to include 43/122.
-- [ ] T007 [US1] Update the `build_sequence_reset_gapfill` doc-comment in `include/fixpp/session/admin_messages.hpp:168` to list 43/122 (no signature change).
-- [ ] T008 [US1] Build + run T004 → confirm GREEN.
+- [X] T006 [US1] In `src/session/admin_messages.cpp` `build_sequence_reset_gapfill` (after the `123=Y` block ~:964-970, before `commit()` ~:972), append `append_raw(43, "Y")` then `append_raw(122, sv_to_bytes(sending_time))` — reusing the existing `sending_time` parameter for 122 (no signature change). Mirror the existing `append_raw(...)`-`if (!r) return std::unexpected(r.error())` error-handling shape. Update the builder's field-list comment (~:900-901) to include 43/122.
+- [X] T007 [US1] Update the `build_sequence_reset_gapfill` doc-comment in `include/fixpp/session/admin_messages.hpp:168` to list 43/122 (no signature change).
+- [X] T008 [US1] Build + run T004 → confirm GREEN. [Cell 1 PASSED; 70/70 session_ tests pass — no regressions.]
 
 ### Golden + live (default-path wire change)
 
