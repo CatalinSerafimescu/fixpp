@@ -657,6 +657,12 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
 
+        // gate-b/r2 R#1a: reset the flush-ran witness counter immediately before
+        // close(graceful) so we can assert it is ≥ 1 after close completes.
+        // This discriminates a skipped flush (A1 hook wiring broken → counter stays 0)
+        // from a genuine fdatasync execution (raw_datasync returned true → counter ≥ 1).
+        (void)fixpp::session::read_and_reset_flush_datasync_count();
+
         // close(graceful) → emits Logout → waits for peer → times out → Disconnected.
         // The A1 flush hook fires on close(graceful): flush_for_session_close() is
         // co_awaited and must complete before close() returns. [C5b / spec.md SC-007b]
@@ -671,6 +677,14 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         auto close_r = close_fut.get();
         // close() returns logout_timeout (no peer) or ok (if peer confirmed). Both are fine.
         (void)close_r;
+
+        // Assert that flush_for_session_close()'s fdatasync actually ran.
+        // If the A1 flush hook were not wired or the offload were skipped, the counter
+        // would be 0 and this assertion would fail — the existing next_seqnum>1 check
+        // alone is a proxy (pwrite page-cache visibility satisfies it even without fsync).
+        EXPECT_GE(fixpp::session::read_and_reset_flush_datasync_count(), 1)
+            << "flush_for_session_close() must run fdatasync during close(graceful): "
+               "counter must be ≥ 1 (raw_datasync returned true inside the offload lambda)";
     }  // ~sess: session and its FileStore are destroyed here.
 
     // Join the pool AFTER the session and its FileStore are destroyed.
@@ -705,12 +719,14 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         verify_pool.stop();
         verify_pool.join();
 
-        // Outbound next seqnum > 1 ⟹ at least the Logon frame was stored durably
-        // (fdatasync fired during close(graceful)'s flush_for_session_close()).
+        // Outbound next seqnum > 1 ⟹ frames were stored durably (combined with
+        // the flush-ran counter above: the flush ran AND the data is durable on disk).
+        // commit_batched(10) with < 10 frames means only flush_for_session_close()'s
+        // fdatasync makes the buffered pwrite data readable after a restart.
         ASSERT_TRUE(next_out.has_value()) << "Fresh FileStore must open and read counter";
         EXPECT_GT(*next_out, seqnum_t{1})
-            << "Outbound seqnum must advance past 1: flush_for_session_close() must have "
-               "run (commit_batched(10) with < 10 frames = only flush makes them durable)";
+            << "Outbound seqnum must advance past 1: frames are durable after "
+               "flush_for_session_close() fdatasync (commit_batched(10) + < 10 frames)";
     }
 
     std::filesystem::remove_all(dir);

@@ -116,6 +116,16 @@ static std::atomic<bool (*)(void) noexcept> g_post_rename_reopen_fail_hook{nullp
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_retrieve_pread_count{0};
 
+// gate-b/r2 R#1a flush-ran witness counter — incremented AFTER raw_datasync() returns
+// true inside flush_for_session_close()'s offload lambda (cold graceful-close path).
+// Compiled UNCONDITIONALLY (library is compiled without FIXPP_TEST_HOOKS; a gated
+// increment would be unreachable from tests that link the library — the #D regression).
+// Declaration in file_store.hpp gated by FIXPP_TEST_HOOKS so production callers
+// cannot reach it. The increment is on the cold graceful-close path (C3 carve-out),
+// never the per-send hot path, so there is no §XV.1/§VIII.5 concern.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_flush_datasync_count{0};
+
 namespace fixpp::session {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -262,6 +272,15 @@ int read_and_reset_catch_fired() noexcept {
 // Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 int read_and_reset_retrieve_pread_count() noexcept {
     return g_retrieve_pread_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// gate-b/r2 R#1a: read and reset the fdatasync-ran counter for flush_for_session_close().
+// Returns the number of successful fdatasync calls since the last reset. Used by the
+// SessionGracefulCloseFlushesFileStore witness to discriminate a skipped flush from a
+// genuine fdatasync. Compiled unconditionally; declaration in file_store.hpp gated by
+// FIXPP_TEST_HOOKS.
+int read_and_reset_flush_datasync_count() noexcept {
+    return g_flush_datasync_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // gate-b/r1 A.2: arm the one-shot flag so the NEXT reset() simulates abort after durable.
@@ -1751,7 +1770,16 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
-            return raw_datasync(raw_fd);
+            const bool ok = raw_datasync(raw_fd);
+            // gate-b/r2 R#1a: increment the flush-ran witness counter AFTER
+            // raw_datasync returns true (fdatasync actually executed and succeeded).
+            // Unconditional: the library is compiled without FIXPP_TEST_HOOKS so a
+            // gated increment would be invisible to tests that link the library.
+            // Cold path (graceful close only) — no §XV.1/§VIII.5 hot-path concern.
+            if (ok) {
+                g_flush_datasync_count.fetch_add(1, std::memory_order_relaxed);
+            }
+            return ok;
         });
 
     if (!io_ok) {

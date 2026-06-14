@@ -224,6 +224,15 @@ void arm_force_abort_after_reset_lambda() noexcept;
 // force the reopen to fail, allowing the poison-on-post-rename-failure path (A.1)
 // to be tested. Pass nullptr to clear. Consumed once per install.
 void install_post_rename_reopen_fail_hook(bool (*hook)() noexcept) noexcept;
+// gate-b/r2 R#1a: read and reset the flush-ran witness counter for
+// flush_for_session_close(). Returns the number of successful fdatasync calls
+// (raw_datasync returned true) since the last reset. Used by
+// SessionGracefulCloseFlushesFileStore to discriminate a skipped flush from a
+// genuine fdatasync execution. The counter is incremented unconditionally in
+// file_store.cpp (so it is reachable when the library TU is compiled without
+// FIXPP_TEST_HOOKS); only this declaration is gated so production callers cannot
+// reach it.
+int read_and_reset_flush_datasync_count() noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session
