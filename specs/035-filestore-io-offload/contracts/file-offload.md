@@ -93,17 +93,24 @@ driven mid-walk `reset()`.
 
 ## C5 — Teardown contract (FR-007 / SC-007)
 
-The `file_io_executor` pool is application-owned (the engine does not own or join it). The contract is
-scoped to **Session/Engine-reachable** store work: after `Engine::stop()` returns, no Session-reachable
-FileStore offload is in flight — every Session-reachable store op (incl. the graceful-close flush) is
-awaited inside the send/close coroutine, and `stop()` (`engine.cpp:1184–1333`) drains all role loops +
-in-flight sends before returning. `stop()` **cannot** drain a **direct** (non-Session) `FileStore` call
-made outside Session ownership (a test-double / custom user); for those the **caller obligation** is that
-the `file_io_executor` MUST outlive all outstanding store awaitables (a misuse note documents this). The
-application may join the pool only after `stop()` completes. **Witness**: shutdown-ordering seam with
-in-flight offloaded `store()` **and** a graceful-close `flush_for_session_close` (under `commit_batched`) +
-`Engine::stop()` under ASan/TSan — `stop()` returns only after the Session-reachable nested
-`co_spawn(use_awaitable)` work completes; no UAF, no use-of-joined-pool.
+The `file_io_executor` pool is application-owned (the engine does not own or join it). The contract has
+two complementary sub-properties:
+
+**C5a — Engine/terminal-close drain.** After `Engine::stop()` returns, no Session-reachable in-flight
+`store()` offload is in flight. `Engine::stop()` drives `close(terminal)` at every call site
+(`engine.cpp:517,947,1042,1085,1366`); `terminal` skips phase-1 (`session.cpp:1241`) and therefore does
+NOT invoke `flush_for_session_close`. The role-loop drain at `stop()` (`engine.cpp:1184–1333`) joins
+all in-flight `store()` `co_await`s; the application may then safely join the pool. **Witness**:
+`test_store_shutdown_ordering.cpp` Test 6 — pool-level shutdown-ordering seam (standalone `FileStore` +
+app-owned pool + in-flight `store()` + `flush_for_session_close()` drain + ASan/TSan).
+
+**C5b — Graceful-close flush.** `Session::close(close_mode::graceful)` invokes the A1 typed-thunk
+`flush_for_session_close` (`session.cpp:1258–1264`) and `co_await`s it to durable completion (C1 — never
+detached). The flush join is structurally guaranteed; no UAF is possible on the graceful path.
+
+`stop()` **cannot** drain a **direct** (non-Session) `FileStore` call made outside Session ownership;
+for those the **caller obligation** is that the `file_io_executor` MUST outlive all outstanding store
+awaitables (a misuse note in `file_store.hpp:Config::file_io_executor` documents this).
 
 ## C6 — No-surface-change contract (FR-009 / Art. X)
 

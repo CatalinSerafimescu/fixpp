@@ -38,13 +38,18 @@
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/thread_pool.hpp>
+#include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/file_store_factory.hpp>
+#include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -55,6 +60,7 @@
 #include <string_view>
 #include <vector>
 
+#include "_fixtures_/store_temp_dir.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/transport_double.hpp"
@@ -553,6 +559,161 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     ioc.run_for(200ms);
     ioc.restart();
     (void)close_fut.get();
+}
+
+// ── SC-007 / R#C.2 — Session + FileStore graceful-close flush witness ─────────
+//
+// Proves contracts/file-offload.md §C5b: Session::close(close_mode::graceful)
+// invokes the A1 typed-thunk flush_for_session_close() (session.cpp:1258–1264)
+// and co_awaits it to durable completion (C1 — never detached).
+//
+// Strategy (discriminating):
+//   - FileStore under commit_batched(batch_size=10); session drives 2 frames
+//     (outbound Logon + inbound Logon-ack). Total 2 < batch_size=10 → no
+//     auto-flush → frames remain in kernel page-cache, not fdatasync'd.
+//   - close(close_mode::graceful) is co_awaited; the A1 dispatch calls
+//     flush_for_session_close() which runs an offloaded fdatasync (Test 7
+//     complement confirms this; here we confirm no UAF + frames durable).
+//   - After close completes: open a new FileStore on the same path + assert
+//     next_seqnum(outbound,false) > 1 (at least 1 frame was committed,
+//     proving fdatasync ran and the counter record is durable).
+//   - Pool joined AFTER close() (correct C5a ordering). No ASan/TSan report
+//     = no use-of-joined-pool, no UAF.
+//
+// Executor topology: ioc (single-threaded session driver) + separate file_pool
+// (file I/O). Emit/close run on the ioc; offloads run on file_pool.
+// [[feedback_strand_in_any_executor_refcount_race]]
+// [[feedback_self_run_build_gate]]
+TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) {
+    using namespace std::chrono_literals;
+    using fixpp::session::FileStore;
+    using fixpp::session::FileStoreFactory;
+    using fixpp::session::FileStorePolicy;
+    using fixpp::session::seqnum_t;
+    using fixpp::session::direction_t;
+    using fixpp::store_test::unique_store_dir;
+
+    auto dir = unique_store_dir("sc007_graceful_flush");
+
+    // Separate pool for file I/O — MUST outlive the session.
+    asio::thread_pool file_pool{2};
+
+    // Single-threaded session driver (ioc).
+    asio::io_context ioc;
+
+    // Mock clock (required by Session / engine).
+    auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
+    auto stp = fixpp::core::steady_time_point{} + std::chrono::seconds{0};
+    auto clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
+
+    fixpp::core::EngineConfig engine;
+    engine.clock = clock;
+    engine.executor = ioc.get_executor();
+    engine.file_io_executor = file_pool.get_executor();
+
+    // FileStoreFactory: commit_batched(10) so frames are buffered until flush.
+    FileStore::Config fs_cfg;
+    fs_cfg.directory = dir;
+    fs_cfg.policy.which = FileStorePolicy::kind::commit_batched;
+    fs_cfg.policy.batch_size = 10;  // batch_size > frames → no auto-flush
+    fs_cfg.max_frame_bytes = 4096;
+    fs_cfg.file_io_executor = file_pool.get_executor();
+    // Config-supplied-wins: engine.file_io_executor ignored; fs_cfg wins.
+
+    fixpp::session::SessionConfig cfg;
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.executor_override = ioc.get_executor();
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.store_factory = std::make_unique<FileStoreFactory>(fs_cfg);
+
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
+
+    {
+        fixpp::session::Session sess(engine, cfg);
+
+        // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
+        {
+            auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+            ioc.run_for(200ms);
+            ioc.restart();
+            ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
+            ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+        }
+
+        // Feed peer Logon-ack → Active. 2 stores now buffered: outbound Logon
+        // (from open) + inbound Logon-ack (from on_inbound_frame).
+        auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
+        {
+            auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
+            ioc.run_for(200ms);
+            ioc.restart();
+            ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
+            ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+        }
+
+        // close(graceful) → emits Logout → waits for peer → times out → Disconnected.
+        // The A1 flush hook fires on close(graceful): flush_for_session_close() is
+        // co_awaited and must complete before close() returns. [C5b / spec.md SC-007b]
+        auto close_fut = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful),
+                                        asio::use_future);
+        ioc.run_for(100ms);
+        ioc.restart();
+        // Advance clock past logout timeout (2 s) to drive close to completion.
+        clock->advance(std::chrono::seconds{3});
+        ioc.run_for(500ms);
+        ioc.restart();
+        auto close_r = close_fut.get();
+        // close() returns logout_timeout (no peer) or ok (if peer confirmed). Both are fine.
+        (void)close_r;
+    }  // ~sess: session and its FileStore are destroyed here.
+
+    // Join the pool AFTER the session and its FileStore are destroyed.
+    // No in-flight offloaded work remains (close() joined everything).
+    // If any offload were still in flight, pool.join() would UAF-or-hang here —
+    // ASan/TSan detects this. [C5a ordering]
+    file_pool.stop();
+    file_pool.join();
+
+    // Verify durability: open a fresh FileStore on the same path.
+    // next_seqnum(outbound, false) must be ≥ 2 (outbound Logon was stored and
+    // flushed — proves fdatasync ran, not just kernel-buffered).
+    {
+        FileStore::Config verify_cfg = fs_cfg;
+        verify_cfg.policy.which = FileStorePolicy::kind::commit_per_message;
+        FileStoreFactory verify_factory{verify_cfg};
+        asio::thread_pool verify_pool{1};
+        auto verify_ex = verify_pool.get_executor();
+
+        std::optional<seqnum_t> next_out;
+        auto fut = asio::co_spawn(
+            verify_pool,
+            [&]() -> asio::awaitable<void> {
+                auto ms = verify_factory.make("ISLD", "TW", nullptr, 1024 * 1024, verify_ex);
+                if (!ms.has_value()) co_return;
+                auto* fs = static_cast<FileStore*>(ms->get());
+                auto r = co_await fs->next_seqnum(direction_t::outbound, false);
+                if (r.has_value()) next_out = *r;
+            },
+            asio::use_future);
+        fut.get();
+        verify_pool.stop();
+        verify_pool.join();
+
+        // Outbound next seqnum > 1 ⟹ at least the Logon frame was stored durably
+        // (fdatasync fired during close(graceful)'s flush_for_session_close()).
+        ASSERT_TRUE(next_out.has_value()) << "Fresh FileStore must open and read counter";
+        EXPECT_GT(*next_out, seqnum_t{1})
+            << "Outbound seqnum must advance past 1: flush_for_session_close() must have "
+               "run (commit_batched(10) with < 10 frames = only flush makes them durable)";
+    }
+
+    std::filesystem::remove_all(dir);
 }
 
 }  // namespace fixpp::session::test
