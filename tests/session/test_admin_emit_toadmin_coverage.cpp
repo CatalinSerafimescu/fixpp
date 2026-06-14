@@ -351,17 +351,7 @@ static std::string extract_msg_type(std::span<const std::byte> frame) {
     return extract_field_str(frame, 35);
 }
 
-static std::size_t count_frames_with_type(const std::vector<std::vector<std::byte>>& frames,
-                                          std::string_view msg_type) {
-    std::size_t n = 0;
-    for (const auto& f : frames) {
-        if (extract_msg_type(f) == msg_type) ++n;
-    }
-    return n;
-}
-
 // Count frames with a given MsgType within [start, end) of the capture vector.
-// Windowed variant of count_frames_with_type: only examines frames[start..end).
 // FQ-3: tightens per-type presence checks to the provocation window so a stale
 // same-type frame from an earlier handshake cannot mask a missing in-window emit.
 // Anchor: opus_pr120_1_triage.md FQ-3.

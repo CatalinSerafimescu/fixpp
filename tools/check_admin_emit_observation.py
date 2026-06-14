@@ -25,6 +25,56 @@ from pathlib import Path
 # Root of the library (tools/ is a sibling of src/)
 ROOT = Path(__file__).parent.parent
 
+
+def _strip_cpp_comments(lines: list[str]) -> list[str]:
+    """Strip C++ line comments (// ...) and block comments (/* ... */) from a
+    list of source lines, returning a parallel list of comment-free lines.
+
+    This prevents a token that appears only inside a comment (e.g. a disabled
+    or example call) from being mistaken for a real observation hook.
+
+    Algorithm:
+      Walk the text character-by-character tracking block-comment state.
+      Replace every character inside a comment with a space (preserving line
+      lengths so line numbers remain 1:1 with the originals).
+    """
+    result: list[str] = []
+    in_block = False
+    for line in lines:
+        out = []
+        i = 0
+        n = len(line)
+        while i < n:
+            if in_block:
+                if i + 1 < n and line[i] == "*" and line[i + 1] == "/":
+                    out.append("  ")  # consume */
+                    i += 2
+                    in_block = False
+                else:
+                    out.append(" ")  # mask comment char
+                    i += 1
+            else:
+                if i + 1 < n and line[i] == "/" and line[i + 1] == "/":
+                    # Line comment: mask everything from here to end-of-line.
+                    out.append(" " * (n - i))
+                    break
+                elif i + 1 < n and line[i] == "/" and line[i + 1] == "*":
+                    out.append("  ")  # consume /*
+                    i += 2
+                    in_block = True
+                elif line[i] in ('"', "'"):
+                    # String/char literal: copy verbatim (we don't need to
+                    # parse it accurately; false-positives from strings are
+                    # acceptable since no hook token appears in a string literal
+                    # in session.cpp and we only care about NOT counting comments).
+                    out.append(line[i])
+                    i += 1
+                else:
+                    out.append(line[i])
+                    i += 1
+        result.append("".join(out))
+    return result
+
 # Default target file
 DEFAULT_TARGET = ROOT / "src" / "session" / "session.cpp"
 
@@ -78,11 +128,19 @@ def check_file(path: Path) -> list[str]:
     "hook must appear between builder and its emit" is a strictly stronger
     check than "hook exists somewhere in the function" and correctly catches
     a future unwired site.
+
+    Comment stripping: the interval scan uses comment-stripped lines so that
+    a hook token appearing only inside a C++ comment (// or /* */) is NOT
+    counted as a real observation call. Builder detection uses the original
+    lines (builders don't appear in comments in production code).
     """
     violations: list[str] = []
 
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
+
+    # Parallel comment-stripped version for hook/emit detection.
+    stripped = _strip_cpp_comments(lines)
 
     total_lines = len(lines)
 
@@ -95,12 +153,13 @@ def check_file(path: Path) -> list[str]:
 
         # Scan forward from the builder line to find store_then_emit.
         # Search up to 60 lines ahead (all current emit blocks are <20 lines).
+        # Use comment-stripped lines so tokens inside comments don't count.
         SEARCH_WINDOW = 60
         emit_line_no: int | None = None
         hook_found = False
 
         for j in range(i, min(i + SEARCH_WINDOW, total_lines)):
-            scan_line = lines[j]  # 0-based; line i corresponds to lines[i-1]
+            scan_line = stripped[j]  # comment-stripped; 0-based
             # Check for hook in the interval (before the emit).
             if emit_line_no is None and required_hook in scan_line:
                 hook_found = True
@@ -145,8 +204,6 @@ def main() -> int:
             print(f"  {v}")
         return 1
 
-    # Count for informational output (not the gate — the gate is per-site structural).
-    admin_count = sum(1 for key in ADMIN_BUILDERS for _ in [None])
     print(
         f"[check_admin_emit_observation] OK — all builder→fire_to_admin_/toApp→store_then_emit "
         f"chains verified in {target.name} (SC-002 gate PASS)."
