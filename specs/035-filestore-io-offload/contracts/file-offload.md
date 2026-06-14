@@ -99,10 +99,14 @@ two complementary sub-properties:
 **C5a — Engine/terminal-close drain.** After `Engine::stop()` returns, no Session-reachable in-flight
 `store()` offload is in flight. `Engine::stop()` drives `close(terminal)` at every call site
 (`engine.cpp:517,947,1042,1085,1366`); `terminal` skips phase-1 (`session.cpp:1241`) and therefore does
-NOT invoke `flush_for_session_close`. The role-loop drain at `stop()` (`engine.cpp:1184–1333`) joins
-all in-flight `store()` `co_await`s; the application may then safely join the pool. **Witness**:
-`test_store_shutdown_ordering.cpp` Test 6 — pool-level shutdown-ordering seam (standalone `FileStore` +
-app-owned pool + in-flight `store()` + `flush_for_session_close()` drain + ASan/TSan).
+NOT invoke `flush_for_session_close`. The drain is established by **code-analysis**:
+`engine.cpp:1184–1333` `co_await`s every in-flight Session-reachable `store()` offload; the offload is
+`use_awaitable`, never detached — join is structurally guaranteed, no UAF possible. The application may
+then safely join the pool. **Witness**: `test_store_shutdown_ordering.cpp` Test 6 — **pool-level
+offload-joined-before-pool-join invariant** (standalone `FileStore` + app-owned pool + in-flight
+`store()` + ASan/TSan). [gate-b/r2 R#1b: removed `flush_for_session_close() drain` from this clause —
+terminal close does NOT invoke the flush (line above); Test 6 witnesses the pool-join ordering
+invariant, not `Engine::stop()` directly; the Engine drain proof is code-analysis.]
 
 **C5b — Graceful-close flush.** `Session::close(close_mode::graceful)` invokes the A1 typed-thunk
 `flush_for_session_close` (`session.cpp:1258–1264`) and `co_await`s it to durable completion (C1 — never
