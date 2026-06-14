@@ -5,8 +5,21 @@ HEAD (post-035). The Fable assessment 2.4 §2 was at post-033; line numbers shif
 
 ## Decision 1 — Emit-site inventory re-verified at current HEAD
 
-The 26 engine-originated admin-builder emit sites, partitioned by observation status. **16 already
-fire `fire_to_admin_`** (unchanged by this feature). The **10 unobserved** sites are the scope:
+Reproducible census (run at branch HEAD, cwd = library submodule):
+
+```
+grep -nc 'fixpp::session::build_' src/session/session.cpp   → 25 build-call sites
+grep -n  'fire_to_admin_(' src/session/session.cpp          → 15 call sites
+   (excluding the function definition at :331; call sites :833 :2118 :2270 :2428
+    :2561 :2701 :2896 :3071 :3114 :4297 :4352 :4638 :4765 :4897 :4940)
+```
+
+So **10 of 25 engine-originated `build_*` emit sites bypass observation; 15 already fire
+`fire_to_admin_`** (unchanged by this feature). Of the 25 total: 24 admin-set frames + 1 BMR (an
+application frame — `35=j` — NOT counted as admin). Of the 10 unwired: 9 administrative (8
+`build_reject` sites incl. the shared helper + the Guard-3 `build_logout`) + 1 BMR. **15 wired + 10
+unwired = 25.** (An earlier draft inherited "26 / 16" verbatim from the Fable assessment without
+re-counting; the grep above is the authoritative count.) The **10 unobserved** sites are the scope:
 
 | # | Site (HEAD) | Frame | Trigger / context | Arm | Fix |
 |---|---|---|---|---|---|
@@ -28,16 +41,27 @@ helper). **Alternatives considered**: incremental per-site wiring — rejected (
 
 ## Decision 2 — ARM 1 ordering: `fire_to_admin_` after `assign_outbound`
 
-The canonical wired pattern is the 033 1137-Reject (`:2112-2124`):
+The contract is **callback before store/transmit**. For seqnum-assignment ordering specifically, the
+new admin sites adopt the **1137-Reject `assign`-then-`fire` shape** (033, `:2106` build / `:2113`
+`assign_outbound` / `:2118` `fire_to_admin_` / `:2126` `store_then_emit`):
 `assign_outbound` → `fire_to_admin_` (false → `record_state_transition_(Disconnected)` +
 `co_return std::unexpected(app_callback_threw)`) → `store_then_emit`.
 
-**Decision**: match it exactly at all 9 admin sites. `toAdmin` is **inspect-only / not vetoable**
-(`session.cpp:323`; `fire_to_admin_` returns false only on a throw). Since a throw always
-disconnects, whether the seqnum was already assigned is immaterial — so the surgical, consistent
-choice is to mirror the existing sites verbatim. **Alternative**: fire before `assign_outbound`
-(like the app arm) — rejected: it would gratuitously diverge from the 16 wired sites for no behavioural
-gain, and the no-loop-guard / Disconnected handling already assumes the wired shape.
+The 15 already-wired sites have **mixed** assign-vs-callback ordering and are **unchanged**: the
+1137-Reject is the lone assign-then-fire site (fires AFTER `assign_outbound`) verified in review; the
+wired Logouts/Heartbeats fire BEFORE it (e.g. the Q3
+Logout `:2421` build / `:2428` fire / `:2433` assign; the ArmD Logout `:2696`/`:2701`/`:2706`; the
+Heartbeat echo `:3064`/`:3071`/`:3076`). So this is NOT a "byte-identical to all 15 wired sites"
+match — it matches exactly the one 1137-Reject site.
+
+**Decision**: adopt the 1137-Reject `assign`-then-`fire` shape at all 9 admin sites. The choice is
+**behaviourally immaterial** for the admin arm: `toAdmin` is **inspect-only / not vetoable**
+(`session.cpp:323`; `fire_to_admin_` returns false only on a throw), and a throw always disconnects
+→ Disconnected regardless of whether the seqnum was already assigned, so seqnum-assignment order does
+not affect accounting. We pick the 1137-Reject shape for surgical consistency with the most-recent
+admin reject pattern. **Alternative**: fire before `assign_outbound` (like the app arm / the wired
+Logouts) — rejected: behaviourally equivalent, but the assign-then-fire shape keeps the new reject
+sites uniform with the 1137-Reject and its already-blessed Disconnected handling.
 
 ## Decision 3 — ARM 2 ordering: `toApp` before `assign_outbound` (veto-no-consume)
 
@@ -82,11 +106,13 @@ the Q3 SendingTime reject (`:2400`) is **established/Active**; the 021 arms are 
 specific malformed-122 inbound; the helper's two callers are fromAdmin-veto / no-`Application`; the
 BMR is **Active** fromApp-reject. A single linear session cannot reach all 10.
 
-**Decision**: the witness is a **suite of per-site cells**. Each cell (a) provokes exactly its emit,
-(b) asserts the target callback fired for that frame (`toAdmin` for admin; `toApp` for `35=j`), and
-(c) asserts the exact-count invariant **within the cell** — `toAdmin_calls == count(admin frames on
-the wire)`, with any `35=j` counted on the `toApp` side and excluded from the admin count. A
-**throwing-callback variant** per site asserts `app_callback_threw` + terminal close. The BMR adds a
+**Decision**: the witness is a **suite of per-site cells**. Each cell (a) provokes exactly its emit
+and (b) asserts the callback fired for that frame (`toAdmin` for admin; `toApp` for `35=j`). The
+exact-count invariant — `toAdmin_calls == count(admin frames on the wire)`, with any `35=j` counted
+on the `toApp` side and excluded from the admin count — applies to the **callback-reachable,
+registered-`Application`** cells; the no-`Application` helper cell is **excluded** and tested as an
+FR-006 byte-identity no-op, and the BMR veto cell is governed by INV-COV-5 (see `quickstart.md:54-58`
+/ C3). A **throwing-callback variant** per site asserts `app_callback_threw` + terminal close. The BMR adds a
 **veto cell**: `app_do_not_send` → `35=j` absent from the wire, session stays Active, **no outbound
 seqnum consumed**. This is the faithful realization of the assessment's exact-count invariant
 ([[feedback_completeness_gate_exact_set_not_subset]] — assert the equality, not subset-presence;

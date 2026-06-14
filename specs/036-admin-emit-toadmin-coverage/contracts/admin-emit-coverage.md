@@ -8,8 +8,14 @@ partial to full coverage.
 
 For **every** engine-originated administrative frame, before the frame is stored or transmitted:
 
+The contract is **callback before store/transmit**. For seqnum-assignment ordering, the new admin
+sites adopt the **1137-Reject `assign`-then-`fire` shape** (`session.cpp:2113-2126`). (The 15 wired
+sites have **mixed** assign-vs-callback ordering — the 1137-Reject is the assign-then-fire outlier;
+the wired Logouts/Heartbeats fire first — and are unchanged. The choice is behaviourally immaterial for admin:
+non-vetoable, and a throw → Disconnected regardless of seqnum-assignment order.)
+
 ```
-assign_outbound()                       // (admin: seqnum assigned first, matching the 16 wired sites)
+assign_outbound()                       // (admin: seqnum assigned first, adopting the 1137-Reject shape)
 if (!fire_to_admin_(frame)) {           // invokes Application::toAdmin if registered; false ⇔ threw
     record_state_transition_(Disconnected);
     co_return std::unexpected(app_callback_threw);
@@ -72,16 +78,27 @@ if (bmr_r) {
 
 ## C3 — Exact-count observation invariant (the durable regression)
 
-For any test scenario S that provokes a set of engine-originated emits:
+The admin exact-count equality holds **only with a registered, non-throwing `Application`**. The BMR
+`toApp` equality holds **only on the non-veto path**; the veto path is carved out explicitly below.
 
 ```
+// Registered, non-throwing Application:
 toAdmin_calls(S)  ==  count(administrative frames on the wire in S)        // exact equality
-toApp_calls_for_35j(S) == count(35=j frames on the wire in S)              // BMR counted separately
+
+// BMR (35=j), non-veto path:
+toApp_calls_for_35j(S) == count(35=j frames on the wire in S)             // BMR counted separately
+
+// BMR (35=j), veto path (app_do_not_send):
+toApp_calls_for_35j(S) == 1  AND  wire_35j_count(S) == 0                  // fired once, not on wire
+   AND  no outbound seqnum consumed
+   AND  inbound durable seqnum advanced                                   // cross-ref INV-COV-5 / C2
 ```
 
 The administrative count **excludes** `35=j`. This is **exact-count** equality (not "≥1", not
-subset-presence): a future emit site added without `fire_to_admin_` breaks the equality, and a
-double-fire breaks it too. See [[feedback_completeness_gate_exact_set_not_subset]].
+subset-presence): a future admin emit site added without `fire_to_admin_` breaks the equality, and a
+double-fire breaks it too. See [[feedback_completeness_gate_exact_set_not_subset]]. The no-`Application`
+helper caller (`:3215`, reachable only when `application == nullptr`) is witnessed as an FR-006
+byte-identity no-op, not a callback count (see the quickstart cell `EmitSessionReject_NoAppUnknownType_NoOp`).
 
 ## C4 — Documentation obligations (FR-008)
 

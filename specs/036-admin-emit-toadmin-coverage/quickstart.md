@@ -51,12 +51,18 @@ Each cell drives the session to exactly the state that provokes one emit, captur
 | `Logout_Guard3LogonAckSendingTime` | initiator LogonSent, peer Logon-ack with stale/absent `52=` → `:3368` | `toAdmin_calls == 1`, one `35=5` |
 | `BMR_ToApp_Observed` | Active, `fromApp` rejects an inbound app msg → `:3249` | `toApp_calls == 1`, `toAdmin_calls == 0`, one `35=j` on wire |
 
-**Exact-count aggregate** (C3): in each cell assert
+**Exact-count aggregate** (C3): in each **callback-reachable, registered-`Application`** cell assert
 `toAdmin_calls == count(admin frames on wire)` and the `35=j` is counted only on the `toApp` side.
+The `EmitSessionReject_NoAppUnknownType_NoOp` cell is **excluded** from the exact-count equality — it
+runs with no `Application` and is witnessed as an FR-006 byte-identity no-op (see its row above). The
+BMR veto cell is governed by INV-COV-5 (`toApp_calls == 1`, `35=j` not on wire), not the admin count.
 
 ## Throwing-callback variant (FR-003 / SC-003)
 
-For each site, re-run with `mode = Throw` and assert:
+For each **callback-reachable, registered-`Application`** newly-wired site, re-run with `mode = Throw`
+and assert (the `EmitSessionReject_NoAppUnknownType_NoOp` cell is **excluded** — its `:3215` caller is
+reachable only with no `Application`, so there is no throwing `toAdmin` to surface there; the shared
+helper's throw path is covered via the app-registered `:3026` `fromAdmin`-veto caller):
 
 ```cpp
 EXPECT_EQ(result.error(), fixpp::core::error::app_callback_threw);
@@ -93,5 +99,7 @@ are byte-for-byte identical to the pre-change baseline (capture once on `main`, 
 ## Sanitizers
 
 Run the new binary under ASan / UBSan / TSan (session suite is the regression set). The callback
-fires on the session strand (`[const §XI.4]`) — TSan must stay clean; a multi-thread pool variant is
-not required (no new cross-thread surface — the callbacks run where the 16 wired sites already run).
+fires on the engine executor under 019's single-thread confinement (L-019-3 / INV-2 — NOT an engaged
+per-session strand; `[const §XI.4]`'s per-session strand is the deferred 019 future-slice) — TSan must
+stay clean; a multi-thread pool variant is not required (no new cross-thread surface — the callbacks
+run where the 15 wired sites already run).

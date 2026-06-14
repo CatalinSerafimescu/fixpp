@@ -9,7 +9,7 @@ the exact-count invariant (SC-001/SC-002).
 Legend: **callback** = which `Application` hook fires before store/emit · **order** = callback
 position relative to `assign_outbound` · **036** = wired by this feature (✱) or pre-existing (·).
 
-### Already observed before 036 (16 — unchanged)
+### Already observed before 036 (15 — unchanged)
 
 | Site (HEAD) | Frame | Callback | 036 |
 |---|---|---|---|
@@ -48,8 +48,13 @@ position relative to `assign_outbound` · **036** = wired by this feature (✱) 
   emit sites whose `callback` column is empty is **zero**. (Pre-036 it is 9.)
 - **INV-COV-2** (FR-004): the one application-message site (`35=j`) routes through `toApp`, never
   `toAdmin`. It is **excluded** from the administrative `toAdmin` count.
-- **INV-COV-3** (SC-001): for any scenario, `toAdmin_calls == count(administrative frames emitted on
-  the wire in that scenario)` — exact equality (not subset).
+- **INV-COV-3** (SC-001): with a **registered, non-throwing** `Application`, on the **non-veto** path,
+  `toAdmin_calls == count(administrative frames emitted on the wire in that scenario)` — exact equality
+  (not subset). Carve-outs (stated correctly in INV-COV-5 and the quickstart cell table): the BMR veto
+  path is governed by INV-COV-5 (see there), and the no-`Application` helper caller (`:3215`,
+  structurally reachable only when `application == nullptr`) is witnessed as an FR-006 byte-identity
+  no-op, not a `toAdmin` count. This invariant does NOT contradict INV-COV-5 — it is scoped to exclude
+  exactly the cases INV-COV-5 governs.
 - **INV-COV-4** (FR-003): a `toAdmin` throw on any administrative site → `app_callback_threw` +
   `Disconnected`; `toAdmin` never suppresses an administrative frame (inspect-only).
 - **INV-COV-5** (FR-004): a `toApp` `app_do_not_send` on the `35=j` site → frame not stored/emitted,
