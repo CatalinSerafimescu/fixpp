@@ -586,11 +586,11 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
 // [[feedback_self_run_build_gate]]
 TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) {
     using namespace std::chrono_literals;
+    using fixpp::session::direction_t;
     using fixpp::session::FileStore;
     using fixpp::session::FileStoreFactory;
     using fixpp::session::FileStorePolicy;
     using fixpp::session::seqnum_t;
-    using fixpp::session::direction_t;
     using fixpp::store_test::unique_store_dir;
 
     auto dir = unique_store_dir("sc007_graceful_flush");
@@ -660,8 +660,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // close(graceful) → emits Logout → waits for peer → times out → Disconnected.
         // The A1 flush hook fires on close(graceful): flush_for_session_close() is
         // co_awaited and must complete before close() returns. [C5b / spec.md SC-007b]
-        auto close_fut = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful),
-                                        asio::use_future);
+        auto close_fut =
+            asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
         ioc.run_for(100ms);
         ioc.restart();
         // Advance clock past logout timeout (2 s) to drive close to completion.

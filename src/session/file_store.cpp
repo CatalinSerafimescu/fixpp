@@ -177,8 +177,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 #ifndef _WIN32
 
 // pwrite_all with EINTR loop — mirrors OsFile::pwrite_all.
-[[nodiscard]] bool raw_pwrite_all(int fd, const void* buf, std::size_t n,
-                                         off_t offset) noexcept {
+[[nodiscard]] bool raw_pwrite_all(int fd, const void* buf, std::size_t n, off_t offset) noexcept {
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     while (remaining > 0) {
@@ -200,7 +199,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 #else  // _WIN32
 
 [[nodiscard]] bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
-                                         std::int64_t offset) noexcept {
+                                  std::int64_t offset) noexcept {
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     std::int64_t off = offset;
@@ -1275,11 +1274,15 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         // --- NO co_await between the re-check above and the pread below ---
-        // Count pread attempts under FIXPP_TEST_HOOKS (test-discrimination state;
-        // not needed on the production read path). [gate-b/r1 D]
-#ifdef FIXPP_TEST_HOOKS
+        // Count pread attempts (test-discrimination state for the mid-walk-reset
+        // witness). Unconditional: the library TU is compiled WITHOUT FIXPP_TEST_HOOKS,
+        // so a gated increment would be invisible to the FIXPP_TEST_HOOKS test targets
+        // that link this library (the witness reads it via read_and_reset_retrieve_pread_count).
+        // Same always-compiled runtime-hook precedent as g_store_offload_probe and
+        // system_clock_source::inflight_count(); a relaxed atomic add on the rare resend
+        // read path (NOT the in-memory hot path) is negligible. [gate-b/r1 D reverted —
+        // gating broke the witness per triage's stated fallback]
         g_retrieve_pread_count.fetch_add(1, std::memory_order_relaxed);
-#endif
         if (!impl_->read_frame_payload(ie, impl_->retrieve_scratch_)) {
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
@@ -1557,8 +1560,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 // If this fails: post-rename failure → caller will poison the store (A.1).
                 // gate-b/r1 A.1 fault-injection: if the hook is installed and returns false,
                 // simulate a reopen failure post-rename to exercise the poison path.
-                if (auto* h = g_post_rename_reopen_fail_hook.exchange(
-                        nullptr, std::memory_order_relaxed)) {
+                if (auto* h = g_post_rename_reopen_fail_hook.exchange(nullptr,
+                                                                      std::memory_order_relaxed)) {
                     if (!h()) {
                         return false;  // forced post-rename reopen failure → poison
                     }
@@ -1577,47 +1580,48 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 return true;
 
 #else
-            // ── Windows atomic-rename path ────────────────────────────────────
-            const std::string tmp_path = path + ".reset.tmp";
-            std::wstring wide_tmp(tmp_path.begin(), tmp_path.end());
-            std::wstring wide_live(path.begin(), path.end());
+                // ── Windows atomic-rename path ────────────────────────────────────
+                const std::string tmp_path = path + ".reset.tmp";
+                std::wstring wide_tmp(tmp_path.begin(), tmp_path.end());
+                std::wstring wide_live(path.begin(), path.end());
 
-            OsFile tmp_file;
-            if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
-                return false;
-            }
-            {
-                FileStoreImpl tmp_impl;
-                tmp_impl.expected_hash = hash;
-                tmp_impl.file = std::move(tmp_file);
-                tmp_impl.write_pos = 0;
-                tmp_impl.next_inbound = seqnum_min;
-                tmp_impl.next_outbound = seqnum_min;
-                if (!tmp_impl.initialise_fresh()) {
+                OsFile tmp_file;
+                if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
+                    return false;
+                }
+                {
+                    FileStoreImpl tmp_impl;
+                    tmp_impl.expected_hash = hash;
+                    tmp_impl.file = std::move(tmp_file);
+                    tmp_impl.write_pos = 0;
+                    tmp_impl.next_inbound = seqnum_min;
+                    tmp_impl.next_outbound = seqnum_min;
+                    if (!tmp_impl.initialise_fresh()) {
+                        tmp_file = std::move(tmp_impl.file);
+                        DeleteFileW(wide_tmp.c_str());
+                        return false;
+                    }
                     tmp_file = std::move(tmp_impl.file);
+                }
+                tmp_file = OsFile{};  // close tmp
+                // Windows: MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH MANDATORY (I-15 /
+                // RC#1)
+                if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
+                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
                     DeleteFileW(wide_tmp.c_str());
                     return false;
                 }
-                tmp_file = std::move(tmp_impl.file);
-            }
-            tmp_file = OsFile{};  // close tmp
-            // Windows: MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH MANDATORY (I-15 / RC#1)
-            if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
-                             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-                DeleteFileW(wide_tmp.c_str());
-                return false;
-            }
-            // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
-            *rename_done = true;
-            OsFile new_file;
-            if (!new_file.open(wide_live.c_str())) {
-                return false;
-            }
-            if (!new_file.try_lock()) {
-                return false;
-            }
-            *result_file = std::move(new_file);
-            return true;
+                // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
+                *rename_done = true;
+                OsFile new_file;
+                if (!new_file.open(wide_live.c_str())) {
+                    return false;
+                }
+                if (!new_file.try_lock()) {
+                    return false;
+                }
+                *result_file = std::move(new_file);
+                return true;
 #endif
             });
         // gate-b/r1 A.2 fault-injection: if g_force_abort_after_reset_lambda is set,
@@ -1648,9 +1652,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             ++impl_->generation_;
             impl_->inbound_index.clear();
             impl_->outbound_index.clear();
-            impl_->write_pos =
-                static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                          record_disk_size(kCounterPayloadSize));
+            impl_->write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
+                                                         record_disk_size(kCounterPayloadSize));
             impl_->next_inbound = seqnum_min;
             impl_->next_outbound = seqnum_min;
             co_return fixpp::core::expected_t<void>{};  // durable success (C3)
