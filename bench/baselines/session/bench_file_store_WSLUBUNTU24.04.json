@@ -1,6 +1,6 @@
 {
   "context": {
-    "date": "2026-05-21T14:36:52+03:00",
+    "date": "2026-06-14T03:52:24+03:00",
     "host_name": "WSLUBUNTU24.04",
     "executable": "./build/linux-clang-release/bin/bench_file_store",
     "num_cpus": 10,
@@ -33,10 +33,11 @@
         "num_sharing": 10
       }
     ],
-    "load_avg": [1.64844,2.81299,1.88477],
+    "load_avg": [0.330078,0.211426,0.239746],
     "library_version": "v1.9.5",
     "library_build_type": "release",
-    "json_schema_version": 1
+    "json_schema_version": 1,
+    "offload_note": "035-filestore-io-offload: real_time includes co_spawn hop to file_io_executor pool (~48 B bounded frame alloc per op per Gate-A Decision 1). Baseline updated 2026-06-14 post-offload; prior baseline was 2026-05-21 (pre-offload, inert co_await). BM_FileStore_Store real_time delta: 1.69 ms → 1.63 ms (within noise; I/O-bound). cpu_time lower due to syscall off session strand."
   },
   "benchmarks": [
     {
@@ -48,12 +49,12 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 416,
-      "real_time": 1.6924545821334156e+06,
-      "cpu_time": 2.8042965865384496e+05,
+      "iterations": 412,
+      "real_time": 1.6301783570738337e+06,
+      "cpu_time": 1.8349310436893327e+05,
       "time_unit": "ns",
-      "bytes_per_second": 1.1817156106363042e+05,
-      "items_per_second": 5.9085780531815203e+02
+      "bytes_per_second": 1.2268596201890419e+05,
+      "items_per_second": 6.1342981009452092e+02
     },
     {
       "name": "BM_FileStore_Reset/real_time",
@@ -64,9 +65,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 215,
-      "real_time": 3.3486868244011044e+06,
-      "cpu_time": 5.3857314883721154e+05,
+      "iterations": 229,
+      "real_time": 3.1227379221129580e+06,
+      "cpu_time": 2.1085942358078319e+05,
       "time_unit": "ns"
     }
   ]
