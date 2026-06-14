@@ -12,7 +12,7 @@ Assert (in order):
   2. count occurrences of tag 43 == 1 AND value == "Y"
   3. count occurrences of tag 122 == 1
   4. value(122) bytes == value(52) bytes                         # INV-2
-  5. tags 8/35/34/49/56/36/123 unchanged vs the pre-037 field set (only 43/122 added)  # INV-6
+  5. tags 8/35/34/49/52/56/36/123 unchanged vs the pre-037 field set (only 43/122 added)  # INV-6 (52 presence is also pinned by assert 4's 122==52)
 ```
 
 ## Cell 2 — Replay dedups 43/122 under the retain knob (SC-002, non-default path)
