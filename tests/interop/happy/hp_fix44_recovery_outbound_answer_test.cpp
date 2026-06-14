@@ -26,7 +26,9 @@
 //   (c) Session returns to Active (not Disconnected) after the outbound-answer window.
 //   Wire-frame assertions (golden-based only per R1 architecture):
 //     QFJ's ResendRequest(35=2) + fixpp's answering replay(43=Y,122=) and/or
-//     SequenceReset-GapFill(35=4,123=Y) are asserted via the golden under {52,10}.
+//     SequenceReset-GapFill(35=4,123=Y,43=Y,122=) are asserted via the golden
+//     under {52,10,122} (037 T009: the GapFill's 122==52 is volatile, excluded;
+//     43=Y stays compared verbatim).
 //
 // 018 T014 (golden assertion):
 //   When the golden is absent → skip:golden-not-yet-captured (never fail).
@@ -240,10 +242,17 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     // ── Golden assertion (T014 / US3-3) ───────────────────────────────────
     // The golden file is captured at first paired run by the parent harness.
     // If absent → skip:golden-not-yet-captured (never fail, never hand-fabricate).
-    // If present → assert diff_transcripts(expected, actual, {52,10}) MATCHES so
-    // that QFJ's ResendRequest(7/16) and fixpp's answer (123/122/43) are verified
-    // verbatim under the admin profile (FR-007).
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // If present → assert diff_transcripts(expected, actual, {52,10,122}) MATCHES
+    // so that QFJ's ResendRequest(7/16) and fixpp's answer (123/43) are verified
+    // verbatim (FR-007).
+    //
+    // 037 T009: fixpp's answering SequenceReset-GapFill now carries
+    // 122=OrigSendingTime (== its own 52, a live wall-clock timestamp; FR-002).
+    // Compare under the poss_dup profile {52,10,122} so 122 is canonicalized like
+    // 52 — otherwise the volatile timestamp yields a false golden mismatch.
+    // 43=Y stays compared VERBATIM (deterministic; gate-biting preserved).
+    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id),
+                            fixpp::interop::poss_dup_profile_excluded_tags());
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

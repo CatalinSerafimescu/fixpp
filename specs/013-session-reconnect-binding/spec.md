@@ -234,3 +234,7 @@ A broker rotates client-cert PKI quarterly. Today, rotating the broker's server 
 
 - **Cancellation variant mappings** (CHK037 SPEC-FIXED): On `cancellation_type::total`, each async timer/operation surfaces the following variant: Heartbeat-timer cancel → operation completes cleanly (no error; cadence loop exits); TestRequest-timer cancel → same; Logout-timeout cancel → `session_logout_timeout` if elapsed, else `expected_t::ok()` (peer replied before cancellation); reconnect-delay sleep cancel → `transport_reconnect_limit_exceeded` if max_attempts exhausted, else loop exits cleanly. No new `session_*_cancelled` variants are defined for v1.0 timer cancellation — cancellation is transparent at the loop level. Per `[const §XI.2]` cancellation-end-to-end discipline.
   - 005 FR-008 amended in-place.
+
+## Post-feature note (2026-06-14)
+
+**2026-06-14 (037-resend-reply-possdup-tags):** 013's FR-010 resend-reply path now stamps `PossDupFlag(43)=Y` and `OrigSendingTime(122)` equal to the GapFill's own `SendingTime(52)` on every emitted `SequenceReset-GapFill(35=4, 123=Y)` (`build_sequence_reset_gapfill`). Emitted-bytes change only; stored bytes in the message store are untouched. See 037 FR-001/FR-002 and `spec/behaviors-and-limitations.md` B-037-1.
