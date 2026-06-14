@@ -39,14 +39,16 @@ Assert: build_replay_frame output == the pre-037 expected bytes, byte-for-byte. 
 
 ## Golden re-bake (SC-001 / SC-003, default-path wire change)
 
-DEFECT 1 changes every fixpp-emitted GapFill. Inspect the candidate goldens containing `35=4` and re-bake the ones where **fixpp** is the GapFill sender (received GapFills are unchanged):
+DEFECT 1 changes every fixpp-emitted GapFill. The in-process witness is `tests/interop/happy/hp_fix44_recovery_outbound_answer_test.cpp` (fixpp emits the GapFill, `49=FIXPP_INIT`), golden-compared.
+
+**Required profile switch (the load-bearing golden change):** that test compares the GapFill under the `{52,10}` admin profile (`golden_diff.hpp:54`). The new `122` *equals* `52` (a live wall-clock timestamp) → comparing it verbatim is non-deterministic. Switch the GapFill comparison to the **already-existing `{52,10,122}` profile** (`golden_diff.hpp:60-76`), then re-bake the golden. `43=Y` is deterministic and stays compared verbatim. The synthetic `123`-mutation gate-bite cells (`:95-107`) remain valid.
 
 ```
-candidates: phase-9-harness/golden/HP-{QFcpp,QFj}-init-fix44-disconnect-reconnect-noreset.fix
-            phase-9-harness/golden/RL-{QFcpp,QFj}-init-fix44-reset-on-logon.fix
-            + any 030 RR-* received-reset / resend goldens and in-repo diff_golden_or_skip captures
-procedure:  for each, confirm whether the 35=4 frame is fixpp-emitted (sender = our CompID); if so,
-            re-bake the golden after the builder change; diff must show ONLY the added 43/122 on that frame.
+profile:    GapFill golden compare  {52,10}  →  {52,10,122}   (profile already exists in golden_diff.hpp)
+re-bake:    hp_fix44_recovery_outbound_answer golden(s); diff must show ONLY the added 43=Y/122 on the 35=4 frame
+candidates: also inspect phase-9-harness/golden/*.fix containing a fixpp-emitted 35=4 (sender 49=<our CompID>):
+            HP-{QFcpp,QFj}-init-fix44-disconnect-reconnect-noreset, RL-{QFcpp,QFj}-init-fix44-reset-on-logon,
+            030 RR-* received-reset / resend goldens; re-bake only the fixpp-emitted ones (received GapFills unchanged).
 ```
 
 ## Live re-run (SC-004)
