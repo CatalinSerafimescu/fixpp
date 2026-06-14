@@ -33,9 +33,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>  // std::memcmp — FQ-2 SC-005 byte-identity oracle
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/admin_messages.hpp>  // FQ-2: build_reject/build_logout for byte-identity oracle
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
@@ -358,6 +360,21 @@ static std::size_t count_frames_with_type(const std::vector<std::vector<std::byt
     return n;
 }
 
+// Count frames with a given MsgType within [start, end) of the capture vector.
+// Windowed variant of count_frames_with_type: only examines frames[start..end).
+// FQ-3: tightens per-type presence checks to the provocation window so a stale
+// same-type frame from an earlier handshake cannot mask a missing in-window emit.
+// Anchor: opus_pr120_1_triage.md FQ-3.
+static std::size_t count_frames_with_type_in_window(
+    const std::vector<std::vector<std::byte>>& frames, std::string_view msg_type,
+    std::size_t start) {
+    std::size_t n = 0;
+    for (std::size_t i = start; i < frames.size(); ++i) {
+        if (extract_msg_type(frames[i]) == msg_type) ++n;
+    }
+    return n;
+}
+
 // Count engine-originated ADMINISTRATIVE frames (FIX admin set A/0/1/2/3/4/5)
 // emitted in [start, end) of the capture window. 35=j is an APP frame → excluded.
 // Used by C3/SC-001 exact-count cross-check: admin frames on wire must equal toAdmin_delta.
@@ -614,12 +631,37 @@ protected:
         return fut.get();
     }
 
+    // make_initiator_cfg: no-app initiator; emits our Logon at open().
+    // For FQ-2 second cell (Guard-3 Logout byte-identity).
+    SessionConfig make_initiator_cfg() {
+        SessionConfig cfg;
+        cfg.sender_comp_id = std::string(kSender);
+        cfg.target_comp_id = std::string(kTarget);
+        cfg.begin_string = "FIX.4.2";
+        cfg.heartbeat_interval = 0s;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
+        cfg.role = session_role::initiator;
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            captured_frames.emplace_back(frame.begin(), frame.end());
+        };
+        return cfg;
+    }
+
     bool open_acceptor_to_active(Session& sess) {
         if (!open_sync(sess).has_value()) return false;
         // No-app: feed Logon directly (no fromAdmin callback).
         auto peer_logon = build_logon(kTarget, kSender, kGoodSendingTime, 1, 0);
         (void)feed_sync(sess, peer_logon);
         return sess.state() == fsm_state::Active;
+    }
+
+    // Open initiator (no-app): emits outbound Logon → LogonSent.
+    bool open_initiator_to_logon_sent(Session& sess) {
+        if (!open_sync(sess).has_value()) return false;
+        return sess.state() == fsm_state::LogonSent;
     }
 };
 
@@ -661,9 +703,9 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
     auto hb = build_heartbeat(2, kTarget, kSender);
     (void)feed_sync(sess, hb);
 
-    // Wire: at least one 35=3 (Reject) must have been emitted.
-    const auto reject_count = count_frames_with_type(captured_frames, "3");
-    EXPECT_GE(reject_count, 1u) << "Reject(35=3) must appear on wire after fromAdmin veto "
+    // Wire: at least one 35=3 (Reject) must have been emitted in the window (FQ-3: windowed).
+    const auto reject_count = count_frames_with_type_in_window(captured_frames, "3", frames_before);
+    EXPECT_GE(reject_count, 1u) << "Reject(35=3) must appear in window after fromAdmin veto "
                                 << "(frames_before=" << frames_before
                                 << " total_now=" << captured_frames.size() << ")";
 
@@ -685,20 +727,29 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// T005 — EmitSessionReject_NoAppUnknownType_NoOp
+// T005 — EmitSessionReject_NoAppUnknownType_NoOp (SC-005 byte-identity oracle)
 //
-// FR-006 byte-identity no-op cell.
+// FR-006 / SC-005 byte-identity cell — gate-b/r1 FQ-2.
 // Scenario: acceptor Active, NO application registered; feed app-type MsgType
-//   "D" (NewOrderSingle) → session.cpp:3216 → emit_session_reject_(:1736).
-//   fire_to_admin_ returns true immediately (engine_.application==nullptr).
-//   Result: Reject(35=3) emitted as before 036 — no behaviour change.
+//   "D" (NewOrderSingle) at seq=2 → session.cpp:3216 → emit_session_reject_(:1736).
+//   fire_to_admin_ short-circuits at session.cpp:332 (null-app fast-return) — no-op.
+//   Result: Reject(35=3) must be byte-for-byte identical to what build_reject()
+//   produces with the same deterministic args (fixed-clock SendingTime; known seqnums).
 //
-// This cell is GREEN before and after wiring (no-op). It witnesses FR-006:
-//   no-app wire bytes unchanged by the T015 wiring.
-// No toAdmin count asserted (application is null — no callback).
+// SC-005 correctness basis:
+//   The 036 change wired fire_to_admin_(*rj_r) AFTER assign_outbound and BEFORE
+//   store_then_emit. In no-app mode, fire_to_admin_ returns true immediately at
+//   session.cpp:332 (engine_.application==nullptr short-circuit) — no frame mutation,
+//   no callback side-effect. The byte-identical comparison below witnesses that the
+//   no-app path passes the builder output through unmodified: if a future change
+//   mutated the frame between build_reject and store_then_emit, this assertion FAILS.
 //
-// Anchors: spec.md FR-006; session.cpp:332 (fire_to_admin_ null-app fast-return);
-//          session.cpp:3216 (no-app emit_session_reject_ caller).
+// The mock_clock is fixed at 2024-01-01 00:00:00.000 UTC → SendingTime is
+// deterministic; seqnum state is deterministic (Logon consumed seq=1, so
+// peek_outbound()==2 when the Reject is built).
+//
+// Anchors: spec.md SC-005/FR-006; session.cpp:332 (null-app short-circuit);
+//          session.cpp:3216 (no-app emit_session_reject_ caller); FQ-2 triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
@@ -712,18 +763,136 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
 
     // Feed an app-type frame (35=D, NewOrderSingle) at seq=2.
     // No Application registered → session.cpp:3216 → emit_session_reject_.
+    // rj_seq=2 (peek_outbound after Logon consumed seq=1).
     auto app_frame = build_frame("D", 2, kTarget, kSender, "FIX.4.2", kGoodSendingTime);
     (void)feed_sync(sess, app_frame);
 
-    // Wire: a Reject(35=3) must be emitted (no-app pre-036 behaviour preserved).
-    const auto reject_count = count_frames_with_type(captured_frames, "3");
-    EXPECT_GE(reject_count, 1u)
-        << "No-app path must still emit Reject(35=3) for unknown app-type MsgType "
-        << "(frames_before=" << frames_before << " total_now=" << captured_frames.size() << ")";
+    // Wire: a Reject(35=3) must be emitted in the provocation window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "No-app path must emit exactly one Reject(35=3) in the provocation window";
 
     // Session should still be Active (no disconnect from no-app unknown-type).
     EXPECT_EQ(sess.state(), fsm_state::Active)
         << "No-app unknown MsgType reject must not disconnect the session";
+
+    // SC-005 / FR-006 byte-identity oracle (builder-transparency witness).
+    // Build the SAME frame the session would build, using the SAME args:
+    //   rj_seq=2 (peek_outbound=2), ref_seq=2 (fed frame seq), ref_msg_type="D",
+    //   ref_tag_id=0, reason=3, sender="ISLD", target="TW",
+    //   begin_string="FIX.4.2", sending_time=kGoodSendingTime (fixed mock clock).
+    // fire_to_admin_ at session.cpp:332 is a null-app no-op → the captured frame
+    // must equal the builder output byte-for-byte.
+    //
+    // If this fails, the 036 wiring mutated the no-app frame path — SC-005 violated.
+    std::array<std::byte, 512> expected_buf{};
+    const seqnum_t rj_seq = 2;   // peek_outbound=2 after Logon (seq=1)
+    const seqnum_t ref_seq = 2;  // fed "D" frame was at seq=2
+    auto expected_r = fixpp::session::build_reject(
+        std::span<std::byte>{expected_buf.data(), expected_buf.size()},
+        rj_seq, "ISLD", "TW", ref_seq,
+        0,     // RefTagID: n/a for MsgType/veto rejection
+        "D",   // RefMsgType: the fed frame's 35= value
+        3,     // SessionRejectReason = 3 (unknown msg type)
+        "FIX.4.2", kGoodSendingTime);
+    ASSERT_TRUE(expected_r.has_value())
+        << "build_reject oracle must succeed (fixed args; buffer large enough)";
+
+    // Find the captured Reject in the window.
+    std::vector<std::byte> captured_reject;
+    for (std::size_t i = frames_before; i < captured_frames.size(); ++i) {
+        if (extract_msg_type(captured_frames[i]) == "3") {
+            captured_reject = captured_frames[i];
+            break;
+        }
+    }
+    ASSERT_FALSE(captured_reject.empty()) << "Must have found a 35=3 frame in the window";
+
+    // Byte-for-byte comparison: SC-005/FR-006 — no bytes added/reordered/changed.
+    const auto expected_bytes = *expected_r;
+    EXPECT_EQ(captured_reject.size(), expected_bytes.size())
+        << "SC-005: captured Reject size must equal builder output size";
+    if (captured_reject.size() == expected_bytes.size()) {
+        EXPECT_EQ(std::memcmp(captured_reject.data(), expected_bytes.data(),
+                              captured_reject.size()), 0)
+            << "SC-005/FR-006: no-app Reject frame must be byte-for-byte identical to "
+               "build_reject() output — the 036 fire_to_admin_ wiring must not mutate "
+               "the no-app wire path (session.cpp:332 null-app short-circuit)";
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// T005b — Logout_Guard3_NoApp_ByteIdentical (SC-005 second no-app cell)
+//
+// SC-005 / FR-006 byte-identity for the Guard-3 Logout (initiator, no-app).
+// Scenario: initiator (no Application) → open() emits outbound Logon at seq=1
+//   → LogonSent; feed peer Logon-ack with stale SendingTime → Guard-3 fires
+//   (session.cpp:3442-3466) → build_logout(..., "SendingTime(52) accuracy", ...).
+//   fire_to_admin_ at session.cpp:332 is null-app no-op.
+//   Result: Logout(35=5) must be byte-for-byte identical to build_logout() output.
+//
+// The text "SendingTime(52) accuracy" is the static literal from the stale-time
+// branch (session.cpp:3437). All other args are deterministic with the fixed clock.
+// Seqnum: our outbound Logon used seq=1; Guard-3 Logout peek_outbound()==2.
+//
+// Anchors: spec.md SC-005/FR-006; session.cpp:332 / :3437 / :3448; FQ-2 triage.
+// ════════════════════════════════════════════════════════════════════════════
+
+TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
+    auto cfg = make_initiator_cfg();
+    Session sess(engine, cfg);
+
+    ASSERT_TRUE(open_initiator_to_logon_sent(sess))
+        << "Prerequisite: no-app initiator must reach LogonSent";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    const auto frames_before = captured_frames.size();
+
+    // Feed peer Logon-ack with stale SendingTime → Guard-3 fires.
+    auto stale_logon = build_logon(kTarget, kSender, kStaleSendingTime, 1, 0);
+    (void)feed_sync(sess, stale_logon);
+
+    // Wire: exactly one Logout(35=5) in the provocation window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+        << "No-app Guard-3 must emit exactly one Logout(35=5) in the window";
+
+    // Session must have disconnected.
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "No-app Guard-3 must disconnect the session";
+
+    // SC-005 / FR-006 byte-identity oracle.
+    // Args: lo_seq=2 (Logon used seq=1), sender="ISLD", target="TW",
+    //       text="SendingTime(52) accuracy" (static literal at session.cpp:3437),
+    //       begin_string="FIX.4.2", sending_time=kGoodSendingTime (fixed clock).
+    std::array<std::byte, 256> expected_buf{};
+    const seqnum_t lo_seq = 2;
+    auto expected_r = fixpp::session::build_logout(
+        std::span<std::byte>{expected_buf.data(), expected_buf.size()},
+        lo_seq, "ISLD", "TW",
+        "SendingTime(52) accuracy",  // text from session.cpp:3437 stale-time literal
+        "FIX.4.2", kGoodSendingTime);
+    ASSERT_TRUE(expected_r.has_value())
+        << "build_logout oracle must succeed (fixed args; buffer large enough)";
+
+    // Find the captured Logout in the window.
+    std::vector<std::byte> captured_logout;
+    for (std::size_t i = frames_before; i < captured_frames.size(); ++i) {
+        if (extract_msg_type(captured_frames[i]) == "5") {
+            captured_logout = captured_frames[i];
+            break;
+        }
+    }
+    ASSERT_FALSE(captured_logout.empty()) << "Must have found a 35=5 frame in the window";
+
+    const auto expected_bytes = *expected_r;
+    EXPECT_EQ(captured_logout.size(), expected_bytes.size())
+        << "SC-005: captured Guard-3 Logout size must equal builder output size";
+    if (captured_logout.size() == expected_bytes.size()) {
+        EXPECT_EQ(std::memcmp(captured_logout.data(), expected_bytes.data(),
+                              captured_logout.size()), 0)
+            << "SC-005/FR-006: no-app Guard-3 Logout must be byte-for-byte identical to "
+               "build_logout() output — fire_to_admin_ at session.cpp:332 must be a no-op "
+               "on the no-app path";
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -759,9 +928,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     auto stale_hb = build_frame("0", 2, kTarget, kSender, "FIX.4.2", kStaleSendingTime);
     (void)feed_sync(sess, stale_hb);
 
-    // Wire: one Reject + one Logout.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u) << "Q3 must emit Reject(35=3)";
-    EXPECT_GE(count_frames_with_type(captured_frames, "5"), 1u) << "Q3 must emit Logout(35=5)";
+    // Wire: one Reject + one Logout in the provocation window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "Q3 must emit exactly one Reject(35=3) in the window";
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+        << "Q3 must emit exactly one Logout(35=5) in the window";
 
     // Session must disconnect.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Q3 must disconnect the session";
@@ -812,9 +983,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     auto sr = build_sequence_reset(50, kTarget, kSender, /*new_seqno=*/10, /*gap_fill=*/false);
     (void)feed_sync(sess, sr);
 
-    // Wire: Reject(35=3) must appear.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "SeqReset fromAdmin veto must emit Reject(35=3)";
+    // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "SeqReset fromAdmin veto must emit exactly one Reject(35=3) in the window";
 
     // Discriminator: 373=3 (not 373=5) confirms this is the veto path at :2491,
     // not the NewSeqNo-too-low path at :4589.
@@ -868,9 +1039,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
     auto frame = build_possdup_heartbeat(2, kTarget, kSender, /*absent_122=*/true);
     (void)feed_sync(sess, frame);
 
-    // Wire: Reject(35=3) must appear.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "021 Arm C must emit Reject(35=3) for absent 122";
+    // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "021 Arm C must emit exactly one Reject(35=3) in the window";
 
     // Session must survive (Arm C does not disconnect).
     EXPECT_EQ(sess.state(), fsm_state::Active) << "021 Arm C: session must survive after Reject";
@@ -917,9 +1088,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
                                          /*orig_sending_time=*/"GARBAGE");
     (void)feed_sync(sess, frame);
 
-    // Wire: Reject(35=3) must appear.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "021 RC#1 must emit Reject(35=3) for present-but-unparseable 122";
+    // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "021 RC#1 must emit exactly one Reject(35=3) in the window";
 
     // Session must survive.
     EXPECT_EQ(sess.state(), fsm_state::Active) << "021 RC#1: session must survive after Reject";
@@ -964,11 +1135,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
                                          /*orig_sending_time=*/kFutureSendingTime);
     (void)feed_sync(sess, frame);
 
-    // Wire: Reject + Logout.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "021 Arm D must emit Reject(35=3)";
-    EXPECT_GE(count_frames_with_type(captured_frames, "5"), 1u)
-        << "021 Arm D must emit Logout(35=5)";
+    // Wire: Reject + Logout in the provocation window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "021 Arm D must emit exactly one Reject(35=3) in the window";
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+        << "021 Arm D must emit exactly one Logout(35=5) in the window";
 
     // Session must disconnect.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "021 Arm D must disconnect the session";
@@ -1026,11 +1197,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     auto lo = build_logout_frame(2, kTarget, kSender);
     (void)feed_sync(sess, lo);
 
-    // Wire: both confirming Logout AND Reject must appear.
-    EXPECT_GE(count_frames_with_type(captured_frames, "5"), 1u)
-        << "Logout path must emit confirming Logout(35=5)";
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "Logout fromAdmin veto must emit Reject(35=3) (best-effort)";
+    // Wire: confirming Logout AND veto Reject in the window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+        << "Logout path must emit exactly one confirming Logout(35=5) in the window";
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "Logout fromAdmin veto must emit exactly one Reject(35=3) in the window";
 
     // Session disconnects regardless.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Logout path must disconnect the session";
@@ -1092,9 +1263,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     auto sr = build_sequence_reset(2, kTarget, kSender, /*new_seqno=*/1, /*gap_fill=*/false);
     (void)feed_sync(sess, sr);
 
-    // Wire: Reject(35=3) must appear.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "NewSeqNo too-low must emit Reject(35=3)";
+    // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+        << "NewSeqNo too-low must emit exactly one Reject(35=3) in the window";
 
     // Discriminator: 373=5 (ValueIsIncorrect) — MUST not be 373=3.
     // 373=5 confirms the NewSeqNo-too-low path at :4589, not the fromAdmin
@@ -1150,10 +1321,10 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
     auto stale_logon = build_logon(kTarget, kSender, kStaleSendingTime, 1, 0);
     (void)feed_sync(sess, stale_logon);
 
-    // Wire: at least one 35=5 (Logout) must have been emitted.
-    const auto logout_count = count_frames_with_type(captured_frames, "5");
-    EXPECT_GE(logout_count, 1u)
-        << "Logout(35=5) must appear on wire after Guard-3 SendingTime failure "
+    // Wire: exactly one Logout(35=5) in the provocation window (FQ-3: windowed).
+    const auto logout_count = count_frames_with_type_in_window(captured_frames, "5", frames_before);
+    EXPECT_EQ(logout_count, 1u)
+        << "Logout(35=5) must appear in window after Guard-3 SendingTime failure "
         << "(frames_before=" << frames_before << " total_now=" << captured_frames.size() << ")";
 
     // Session must have reached Disconnected (Guard-3 unconditionally disconnects).
@@ -1472,6 +1643,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
     // Capture in-memory outbound seqnum before provocation: assign_outbound() on the
     // non-veto path must consume exactly one outbound seqnum.
     const seqnum_t outbound_seq_before = sess.seqnum_mgr_test_access().peek_outbound();
@@ -1491,9 +1663,9 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
         << "toAdmin must NOT fire for BMR(35=j) (INV-COV-2: app message, not admin) "
         << "(delta=" << toAdmin_delta << "; expected 0)";
 
-    // Non-veto path: 35=j must appear on wire.
-    EXPECT_EQ(count_frames_with_type(captured_frames, "j"), 1u)
-        << "Non-veto path: one BMR(35=j) must be on wire";
+    // Non-veto path: exactly one 35=j in the provocation window (FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 1u)
+        << "Non-veto path: one BMR(35=j) must appear in the window";
 
     // Session stays Active after a BMR emit.
     EXPECT_EQ(sess.state(), fsm_state::Active)
@@ -1542,6 +1714,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
     // then persist_inbound_advance_ set durable to 2).
     // Capture before the provocation to measure the delta.
     const seqnum_t inbound_durable_before = store_persisted_inbound_seqnum();
+    const auto frames_before = captured_frames.size();
     // Capture in-memory outbound seqnum. On veto, assign_outbound() must NOT be
     // called — peek_outbound() must stay the same after the provocation.
     // This is discriminating: T027 proves that on the non-veto path peek_outbound()
@@ -1556,9 +1729,9 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
     EXPECT_EQ(app->toApp_calls, 1)
         << "toApp must fire once even on the veto path (before veto decision)";
 
-    // 35=j must NOT be on wire (suppressed by veto).
-    EXPECT_EQ(count_frames_with_type(captured_frames, "j"), 0u)
-        << "Veto: BMR(35=j) must be suppressed (not emitted)";
+    // 35=j must NOT be in the window (suppressed by veto; FQ-3: windowed).
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 0u)
+        << "Veto: BMR(35=j) must be suppressed (not emitted) in the window";
 
     // Session must remain Active (veto is not a fatal outcome).
     EXPECT_EQ(sess.state(), fsm_state::Active) << "Veto: session must stay Active";
