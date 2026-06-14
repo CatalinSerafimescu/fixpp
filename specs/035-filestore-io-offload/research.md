@@ -215,7 +215,10 @@ outlive all outstanding store awaitables. This feature documents both: the Sessi
 guarantee, **and** a misuse note for direct FileStore use (operator docs / B&L). The positive
 shutdown-ordering seam proves `stop()` returns only **after** Session-reachable nested
 `co_spawn(use_awaitable)` work completes (in-flight offloaded `store()` + `Engine::stop()` under ASan/TSan,
-no UAF, no use-of-joined-pool). **Verify**: draining the `send` coroutine truly awaits the nested
+no UAF, no use-of-joined-pool). *(Gate B r2 correction 2026-06-14: `Engine::stop()` is terminal-only, so the
+real drain is verified by code-analysis over `engine.cpp:1184–1333` + the pool-level offload-join invariant
+witness `store_shutdown_ordering` (C5a); the graceful-close flush is witnessed separately by the
+discriminating `SessionGracefulCloseFlushesFileStore` (C5b). See contracts §C5a/§C5b + quickstart Recipe D1/D2.)* **Verify**: draining the `send` coroutine truly awaits the nested
 `co_spawn` to completion (it does, since `store()`'s outer `co_await` does not return until the child
 completes) — covered by the seam.
 

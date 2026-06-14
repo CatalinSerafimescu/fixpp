@@ -61,12 +61,23 @@ Also assert the `co_spawn` terminal-only default does **not** swallow `total` an
 
 ## Recipe D — shutdown ordering (SC-007)
 
-Queue in-flight offloaded `store()` work **and** drive a graceful close (`Session::close(graceful)` →
-`flush_for_session_close` under `commit_batched`, where the close-flush has buffered frames to drain), then
-`Engine::stop()`; build under ASan + TSan. **Assert**: no UAF, no use-of-joined-pool — `stop()` returns
-only after every **Session-reachable** store-awaiting / close-flush coroutine completes, so the app-owned
-pool is safe to join afterwards. (Direct non-Session FileStore use carries the caller obligation that the
-executor outlives all outstanding store awaitables — a misuse note, not drained by `stop()`.)
+> **Gate B r2 correction (2026-06-14):** `Engine::stop()` drives **terminal** close at all sites, which
+> SKIPS the graceful-only `flush_for_session_close` — so the original single "Engine::stop() + graceful
+> flush co-occurrence" recipe was structurally impossible. The witness is **split** into two independent
+> paths (contracts §C5a/§C5b):
+
+**D1 — Engine terminal-close drain (C5a).** The `Engine::stop()` Session-reachable-offload drain is
+verified by **code-analysis** (`engine.cpp:1184–1333` drains the role loops, which `co_await` the
+Session-reachable `store()` work; the offload is `use_awaitable`/joined), PLUS the pool-level
+`test_store_shutdown_ordering` seam (ASan+TSan) which witnesses the **offload-is-joined-before-pool-join**
+invariant — the actual UAF guard: queue in-flight offloaded `store()` work, await it, then `pool.stop()/join()`;
+assert no UAF / no use-of-joined-pool. (Direct non-Session FileStore use carries the caller obligation that
+the executor outlives all outstanding store awaitables — a misuse note, not drained by `stop()`.)
+
+**D2 — Session graceful-close flush (C5b).** `Session::close(graceful)` → `flush_for_session_close` under
+`commit_batched` is witnessed by `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
+(a real `Session`+`FileStore`), made **discriminating** by `g_flush_datasync_count` (incremented only after
+the flush's `fdatasync` succeeds) asserted `>= 1`, plus the durability check.
 
 ## Regression — MemoryStore + surfaces unchanged (SC-006)
 
