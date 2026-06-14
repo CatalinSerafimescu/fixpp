@@ -25,15 +25,14 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -46,6 +45,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -60,8 +60,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
@@ -88,7 +88,7 @@ namespace {
 
 struct CoverageApp : Application {
     int toAdmin_calls = 0;
-    int toApp_calls   = 0;
+    int toApp_calls = 0;
 
     // Per-instance control: whether fromAdmin rejects.
     // Default false so cells that use fromAdmin-ACCEPT paths don't accidentally
@@ -123,8 +123,7 @@ struct CoverageApp : Application {
         return {};
     }
 
-    void toAdmin(const MessageView<access_mode::Index>& mv,
-                 const SessionId& /*id*/) override {
+    void toAdmin(const MessageView<access_mode::Index>& mv, const SessionId& /*id*/) override {
         ++toAdmin_calls;
         if (mode == Mode::Throw) {
             // Gate the throw by MsgType so the handshake Logon (35=A) is not
@@ -141,7 +140,7 @@ struct CoverageApp : Application {
                            const SessionId& /*id*/) override {
         ++toApp_calls;
         if (mode == Mode::Throw) throw std::runtime_error("toApp boom");
-        if (mode == Mode::Veto)  return std::unexpected(error::app_do_not_send);
+        if (mode == Mode::Veto) return std::unexpected(error::app_do_not_send);
         return {};
     }
 };
@@ -176,9 +175,9 @@ public:
           durable_outbound(seed_outbound) {}
 
     // Observable state for witnesses.
-    seqnum_t durable_inbound;    // updated by next_seqnum(inbound, true)
-    seqnum_t durable_outbound;   // updated by next_seqnum(outbound, true)
-    int outbound_write_count{0}; // number of outbound increment calls
+    seqnum_t durable_inbound;     // updated by next_seqnum(inbound, true)
+    seqnum_t durable_outbound;    // updated by next_seqnum(outbound, true)
+    int outbound_write_count{0};  // number of outbound increment calls
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/,
@@ -210,9 +209,9 @@ public:
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        next_inbound_  = 1;
+        next_inbound_ = 1;
         next_outbound_ = 1;
-        durable_inbound  = 1;
+        durable_inbound = 1;
         durable_outbound = 1;
         outbound_write_count = 0;
         co_return fixpp::core::expected_t<void>{};
@@ -231,8 +230,8 @@ public:
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
-        std::string_view /*sender*/, std::string_view /*target*/,
-        std::pmr::memory_resource* /*mr*/, std::size_t /*max_store_memory_bytes*/,
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
         auto store = std::make_unique<ObservableStore>();
         last_store = store.get();
@@ -259,7 +258,7 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
     hdr += "9=" + std::to_string(body.size()) + "\x01";
 
     std::string full = hdr + body;
-    unsigned int cs  = 0;
+    unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
     cs &= 0xFFU;
     char csbuf[4];
@@ -282,7 +281,10 @@ static constexpr std::string_view kFutureSendingTime = "20300101-00:00:00.000";
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
                                    std::string_view sending_time, std::uint32_t seq = 1,
                                    int heartbt = 0) {
-    std::string extra = "98=0\x01" "108=" + std::to_string(heartbt) + "\x01";
+    std::string extra =
+        "98=0\x01"
+        "108=" +
+        std::to_string(heartbt) + "\x01";
     return build_frame("A", seq, sender, target, "FIX.4.2", sending_time, extra);
 }
 
@@ -319,8 +321,7 @@ std::vector<std::byte> build_app_frame(std::uint32_t seq, std::string_view sende
 // PossDup Heartbeat(35=0): 43=Y + optional 122= field.
 // absent_122=true → omit 122 (Arm C trigger). extra_122 can override the 122 value.
 std::vector<std::byte> build_possdup_heartbeat(std::uint32_t seq, std::string_view sender,
-                                               std::string_view target,
-                                               bool absent_122,
+                                               std::string_view target, bool absent_122,
                                                std::string_view orig_sending_time = {}) {
     std::string extra = "43=Y\x01";
     if (!absent_122) {
@@ -360,14 +361,17 @@ static std::size_t count_frames_with_type(const std::vector<std::vector<std::byt
 // Count engine-originated ADMINISTRATIVE frames (FIX admin set A/0/1/2/3/4/5)
 // emitted in [start, end) of the capture window. 35=j is an APP frame → excluded.
 // Used by C3/SC-001 exact-count cross-check: admin frames on wire must equal toAdmin_delta.
-static std::size_t count_admin_frames_in_window(
-    const std::vector<std::vector<std::byte>>& frames, std::size_t start) {
+static std::size_t count_admin_frames_in_window(const std::vector<std::vector<std::byte>>& frames,
+                                                std::size_t start) {
     static constexpr std::string_view kAdminSet[] = {"A", "0", "1", "2", "3", "4", "5"};
     std::size_t n = 0;
     for (std::size_t i = start; i < frames.size(); ++i) {
         const auto mt = extract_msg_type(frames[i]);
         for (auto a : kAdminSet) {
-            if (mt == a) { ++n; break; }
+            if (mt == a) {
+                ++n;
+                break;
+            }
         }
     }
     return n;
@@ -393,16 +397,16 @@ protected:
 
     std::vector<std::vector<std::byte>> captured_frames;
 
-    static constexpr std::string_view kSender   = "ISLD";
-    static constexpr std::string_view kTarget    = "TW";
-    static constexpr std::string_view kBeginStr  = "FIX.4.2";
+    static constexpr std::string_view kSender = "ISLD";
+    static constexpr std::string_view kTarget = "TW";
+    static constexpr std::string_view kBeginStr = "FIX.4.2";
 
     void SetUp() override {
         using sc = std::chrono::system_clock;
         auto utc = sc::time_point{} + std::chrono::seconds{1704067200};  // 2024-01-01
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
 
         app = std::make_shared<CoverageApp>();
@@ -413,10 +417,10 @@ protected:
         SessionConfig cfg;
         cfg.sender_comp_id = std::string(kSender);
         cfg.target_comp_id = std::string(kTarget);
-        cfg.begin_string   = std::string(kBeginStr);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = 0s;  // disable liveness
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.role = session_role::acceptor;
@@ -430,10 +434,10 @@ protected:
         SessionConfig cfg;
         cfg.sender_comp_id = std::string(kSender);
         cfg.target_comp_id = std::string(kTarget);
-        cfg.begin_string   = std::string(kBeginStr);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = 0s;  // disable liveness
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.role = session_role::initiator;
@@ -491,8 +495,8 @@ protected:
 
     std::vector<std::vector<std::byte>> captured_frames;
 
-    static constexpr std::string_view kSender  = "ISLD";
-    static constexpr std::string_view kTarget   = "TW";
+    static constexpr std::string_view kSender = "ISLD";
+    static constexpr std::string_view kTarget = "TW";
     static constexpr std::string_view kBeginStr = "FIX.4.2";
 
     void SetUp() override {
@@ -500,7 +504,7 @@ protected:
         auto utc = sc::time_point{} + std::chrono::seconds{1704067200};  // 2024-01-01
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
 
         app = std::make_shared<CoverageApp>();
@@ -513,10 +517,10 @@ protected:
         SessionConfig cfg;
         cfg.sender_comp_id = std::string(kSender);
         cfg.target_comp_id = std::string(kTarget);
-        cfg.begin_string   = std::string(kBeginStr);
+        cfg.begin_string = std::string(kBeginStr);
         cfg.heartbeat_interval = 0s;
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.role = session_role::acceptor;
@@ -566,15 +570,15 @@ protected:
 
     std::vector<std::vector<std::byte>> captured_frames;
 
-    static constexpr std::string_view kSender   = "ISLD";
-    static constexpr std::string_view kTarget    = "TW";
+    static constexpr std::string_view kSender = "ISLD";
+    static constexpr std::string_view kTarget = "TW";
 
     void SetUp() override {
         using sc = std::chrono::system_clock;
         auto utc = sc::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clock;
+        engine.clock = clock;
         engine.executor = ioc.get_executor();
         engine.application = nullptr;  // no-app path
     }
@@ -583,10 +587,10 @@ protected:
         SessionConfig cfg;
         cfg.sender_comp_id = std::string(kSender);
         cfg.target_comp_id = std::string(kTarget);
-        cfg.begin_string   = "FIX.4.2";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 0s;
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary       = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.role = session_role::acceptor;
@@ -648,8 +652,8 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
     // Snapshot toAdmin_calls and frame count AFTER handshake.
     // The acceptor emits a Logon-reply (35=A) during open_acceptor_to_active,
     // which fires toAdmin for the already-wired Logon site — snapshot excludes it.
-    const int toAdmin_before  = app->toAdmin_calls;
-    const auto frames_before  = captured_frames.size();
+    const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // Feed a valid Heartbeat from TW. CoverageApp::fromAdmin returns app_do_not_send
     // → session.cpp:3026 → emit_session_reject_.
@@ -659,20 +663,18 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 
     // Wire: at least one 35=3 (Reject) must have been emitted.
     const auto reject_count = count_frames_with_type(captured_frames, "3");
-    EXPECT_GE(reject_count, 1u)
-        << "Reject(35=3) must appear on wire after fromAdmin veto "
-        << "(frames_before=" << frames_before
-        << " total_now=" << captured_frames.size() << ")";
+    EXPECT_GE(reject_count, 1u) << "Reject(35=3) must appear on wire after fromAdmin veto "
+                                << "(frames_before=" << frames_before
+                                << " total_now=" << captured_frames.size() << ")";
 
     // toAdmin delta: must be exactly 1 for the Reject frame (FR-001/ARM-1).
     // Pre-036: fire_to_admin_ not called → delta = 0 → this assertion FAILS (RED).
     // Post-036 (after T015): delta = 1 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 1)
-        << "toAdmin must fire exactly once for the Reject(35=3) emit "
-        << "(delta=" << toAdmin_delta
-        << "; toAdmin_before=" << toAdmin_before
-        << "; toAdmin_now=" << app->toAdmin_calls << ")";
+    EXPECT_EQ(toAdmin_delta, 1) << "toAdmin must fire exactly once for the Reject(35=3) emit "
+                                << "(delta=" << toAdmin_delta
+                                << "; toAdmin_before=" << toAdmin_before
+                                << "; toAdmin_now=" << app->toAdmin_calls << ")";
 
     // C3/SC-001 exact-count cross-check: admin frames on wire in the provocation window
     // must equal toAdmin_delta. A future emit site added WITHOUT fire_to_admin_ would
@@ -703,8 +705,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: no-app acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: no-app acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const auto frames_before = captured_frames.size();
@@ -718,8 +719,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     const auto reject_count = count_frames_with_type(captured_frames, "3");
     EXPECT_GE(reject_count, 1u)
         << "No-app path must still emit Reject(35=3) for unknown app-type MsgType "
-        << "(frames_before=" << frames_before
-        << " total_now=" << captured_frames.size() << ")";
+        << "(frames_before=" << frames_before << " total_now=" << captured_frames.size() << ")";
 
     // Session should still be Active (no disconnect from no-app unknown-type).
     EXPECT_EQ(sess.state(), fsm_state::Active)
@@ -748,8 +748,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -761,22 +760,18 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     (void)feed_sync(sess, stale_hb);
 
     // Wire: one Reject + one Logout.
-    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u)
-        << "Q3 must emit Reject(35=3)";
-    EXPECT_GE(count_frames_with_type(captured_frames, "5"), 1u)
-        << "Q3 must emit Logout(35=5)";
+    EXPECT_GE(count_frames_with_type(captured_frames, "3"), 1u) << "Q3 must emit Reject(35=3)";
+    EXPECT_GE(count_frames_with_type(captured_frames, "5"), 1u) << "Q3 must emit Logout(35=5)";
 
     // Session must disconnect.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "Q3 must disconnect the session";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Q3 must disconnect the session";
 
     // toAdmin delta must be 2: Reject + Logout.
     // Pre-036: Reject not wired → delta==1 (Logout only) → RED.
     // Post-036: both wired → delta==2 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 2)
-        << "toAdmin must fire for both Reject AND Logout in Q3 path "
-        << "(delta=" << toAdmin_delta << "; expected 2)";
+    EXPECT_EQ(toAdmin_delta, 2) << "toAdmin must fire for both Reject AND Logout in Q3 path "
+                                << "(delta=" << toAdmin_delta << "; expected 2)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -806,8 +801,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -835,9 +829,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     // toAdmin delta: 1 (Reject only; no Logout on this path).
     // Pre-036: delta==0 → RED. Post-036: delta==1 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 1)
-        << "toAdmin must fire exactly once for the SeqReset veto Reject "
-        << "(delta=" << toAdmin_delta << "; expected 1)";
+    EXPECT_EQ(toAdmin_delta, 1) << "toAdmin must fire exactly once for the SeqReset veto Reject "
+                                << "(delta=" << toAdmin_delta << "; expected 1)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -864,8 +857,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -881,15 +873,13 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
         << "021 Arm C must emit Reject(35=3) for absent 122";
 
     // Session must survive (Arm C does not disconnect).
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "021 Arm C: session must survive after Reject";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "021 Arm C: session must survive after Reject";
 
     // toAdmin delta: 1.
     // Pre-036: delta==0 → RED. Post-036: delta==1 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 1)
-        << "toAdmin must fire once for 021 ArmC Reject "
-        << "(delta=" << toAdmin_delta << "; expected 1)";
+    EXPECT_EQ(toAdmin_delta, 1) << "toAdmin must fire once for 021 ArmC Reject "
+                                << "(delta=" << toAdmin_delta << "; expected 1)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -916,8 +906,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -933,14 +922,12 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
         << "021 RC#1 must emit Reject(35=3) for present-but-unparseable 122";
 
     // Session must survive.
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "021 RC#1: session must survive after Reject";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "021 RC#1: session must survive after Reject";
 
     // toAdmin delta: 1.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 1)
-        << "toAdmin must fire once for 021 RC#1 Reject "
-        << "(delta=" << toAdmin_delta << "; expected 1)";
+    EXPECT_EQ(toAdmin_delta, 1) << "toAdmin must fire once for 021 RC#1 Reject "
+                                << "(delta=" << toAdmin_delta << "; expected 1)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -966,8 +953,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -985,15 +971,13 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
         << "021 Arm D must emit Logout(35=5)";
 
     // Session must disconnect.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "021 Arm D must disconnect the session";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "021 Arm D must disconnect the session";
 
     // toAdmin delta: 2 (Reject + Logout).
     // Pre-036: Reject not wired → delta==1 → RED. Post-036: delta==2 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 2)
-        << "toAdmin must fire for both Reject AND Logout in 021 ArmD "
-        << "(delta=" << toAdmin_delta << "; expected 2)";
+    EXPECT_EQ(toAdmin_delta, 2) << "toAdmin must fire for both Reject AND Logout in 021 ArmD "
+                                << "(delta=" << toAdmin_delta << "; expected 2)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -1029,8 +1013,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -1050,16 +1033,14 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
         << "Logout fromAdmin veto must emit Reject(35=3) (best-effort)";
 
     // Session disconnects regardless.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "Logout path must disconnect the session";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Logout path must disconnect the session";
 
     // toAdmin delta: 2 (confirming Logout + veto Reject).
     // Pre-036: Reject(:2953) not wired → delta==1 → RED.
     // Post-036: Reject wired → delta==2 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 2)
-        << "toAdmin must fire for confirming Logout AND veto Reject "
-        << "(delta=" << toAdmin_delta << "; expected 2)";
+    EXPECT_EQ(toAdmin_delta, 2) << "toAdmin must fire for confirming Logout AND veto Reject "
+                                << "(delta=" << toAdmin_delta << "; expected 2)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -1099,8 +1080,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -1124,15 +1104,13 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
         << "not 373=3 (which would indicate the wrong :2491 fromAdmin-veto path)";
 
     // Session must survive (apply_inbound_sequence_reset returns ok after Reject).
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "NewSeqNo too-low Reject: session must survive";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "NewSeqNo too-low Reject: session must survive";
 
     // toAdmin delta: 1.
     // Pre-036: delta==0 → RED. Post-036: delta==1 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
-    EXPECT_EQ(toAdmin_delta, 1)
-        << "toAdmin must fire once for the NewSeqNo-too-low Reject "
-        << "(delta=" << toAdmin_delta << "; expected 1)";
+    EXPECT_EQ(toAdmin_delta, 1) << "toAdmin must fire once for the NewSeqNo-too-low Reject "
+                                << "(delta=" << toAdmin_delta << "; expected 1)";
 
     // C3/SC-001 exact-count cross-check.
     EXPECT_EQ(count_admin_frames_in_window(captured_frames, frames_before),
@@ -1164,8 +1142,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
     // Snapshot toAdmin_calls and frame count AFTER our outbound Logon.
     // open() emits the initiator Logon (35=A) which fires toAdmin at the already-wired
     // Logon site — snapshot excludes it.
-    const int toAdmin_before  = app->toAdmin_calls;
-    const auto frames_before  = captured_frames.size();
+    const int toAdmin_before = app->toAdmin_calls;
+    const auto frames_before = captured_frames.size();
 
     // Feed peer Logon-ack with stale SendingTime → Guard-3 fires.
     // Sender = TW (peer), Target = ISLD (us), seq = 1, heartbt = 0.
@@ -1176,8 +1154,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
     const auto logout_count = count_frames_with_type(captured_frames, "5");
     EXPECT_GE(logout_count, 1u)
         << "Logout(35=5) must appear on wire after Guard-3 SendingTime failure "
-        << "(frames_before=" << frames_before
-        << " total_now=" << captured_frames.size() << ")";
+        << "(frames_before=" << frames_before << " total_now=" << captured_frames.size() << ")";
 
     // Session must have reached Disconnected (Guard-3 unconditionally disconnects).
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
@@ -1189,8 +1166,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
     EXPECT_EQ(toAdmin_delta, 1)
         << "toAdmin must fire exactly once for the Guard-3 Logout(35=5) emit "
-        << "(delta=" << toAdmin_delta
-        << "; toAdmin_before=" << toAdmin_before
+        << "(delta=" << toAdmin_delta << "; toAdmin_before=" << toAdmin_before
         << "; toAdmin_now=" << app->toAdmin_calls << ")";
 
     // C3/SC-001 exact-count cross-check.
@@ -1235,9 +1211,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
 // Anchors: spec.md FR-003; plan.md ARM-1; session.cpp:3026→1736.
 
 TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
-    app->fromAdmin_rejects    = true;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";  // gate: throw only on Reject, not on handshake Logon
+    app->fromAdmin_rejects = true;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";  // gate: throw only on Reject, not on handshake Logon
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1248,12 +1224,10 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
     auto hb = build_heartbeat(2, kTarget, kSender);
     auto result = feed_sync(sess, hb);
 
-    EXPECT_FALSE(result.has_value())
-        << "on_inbound_frame must return an error when toAdmin throws";
+    EXPECT_FALSE(result.has_value()) << "on_inbound_frame must return an error when toAdmin throws";
     EXPECT_EQ(result.error(), error::app_callback_threw)
         << "C1 arm must surface app_callback_threw (not terminate)";
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "C1 arm must disconnect the session";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "C1 arm must disconnect the session";
 }
 
 // T025b — Reject_Q3SendingTimeAccuracy — throw variant
@@ -1263,9 +1237,9 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2407.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy_Throw) {
-    app->fromAdmin_rejects    = false;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = false;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1287,9 +1261,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2491.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto_Throw) {
-    app->fromAdmin_rejects    = true;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = true;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1311,9 +1285,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2606.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122_Throw) {
-    app->fromAdmin_rejects    = false;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = false;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1335,9 +1309,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2651.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122_Throw) {
-    app->fromAdmin_rejects    = false;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = false;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1360,9 +1334,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2682.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD_Throw) {
-    app->fromAdmin_rejects    = false;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = false;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1395,9 +1369,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD_Throw) {
 // Anchors: spec.md FR-003; session.cpp:2953 (036 T011 site).
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto_Throw) {
-    app->fromAdmin_rejects    = true;   // veto on inbound Logout → triggers the Reject
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";    // throw on Reject; confirming Logout (35=5) passes
+    app->fromAdmin_rejects = true;  // veto on inbound Logout → triggers the Reject
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";  // throw on Reject; confirming Logout (35=5) passes
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1421,9 +1395,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto_Throw) {
 // Anchors: spec.md FR-003; session.cpp:4589.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow_Throw) {
-    app->fromAdmin_rejects    = false;
-    app->mode                 = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type    = "3";
+    app->fromAdmin_rejects = false;
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "3";
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
@@ -1448,8 +1422,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow_Throw) {
 // Anchors: spec.md FR-003; session.cpp:3368-3380 (Guard-3 block).
 
 TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime_Throw) {
-    app->mode              = CoverageApp::Mode::Throw;
-    app->throw_on_msg_type = "5";   // throw on Logout; initiator Logon (35=A) passes
+    app->mode = CoverageApp::Mode::Throw;
+    app->throw_on_msg_type = "5";  // throw on Logout; initiator Logon (35=A) passes
 
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
@@ -1494,8 +1468,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const int toAdmin_before = app->toAdmin_calls;
@@ -1509,9 +1482,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 
     // toApp must be called exactly once for the BMR(35=j).
     // Pre-036: toApp_calls==0 → FAILS (RED). Post-036: toApp_calls==1 → GREEN.
-    EXPECT_EQ(app->toApp_calls, 1)
-        << "toApp must fire exactly once for BMR(35=j) emit "
-        << "(toApp_calls=" << app->toApp_calls << "; expected 1)";
+    EXPECT_EQ(app->toApp_calls, 1) << "toApp must fire exactly once for BMR(35=j) emit "
+                                   << "(toApp_calls=" << app->toApp_calls << "; expected 1)";
 
     // INV-COV-2: 35=j routes through toApp, NOT toAdmin.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
@@ -1557,14 +1529,13 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 //          session.cpp:3320 (persist_inbound_advance_ outside fromApp branch).
 
 TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
-    app->fromApp_rejects = true;   // provoke BMR
+    app->fromApp_rejects = true;          // provoke BMR
     app->mode = CoverageApp::Mode::Veto;  // toApp vetoes: app_do_not_send
 
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Snapshot: after Logon handshake, durable_inbound is 2 (Logon was seq=1,
@@ -1590,8 +1561,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
         << "Veto: BMR(35=j) must be suppressed (not emitted)";
 
     // Session must remain Active (veto is not a fatal outcome).
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "Veto: session must stay Active";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "Veto: session must stay Active";
 
     // No outbound seqnum consumed on veto path (C2: assign_outbound skipped on suppressed).
     // Discriminating: T027 proves peek_outbound advances by 1 on non-veto; here it must NOT.
@@ -1607,8 +1577,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
     EXPECT_EQ(store_persisted_inbound_seqnum(), inbound_durable_before + 1)
         << "Veto: inbound durable seqnum MUST still advance (persist_inbound_advance_() "
         << "must not be skipped by the veto) — INV-COV-5 "
-        << "(before=" << inbound_durable_before
-        << " after=" << store_persisted_inbound_seqnum() << "; expected " << (inbound_durable_before + 1) << ")";
+        << "(before=" << inbound_durable_before << " after=" << store_persisted_inbound_seqnum()
+        << "; expected " << (inbound_durable_before + 1) << ")";
 }
 
 // T029 — BMR_Throw_TerminalClose
@@ -1628,8 +1598,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
 //          session.cpp:3277-3279 (fromApp throw close pattern mirror).
 
 TEST_F(AdminEmitBMRCoverageTest, BMR_Throw_TerminalClose) {
-    app->fromApp_rejects   = true;        // provoke BMR
-    app->mode              = CoverageApp::Mode::Throw;  // toApp throws
+    app->fromApp_rejects = true;           // provoke BMR
+    app->mode = CoverageApp::Mode::Throw;  // toApp throws
     // Gate toAdmin throw by MsgType="j" — no admin frame is type j, so the
     // handshake Logon (35=A) passes toAdmin without throwing, while toApp still
     // throws unconditionally (toApp has no MsgType gate in CoverageApp).
@@ -1638,16 +1608,14 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_Throw_TerminalClose) {
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
 
-    ASSERT_TRUE(open_acceptor_to_active(sess))
-        << "Prerequisite: acceptor must reach Active";
+    ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Feed app-type frame (35=D) at seq=2. fromApp rejects → toApp throws → C2 throw arm.
     auto app_frame = build_app_frame(2, kTarget, kSender);
     auto result = feed_sync(sess, app_frame);
 
-    EXPECT_FALSE(result.has_value())
-        << "on_inbound_frame must return an error when toApp throws";
+    EXPECT_FALSE(result.has_value()) << "on_inbound_frame must return an error when toApp throws";
     EXPECT_EQ(result.error(), error::app_callback_threw)
         << "C2 throw arm must surface app_callback_threw";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)

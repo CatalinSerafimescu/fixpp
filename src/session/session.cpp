@@ -2419,7 +2419,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
-                            // 036 T006: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
+                            // 036 T006: ARM-1 — toAdmin observation before transmit
+                            // (FR-001/FR-002).
                             if (!fire_to_admin_(*rj_result)) {
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -2507,7 +2508,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 // throw arm co_returns app_callback_threw + Disconnected.
                                 if (!fire_to_admin_(*rj_r)) {
                                     record_state_transition_(fsm_state::Disconnected);
-                                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                                    co_return std::unexpected(
+                                        fixpp::core::error::app_callback_threw);
                                 }
                                 (void)co_await store_then_emit(rj_seq, *rj_r);
                             }
@@ -2630,7 +2632,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(assign_r.error());
                             }
-                            // 036 T008: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
+                            // 036 T008: ARM-1 — toAdmin observation before transmit
+                            // (FR-001/FR-002).
                             if (!fire_to_admin_(*rj_r_c)) {
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -2680,10 +2683,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                     record_state_transition_(fsm_state::Disconnected);
                                     co_return std::unexpected(assign_r.error());
                                 }
-                                // 036 T009: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
+                                // 036 T009: ARM-1 — toAdmin observation before transmit
+                                // (FR-001/FR-002).
                                 if (!fire_to_admin_(*rj_r_rc1)) {
                                     record_state_transition_(fsm_state::Disconnected);
-                                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                                    co_return std::unexpected(
+                                        fixpp::core::error::app_callback_threw);
                                 }
                                 auto emit_r = co_await store_then_emit(rj_seq_rc1, *rj_r_rc1);
                                 (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
@@ -2716,10 +2721,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                         record_state_transition_(fsm_state::Disconnected);
                                         co_return std::unexpected(assign_r.error());
                                     }
-                                    // 036 T010: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
+                                    // 036 T010: ARM-1 — toAdmin observation before transmit
+                                    // (FR-001/FR-002).
                                     if (!fire_to_admin_(*rj_result)) {
                                         record_state_transition_(fsm_state::Disconnected);
-                                        co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                                        co_return std::unexpected(
+                                            fixpp::core::error::app_callback_threw);
                                     }
                                     auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
                                     (void)emit_r;
@@ -2992,7 +2999,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 // app_callback_threw + Disconnected.
                                 if (!fire_to_admin_(*rj_r)) {
                                     record_state_transition_(fsm_state::Disconnected);
-                                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                                    co_return std::unexpected(
+                                        fixpp::core::error::app_callback_threw);
                                 }
                                 (void)co_await store_then_emit(rj_seq, *rj_r);
                             }
@@ -3302,20 +3310,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // no outbound seqnum (C2/INV-COV-5/FR-004).
                             // Veto (app_do_not_send): set suppressed=true and fall through
                             // to persist_inbound_advance_() below — do NOT early-return
-                            // (under-persist hazard: [[feedback_unconditional_persist_at_multiexit_gate_breaks_lowerbound]]).
+                            // (under-persist hazard:
+                            // [[feedback_unconditional_persist_at_multiexit_gate_breaks_lowerbound]]).
                             // Throw: terminal close + early return (persist moot under close).
                             // [036 tasks T031; contracts C2; data-model.md INV-COV-5]
                             bool suppressed = false;
                             if (engine_.application != nullptr) {
                                 auto cb_r = parse_and_dispatch_(
-                                    *bmr_r, kInboundParseArena,
-                                    [&](auto& mv, auto& sid) {
+                                    *bmr_r, kInboundParseArena, [&](auto& mv, auto& sid) {
                                         return engine_.application->toApp(mv, sid);
                                     });
                                 if (!cb_r) {
                                     if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                                         co_await close(close_mode::terminal);
-                                        co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                                        co_return std::unexpected(
+                                            fixpp::core::error::app_callback_threw);
                                     }
                                     // app_do_not_send: suppress the BMR emit; still
                                     // fall through to persist_inbound_advance_() below.
