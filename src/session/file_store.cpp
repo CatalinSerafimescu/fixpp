@@ -90,17 +90,29 @@
 // T012 catch-fired diagnostic counter — compiled unconditionally (like
 // g_store_offload_probe / install_store_offload_probe); declaration in
 // file_store.hpp gated by FIXPP_TEST_HOOKS so production callers cannot reach it.
-// The counter only increments inside #ifdef FIXPP_TEST_HOOKS catch arms, so it
-// stays at 0 in production builds (the increment is dead-code-eliminated).
+// The increment sites are unconditional (the library is compiled without
+// FIXPP_TEST_HOOKS, so gating them would make them unreachable from tests).
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_catch_fired{0};
 
+// gate-b/r1 A.2 + #6 fault-injection seam: forces asio::system_error(operation_aborted)
+// to be thrown at the outer co_await of reset()'s offload, AFTER the pool lambda has
+// completed, exercising the durable-commit catch body (C3). Compiled unconditionally
+// (like g_catch_fired); declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+// The arm/throw logic inside reset() is unconditional so the check fires when the
+// library is linked into test binaries that call arm_force_abort_after_reset_lambda().
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_abort_after_reset_lambda{false};
+// gate-b/r1 A.1 fault-injection seam: hook called just before reopen in reset()'s
+// offload lambda; returns false to force the reopen to fail (tests the poison path).
+// Compiled unconditionally; the call site inside the lambda is also unconditional.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool (*)(void) noexcept> g_post_rename_reopen_fail_hook{nullptr};
+
 // T015 retrieve pread-attempt counter — counts each call to read_frame_payload()
-// inside retrieve()'s walk loop. Incremented unconditionally (atomic<int>,
-// negligible cost). Exposed via read_and_reset_retrieve_pread_count()
-// (declaration in file_store.hpp gated by FIXPP_TEST_HOOKS).
-// Purpose: discriminate "generation guard fired before pread" (count==1 on 2-frame
-// retrieve interrupted after frame 1) from "stale pread failed at EOF" (count==2).
+// inside retrieve()'s walk loop. Compiled unconditionally (like g_catch_fired);
+// the increment in the loop is gated by FIXPP_TEST_HOOKS (gate-b/r1 D: not needed
+// on the production read path). Exposed via read_and_reset_retrieve_pread_count().
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_retrieve_pread_count{0};
 
@@ -248,8 +260,21 @@ int read_and_reset_catch_fired() noexcept {
 // Returns number of read_frame_payload() calls in retrieve()'s walk loop since
 // the last reset. Used by MidWalkReset tests to confirm the generation guard
 // fires BEFORE the second pread (count==1 not count==2 on a 2-frame walk).
+// Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 int read_and_reset_retrieve_pread_count() noexcept {
     return g_retrieve_pread_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// gate-b/r1 A.2: arm the one-shot flag so the NEXT reset() simulates abort after durable.
+// Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+void arm_force_abort_after_reset_lambda() noexcept {
+    g_force_abort_after_reset_lambda.store(true, std::memory_order_relaxed);
+}
+
+// gate-b/r1 A.1: install (or clear) the post-rename reopen-fail hook.
+// Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+void install_post_rename_reopen_fail_hook(bool (*hook)() noexcept) noexcept {
+    g_post_rename_reopen_fail_hook.store(hook, std::memory_order_relaxed);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1133,9 +1158,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         }
         // operation_aborted post-dates linearisation: the syscall completed durably.
         // Fall through with io_ok=true so Region 3 applies the correct mutations.
-#ifdef FIXPP_TEST_HOOKS
         g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-#endif
         io_ok = true;
     }
 
@@ -1252,9 +1275,11 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         // --- NO co_await between the re-check above and the pread below ---
-        // Count pread attempts unconditionally (atomic<int>, negligible cost).
-        // Exposed via read_and_reset_retrieve_pread_count() for T015 witnesses.
+        // Count pread attempts under FIXPP_TEST_HOOKS (test-discrimination state;
+        // not needed on the production read path). [gate-b/r1 D]
+#ifdef FIXPP_TEST_HOOKS
         g_retrieve_pread_count.fetch_add(1, std::memory_order_relaxed);
+#endif
         if (!impl_->read_frame_payload(ie, impl_->retrieve_scratch_)) {
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
@@ -1378,9 +1403,7 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
             if (e.code() != asio::error::operation_aborted) {
                 throw;  // Only operation_aborted is handled; anything else propagates.
             }
-#ifdef FIXPP_TEST_HOOKS
             g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-#endif
             io_ok = true;  // Post-dates linearisation: durable success.
         }
 
@@ -1437,22 +1460,35 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 
     // ── Region 2: POOL — entire atomic-rename sequence in the offloaded lambda ──
     //
-    // Returns the opened+locked new OsFile on success, std::nullopt on any failure.
-    // The lambda touches NO impl_ field — it uses only the captured copies.
-    // Capture list: [path, hash, probe_fn] — only what initialise_fresh needs
-    // (expected_hash via hash; the tmp file is opened from path). cfg is NOT read on
-    // the reset path, so it is not captured (avoids a heavy FileStore::Config copy).
+    // The lambda publishes its result via two shared slots that survive even if
+    // operation_aborted is thrown at the outer co_await (C3 / gate-b/r1 A.1+A.2):
+    //
+    //   result_file  — shared_ptr<OsFile>. The lambda writes the opened+locked
+    //                  OsFile here BEFORE returning. On the normal (non-aborted)
+    //                  path, Region 3 moves from this slot. On operation_aborted,
+    //                  the catch reads it: if result_file->valid() the lambda
+    //                  completed durably and the catch commits (A.2).
+    //   rename_done  — shared_ptr<bool>. Set to true AFTER rename+dir-fsync succeed
+    //                  but BEFORE the reopen attempt. Region 3 reads this to
+    //                  distinguish pre-rename failure (old fd valid, keep it) from
+    //                  post-rename failure (old fd now stale → poison) (A.1).
+    //
+    // The lambda returns bool: true=fully succeeded, false=any failure. This avoids
+    // double-move of the OsFile: the result slot holds the sole owned copy throughout.
+    //
+    // Thread-safety: both shared slots are written ONLY by the pool lambda and read
+    // ONLY on the strand after the co_await resumes — no concurrent access.
     //
     // T012 — unconditional operation_aborted→durable catch (FR-004 / C3).
-    // Any operation_aborted at this await post-dates linearisation; treat as durable
-    // success with the returned new_file. Note: if the co_spawn body completes with
-    // std::nullopt AND operation_aborted is thrown, the syscall failed — we cannot
-    // recover the new file; only the "durable success (non-nullopt)" catch arm applies.
     // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
-    std::optional<OsFile> new_file_opt;
+    auto result_file = std::make_shared<OsFile>();
+    auto rename_done = std::make_shared<bool>(false);
+
+    bool reset_ok = false;
     try {
-        new_file_opt = co_await offload_to(
-            impl_->cfg.file_io_executor, [path, hash, probe_fn]() -> std::optional<OsFile> {
+        reset_ok = co_await offload_to(
+            impl_->cfg.file_io_executor,
+            [path, hash, probe_fn, result_file, rename_done]() -> bool {
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
                 }
@@ -1464,7 +1500,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 // Open tmp file (O_RDWR | O_CREAT | O_TRUNC)
                 OsFile tmp_file;
                 if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
-                    return std::nullopt;
+                    return false;
                 }
 
                 // Write sentinel + initial counter to tmp file using a local tmp_impl.
@@ -1480,7 +1516,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                         // Move file back so it closes properly, then unlink tmp.
                         tmp_file = std::move(tmp_impl.file);
                         ::unlink(tmp_path.c_str());
-                        return std::nullopt;
+                        return false;
                     }
                     // tmp_file.datasync() is called inside initialise_fresh()
                     tmp_file = std::move(tmp_impl.file);
@@ -1492,7 +1528,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
                 if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
                     ::unlink(tmp_path.c_str());
-                    return std::nullopt;
+                    return false;
                 }
 
                 // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
@@ -1503,24 +1539,42 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                         dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
                     const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
                     if (dir_fd < 0) {
-                        return std::nullopt;
+                        return false;
                     }
                     const int fsync_rc = ::fsync(dir_fd);
                     ::close(dir_fd);
                     if (fsync_rc != 0) {
-                        return std::nullopt;
+                        return false;
                     }
                 }
 
-                // Re-open the live log (it was replaced by rename; advisory lock must be re-taken)
+                // Rename + dir-fsync committed the fresh log. Mark this BEFORE the reopen
+                // so Region 3 / catch can distinguish post-rename failure (old fd stale)
+                // from pre-rename failure (old fd valid). [gate-b/r1 A.1/A.2]
+                *rename_done = true;
+
+                // Re-open the live log (replaced by rename; advisory lock must be re-taken).
+                // If this fails: post-rename failure → caller will poison the store (A.1).
+                // gate-b/r1 A.1 fault-injection: if the hook is installed and returns false,
+                // simulate a reopen failure post-rename to exercise the poison path.
+                if (auto* h = g_post_rename_reopen_fail_hook.exchange(
+                        nullptr, std::memory_order_relaxed)) {
+                    if (!h()) {
+                        return false;  // forced post-rename reopen failure → poison
+                    }
+                }
                 OsFile new_file;
                 if (!new_file.open(path.c_str())) {
-                    return std::nullopt;
+                    return false;
                 }
                 if (!new_file.try_lock()) {
-                    return std::nullopt;
+                    return false;
                 }
-                return new_file;
+                // Publish to result slot; the sole owner stays here until Region 3 moves it.
+                // (On operation_aborted, catch reads result_file->valid() to confirm durable
+                // completion before committing.) [gate-b/r1 A.2]
+                *result_file = std::move(new_file);
+                return true;
 
 #else
             // ── Windows atomic-rename path ────────────────────────────────────
@@ -1530,7 +1584,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 
             OsFile tmp_file;
             if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
-                return std::nullopt;
+                return false;
             }
             {
                 FileStoreImpl tmp_impl;
@@ -1542,7 +1596,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 if (!tmp_impl.initialise_fresh()) {
                     tmp_file = std::move(tmp_impl.file);
                     DeleteFileW(wide_tmp.c_str());
-                    return std::nullopt;
+                    return false;
                 }
                 tmp_file = std::move(tmp_impl.file);
             }
@@ -1551,43 +1605,86 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
                              MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
                 DeleteFileW(wide_tmp.c_str());
-                return std::nullopt;
+                return false;
             }
+            // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
+            *rename_done = true;
             OsFile new_file;
             if (!new_file.open(wide_live.c_str())) {
-                return std::nullopt;
+                return false;
             }
             if (!new_file.try_lock()) {
-                return std::nullopt;
+                return false;
             }
-            return new_file;
+            *result_file = std::move(new_file);
+            return true;
 #endif
             });
+        // gate-b/r1 A.2 fault-injection: if g_force_abort_after_reset_lambda is set,
+        // simulate operation_aborted arriving at the outer resume after the lambda
+        // completed (co_spawn's terminal-only filter normally prevents this; the seam
+        // makes the catch body reachable for witness testing). The flag is consumed
+        // once (exchange to false) so subsequent resets are unaffected.
+        if (g_force_abort_after_reset_lambda.exchange(false, std::memory_order_relaxed)) {
+            throw asio::system_error(asio::error::operation_aborted);
+        }
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
             throw;  // Unexpected (OOM, etc.) — propagate.
         }
-        // operation_aborted: post-dates linearisation per §C3. new_file_opt is empty
-        // because the throw replaced the value path; fall through to Region 3 which
-        // returns store_io_failure on empty opt (conservative: the mutex still holds
-        // the live log as source of truth). The catch is defensive-only (no reaper on
-        // the co_spawn; terminal-only default filters total cancellation). (T020 BRDA note)
-#ifdef FIXPP_TEST_HOOKS
+        // operation_aborted: post-dates linearisation per C3 (§6.1.4 / contracts C3).
+        // The lambda may have completed durably (rename + reopen + lock all succeeded)
+        // before the exception replaced the return path. Recover via result_file slot:
+        //   • result_file->valid(): lambda completed fully → commit exactly as Region 3
+        //     would (A.2). This honours C3: a durable reset MUST return success, never
+        //     store_io_failure or store_cancelled.
+        //   • !result_file->valid(): lambda returned false (pre- or post-rename failure)
+        //     AND was also aborted → fall through to Region 3 (poison/fail-closed).
+        // [gate-b/r1 A.2] [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
         g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-#endif
+        if (result_file->valid()) {
+            // Lambda completed durably; commit the result exactly as Region 3 would.
+            impl_->file = std::move(*result_file);
+            ++impl_->generation_;
+            impl_->inbound_index.clear();
+            impl_->outbound_index.clear();
+            impl_->write_pos =
+                static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
+                                          record_disk_size(kCounterPayloadSize));
+            impl_->next_inbound = seqnum_min;
+            impl_->next_outbound = seqnum_min;
+            co_return fixpp::core::expected_t<void>{};  // durable success (C3)
+        }
+        // Lambda did not produce a valid file; fall through to Region 3.
+        // reset_ok remains false; rename_done indicates which poison branch applies.
     }
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //
-    // On failure: impl_->file unchanged — live log is still source of truth.
+    // On pre-rename failure (!rename_done): impl_->file unchanged — live log is
+    //   still source of truth.
+    // On post-rename failure (*rename_done && !reset_ok): the live pathname now names
+    //   the fresh reset log but impl_->file is the stale (now-unlinked) previous inode.
+    //   Subsequent stores on that inode would vanish on restart → POISON the store so
+    //   all further ops (store/next_seqnum/retrieve/reset) fail-closed until restart.
+    //   [gate-b/r1 A.1] [L-035-2] (behaviors-and-limitations.md updated)
     // On success: swap in the newly opened file, bump generation_, then reset
-    // index + counters. The generation bump (T015) MUST come immediately after
-    // the file swap so any retrieve() walk suspended during the offload detects
-    // the stale snapshot on its next iteration (data-model §4 / I-03 / FR-006).
-    if (!new_file_opt) {
+    //   index + counters. The generation bump (T015) MUST come immediately after
+    //   the file swap so any retrieve() walk suspended during the offload detects
+    //   the stale snapshot on its next iteration (data-model §4 / I-03 / FR-006).
+    if (!reset_ok) {
+        if (*rename_done) {
+            // Post-rename reopen/lock failure: old fd names a dead inode (unlinked by
+            // rename); poison the store so no write reaches it. A later reset() will
+            // poison-check open_ok and return store_io_failure immediately.
+            // The only recovery is to restart the process and let the factory re-open
+            // the now-fresh live log. [gate-b/r1 A.1] [L-035-2]
+            impl_->file = OsFile{};  // close/release the stale (unlinked) fd
+            impl_->open_ok = false;  // fail-closed: all further ops return store_io_failure
+        }
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
-    impl_->file = std::move(*new_file_opt);
+    impl_->file = std::move(*result_file);
     // T015: bump epoch — any in-progress retrieve() walk sees g0 != generation_
     // on the next per-frame re-check and returns store_io_failure (clean-fail).
     // Mutated on the strand (here, mutex held); no atomic needed (Decision 3).

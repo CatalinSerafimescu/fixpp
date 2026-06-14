@@ -214,6 +214,16 @@ int read_and_reset_catch_fired() noexcept;
 // the last reset. Discriminates guard-before-pread (==1) from stale-pread-failed
 // (==2) in the MidWalkReset generation-guard witness.
 int read_and_reset_retrieve_pread_count() noexcept;
+// gate-b/r1 A.2 fault-injection: arm a one-shot flag so the NEXT reset() call
+// simulates asio::system_error(operation_aborted) arriving at the outer co_await
+// AFTER the lambda completed durably (makes the C3 catch body reachable for witness
+// testing). Consumed once (auto-cleared after the next reset() trigger).
+void arm_force_abort_after_reset_lambda() noexcept;
+// gate-b/r1 A.1 fault-injection: install a hook that is called just before the
+// post-rename reopen step in reset()'s offload lambda; the hook returns false to
+// force the reopen to fail, allowing the poison-on-post-rename-failure path (A.1)
+// to be tested. Pass nullptr to clear. Consumed once per install.
+void install_post_rename_reopen_fail_hook(bool (*hook)() noexcept) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session
