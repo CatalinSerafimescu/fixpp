@@ -1649,7 +1649,8 @@ struct SendingTimeStamp {
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;                       // skip SOH
-        if (tag == 9 || tag == 10 || tag == 43 || tag == 122) continue;  // 9/10 recomputed; 43/122 re-added below (037 FR-004 dedup)
+        if (tag == 9 || tag == 10 || tag == 43 || tag == 122)
+            continue;  // 9/10 recomputed; 43/122 re-added below (037 FR-004 dedup)
         if (tag == 52) {
             orig_sending_time =
                 std::string_view{reinterpret_cast<const char*>(val.data()), val.size()};
