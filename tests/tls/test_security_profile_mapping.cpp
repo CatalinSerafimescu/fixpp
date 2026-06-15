@@ -114,9 +114,9 @@ TEST(SecurityProfileMapping, OneWayCaAccepted) {
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     auto result =
         make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), nullptr, nullptr);
-#pragma GCC diagnostic pop
     ASSERT_TRUE(result.has_value()) << "one_way_ca with null Pinset should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::one_way_ca);
+#pragma GCC diagnostic pop
 }
 
 // ── Rejection: SecurityProfile::unset → tls_invalid_security_profile ─────────
