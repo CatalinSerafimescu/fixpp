@@ -120,13 +120,13 @@ headers; confirm the gate still passes (they are clean today). Build/test-infra 
 
 ### Implementation for User Story 4
 
-- [ ] T009 [US4] Re-confirm the uncovered set via the gate's own preprocess criterion
+- [x] T009 [US4] Re-confirm the uncovered set via the gate's own preprocess criterion
   (`tools/check_no_std_mutex_in_awaitable_headers.sh`: post-`-E`, a header is in scope only if it BOTH
   pulls `asio::awaitable<...>` AND could name a banned `std::*mutex`): the **7** session-side headers
   `detail/has_flush_for_session_close`, `engine`, `file_store`, `memory_store`, `message_store`,
   `reconnect_fsm`, `retrieve_visitor`; confirm `business_messages.hpp` is correctly **excluded** (no
   awaitable include, self-declared `:30`). Record the criterion output (edge case in spec.md).
-- [ ] T010 [US4] Add the 7 confirmed headers to the explicit `check_no_std_mutex_corpus` list in
+- [x] T010 [US4] Add the 7 confirmed headers to the explicit `check_no_std_mutex_corpus` list in
   `tests/sync/CMakeLists.txt:140`, matching the existing entries' **list style** (alignment/quoting) —
   but **do NOT carry the stale `[const §VI.4]` citation** that the existing comment at `:138` uses;
   Article VI §4 is bidirectional coverage-index traceability, not a glob rule (research.md D-4 / Gate A
