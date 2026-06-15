@@ -159,3 +159,11 @@ not surfaced; `4294967330` still rejects; `65535` parses.
   witnesses carry the proof.
 - Helper digit-only precondition: sites 4 & 5 MUST keep the explicit non-digit check before the helper
   (FR-007a) — do NOT fold it into the helper (would accept a non-numeric tag token).
+- **/simplify (2026-06-15):** 4 agents — production CLEAN (census re-confirmed; reuse clean; FR-006
+  perf-neutrality confirmed — helper inlines, division strength-reduced; altitude correct at all 5
+  sites + helper + the 2 extraction seams; the static_assert gate praised as the strongest part).
+  Applied: removed a stray double blank line at `session.cpp` namespace close (extraction noise).
+  **Deferred SIMP-040-1** (low value, security-PR optics): two pairs of byte-identical test
+  frame-builders (`make_raw_frame` in parser/offset_table overflow tests; `make_frame` in
+  scan_frame_header/scan_first_frame_ids overflow tests) could hoist to a shared test header — same
+  class as 038's deferred SIMP items; not worth churning here.

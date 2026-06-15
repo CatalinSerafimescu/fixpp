@@ -5018,5 +5018,4 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
     co_return fixpp::core::expected_t<bool>{true};
 }
 
-
 }  // namespace fixpp::session
