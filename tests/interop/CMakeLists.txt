@@ -221,6 +221,15 @@ fixpp_add_interop_test(
     SOURCES parity/replay_subsumes_reorder_queue_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
+# FIX-TC / QuickFIX reference-suite coverage-gap characterization witnesses.
+# Closes/documents fix-tc-coverage-audit.md rows (2b/2t/15/EndSeqNo-over-range).
+fixpp_add_interop_test(
+    NAME interop_parity_fix_tc_coverage_gaps_test
+    GROUP parity
+    LABEL "interop;016;interop-parity;us3"
+    SOURCES parity/fix_tc_coverage_gaps_test.cpp
+    EXTRA_LIBS fixpp_mock_clock
+)
 
 # ── 024 live ResetOnLogon interop cells — T016 (initiator) + T017 (acceptor) ──
 # Both cells value-parameterized over counterparty × role in one file.
