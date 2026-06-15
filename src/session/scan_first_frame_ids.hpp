@@ -20,10 +20,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/tag_scan.hpp>  // 040 US2: accumulate_tag_digit shared bounded-tag helper
 #include <span>
 #include <string_view>
-
-#include <fixpp/wire/tag_scan.hpp>  // 040 US2: accumulate_tag_digit shared bounded-tag helper
 
 namespace fixpp::session::detail {
 
@@ -36,8 +35,7 @@ struct FirstFrameIds {
     std::string_view target_comp_id;
 };
 
-[[nodiscard]] inline FirstFrameIds scan_first_frame_ids(
-    std::span<const std::byte> frame) noexcept {
+[[nodiscard]] inline FirstFrameIds scan_first_frame_ids(std::span<const std::byte> frame) noexcept {
     FirstFrameIds ids;
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};

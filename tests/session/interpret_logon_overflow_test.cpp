@@ -77,22 +77,29 @@ constexpr char SOH = '\x01';
 // default_appl_ver_id == "9" (the forged value). Post-fix: std::nullopt.
 TEST(InterpretLogonOverflow, ForgedTag42949672961137_NotConsumedAsDefaultApplVerID) {
     std::string body;
-    body += "35=A";         body += SOH;
-    body += "34=1";         body += SOH;
-    body += "49=TW";        body += SOH;
-    body += "52=20240101-00:00:00.000"; body += SOH;
-    body += "56=ISLD";      body += SOH;
-    body += "98=0";         body += SOH;
-    body += "108=30";       body += SOH;
+    body += "35=A";
+    body += SOH;
+    body += "34=1";
+    body += SOH;
+    body += "49=TW";
+    body += SOH;
+    body += "52=20240101-00:00:00.000";
+    body += SOH;
+    body += "56=ISLD";
+    body += SOH;
+    body += "98=0";
+    body += SOH;
+    body += "108=30";
+    body += SOH;
     // Forged token: 42949672961137 → without bound, wraps to 1137.
-    body += "42949672961137=9"; body += SOH;
+    body += "42949672961137=9";
+    body += SOH;
 
     auto frame = make_frame(body);
-    auto result = interpret_logon(
-        std::span<const std::byte>{frame},
-        /*expected_sender=*/"TW",
-        /*expected_target=*/"ISLD",
-        /*expected_begin=*/"FIX.4.4");
+    auto result = interpret_logon(std::span<const std::byte>{frame},
+                                  /*expected_sender=*/"TW",
+                                  /*expected_target=*/"ISLD",
+                                  /*expected_begin=*/"FIX.4.4");
 
     ASSERT_TRUE(result.has_value())
         << "interpret_logon must succeed on an otherwise-valid Logon frame";
@@ -108,23 +115,30 @@ TEST(InterpretLogonOverflow, ForgedTag42949672961137_NotConsumedAsDefaultApplVer
 TEST(InterpretLogonOverflow, ForgedTag429496729649_NotConsumedAsSenderCompId) {
     std::string body;
     // Insert forged 49 BEFORE the real 49= to make substitution unambiguous.
-    body += "35=A";         body += SOH;
-    body += "34=1";         body += SOH;
-    body += "429496729649=FORGE49"; body += SOH;  // forged token
-    body += "49=TW";        body += SOH;          // real SenderCompID
-    body += "52=20240101-00:00:00.000"; body += SOH;
-    body += "56=ISLD";      body += SOH;
-    body += "98=0";         body += SOH;
-    body += "108=30";       body += SOH;
+    body += "35=A";
+    body += SOH;
+    body += "34=1";
+    body += SOH;
+    body += "429496729649=FORGE49";
+    body += SOH;  // forged token
+    body += "49=TW";
+    body += SOH;  // real SenderCompID
+    body += "52=20240101-00:00:00.000";
+    body += SOH;
+    body += "56=ISLD";
+    body += SOH;
+    body += "98=0";
+    body += SOH;
+    body += "108=30";
+    body += SOH;
 
     auto frame = make_frame(body);
     // If the forged field had been consumed as 49, the sender would be "FORGE49"
     // and the CompID check would fail (expected_sender="TW"). Passing == forged skipped.
-    auto result = interpret_logon(
-        std::span<const std::byte>{frame},
-        /*expected_sender=*/"TW",
-        /*expected_target=*/"ISLD",
-        /*expected_begin=*/"FIX.4.4");
+    auto result = interpret_logon(std::span<const std::byte>{frame},
+                                  /*expected_sender=*/"TW",
+                                  /*expected_target=*/"ISLD",
+                                  /*expected_begin=*/"FIX.4.4");
 
     EXPECT_TRUE(result.has_value())
         << "interpret_logon must validate successfully when the forged 49 field is "
@@ -138,21 +152,28 @@ TEST(InterpretLogonOverflow, ForgedTag429496729649_NotConsumedAsSenderCompId) {
 // W3 proves real 1137=9 → has_value(). Together they discriminate.
 TEST(InterpretLogonOverflow, ConformingLogonWith1137_DefaultApplVerIdIsSet) {
     std::string body;
-    body += "35=A";         body += SOH;
-    body += "34=1";         body += SOH;
-    body += "49=TW";        body += SOH;
-    body += "52=20240101-00:00:00.000"; body += SOH;
-    body += "56=ISLD";      body += SOH;
-    body += "98=0";         body += SOH;
-    body += "108=30";       body += SOH;
-    body += "1137=9";       body += SOH;  // real DefaultApplVerID: 9 = FIX50SP2
+    body += "35=A";
+    body += SOH;
+    body += "34=1";
+    body += SOH;
+    body += "49=TW";
+    body += SOH;
+    body += "52=20240101-00:00:00.000";
+    body += SOH;
+    body += "56=ISLD";
+    body += SOH;
+    body += "98=0";
+    body += SOH;
+    body += "108=30";
+    body += SOH;
+    body += "1137=9";
+    body += SOH;  // real DefaultApplVerID: 9 = FIX50SP2
 
     auto frame = make_frame(body);
-    auto result = interpret_logon(
-        std::span<const std::byte>{frame},
-        /*expected_sender=*/"TW",
-        /*expected_target=*/"ISLD",
-        /*expected_begin=*/"FIX.4.4");
+    auto result = interpret_logon(std::span<const std::byte>{frame},
+                                  /*expected_sender=*/"TW",
+                                  /*expected_target=*/"ISLD",
+                                  /*expected_begin=*/"FIX.4.4");
 
     ASSERT_TRUE(result.has_value())
         << "interpret_logon must succeed on conforming FIXT-style Logon (regression guard)";

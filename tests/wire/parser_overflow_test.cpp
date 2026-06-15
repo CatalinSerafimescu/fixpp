@@ -62,7 +62,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // to at most `max_steps` steps (guards against non-terminating-on-corrupt loops).
 struct TagVal {
     std::uint32_t tag;
-    std::string   value;
+    std::string value;
 };
 std::vector<TagVal> collect_iter_fields(MessageView<access_mode::Iter>& mv,
                                         std::size_t max_steps = 64) {
@@ -71,9 +71,8 @@ std::vector<TagVal> collect_iter_fields(MessageView<access_mode::Iter>& mv,
     auto en = mv.end();
     for (std::size_t steps = 0; steps < max_steps && !(it == en); ++steps) {
         auto const& f = *it;
-        out.push_back({f.tag,
-                       std::string(reinterpret_cast<char const*>(f.value.data()),
-                                   f.value.size())});
+        out.push_back(
+            {f.tag, std::string(reinterpret_cast<char const*>(f.value.data()), f.value.size())});
         ++it;
     }
     return out;
@@ -87,7 +86,9 @@ std::vector<TagVal> collect_iter_fields(MessageView<access_mode::Iter>& mv,
 TEST(ParserOverflow, ForgedTag429496729649_NeverYieldedAsTag49) {
     // Frame containing ONLY the forged field (plus framing tags).
     // Pre-fix: "FORGE49" yielded as tag 49. Post-fix: done_=true, never yielded.
-    auto buf = make_raw_frame("429496729649=FORGE49\x01""35=A\x01");
+    auto buf = make_raw_frame(
+        "429496729649=FORGE49\x01"
+        "35=A\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -105,7 +106,10 @@ TEST(ParserOverflow, ForgedTag429496729649_NeverYieldedAsTag49) {
         << "Forged token 429496729649=FORGE49 must NOT be yielded as tag 49 (SC-001)";
 
     // Conforming pair (separate frame): a real 49= field must be yielded.
-    auto cbuf = make_raw_frame("35=A\x01""49=REAL\x01""34=1\x01");
+    auto cbuf = make_raw_frame(
+        "35=A\x01"
+        "49=REAL\x01"
+        "34=1\x01");
     auto cfv = fixpp::wire::test::make_frame_view(cbuf);
     ASSERT_TRUE(cfv.has_value());
     MessageView<access_mode::Iter> cmv{*cfv};
@@ -122,7 +126,9 @@ TEST(ParserOverflow, ForgedTag429496729649_NeverYieldedAsTag49) {
 
 // ── W2: token 429496729634 must NOT yield tag 34 ────────────────────────────
 TEST(ParserOverflow, ForgedTag429496729634_NeverYieldedAsTag34) {
-    auto buf = make_raw_frame("429496729634=42\x01""35=A\x01");
+    auto buf = make_raw_frame(
+        "429496729634=42\x01"
+        "35=A\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -140,7 +146,10 @@ TEST(ParserOverflow, ForgedTag429496729634_NeverYieldedAsTag34) {
         << "Forged token 429496729634=42 must NOT be yielded as tag 34 (SC-001)";
 
     // Conforming pair (separate frame): a real 34= field must be yielded.
-    auto cbuf = make_raw_frame("35=A\x01""34=7\x01""49=SENDER\x01");
+    auto cbuf = make_raw_frame(
+        "35=A\x01"
+        "34=7\x01"
+        "49=SENDER\x01");
     auto cfv = fixpp::wire::test::make_frame_view(cbuf);
     ASSERT_TRUE(cfv.has_value());
     MessageView<access_mode::Iter> cmv{*cfv};
@@ -171,10 +180,18 @@ TEST(ParserOverflow, ConformingFrame_AllFieldsYielded) {
 
     bool found35 = false, found34 = false, found49 = false, found56 = false;
     for (auto const& f : fields) {
-        if (f.tag == 35 && f.value == "A")       { found35 = true; }
-        if (f.tag == 34 && f.value == "3")       { found34 = true; }
-        if (f.tag == 49 && f.value == "SENDER")  { found49 = true; }
-        if (f.tag == 56 && f.value == "TARGET")  { found56 = true; }
+        if (f.tag == 35 && f.value == "A") {
+            found35 = true;
+        }
+        if (f.tag == 34 && f.value == "3") {
+            found34 = true;
+        }
+        if (f.tag == 49 && f.value == "SENDER") {
+            found49 = true;
+        }
+        if (f.tag == 56 && f.value == "TARGET") {
+            found56 = true;
+        }
     }
     EXPECT_TRUE(found35) << "tag 35=A must be yielded in conforming frame";
     EXPECT_TRUE(found34) << "tag 34=3 must be yielded in conforming frame";

@@ -128,8 +128,7 @@ TEST(ScanFrameHeaderOverflow, ForgedTag34_NotSurfacedAsMsgSeqNum) {
     conforming += SOH;
     auto c = make_frame(conforming);
     auto cr = scan_frame_header(std::span<const std::byte>(c));
-    EXPECT_EQ(cr.msg_seq_num, "42")
-        << "Conforming tag 34=42 must be surfaced as msg_seq_num";
+    EXPECT_EQ(cr.msg_seq_num, "42") << "Conforming tag 34=42 must be surfaced as msg_seq_num";
 }
 
 // ── T005-W4: 4294967330 already rejected by pre-fix code (regression guard) ───

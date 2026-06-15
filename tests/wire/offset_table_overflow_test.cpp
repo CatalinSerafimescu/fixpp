@@ -49,8 +49,8 @@ using fixpp::wire::OffsetTable;
 // OffsetTable scans bytes; checksum correctness is not required — only the
 // 9= and \x0110= structural markers matter for the factory.
 std::vector<std::byte> make_raw_frame(std::string const& body) {
-    std::string nine  = "9=" + std::to_string(body.size()) + "\x01";
-    std::string full  = "8=FIX.4.4\x01" + nine + body + "10=000\x01";
+    std::string nine = "9=" + std::to_string(body.size()) + "\x01";
+    std::string full = "8=FIX.4.4\x01" + nine + body + "10=000\x01";
     std::vector<std::byte> out(full.size());
     std::memcpy(out.data(), full.data(), full.size());
     return out;
@@ -75,8 +75,7 @@ TEST(OffsetTableOverflow, ForgedTag429496729649_RejectedNotSurfacedAsTag49) {
 
     // The table must be RED with wire_tag_out_of_range.
     auto s = t.build_status();
-    ASSERT_FALSE(s.has_value())
-        << "Forged token 429496729649 must make OffsetTable RED";
+    ASSERT_FALSE(s.has_value()) << "Forged token 429496729649 must make OffsetTable RED";
     EXPECT_EQ(s.error(), error::wire_tag_out_of_range)
         << "Site 1 (T008): in-loop helper must fire wire_tag_out_of_range (SC-004)";
 
@@ -85,11 +84,13 @@ TEST(OffsetTableOverflow, ForgedTag429496729649_RejectedNotSurfacedAsTag49) {
 
     // The forged field must NOT be queryable under tag 49.
     auto found49 = t.find(49);
-    ASSERT_FALSE(found49.has_value())
-        << "Forged value must NOT be queryable under tag 49 (SC-001)";
+    ASSERT_FALSE(found49.has_value()) << "Forged value must NOT be queryable under tag 49 (SC-001)";
 
     // Conforming pair: a real 49= field in a clean frame must be found.
-    auto cbuf = make_raw_frame("35=A\x01""49=REAL\x01""34=1\x01");
+    auto cbuf = make_raw_frame(
+        "35=A\x01"
+        "49=REAL\x01"
+        "34=1\x01");
     auto cfv = fixpp::wire::test::make_frame_view(cbuf);
     ASSERT_TRUE(cfv.has_value());
     std::pmr::monotonic_buffer_resource carena;
@@ -112,19 +113,20 @@ TEST(OffsetTableOverflow, ForgedTag429496729634_RejectedNotSurfacedAsTag34) {
     OffsetTable t{*fv, &arena};
 
     auto s = t.build_status();
-    ASSERT_FALSE(s.has_value())
-        << "Forged token 429496729634 must make OffsetTable RED";
+    ASSERT_FALSE(s.has_value()) << "Forged token 429496729634 must make OffsetTable RED";
     EXPECT_EQ(s.error(), error::wire_tag_out_of_range)
         << "Site 1 (T008): in-loop helper must fire wire_tag_out_of_range (SC-004)";
 
     EXPECT_EQ(t.size(), 0U) << "Table must be cleared on overflow rejection";
 
     auto found34 = t.find(34);
-    ASSERT_FALSE(found34.has_value())
-        << "Forged value must NOT be queryable under tag 34 (SC-001)";
+    ASSERT_FALSE(found34.has_value()) << "Forged value must NOT be queryable under tag 34 (SC-001)";
 
     // Conforming pair: real 34= must be found.
-    auto cbuf = make_raw_frame("35=A\x01""34=7\x01""49=SENDER\x01");
+    auto cbuf = make_raw_frame(
+        "35=A\x01"
+        "34=7\x01"
+        "49=SENDER\x01");
     auto cfv = fixpp::wire::test::make_frame_view(cbuf);
     ASSERT_TRUE(cfv.has_value());
     std::pmr::monotonic_buffer_resource carena;
@@ -133,8 +135,7 @@ TEST(OffsetTableOverflow, ForgedTag429496729634_RejectedNotSurfacedAsTag34) {
     auto cf34 = ct.find(34);
     ASSERT_TRUE(cf34.has_value()) << "Conforming tag 34 must be found";
     auto const* raw = reinterpret_cast<char const*>(cbuf.data()) + cf34->offset;
-    EXPECT_EQ(std::string_view(raw, cf34->length), "7")
-        << "Conforming tag 34 must yield value 7";
+    EXPECT_EQ(std::string_view(raw, cf34->length), "7") << "Conforming tag 34 must yield value 7";
 }
 
 // ── W3: conforming frame — no regression ────────────────────────────────────

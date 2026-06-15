@@ -152,12 +152,9 @@ TEST(ScanFirstFrameIdsOverflow, ConformingFrame_AllFieldsCorrect) {
     frame += SOH;
     auto f = make_frame(frame);
     auto result = scan_first_frame_ids(std::span<const std::byte>(f));
-    EXPECT_EQ(result.begin_string, "FIX.4.4")
-        << "tag 8 (BeginString) must be surfaced";
-    EXPECT_EQ(result.sender_comp_id, "BROKER")
-        << "tag 49 (SenderCompID) must be surfaced";
-    EXPECT_EQ(result.target_comp_id, "CLIENT")
-        << "tag 56 (TargetCompID) must be surfaced";
+    EXPECT_EQ(result.begin_string, "FIX.4.4") << "tag 8 (BeginString) must be surfaced";
+    EXPECT_EQ(result.sender_comp_id, "BROKER") << "tag 49 (SenderCompID) must be surfaced";
+    EXPECT_EQ(result.target_comp_id, "CLIENT") << "tag 56 (TargetCompID) must be surfaced";
 }
 
 }  // namespace fixpp::session::test

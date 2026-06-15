@@ -63,8 +63,8 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
-#include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
-#include "scan_frame_header.hpp"         // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
+#include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
+#include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.

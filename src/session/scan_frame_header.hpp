@@ -20,10 +20,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/tag_scan.hpp>  // 040 US1: accumulate_tag_digit shared bounded-tag helper
 #include <span>
 #include <string_view>
-
-#include <fixpp/wire/tag_scan.hpp>  // 040 US1: accumulate_tag_digit shared bounded-tag helper
 
 namespace fixpp::session::detail {
 
