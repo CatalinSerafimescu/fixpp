@@ -197,6 +197,11 @@ the exclusion rationale (stored own-outbound, not live-inbound).
   (`65535` ok, `65536` reject, wrap-and-continue reject, zero-padded ok). A **live** cross-engine
   (QFcpp/QFJ) forged-frame witness is DEFERRED to the Item-1 live-golden workstream (038 L-038-2
   family); unit witnesses carry the proof.
+- **FR-007a**: Sites 4 (`scan_first_frame_ids`) and 5 (`scan_frame_header`) MUST keep their explicit
+  non-digit-class check *before* calling the helper (the helper's `'0'..'9'` precondition), and MUST
+  have a **non-digit negative witness** (e.g. a token containing a non-digit) asserting the field is
+  rejected — guarding against a future "simplification" that folds the digit check into the helper
+  and would otherwise accept/dispatch a non-numeric tag token. (Gate A round 1 P3.)
 - **FR-008**: `build_replay_frame` MUST be recorded as a justified out-of-scope exclusion (comment +
   research/B&L note), not silently omitted.
 - **FR-009**: No new error codes beyond reusing existing out-of-range/invalid dispositions; no new

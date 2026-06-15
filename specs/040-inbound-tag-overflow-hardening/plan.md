@@ -90,3 +90,17 @@ the `scan_frame_header` defect (root cause), with minimal control-flow churn per
 ## Complexity Tracking
 
 > No Constitution Check violations — section intentionally empty.
+
+## Gate A
+
+- Round 1 applied 2026-06-15: Codex (gpt-5.5) P1=0 P2=0 P3=1; Opus post-judging P1=0 P2=0 P3=1 →
+  **CONVERGED** (P1==0 AND P2==0), 0 rewrites. Both reviewers independently re-swept and confirmed the
+  completeness claim (5 live-inbound scanners + `build_replay_frame` excluded; no 6th, incl. a
+  non-idiom `from_chars`/`strtoul`/… sweep), the helper boundary arithmetic (incl. compiling the
+  `static_assert`), all 5 per-site dispositions, the layering (wire leaf header), and the 038
+  SendingTime-guard regression vector (`scan_frame_header` case 52 → `h.sending_time` → 038 MaxLatency
+  guard). P3 folded in: research.md D-3 rows 4/5 spelled as `if/else-if` (digit-check before helper,
+  preserving the helper's `'0'..'9'` precondition) + FR-007a non-digit negative witness at sites 4/5
+  (prevents a future fold-into-helper "simplification" from accepting a non-numeric tag token).
+  Reviews: `research/reviews/codex_040-inbound-tag-overflow-hardening_gate_a_review.md`,
+  `research/reviews/opus_040-inbound-tag-overflow-hardening_gate_a_adversarial_review.md`.
