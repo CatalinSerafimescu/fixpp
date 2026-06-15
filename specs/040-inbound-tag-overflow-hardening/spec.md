@@ -52,6 +52,20 @@ clause, so the accumulator can reach `429496729` then wrap on the next digit).
   and simpler — a tag `>0xFFFF` is already invalid by the field's 16-bit width, so there is no
   legitimate tag the tighter bound rejects. (The `scan_frame_header` author's intent was this; the
   bug was using the looser `UINT32_MAX/10` bound *and* getting its boundary wrong.)
+- Q: When a session-layer scanner (`scan_frame_header` / `interpret_logon` / `scan_first_frame_ids`)
+  hits an overflowing tag, what disposition (forged hostile frame, not accidental malformation)? → A:
+  **Keep each site's existing disposition.** The forged field is rejected/skipped per existing
+  behavior (`tag_ok=false`/skip-field for the session scanners; `entries_.clear()` Index; `done_`
+  Scan) — so the forged field can never be consumed under the aliased tag. Where the skipped field
+  was a required header field, the session's existing missing-required-field handling provides
+  frame-level rejection. Minimal change, lowest blast radius (Opus census rec). NOT a uniform
+  whole-frame reject (that would change all five sites' control flow).
+- Q: Does 040 need a live cross-engine (QFcpp/QFJ) interop witness for forged-tag rejection, or do
+  unit-level witnesses suffice? → A: **Unit witnesses suffice; live cross-engine witness DEFERRED.**
+  Per-scanner unit witnesses (drive wrap-and-continue tokens, assert rejection) carry the proof. A
+  live forged-frame witness is deferred to the Item-1 live-golden workstream — the
+  038 L-038-2 / L-021-3 / L-037-2 deferral family (reference engines do not emit forged overflow
+  tags, so a live witness needs custom hostile-frame injection).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -178,9 +192,11 @@ the exclusion rationale (stored own-outbound, not live-inbound).
   exactly as today at every site (no behavioral regression on conforming input).
 - **FR-006**: The helper MUST preserve `noexcept` and the existing per-site hot-path characteristics
   (inlinable; no allocation; no measurable throughput regression).
-- **FR-007**: Each of the five sites MUST have a wrap-and-continue negative witness asserting the
-  forged field is rejected; the helper itself MUST have a unit test covering the boundary
-  (`65535` ok, `65536` reject, wrap-and-continue reject, zero-padded ok).
+- **FR-007**: Each of the five sites MUST have a wrap-and-continue negative **unit** witness asserting
+  the forged field is rejected; the helper itself MUST have a unit test covering the boundary
+  (`65535` ok, `65536` reject, wrap-and-continue reject, zero-padded ok). A **live** cross-engine
+  (QFcpp/QFJ) forged-frame witness is DEFERRED to the Item-1 live-golden workstream (038 L-038-2
+  family); unit witnesses carry the proof.
 - **FR-008**: `build_replay_frame` MUST be recorded as a justified out-of-scope exclusion (comment +
   research/B&L note), not silently omitted.
 - **FR-009**: No new error codes beyond reusing existing out-of-range/invalid dispositions; no new
