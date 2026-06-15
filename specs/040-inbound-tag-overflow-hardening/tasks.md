@@ -106,9 +106,17 @@ not surfaced; `4294967330` still rejects; `65535` parses.
 - [ ] T015 Run `tools/check_layers.py` to confirm the new `include/fixpp/wire/tag_scan.hpp` leaf header
   does not invert layers (wire leaf included by session is allowed). **SC-004 centralization gate**:
   after the helper lands, confirm NO residual per-site tag bound remains — grep the 5 scanner sites
-  (`offset_table.cpp`, `parser.hpp`, `admin_messages.cpp`, `engine.cpp`, `session.cpp` `scan_frame_header`)
-  for a `tag > 0xFFFF`/`tag > 429496729U` bound; expect zero (the only `429496729U` left is the
-  legit seqnum guard at `session.cpp:1588`, NOT a tag bound). (Plan Constitution Check; analyze E2.)
+  for a `tag > 0xFFFF`/`tag > 429496729U` bound. NOTE: `scan_frame_header` was extracted from
+  `session.cpp` to `src/session/scan_frame_header.hpp` (US1), and `scan_first_frame_ids` will be
+  extracted from `engine.cpp` to a session-internal header (US2) — so grep `offset_table.cpp`,
+  `parser.hpp`, `admin_messages.cpp`, `scan_frame_header.hpp`, and the new `scan_first_frame_ids`
+  header (NOT just the .cpp files). Expect zero tag bounds; the only `429496729U` left is the legit
+  seqnum guard at `session.cpp:1588`. (Plan Constitution Check; analyze E2.)
+- [ ] T017 [P] **Doc-drift sweep (US1 extraction side-effect):** the `scan_frame_header` guard moved
+  from `session.cpp:1493` to `src/session/scan_frame_header.hpp`. Update the stale `session.cpp:1493`
+  references for `scan_frame_header` in `spec.md` (census row 5), `research.md` (D-3 row 5),
+  `plan.md`, and the parent `CLAUDE.md` pointer to cite the new header. (Same for `scan_first_frame_ids`
+  → its new header after US2.) Bookkeeping; no behavior change.
 - [ ] T016 Full targeted regression: build + `ctest` for `tests/wire/` and `tests/session/` on at
   least `linux-clang-debug` + `linux-clang-asan` (all new overflow witnesses GREEN; conforming
   wire/session corpora unchanged — SC-003; the full 6-preset matrix runs at `/speckit-verify`).
