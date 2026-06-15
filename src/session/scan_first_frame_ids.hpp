@@ -47,18 +47,13 @@ struct FirstFrameIds {
         bool tag_ok = true;
         while (i < n && frame[i] != EQ && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
-            // 040 US2 (FR-007a): digit-class check BEFORE the helper
-            // (accumulate_tag_digit precondition: c must be '0'..'9'). Without
-            // the bound, a forged token wraps uint32 and aliases a security tag
-            // (49/56). The if/else-if shape keeps the existing tag_ok disposition
-            // and guards against a future fold-into-helper that would silently
-            // accept/dispatch non-numeric tokens.
-            if (c < '0' || c > '9') {
-                tag_ok = false;
-            } else if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
-                // Accumulated value would exceed 0xFFFF (16-bit FIX tag bound).
-                // Reject the field so it is never dispatched under the aliased tag.
-                // Fixes the unguarded open-coded accumulate (research.md D-3).
+            // 040 US2 (FR-007a): the digit-class clause is FIRST so short-circuit only ever
+            // calls accumulate_tag_digit on a '0'..'9' digit (its precondition). A non-digit
+            // OR an out-of-range tag (>0xFFFF — fixes the unguarded open-coded accumulate
+            // that aliased 49/56) marks the field unparseable so it is skipped, never used
+            // for CompID resolution. Do NOT drop the digit-class clause and lean on the
+            // helper — the non-digit witness (FR-007a / research.md D-3) guards against that.
+            if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(tag, c)) {
                 tag_ok = false;
             }
             ++i;

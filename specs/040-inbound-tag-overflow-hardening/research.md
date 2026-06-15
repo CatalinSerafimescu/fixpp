@@ -60,21 +60,23 @@ clause — rejected: needlessly admits 17-bit..32-bit tags that are invalid anyw
 | 1 | `offset_table.cpp:160-176` (Index) | replace per-digit `tag = tag*10+digit` with the helper; DROP the now-redundant post-loop `if (tag > 0xFFFFU)` at `:176` (the in-loop helper subsumes it), keep `status_=err_tag_out_of_range(); entries_.clear()` on overflow |
 | 2 | `parser.hpp:333-346` (Scan) | add the helper in the digit loop; on false → `done_ = true; return;` (matches the existing non-digit reject) |
 | 3 | `admin_messages.cpp:255-266` (`interpret_logon`) | helper in the loop; on false → `goto next_field;` (existing skip-malformed disposition) |
-| 4 | `scan_first_frame_ids.hpp` (extracted from `engine.cpp` anon-ns) (`scan_first_frame_ids`) | **digit-check FIRST, then helper** (see precondition note) — `if (c<'0'\|\|c>'9') tag_ok=false; else if (!accumulate_tag_digit(tag,c)) tag_ok=false;` |
-| 5 | `scan_frame_header.hpp` (extracted from `session.cpp` anon-ns) (`scan_frame_header`) | **REPLACE** the defective `if (tag > 429496729U) tag_ok=false;` + `tag=tag*10+d` with the same digit-check-then-helper `if/else-if` shape — fixes the wrap-and-continue admission |
+| 4 | `scan_first_frame_ids.hpp` (extracted from `engine.cpp` anon-ns) (`scan_first_frame_ids`) | **digit-class clause FIRST in a single short-circuit condition** — `if (c<'0'\|\|c>'9' \|\| !accumulate_tag_digit(tag,c)) tag_ok=false;` |
+| 5 | `scan_frame_header.hpp` (extracted from `session.cpp` anon-ns) (`scan_frame_header`) | **REPLACE** the defective `if (tag > 429496729U) tag_ok=false;` + `tag=tag*10+d` with the same single short-circuit condition — fixes the wrap-and-continue admission |
 
 **Helper digit-only precondition — load-bearing for sites 4 & 5 (Gate A round 1 P3, tightened by
-Opus).** `scan_first_frame_ids` and `scan_frame_header` today set `tag_ok=false` on a non-digit but
-**fall through** and still execute the accumulate. A *literal* "replace `tag = tag*10+d` with
+Opus).** `scan_first_frame_ids` and `scan_frame_header` originally set `tag_ok=false` on a non-digit but
+**fell through** and still executed the accumulate. A *literal* "replace `tag = tag*10+d` with
 `if (!accumulate_tag_digit(tag,c)) tag_ok=false`" would call the helper on a non-digit, breaching its
-`'0'..'9'` precondition (defined-but-meaningless arithmetic, not UB — disposition survives because the
-separate `tag_ok=false` line stays). **DO NOT** fold the digit-class check *into* the helper call: if
-an implementer "simplifies" by deleting the explicit non-digit line and relying on the helper, a token
-like `"3a5="` would be **accepted and dispatched** (a NEW acceptance/aliasing bug) — and FR-007's
-all-digit witnesses would not catch it. Hence sites 4/5 MUST keep the explicit digit-class check
-*before* the helper (the `if/else-if` shape above), and FR-007 adds a **non-digit negative witness**
-at sites 4/5. (Sites 1/2/3 already reject non-digits with an immediate `return`/`goto` before any
-accumulate, so they satisfy the precondition unchanged.)
+`'0'..'9'` precondition. **The shipped fix puts the digit-class clause FIRST in a single short-circuit
+condition** `if (c<'0' || c>'9' || !accumulate_tag_digit(tag,c)) tag_ok=false;` — `||` short-circuit
+guarantees the helper is only called on a `'0'..'9'` digit. (Implemented as the single condition rather
+than an `if/else-if` with two identical `tag_ok=false` bodies, which `clang-tidy bugprone-branch-clone`
+correctly flagged; the single form is equivalent and cleaner.) **DO NOT** drop the leading digit-class
+clause and lean on the helper: if an implementer "simplifies" to `if (!accumulate_tag_digit(...))`, a
+token like `"3a5="` would be **accepted and dispatched** (a NEW acceptance/aliasing bug) — and FR-007's
+all-digit witnesses would not catch it. Hence FR-007a adds a **non-digit negative witness** at sites
+4/5. (Sites 1/2/3 already reject non-digits with an immediate `return`/`goto` before any accumulate, so
+they satisfy the precondition unchanged.)
 
 **scan_frame_header is the headline**: its `:1493` guard uses `> 429496729U` (UINT32_MAX/10) and is
 `>` not `>=`-with-boundary, so the accumulator can reach `429496729`, then `*10+6` wraps to 0 and

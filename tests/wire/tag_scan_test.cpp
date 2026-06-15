@@ -31,10 +31,10 @@ DriveResult drive(std::string_view digits) {
     std::uint32_t t = 0;
     for (char c : digits) {
         if (!accumulate_tag_digit(t, static_cast<unsigned char>(c))) {
-            return {true, t};
+            return {.saw_false = true, .final_value = t};
         }
     }
-    return {false, t};
+    return {.saw_false = false, .final_value = t};
 }
 
 // ---------------------------------------------------------------------------
