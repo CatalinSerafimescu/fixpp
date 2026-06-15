@@ -73,8 +73,8 @@ properly-justified, re-measured waiver, so the coverage record is honest.
 **Acceptance Scenarios**:
 
 1. **Given** the `set_next_outbound` lock-fail branch (returns `session_already_closed`), **When**
-   a test forces `async_lock` to fail via the `mutex_test_access` seam, **Then** the branch executes
-   and the error is asserted.
+   a test forces `async_lock` to fail by draining the mutex (`drain()`/`cancel_and_drain`), **Then** the
+   branch executes and the error is asserted.
 2. **Given** the 008 `OsFile` move-constructor, **When** the move-ctor witness runs, **Then** the
    move-ctor is exercised and the moved-from/-to invariants hold.
 3. **Given** the 033 lines deferred to a Gate B that never measured per-line DA/BRDA, **When**
@@ -126,7 +126,7 @@ the relevant spec/behaviors docs and are internally consistent with the shipped 
 ### Edge Cases
 
 - **US2**: sentinel as left, right, and both operands; out-of-domain exponent still rejects.
-- **US3**: the `mutex_test_access` seam must force lock failure deterministically (no flake).
+- **US3**: draining the mutex (`drain()`) must force lock failure deterministically (no flake).
 - **US4**: a candidate header that does NOT preprocess to `asio/awaitable.hpp` is out of the gate's
   scope (the gate flags only headers that BOTH pull `asio::awaitable` AND name a banned mutex,
   post-`-E`); such a header must not be claimed as an "uncovered awaitable header."
@@ -147,7 +147,8 @@ the relevant spec/behaviors docs and are internally consistent with the shipped 
 
 **US3 — coverage-waiver remediation (test-only)**
 - **FR-008**: The `set_next_outbound` lock-fail branch MUST be exercised by a witness that forces
-  `async_lock` failure via the `mutex_test_access` seam and asserts `session_already_closed`.
+  `async_lock` failure by draining the mutex (`drain()`/`cancel_and_drain` → drained state; the
+  `mutex_test_access` seam exists as a lower-level alternative) and asserts `session_already_closed`.
 - **FR-009**: The 008 `OsFile` move-constructor MUST be exercised by a witness — OR, if
   re-measurement shows it production-unreachable (constructed-in-place + move-assigned only, never
   move-constructed) and TU-local (un-witnessable without a forbidden production seam, FR-014), it
@@ -215,8 +216,9 @@ test-completeness, a build-gate extension, and a documentation wording fix. The 
 - US2's existing `_checked` sentinel behavior (`OK`+0 for a valid-exponent sentinel) is the ratified
   intent, not a defect (confirmed against 001 AC-C6 / D-12 / the code comment during planning and
   independently re-confirmed in Gate A round 1).
-- The `mutex_test_access` seam already exists and can force `async_lock` failure deterministically
-  for US3(a).
+- `SeqnumManager::drain()` (`cancel_and_drain`) puts the mutex in the drained state so the next
+  `async_lock` deterministically fails — the witness mechanism for US3(a). (The `mutex_test_access` seam
+  also exists as a lower-level alternative.)
 - The §XV.9 gate's header list lives in `tests/sync/CMakeLists.txt` and is the right place to extend
   for US4; the gate flags a header only if, post-`-E`, it BOTH pulls `asio::awaitable` AND names a
   banned mutex (so `business_messages.hpp`, which has no awaitable include, is correctly NOT in the
