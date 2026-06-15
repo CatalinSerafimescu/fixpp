@@ -48,13 +48,13 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <cstdio>
-#include <ctime>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -282,17 +282,11 @@ static std::vector<std::byte> make_min_app_payload() {
 // acceptor first-Logon SendingTime(52) MaxLatency guard admits the peer Logon
 // (the legacy fixed "20240101-00:00:00.000" literal is now stale → rejected).
 static std::string utc_now_fix_timestamp() {
-    const auto now = std::chrono::system_clock::now();
-    const auto secs = std::chrono::floor<std::chrono::seconds>(now);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - secs).count();
-    const std::time_t t = std::chrono::system_clock::to_time_t(secs);
-    std::tm tm{};
-    gmtime_r(&t, &tm);
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03lld", tm.tm_year + 1900,
-                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-                  static_cast<long long>(ms));
-    return buf;
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
 }
 
 static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
