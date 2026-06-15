@@ -196,11 +196,13 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
     ASSERT_EQ(s.state(), fixpp::session::fsm_state::LogoutSent)
         << "precondition: graceful close emits Logout and enters LogoutSent";
 
-    // Peer sends a Logon while we await its Logout confirmation.
+    // Peer sends a Logon while we await its Logout confirmation. NOTE: the frame
+    // MUST be a named local that outlives run_for — on_inbound_frame takes a
+    // non-owning span and reads it only when the coroutine resumes inside
+    // run_for (the caller owns the buffer across the await, as the read-pump does).
     {
-        auto fut = asio::co_spawn(
-            ioc, s.on_inbound_frame(make_logon("FIX.4.2", inbound_before, "TW", "ISLD")),
-            asio::use_future);
+        auto logon = make_logon("FIX.4.2", inbound_before, "TW", "ISLD");
+        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(logon), asio::use_future);
         ioc.run_for(100ms);
         (void)fut.get();
     }
