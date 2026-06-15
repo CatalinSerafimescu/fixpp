@@ -53,22 +53,22 @@ operands of `_checked` compare/equal returns `FIXPP_ERR_OK` + 0; out-of-domain *
 
 ### Implementation for User Story 2
 
-- [ ] T001 [US2] Add a regression test in `tests/core/decimal_capi_error_test.cpp` asserting
+- [x] T001 [US2] Add a regression test in `tests/core/decimal_capi_error_test.cpp` asserting
   `fixpp_decimal_compare_checked` and `fixpp_decimal_equal_checked` of the `INT64_MIN` sentinel POD with
   a valid exponent (`∈ [-38,0]`) return `FIXPP_ERR_OK` with `out_ordering == 0` / `out_equal == 0`, with
   the sentinel as **left, right, and both** operands (AC-1/AC-2; FR-006; SC-003).
-- [ ] T002 [US2] In the same test, add the negative + no-regression assertions: an out-of-domain
+- [x] T002 [US2] In the same test, add the negative + no-regression assertions: an out-of-domain
   *exponent* (outside `[-38,0]`) still returns `FIXPP_ERR_DECIMAL_INVALID` (AC-3; FR-007), and two
   ordinary valid in-domain decimals report the true ordering/equality unchanged (AC-4; FR-007).
-- [ ] T003 [US2] Add a cross-reference comment at the new test citing **001 AC-C6 / research.md D-12 /
+- [x] T003 [US2] Add a cross-reference comment at the new test citing **001 AC-C6 / research.md D-12 /
   `[const §X.1]`** ("ratified frozen-ABI contract — `_checked` validates the exponent domain only; do NOT
   re-fix to reject the sentinel"); if the existing `src/capi/decimal.cpp:43-48` comment does not already
   carry the AC-C6/D-12 citation, add it there too — **comment-only, zero logic change** (FR-006a).
-- [ ] T004 [US2] **Mutation-discrimination check** (non-discriminating-witness guard): temporarily mutate
+- [x] T004 [US2] **Mutation-discrimination check** (non-discriminating-witness guard): temporarily mutate
   the `_checked` path in `src/capi/decimal.cpp` to reject the sentinel (return
   `FIXPP_ERR_DECIMAL_INVALID`), rebuild, and confirm the T001/T002 pin test goes **RED**; then revert the
   mutation. Record the RED observation. (Confirms the witness actually pins the behavior, not a tautology.)
-- [ ] T005 [US2] Verify the final `src/capi/decimal.cpp` diff vs `main` is **comment-only**
+- [x] T005 [US2] Verify the final `src/capi/decimal.cpp` diff vs `main` is **comment-only**
   (`git diff main -- src/capi/decimal.cpp` shows no executable-line change) — the literal gate that this
   story changed no production logic.
 
