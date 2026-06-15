@@ -1062,7 +1062,9 @@ When `SessionConfig::version` selects a FIXT.1.1 profile, the session layer emit
 and enforces the transport/application version split. Both roles (initiator and acceptor) emit
 `DefaultApplVerID(1137)` on the outbound Logon (FR-001/FR-002); the acceptor requires and validates the
 peer's `1137` field (FR-003/FR-004). The `negotiated_version_profile()` accessor on `Session` exposes
-the negotiated application version after establishment (FR-005). The implementation is version-general:
+the negotiated application version after establishment (FR-005); on the **initiator**, a peer Logon-ack
+that omits `1137` or carries an unserviceable value leaves the profile at the unnegotiated fallback
+`{session=Unknown, default_appl=Unknown}` (the initiator does not auto-reject — see L-033-3). The implementation is version-general:
 any application-layer `ApplVerID` enum value accepted for `1137` is valid; acceptors reject only values
 they are not configured to service (FR-004a, acceptor-scoped only). When FIXT.1.1 is **not** configured,
 the FIX.4.x path is byte-identical — no wire change, no protocol divergence (FR-009/SC-002). *(FR-001
@@ -1093,10 +1095,28 @@ configuration-driven reject path. Acceptors that need to reject Logons based on 
 supply a custom `CompIdAuthorizationPolicy` implementation. A built-in config-gated validation/rejection
 path is a committed future feature (FR-008a).
 
-**L-033-3 — Initiator-side unserviceable-`1137` dispose deferred.** FR-004a (unserviceable application
-version → `Reject` + Disconnect, NOT a Logout message) is acceptor-scoped only in this feature. An initiator that receives a peer
-Logon advertising an `1137` value it cannot service has no automatic disposal path in 033; the
-application's `authorize_logon` / `fromAdmin` hooks must handle this case explicitly if needed.
+**L-033-3 — Initiator-side `1137` validation (unserviceable AND absent) is deliberately deferred to the
+application.** FR-004a (unserviceable application version → `Reject` + Disconnect, NOT a Logout message)
+is **acceptor-scoped only**. The initiator's Logon-ack arm (`src/session/session.cpp` ~`:3649-3665`)
+records the peer's `DefaultApplVerID(1137)` only when it is present **and** maps to a known
+`application_version`, and **never refuses on any value** — there is no automatic initiator-side disposal
+path for a peer `1137` the initiator cannot service. The two non-conforming inputs and their concrete
+shipped dispositions:
+
+- **Unserviceable `1137`-ack** (present but unmappable / a version the initiator cannot service): the
+  value is not recorded; `negotiated_appl_version_` stays `Unknown`; the session still reaches Active.
+- **Absent `1137`-ack** (the peer Logon-ack omits `1137` entirely): the `result->default_appl_ver_id`
+  optional is empty, the record-arm condition is false, `negotiated_appl_version_` stays `Unknown`, and
+  the session still reaches Active. (The acceptor, by contrast, rejects a missing `1137` with
+  `RequiredTagMissing(1)` per FR-004 — see B-033-1 / the FIXT establishment notes; the asymmetry is
+  intentional and acceptor-scoped.)
+
+In both initiator cases `negotiated_version_profile()` returns the unnegotiated fallback
+`{session=Unknown, default_appl=Unknown}` (`session.cpp:189-192`), which a downstream `fromApp` reify
+call-site can detect. An initiator requiring strict application-version negotiation must enforce it in
+its `authorize_logon` / `fromAdmin` hooks. **Status: deferred-by-design** (no auto-dispose on the
+initiator; not an open question — a built-in initiator-side strict-`1137` gate would be its own future
+feature).
 
 **L-033-4 — `Password(554)` redaction wired at unit-golden + interop-golden; production
 logger/tap/transcript wiring is a forward obligation.** The `redact_tag554` utility is wired at the

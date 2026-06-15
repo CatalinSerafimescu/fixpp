@@ -151,7 +151,7 @@ placeholder) and the absent-`1137`-ack case described, consistent with shipped F
 
 ### Implementation for User Story 5
 
-- [ ] T011 [US5] Resolve the L-033-3 entry wording in `spec/behaviors-and-limitations.md` (remove the
+- [x] T011 [US5] Resolve the L-033-3 entry wording in `spec/behaviors-and-limitations.md` (remove the
   open placeholder) and document the absent-`1137`-ack case in the FIXT `DefaultApplVerID(1137)` notes,
   internally consistent with the shipped behavior (FR-012; SC-006). No code/wire/config change.
 
