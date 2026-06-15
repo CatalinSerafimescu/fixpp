@@ -169,5 +169,55 @@ TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     EXPECT_EQ(capture.count_msg_type("3"), 0U) << "no Reject emitted";
 }
 
+// ── gap #10 / FIX-TC validLogonState_MsgTypeLogoutAndLogonAlreadySent ─────────
+//
+// After WE initiate a graceful logout (state LogoutSent, our Logout emitted,
+// awaiting the peer's Logout confirmation), an inbound Logon — or any non-Logout
+// frame — is DRAINED: the FSM stays LogoutSent, the inbound seqnum does not
+// advance, and no Reject / no new Logon is emitted. Only the peer's Logout(35=5)
+// is acted upon (→ Disconnected).
+//
+// DIVERGENCE (documented, B-cov-2). QuickFIX's
+// `validLogonState_MsgTypeLogoutAndLogonAlreadySent_Valid` treats a second Logon
+// in this state as "valid" (processed). fixpp silently drains it: a graceful
+// logout in progress is not aborted to re-establish. Not a Reject either, so the
+// wire is not polluted — the frame is simply ignored.
+TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
+    fixpp::session::Session s{engine, make_acceptor_cfg()};
+    ASSERT_TRUE(drive_to_active(s));
+    const std::uint32_t inbound_before = next_inbound(s);
+    const std::size_t logons_before = capture.count_msg_type("A");
+
+    // WE initiate graceful logout → emits Logout, transitions to LogoutSent, then
+    // parks awaiting the peer's Logout confirmation (2 s clock-bound timeout).
+    auto close_fut = asio::co_spawn(ioc, s.close(fixpp::session::close_mode::graceful),
+                                    asio::use_future);
+    ioc.run_for(100ms);
+    ASSERT_EQ(s.state(), fixpp::session::fsm_state::LogoutSent)
+        << "precondition: graceful close emits Logout and enters LogoutSent";
+
+    // Peer sends a Logon while we await its Logout confirmation.
+    {
+        auto fut = asio::co_spawn(
+            ioc, s.on_inbound_frame(make_logon("FIX.4.2", inbound_before, "TW", "ISLD")),
+            asio::use_future);
+        ioc.run_for(100ms);
+        (void)fut.get();
+    }
+
+    EXPECT_EQ(s.state(), fixpp::session::fsm_state::LogoutSent)
+        << "DIVERGENCE: inbound Logon in LogoutSent is drained — graceful logout not aborted";
+    EXPECT_EQ(next_inbound(s), inbound_before)
+        << "a drained frame must NOT advance the inbound seqnum";
+    EXPECT_EQ(capture.count_msg_type("A"), logons_before)
+        << "no new Logon emitted in response (session is NOT re-established)";
+    EXPECT_EQ(capture.count_msg_type("3"), 0U) << "no Reject emitted (drained, not rejected)";
+
+    // Drain the parked close() coroutine cleanly: let the 2 s logout timeout fire.
+    clock->advance(std::chrono::seconds{3});
+    ioc.run_for(200ms);
+    (void)close_fut.get();
+}
+
 }  // namespace
 }  // namespace fixpp::interop::parity
