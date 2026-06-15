@@ -1,16 +1,8 @@
-# Quickstart: F-f tail hardening bundle (039)
+# Quickstart: F-f tail hardening bundle (039, LOW)
 
 How to exercise each user story's witness. Build from a configured preset (e.g.
-`linux-clang-debug`); run from the library submodule root.
-
-## US1 — wire tag-overflow guard (MED, production change)
-
-```bash
-# Adversarial forged-tag aliasing witness (Index + Scan modes)
-ctest --test-dir build/<preset> -R 'wire.*tag.*overflow|tag.*alias' -V
-```
-Expect: forged token `4294967330` (uint32-wraps to 34) is rejected in both modes; not queryable
-under tag 34. `65535` decodes; `70000` rejects. Conforming-corpus wire tests unchanged (SC-002).
+`linux-clang-debug`); run from the library submodule root. **No production behavior changes** in this
+feature (US1 was split out to `040-inbound-tag-overflow-hardening`).
 
 ## US2 — C-ABI sentinel behavior pinned (no production change)
 
@@ -47,4 +39,4 @@ Expect: resolved wording (no open placeholder) and the absent-`1137`-ack case do
 ## Full verification (pre-Gate-B)
 
 `/speckit-verify` runs the 6-preset Tier-1 matrix (incl. TSan) + lcov DA/BRDA + the corpus gate.
-US1 is the only production change; US2–US5 are test/build-gate/doc.
+US2–US5 are test/comment/build-gate/doc — no production change.
