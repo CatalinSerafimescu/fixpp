@@ -87,16 +87,21 @@ re-measured waiver. Test-only; no production change.
 ### Implementation for User Story 3
 
 - [ ] T006 [US3] Witness in `tests/session/` that forces `async_lock` failure via the existing
-  `SeqnumManager::mutex_test_access()` seam (`include/fixpp/session/seqnum_manager.hpp:162`) and asserts
-  `set_next_outbound` (`src/session/seqnum_manager.cpp:188`) returns
-  `error::session_already_closed` (AC-1; FR-008). Seam must force the failure deterministically (no flake).
+  `SeqnumManager::mutex_test_access()` seam (`include/fixpp/session/seqnum_manager.hpp:162`, returns
+  `fixpp::sync::async_mutex&`) and asserts `set_next_outbound` (`src/session/seqnum_manager.cpp:188`)
+  returns `error::session_already_closed` (AC-1; FR-008). **Seam mechanic** (non-trivial): drive the
+  returned `async_mutex` into its drain/cancelled state so the next `co_await async_lock(...)` inside
+  `set_next_outbound` returns the lock-fail error — mirror the existing seqnum lock-fail witnesses if any.
+  Must be deterministic (no flake).
 - [ ] T007 [P] [US3] Witness in `tests/session/` exercising the `OsFile` move-constructor
   (`src/session/file_store.cpp:401` POSIX / `:503` Windows) and asserting the moved-from
   fd/handle is invalidated (`-1` / `INVALID_HANDLE_VALUE`) and moved-to is valid (AC-2; FR-009).
 - [ ] T008 [US3] Re-measure (lcov DA/BRDA, `[const §IX.1]`) the 033 lines previously deferred without
   per-line measurement; for each, either add a covering witness or record a **specific re-measured**
   waiver citing the exact `file:line` and reason (AC-3; FR-010; SC-004). Zero unjustified "untestable"
-  dispositions may remain among the three.
+  dispositions may remain among the three. **First identify the exact lines** — research.md D-3(c) does
+  not enumerate them; recover the deferred set from the 033 verify/Gate-B coverage records
+  (`.specify/decisions/033-*-verify.md` / `033-*-gateb.md` and `research/reviews/*033*`).
 
 **Checkpoint**: US3 coverage record is honest; US2 + US3 both pass independently.
 
@@ -118,10 +123,16 @@ headers; confirm the gate still passes (they are clean today). Build/test-infra 
   `reconnect_fsm`, `retrieve_visitor`; confirm `business_messages.hpp` is correctly **excluded** (no
   awaitable include, self-declared `:30`). Record the criterion output (edge case in spec.md).
 - [ ] T010 [US4] Add the 7 confirmed headers to the explicit `check_no_std_mutex_corpus` list in
-  `tests/sync/CMakeLists.txt:140`, matching the existing entries' style; run the gate and confirm it
-  **PASSES** on the current tree (FR-011; SC-005). **Default-real**: if any added header *fails*
-  post-preprocess, that is a genuine §XV.9 violation — surface and fix it (route to
-  `fixpp::sync::async_mutex`), do NOT silently drop it from the list.
+  `tests/sync/CMakeLists.txt:140`, matching the existing entries' **list style** (alignment/quoting) —
+  but **do NOT carry the stale `[const §VI.4]` citation** that the existing comment at `:138` uses;
+  Article VI §4 is bidirectional coverage-index traceability, not a glob rule (research.md D-4 / Gate A
+  round 1 P2 correction). Cite the local CMake-gate convention if a comment is warranted. Run the gate
+  and confirm it **PASSES** on the current tree (FR-011; SC-005). **Default-real**: if any added header
+  *fails* post-preprocess, that is a genuine §XV.9 violation — surface and fix it (route to
+  `fixpp::sync::async_mutex`), do NOT silently drop it from the list. **Premise guard (analyze F2)**: a
+  gate failure on any of the 7 would re-trigger a concurrency/Appendix-A surface and invalidate the
+  FR-014 "no production change → Gate A not required" premise — STOP and reassess Gate A, do not push
+  through.
 
 **Checkpoint**: US4 gate covers the 7 headers and passes; US2–US4 all pass independently.
 
