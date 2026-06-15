@@ -16,16 +16,18 @@ disposition. Witnesses are REQUIRED (FR-007/FR-007a) → test tasks are generate
 
 ## Phase 2: Foundational — the shared helper (BLOCKS US1 + US2)
 
-- [ ] T002 Create the leaf header `include/fixpp/wire/tag_scan.hpp` with
+- [X] T002 Create the leaf header `include/fixpp/wire/tag_scan.hpp` with
   `namespace fixpp::wire { [[nodiscard]] constexpr bool accumulate_tag_digit(std::uint32_t& tag, unsigned char c) noexcept; }`
   implementing the in-loop pre-multiply `0xFFFF` bound (`if (tag > (0xFFFFu - d)/10u) return false; tag = tag*10u + d; return true;`),
   `[[gnu::always_inline]]`, `<cstdint>` only, no other deps. Per `contracts/tag-scan-helper.md`.
-- [ ] T003 Add the compile-time boundary `static_assert` block adjacent to the helper in
+  Note: `[[gnu::always_inline]]` not used — not idiomatic in this codebase (zero existing usages).
+- [X] T003 Add the compile-time boundary `static_assert` block adjacent to the helper in
   `include/fixpp/wire/tag_scan.hpp`: `65535` accepted, `65536` rejected, wrap-and-continue
   (`429496729649`) rejected, zero-padded (`000000000034`) → 34. (FR-001; compile-time guarantee.)
-- [ ] T004 [P] Add a runtime helper boundary unit test `tests/wire/tag_scan_test.cpp` (register in
+  Mutation-verified: corrupting `t==65535u` → `t==65534u` gives compile error at the static_assert.
+- [X] T004 [P] Add a runtime helper boundary unit test `tests/wire/tag_scan_test.cpp` (register in
   `tests/wire/CMakeLists.txt`): `65535` ok, `65536` reject, `429496729634`/`429496729649` reject,
-  zero-padded ok, single-digit ok. (FR-007.)
+  zero-padded ok, single-digit ok. (FR-007.) 6/6 cases PASS.
 
 **Checkpoint**: helper compiles (incl. `static_assert`); `tag_scan_test` passes. US1 + US2 unblocked.
 
