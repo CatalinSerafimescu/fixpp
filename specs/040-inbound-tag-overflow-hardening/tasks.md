@@ -67,17 +67,19 @@ not surfaced; `4294967330` still rejects; `65535` parses.
 `scan_first_frame_ids`.
 **Independent test**: per-site wrap-and-continue token rejected / not queryable under the aliased tag.
 
-- [ ] T008 [P] [US2] Site 1 (Index): in `src/wire/offset_table.cpp:160-176`, replace the per-digit
+- [X] T008 [P] [US2] Site 1 (Index): in `src/wire/offset_table.cpp:160-176`, replace the per-digit
   `tag = tag*10+d` with `accumulate_tag_digit`; on `false` set
   `status_ = err_tag_out_of_range(); entries_.clear(); return;` and DROP the now-redundant post-loop
   `if (tag > 0xFFFFU)` at `:176` (the in-loop helper subsumes it). Keep the non-digit
   `err_invalid_field_format()` path distinct. (FR-002.)
-- [ ] T009 [P] [US2] Site 2 (Scan): in `include/fixpp/wire/parser.hpp:333-346`
+  SC-004 confirmed: post-loop `if (tag > 0xFFFFU)` block removed; in-loop helper is the sole bound.
+- [X] T009 [P] [US2] Site 2 (Scan): in `include/fixpp/wire/parser.hpp:333-346`
   (`field_iterator::advance`), add `accumulate_tag_digit` in the digit loop; on `false` →
   `done_ = true; return;` (matches existing malformed termination). (FR-002.)
-- [ ] T010 [P] [US2] Site 3 (`interpret_logon`): in `src/session/admin_messages.cpp:255-266`, use the
+- [X] T010 [P] [US2] Site 3 (`interpret_logon`): in `src/session/admin_messages.cpp:255-266`, use the
   helper in the loop; on `false` → `goto next_field;` (existing skip-malformed disposition; the
   existing immediate non-digit `goto` already satisfies the digit precondition). (FR-002.)
+  Confirmed: non-digit check is an immediate `goto next_field` BEFORE the accumulate — no if/else-if needed.
 - [ ] T011 [P] [US2] Site 4 (`scan_first_frame_ids`): in `src/session/engine.cpp:349-353`, use the
   digit-check-before-helper `if/else-if` shape → `tag_ok=false` on either branch. (FR-002/FR-007a.)
 - [ ] T012 [US2] Wrap-and-continue + non-digit witnesses: `tests/wire/offset_table_overflow_test.cpp`
@@ -89,6 +91,8 @@ not surfaced; `4294967330` still rejects; `65535` parses.
   `429496729649`→49 explicitly at the Index and Scan sites** (not just a site-relevant alias) so
   SC-001's "reject everywhere" is directly traceable. Register all in the respective `CMakeLists.txt`.
   Conforming-corpus tags unchanged. (FR-004/FR-005/FR-007/FR-007a; analyze E3.)
+  T012 (sites 1/2/3 portion): DONE — offset_table_overflow_test.cpp (3 cells GREEN), parser_overflow_test.cpp
+  (3 cells GREEN), interpret_logon_overflow_test.cpp (3 cells GREEN). Site 4 portion pending T011.
 
 **Checkpoint**: all five scanners reject the verified wrap vectors; SC-001 met across the full set.
 

@@ -1922,6 +1922,14 @@ add_test(NAME session_fixt_credentials
 set_tests_properties(session_fixt_credentials PROPERTIES
   LABELS "033;s022;fixt-credentials;foundational")
 
+# ── 040-inbound-tag-overflow-hardening Phase 4 US2 — site 3 witness (T010/T012) ──
+# interpret_logon overflow test: forged wrap-and-continue tokens must be skipped,
+# not consumed into logon_interpret_result fields (SC-001 / research.md D-3).
+add_threading_test(session_interpret_logon_overflow
+  interpret_logon_overflow_test.cpp)
+set_tests_properties(session_interpret_logon_overflow PROPERTIES
+  LABELS "040;sc001;overflow-hardening;foundational")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

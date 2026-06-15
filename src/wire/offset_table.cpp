@@ -9,6 +9,7 @@
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/view.hpp>  // group_slice
 #include <memory_resource>
 #include <new>
@@ -165,16 +166,15 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                     entries_.clear();
                     return;
                 }
-                tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+                if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
+                    status_ = err_tag_out_of_range();
+                    entries_.clear();
+                    return;
+                }
                 ++i;
             }
             if (i >= n || buf[i] != EQ || i == tag_start) {
                 status_ = err_invalid_field_format();
-                entries_.clear();
-                return;
-            }
-            if (tag > 0xFFFFU) {
-                status_ = err_tag_out_of_range();
                 entries_.clear();
                 return;
             }

@@ -26,6 +26,7 @@
 #include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
 #include <optional>
@@ -261,7 +262,10 @@ namespace {
                                   // nested-flag/break-stack inflates the parser for no behavioral
                                   // win.
             }
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+            if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
+                goto next_field;  // NOLINT(cppcoreguidelines-avoid-goto,hicpp-avoid-goto) — same
+                                  // skip-malformed-field path; see above.
+            }
             ++i;
         }
         if (i >= n || frame[i] != static_cast<std::byte>('=')) {
