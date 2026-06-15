@@ -23,6 +23,8 @@
 #include <span>
 #include <string_view>
 
+#include <fixpp/wire/tag_scan.hpp>  // 040 US2: accumulate_tag_digit shared bounded-tag helper
+
 namespace fixpp::session::detail {
 
 // Minimal SOH-delimited scanner for CompID resolution (T012).
@@ -47,8 +49,20 @@ struct FirstFrameIds {
         bool tag_ok = true;
         while (i < n && frame[i] != EQ && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
-            if (c < '0' || c > '9') tag_ok = false;
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+            // 040 US2 (FR-007a): digit-class check BEFORE the helper
+            // (accumulate_tag_digit precondition: c must be '0'..'9'). Without
+            // the bound, a forged token wraps uint32 and aliases a security tag
+            // (49/56). The if/else-if shape keeps the existing tag_ok disposition
+            // and guards against a future fold-into-helper that would silently
+            // accept/dispatch non-numeric tokens.
+            if (c < '0' || c > '9') {
+                tag_ok = false;
+            } else if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
+                // Accumulated value would exceed 0xFFFF (16-bit FIX tag bound).
+                // Reject the field so it is never dispatched under the aliased tag.
+                // Fixes the unguarded open-coded accumulate (research.md D-3).
+                tag_ok = false;
+            }
             ++i;
         }
         if (i >= n || frame[i] != EQ || !tag_ok) {

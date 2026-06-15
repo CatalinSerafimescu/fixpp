@@ -80,9 +80,11 @@ not surfaced; `4294967330` still rejects; `65535` parses.
   helper in the loop; on `false` → `goto next_field;` (existing skip-malformed disposition; the
   existing immediate non-digit `goto` already satisfies the digit precondition). (FR-002.)
   Confirmed: non-digit check is an immediate `goto next_field` BEFORE the accumulate — no if/else-if needed.
-- [ ] T011 [P] [US2] Site 4 (`scan_first_frame_ids`): in `src/session/engine.cpp:349-353`, use the
-  digit-check-before-helper `if/else-if` shape → `tag_ok=false` on either branch. (FR-002/FR-007a.)
-- [ ] T012 [US2] Wrap-and-continue + non-digit witnesses: `tests/wire/offset_table_overflow_test.cpp`
+- [X] T011 [P] [US2] Site 4 (`scan_first_frame_ids`): extracted from `engine.cpp` anon-ns to
+  `src/session/scan_first_frame_ids.hpp` (behavior-preserving move, then fix — 2-commit split, like
+  site 5); applied the digit-check-before-helper `if/else-if` shape → `tag_ok=false` on either
+  branch. (FR-002/FR-007a.) Witness GREEN (W1/W2 RED-proven against the unguarded move).
+- [X] T012 [US2] Wrap-and-continue + non-digit witnesses: `tests/wire/offset_table_overflow_test.cpp`
   (Index — forged field not queryable under aliased tag; whole message all-absent),
   `tests/wire/parser_overflow_test.cpp` (Scan — forged field never yielded), and
   `tests/session/interpret_logon_overflow_test.cpp` (forged `…1137`/`…49`/`…56` not consumed) +

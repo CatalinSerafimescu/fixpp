@@ -555,6 +555,24 @@ target_include_directories(session_scan_frame_header_overflow PRIVATE
 set_tests_properties(session_scan_frame_header_overflow PROPERTIES
   LABELS "040;us1;scan_frame_header;overflow")
 
+# ── 040-inbound-tag-overflow-hardening T011/T012 (US2 Phase 4) ───────────────
+# Wrap-and-continue + non-digit witnesses for scan_first_frame_ids (site 4).
+# 4 cells: forged 429496729649→49 (sender_comp_id), 429496729656→56
+# (target_comp_id), non-digit "4@=" (FR-007a), conforming 8/49/56 (SC-003).
+# scan_first_frame_ids and FirstFrameIds are included directly from the internal
+# src/session/scan_first_frame_ids.hpp (moved from engine.cpp anonymous namespace
+# to enable direct unit testing — 040 US2 Phase 4 T011). The ${CMAKE_SOURCE_DIR}/src
+# include path is added so "session/scan_first_frame_ids.hpp" resolves correctly.
+# No FIXPP_TEST_HOOKS needed — the function is inline in the internal header.
+# Anchors: spec.md FR-003/FR-007/FR-007a; research.md D-3; tasks.md T011/T012.
+add_threading_test(session_scan_first_frame_ids_overflow
+  scan_first_frame_ids_overflow_test.cpp)
+target_include_directories(session_scan_first_frame_ids_overflow PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+set_tests_properties(session_scan_first_frame_ids_overflow PROPERTIES
+  LABELS "040;us2;scan_first_frame_ids;overflow")
+
 # ── 037-resend-reply-possdup-tags T001/T004 (Cell 1) ─────────────────────────
 # Direct builder unit test: build_sequence_reset_gapfill → assert 43=Y + 122=<own 52>.
 # No Session/io_context/mock_clock required — pure free-function call + field walk.
