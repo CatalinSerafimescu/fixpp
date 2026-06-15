@@ -339,6 +339,29 @@ Scope and conventions:
   (`[[project_business_roundtrip_bio_ctrl_segv]]`). *(FR-010/SC-005; research.md D0–D8;
   data-model.md E-0…E-7; contract C-0…C-8 / V-1…V-12.)*
 
+- **L-019-4 — `toApp` is an ORIGINATE-path tap; retransmissions answering a peer
+  `ResendRequest` are NOT surfaced to `toApp` and cannot be app-vetoed or app-gap-filled.**
+  On a `ResendRequest`, `replay_outbound_range_` (`src/session/session.cpp`) re-transmits each
+  stored **application** frame verbatim via `build_replay_frame` (stamping `PossDupFlag(43)=Y`
+  + `OrigSendingTime(122)` per 037) with **no `toApp` call**; absent slots and **admin** frames
+  are folded into a `SequenceReset-GapFill` (which *does* fire `toAdmin`). This wire output is
+  FIX-conformant — retransmitted application messages carry `43=Y`, admin/absent ranges are
+  gap-filled — and is live-proven against QuickFIX-cpp and QuickFIX-J. The divergence is at the
+  **callback** layer only: QuickFIX calls `toApp` for every resent message and converts an
+  application `DoNotSend` into a `SequenceReset-GapFill` over that slot; fixpp offers no
+  equivalent. Operator consequence: an `Application` using `toApp` as a compliance/audit tap
+  will **not observe retransmissions**, and cannot elect to gap-fill a stale application message
+  on resend. **Why this is a deferral, not a quick wiring:** the originate-path `toApp` veto
+  means *drop the frame and consume no outbound seqnum* (L-019-1 / B-036-1) — a semantic that is
+  invalid on the resend path, where the seqnum is already consumed and the peer is waiting for
+  it; reusing it would punch a sequence hole and break the peer's recovery. Correct resend
+  interception must re-interpret a veto as `DoNotSend → emit a GapFill over that slot`, a
+  separable Phase-5 slice, not a config flag. **Status: by-design / deferred** (the wire
+  behavior is conformant today; resend observability + app-driven `DoNotSend`-on-resend gap-fill
+  is a future Phase-5 slice). *(scopes 019 FR-007/008 `toApp`; resend path =
+  027/037 `replay_outbound_range_`; Fable `2.4-half-restructure.md` §4 /
+  `[[feedback_half_restructure_symmetric_api]]`.)*
+
 ## G2 Business Messages (020-g2-business-messages)
 
 ### Feature Catalogue Rows
