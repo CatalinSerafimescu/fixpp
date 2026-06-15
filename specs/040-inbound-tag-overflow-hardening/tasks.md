@@ -76,8 +76,10 @@ not surfaced; `4294967330` still rejects; `65535` parses.
   `tests/wire/parser_overflow_test.cpp` (Scan — forged field never yielded), and
   `tests/session/interpret_logon_overflow_test.cpp` (forged `…1137`/`…49`/`…56` not consumed) +
   `tests/session/scan_first_frame_ids_overflow_test.cpp` (forged `…49`/`…56` not used for resolution;
-  non-digit token rejected). Register all in the respective `CMakeLists.txt`. Conforming-corpus tags
-  unchanged. (FR-004/FR-005/FR-007/FR-007a.)
+  non-digit token rejected). **Pin the canonical verified vectors `429496729634`→34 and
+  `429496729649`→49 explicitly at the Index and Scan sites** (not just a site-relevant alias) so
+  SC-001's "reject everywhere" is directly traceable. Register all in the respective `CMakeLists.txt`.
+  Conforming-corpus tags unchanged. (FR-004/FR-005/FR-007/FR-007a; analyze E3.)
 
 **Checkpoint**: all five scanners reject the verified wrap vectors; SC-001 met across the full set.
 
@@ -91,12 +93,23 @@ not surfaced; `4294967330` still rejects; `65535` parses.
 
 - [ ] T014 [P] Add a behaviors-and-limitations row to `spec/behaviors-and-limitations.md`: forged-tag
   overflow aliasing hardened across the 5 live-inbound scanners (TLS-auth-bounded threat per 015; one
-  shared `0xFFFF` bound helper); note the `build_replay_frame` justified exclusion. (FR-003a-analog.)
+  shared `0xFFFF` bound helper); note the `build_replay_frame` justified exclusion. (FR-008.)
 - [ ] T015 Run `tools/check_layers.py` to confirm the new `include/fixpp/wire/tag_scan.hpp` leaf header
-  does not invert layers (wire leaf included by session is allowed). (Plan Constitution Check.)
-- [ ] T016 Full targeted regression: build + `ctest` for `tests/wire/` and `tests/session/` (all new
-  overflow witnesses GREEN; conforming wire/session corpora unchanged — SC-003). Confirm no
-  unticked-box drift. (Pre-`/simplify`.)
+  does not invert layers (wire leaf included by session is allowed). **SC-004 centralization gate**:
+  after the helper lands, confirm NO residual per-site tag bound remains — grep the 5 scanner sites
+  (`offset_table.cpp`, `parser.hpp`, `admin_messages.cpp`, `engine.cpp`, `session.cpp` `scan_frame_header`)
+  for a `tag > 0xFFFF`/`tag > 429496729U` bound; expect zero (the only `429496729U` left is the
+  legit seqnum guard at `session.cpp:1588`, NOT a tag bound). (Plan Constitution Check; analyze E2.)
+- [ ] T016 Full targeted regression: build + `ctest` for `tests/wire/` and `tests/session/` on at
+  least `linux-clang-debug` + `linux-clang-asan` (all new overflow witnesses GREEN; conforming
+  wire/session corpora unchanged — SC-003; the full 6-preset matrix runs at `/speckit-verify`).
+  **Perf-neutrality (FR-006 / Article VIII §3):** run `bench/wire/parser_bench` +
+  `bench/wire/offset_table_bench` and confirm no regression vs `bench/baselines/` (the in-loop helper
+  inlines to the same code). **Fuzz coverage (Article VII §7):** confirm the existing
+  `tests/fuzz/fuzz_wire_parser.cpp` reaches the modified `field_iterator::advance` + `OffsetTable::build`
+  paths (≥60s smoke), and assess whether a session-side fuzz harness reaches `scan_frame_header` /
+  `scan_first_frame_ids` — record the assessment in `.specify/decisions/040-verify.md`. Confirm no
+  unticked-box drift. (Pre-`/simplify`; analyze E1/D1/B1.)
 
 ## Dependencies
 
