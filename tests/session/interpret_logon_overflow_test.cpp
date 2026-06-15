@@ -12,8 +12,9 @@
 // Cells:
 //   W1: token 42949672961137 (wraps to 1137 without fix) — result.has_value() &&
 //       result->default_appl_ver_id == std::nullopt  (field skipped, not consumed)
-//   W2: token 429496729649 (wraps to 49 without fix) — result successfully parsed &&
-//       sender_comp_id validated via expected_sender == "TW" (no forged alias)
+//   W2: token 429496729649 (wraps to 49 without fix) — real 49=TW placed first, forged
+//       token placed after; pre-fix the forged token overwrites "TW" → CompID mismatch
+//       → has_value()==false; post-fix the forged token is skipped → has_value()==true
 //   W3: conforming Logon including real 1137=9 — result.has_value() &&
 //       result->default_appl_ver_id has_value() (no regression on legitimate field)
 //
@@ -112,17 +113,28 @@ TEST(InterpretLogonOverflow, ForgedTag42949672961137_NotConsumedAsDefaultApplVer
 // The forged 49 field must be skipped; the real 49=TW is still validated.
 // This confirms interpret_logon's CompID check succeeds on the real 49=TW value,
 // i.e. the forged field was not consumed under tag 49.
+//
+// Discriminating construction:
+//   The real 49=TW comes FIRST; the forged 429496729649=FORGE49 comes AFTER.
+//   interpret_logon's scanner is last-writer-wins (case 49: sender_found = val),
+//   so ordering matters:
+//   Pre-fix (guard absent): the forged token wraps uint32 to 49 → sender_found="FORGE49"
+//     (overwrites the earlier "TW") → CompID check: "FORGE49" != "TW" → compid_mismatch
+//     → has_value()==false → EXPECT_TRUE FAILS → test is RED.
+//   Post-fix (guard present): the forged token is rejected by accumulate_tag_digit
+//     → goto next_field → sender_found stays "TW" → has_value()==true → PASSES.
 TEST(InterpretLogonOverflow, ForgedTag429496729649_NotConsumedAsSenderCompId) {
     std::string body;
-    // Insert forged 49 BEFORE the real 49= to make substitution unambiguous.
+    // Real 49=TW is placed FIRST; the forged token comes AFTER.
+    // If the guard is absent, the forged token wraps to tag 49 and overwrites
+    // the real value ("FORGE49" != "TW" → CompID check fails → has_value()==false).
+    // With the guard, the forged token is skipped and the real 49=TW stands.
     body += "35=A";
     body += SOH;
     body += "34=1";
     body += SOH;
-    body += "429496729649=FORGE49";
-    body += SOH;  // forged token
     body += "49=TW";
-    body += SOH;  // real SenderCompID
+    body += SOH;  // real SenderCompID — must come first
     body += "52=20240101-00:00:00.000";
     body += SOH;
     body += "56=ISLD";
@@ -131,6 +143,8 @@ TEST(InterpretLogonOverflow, ForgedTag429496729649_NotConsumedAsSenderCompId) {
     body += SOH;
     body += "108=30";
     body += SOH;
+    body += "429496729649=FORGE49";
+    body += SOH;  // forged token — after real 49; wraps to 49 pre-fix, overwriting "TW"
 
     auto frame = make_frame(body);
     // If the forged field had been consumed as 49, the sender would be "FORGE49"
