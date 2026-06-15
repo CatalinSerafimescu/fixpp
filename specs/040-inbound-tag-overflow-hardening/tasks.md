@@ -37,19 +37,26 @@ disposition. Witnesses are REQUIRED (FR-007/FR-007a) → test tasks are generate
 **Independent test**: drive `429496729649`→49, `429496729652`→52 through `scan_frame_header`; assert
 not surfaced; `4294967330` still rejects; `65535` parses.
 
-- [ ] T005 [US1] Add a RED wrap-and-continue witness `tests/session/scan_frame_header_overflow_test.cpp`
+- [X] T005 [US1] Add a RED wrap-and-continue witness `tests/session/scan_frame_header_overflow_test.cpp`
   (register in `tests/session/CMakeLists.txt`): assert `scan_frame_header` does NOT surface
   `429496729649` as SenderCompID(49), `429496729652` as SendingTime(52), `429496729634` as
   MsgSeqNum(34); assert `4294967330` still rejected and `65535`/ordinary tags parse. (Demonstrates the
   defect RED against the current `>429496729U` guard.)
-- [ ] T006 [US1] Replace the defective guard at `src/session/session.cpp:1493-1496` (`scan_frame_header`)
-  with the digit-check-before-helper shape:
+  Implementation note: FrameHeader + scan_frame_header moved from session.cpp anonymous namespace to
+  `src/session/scan_frame_header.hpp` (fixpp::session::detail) to enable direct unit testing;
+  session.cpp pulls them back in scope via `using` declarations. The inline header approach avoids
+  FIXPP_TEST_HOOKS linkage issues (no library recompile needed).
+  RED confirmed: 3 wrap cells FAIL (W1/W2/W3) with defective code; W4/W5/W6 PASS both ways.
+- [X] T006 [US1] Replace the defective guard in `scan_frame_header` (now in
+  `src/session/scan_frame_header.hpp`) with the digit-check-before-helper shape:
   `if (c<'0'||c>'9') { tag_ok=false; } else if (!fixpp::wire::accumulate_tag_digit(tag,c)) { tag_ok=false; }`
-  (include `fixpp/wire/tag_scan.hpp`); preserve the existing `tag_ok` skip-field disposition and the
-  `:1518` switch. Turn T005 GREEN. (FR-002/FR-003/FR-007a.)
-- [ ] T007 [US1] Add the non-digit negative witness for `scan_frame_header` to
-  `tests/session/scan_frame_header_overflow_test.cpp`: a token containing a non-digit (e.g. `"3a5="`)
-  is rejected, never dispatched. (FR-007a — guards against folding the digit check into the helper.)
+  (include `fixpp/wire/tag_scan.hpp` in the header); preserve the existing `tag_ok` skip-field
+  disposition and the switch(tag) exactly. T005 GREEN. (FR-002/FR-003/FR-007a.)
+- [X] T007 [US1] Add the non-digit negative witness for `scan_frame_header` to
+  `tests/session/scan_frame_header_overflow_test.cpp`: token "4@=" (non-digit '@'=0x40; c-'0'=16
+  would accumulate 4→56 without the digit guard) is rejected, value not surfaced as target_comp_id(56).
+  Mutation-verified: removing the digit-check line makes W6 RED (target_comp_id=="NODIGIT").
+  (FR-007a — guards against folding the digit check into the helper.)
 
 **Checkpoint**: `scan_frame_header_overflow_test` GREEN; the 038 SendingTime-guard regression vector
 (52-aliasing) is closed.

@@ -23,6 +23,8 @@
 #include <span>
 #include <string_view>
 
+#include <fixpp/wire/tag_scan.hpp>  // 040 US1: accumulate_tag_digit shared bounded-tag helper
+
 namespace fixpp::session::detail {
 
 // Minimal SOH-delimited field scanner — no heap, no library.
@@ -68,16 +70,20 @@ struct FrameHeader {
         bool tag_ok = true;
         while (i < n && frame[i] != EQ && frame[i] != SOH) {
             auto c = static_cast<unsigned char>(frame[i]);
+            // 040 US1 (FR-002/FR-003/FR-007a): digit-class check BEFORE the helper
+            // (accumulate_tag_digit precondition: c must be '0'..'9'). A token like
+            // "3a5=" would otherwise be passed to the helper on a non-digit, breaching
+            // its precondition (research.md D-3). The if/else-if shape keeps the
+            // existing tag_ok disposition and guards against a future fold-into-helper
+            // simplification that would silently accept/dispatch non-numeric tokens.
             if (c < '0' || c > '9') {
                 tag_ok = false;
-            }
-            // Overflow guard: a tag wider than UINT32_MAX would wrap and could
-            // ALIAS a known small tag (e.g. 2^32+35 → 35 overrides MsgType).
-            // Mark unparseable so the field is skipped, never aliased.
-            if (tag > 429496729U) {
+            } else if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
+                // Accumulated value would exceed 0xFFFF (16-bit FIX tag bound).
+                // Reject the field so it is never dispatched under the aliased tag.
+                // Fixes the defective >429496729U guard (research.md D-3, SC-002).
                 tag_ok = false;
             }
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
             ++i;
         }
         if (i >= n || frame[i] != EQ || !tag_ok) {
