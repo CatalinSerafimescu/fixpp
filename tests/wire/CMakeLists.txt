@@ -78,3 +78,10 @@ add_wire_test(wire_parser_error_path_test parser_error_path_test.cpp)         # 
 add_wire_test(wire_validator_type_check_test validator_type_check_test.cpp)   # T055
 add_wire_test(wire_offset_table_error_path_test offset_table_error_path_test.cpp)  # T056 cov
 add_wire_test(wire_accessor_smoke_test accessor_smoke_test.cpp)                   # T055-R2
+
+# 040-inbound-tag-overflow-hardening — Phase 2 helper unit test (T004)
+add_wire_test(wire_tag_scan_test tag_scan_test.cpp)                               # T004
+
+# 040-inbound-tag-overflow-hardening — Phase 4 US2 site-1/site-2 witnesses (T008/T009/T012)
+add_wire_test(wire_offset_table_overflow_test offset_table_overflow_test.cpp)    # T008/T012
+add_wire_test(wire_parser_overflow_test parser_overflow_test.cpp)                # T009/T012

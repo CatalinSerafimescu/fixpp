@@ -33,6 +33,7 @@
 #include "framer.hpp"
 #include "group_view.hpp"
 #include "offset_table.hpp"
+#include "tag_scan.hpp"  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include "unknown_fields.hpp"
 #include "view.hpp"
 
@@ -337,7 +338,10 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
             done_ = true;
             return;
         }
-        tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+        if (!fixpp::wire::accumulate_tag_digit(tag, static_cast<unsigned char>(c))) {
+            done_ = true;
+            return;
+        }
         ++i;
     }
     if (i >= buf_.size() || buf_[i] != EQ) {
