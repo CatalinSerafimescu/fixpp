@@ -48,11 +48,13 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -275,13 +277,25 @@ static std::vector<std::byte> make_min_app_payload() {
 }
 
 // Build a valid FIX Logon frame for an inbound peer.
+// Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
+// Real-clock acceptor tests must stamp a *fresh* SendingTime(52) so the 038
+// acceptor first-Logon SendingTime(52) MaxLatency guard admits the peer Logon
+// (the legacy fixed "20240101-00:00:00.000" literal is now stale → rejected).
+static std::string utc_now_fix_timestamp() {
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
 static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std::uint32_t seq,
                                               std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + utc_now_fix_timestamp() + "\x01";
     body += "56=" + std::string(target) + "\x01";
     body += "98=0\x01";
     body += "108=30\x01";

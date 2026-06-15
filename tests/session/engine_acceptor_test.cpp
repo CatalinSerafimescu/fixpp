@@ -31,10 +31,12 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <asio/write.hpp>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
@@ -49,6 +51,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -62,6 +65,19 @@ using namespace std::chrono_literals;
 
 namespace {
 
+// Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
+// The real-clock acceptor liveness test (StopDrainsParkedLivenessLoopNoUaf)
+// needs a *fresh* SendingTime(52) so the 038 acceptor first-Logon
+// SendingTime(52) MaxLatency guard admits the peer Logon (an absent 52 is
+// now rejected). Clock-less callers skip the guard, so the field is harmless.
+static std::string utc_now_fix_timestamp() {
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
 // Build a valid FIX Logon frame with given sender/target.
 static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
                                                std::string_view target) {
@@ -72,6 +88,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
     body += field(35, "A");  // MsgType = Logon
     body += field(34, "1");  // MsgSeqNum
     body += field(49, sender);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 038 guard)
     body += field(56, target);
     body += field(98, "0");    // EncryptMethod = none
     body += field(108, "30");  // HeartBtInt
