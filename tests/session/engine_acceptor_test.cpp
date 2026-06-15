@@ -33,7 +33,9 @@
 #include <asio/write.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -62,6 +64,25 @@ using namespace std::chrono_literals;
 
 namespace {
 
+// Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
+// The real-clock acceptor liveness test (StopDrainsParkedLivenessLoopNoUaf)
+// needs a *fresh* SendingTime(52) so the 038 acceptor first-Logon
+// SendingTime(52) MaxLatency guard admits the peer Logon (an absent 52 is
+// now rejected). Clock-less callers skip the guard, so the field is harmless.
+static std::string utc_now_fix_timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto secs = std::chrono::floor<std::chrono::seconds>(now);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - secs).count();
+    const std::time_t t = std::chrono::system_clock::to_time_t(secs);
+    std::tm tm{};
+    gmtime_r(&t, &tm);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03lld", tm.tm_year + 1900,
+                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                  static_cast<long long>(ms));
+    return buf;
+}
+
 // Build a valid FIX Logon frame with given sender/target.
 static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
                                                std::string_view target) {
@@ -72,6 +93,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
     body += field(35, "A");  // MsgType = Logon
     body += field(34, "1");  // MsgSeqNum
     body += field(49, sender);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 038 guard)
     body += field(56, target);
     body += field(98, "0");    // EncryptMethod = none
     body += field(108, "30");  // HeartBtInt
