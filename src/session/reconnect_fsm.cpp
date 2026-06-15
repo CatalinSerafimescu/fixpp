@@ -197,10 +197,27 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                 // (FR-011). The callback is strand-bound and set by
                 // Session::open() (T018); the standalone-FSM test path injects
                 // it directly. old=last_active_fp_ is read before the update.
-                emit_credentials_rotated_(session_event_credentials_rotated{
-                    .old_sha256 = last_active_fp_,
-                    .new_sha256 = new_fp,
-                });
+                //
+                // 038 T011 (G2): wrap in try/catch — best-effort notification.
+                // Production path: Session::open() injects a noexcept lambda
+                // (→ noexcept emit_event ring-buffer write), so throw is
+                // unreachable in production. This hardens the standalone-FSM
+                // injection seam so a throwing test callback does not propagate
+                // out of the noexcept coroutine body.
+                // Mirror: CompIdAuthorizationPolicy::authorize_logon try/catch
+                // shape (compid_authorization_policy.cpp:355-361).
+                // The catch MUST fall through: baseline update and make() still
+                // run (the attempt proceeds to its policy outcome; INV-7).
+                // [038 G2; FR-006/FR-007; INV-7/8/9; 038 contracts C-2]
+                try {
+                    emit_credentials_rotated_(session_event_credentials_rotated{
+                        .old_sha256 = last_active_fp_,
+                        .new_sha256 = new_fp,
+                    });
+                } catch (...) {
+                    // Contain — best-effort rotation notification.
+                    // Fall through to baseline update + make() step.
+                }
             }
             // First load sets the baseline (NO event, FR-009 SPEC-FIXED);
             // rotation updates AFTER the emit above.

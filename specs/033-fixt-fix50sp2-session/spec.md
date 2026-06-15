@@ -145,3 +145,7 @@ Per `[const §VI.5]` — the exact coverage-index / feature-catalogue entries th
 - `[FIX-SL §4.3]` Establishing a FIX connection — Logon establishment and `Username(553)`/`Password(554)` authentication fields (catalogue **S-022**).
 - `[FIX-SL §4.3.7]` Specifying application version — `DefaultApplVerID(1137)` on the FIXT Logon (catalogue **S-025**).
 - `[FIX-SL §5.3.5]` Explicit application version per message — `ApplVerID(1128)` per-application-message (catalogue **S-026**, tolerate-only / per-message routing deferred — FR-010).
+
+---
+
+> **Dated note — 2026-06-15 (038-acceptor-sendingtime-guard):** The `DefaultApplVerID(1137)` reject path shipped in this 033 feature (FR-004/FR-004a: absent `1137` → `Reject(35=3, 371=1137, 373=1)`; unserviceable `1137` → `Reject(35=3, 371=1137, 373=5)`) now carries **session-level negative witnesses** in `tests/session/test_fixt_logon_establishment.cpp` (038 US3/T013). The 033 production behaviour is **unchanged** (no production code diff); the 038 contribution is coverage parity with the 031-reject-witness family. Additionally, feature 038 adds an ordering cell (038 T013(c)) confirming that on a FIXT session, a bad-`SendingTime(52)` guard fires BEFORE the `1137` gate — a stale-`52` + missing-`1137` Logon surfaces `Reject(371=52, 373=10)`, NOT `Reject(371=1137)`. See `tests/session/test_fixt_logon_establishment.cpp` for the new witness cells.

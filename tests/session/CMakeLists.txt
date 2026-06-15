@@ -522,6 +522,21 @@ add_test(NAME session_admin_emit_observation_gate
 set_tests_properties(session_admin_emit_observation_gate PROPERTIES
   LABELS "036;sc002;static_gate")
 
+# ── 038-acceptor-sendingtime-guard T001–T008 (Group 1 witness) ───────────────
+# 14 cells: stale-past/future, malformed, absent, empty 52; toAdmin-throw;
+# assign_outbound-fail; build-fail-closed; persistent-inbound-seeded; ordering
+# (52 wins vs 1137/creds/check_inbound); conforming; persistent-reconnect seq.
+# FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() for cell 7 (overflow inject).
+# Anchors: spec.md FR-002/FR-003/FR-004; contracts/acceptor-logon-sendingtime.md C-1;
+#          quickstart.md §Group-1; tasks.md T001-T008.
+add_threading_test(session_acceptor_logon_sending_time
+  test_acceptor_logon_sending_time.cpp
+  $<TARGET_OBJECTS:session_test_support>
+)
+target_compile_definitions(session_acceptor_logon_sending_time PRIVATE FIXPP_TEST_HOOKS)
+set_tests_properties(session_acceptor_logon_sending_time PROPERTIES
+  LABELS "038;s019;acceptor-logon-sendingtime")
+
 # ── 037-resend-reply-possdup-tags T001/T004 (Cell 1) ─────────────────────────
 # Direct builder unit test: build_sequence_reset_gapfill → assert 43=Y + 122=<own 52>.
 # No Session/io_context/mock_clock required — pure free-function call + field walk.

@@ -1924,6 +1924,75 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                 }
 
+                // ── 038 T006: US1 — AcceptorLogon SendingTime(52) MaxLatency guard ──
+                //
+                // Guard placement: AFTER ensure_hydrated_ (line above) so the hydrated
+                // outbound counter is available (peek_outbound returns the durable N) and
+                // BEFORE reset_on_logon/check_inbound so inbound is NOT advanced on reject.
+                // Contract C-1: absent/empty/malformed/stale-past/stale-future all → reason=10.
+                // Pre-establishment shape: Reject only, NO Logout (contrast with Q3 established
+                // path which emits Reject then Logout). [038 spec FR-002/FR-003/FR-004; data-model
+                // INV-4; contracts/acceptor-logon-sendingtime.md C-1]
+                // [[feedback_admin_emit_bypasses_fire_to_admin]]: fire_to_admin_ before emit.
+                // [[feedback_fixed_buffer_build_failure_silent_success]]: ≥512B buffer;
+                // fail-closed. Guard is skipped when effective_clock_ is null (analogous to Q3
+                // guard at :2452).
+                if (effective_clock_) {
+                    // Determine if SendingTime is valid: present AND parseable AND in-range.
+                    bool sending_time_ok = false;
+                    if (!hdr.sending_time.empty()) {
+                        auto parse_r = fixpp::core::fix_string_to_utc_time(std::span<const char>{
+                            hdr.sending_time.data(), hdr.sending_time.size()});
+                        if (parse_r) {
+                            const auto max_lat =
+                                cfg_.sending_time_threshold.has_value()
+                                    ? std::chrono::duration_cast<std::chrono::seconds>(
+                                          *cfg_.sending_time_threshold)
+                                    : std::chrono::seconds{120};  // D-8 default 120 s
+                            sending_time_ok = fixpp::session::check_sending_time(
+                                                  *parse_r, effective_clock_->now(), max_lat)
+                                                  .has_value();
+                        }
+                        // parse failure: sending_time_ok stays false → path fires.
+                    }
+                    // absent (empty string_view) or empty (present but zero-length value):
+                    // sending_time_ok stays false → path fires.
+
+                    if (!sending_time_ok) {
+                        // Emit Reject(35=3, RefTagID=52, SessionRejectReason=10) then
+                        // Disconnected. NO Logout (pre-establishment; peer has not yet
+                        // been accepted into Active).
+                        const auto rj_st52 =
+                            stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
+                        const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+                        const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                        std::array<std::byte, 512> rj_buf{};
+                        auto rj_r = fixpp::session::build_reject(
+                            std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                            cfg_.sender_comp_id, cfg_.target_comp_id, rj_ref,
+                            52,   // RefTagID = 52 (SendingTime)
+                            "A",  // RefMsgType = Logon
+                            10,   // SessionRejectReason = 10 (SendingTime accuracy)
+                            cfg_.begin_string, rj_st52.value);
+                        if (rj_r) {
+                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                            if (!assign_r) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(assign_r.error());
+                            }
+                            if (!fire_to_admin_(*rj_r)) {
+                                record_state_transition_(fsm_state::Disconnected);
+                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
+                            }
+                            auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                            (void)emit_r;  // I-07: store-side errors logged-then-proceed
+                        }
+                        // Fail-closed: Disconnected whether rj_r succeeded or not.
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return fixpp::core::expected_t<void>{};
+                    }
+                }
+
                 if (cfg_.reset_on_logon) {
                     // Knob-driven → fatal: a store failure blocks Active (C2.6).
                     auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);

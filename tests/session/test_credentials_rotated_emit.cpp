@@ -775,4 +775,193 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
         << "Emitted new_sha256 is all-zero — not a real fingerprint (FR-010).";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 038 T009 [US2] — Throwing-callback cell
+//
+// Inject a credentials_rotated callback that throws during a rotated reconnect
+// attempt. Assert:
+//   (a) The throw does NOT propagate out of drive_reconnect_attempt.
+//   (b) The attempt proceeds to its policy outcome (reaches make()).
+//   (c) last_active_fp_ WAS updated — verified indirectly: a SECOND attempt
+//       with the same snap (source_b still staged, no new pointer) emits ZERO
+//       new events (snap == last_active_source_ after the baseline update), so
+//       the rotation is NOT re-emitted (INV-8). If the baseline had NOT been
+//       updated, last_active_source_ would still be source_a and the second
+//       attempt would emit again.
+//
+// RED pre-fix: an uncaught exception from emit_credentials_rotated_ escapes the
+//   coroutine BODY → it is captured by the promise's unhandled_exception() and
+//   re-thrown by asio use_future on .get() (NOT std::terminate — `noexcept` on a
+//   coroutine governs the ramp, not body exceptions). The attempt is abandoned and
+//   gtest reports the rethrown exception as a test failure.
+// GREEN post-fix: try/catch wraps the callback; throw is contained; attempt
+//   proceeds; make() is called; baseline is updated; second attempt emits 0 events.
+//
+// Anchors: FR-006/FR-007; INV-7/8/9; 038 plan G2; 038 contracts C-2.
+// [[feedback_noexcept_boundary_user_callback_terminate]] (variant: coroutine body —
+//   delivered to the promise, NOT terminate)
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]: assert last_active_fp_
+//   via discriminating SECOND-attempt behavior (not a proxy).
+// [[feedback_fail_placeholder_red_test]]: genuine RED — pre-fix .get() rethrows the
+//   escaped exception (no FAIL placeholder).
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(CredentialsRotatedEmitTest, ThrowingCallbackContained_AttemptProceeds_BaselineUpdated) {
+    auto factory = std::make_shared<OrderedFactory>();
+
+    // source_a = prior active (DISTINCT sentinel value so baseline check is
+    // discriminating; INV-8 trivial-seed trap: seeding last_active_source_
+    // to the same ptr as source_b would make the test vacuous).
+    auto sha_a = make_sha(0x11);
+    auto source_a = std::make_shared<known_sha_cert_source>(sha_a);
+
+    // source_b = the newly staged rotation (different ptr → rotated==true).
+    auto sha_b = make_sha(0x22);
+    auto source_b = std::make_shared<known_sha_cert_source>(sha_b);
+
+    factory->current_source = source_a;
+
+    // Count of make() calls — proves the attempt REACHED make() after the throw.
+    int make_calls = 0;
+    factory->factory_make_count = 0;
+
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+
+    // Inject a throwing callback. Pre-fix: the throw escapes the coroutine BODY → it is
+    // delivered to the promise's unhandled_exception (NOT std::terminate — that is the
+    // distinct noexcept-METHOD class, [[feedback_noexcept_boundary_user_callback_terminate]]),
+    // so use_future rethrows it on .get() and the attempt is abandoned. Post-fix: the
+    // try/catch contains it. [038 spec G2 framing]
+    int callback_call_count = 0;
+    fsm.set_emit_credentials_rotated(
+        [&callback_call_count](fixpp::session::session_event_credentials_rotated /*ev*/) {
+            ++callback_call_count;
+            throw std::runtime_error("rotation callback throws — must be contained");
+        });
+
+    // ── Attempt 0: source_a (first load — sets baseline, no rotation, no throw) ──
+    {
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        (void)fut.get();
+        EXPECT_EQ(callback_call_count, 0) << "First load must not invoke the callback";
+    }
+
+    // Stage source_b (the rotation): snap will differ from last_active_source_.
+    factory->current_source = source_b;
+    factory->factory_make_count = 0;
+
+    // ── Attempt 1: source_b — rotation detected → callback fires + throws.
+    // Pre-fix: the throw reaches the promise's unhandled_exception → use_future
+    // rethrows on .get() (test aborts here). Post-fix: returns normally.
+    {
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        // We don't assert the return value — the attempt may succeed or fail
+        // depending on the null session_ path; what matters is it returned at all.
+        (void)fut.get();
+    }
+
+    // (a) Callback was invoked exactly once (for the rotation).
+    EXPECT_EQ(callback_call_count, 1) << "Throwing callback must be called once for the rotation";
+
+    // (b) Attempt reached make() — factory_make_count > 0 proves the throw did not
+    // abandon the attempt before the make() step.
+    make_calls = factory->factory_make_count;
+    EXPECT_GT(make_calls, 0)
+        << "Attempt must reach make() even when the credentials_rotated callback throws. "
+        << "RED: the throw abandoned the attempt before make() was called.";
+
+    // (c) Baseline was updated: stage source_b again (same pointer) and run another
+    // attempt → snap == last_active_source_ (source_b) → NOT a rotation → callback
+    // must NOT be called again (INV-8 — no spurious re-emit).
+    // If baseline was NOT updated (last_active_source_ still source_a), the second
+    // attempt would see snap != last_active_source_ again and invoke the callback.
+    factory->factory_make_count = 0;
+    // source_b is still staged — no change to factory->current_source.
+    int callback_count_before = callback_call_count;
+    {
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        (void)fut.get();
+    }
+    EXPECT_EQ(callback_call_count, callback_count_before)
+        << "Second attempt with the same source must NOT re-emit (INV-8 — baseline updated). "
+        << "If callback_call_count incremented, the baseline was NOT updated after the throw.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 038 T009 [US2] — Transparency cell (INV-9)
+//
+// A non-throwing callback must retain the existing 014 behaviour: one event
+// emitted on rotation, correct fingerprints, attempt proceeds normally.
+// This confirms the try/catch fix does NOT suppress non-throwing callbacks
+// or change behaviour when no exception is thrown.
+//
+// GREEN both pre-fix and post-fix (INV-9: transparent when no throw).
+//
+// Anchors: INV-9; FR-006/FR-007; 038 plan G2.
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]: assert the named
+//   post-conditions (event count + fingerprints) DIRECTLY.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
+    auto factory = std::make_shared<OrderedFactory>();
+
+    auto sha_a = make_sha(0x33);
+    auto source_a = std::make_shared<known_sha_cert_source>(sha_a);
+
+    auto sha_b = make_sha(0x44);
+    auto source_b = std::make_shared<known_sha_cert_source>(sha_b);
+
+    factory->current_source = source_a;
+
+    std::vector<fixpp::session::session_event_credentials_rotated> events;
+
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+
+    // Non-throwing callback: just capture the event.
+    fsm.set_emit_credentials_rotated(
+        [&events](fixpp::session::session_event_credentials_rotated ev) { events.push_back(ev); });
+
+    // Attempt 0: first load (source_a → baseline, no event).
+    {
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        (void)fut.get();
+        ASSERT_EQ(events.size(), 0u) << "Precondition: first load emits no event";
+    }
+
+    // Stage source_b.
+    factory->current_source = source_b;
+    factory->factory_make_count = 0;
+
+    // Attempt 1: rotation → must emit one event with correct fingerprints (INV-9).
+    {
+        auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
+        ioc.run_for(500ms);
+        ioc.restart();
+        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        (void)fut.get();
+    }
+
+    // Non-throwing callback must emit exactly one event (INV-9 — transparent).
+    ASSERT_EQ(events.size(), 1u)
+        << "Non-throwing callback must emit exactly one credentials_rotated event "
+        << "(INV-9 transparency: try/catch must not suppress non-throwing callbacks)";
+
+    EXPECT_EQ(events[0].old_sha256, sha_a) << "old_sha256 must equal sha_a (INV-9)";
+    EXPECT_EQ(events[0].new_sha256, sha_b) << "new_sha256 must equal sha_b (INV-9)";
+
+    // make() must also have been called (attempt proceeded normally).
+    EXPECT_GT(factory->factory_make_count, 0)
+        << "Non-throwing callback must not suppress the make() step (INV-9)";
+}
+
 }  // namespace
