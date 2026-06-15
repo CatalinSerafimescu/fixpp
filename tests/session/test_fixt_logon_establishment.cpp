@@ -1147,6 +1147,262 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
         << "Session must NOT reach Active on null registry (FQ-1b)";
 }
 
+// ── 038 T013 [US3] — FIXT DefaultApplVerID(1137) reject witnesses ────────────
+//
+// The existing acceptor 1137 reject arms (session.cpp:~2146-2208: absent → Reject
+// 373=1; non-conformant → Reject 373=5, both RefTagID=1137, then Disconnected)
+// are fail-closed by code-read but had zero session-level negative witnesses with
+// toAdmin observation (W2/W3 cover wire shape + state only). These cells add the
+// missing toAdmin + gate-ordering witnesses.
+//
+// (a) Absent 1137 → Reject(35=3, 371=1137, 373=1 RequiredTagMissing) + toAdmin
+//     observed + Disconnected.
+// (b) Non-conformant 1137 → Reject(371=1137, 373=5 ValueIsIncorrect) + toAdmin
+//     + Disconnected. 373=5 DISCRIMINATES from (a)'s 373=1.
+// (c) [US1 Judge-pass carry-over] — Ordering witness: FIXT + stale-52 +
+//     missing-1137 → Reject(371=52, 373=10) wins; NO 371=1137 on wire;
+//     Disconnected. Proves the SendingTime guard (session.cpp:~1939) pre-empts
+//     the FIXT 1137 gate (session.cpp:~2146). NOTE: FixtSetup has an active
+//     mock_clock (engine.clock = clock); the 52 guard is gated on
+//     effective_clock_ != null, so the clock MUST be present. A stale sending_time
+//     is used (far outside the 120s default threshold).
+//
+// Production change: NONE (FR-009). These characterize existing behaviour.
+//
+// [038 tasks.md T013; 038 plan G3/FR-008/FR-009; contracts C-1 (G1) + C3 (G3)]
+// [033 contracts C4/C5; S-025 / [FIX-SL §4.3.7]]
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]: assert each clause
+//   directly (toAdmin count + 371 presence/absence on wire).
+
+// Counting Application for toAdmin observation.
+class ToAdminCountingApp : public fixpp::session::Application {
+public:
+    int to_admin_calls = 0;
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                 const fixpp::session::SessionId& /*id*/) override {
+        ++to_admin_calls;
+    }
+};
+
+// (a) Absent 1137 → Reject(371=1137, 373=1) + toAdmin observed + Disconnected.
+// Reuses FixtSetup with a non-null registry (v50sp2); acceptor configured with
+// v50sp2. The peer's Logon omits 1137 → RequiredTagMissing path.
+// Characterizes existing behaviour — should be GREEN.
+TEST(FixtLogonEstablishment,
+     W_Missing1137_ToAdminObserved_RequiredTagMissing_Disconnected) {
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+
+    // Register a counting Application to observe toAdmin.
+    auto app = std::make_shared<ToAdminCountingApp>();
+    s.engine.application = app;
+
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    std::vector<std::byte> acpt_frame_out;
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        acpt_frame_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+
+    run_sync(s.ioc, [&] { return acceptor.open(); });
+
+    // Feed a FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
+    auto logon_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "");
+    auto r = run_sync(s.ioc, [&] {
+        return acceptor.on_inbound_frame(
+            std::span<const std::byte>{logon_no_1137.data(), logon_no_1137.size()});
+    });
+    (void)r;
+
+    // (a) Must be Disconnected (not Active).
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "Acceptor must NOT reach Active when 1137 is absent (C4)";
+
+    // (b) A Reject(35=3) frame must have been emitted with 371=1137, 373=1.
+    ASSERT_FALSE(acpt_frame_out.empty())
+        << "Acceptor must emit a Reject frame when 1137 is missing";
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
+                     acpt_frame_out.size());
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
+        << "Emitted frame must be Reject(35=3) for missing 1137; got: " << wire;
+    EXPECT_NE(wire.find("\x01"
+                        "371=1137\x01"),
+              std::string::npos)
+        << "Reject must carry 371=1137 (RefTagID=DefaultApplVerID); got: " << wire;
+    EXPECT_NE(wire.find("\x01"
+                        "373=1\x01"),
+              std::string::npos)
+        << "Reject must carry 373=1 (RequiredTagMissing) for missing 1137; got: " << wire;
+
+    // (c) toAdmin was called (the Reject was observed via fire_to_admin_).
+    // [[feedback_witness_asserts_named_postcondition_not_proxy]]: assert directly.
+    EXPECT_GT(app->to_admin_calls, 0)
+        << "toAdmin must be called for the Reject frame (fire_to_admin_ path; "
+        << "[[feedback_admin_emit_bypasses_fire_to_admin]] — every admin emit must be observable). "
+        << "RED: if to_admin_calls==0, the 1137 reject does not route through fire_to_admin_.";
+}
+
+// (b) Non-conformant 1137 → Reject(371=1137, 373=5 ValueIsIncorrect) + toAdmin
+// observed + Disconnected. 373=5 DISCRIMINATES from (a)'s 373=1.
+// Registry has v44 only → v50sp2 (1137=9) is unserviceable.
+TEST(FixtLogonEstablishment,
+     W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected) {
+    // Registry with v44 only — v50sp2 (1137=9) is unserviceable.
+    auto v44_dict = make_dict(kMinimalFix44Xml);
+    FixtSetup s{{v44_dict}};
+
+    // Register counting Application.
+    auto app = std::make_shared<ToAdminCountingApp>();
+    s.engine.application = app;
+
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    std::vector<std::byte> acpt_frame_out;
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        acpt_frame_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+
+    run_sync(s.ioc, [&] { return acceptor.open(); });
+
+    // Peer sends FIXT Logon with 1137=9 (v50sp2) — present but unserviceable.
+    auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
+    auto r = run_sync(s.ioc, [&] {
+        return acceptor.on_inbound_frame(
+            std::span<const std::byte>{logon_unserviceable.data(), logon_unserviceable.size()});
+    });
+    (void)r;
+
+    // Must be Disconnected.
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "Acceptor must NOT reach Active when 1137 is unserviceable (C5)";
+
+    ASSERT_FALSE(acpt_frame_out.empty())
+        << "Acceptor must emit a Reject frame when 1137 is unserviceable";
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
+                     acpt_frame_out.size());
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
+        << "Emitted frame must be Reject(35=3) for unserviceable 1137; got: " << wire;
+    EXPECT_NE(wire.find("\x01"
+                        "371=1137\x01"),
+              std::string::npos)
+        << "Reject must carry 371=1137 (RefTagID=DefaultApplVerID); got: " << wire;
+    // 373=5 (ValueIsIncorrect) — DISTINCT from (a)'s 373=1.
+    EXPECT_NE(wire.find("\x01"
+                        "373=5\x01"),
+              std::string::npos)
+        << "Reject must carry 373=5 (ValueIsIncorrect) for unserviceable 1137; "
+        << "373=5 discriminates from absent-1137 path's 373=1; got: " << wire;
+    // Confirm 373=1 is NOT present (non-overlap with (a)).
+    EXPECT_EQ(wire.find("\x01"
+                        "373=1\x01"),
+              std::string::npos)
+        << "Unserviceable path must emit 373=5, NOT 373=1; got: " << wire;
+
+    // toAdmin observed.
+    EXPECT_GT(app->to_admin_calls, 0)
+        << "toAdmin must be called for the Reject frame (fire_to_admin_ path)";
+}
+
+// (c) Gate-ordering witness [US1 Judge-pass carry-over]:
+//   FIXT session + stale SendingTime(52) + missing 1137:
+//   → Reject(371=52, 373=10) wins (52 guard fires before 1137 gate);
+//   → NO 371=1137 on the wire;
+//   → Disconnected.
+//
+// This cell CANNOT be in US1's FIX.4.4 cells (T004 cell 10 — the 1137 gate is
+// not reachable for FIX.4.4 sessions where is_fixt()==false). It belongs here
+// where FixtSetup provides the FIXT context AND the mock_clock is active.
+//
+// Clock wiring: FixtSetup injects engine.clock = mock_clock (seeded at
+//   UTC=2024-01-01 00:00:00). effective_clock_ = engine_.clock (Session ctor).
+//   52 guard: gated on (effective_clock_ != nullptr) — TRUE here.
+//   Stale timestamp: "20200101-00:00:00.000" is 4 years before the clock's UTC →
+//   |52 - now| >> 120s default threshold → sending_time_ok = false → reject fires.
+// 1137 gate: session.cpp:~2146, unreachable on the 52-reject path (52 returns
+//   Disconnected before reaching the 1137 block).
+//
+// Discriminating assertion: 371=52 present AND 371=1137 ABSENT on wire.
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]: both clauses direct.
+TEST(FixtLogonEstablishment,
+     W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
+    // Registry with v50sp2; acceptor configured v50sp2 (so 1137 gate is armed).
+    // Only the 52 guard should fire — before the 1137 gate is reached.
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+
+    // The FixtSetup's mock_clock is seeded at UTC=2024-01-01 00:00:00.
+    // effective_clock_ will be non-null (engine.clock == mock_clock).
+
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    std::vector<std::byte> acpt_frame_out;
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        acpt_frame_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+
+    run_sync(s.ioc, [&] { return acceptor.open(); });
+
+    // Build a FIXT Logon with:
+    //   - stale 52 (2020-01-01, 4 years before the clock's UTC) → 52 guard fires
+    //   - missing 1137 (empty default_appl_ver_id) → would normally fire 373=1
+    //     but the 52 guard fires FIRST and returns Disconnected before reaching 1137.
+    //
+    // Sending time "20200101-00:00:00.000" is well outside the 120s default threshold.
+    auto logon_stale52_no_1137 = make_fixt_logon_frame(
+        "FIXT.1.1", 1, "TW", "ISLD", 30, "",  // missing 1137
+        "20200101-00:00:00.000"                  // stale 52 (2020 vs clock 2024)
+    );
+
+    auto r = run_sync(s.ioc, [&] {
+        return acceptor.on_inbound_frame(
+            std::span<const std::byte>{logon_stale52_no_1137.data(),
+                                       logon_stale52_no_1137.size()});
+    });
+    (void)r;
+
+    // Must be Disconnected (both guards would reject, 52 wins).
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "Acceptor must NOT reach Active (stale 52 + missing 1137 → 52 guard fires)";
+
+    // A frame must have been emitted.
+    ASSERT_FALSE(acpt_frame_out.empty())
+        << "Acceptor must emit a Reject frame (52 guard fires)";
+
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
+                     acpt_frame_out.size());
+
+    // Reject(35=3) emitted.
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
+        << "Emitted frame must be Reject(35=3) for stale 52; got: " << wire;
+
+    // 371=52 (RefTagID = SendingTime) — the 52 guard's reject.
+    EXPECT_NE(wire.find("\x01"
+                        "371=52\x01"),
+              std::string::npos)
+        << "Reject must carry 371=52 (RefTagID=SendingTime) — 52 guard wins; "
+        << "got: " << wire;
+
+    // 373=10 (SendingTime accuracy reason).
+    EXPECT_NE(wire.find("\x01"
+                        "373=10\x01"),
+              std::string::npos)
+        << "Reject must carry 373=10 (SendingTimeAccuracy); got: " << wire;
+
+    // NO 371=1137: the 52 guard returned Disconnected BEFORE the 1137 gate was reached.
+    // This is the primary discriminator: if 371=1137 appears, the ordering is WRONG.
+    EXPECT_EQ(wire.find("\x01"
+                        "371=1137\x01"),
+              std::string::npos)
+        << "Reject must NOT carry 371=1137 — the 52 guard pre-empts the 1137 gate; "
+        << "if 371=1137 is present, the guard-ordering is broken; got: " << wire;
+}
+
 }  // namespace fixpp_fixt_inbound
 
 }  // namespace

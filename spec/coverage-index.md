@@ -37,7 +37,7 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.2 | Identifying the FIX session | Y | S-016, S-020 | — |
 | §4.2.1 | The FIX session profile | Y | S-020 | — |
 | §4.2.2 | Identification of FIX session peers (CompID) | Y | S-016, S-040 | S-040 (028): `check_comp_id=false` skips the steady-state `49`/`56` match; Logon-establishment + BeginString + 013 authz still enforced. |
-| §4.2.3 | Validation of SendingTime(52) | Y | S-019, S-039 | — |
+| §4.2.3 | Validation of SendingTime(52) | Y | S-019, S-039 | **S-019 extended by 038 (2026-06-15):** the MaxLatency check now covers the acceptor first-Logon path in addition to the established-session and initiator Logon-ack paths; absent/empty/malformed/stale `52` → `Reject(35=3, 371=52, 373=10)` + disconnect (pre-establishment shape, no Logout). Conforming path byte-identical. Witnesses: `tests/session/test_acceptor_logon_sending_time.cpp`. See B-038-1/L-038-1/L-038-2/L-038-3 in `behaviors-and-limitations.md`. |
 | §4.2.4 | Additional fields available for peer identification (SubID, LocationID) | Y | S-016 | — |
 | §4.3 | Establishing a FIX connection | Y | S-001, S-015, S-021, S-022 | **S-022 `backlog → done` via 033**: `Username(553)`/`Password(554)` emit (when configured) + inbound parse + surface via `authorize_logon` seam; `554` redacted. Unit witnesses green (`test_fixt_credentials.cpp` W6/W7); live interop (SC-003/SC-004) deferred to `/speckit-verify` self-run. |
 | §4.3.1 | Transport layer requirements (TCP/IP, FIXS mandatory) | Y | T-001, T-002 | — |
