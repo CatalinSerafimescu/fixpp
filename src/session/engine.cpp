@@ -49,6 +49,10 @@
 // Allowed under [arch §5.3] engine-bootstrap carve-out (engine.cpp already
 // includes asio_listener.hpp — same concession for concrete transport types).
 #include "transport/asio_tls_transport.hpp"
+// 040 US2: FirstFrameIds + scan_first_frame_ids (moved from anon ns to enable
+// direct unit testing — T011/T012). Bounded tag helper (accumulate_tag_digit)
+// guards against wrap-and-continue overflow aliasing CompID tags.
+#include "scan_first_frame_ids.hpp"
 
 namespace fixpp::session {
 
@@ -326,47 +330,11 @@ namespace {
 #endif
 }
 
-// ── Minimal SOH-delimited scanner for CompID resolution (T012) ───────────────
-// Extracts begin_string (tag 8), sender_comp_id (tag 49), target_comp_id (tag 56)
-// from a raw FIX frame bytes (views into the frame buffer — caller keeps it alive).
-struct FirstFrameIds {
-    std::string_view begin_string;
-    std::string_view sender_comp_id;
-    std::string_view target_comp_id;
-};
-
-[[nodiscard]] FirstFrameIds scan_first_frame_ids(std::span<const std::byte> frame) noexcept {
-    FirstFrameIds ids;
-    const std::byte SOH{0x01};
-    const std::byte EQ{static_cast<std::byte>('=')};
-    std::size_t i = 0;
-    const std::size_t n = frame.size();
-
-    while (i < n) {
-        std::uint32_t tag = 0;
-        bool tag_ok = true;
-        while (i < n && frame[i] != EQ && frame[i] != SOH) {
-            auto c = static_cast<unsigned char>(frame[i]);
-            if (c < '0' || c > '9') tag_ok = false;
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
-            ++i;
-        }
-        if (i >= n || frame[i] != EQ || !tag_ok) {
-            while (i < n && frame[i] != SOH) ++i;
-            if (i < n) ++i;
-            continue;
-        }
-        ++i;  // skip '='
-        std::size_t vstart = i;
-        while (i < n && frame[i] != SOH) ++i;
-        std::string_view val{reinterpret_cast<const char*>(frame.data() + vstart), i - vstart};
-        if (i < n) ++i;  // skip SOH
-        if (tag == 8) ids.begin_string = val;
-        if (tag == 49) ids.sender_comp_id = val;
-        if (tag == 56) ids.target_comp_id = val;
-    }
-    return ids;
-}
+// FirstFrameIds + scan_first_frame_ids are now defined in scan_first_frame_ids.hpp
+// (040 US2 Phase 4: moved from anonymous namespace to enable direct unit testing).
+// Bring them into scope for all callers in this TU via using declarations.
+using fixpp::session::detail::FirstFrameIds;
+using fixpp::session::detail::scan_first_frame_ids;
 
 // ── Bounded first-frame read (FR-014 / E-2 / C1 steps 2-3) ──────────────────
 // Reads raw bytes from an accepted (not-yet-TLS-handshaken, post-handshake) TCP
