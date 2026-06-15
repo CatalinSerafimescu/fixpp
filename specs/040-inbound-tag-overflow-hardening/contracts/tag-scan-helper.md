@@ -41,6 +41,21 @@ per `data-model.md`.
 - `src/session/session.cpp:1588` — seqnum bound with the boundary clause.
 The helper generalizes these to the `0xFFFF` tag bound.
 
+## Compile-time guarantee (normative)
+
+Because the helper is `constexpr`, the boundary correctness — the exact property the defective
+`scan_frame_header:1493` guard lacked — MUST be pinned as a `static_assert` block adjacent to the
+helper, evaluated at compile time:
+
+```cpp
+// 65535 builds (last step 6553*10+5 = 65535, accepted); 65536 rejects;
+// wrap-and-continue rejects long before any uint32 wrap; zero-padded ok.
+static_assert([]{ std::uint32_t t=0; for(char c:"65535") if(c) if(!accumulate_tag_digit(t,c)) return false; return t==65535u; }());
+static_assert([]{ std::uint32_t t=0; for(char c:"65536") if(c) if(!accumulate_tag_digit(t,c)) return true; return false; }());   // expect a reject
+static_assert([]{ std::uint32_t t=0; for(char c:"429496729649") if(c) if(!accumulate_tag_digit(t,c)) return true; return false; }()); // wrap-reject
+```
+(Exact form finalized at implement; the intent is a compile-time fact, not a runtime-only test.)
+
 ## Witness (normative)
 
 - Helper unit test: `65535`→ok; `65536`→reject; wrap-and-continue (`429496729649`) → reject;

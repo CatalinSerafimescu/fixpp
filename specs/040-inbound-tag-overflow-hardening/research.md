@@ -69,6 +69,18 @@ rebuilds a small aliased tag (verified: `429496729649` → 49 admitted). The cor
 down at `:1588` (the seqnum guard, with the `|| (val==LIMIT && digit>N)` boundary clause) — the tag
 guard simply failed to copy it. The helper's `0xFFFF` pre-multiply bound is the clean fix.
 
+## D-3a — Census completeness: non-idiom sweep (closed)
+
+The Opus census swept the `tag = tag*10 + digit` idiom. To close the "all 5 scanners" completeness
+claim, a second sweep covered **non-idiom** numeric tag extraction (`from_chars`, `strtoul`/`strtol`,
+`atoi`, `sscanf`, `stoul`/`stoi`) across `src/` + `include/`. Result: **no inbound wire-frame tag
+scanner uses a non-idiom path.** The `std::from_chars` hits are all out of scope — dictionary XML
+loading at config time (`xml_loader.cpp:173/:324`, parsing the data-dictionary file's `tag_i`, not
+received bytes), decimal value parsing (`decimal.cpp`, `capi/decimal.cpp`), and field-value type
+parsing (`field_traits.cpp`). The five hand-rolled scanners are the complete live-inbound set.
+(`scan_first_frame_ids` dispatches via `if (tag == 8/49/56)` rather than `switch`, which is why a
+literal `switch (tag)` grep finds only two sites — it is still site 4.)
+
 ## D-4 — build_replay_frame (site 6): justified exclusion
 
 **Decision**: add a code comment at `session.cpp:1639` + a research/B&L note: this scanner parses
