@@ -34,6 +34,12 @@ scanners directly from inbound bytes.
 | 5 | `src/session/session.cpp:1493` | `scan_frame_header` | **DEFECTIVE** — `>429496729U` pre-multiply; admits wrap-and-continue | 34/49/52/56/… | **yes** |
 | 6 | `src/session/session.cpp:1639` | `build_replay_frame` | none | 9/10/43/52/122 | NO — stored own-outbound, not inbound |
 
+**Census completeness basis:** the set above is closed by two sweeps — the `tag = tag*10 + digit`
+idiom AND a non-idiom numeric-parse sweep (`from_chars`/`strtoul`/`atoi`/`sscanf`/`stoul`/`stoi`),
+which found no inbound tag scanner using a non-idiom path (the `from_chars` hits are config-time
+dictionary XML + decimal/field value parses, not inbound tag dispatch). See research.md §D-3a;
+independently re-verified by the Gate-A Codex + Opus reviews.
+
 The correct reference shape already exists twice in-tree: the framer `BodyLength` guard
 (`src/wire/framer.cpp:120`) and the seqnum guard (`src/session/session.cpp:1588`,
 `val > 429496729U || (val == 429496729U && digit > 5U)`) — both bound the accumulator *inside* the
