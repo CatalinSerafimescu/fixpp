@@ -161,15 +161,15 @@ placeholder) and the absent-`1137`-ack case described, consistent with shipped F
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T012 [P] Run `quickstart.md` validation for US2–US5 (each story's listed `ctest`/`grep` command
+- [x] T012 [P] Run `quickstart.md` validation for US2–US5 (each story's listed `ctest`/`grep` command
   passes as described).
-- [ ] T013 Confirm 039 owns **no** OFFICIAL `feature-catalogue.md` row (source-grounded hardening / test-
+- [x] T013 Confirm 039 owns **no** OFFICIAL `feature-catalogue.md` row (source-grounded hardening / test-
   completeness / build-gate / doc — adds no normative FIX coverage per spec.md Normative References); if
   a row is nonetheless warranted, add it with a matching `coverage-index.md` entry (T057-class check).
-- [ ] T014 Feature-completeness audit (T058 / `[const §XVII.8]`): every tasks.md row `[X]` or waived;
+- [x] T014 Feature-completeness audit (T058 / `[const §XVII.8]`): every tasks.md row `[X]` or waived;
   every FR-/SC- maps to a landed test/doc; catalogue/coverage consistent. Record verdict for gate-b
   pre-flight (`.specify/decisions/039-ff-tail-hardening-completeness.md`).
-- [ ] T015 Author the phase-4 lifecycle doc
+- [x] T015 Author the phase-4 lifecycle doc
   `research/G19-fix-fpml-iso20022/phases/phase-4/session/039-ff-tail-hardening.md` explicitly recording
   **Gate A = NOT required** with the FR-014 justification (no wire/C-ABI-behavior/codegen/config surface)
   + the verify verdict — so `/gate-b` pre-flight step 4c does not STOP demanding Gate A evidence.
