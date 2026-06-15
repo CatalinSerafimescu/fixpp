@@ -266,4 +266,19 @@ TEST_F(SeqnumManagerTest, AssignOutboundAfterDrainReturnsSessionAlreadyClosed) {
     EXPECT_EQ(r.error(), fixpp::core::error::session_already_closed);
 }
 
+// 039 US3 (FR-008): set_next_outbound's lock-fail arm (seqnum_manager.cpp:188)
+// was previously uncovered. After drain() the async_mutex's next async_lock()
+// resolves to the unexpected branch, so set_next_outbound surfaces
+// session_already_closed without mutating next_outbound_. Deterministic via the
+// drain seam (no parked holder) — mirrors the check_inbound/assign_outbound
+// after-drain witnesses above.
+TEST_F(SeqnumManagerTest, SetNextOutboundAfterDrainReturnsSessionAlreadyClosed) {
+    SeqnumManager mgr;
+    run_sync(ioc, mgr.drain());
+
+    auto r = run_sync(ioc, mgr.set_next_outbound(42));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::session_already_closed);
+}
+
 }  // namespace fixpp::session::test

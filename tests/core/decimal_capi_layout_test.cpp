@@ -128,3 +128,52 @@ TEST(DecimalCABIChecked, EqualCheckedRejectsNullOut) {
     fixpp_decimal_t a{1, 0, {}};
     EXPECT_EQ(fixpp_decimal_equal_checked(a, a, nullptr), FIXPP_ERR_DECIMAL_INVALID);
 }
+
+// ── 039 US2: PIN the ratified frozen-ABI sentinel behavior (AC-C6 / D-12) ────
+//
+// The _checked siblings validate the EXPONENT DOMAIN ONLY ([-38,0]); they
+// deliberately do NOT reject the INT64_MIN sentinel mantissa. A sentinel POD
+// with a valid exponent is therefore IN-domain for _checked, so the call returns
+// FIXPP_ERR_OK; the bare compare/equal it forwards to lifts the POD through
+// from_pod(), which DOES reject INT64_MIN, yielding the documented out-of-domain
+// result 0. Net observable — ratified and frozen at C-ABI MAJOR=1: OK + 0.
+//
+// This is a PIN, not a defect. Rejecting the sentinel in _checked (routing it
+// through from_pod) would tighten the frozen C-ABI and contradicts the ratified
+// decision: 001 AC-C6 / specs/001-core-decimal/research.md D-12 / [const §X.1]
+// (see also src/capi/decimal.cpp in_canonical_domain). DO NOT "re-fix" these to
+// return FIXPP_ERR_DECIMAL_INVALID — that is a separate ABI-decision feature. If
+// these go RED after such a change, the change is the bug, not the test.
+
+TEST(DecimalCABIChecked, CompareCheckedSentinelInDomainReturnsOkZero) {
+    fixpp_decimal_t sentinel = FIXPP_DECIMAL_INVALID;  // {INT64_MIN, 0} — valid exponent
+    fixpp_decimal_t good{1, 0, {}};
+    int ord = 99;
+
+    // sentinel as LEFT operand
+    EXPECT_EQ(fixpp_decimal_compare_checked(sentinel, good, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, 0);
+    // sentinel as RIGHT operand
+    ord = 99;
+    EXPECT_EQ(fixpp_decimal_compare_checked(good, sentinel, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, 0);
+    // sentinel as BOTH operands
+    ord = 99;
+    EXPECT_EQ(fixpp_decimal_compare_checked(sentinel, sentinel, &ord), FIXPP_ERR_OK);
+    EXPECT_EQ(ord, 0);
+}
+
+TEST(DecimalCABIChecked, EqualCheckedSentinelInDomainReturnsOkZero) {
+    fixpp_decimal_t sentinel = FIXPP_DECIMAL_INVALID;  // {INT64_MIN, 0} — valid exponent
+    fixpp_decimal_t good{1, 0, {}};
+    int eq = 99;
+
+    EXPECT_EQ(fixpp_decimal_equal_checked(sentinel, good, &eq), FIXPP_ERR_OK);
+    EXPECT_EQ(eq, 0);
+    eq = 99;
+    EXPECT_EQ(fixpp_decimal_equal_checked(good, sentinel, &eq), FIXPP_ERR_OK);
+    EXPECT_EQ(eq, 0);
+    eq = 99;
+    EXPECT_EQ(fixpp_decimal_equal_checked(sentinel, sentinel, &eq), FIXPP_ERR_OK);
+    EXPECT_EQ(eq, 0);
+}

@@ -153,4 +153,17 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/seqnum_manager.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/session_fsm.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/session.hpp"
+    # 039-ff-tail-hardening US4 (FR-011 / SC-005) — extend the [const §XV.9] gate
+    # over the remaining session-side headers that (transitively) pull
+    # asio::awaitable but were not yet listed. Confirmed clean post-preprocess
+    # (their std::mutex occurrences are [const §XV.9] comment markers, stripped
+    # by -E). The explicit list is a local CMake-gate convention — NOT a §VI.4
+    # property (research.md D-4 corrects the earlier mis-citation above).
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/detail/has_flush_for_session_close.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/engine.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/file_store.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/memory_store.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/message_store.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/reconnect_fsm.hpp"
+    "${CMAKE_SOURCE_DIR}/include/fixpp/session/retrieve_visitor.hpp"
 )

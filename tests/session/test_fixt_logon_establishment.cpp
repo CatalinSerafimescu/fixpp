@@ -763,6 +763,58 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
         << "Initiator must record negotiated_appl_version_=v50sp2 from peer Logon-ack";
 }
 
+// ── 039 US3/US5 — Absent-1137 acceptor Logon-ack on the INITIATOR ────────────
+//
+// FR-004a (unserviceable/missing-1137 → Reject) is ACCEPTOR-scoped only (L-033-3).
+// When fixpp is the INITIATOR and the peer's Logon-ack omits 1137, the initiator
+// does NOT auto-reject — it reaches Active and leaves negotiated_appl_version_ at
+// Unknown, so negotiated_version_profile() returns the unnegotiated fallback
+// {session=Unknown, default_appl=Unknown}.
+//
+// This witness (039 US3, FR-010/SC-004) covers negotiated_version_profile's
+// Unknown-fallback arm (session.cpp:189-192) — a 033-introduced line previously
+// unexercised by the FIXT corpus (every other FIXT witness negotiates a known
+// version) — AND validates the L-033-3 / B-033-1 documented behavior (039 US5).
+// Discriminator: pre-fix none — the arm is simply reached for the first time;
+// the assertion is the {Unknown,Unknown} value, which only this absent-1137 path
+// produces (the W1/W5 negotiated paths return v50sp2/v44).
+TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnknown) {
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+    const version_registry* reg = &s.registry;
+
+    std::vector<std::byte> init_frame_out;
+    auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
+    init_cfg.transport_send = [&](std::span<const std::byte> f) {
+        init_frame_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session initiator(s.engine, init_cfg, reg);
+
+    run_sync(s.ioc, [&] { return initiator.open(); });
+    ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
+
+    // Synthetic acceptor Logon-ack (ISLD→TW) WITHOUT 1137 (empty default_appl_ver_id).
+    auto ack_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "ISLD", "TW", 30, "");
+    auto init_r = run_sync(s.ioc, [&] {
+        return initiator.on_inbound_frame(
+            std::span<const std::byte>{ack_no_1137.data(), ack_no_1137.size()});
+    });
+    ASSERT_TRUE(init_r.has_value())
+        << "Initiator must accept a 1137-less acceptor Logon-ack — no auto-reject "
+           "(FR-004a is acceptor-scoped; L-033-3)";
+
+    // L-033-3: initiator does NOT auto-reject a missing/unserviceable peer 1137.
+    ASSERT_EQ(initiator.state(), fsm_state::Active)
+        << "Initiator must reach Active on a 1137-less ack (L-033-3 deferred-by-design)";
+
+    // The unnegotiated fallback (session.cpp:189-192): no application version recorded.
+    auto profile = initiator.negotiated_version_profile();
+    EXPECT_EQ(profile.default_appl, application_version::Unknown)
+        << "Absent 1137-ack → negotiated_appl_version_ stays Unknown";
+    EXPECT_EQ(profile.session, fixpp::dict::session_version::Unknown)
+        << "Unknown-fallback returns session=Unknown too (negotiated_version_profile arm)";
+}
+
 // ── T012 / W2 — Missing-1137 witness ─────────────────────────────────────────
 //
 // Acceptor receives a FIXT Logon WITHOUT 1137. Per C4/FR-004:

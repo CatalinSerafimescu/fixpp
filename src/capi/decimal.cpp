@@ -46,6 +46,10 @@ fixpp::core::expected_t<pod_decimal> pod_from_cabi(fixpp_decimal_t d) noexcept {
 // surface forwards a sentinel mantissa to compare()/equal(), which carry their
 // own INT64_MIN handling (AC-C6). Routing this through from_pod would silently
 // tighten the frozen C-ABI contract — do not unify without an ABI decision.
+// Ratified & frozen at MAJOR=1: 001 AC-C6 / specs/001-core-decimal/research.md
+// D-12 / [const §X.1]. The net _checked-of-sentinel observable (OK + 0) is PINNED
+// by DecimalCABIChecked.*SentinelInDomainReturnsOkZero — do NOT "re-fix" this to
+// reject the sentinel (that is a separate ABI-decision feature).
 bool in_canonical_domain(fixpp_decimal_t d) noexcept {
     return d.exponent >= -38 && d.exponent <= 0;
 }
