@@ -60,8 +60,8 @@ clause — rejected: needlessly admits 17-bit..32-bit tags that are invalid anyw
 | 1 | `offset_table.cpp:160-176` (Index) | replace per-digit `tag = tag*10+digit` with the helper; DROP the now-redundant post-loop `if (tag > 0xFFFFU)` at `:176` (the in-loop helper subsumes it), keep `status_=err_tag_out_of_range(); entries_.clear()` on overflow |
 | 2 | `parser.hpp:333-346` (Scan) | add the helper in the digit loop; on false → `done_ = true; return;` (matches the existing non-digit reject) |
 | 3 | `admin_messages.cpp:255-266` (`interpret_logon`) | helper in the loop; on false → `goto next_field;` (existing skip-malformed disposition) |
-| 4 | `engine.cpp:349-353` (`scan_first_frame_ids`) | **digit-check FIRST, then helper** (see precondition note) — `if (c<'0'\|\|c>'9') tag_ok=false; else if (!accumulate_tag_digit(tag,c)) tag_ok=false;` |
-| 5 | `session.cpp:1493-1496` (`scan_frame_header`) | **REPLACE** the defective `if (tag > 429496729U) tag_ok=false;` + `tag=tag*10+d` with the same digit-check-then-helper `if/else-if` shape — fixes the wrap-and-continue admission |
+| 4 | `scan_first_frame_ids.hpp` (extracted from `engine.cpp` anon-ns) (`scan_first_frame_ids`) | **digit-check FIRST, then helper** (see precondition note) — `if (c<'0'\|\|c>'9') tag_ok=false; else if (!accumulate_tag_digit(tag,c)) tag_ok=false;` |
+| 5 | `scan_frame_header.hpp` (extracted from `session.cpp` anon-ns) (`scan_frame_header`) | **REPLACE** the defective `if (tag > 429496729U) tag_ok=false;` + `tag=tag*10+d` with the same digit-check-then-helper `if/else-if` shape — fixes the wrap-and-continue admission |
 
 **Helper digit-only precondition — load-bearing for sites 4 & 5 (Gate A round 1 P3, tightened by
 Opus).** `scan_first_frame_ids` and `scan_frame_header` today set `tag_ok=false` on a non-digit but

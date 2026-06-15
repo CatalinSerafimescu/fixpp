@@ -1508,6 +1508,13 @@ struct SendingTimeStamp {
     std::string_view orig_sending_time;
     std::size_t i = 0;
     const std::size_t n = stored.size();
+    // 040 US3 (FR-008) — JUSTIFIED EXCLUSION from the inbound forged-tag-overflow
+    // guard: this scanner parses STORED OWN-OUTBOUND frames (the `stored` span —
+    // our own previously-sent messages replayed during resend), NOT received
+    // inbound bytes. There is no forged-tag aliasing vector here (an attacker who
+    // can rewrite our own message store has already won). The unguarded accumulate
+    // is intentional — do NOT "harden" it as a missed inbound scanner (it is site 6
+    // in the 040 census; the 5 live-inbound scanners use fixpp::wire::accumulate_tag_digit).
     while (i < n) {
         std::uint32_t tag = 0;
         bool tag_ok = true;

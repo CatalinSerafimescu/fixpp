@@ -71,9 +71,9 @@ include/fixpp/wire/tag_scan.hpp              # NEW — the shared constexpr boun
 src/wire/offset_table.cpp:160-176            # site 1 (Index) — replace post-loop check w/ in-loop helper
 include/fixpp/wire/parser.hpp:333-346        # site 2 (Scan) — add in-loop helper (none today)
 src/session/admin_messages.cpp:255-266       # site 3 — interpret_logon, add in-loop helper
-src/session/engine.cpp:349-353               # site 4 — scan_first_frame_ids, add in-loop helper
-src/session/session.cpp:1493-1496            # site 5 — scan_frame_header, REPLACE defective >429496729U guard
-src/session/session.cpp:1639                 # site 6 — build_replay_frame: add justified-exclusion comment (FR-008)
+src/session/scan_first_frame_ids.hpp         # site 4 — scan_first_frame_ids (extracted from engine.cpp) + in-loop helper
+src/session/scan_frame_header.hpp            # site 5 — scan_frame_header (extracted from session.cpp), REPLACE defective >429496729U guard
+src/session/session.cpp build_replay_frame   # site 6 — justified-exclusion comment (FR-008)
 
 tests/
 ├── wire/      # helper boundary unit test; offset_table + parser wrap-and-continue witnesses

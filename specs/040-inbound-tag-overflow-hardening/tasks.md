@@ -100,16 +100,16 @@ not surfaced; `4294967330` still rejects; `65535` parses.
 
 ## Phase 5: User Story 3 — document the build_replay_frame exclusion (Priority: P3)
 
-- [ ] T013 [US3] Add a justified-exclusion comment at `src/session/session.cpp:1639`
+- [X] T013 [US3] Add a justified-exclusion comment at `src/session/session.cpp:1639`
   (`build_replay_frame`): exempt from the inbound tag-overflow guard because it parses stored
   own-outbound replay frames, not received bytes. (FR-008.)
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T014 [P] Add a behaviors-and-limitations row to `spec/behaviors-and-limitations.md`: forged-tag
+- [X] T014 [P] Add a behaviors-and-limitations row to `spec/behaviors-and-limitations.md`: forged-tag
   overflow aliasing hardened across the 5 live-inbound scanners (TLS-auth-bounded threat per 015; one
   shared `0xFFFF` bound helper); note the `build_replay_frame` justified exclusion. (FR-008.)
-- [ ] T015 Run `tools/check_layers.py` to confirm the new `include/fixpp/wire/tag_scan.hpp` leaf header
+- [X] T015 Run `tools/check_layers.py` to confirm the new `include/fixpp/wire/tag_scan.hpp` leaf header
   does not invert layers (wire leaf included by session is allowed). **SC-004 centralization gate**:
   after the helper lands, confirm NO residual per-site tag bound remains — grep the 5 scanner sites
   for a `tag > 0xFFFF`/`tag > 429496729U` bound. NOTE: `scan_frame_header` was extracted from
@@ -118,7 +118,7 @@ not surfaced; `4294967330` still rejects; `65535` parses.
   `parser.hpp`, `admin_messages.cpp`, `scan_frame_header.hpp`, and the new `scan_first_frame_ids`
   header (NOT just the .cpp files). Expect zero tag bounds; the only `429496729U` left is the legit
   seqnum guard at `session.cpp:1588`. (Plan Constitution Check; analyze E2.)
-- [ ] T017 [P] **Doc-drift sweep (US1 extraction side-effect):** the `scan_frame_header` guard moved
+- [X] T017 [P] **Doc-drift sweep (US1 extraction side-effect):** the `scan_frame_header` guard moved
   from `session.cpp:1493` to `src/session/scan_frame_header.hpp`. Update the stale `session.cpp:1493`
   references for `scan_frame_header` in `spec.md` (census row 5), `research.md` (D-3 row 5),
   `plan.md`, and the parent `CLAUDE.md` pointer to cite the new header. (Same for `scan_first_frame_ids`

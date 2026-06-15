@@ -30,9 +30,9 @@ scanners directly from inbound bytes.
 | 1 | `src/wire/offset_table.cpp:168` | `OffsetTable::build` (Index) | insufficient — post-loop `>0xFFFF` at `:176`, after wrap | Length/Data dispatch | **yes** |
 | 2 | `include/fixpp/wire/parser.hpp:340` | `field_iterator::advance` (Scan) | none | any | **yes** |
 | 3 | `src/session/admin_messages.cpp:264` | `interpret_logon` | none | 8/35/49/56/108/1137/553/554 | **yes** |
-| 4 | `src/session/engine.cpp:351` | `scan_first_frame_ids` | none | 8/49/56 (acceptor routing) | **yes** |
-| 5 | `src/session/session.cpp:1493` | `scan_frame_header` | **DEFECTIVE** — `>429496729U` pre-multiply; admits wrap-and-continue | 34/49/52/56/… | **yes** |
-| 6 | `src/session/session.cpp:1639` | `build_replay_frame` | none | 9/10/43/52/122 | NO — stored own-outbound, not inbound |
+| 4 | `src/session/scan_first_frame_ids.hpp` (extracted from `engine.cpp` anon-ns during impl) | `scan_first_frame_ids` | none | 8/49/56 (acceptor routing) | **yes** |
+| 5 | `src/session/scan_frame_header.hpp` (extracted from `session.cpp` anon-ns during impl) | `scan_frame_header` | **DEFECTIVE** — `>429496729U` pre-multiply; admits wrap-and-continue | 34/49/52/56/… | **yes** |
+| 6 | `src/session/session.cpp` `build_replay_frame` | `build_replay_frame` | none | 9/10/43/52/122 | NO — stored own-outbound, not inbound |
 
 **Census completeness basis:** the set above is closed by two sweeps — the `tag = tag*10 + digit`
 idiom AND a non-idiom numeric-parse sweep (`from_chars`/`strtoul`/`atoi`/`sscanf`/`stoul`/`stoi`),
