@@ -148,7 +148,11 @@ the relevant spec/behaviors docs and are internally consistent with the shipped 
 **US3 — coverage-waiver remediation (test-only)**
 - **FR-008**: The `set_next_outbound` lock-fail branch MUST be exercised by a witness that forces
   `async_lock` failure via the `mutex_test_access` seam and asserts `session_already_closed`.
-- **FR-009**: The 008 `OsFile` move-constructor MUST be exercised by a witness.
+- **FR-009**: The 008 `OsFile` move-constructor MUST be exercised by a witness — OR, if
+  re-measurement shows it production-unreachable (constructed-in-place + move-assigned only, never
+  move-constructed) and TU-local (un-witnessable without a forbidden production seam, FR-014), it
+  carries a specific re-measured waiver per SC-004 (re-confirming the prior 008 disposition). The
+  witness/waiver choice mirrors FR-010's.
 - **FR-010**: The 033 lines previously deferred without per-line DA/BRDA measurement MUST be
   re-measured and either covered or given a specific re-measured waiver.
 

@@ -86,17 +86,21 @@ re-measured waiver. Test-only; no production change.
 
 ### Implementation for User Story 3
 
-- [ ] T006 [US3] Witness in `tests/session/` that forces `async_lock` failure via the existing
+- [x] T006 [US3] Witness in `tests/session/` that forces `async_lock` failure via the existing
   `SeqnumManager::mutex_test_access()` seam (`include/fixpp/session/seqnum_manager.hpp:162`, returns
   `fixpp::sync::async_mutex&`) and asserts `set_next_outbound` (`src/session/seqnum_manager.cpp:188`)
   returns `error::session_already_closed` (AC-1; FR-008). **Seam mechanic** (non-trivial): drive the
   returned `async_mutex` into its drain/cancelled state so the next `co_await async_lock(...)` inside
   `set_next_outbound` returns the lock-fail error — mirror the existing seqnum lock-fail witnesses if any.
   Must be deterministic (no flake).
-- [ ] T007 [P] [US3] Witness in `tests/session/` exercising the `OsFile` move-constructor
-  (`src/session/file_store.cpp:401` POSIX / `:503` Windows) and asserting the moved-from
-  fd/handle is invalidated (`-1` / `INVALID_HANDLE_VALUE`) and moved-to is valid (AC-2; FR-009).
-- [ ] T008 [US3] Re-measure (lcov DA/BRDA, `[const §IX.1]`) the 033 lines previously deferred without
+- [x] T007 [US3] Re-audit the `OsFile` move-constructor (`src/session/file_store.cpp:401` POSIX /
+  `:503` Windows). Witness it IF reachable; otherwise record a specific re-measured waiver per FR-009/
+  SC-004. **Outcome (re-measured):** the move-CTOR is production-UNREACHABLE — every site default-
+  constructs then move-ASSIGNS (`OsFile tmp_file; … tmp_impl.file = std::move(tmp_file)`;
+  `make_shared<OsFile>()` constructs in place; no return/pass-by-value) — and TU-local (defined in the
+  `.cpp`, not a header), so un-witnessable without a production seam (forbidden by FR-014). → **WAIVED**,
+  re-confirming the prior 008 disposition (`008-message-store-verify.md` line 331). No production change.
+- [x] T008 [US3] Re-measure (lcov DA/BRDA, `[const §IX.1]`) the 033 lines previously deferred without
   per-line measurement; for each, either add a covering witness or record a **specific re-measured**
   waiver citing the exact `file:line` and reason (AC-3; FR-010; SC-004). Zero unjustified "untestable"
   dispositions may remain among the three. **First identify the exact lines** — research.md D-3(c) does
