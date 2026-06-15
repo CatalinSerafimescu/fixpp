@@ -329,27 +329,39 @@ protected:
         return fut.get();
     }
 
-    // Assert Reject(35=3, 371=52, 373=10) present and NO Logout(35=5).
-    void assert_reject_no_logout(const char* cell) const {
+    // Assert the FULL C-1 reject wire shape: Reject(35=3, 371=52, 372="A",
+    // 373=10, 45=<inbound 34>) present and NO Logout(35=5). expected_ref_seq is
+    // the inbound Logon's 34 (the RefSeqNum the guard stamps); default 1.
+    void assert_reject_no_logout(const char* cell, seqnum_t expected_ref_seq = 1) const {
         bool found_reject = false;
         bool found_371_52 = false;
+        bool found_372_a = false;
         bool found_373_10 = false;
+        bool found_45_ref = false;
         bool found_logout = false;
+        const std::string want_45 = std::to_string(expected_ref_seq);
         for (const auto& f : captured_frames_) {
             auto sp = std::span<const std::byte>(f);
             auto mt = extract_field(sp, 35);
             if (mt && *mt == "3") {
                 found_reject = true;
                 auto r371 = extract_field(sp, 371);
+                auto r372 = extract_field(sp, 372);
                 auto r373 = extract_field(sp, 373);
+                auto r45 = extract_field(sp, 45);
                 if (r371 && *r371 == "52") found_371_52 = true;
+                if (r372 && *r372 == "A") found_372_a = true;
                 if (r373 && *r373 == "10") found_373_10 = true;
+                if (r45 && *r45 == want_45) found_45_ref = true;
             }
             if (mt && *mt == "5") found_logout = true;
         }
         EXPECT_TRUE(found_reject)  << cell << ": must emit Reject(35=3)";
         EXPECT_TRUE(found_371_52)  << cell << ": Reject must carry 371=52";
+        EXPECT_TRUE(found_372_a)   << cell << ": Reject must carry 372=A (RefMsgType=Logon)";
         EXPECT_TRUE(found_373_10)  << cell << ": Reject must carry 373=10";
+        EXPECT_TRUE(found_45_ref)  << cell << ": Reject must carry 45=" << want_45
+                                   << " (RefSeqNum = inbound Logon 34)";
         EXPECT_FALSE(found_logout) << cell << ": pre-establishment guard must NOT emit Logout";
     }
 
@@ -610,7 +622,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell9_PersistentStore_InboundNotAdvanced) {
     feed(sess, logon);
 
     assert_disconnected(sess, "Cell9");
-    assert_reject_no_logout("Cell9");
+    assert_reject_no_logout("Cell9", kSeedIn);  // inbound 34 = kSeedIn
 
     // Durable inbound must be UNCHANGED (guard fires before check_inbound).
     ASSERT_NE(factory->last_store, nullptr) << "Cell9: store was not minted";
@@ -716,7 +728,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell12_BadStalePlusTooHighSeq_52Wins) {
     auto logon = make_logon_with_time(kStalePast, /*seq=*/999);
     feed(sess, logon);
 
-    assert_reject_no_logout("Cell12");
+    assert_reject_no_logout("Cell12", 999);  // inbound 34 = 999 (too-high seq)
     assert_disconnected(sess, "Cell12");
 
     // Reject must carry 371=52 (not from seqnum handling).
