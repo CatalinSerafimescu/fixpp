@@ -424,49 +424,91 @@ TEST(ValidateGateInbound, SeqnumNotAdvancedOnReject) {
 // The validate gate used kAdminParseArena (8192 bytes) while the dispatch path
 // uses kInboundParseArena (16384 bytes). The OffsetTable parser allocates PMR-backed
 // pmr::vector<entry> (12 bytes/entry) from the arena with geometric reallocation.
-// After ~256 entries the cumulative monotonic usage (~6132 bytes) leaves only ~2060
-// bytes remaining — the next vector growth (cap 256→512, needing 6144 bytes) fails
-// with bad_alloc, setting status_=out_of_memory. parse() then returns unexpected;
-// the gate's `if (vg_mv_r)` is false → validation silently skipped → message
-// dispatched UNVALIDATED.
-// With kInboundParseArena (16384): the cap-512 realloc fits (~10252 bytes remain)
-// → parse succeeds → validate fires → Reject(373=2).
 //
-// Frame: NOS(35=D) with required fields + 300 unique undefined tags (9000-9299,
-// not in the test dictionary) to exceed the 8192-arena entry limit while staying
-// within the 16384-arena limit. Each undefined tag yields wire_unexpected_tag.
+// Arena exhaustion mechanics (sizeof(entry)==12; 2× growth from initial cap=1):
+//   Cumulative monotonic usage before the cap-256→512 step:
+//     Σ cap_i × 12  for cap_i in {1,2,4,8,16,32,64,128,256} = 511×12 = 6132 bytes
+//   8 KiB arena: 8192 − 6132 = 2060 bytes remaining; cap-512 needs 6144 → FAILS.
+//     parse() returns unexpected; validation silently skipped → bypass.
+//   16 KiB arena: 16384 − 6132 = 10252 bytes remaining; cap-512 needs 6144 → OK.
+//     parse succeeds; validate fires → Reject(373=2) ✓.
 //
-// RED on HEAD (gate parse exhausts arena → unexpected → no Reject → bypass).
-// GREEN after FIX-1 (gate parse succeeds → validate rejects with reason=2).
+// Field count choice (N = 400 undefined tags):
+//   Total entries = 10 header/required + 400 undefined = 410 → cap-512 needed.
+//   N = 400 gives comfortable margin (> 256 required to trigger the boundary)
+//   while the PMR usage with 2× growth (6132 + 6144 = 12276 bytes peak) stays
+//   well within 16384.  Any N in [257, 502] triggers the same exhaustion on 8 KiB
+//   and fits in 16 KiB; 400 is chosen for robust margin above the 256-entry knee.
+//
+// Threshold-independent discrimination (part b):
+//   After the validate-Reject (seqnum NOT advanced, W7-proven), feed a conformant
+//   NOS at the SAME seqnum=2.  A conformant message must be dispatched without
+//   Reject, proving: (1) the 16 KiB arena is sufficient for the validate path even
+//   on conformant messages, (2) the Reject was triggered by the undefined tags, not
+//   by some universal large-message policy.  This assertion passes regardless of
+//   the exact PMR exhaustion threshold.
+//
+// RED on kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
+//   unexpected → validation SKIPPED → no Reject.
+// GREEN on kInboundParseArena gate: parse succeeds → validate fires → Reject(373=2)
+//   for the first undefined tag; then conformant NOS at seq=2 dispatched, no Reject.
+//
+// RED-discrimination confirmation (required by brief):
+//   To confirm RED: temporarily set the gate arena to kAdminParseArena (8192) in
+//   validate_inbound_() and rebuild → W8 FAILS (no Reject).
+//   Restore kInboundParseArena → GREEN.
 TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
 
-    // Build NOS(35=D) with required fields + 300 unique undefined tags (9000-9299).
-    // 300 fields exhaust the 8192-byte arena (cap-512 realloc fails) while the
-    // 16384-byte dispatch arena handles them (cap-512 fits in ~10252 remaining bytes).
-    // Tags 9000-9299 are NOT defined in the test dictionary for any msg type.
+    // ── (a) Feed violation frame: 400 undefined tags → must produce Reject(373=2) ──
+    //
+    // Total entries: 7 header fields (8,9,35,49,56,34,52) + 3 required body fields
+    // (11,54,60) + 400 undefined (9000-9399) = 410.  Needs cap-512 (next power of 2
+    // above 256 that fits 410).  Exhausts 8 KiB arena; fits in 16 KiB arena.
     std::string body;
     body += "11=ORD001\x01";
     body += "54=1\x01";
     body += "60=20240101-00:00:00.000\x01";
-    for (int t = 9000; t < 9300; ++t) {
-        body += std::to_string(t) + "=X\x01";  // 300 undefined tags
+    for (int t = 9000; t < 9400; ++t) {
+        body += std::to_string(t) + "=X\x01";  // 400 undefined tags
     }
-    auto frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
+    auto violation_frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
 
-    fix.feed(sess, frame);
+    fix.feed(sess, violation_frame);
 
-    // Must produce Reject(373=2) for the undefined tags.
-    // On HEAD (kAdminParseArena gate): arena exhausts at ~257 fields → parse()
-    //   returns unexpected → if(vg_mv_r) is false → validation SKIPPED → no Reject.
-    // After FIX-1 (kInboundParseArena gate): parse succeeds → validate fires →
-    //   first undefined tag (9000) detected → Reject(373=2).
+    // On kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
+    //   unexpected → validation SKIPPED → no Reject  [RED].
+    // On kInboundParseArena gate: parse succeeds → validate fires →
+    //   first undefined tag (9000) detected → Reject(373=2)  [GREEN].
     EXPECT_TRUE(fix.has_reject_with_reason(2))
-        << "W8: high-field-count frame with undefined tags must be Rejected (373=2), "
+        << "W8a: high-field-count frame with undefined tags must be Rejected (373=2), "
            "not silently bypassed due to parse-arena exhaustion in the validate gate";
+
+    // ── (b) Threshold-independent discrimination: conformant Heartbeat at same seqnum ──
+    //
+    // The validate-Reject does NOT advance the inbound seqnum (C-3 / W7).  Feed a
+    // conformant Heartbeat(35=0) at the SAME seq=2 to prove: (i) the session remains
+    // Active, (ii) the conformant message is dispatched without a Reject, and (iii)
+    // the shared kInboundParseArena is sufficient for conformant messages.  A Heartbeat
+    // is used (not NOS) because it is an admin message that routes through fromAdmin —
+    // no Application is registered in this fixture, so a NOS would produce a Reject
+    // (reason=3) for a different reason (no fromApp handler), masking the arena result.
+    // This assertion is threshold-independent: it passes whether the fix was via 8 KiB
+    // or 16 KiB arena, because it only requires that a small conformant frame routes
+    // through the arena without exhaustion and gets dispatched.
+    fix.transport.reset();
+    auto conformant_frame = make_heartbeat_frame(2);  // seq=2, admin message, no Application needed
+    fix.feed(sess, conformant_frame);
+
+    EXPECT_FALSE(fix.has_any_reject())
+        << "W8b: conformant Heartbeat at the same seqnum must be dispatched without Reject "
+           "(proves the validate gate does not spuriously reject conformant messages, "
+           "threshold-independent)";
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << "W8b: session must remain Active after a conformant dispatch";
 }
 
 }  // namespace

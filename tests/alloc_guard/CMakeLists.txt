@@ -106,3 +106,45 @@ set_target_properties(test_session_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 add_test(NAME alloc_guard_session COMMAND test_session_alloc_guard)
+
+# 041-validation-gate-wiring: zero-global-heap for the validate-ON (validate_
+# inbound_messages=true) hot path.  Closes the blind spot in the suite: prior
+# cells cover the validation-OFF default path only; this cell detects a
+# per-message coroutine-frame heap alloc if validate_inbound_() were (re-)
+# introduced as an asio::awaitable<> (the pre-simplify-triage regression).
+# Same mallocnesia harness as the other alloc-guard cells.
+# CTest NAME deliberately NOT `session_`-prefixed (driven by tools/check_alloc.py
+# under LD_PRELOAD, not swept by the ^session_ ctest selection — same convention
+# as alloc_guard_dispatch above).
+add_executable(test_validate_gate_alloc_guard test_validate_gate_alloc_guard.cpp)
+target_link_libraries(test_validate_gate_alloc_guard PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_validate_gate_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(test_validate_gate_alloc_guard PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME alloc_guard_validate_gate COMMAND test_validate_gate_alloc_guard)
+set_tests_properties(alloc_guard_validate_gate PROPERTIES
+  LABELS "041;alloc_guard;validation-gate;t014"
+)
+
+# Mallocnesia gate: re-runs the validate-ON alloc-guard under LD_PRELOAD so
+# global malloc/calloc/realloc is intercepted.  Absent mallocnesia.so → skip
+# (the base test alloc_guard_validate_gate is the fallback; it runs without
+# interception and asserts the validation outcome only).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME alloc_guard_validate_gate_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:test_validate_gate_alloc_guard>"
+  )
+  set_tests_properties(alloc_guard_validate_gate_mallocnesia PROPERTIES
+    LABELS "041;alloc_guard;validation-gate;t014"
+    DEPENDS test_validate_gate_alloc_guard)
+endif()
