@@ -1988,6 +1988,29 @@ add_threading_test(session_validate_gate_logon_arm
 set_tests_properties(session_validate_gate_logon_arm PROPERTIES
   LABELS "041;t013;t014;validation-gate;logon-arm;foundational")
 
+# ── 041-validation-gate-wiring T017 — Engine clock-config gate (US3) ─────────
+# SC-004 / FR-007 / FR-008 / C-4 / data-model E-5:
+#   Cell 1 (null clock)  → start() returns clock_not_set, no loops spawned.
+#   Cell 2 (valid clock) → start() succeeds, engine operates unchanged.
+# No live TLS needed: sessions use no-op transport_send.
+# T017 RED until T018 changes start() void → expected_t<void>.
+add_executable(engine_clock_gate_test
+  test_engine_clock_gate.cpp
+)
+target_link_libraries(engine_clock_gate_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_clock_gate_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME engine_clock_gate COMMAND engine_clock_gate_test)
+set_tests_properties(engine_clock_gate PROPERTIES
+  LABELS "041;t017;t018;us3;clock-gate;session")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

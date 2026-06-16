@@ -41,7 +41,15 @@ InteropEngineFixture::~InteropEngineFixture() {
     }
 }
 
-void InteropEngineFixture::start() { engine_.start(); }
+void InteropEngineFixture::start() {
+    // The fixture injects a real clock via with_clock() at construction (see
+    // the with_clock() call in the ctor), so validate_engine_config succeeds
+    // unconditionally here.  Assert to surface any future misconfiguration
+    // rather than silently running without session loops.  [041 T019 / C-4]
+    auto r = engine_.start();
+    assert(r.has_value() && "InteropEngineFixture::start() — engine_.start() failed");
+    (void)r;
+}
 
 bool InteropEngineFixture::run_until(const std::function<bool()>& ready,
                                      std::chrono::milliseconds deadline) {

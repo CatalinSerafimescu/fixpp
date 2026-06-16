@@ -74,9 +74,9 @@
 **Goal**: `Engine::start()` rejects an unset clock with `clock_not_set`; valid clock starts unchanged.
 **Independent test**: start an engine with null clock → `clock_not_set`, not operational; with valid clock → ok.
 
-- [ ] T017 [P] [US3] RED test: `Engine::start()` on a config with `clock==nullptr` returns `error::clock_not_set` and the engine does not become operational (no session loops spawned); with a valid clock returns success and operates unchanged (C-4 / SC-004). New `tests/session/`.
-- [ ] T018 [US3] Change `Engine::start()` `void`→`[[nodiscard]] expected_t<void>` (`include/fixpp/session/engine.hpp:270`, `src/session/engine.cpp:1079`); call `validate_engine_config(cfg)` at the top, return its error before any `co_spawn`. Make T017 GREEN.
-- [ ] T019 [US3] Migrate the `start()` call sites to check the result: the `fx.start()` fixture wrapper + the dozens of test/interop direct `start()` callers (RC-C — accurate blast radius; zero production callers, no C-ABI wrapper). Build GREEN across touched suites.
+- [X] T017 [P] [US3] RED test: `Engine::start()` on a config with `clock==nullptr` returns `error::clock_not_set` and the engine does not become operational (no session loops spawned); with a valid clock returns success and operates unchanged (C-4 / SC-004). New `tests/session/`.
+- [X] T018 [US3] Change `Engine::start()` `void`→`[[nodiscard]] expected_t<void>` (`include/fixpp/session/engine.hpp:270`, `src/session/engine.cpp:1079`); call `validate_engine_config(cfg)` at the top, return its error before any `co_spawn`. Make T017 GREEN.
+- [X] T019 [US3] Migrate the `start()` call sites to check the result: the `fx.start()` fixture wrapper + the dozens of test/interop direct `start()` callers (RC-C — accurate blast radius; zero production callers, no C-ABI wrapper). Build GREEN across touched suites.
 
 **Checkpoint**: US3 independently testable and independent of US1/US2.
 

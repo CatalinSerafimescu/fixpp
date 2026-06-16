@@ -36,6 +36,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
@@ -68,6 +70,16 @@ static bool has_authz_failed_event(const fixpp::session::Session& s) {
     });
 }
 
+// Build a fresh SendingTime(52) string so the Q3 guard (038/041 T019) admits
+// this frame when the engine has a real clock.
+static std::string utc_now_fix_timestamp() {
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
 // Build a valid FIX Logon frame.
 static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
                                                std::string_view target) {
@@ -78,6 +90,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
     body += field(35, "A");
     body += field(34, "1");
     body += field(49, sender);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 041 T019 clock gate)
     body += field(56, target);
     body += field(98, "0");
     body += field(108, "30");
@@ -150,6 +163,8 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
@@ -197,7 +212,7 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -265,6 +280,8 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
@@ -314,7 +331,7 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 

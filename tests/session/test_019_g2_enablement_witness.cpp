@@ -38,6 +38,7 @@
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
@@ -191,6 +192,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     fixpp::core::EngineConfig ecfg;
     ecfg.executor = ioc.get_executor();
     ecfg.application = app;
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    ecfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
@@ -230,7 +233,7 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
         << "register initiator failed";
 
     // ── Start engine and wait for both sessions to reach Active ──────────────
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     bool acc_active = false, ini_active = false;
     auto deadline_logon = std::chrono::steady_clock::now() + 5s;
