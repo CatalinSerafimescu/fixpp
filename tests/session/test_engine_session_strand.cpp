@@ -384,7 +384,7 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
         FAIL() << "V-1: initiator register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Phase 1: establish both sessions (single-threaded drive until both Active).
     bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
@@ -508,7 +508,7 @@ TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
         FAIL() << "V-3: register_session failed for one or more sessions";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Phase 1: single-threaded drive until all four sessions reach Active.
     bool pair_a_active = wait_both_active(ioc, *engine, acc_a_id, ini_a_id, 15000ms);
@@ -640,7 +640,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
         FAIL() << "V-9: register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Establish both sessions.
     bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
@@ -827,7 +827,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
         FAIL() << "V-10: initiator register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Establish both sessions.
     bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
@@ -1024,7 +1024,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
         FAIL() << "V-8: acceptor register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Start engine executor threads AFTER start() so the accept loop is already
     // queued.  t1 and t2 drive the ioc (and the accept loop which writes the map).
@@ -1173,7 +1173,7 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
         FAIL() << "V-12: acceptor register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Let the accept loop get established (listener bind, waiting on async_accept).
     // 50ms is sufficient to reach async_accept on a local loopback ioc.
@@ -1317,7 +1317,7 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         co_return;
     });
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Drive ioc on 2 background threads so the accept loop and initiator
     // can run concurrently with the test's stop() call.
@@ -1607,7 +1607,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // that returns end() (no entry).  The find() itself reads the unordered_map →
     // races the stop()-clear() just as a successful find() would.
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Part 1: TSan-race witness.
     //
@@ -1723,7 +1723,10 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
             stop_engine_sync(ioc, *engine2);
             FAIL() << "V-11 Part 2: initiator register_session failed";
         }
-        engine2->start();
+        if (!engine2->start().has_value()) {
+            stop_engine_sync(ioc, *engine2);
+            FAIL() << "V-11 Part 2: engine2.start() failed";
+        }
 
         // Wait for both sessions to reach Active (publish_entry has run).
         bool both_active = wait_both_active(ioc, *engine2, acc_id2, ini_id2, 8000ms);
@@ -1789,7 +1792,10 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
             stop_engine_sync(ioc, *engine3);
             FAIL() << "V-11 Part 3: initiator register_session failed";
         }
-        engine3->start();
+        if (!engine3->start().has_value()) {
+            stop_engine_sync(ioc, *engine3);
+            FAIL() << "V-11 Part 3: engine3.start() failed";
+        }
 
         bool both_active3 = wait_both_active(ioc, *engine3, acc_id3, ini_id3, 8000ms);
         if (!both_active3) {
@@ -1884,7 +1890,7 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
         FAIL() << "V-13: initiator register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Wait for both sessions to reach Active (ensures fsm_state_ is Active
     // before senders start, widening the send-vs-transition race window).
@@ -2042,7 +2048,7 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     // start() spawns loops for all registered sessions.
     // Pre-fix: outstanding_counter_ assigned AFTER loop → concurrent stop() sees null.
     // Post-fix: assigned BEFORE loop → stop() always finds a valid counter.
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Immediately call stop() — exercises the start/stop concurrent window.
     {
@@ -2137,7 +2143,7 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
         FAIL() << "V-15: initiator register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Wait for both sessions to reach Active so sends have a real session to target.
     bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
@@ -2286,7 +2292,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
             co_return;
         });
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     bool both_active = wait_both_active(ioc, *engine, acc_id, ini_id, 8000ms);
     if (!both_active) {
@@ -2415,7 +2421,7 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
         FAIL() << "V-17: initiator register_session failed";
     }
 
-    engine->start();
+    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
     // Worker threads drive the connect loop (which exhausts) + later stop().
     // work_guard keeps run() alive across the idle window (no run_for/restart UB).

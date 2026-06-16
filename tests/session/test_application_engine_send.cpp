@@ -221,7 +221,10 @@ bool setup_engine(asio::io_context& ioc, fixpp::session::Engine& engine,
         ADD_FAILURE() << "initiator register failed";
         return false;
     }
-    engine.start();
+    if (!engine.start().has_value()) {
+        ADD_FAILURE() << "engine.start() failed";
+        return false;
+    }
     bool ok = wait_until(ioc,
         [&] {
             auto a = engine.lookup(out_acc_id);

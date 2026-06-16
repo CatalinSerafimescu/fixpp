@@ -273,7 +273,7 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -379,7 +379,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -464,7 +464,7 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
