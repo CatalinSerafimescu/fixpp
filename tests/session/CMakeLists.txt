@@ -1988,6 +1988,18 @@ add_threading_test(session_validate_gate_logon_arm
 set_tests_properties(session_validate_gate_logon_arm PROPERTIES
   LABELS "041;t013;t014;validation-gate;logon-arm;foundational")
 
+# ── 041-validation-gate-wiring T015+T016 — US2 lenient-by-default (default-off)
+# T015 (C-2 default branch, FR-002, SC-001): violation inputs with flag=false →
+#   accepted and dispatched (no Reject). Positive dispatch proof: seq-advance.
+# T016 (SC-005, FR-002): structural proof via FIXPP_TEST_HOOKS
+#   has_validator_for_test() → false after open() with flag=false (dict set) —
+#   the direct named postcondition: no validator constructed.
+add_threading_test(session_validate_gate_default_off
+  test_validate_gate_default_off.cpp)
+target_compile_definitions(session_validate_gate_default_off PRIVATE FIXPP_TEST_HOOKS)
+set_tests_properties(session_validate_gate_default_off PROPERTIES
+  LABELS "041;t015;t016;us2;validation-gate;default-off;session")
+
 # ── 041-validation-gate-wiring T017 — Engine clock-config gate (US3) ─────────
 # SC-004 / FR-007 / FR-008 / C-4 / data-model E-5:
 #   Cell 1 (null clock)  → start() returns clock_not_set, no loops spawned.

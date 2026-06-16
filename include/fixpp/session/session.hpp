@@ -491,6 +491,14 @@ public:
         seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
         return store_then_emit(stamped_seq, frame);
     }
+
+    // TEST-ONLY accessor: returns true iff the validator was constructed at open()
+    // (i.e. validate_inbound_messages==true && dictionary!=null). Used by T016
+    // (041-validation-gate-wiring SC-005) to prove that the default (flag=false)
+    // path leaves validator_==null — no validator constructed or invocable.
+    // A plain bool accessor; adds no include edge → [const §XV.9]-safe.
+    // NOT for production use. [041 T016; SC-005; FR-002]
+    [[nodiscard]] bool has_validator_for_test() const noexcept { return validator_ != nullptr; }
 #endif
 
     // 015 T011 — Engine-internal acceptor attach primitive.

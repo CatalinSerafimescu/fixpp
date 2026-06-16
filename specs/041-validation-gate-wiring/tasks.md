@@ -62,8 +62,8 @@
 **Goal**: default config (flag false) is byte-for-byte unchanged from the prior release; no validator constructed/invoked.
 **Independent test**: run the existing inbound/interop corpus at default config; outcomes identical to baseline (T001).
 
-- [ ] T015 [P] [US2] RED/characterization test: with `validate_inbound_messages==false`, an out-of-order-header / undefined-tag / required-missing message is **accepted and dispatched** exactly as before (no validation-induced reject) (C-2 default branch, FR-002).
-- [ ] T016 [US2] Verify (and, if needed, tighten) the T014 guard so that on the default path the validator and the early MessageView parse are **never constructed/invoked** — SC-005. Add an instrumentation/inspection assertion or a structural test that the default path does not enter the validate block. Make T015 GREEN and confirm no diff vs the T001 baseline.
+- [X] T015 [P] [US2] RED/characterization test: with `validate_inbound_messages==false`, an out-of-order-header / undefined-tag / required-missing message is **accepted and dispatched** exactly as before (no validation-induced reject) (C-2 default branch, FR-002).
+- [X] T016 [US2] Verify (and, if needed, tighten) the T014 guard so that on the default path the validator and the early MessageView parse are **never constructed/invoked** — SC-005. Add an instrumentation/inspection assertion or a structural test that the default path does not enter the validate block. Make T015 GREEN and confirm no diff vs the T001 baseline.
 
 **Checkpoint**: US2 independently testable — default-off no-op confirmed against baseline.
 
