@@ -70,6 +70,41 @@ __attribute__((weak)) void alloc_guard_start() {}
 __attribute__((weak)) void alloc_guard_end() {}
 }
 
+// ── Sanitizer-detection guard ─────────────────────────────────────────────────
+//
+// ASan and TSan ship their own strong operator new/delete replacements.  Under
+// those sanitizers our TU-local replacement conflicts:
+//   - ASan: operator new allocates via ASan's allocator; our operator delete
+//     calls std::free directly → runtime alloc-dealloc-mismatch abort.
+//   - TSan: multiply-defined operator new at link time.
+// Under MSan the same conflict applies.
+//
+// Detection follows the established pattern in
+// tests/session/test_business_messages_build.cpp: clang exposes
+// __has_feature(address_sanitizer/thread_sanitizer/memory_sanitizer); GCC
+// defines __SANITIZE_ADDRESS__/__SANITIZE_THREAD__ directly.
+//
+// When FIXPP_SANITIZER_REPLACES_NEW is 1:
+//   - The TU-local operator new/delete replacements are compiled out.
+//   - The g_arming / g_new_count statics are compiled out.
+//   - LongMsgTypeNoGlobalHeapAlloc skips the count assertion (GTEST_SKIP) but
+//     still runs the validation-correctness path so the cell is not inert.
+//   - mallocnesia remains the CI-tier cross-check on the alloc-guard window.
+//   - UBSan is unaffected and keeps the full witness.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#endif
+#if !defined(FIXPP_SANITIZER_REPLACES_NEW) && \
+    (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#ifndef FIXPP_SANITIZER_REPLACES_NEW
+#define FIXPP_SANITIZER_REPLACES_NEW 0
+#endif
+
 // ── TU-local global operator new counter ─────────────────────────────────────
 //
 // WHY: mallocnesia is inert for the alloc-guard window on this WSL2/llvm22 host
@@ -91,6 +126,12 @@ __attribute__((weak)) void alloc_guard_end() {}
 // Both g_arming and g_new_count are constant-initialized (trivial types at
 // namespace scope), so they are safe to read from operator new during dynamic
 // initialisation of other TUs (g_arming == false at that point).
+//
+// Compiled out under ASan/TSan/MSan (FIXPP_SANITIZER_REPLACES_NEW == 1) because
+// those sanitizers supply their own operator new/delete and our replacement
+// conflicts (alloc-dealloc-mismatch / link multiply-defined).  See guard above.
+
+#if !FIXPP_SANITIZER_REPLACES_NEW
 
 static std::atomic<std::size_t> g_new_count{0};
 static bool g_arming = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -128,6 +169,8 @@ void operator delete[](void* p) noexcept { std::free(p); }
 
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+
+#endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {
 
@@ -400,20 +443,31 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
     // Post-fix (transparent string_hash, .find(string_view)):
     //   count == 0 → ASSERT_EQ PASSES → GREEN (confirmed 2026-06-16).
     //
+    // Under ASan/TSan/MSan: the TU-local operator new replacement is compiled out
+    // (FIXPP_SANITIZER_REPLACES_NEW == 1) so we cannot count allocations here.
+    // We still run the validation-correctness path to keep the cell non-inert;
+    // the count assertion is skipped with GTEST_SKIP.  mallocnesia remains the
+    // CI-tier cross-check on the alloc-guard window.
+    //
     // SECONDARY gate: mallocnesia LD_PRELOAD (alloc_guard_start/end markers).
     // Non-discriminating on this WSL2/llvm22 host (markers not exported as
     // dynamic symbols → interceptor cannot arm itself); retained for CI coverage.
+#if !FIXPP_SANITIZER_REPLACES_NEW
     g_new_count.store(0, std::memory_order_relaxed);
     g_arming = true;
+#endif
     alloc_guard_start();
     bool measured_ok = run_long_validate();
     alloc_guard_end();
+#if !FIXPP_SANITIZER_REPLACES_NEW
     g_arming = false;
     std::size_t global_new_count = g_new_count.load(std::memory_order_relaxed);
+#endif
 
     EXPECT_TRUE(measured_ok)
         << "measured parse+validate failed for long-MsgType — conformant frame must pass";
 
+#if !FIXPP_SANITIZER_REPLACES_NEW
     // PRIMARY alloc-guard assertion: zero global operator new calls in the window.
     // This is the discriminating gate for the transparent-hash P1 fix.
     ASSERT_EQ(global_new_count, std::size_t{0})
@@ -421,6 +475,10 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
         << " time(s) during parse+validate with 31-char MsgType — "
            "table_view lookups must not construct std::string temporaries "
            "(post-fix: transparent string_hash / std::equal_to<> on valid_/required_ maps)";
+#else
+    GTEST_SKIP() << "operator-new replacement disabled under sanitizers (ASan/TSan/MSan own "
+                    "the allocator) — count assertion skipped; mallocnesia is the CI-tier gate";
+#endif
 }
 
 }  // namespace

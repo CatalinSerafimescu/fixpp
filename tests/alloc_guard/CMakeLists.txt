@@ -146,5 +146,5 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
   )
   set_tests_properties(alloc_guard_validate_gate_mallocnesia PROPERTIES
     LABELS "041;alloc_guard;validation-gate;t014"
-    DEPENDS test_validate_gate_alloc_guard)
+    DEPENDS alloc_guard_validate_gate)
 endif()
