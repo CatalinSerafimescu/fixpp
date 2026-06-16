@@ -67,6 +67,14 @@ bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
     return false;
 }
 
+// Does ONE specific captured frame contain a literal needle? (Stronger than
+// any_frame_contains: ties the asserted token to a single emitted frame so a
+// witness can't be satisfied by the token appearing in some unrelated frame.)
+bool frame_has(const std::vector<std::byte>& f, std::string_view needle) {
+    std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
+    return wire.find(std::string(needle)) != std::string::npos;
+}
+
 using FixTcCoverageGaps = ParityAcceptorFixture;
 
 // ── gap #1 / FIX-TC 2b — too-high inbound seqnum → ResendRequest, stays Active ─
@@ -81,17 +89,25 @@ TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
 
+    const std::size_t before = capture.frames.size();
+
     // Peer skips [2..9] and sends a Heartbeat at seq=10 (too high).
     (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/10, "TW", "ISLD"));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "013 FR-009: too-high gap → AwaitingResend, session stays Active";
-    EXPECT_GE(capture.count_msg_type("2"), 1U)
-        << "013 FR-009: a ResendRequest(35=2) must be emitted to fill the gap "
-           "(this is the emission the seqnum_gap_fatal cells never asserted)";
-    // The ResendRequest fills from the first missing seqnum (our next-expected = 2).
-    EXPECT_TRUE(any_frame_contains(capture, "7=2\x01"))
-        << "ResendRequest BeginSeqNo(7) should start at the first missing seqnum (2)";
+    ASSERT_EQ(capture.frames.size(), before + 1U)
+        << "exactly one frame (the ResendRequest) must be emitted in response";
+    const auto& rr = capture.frames.back();
+    EXPECT_TRUE(frame_has(rr, "35=2\x01")) << "the emitted frame must be a ResendRequest(35=2)";
+    // Pin the FULL resend range on the SAME frame: BeginSeqNo(7) = first missing
+    // seqnum (2), EndSeqNo(16) = 0 ("through current" — open-ended). Asserting
+    // only 7=2 (or asserting across all frames) would tolerate a mutated EndSeqNo
+    // that silently narrows the recovery window.
+    EXPECT_TRUE(frame_has(rr, "7=2\x01"))
+        << "ResendRequest BeginSeqNo(7) must start at the first missing seqnum (2)";
+    EXPECT_TRUE(frame_has(rr, "16=0\x01"))
+        << "ResendRequest EndSeqNo(16) must be 0 (through-current / open-ended)";
 }
 
 // ── gap #9 — ResendRequest EndSeqNo larger than messages we have → GapFill ────
@@ -108,6 +124,8 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
     fixpp::session::Session s{engine, make_acceptor_cfg()};
     ASSERT_TRUE(drive_to_active(s));
 
+    const std::size_t before = capture.frames.size();
+
     // We (acceptor) have emitted only our Logon reply (outbound seq 1) and keep no
     // store. The peer asks for [1..100] — far beyond anything we can replay.
     (void)feed(s, make_resend_request("FIX.4.2", /*seq=*/2, "TW", "ISLD",
@@ -115,13 +133,21 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "over-range ResendRequest must not disconnect the session";
-    EXPECT_GE(capture.count_msg_type("4"), 1U)
-        << "the over-range request must collapse into a SequenceReset-GapFill(35=4)";
-    // DISCRIMINATING (not just "a GapFill happened"): the store-absent GapFill must
-    // honor the full requested EndSeqNo, so NewSeqNo(36)=requested_end+1=101. A
-    // witness asserting only count>=1 would also pass on a [1..1] gap-fill
-    // (NewSeqNo=2) or any unrelated GapFill — 36=101 pins the over-range coverage.
-    EXPECT_TRUE(any_frame_contains(capture, "36=101\x01"))
+    // Enforce the "SINGLE GapFill" post-condition: exactly one frame emitted, and
+    // it is a SequenceReset (35=4). Asserting count>=1 across all frames would
+    // tolerate multiple resets or fail to bind the range fields to this frame.
+    ASSERT_EQ(capture.frames.size(), before + 1U)
+        << "the over-range request must collapse into exactly ONE reply frame";
+    const auto& gf = capture.frames.back();
+    EXPECT_TRUE(frame_has(gf, "35=4\x01")) << "the single reply must be a SequenceReset(35=4)";
+    // DISCRIMINATING the over-range coverage on that SAME frame: it must be a
+    // GAP-FILL (123=Y), not a hard reset (123=N), and honor the full requested
+    // EndSeqNo so NewSeqNo(36)=requested_end+1=101. A witness asserting only
+    // "a 35=4 exists" would also pass on a [1..1] gap-fill (36=2), a reset-mode
+    // 35=4, or an unrelated SequenceReset — 36=101 + 123=Y pin the exact behavior.
+    EXPECT_TRUE(frame_has(gf, "123=Y\x01"))
+        << "the reply must be a SequenceReset-GapFill (123=Y), not a hard reset";
+    EXPECT_TRUE(frame_has(gf, "36=101\x01"))
         << "store-absent over-range GapFill must carry NewSeqNo=EndSeqNo+1 (101)";
 }
 
@@ -154,29 +180,44 @@ TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotFirst_Accepted_Diverg
         << "DIVERGENCE: fixpp emits NO Reject for field-order violations (QF emits 373=14)";
 }
 
-// ── gap #3 / FIX-TC 15 — non-header body fields in arbitrary order → ACCEPTED ──
+// ── gap #3 / FIX-TC 15 — non-header BODY fields in arbitrary order → ACCEPTED ──
 //
-// Same order-independent-parse divergence (B-cov-1). Body fields presented in a
-// non-dictionary order are accepted; no Reject, session continues.
+// Same order-independent-parse divergence (B-cov-1). This must shuffle real
+// BODY fields, not header/session fields: a Heartbeat carries no body fields, so
+// shuffling 49/52/56 (all HEADER fields) would only re-test the header-order cell
+// above. Instead use a ResendRequest, whose body fields are BeginSeqNo(7) and
+// EndSeqNo(16), and place EndSeqNo(16) BEFORE BeginSeqNo(7). fixpp parses them
+// order-independently: the resend range is read correctly and honored — proven by
+// the GapFill reply carrying NewSeqNo(36)=101 (= EndSeqNo 100 + 1). A parser that
+// enforced body-field order would Reject(35=3) and emit no GapFill.
 TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
+    const std::size_t before = capture.frames.size();
 
-    // A Heartbeat with the CompID/SendingTime body fields in a shuffled order
-    // (56 then 49 then 52, vs the canonical 49/52/56). MsgType stays first.
+    // A ResendRequest(35=2, seq=2) with EndSeqNo(16) placed BEFORE BeginSeqNo(7) —
+    // body fields in non-canonical order.
     std::string body;
-    body += field(35, "0");
+    body += field(35, "2");
     body += field(34, "2");
-    body += field(56, "ISLD");
     body += field(49, "TW");
     body += field(52, "20240101-00:00:00.000");
+    body += field(56, "ISLD");
+    body += field(16, "100");  // EndSeqNo before BeginSeqNo (canonical is 7 then 16)
+    body += field(7, "1");
     (void)feed(s, frame_from_body("FIX.4.2", body));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
-        << "shuffled body fields are accepted, session stays Active";
+        << "out-of-order body fields are accepted, session stays Active";
     EXPECT_EQ(next_inbound(s), 3U) << "processed in-sequence (counter advances)";
-    EXPECT_EQ(capture.count_msg_type("3"), 0U) << "no Reject emitted";
+    EXPECT_EQ(capture.count_msg_type("3"), 0U)
+        << "DIVERGENCE: no Reject for out-of-order body fields (QF emits 373=14)";
+    // Prove the body fields were actually PARSED (not ignored): the resend range
+    // [1..100] was read from the reversed 16/7 and honored → GapFill NewSeqNo=101.
+    ASSERT_EQ(capture.frames.size(), before + 1U) << "exactly one GapFill reply expected";
+    EXPECT_TRUE(frame_has(capture.frames.back(), "36=101\x01"))
+        << "the reversed-order EndSeqNo(16)=100 must still be parsed (NewSeqNo=101)";
 }
 
 // ── gap #10 / FIX-TC validLogonState_MsgTypeLogoutAndLogonAlreadySent ─────────
