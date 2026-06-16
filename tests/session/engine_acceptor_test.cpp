@@ -167,6 +167,7 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str,
     body += field(35, "0");                  // MsgType = Heartbeat
     body += field(34, std::to_string(seq));  // MsgSeqNum
     body += field(49, sender);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 041 T019 clock gate)
     body += field(56, target);
 
     std::string msg;
@@ -301,7 +302,7 @@ static std::optional<std::pair<fixpp::session::SessionId, uint16_t>> start_mtls_
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     if (!engine.register_session(std::move(acc)).has_value()) return std::nullopt;
 
-    engine.start();
+    if (!engine.start().has_value()) return std::nullopt;
     ioc.run_for(50ms);
     ioc.restart();
     uint16_t port = engine.acceptor_bound_endpoint(acc_id).port;
@@ -335,6 +336,8 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     // Build a shared TLS factory + cert_source.
     fixpp::tls::file_cert_source::Config cs_cfg;
@@ -384,7 +387,7 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Run executor briefly to let the accept loop bind the listener.
     ioc.run_for(50ms);
@@ -449,6 +452,8 @@ TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     std::shared_ptr<fixpp::transport::TransportFactory> fac;
     auto rig = start_mtls_acceptor(ioc, engine, fixture_dir, fac);
@@ -498,6 +503,8 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     std::shared_ptr<fixpp::transport::TransportFactory> fac;
     auto rig = start_mtls_acceptor(ioc, engine, fixture_dir, fac);
@@ -575,6 +582,8 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
@@ -620,7 +629,7 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -762,7 +771,7 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     auto acc_id = fixpp::session::SessionId::from_config(acc);
     ASSERT_TRUE(engine.register_session(std::move(acc)).has_value());
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;

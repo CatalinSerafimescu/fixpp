@@ -26,12 +26,8 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstdlib>
-#include <future>
-#include <memory>
-#include <span>
-#include <utility>
-
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -40,6 +36,10 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <utility>
 
 #include "support/minimal_dictionary.hpp"
 
@@ -108,7 +108,10 @@ TEST(ReconnectPolicyWitness, StopReturnsBoundedOnUnreachablePeer) {
     ASSERT_NE(factory, nullptr) << "TLS factory build failed";
 
     asio::io_context ioc;
-    fixpp::session::Engine engine{ioc.get_executor(), fixpp::core::EngineConfig{}};
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     fixpp::session::SessionConfig ini;
     ini.sender_comp_id = "INITIATOR";
@@ -126,7 +129,7 @@ TEST(ReconnectPolicyWitness, StopReturnsBoundedOnUnreachablePeer) {
     ini.transport_send = [](std::span<const std::byte>) {};
 
     ASSERT_TRUE(engine.register_session(std::move(ini)).has_value());
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Let the connect loop reach the in-flight async_connect (resolve of an IP is
     // immediate; the connect then blocks on the black-holed SYN).

@@ -109,7 +109,7 @@ TEST(EngineFirstFrameTest, SilentPeerClosedWithinDeadline) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    harness->engine().start();
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
     // Run briefly to let the accept loop bind the listener (OS port assignment).
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
@@ -148,7 +148,7 @@ TEST(EngineFirstFrameTest, OverBudgetPayloadClosedWithinDeadline) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    harness->engine().start();
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;
@@ -191,7 +191,7 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    harness->engine().start();
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;

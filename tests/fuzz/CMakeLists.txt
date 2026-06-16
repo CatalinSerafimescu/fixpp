@@ -40,7 +40,8 @@ set_target_properties(fuzz_wire_framer PROPERTIES
 # T050 — Seam #11 — Wire parser + OffsetTable fuzzer for 004-wire-codec.
 # fuzz_wire_parser: feed arbitrary bytes through the test factory to
 # Parser<Index>::parse; assert no OOB/UB, bounded OffsetTable, defined errors.
-# NOTE: fuzz_wire_validator.cpp is intentionally ABSENT (US4 PAUSED).
+# NOTE: fuzz_wire_validator.cpp NOW EXISTS — wired by 041-validation-gate-wiring
+# (T026). See the fuzz_wire_validator target below.
 add_executable(fuzz_wire_parser fuzz_wire_parser.cpp)
 target_link_libraries(fuzz_wire_parser PRIVATE fixpp_wire fixpp_core)
 target_compile_options(fuzz_wire_parser PRIVATE -fsanitize=fuzzer,address,undefined)
@@ -49,6 +50,24 @@ target_include_directories(fuzz_wire_parser PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 set_target_properties(fuzz_wire_parser PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+# T026 — Seam #11 extension — Wire validator fuzzer for 041-validation-gate-wiring
+# per `[const §VII.7]`. Ends the feature-004 "US4 PAUSED" deferral.
+# fuzz_wire_validator: feed arbitrary bytes through the frame factory and
+# Parser<Index>::parse; on a successfully parsed MessageView, run
+# dictionary_driven_validator::validate() backed by a real Dictionary
+# (as_table_view()). Asserts no crash/OOB/UB, no exception escape, and every
+# rejection is a defined wire_* slot (never a raw decimal_* code — T009a remap).
+add_executable(fuzz_wire_validator fuzz_wire_validator.cpp)
+target_link_libraries(fuzz_wire_validator PRIVATE fixpp_wire fixpp_dictionary fixpp_core)
+target_compile_options(fuzz_wire_validator PRIVATE -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_wire_validator PRIVATE -fsanitize=fuzzer,address,undefined)
+target_include_directories(fuzz_wire_validator PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(fuzz_wire_validator PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 

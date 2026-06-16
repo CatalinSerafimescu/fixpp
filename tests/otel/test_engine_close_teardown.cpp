@@ -183,7 +183,7 @@ TEST(EngineCloseTeardown, E2_ProviderShutdownCalled) {
     eng_cfg.meter    = meter_provider;
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
@@ -204,7 +204,7 @@ TEST(EngineCloseTeardown, E2_NullProviders_NoCrash) {
     eng_cfg.clock    = make_mock_clock(ioc.get_executor());
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.run();
@@ -279,7 +279,7 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     eng_cfg.logger   = logger;
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Time Engine::stop() — it must return bounded by drain_timeout, not
     // blocked for the full k_flush_delay.

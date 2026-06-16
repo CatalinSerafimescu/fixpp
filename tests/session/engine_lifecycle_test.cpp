@@ -45,6 +45,7 @@
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
@@ -127,6 +128,8 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
 
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     // The leaf cert CN is "fixpp-leaf-rsa2048" (loopback fixture convention).
@@ -165,7 +168,7 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     // ── (a) lazy construction: null before each loop reaches open() ───────────
     // start() only co_spawns the loops (posts them); nothing runs until the
     // io_context is polled, so lookup() is null for both right after start().
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
     EXPECT_EQ(engine.lookup(acc_id), nullptr)
         << "acceptor lookup() must be null after start() but before its accept "
         << "loop reaches the lazy ctor + open() (Gate A New-3).";

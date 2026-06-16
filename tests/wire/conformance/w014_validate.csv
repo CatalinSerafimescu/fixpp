@@ -16,7 +16,10 @@ w014,T1.1,conforming-heartbeat-t11,383d464958542e312e3101393d33300133353d3001343
 # missing required field (ClOrdID/tag-11 absent from NewOrderSingle)
 w014,4.4,missing-required-field-nos-44,383d4649582e342e3401393d33300133353d440134393d53454e4445520135363d5441524745540133343d310131303d31353101,0,wire_required_field_missing
 # enum violation: Side (tag 54) value 'X' is not in the {1..9} allowed set
-w014,4.4,enum-violation-side-44,383d4649582e342e3401393d36330133353d440134393d53454e4445520135363d5441524745540133343d310131313d4f5244310135353d4141504c0135343d580133383d3130300134303d320131303d30333801,0,wire_field_value_out_of_range
+# Phase-1 (041-validation-gate-wiring FR-005): enum_valid() always returns
+# true; enum-value violations are accepted. Changed expect_ok=0→1.
+# Phase-2 (2c enum tables) will restore expect_ok=0,wire_field_value_out_of_range.
+w014,4.4,enum-violation-side-44,383d4649582e342e3401393d36330133353d440134393d53454e4445520135363d5441524745540133343d310131313d4f5244310135353d4141504c0135343d580133383d3130300134303d320131303d30333801,1,
 # unexpected tag: tag 9999 is not valid for Heartbeat (35=0) in FIX 4.2
 w014,4.2,unexpected-tag-42,383d4649582e342e3201393d34310133353d300134393d53454e4445520135363d5441524745540133343d3101393939393d424f4755530131303d30333701,0,wire_unexpected_tag
 # malformed repeating-group count: NoPartyIDs=2 but only one field follows

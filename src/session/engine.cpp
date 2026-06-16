@@ -192,6 +192,12 @@ void Engine::publish_reader_snapshot_unlocked_() {
 // Duplicate SessionId::from_config(cfg) → session_invalid_argument (119 / R5).
 
 expected_t<void> Engine::register_session(SessionConfig cfg) {
+    // 041 T004 / C-5 / FR-011 / data-model E-1: fail-closed config gate.
+    // validate_inbound_messages=true requires a non-null dictionary; reject BEFORE
+    // any registry mutation so no half-registered entry is left behind.
+    if (cfg.validate_inbound_messages && cfg.dictionary == nullptr)
+        return std::unexpected(error::invalid_session_config);
+
     SessionId id = SessionId::from_config(cfg);  // derive key BEFORE move
     if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);
 
@@ -1072,11 +1078,22 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     co_return;
 }
 
-// ── start (FR-001/FR-003 / data-model "Public surface") ──────────────────────
-// Non-blocking. co_spawns one per-role loop per registered session on exec_.
-// Each loop co_awaits open() itself — cannot run in this synchronous void.
+// ── start (FR-001/FR-003/FR-007 / data-model "Public surface" / 041 T018) ─────
+// Non-blocking. Validates the EngineConfig (clock not null) before spawning.
+// Returns clock_not_set (slot 54) without spawning any loops if invalid.
+// On success, co_spawns one per-role loop per registered session on exec_.
+// Each loop co_awaits open() itself — cannot run in this synchronous call.
+// C-4 / SC-004: [[nodiscard]] — callers MUST check the result.
 
-void Engine::start() {
+fixpp::core::expected_t<void> Engine::start() {
+    // 041 T018 / FR-007 / C-4: fail fast if the config is invalid.
+    // validate_engine_config rejects a null clock with clock_not_set (slot 54).
+    // Return BEFORE publishing the counter or spawning any loops — no partial
+    // operational state on failure.
+    if (auto r = fixpp::core::validate_engine_config(engine_cfg_); !r) {
+        return std::unexpected(r.error());
+    }
+
     auto counter = std::make_shared<std::atomic<int>>(0);
 
     // gate-b/r1 #2 (TOCTOU fix): publish outstanding_counter_ BEFORE spawning any
@@ -1129,6 +1146,7 @@ void Engine::start() {
                 asio::bind_cancellation_slot(entry.session_cancel.slot(), asio::detached));
         }
     }
+    return {};
 }
 
 // ── stop (FR-011 / C5 / E-7; T014 teardown ordering) ─────────────────────────

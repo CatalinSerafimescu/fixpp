@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -66,6 +67,11 @@ public:
         h->fixture_dir_ = fixture_dir;
         h->transport_fixture_ =
             std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(h->fixture_dir_, exec);
+        // 041 T019: inject a real system clock if the caller did not supply one.
+        // Engine::start() rejects a null clock with clock_not_set (FR-007/C-4).
+        if (!engine_cfg.clock) {
+            engine_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(exec);
+        }
         h->engine_ = std::make_unique<fixpp::session::Engine>(exec, std::move(engine_cfg));
         if (register_sessions) h->register_default_sessions(exec);
         return h;

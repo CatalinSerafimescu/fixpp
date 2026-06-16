@@ -56,6 +56,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
@@ -80,6 +82,16 @@ using fixpp::session::fsm_state;
 
 namespace {
 
+// Build a fresh SendingTime(52) string so the Q3 guard (038/041 T019) admits
+// this frame when the engine has a real clock.
+static std::string utc_now_fix_timestamp() {
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
 static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
@@ -92,6 +104,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
     body += field(35, msg_type);
     body += field(34, std::to_string(seq_num));
     body += field(49, sender);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 041 T019 clock gate)
     body += field(56, target);
     body += extra_body;
 
@@ -314,6 +327,8 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
 
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
@@ -352,7 +367,7 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
                    asio::detached);
 
     // ── Start the engine ─────────────────────────────────────────────────────
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Run the executor for up to 4 seconds to allow:
     //   GREEN path: connect → handshake → Logon emission → Logon-ack + kN HBs

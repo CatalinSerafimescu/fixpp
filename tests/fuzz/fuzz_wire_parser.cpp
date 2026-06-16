@@ -17,8 +17,8 @@
 // frames, the factory itself returns a wire_* error and parse() is skipped;
 // both paths are exercised by the fuzzer.
 //
-// Validator bench omitted (US4 PAUSED — deferred with US4):
-//   NO fuzz_wire_validator.cpp per HARD CONSTRAINT.
+// Validator harness: fuzz_wire_validator.cpp wired by 041-validation-gate-wiring
+// (T026) — the feature-004 "US4 PAUSED" deferral is ended.
 //
 // Campaign note (T050): A full ≥10-min Tier-1 ASan+UBSan campaign is the
 // CI/T055 responsibility. The in-PR campaign was run for 120 s under

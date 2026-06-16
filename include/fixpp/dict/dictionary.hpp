@@ -15,8 +15,9 @@
 //     `component`, `group`, `messages`).
 //   - Move-only value semantics with heap-pinned metadata handle.
 //
-// OUT of scope this PR: `with_overlay`, `as_table_view`,
-// `resolve_application_version`, `was_dialect_promoted` — all deferred.
+// OUT of scope this PR: `with_overlay`,
+// `resolve_application_version`, `was_dialect_promoted` — deferred.
+// `as_table_view()` implemented in 041-validation-gate-wiring (T008).
 
 #pragma once
 
@@ -24,6 +25,7 @@
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/group_ref.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <memory>
 #include <optional>
@@ -167,6 +169,20 @@ public:
     // Aliases the metadata-handle name pool (lifetime = this Dictionary).
     [[nodiscard]] std::string_view field_name(std::uint16_t tag) const noexcept
         [[clang::lifetimebound]];
+
+    // 041-validation-gate-wiring T008: build a `dict::table_view` from this
+    // Dictionary for use by `wire::dictionary_driven_validator`. The returned
+    // `table_view` owns its tables; all validator method calls on it are O(1)
+    // and alloc-free (tables are built once here, not per-message).
+    //
+    // Builds: field-valid sets, required-field lists, group first/member tags,
+    // global tag→`field_type` map (field_data_type collapsed via
+    // `field_type_from_data_type()`). `enum_valid` is stubbed to true (FR-005,
+    // enum tables deferred to 2c work).
+    //
+    // [const §XV.1]: construction only at config-time; the returned table_view
+    // is immutable and must not be rebuilt on the per-message hot path.
+    [[nodiscard]] table_view as_table_view() const;
 
 private:
     friend class XmlLoader;

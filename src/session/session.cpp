@@ -71,6 +71,12 @@
 #include <fixpp/session/application.hpp>  // Application::fromAdmin / fromApp
 #include <fixpp/session/engine.hpp>       // SessionId::from_config
 #include <fixpp/wire/parser.hpp>          // wire::Parser<Index>, wire::MessageView<Index>
+// 041-validation-gate-wiring T014: full definition of dictionary_driven_validator
+// (forward-declared in session.hpp to keep it out of the awaitable closure per
+// [const §XV.9]). Also includes dict/table_view.hpp for as_table_view().
+// session → wire is ALLOWED per [arch §5.3] / check_layers.py.
+#include <fixpp/wire/reject_reason_map.hpp>  // T011: wire_error_to_session_reject_reason
+#include <fixpp/wire/validator.hpp>          // T014: dictionary_driven_validator
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -1083,6 +1089,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         store_is_persistent_ = cfg_.store_factory->yields_persistent_store();
     }
 
+    // ── 041-validation-gate-wiring T014 — build validator once at open() ──────
+    // Construct the dictionary_driven_validator from the session dictionary's
+    // table_view (built once here, zero per-message heap — [const §VIII.5]/§XV.1).
+    // Guard: cfg_.validate_inbound_messages && cfg_.dictionary non-null.
+    // cfg_.dictionary is guaranteed non-null by this point: the null-dict check
+    // at line ~903 above returns invalid_session_config before reaching here.
+    // A directly-constructed Session (bypassing register_session's T004 gate)
+    // that sets validate_inbound_messages=true with a null dictionary is
+    // therefore caught by open()'s own null-dict guard too. The additional
+    // null-check here is a defensive belt-and-suspenders for future callers.
+    // [041 T014; data-model E-2; research R-2/R-6; SC-005; FR-002]
+    if (cfg_.validate_inbound_messages) {
+        // Defensive: dictionary should be non-null here (open() rejects null-dict
+        // above), but guard explicitly to avoid a null deref if the invariant drifts.
+        if (cfg_.dictionary) {
+            validator_ = std::make_unique<fixpp::wire::dictionary_driven_validator>(
+                cfg_.dictionary->as_table_view());
+        }
+        // If dictionary is null despite the guard, validator_ stays null → the
+        // validate gate in on_inbound_frame skips (fail-closed skip, not crash).
+        // This matches R-6: "validation enabled + no dict = config error".
+        // In practice this branch is unreachable in production (open() would
+        // have returned invalid_session_config above).
+    }
+
     state_ = lifecycle::open;
 
     // US4 (T046): capture transport_send from config (null if not set).
@@ -1646,6 +1677,101 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     co_return fixpp::core::expected_t<void>{};
 }
 
+// ── emit_session_reject_ (with reason + ref_tag_id) ──────────────────────────
+//
+// 041-validation-gate-wiring T010 — overload that threads the mapped
+// SessionRejectReason (373) and an optional offending RefTagID (371) through
+// to the already-capable build_reject (admin_messages.cpp:613-700, UNCHANGED).
+//
+// validate() returns a wire_* error slot; the caller maps it via
+// wire_error_to_session_reject_reason() (T011) and passes the resulting reason
+// here. ref_tag_id == 0 → 371 omitted from the outbound Reject frame (the
+// validate gate has no per-tag provenance from validate(); it passes 0).
+//
+// Identical Disconnected-on-failure handling to the zero-arg overload.
+// [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
+asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
+    seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id) noexcept {
+    std::array<std::byte, 512> rj_buf{};
+    const auto rj_st52 = effective_clock_
+                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                             : SendingTimeStamp{};
+    const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
+    auto rj_r =
+        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
+                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id,
+                                     ref_msg_type, reason, cfg_.begin_string, rj_st52.value);
+    if (rj_r) {
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(assign_r.error());
+        }
+        // 036 T015: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
+        if (!fire_to_admin_(*rj_r)) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+        if (!emit_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(emit_r.error());
+        }
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// ── 041-validation-gate-wiring FIX-2 + per-message-alloc fix:
+//    validate_inbound_ (synchronous, no sub-coroutine frame)
+//
+// Extracted from the three verbatim validate-gate blocks (NotConnected:1839,
+// Active:2462, LogonSent:3528). Each block built the same kInboundParseArena
+// stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
+// Now collapsed here; emit_session_reject_ is inlined at each call site so the
+// PASS path (returns nullopt) is coroutine-frame-free and alloc-free.
+//
+// Returns nullopt when validation passes (or is inapplicable: framer/parse fail).
+// Returns optional{RejectDecision} when a violation is found; caller emits:
+//   co_return co_await emit_session_reject_(
+//       parse_seqnum(hdr.msg_seq_num), hdr.msg_type, rej->reason, rej->ref_tag_id);
+//
+// SYNCHRONOUS — no co_await anywhere. All arenas are stack-local.
+// PRECONDITIONS (callers guard):
+//   • cfg_.validate_inbound_messages && validator_ must hold
+//   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
+// [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
+std::optional<Session::RejectDecision> Session::validate_inbound_(
+    std::span<const std::byte> frame,
+    fixpp::session::detail::FrameHeader const& hdr) const noexcept {
+    std::array<std::byte, kInboundParseArena> vg_buf{};
+    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    std::array<std::byte, 512> vg_carry_store{};
+    std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(), vg_carry_store.size(),
+                                                    std::pmr::null_memory_resource()};
+    fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
+    fixpp::wire::Framer vg_framer;
+    std::array<fixpp::wire::frame_view, 1> vg_out{};
+    auto vg_feed = vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
+    if (!vg_feed || vg_feed->empty()) {
+        return std::nullopt;
+    }
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
+    std::array<std::byte, 512> vg_scratch_buf{};
+    std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
+                                                      std::pmr::null_memory_resource()};
+    auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+    if (!vg_mv_r) {
+        return std::nullopt;
+    }
+    auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
+    if (!val_r) {
+        const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
+        return RejectDecision{vg_reason, 0};
+    }
+    return std::nullopt;
+}
+
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
 //
 // parse_cn_from_dn_local: extract the first "CN=" value from an OpenSSL
@@ -1710,6 +1836,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
+            // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
+            // Run BEFORE interpret_logon so a dict-invalid Logon produces a Reject
+            // instead of a silent Disconnect (C-2 rows a/c-i/validate-first ordering).
+            // Guard: outer cfg_.validate_inbound_messages + inner non-null validator_
+            // (built at open() when validate_inbound_messages && dictionary).
+            // No-reject-loop: skip validate for 35=3 (Reject) and 35=5 (Logout) —
+            // these are drained silently on this arm anyway (FR-004 no-loop guard).
+            // Seqnum is NOT advanced on validate failure (validate fires before
+            // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
+            // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
+            // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
+            if (cfg_.validate_inbound_messages && validator_) {
+                auto vg_hdr = scan_frame_header(frame);
+                if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
+                    if (auto rej = validate_inbound_(frame, vg_hdr)) {
+                        co_return co_await emit_session_reject_(parse_seqnum(vg_hdr.msg_seq_num),
+                                                                vg_hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
+                    }
+                }
+            }
+
             // First message must be a Logon. interpret_logon validates:
             //   MsgType==A, BeginString==cfg_.begin_string,
             //   SenderCompID==cfg_.target_comp_id (peer's sender = our target),
@@ -2306,6 +2454,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (5) message-type-for-state
 
             auto hdr = scan_frame_header(frame);
+
+            // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
+            // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
+            // and BEFORE check_inbound (C-3: seqnum NOT advanced on validate failure).
+            // No-reject-loop: 35=3 and 35=5 exempt (FR-004). [041 T014; data-model E-4]
+            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            if (cfg_.validate_inbound_messages && validator_) {
+                if (hdr.msg_type != "3" && hdr.msg_type != "5") {
+                    if (auto rej = validate_inbound_(frame, hdr)) {
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
+                    }
+                }
+            }
 
             // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
             // BeginString(8) mismatch → always session-fatal → Disconnected.
@@ -3351,6 +3514,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // US4/Phase 6 (when the Logout build/send path is wired); for now
             // we transition directly to Disconnected on the fatal/refusal cells,
             // matching the same pattern Phase 3 used for NotConnected refusals.
+
+            // Header scan hoisted above interpret_logon so the validate gate (below)
+            // can use hdr.msg_type for the 3/5 no-reject-loop exemption and
+            // hdr.msg_seq_num for the RefSeqNum in any emitted Reject.
+            // The hdr is reused for the SendingTime/seqnum guards below.
+            // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
+            auto hdr = scan_frame_header(frame);
+
+            // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
+            // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
+            // rather than a silent Disconnect (C-2 validate-first ordering, FR-003).
+            // No-reject-loop: 35=3 and 35=5 exempt. C-3: seqnum NOT advanced.
+            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
+            if (cfg_.validate_inbound_messages && validator_) {
+                if (hdr.msg_type != "3" && hdr.msg_type != "5") {
+                    if (auto rej = validate_inbound_(frame, hdr)) {
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
+                    }
+                }
+            }
+
             auto result = fixpp::session::interpret_logon(frame, cfg_.target_comp_id,
                                                           cfg_.sender_comp_id, cfg_.begin_string);
 
@@ -3362,9 +3549,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
-
-            // Valid Logon-ack shape: scan header fields (SendingTime + seqnum).
-            auto hdr = scan_frame_header(frame);
 
             // ── Guard (3): SendingTime MaxLatency — Logon-path special case ───
             // D-3 / FR-009 / RC#5: if the inbound Logon's SendingTime is absent,

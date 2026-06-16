@@ -85,3 +85,22 @@ add_wire_test(wire_tag_scan_test tag_scan_test.cpp)                             
 # 040-inbound-tag-overflow-hardening — Phase 4 US2 site-1/site-2 witnesses (T008/T009/T012)
 add_wire_test(wire_offset_table_overflow_test offset_table_overflow_test.cpp)    # T008/T012
 add_wire_test(wire_parser_overflow_test parser_overflow_test.cpp)                # T009/T012
+
+# 041-validation-gate-wiring T009/T009a: compile-witness (production table_view,
+# no mock) + Float parse-error remap witness (garbage Float → wire_field_value_out_of_range).
+add_executable(wire_validator_production_table_view_test
+  validator_production_table_view_test.cpp)
+target_link_libraries(wire_validator_production_table_view_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main)
+target_include_directories(wire_validator_production_table_view_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(wire_validator_production_table_view_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME wire_validator_production_table_view_test
+  COMMAND wire_validator_production_table_view_test)
+# This test links fixpp_dictionary and uses live dictionary loading — not
+# registered under the pure wire label to avoid pulling dict deps into
+# wire-only suites.

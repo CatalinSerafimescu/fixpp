@@ -263,11 +263,15 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
         SessionId const& id, std::span<const std::byte> app_payload);
 
-    /// FR-001/FR-003: non-blocking.  co_spawns one connect loop per initiator
-    /// and one accept loop per acceptor on exec.  Legal to call once.
+    /// FR-001/FR-003/FR-007 (041 T018): non-blocking.  Validates the
+    /// EngineConfig (clock not null — clock_not_set, slot 54) and returns an
+    /// error without spawning any loops if the config is invalid.  On success,
+    /// co_spawns one connect loop per initiator and one accept loop per acceptor
+    /// on exec.  Legal to call once.
     /// Each loop co_awaits Session::open() as its first async step (open()
-    /// cannot run in this synchronous void start() — Gate A New-3).
-    void start();
+    /// cannot run in this synchronous call — Gate A New-3).
+    /// C-4 / SC-004: callers MUST check the returned result.
+    [[nodiscard]] fixpp::core::expected_t<void> start();
 
     /// FR-011: idempotent total-cancellation teardown.
     /// Cancels every accept loop, connect loop, read-pump, accept-scope domain,

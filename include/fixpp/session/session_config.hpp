@@ -430,6 +430,19 @@ struct SessionConfig {
     // No new include: primitive bool, §XV.9 N/A (data-model E1).
     bool validate_sequence_numbers = true;
 
+    // 041 T002 / data-model E1 / contract C-5 — opt-in dictionary-driven inbound
+    // message validation (FR-001). Default false = disabled = byte-identical
+    // prior-release behaviour (FR-002/FR-009). true = enable: every inbound
+    // message in the processing states (NotConnected/LogonSent/LogonReceived/
+    // Active) is validated against cfg.dictionary before the seqnum gate
+    // (QuickFIX parity). Requires dictionary != nullptr — register_session
+    // rejects validate_inbound_messages=true + null dictionary with
+    // invalid_session_config (C-5 fail-closed / FR-011). Note opposite polarity
+    // vs validate_sequence_numbers (that defaults true, this defaults false —
+    // this adds a new strictness rather than relaxing an existing one).
+    // No new include: primitive bool, §XV.9 N/A (data-model E-1).
+    bool validate_inbound_messages = false;
+
     // ── 033 T003 / data-model E3 — FIXT.1.1 / FIX 5.0 SP2 config extensions ──
     //
     // default_appl_ver_id: the default application version this side advertises in

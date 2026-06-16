@@ -1948,6 +1948,81 @@ add_threading_test(session_interpret_logon_overflow
 set_tests_properties(session_interpret_logon_overflow PROPERTIES
   LABELS "040;sc001;overflow-hardening;foundational")
 
+# ── 041-validation-gate-wiring T003/T004 — fail-closed config gate ──────────
+# C-5 / FR-011 / data-model E-1: register_session rejects
+#   validate_inbound_messages=true + null dictionary with invalid_session_config.
+# T003 RED: proves the assertion fails before the check is wired.
+# T004 GREEN: check is wired in engine.cpp register_session.
+# No TLS / no mock_clock needed: register_session is a sync config call.
+add_executable(session_validation_gate_config
+  test_validation_gate_config.cpp
+)
+target_link_libraries(session_validation_gate_config PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_validation_gate_config PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_validation_gate_config
+  COMMAND session_validation_gate_config)
+set_tests_properties(session_validation_gate_config PROPERTIES
+  LABELS "041;t003;t004;validation-gate;foundational")
+
+# ── 041-validation-gate-wiring T012 — per-violation-class reject witnesses ───
+# SC-005 / FR-003 / FR-004 / data-model E-4: one inbound msg per violation class
+# (W1-W7) → asserts mapped SessionRejectReason; proves seqnum NOT advanced on
+# reject (C-3 invariant). Requires validate_inbound_messages=true + dictionary.
+add_threading_test(session_validate_gate_inbound
+  test_validate_gate_inbound.cpp)
+set_tests_properties(session_validate_gate_inbound PROPERTIES
+  LABELS "041;t012;t014;validation-gate;inbound;foundational")
+
+# ── 041-validation-gate-wiring T013 — validate-first Logon-arm ordering ──────
+# C-2 rows a-f: validate before interpret_logon in NotConnected/LogonSent arms.
+# No-reject-loop exemption (35=3 and 35=5). Absent/malformed SendingTime(52)
+# handled by Logon path, not validation reject loop.
+add_threading_test(session_validate_gate_logon_arm
+  test_validate_gate_logon_arm.cpp)
+set_tests_properties(session_validate_gate_logon_arm PROPERTIES
+  LABELS "041;t013;t014;validation-gate;logon-arm;foundational")
+
+# ── 041-validation-gate-wiring T015+T016 — US2 lenient-by-default (default-off)
+# T015 (C-2 default branch, FR-002, SC-001): violation inputs with flag=false →
+#   accepted and dispatched (no Reject). Positive dispatch proof: seq-advance.
+# T016 (SC-005, FR-002): structural proof via FIXPP_TEST_HOOKS
+#   has_validator_for_test() → false after open() with flag=false (dict set) —
+#   the direct named postcondition: no validator constructed.
+add_threading_test(session_validate_gate_default_off
+  test_validate_gate_default_off.cpp)
+target_compile_definitions(session_validate_gate_default_off PRIVATE FIXPP_TEST_HOOKS)
+set_tests_properties(session_validate_gate_default_off PROPERTIES
+  LABELS "041;t015;t016;us2;validation-gate;default-off;session")
+
+# ── 041-validation-gate-wiring T017 — Engine clock-config gate (US3) ─────────
+# SC-004 / FR-007 / FR-008 / C-4 / data-model E-5:
+#   Cell 1 (null clock)  → start() returns clock_not_set, no loops spawned.
+#   Cell 2 (valid clock) → start() succeeds, engine operates unchanged.
+# No live TLS needed: sessions use no-op transport_send.
+# T017 RED until T018 changes start() void → expected_t<void>.
+add_executable(engine_clock_gate_test
+  test_engine_clock_gate.cpp
+)
+target_link_libraries(engine_clock_gate_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_clock_gate_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME engine_clock_gate COMMAND engine_clock_gate_test)
+set_tests_properties(engine_clock_gate PROPERTIES
+  LABELS "041;t017;t018;us3;clock-gate;session")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

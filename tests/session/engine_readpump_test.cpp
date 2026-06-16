@@ -51,6 +51,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
@@ -78,6 +80,18 @@ namespace {
 
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
+// 041 T019: a real engine clock activates the session SendingTime(52) MaxLatency
+// guard (inert under the prior null clock). Inbound frames feeding a live session
+// must carry a fresh 52 or the guard rejects them (reason=10). Mirrors the 038/US3
+// fix in engine_acceptor_test.cpp.
+static std::string utc_now_fix_timestamp() {
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
 static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
                                              int seq_num, std::string_view sender,
                                              std::string_view target, std::string extra_body = "") {
@@ -89,6 +103,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
     body += field(34, std::to_string(seq_num));
     body += field(49, sender);
     body += field(56, target);
+    body += field(52, utc_now_fix_timestamp());  // SendingTime (fresh; 041 T019 clock gate)
     body += extra_body;
 
     std::string msg;
@@ -166,6 +181,9 @@ static std::unique_ptr<ReadPumpHarness> build_harness(asio::io_context& ioc) {
 
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    // 041 US3: Engine::start() now gates on a non-null clock (clock_not_set);
+    // this harness previously relied on start() being void. Provide a real clock.
+    eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     auto h = std::make_unique<ReadPumpHarness>();
 
@@ -273,7 +291,7 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -379,7 +397,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 
@@ -464,7 +482,7 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    h->engine->start();
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
     ioc.run_for(50ms);
     ioc.restart();
 

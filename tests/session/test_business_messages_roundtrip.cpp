@@ -56,6 +56,7 @@
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
@@ -750,6 +751,8 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     fixpp::core::EngineConfig ecfg;
     ecfg.executor = ioc.get_executor();
     ecfg.application = app;
+    // 041 T019: Engine::start() rejects a null clock with clock_not_set.
+    ecfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
@@ -786,7 +789,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     ASSERT_TRUE(engine.register_session(std::move(ini_cfg)).has_value())
         << "register initiator failed";
 
-    engine.start();
+    ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Helper: drive ioc from main thread until pred() or timeout (mirrors 019 test).
     // MUST NOT be called while t1/t2 are in ioc.run() — restart() is UB then.
