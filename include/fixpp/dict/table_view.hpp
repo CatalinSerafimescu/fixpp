@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -45,6 +46,28 @@
 #include <vector>
 
 namespace fixpp::dict {
+
+// Transparent hash for std::unordered_map<std::string, ...> enabling
+// heterogeneous find(std::string_view) without constructing a std::string
+// temporary. Both overloads hash via std::hash<std::string_view> so
+// stored-string-key hashes remain consistent with string_view lookups.
+// Combined with std::equal_to<> (transparent equality), this makes
+// .find(string_view) fully allocation-free on the lookup path.
+//
+// [const §VIII.5 / §XV.1]: the two string-keyed maps (valid_, required_)
+// are on the validate-ON hot path (called once per field per inbound message).
+// Without this, a MsgType longer than SSO (~15 chars on libstdc++, ~22 on
+// libc++) heap-allocates per message AND std::terminate()s on bad_alloc
+// inside the noexcept methods.
+struct string_hash {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+    [[nodiscard]] std::size_t operator()(const std::string& s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+};
 
 // Production value type exposing exactly the 6-method surface bound by
 // `wire::dictionary_driven_validator`. Owns its backing storage; spans
@@ -70,7 +93,7 @@ public:
     // True iff `tag` is declared for `msg_type` in the source Dictionary.
     [[nodiscard]] bool field_valid_for(std::string_view msg_type,
                                        std::uint16_t tag) const noexcept {
-        auto it = valid_.find(std::string{msg_type});
+        auto it = valid_.find(msg_type);
         return it != valid_.end() && it->second.count(tag) > 0;
     }
 
@@ -78,7 +101,7 @@ public:
     // The span aliases storage owned by this table_view (stable for lifetime).
     [[nodiscard]] std::span<std::uint16_t const> required_fields(
         std::string_view msg_type) const noexcept {
-        auto it = required_.find(std::string{msg_type});
+        auto it = required_.find(msg_type);
         if (it == required_.end()) {
             return {};
         }
@@ -177,10 +200,16 @@ public:
 
 private:
     // Valid-tag set per msg_type (used by field_valid_for).
-    std::unordered_map<std::string, std::unordered_set<std::uint16_t>> valid_;
+    // transparent hash+equality: find(string_view) is allocation-free
+    // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
+    std::unordered_map<std::string, std::unordered_set<std::uint16_t>,
+                       string_hash, std::equal_to<>> valid_;
 
     // Required-tag list per msg_type (insertion order preserved; spans stable).
-    std::unordered_map<std::string, std::vector<std::uint16_t>> required_;
+    // transparent hash+equality: find(string_view) is allocation-free
+    // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
+    std::unordered_map<std::string, std::vector<std::uint16_t>,
+                       string_hash, std::equal_to<>> required_;
 
     // Group first-delimiter (no_tag → first member tag).
     std::unordered_map<std::uint16_t, std::uint16_t> group_first_;
