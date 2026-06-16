@@ -26,11 +26,6 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstdlib>
-#include <future>
-#include <memory>
-#include <span>
-#include <utility>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/engine.hpp>
@@ -41,6 +36,10 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <future>
+#include <memory>
+#include <span>
+#include <utility>
 
 #include "support/minimal_dictionary.hpp"
 

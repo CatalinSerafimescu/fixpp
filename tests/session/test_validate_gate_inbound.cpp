@@ -101,8 +101,7 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
                                                std::uint32_t seq = 1,
                                                std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 30) {
+                                               std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -115,11 +114,10 @@ static std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2) {
 }
 
 // Build a NewOrderSingle(35=D) frame — base well-formed.
-static std::vector<std::byte> make_nos_frame(std::uint32_t seq = 2,
-                                             std::string extra_body = {}) {
+static std::vector<std::byte> make_nos_frame(std::uint32_t seq = 2, std::string extra_body = {}) {
     std::string body;
-    body += "11=ORD001\x01";  // ClOrdID required
-    body += "54=1\x01";       // Side required (1 char = valid CHAR)
+    body += "11=ORD001\x01";                 // ClOrdID required
+    body += "54=1\x01";                      // Side required (1 char = valid CHAR)
     body += "60=20240101-00:00:00.000\x01";  // TransactTime required
     if (!extra_body.empty()) {
         body += extra_body;
@@ -178,7 +176,8 @@ struct ValidateGateFixture {
         return cfg;
     }
 
-    // Open session and drive to Active (initiator path: open → LogonSent → feed Logon ack → Active).
+    // Open session and drive to Active (initiator path: open → LogonSent → feed Logon ack →
+    // Active).
     void open_to_active(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -246,8 +245,8 @@ TEST(ValidateGateInbound, HeaderOutOfOrder_Reason14) {
     // Out-of-order: 49= first, then 35=
     // Build raw frame manually (bypassing make_raw_frame's ordering).
     std::string body;
-    body += "49=TW\x01";   // sender before MsgType — out of order
-    body += "35=0\x01";    // MsgType after sender
+    body += "49=TW\x01";  // sender before MsgType — out of order
+    body += "35=0\x01";   // MsgType after sender
     body += "34=2\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
@@ -287,8 +286,7 @@ TEST(ValidateGateInbound, UnexpectedTag_Reason2) {
 
     fix.feed(sess, frame);
 
-    EXPECT_TRUE(fix.has_reject_with_reason(2))
-        << "W2: undefined-tag must produce Reject(373=2)";
+    EXPECT_TRUE(fix.has_reject_with_reason(2)) << "W2: undefined-tag must produce Reject(373=2)";
 }
 
 // ── W3: required-field-missing → reason=1 ────────────────────────────────────
@@ -305,7 +303,7 @@ TEST(ValidateGateInbound, RequiredFieldMissing_Reason1) {
     // NOS without ClOrdID(11) — all other required fields present.
     std::string body;
     // Deliberately omit 11=ClOrdID
-    body += "54=1\x01";       // Side required
+    body += "54=1\x01";                      // Side required
     body += "60=20240101-00:00:00.000\x01";  // TransactTime required
     auto frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
 
@@ -383,8 +381,7 @@ TEST(ValidateGateInbound, ConformantMessage_NoReject) {
     auto frame = make_heartbeat_frame(2);
     fix.feed(sess, frame);
 
-    EXPECT_FALSE(fix.has_any_reject())
-        << "W6: conformant message must NOT produce a Reject";
+    EXPECT_FALSE(fix.has_any_reject()) << "W6: conformant message must NOT produce a Reject";
 }
 
 // ── W7: seqnum NOT advanced on validate reject (C-3) ─────────────────────────
@@ -414,8 +411,7 @@ TEST(ValidateGateInbound, SeqnumNotAdvancedOnReject) {
     EXPECT_FALSE(fix.has_any_reject())
         << "W7: after validate-reject, a conformant frame at the same seqnum must be accepted "
            "(seqnum was not advanced by the rejected frame)";
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "W7: session should remain Active";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "W7: session should remain Active";
 }
 
 // ── W8: arena-bypass — high-field-count frame with a violation NOT silently dispatched

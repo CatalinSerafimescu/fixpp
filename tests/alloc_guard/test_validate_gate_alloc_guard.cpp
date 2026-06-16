@@ -85,8 +85,7 @@ constexpr std::size_t kScratchArena = 512;
 // This is a small frame (~80 bytes) — the alloc-guard proves the validate path
 // is stack-only regardless of frame size (the parse arena is pre-allocated).
 std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
-                                            std::string_view sender,
-                                            std::string_view target) {
+                                            std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -162,25 +161,22 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
         std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
                                                   std::pmr::null_memory_resource()};
         std::array<std::byte, kCarryArena> vg_carry_store{};
-        std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(),
-                                                        vg_carry_store.size(),
-                                                        std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource vg_carry_mr{
+            vg_carry_store.data(), vg_carry_store.size(), std::pmr::null_memory_resource()};
         pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
 
         Framer vg_framer;
         std::array<fixpp::wire::frame_view, 1> vg_out{};
-        auto vg_feed = vg_framer.feed(
-            std::span<const std::byte>{frame.data(), frame.size()}, vg_carry,
-            std::span<fixpp::wire::frame_view>{vg_out});
+        auto vg_feed = vg_framer.feed(std::span<const std::byte>{frame.data(), frame.size()},
+                                      vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
         if (!vg_feed || vg_feed->empty()) {
             return false;
         }
 
         Parser<access_mode::Index> vg_parser;
         std::array<std::byte, kScratchArena> vg_scratch_buf{};
-        std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(),
-                                                          vg_scratch_buf.size(),
-                                                          std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource vg_scratch_mr{
+            vg_scratch_buf.data(), vg_scratch_buf.size(), std::pmr::null_memory_resource()};
         auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
         if (!vg_mv_r) {
             return false;

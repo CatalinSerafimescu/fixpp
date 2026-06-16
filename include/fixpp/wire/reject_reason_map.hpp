@@ -45,8 +45,7 @@ namespace fixpp::wire {
 /// for any error outside the five validator-emitted wire_* slots.
 ///
 /// [[nodiscard]]: callers always use the result.
-[[nodiscard]] constexpr int wire_error_to_session_reject_reason(
-    fixpp::core::error e) noexcept {
+[[nodiscard]] constexpr int wire_error_to_session_reject_reason(fixpp::core::error e) noexcept {
     using fixpp::core::error;
     switch (e) {
         case error::wire_required_field_missing:

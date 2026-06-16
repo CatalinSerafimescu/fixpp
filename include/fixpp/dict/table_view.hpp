@@ -36,14 +36,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
 
 namespace fixpp::dict {
 
@@ -135,9 +134,7 @@ public:
         valid_[std::string{msg_type}].insert(tag);
     }
 
-    void set_field_type(std::uint16_t tag, field_type ft) {
-        types_[tag] = ft;
-    }
+    void set_field_type(std::uint16_t tag, field_type ft) { types_[tag] = ft; }
 
     // add_group_member returns *this for chaining (mirrors mock surface).
     table_view& add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
@@ -176,9 +173,7 @@ public:
 
     // Phase-1 enum stub: always returns true from enum_valid(); no storage
     // (FR-005 — enum tables deferred to 2c work).
-    table_view& add_enum(std::uint16_t /*tag*/, std::string_view /*value*/) {
-        return *this;
-    }
+    table_view& add_enum(std::uint16_t /*tag*/, std::string_view /*value*/) { return *this; }
 
 private:
     // Valid-tag set per msg_type (used by field_valid_for).

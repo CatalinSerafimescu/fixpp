@@ -80,9 +80,10 @@ namespace {
 
 // ── Shared frame builders ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_logon_with_fields(
-    std::string_view begin_string, std::string_view sender, std::string_view target,
-    std::uint32_t seq, std::string extra_body) {
+static std::vector<std::byte> make_raw_logon_with_fields(std::string_view begin_string,
+                                                         std::string_view sender,
+                                                         std::string_view target, std::uint32_t seq,
+                                                         std::string extra_body) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -114,7 +115,8 @@ static std::vector<std::byte> make_valid_logon(std::string_view begin_string = "
                                                std::string_view sender = "TW",
                                                std::string_view target = "ISLD") {
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
-                                     "98=0\x01""108=30\x01");
+                                      "98=0\x01"
+                                      "108=30\x01");
 }
 
 // Build a frame (any msg type) manually — allows arbitrary field ordering.
@@ -139,18 +141,22 @@ static std::string cs_str(unsigned int cs) {
 
 // Build a Logon that has a dict-violating extra field (e.g. tag 44 = Price is
 // not defined for Logon(35=A) in the test dict → wire_unexpected_tag → reason=2).
-static std::vector<std::byte> make_dict_invalid_logon(
-    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
-    std::string_view sender = "TW", std::string_view target = "ISLD") {
+static std::vector<std::byte> make_dict_invalid_logon(std::string_view begin_string = "FIX.4.2",
+                                                      std::uint32_t seq = 1,
+                                                      std::string_view sender = "TW",
+                                                      std::string_view target = "ISLD") {
     // Include tag 44 (Price) — not a valid field for Logon(35=A).
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
-                                     "98=0\x01""108=30\x01""44=99.99\x01");
+                                      "98=0\x01"
+                                      "108=30\x01"
+                                      "44=99.99\x01");
 }
 
 // Build a Logon WITHOUT 52 (SendingTime) — absent required field.
-static std::vector<std::byte> make_logon_no_sending_time(
-    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
-    std::string_view sender = "TW", std::string_view target = "ISLD") {
+static std::vector<std::byte> make_logon_no_sending_time(std::string_view begin_string = "FIX.4.2",
+                                                         std::uint32_t seq = 1,
+                                                         std::string_view sender = "TW",
+                                                         std::string_view target = "ISLD") {
     // Build body WITHOUT the 52= field.
     std::string body;
     body += "35=A\x01";
@@ -178,7 +184,8 @@ static std::vector<std::byte> make_logon_malformed_sending_time(
     std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
     std::string_view sender = "TW", std::string_view target = "ISLD") {
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
-                                     "98=0\x01""108=30\x01");
+                                      "98=0\x01"
+                                      "108=30\x01");
     // NOTE: we use make_raw_logon_with_fields which includes 52=20240101-00:00:00.000
     // That's a valid timestamp. To get a STALE (out-of-range) timestamp, we need a
     // timestamp that is more than 120s in the past relative to the mock clock.
@@ -192,15 +199,17 @@ static std::vector<std::byte> make_logon_stale_sending_time(
     std::string_view sender = "TW", std::string_view target = "ISLD") {
     // Use a timestamp one year before the mock clock (2024-01-01 00:00:00).
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
-                                     "98=0\x01""108=30\x01");
+                                      "98=0\x01"
+                                      "108=30\x01");
     // For now, we use the standard timestamp and test that a MALFORMED timestamp
     // ("NOTATIME") passes validate and hits the existing SendingTime path.
 }
 
 // Build a Logon where 52="NOTATIME" (present-but-malformed string value).
-static std::vector<std::byte> make_logon_with_malformed_52_in_body(
-    std::string_view begin_string, std::string_view sender, std::string_view target,
-    std::uint32_t seq) {
+static std::vector<std::byte> make_logon_with_malformed_52_in_body(std::string_view begin_string,
+                                                                   std::string_view sender,
+                                                                   std::string_view target,
+                                                                   std::uint32_t seq) {
     // We must construct the body WITHOUT using make_raw_logon_with_fields (which
     // always inserts a well-formed 52=). Build the full frame manually.
     std::string body;

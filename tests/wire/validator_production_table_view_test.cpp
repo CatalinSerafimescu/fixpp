@@ -35,12 +35,13 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
-#include "support/frame_view_factory.hpp"
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "support/frame_view_factory.hpp"
 
 namespace {
 
@@ -54,27 +55,26 @@ using fixpp::wire::Parser;
 
 // Load a tiny dictionary with an Int field (tag 98) and a Float field (tag 38).
 fixpp::dict::Dictionary load_tiny_dict(std::pmr::memory_resource* mr) {
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='8'  name='BeginString' type='STRING'/>)"
-        R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
-        R"(<field number='10' name='CheckSum'    type='STRING'/>)"
-        R"(<field number='35' name='MsgType'     type='STRING'/>)"
-        R"(<field number='38' name='OrderQty'    type='QTY'/>)"
-        R"(<field number='98' name='EncryptMethod' type='INT'/>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='Logon' msgtype='A' msgcat='admin'>)"
-        R"(  <field name='BeginString'   required='N'/>)"
-        R"(  <field name='BodyLength'    required='N'/>)"
-        R"(  <field name='CheckSum'      required='N'/>)"
-        R"(  <field name='MsgType'       required='N'/>)"
-        R"(  <field name='EncryptMethod' required='N'/>)"
-        R"(  <field name='OrderQty'      required='N'/>)"
-        R"(</message>)"
-        R"(</messages>)"
-        R"(</fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='8'  name='BeginString' type='STRING'/>)"
+                                      R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
+                                      R"(<field number='10' name='CheckSum'    type='STRING'/>)"
+                                      R"(<field number='35' name='MsgType'     type='STRING'/>)"
+                                      R"(<field number='38' name='OrderQty'    type='QTY'/>)"
+                                      R"(<field number='98' name='EncryptMethod' type='INT'/>)"
+                                      R"(</fields>)"
+                                      R"(<messages>)"
+                                      R"(<message name='Logon' msgtype='A' msgcat='admin'>)"
+                                      R"(  <field name='BeginString'   required='N'/>)"
+                                      R"(  <field name='BodyLength'    required='N'/>)"
+                                      R"(  <field name='CheckSum'      required='N'/>)"
+                                      R"(  <field name='MsgType'       required='N'/>)"
+                                      R"(  <field name='EncryptMethod' required='N'/>)"
+                                      R"(  <field name='OrderQty'      required='N'/>)"
+                                      R"(</message>)"
+                                      R"(</messages>)"
+                                      R"(</fix>)";
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
 }
 
@@ -137,8 +137,7 @@ TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
     // Basic sanity: field_valid_for via the production path.
     EXPECT_TRUE(v.field_valid_for("A", 98))
         << "EncryptMethod(98) must be valid for Logon via production table_view";
-    EXPECT_FALSE(v.field_valid_for("A", 9999))
-        << "unknown tag must not be valid for Logon";
+    EXPECT_FALSE(v.field_valid_for("A", 9999)) << "unknown tag must not be valid for Logon";
 }
 
 // ── T009a-1 RED→GREEN: Float garbage value → wire_field_value_out_of_range ───
@@ -171,8 +170,7 @@ TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
                                                    std::pmr::null_memory_resource()};
 
     auto result = v.validate(mv, &scratch_mr);
-    ASSERT_FALSE(result.has_value())
-        << "validate() with garbage Float value must return an error";
+    ASSERT_FALSE(result.has_value()) << "validate() with garbage Float value must return an error";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "garbage Float must map to wire_field_value_out_of_range (slot 40), "
         << "not a raw decimal error (slot 10 = decimal_invalid_input); "
@@ -204,8 +202,7 @@ TEST(ValidatorProductionTableView, FloatParseErrorAlwaysMapsToWireSlot) {
         std::vector<std::byte> val(garbage.size());
         std::memcpy(val.data(), garbage.data(), garbage.size());
         auto rc = v.validate_field(38, std::span<const std::byte>{val.data(), val.size()});
-        ASSERT_FALSE(rc.has_value())
-            << "garbage Float value must produce an error";
+        ASSERT_FALSE(rc.has_value()) << "garbage Float value must produce an error";
         // Must be a wire_* slot (38–42), not a raw decimal slot (10–12).
         auto const slot = static_cast<int>(rc.error());
         EXPECT_GE(slot, 38) << "Float error must be a wire_* slot (>=38); got " << slot;
@@ -218,7 +215,6 @@ TEST(ValidatorProductionTableView, FloatParseErrorAlwaysMapsToWireSlot) {
         std::vector<std::byte> val(valid_dec.size());
         std::memcpy(val.data(), valid_dec.data(), valid_dec.size());
         auto rc = v.validate_field(38, std::span<const std::byte>{val.data(), val.size()});
-        EXPECT_TRUE(rc.has_value())
-            << "valid Float value must succeed via production table_view";
+        EXPECT_TRUE(rc.has_value()) << "valid Float value must succeed via production table_view";
     }
 }

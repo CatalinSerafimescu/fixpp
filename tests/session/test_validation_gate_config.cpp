@@ -37,8 +37,7 @@ using fixpp::session::SessionConfig;
 
 // Minimal SessionConfig for register_session that resolves to a valid SessionId.
 // No dictionary set (nullptr) — used with validate_inbound_messages=true for C-5.
-static SessionConfig make_cfg(asio::any_io_executor exec, bool validate_inbound,
-                               bool with_dict) {
+static SessionConfig make_cfg(asio::any_io_executor exec, bool validate_inbound, bool with_dict) {
     SessionConfig c;
     c.sender_comp_id = "SENDER";
     c.target_comp_id = "TARGET";

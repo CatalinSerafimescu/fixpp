@@ -72,11 +72,11 @@ fixpp::wire::dictionary_driven_validator const& get_validator() {
 bool is_valid_wire_error(fixpp::core::error e) noexcept {
     using fixpp::core::error;
     switch (e) {
-        case error::wire_header_out_of_order:    // reason 14
-        case error::wire_unexpected_tag:          // reason 2
-        case error::wire_required_field_missing:  // reason 1
-        case error::wire_field_value_out_of_range: // reason 5
-        case error::wire_field_value_truncated:   // reason 6
+        case error::wire_header_out_of_order:       // reason 14
+        case error::wire_unexpected_tag:            // reason 2
+        case error::wire_required_field_missing:    // reason 1
+        case error::wire_field_value_out_of_range:  // reason 5
+        case error::wire_field_value_truncated:     // reason 6
             return true;
         default:
             return false;

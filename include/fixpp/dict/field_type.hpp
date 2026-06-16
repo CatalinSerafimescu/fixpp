@@ -63,8 +63,7 @@ enum class field_type : std::uint8_t {
 // The mapping is stable for the v1.0 validator; consult the comment block above
 // for the full collapse table. Called once per tag at `as_table_view()` time
 // ([const §XV.1] — config-time, never per-message).
-[[nodiscard]] constexpr field_type field_type_from_data_type(
-    field_data_type dt) noexcept {
+[[nodiscard]] constexpr field_type field_type_from_data_type(field_data_type dt) noexcept {
     switch (dt) {
         case field_data_type::Int:
         case field_data_type::SeqNum:

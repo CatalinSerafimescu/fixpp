@@ -226,9 +226,9 @@ TEST_P(ValidatorPerVersion, BadEnumEncryptMethodPassedInPhase1) {
 
     auto result = do_validate(v, buf);
     // Phase-1: enum_valid always true → accepted, not rejected (FR-005).
-    EXPECT_TRUE(result.has_value())
-        << p.label << ": Phase-1: enum_valid always true; EncryptMethod=9 must "
-                      "be accepted (FR-005, enum-check deferred to 2c)";
+    EXPECT_TRUE(result.has_value()) << p.label
+                                    << ": Phase-1: enum_valid always true; EncryptMethod=9 must "
+                                       "be accepted (FR-005, enum-check deferred to 2c)";
 }
 
 // ── 4. Unexpected tag → wire_unexpected_tag ───────────────────────────────────

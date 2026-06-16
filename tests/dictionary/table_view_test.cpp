@@ -98,27 +98,27 @@ TEST(TableViewTest, FieldValidForAgreesWithDictionary) {
     auto tv = dict.as_table_view();
 
     // Tags declared for Logon ("A") must be valid.
-    EXPECT_TRUE(tv.field_valid_for("A", 49))   // SenderCompID
+    EXPECT_TRUE(tv.field_valid_for("A", 49))  // SenderCompID
         << "SenderCompID must be valid for Logon";
-    EXPECT_TRUE(tv.field_valid_for("A", 56))   // TargetCompID
+    EXPECT_TRUE(tv.field_valid_for("A", 56))  // TargetCompID
         << "TargetCompID must be valid for Logon";
-    EXPECT_TRUE(tv.field_valid_for("A", 98))   // EncryptMethod
+    EXPECT_TRUE(tv.field_valid_for("A", 98))  // EncryptMethod
         << "EncryptMethod must be valid for Logon";
 
     // Tags declared for NewOrderSingle ("D") must be valid.
-    EXPECT_TRUE(tv.field_valid_for("D", 11))   // ClOrdID
+    EXPECT_TRUE(tv.field_valid_for("D", 11))  // ClOrdID
         << "ClOrdID must be valid for NewOrderSingle";
-    EXPECT_TRUE(tv.field_valid_for("D", 38))   // OrderQty (Float)
+    EXPECT_TRUE(tv.field_valid_for("D", 38))  // OrderQty (Float)
         << "OrderQty must be valid for NewOrderSingle";
-    EXPECT_TRUE(tv.field_valid_for("D", 40))   // OrdType (Char)
+    EXPECT_TRUE(tv.field_valid_for("D", 40))  // OrdType (Char)
         << "OrdType must be valid for NewOrderSingle";
 
     // Tags NOT declared for a msg_type must be invalid.
-    EXPECT_FALSE(tv.field_valid_for("A", 11))   // ClOrdID not on Logon
+    EXPECT_FALSE(tv.field_valid_for("A", 11))  // ClOrdID not on Logon
         << "ClOrdID must NOT be valid for Logon";
-    EXPECT_FALSE(tv.field_valid_for("D", 9999)) // unknown tag
+    EXPECT_FALSE(tv.field_valid_for("D", 9999))  // unknown tag
         << "unknown tag must NOT be valid";
-    EXPECT_FALSE(tv.field_valid_for("Z", 49))   // unknown msg_type
+    EXPECT_FALSE(tv.field_valid_for("Z", 49))  // unknown msg_type
         << "known tag on unknown msg_type must NOT be valid";
 }
 
@@ -135,14 +135,14 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
     ASSERT_FALSE(logon_req.empty()) << "Logon required_fields must not be empty";
     bool has_49 = false, has_56 = false, has_98 = false, has_108 = false;
     for (auto t : logon_req) {
-        if (t == 49)  has_49  = true;
-        if (t == 56)  has_56  = true;
-        if (t == 98)  has_98  = true;
+        if (t == 49) has_49 = true;
+        if (t == 56) has_56 = true;
+        if (t == 98) has_98 = true;
         if (t == 108) has_108 = true;
     }
-    EXPECT_TRUE(has_49)  << "SenderCompID(49) must be in Logon required_fields";
-    EXPECT_TRUE(has_56)  << "TargetCompID(56) must be in Logon required_fields";
-    EXPECT_TRUE(has_98)  << "EncryptMethod(98) must be in Logon required_fields";
+    EXPECT_TRUE(has_49) << "SenderCompID(49) must be in Logon required_fields";
+    EXPECT_TRUE(has_56) << "TargetCompID(56) must be in Logon required_fields";
+    EXPECT_TRUE(has_98) << "EncryptMethod(98) must be in Logon required_fields";
     EXPECT_TRUE(has_108) << "HeartBtInt(108) must be in Logon required_fields";
 
     // NewOrderSingle required: 11, 21, 54, 55.
@@ -200,14 +200,12 @@ TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
 
     // NoContraBrokers(382) has member ContraBroker(375).
     auto members = tv.group_member_tags(382);
-    ASSERT_FALSE(members.empty())
-        << "group_member_tags(382) must not be empty";
+    ASSERT_FALSE(members.empty()) << "group_member_tags(382) must not be empty";
     bool has_375 = false;
     for (auto t : members) {
         if (t == 375) has_375 = true;
     }
-    EXPECT_TRUE(has_375)
-        << "ContraBroker(375) must be in group_member_tags(NoContraBrokers=382)";
+    EXPECT_TRUE(has_375) << "ContraBroker(375) must be in group_member_tags(NoContraBrokers=382)";
 
     // Unknown no_tag → empty span.
     EXPECT_TRUE(tv.group_member_tags(9999).empty())
@@ -295,25 +293,21 @@ TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
 TEST(TableViewTest, FullFix44DictionaryTableView) {
     std::vector<std::byte> buf(4u * 1024u * 1024u);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
-    auto const xml_path =
-        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     auto dict = fixpp::dict::XmlLoader{}.load(xml_path, &mr);
     auto tv = dict.as_table_view();
 
     // Logon (A) → SenderCompID(49) valid + required.
-    EXPECT_TRUE(tv.field_valid_for("A", 49))
-        << "SenderCompID must be valid for Logon in FIX44";
+    EXPECT_TRUE(tv.field_valid_for("A", 49)) << "SenderCompID must be valid for Logon in FIX44";
     auto logon_req = tv.required_fields("A");
     bool has_sender = false;
     for (auto t : logon_req) {
         if (t == 49) has_sender = true;
     }
-    EXPECT_TRUE(has_sender)
-        << "SenderCompID(49) must be required for Logon in FIX44";
+    EXPECT_TRUE(has_sender) << "SenderCompID(49) must be required for Logon in FIX44";
 
     // NewOrderSingle (D) exists.
-    EXPECT_TRUE(tv.field_valid_for("D", 11))
-        << "ClOrdID must be valid for NewOrderSingle in FIX44";
+    EXPECT_TRUE(tv.field_valid_for("D", 11)) << "ClOrdID must be valid for NewOrderSingle in FIX44";
 
     // NoPartyIDs(453) is a group in FIX44 — first field should be non-zero.
     auto const party_first = tv.group_first_field(453);
@@ -328,8 +322,7 @@ TEST(TableViewTest, FullFix44DictionaryTableView) {
     for (auto t : party_members) {
         if (t == party_first) has_first = true;
     }
-    EXPECT_TRUE(has_first)
-        << "group_member_tags must contain the group_first_field tag";
+    EXPECT_TRUE(has_first) << "group_member_tags must contain the group_first_field tag";
 }
 
 // ── T005 Gate A P3-b: UtcTimestamp collapses to String ──────────────────────
@@ -339,8 +332,8 @@ TEST(TableViewTest, FullFix44DictionaryTableView) {
 // guard in 038 already handles it before validation runs).
 // Anchor: 041-validation-gate-wiring/plan.md Gate A P3-b.
 TEST(TableViewTest, FieldTypeFromDataTypeUtcTimestampMapsToString) {
-    using fixpp::dict::field_type;
     using fixpp::dict::field_data_type;
+    using fixpp::dict::field_type;
 
     EXPECT_EQ(field_type_from_data_type(field_data_type::UtcTimestamp), field_type::String)
         << "UtcTimestamp must map to String (Gate A P3-b pin)";

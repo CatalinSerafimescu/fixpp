@@ -76,7 +76,7 @@
 // [const §XV.9]). Also includes dict/table_view.hpp for as_table_view().
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
 #include <fixpp/wire/reject_reason_map.hpp>  // T011: wire_error_to_session_reject_reason
-#include <fixpp/wire/validator.hpp>           // T014: dictionary_driven_validator
+#include <fixpp/wire/validator.hpp>          // T014: dictionary_driven_validator
 // NOTE: fixpp/tls/peer_identity.hpp is transitively available via session_config.hpp
 // → compid_authorization_policy.hpp → peer_identity.hpp. A direct include from
 // session.cpp would violate [arch §2.3] session→tls edge (check_layers.py).
@@ -1691,8 +1691,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // Identical Disconnected-on-failure handling to the zero-arg overload.
 // [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
-    seqnum_t ref_seq, std::string_view ref_msg_type, int reason,
-    int ref_tag_id) noexcept {
+    seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id) noexcept {
     std::array<std::byte, 512> rj_buf{};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
@@ -1700,9 +1699,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
     auto rj_r =
         fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-                                     ref_tag_id, ref_msg_type, reason, cfg_.begin_string,
-                                     rj_st52.value);
+                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id,
+                                     ref_msg_type, reason, cfg_.begin_string, rj_st52.value);
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -1742,9 +1740,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //   • cfg_.validate_inbound_messages && validator_ must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
-std::optional<Session::RejectDecision>
-Session::validate_inbound_(std::span<const std::byte> frame,
-                            fixpp::session::detail::FrameHeader const& hdr) const noexcept {
+std::optional<Session::RejectDecision> Session::validate_inbound_(
+    std::span<const std::byte> frame,
+    fixpp::session::detail::FrameHeader const& hdr) const noexcept {
     std::array<std::byte, kInboundParseArena> vg_buf{};
     std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
                                               std::pmr::null_memory_resource()};
@@ -1768,8 +1766,7 @@ Session::validate_inbound_(std::span<const std::byte> frame,
     }
     auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
     if (!val_r) {
-        const int vg_reason =
-            fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
+        const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
         return RejectDecision{vg_reason, 0};
     }
     return std::nullopt;
@@ -1854,9 +1851,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 auto vg_hdr = scan_frame_header(frame);
                 if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
                     if (auto rej = validate_inbound_(frame, vg_hdr)) {
-                        co_return co_await emit_session_reject_(
-                            parse_seqnum(vg_hdr.msg_seq_num), vg_hdr.msg_type,
-                            rej->reason, rej->ref_tag_id);
+                        co_return co_await emit_session_reject_(parse_seqnum(vg_hdr.msg_seq_num),
+                                                                vg_hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
                     }
                 }
             }
@@ -2466,9 +2463,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     if (auto rej = validate_inbound_(frame, hdr)) {
-                        co_return co_await emit_session_reject_(
-                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
-                            rej->reason, rej->ref_tag_id);
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
                     }
                 }
             }
@@ -3534,9 +3531,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     if (auto rej = validate_inbound_(frame, hdr)) {
-                        co_return co_await emit_session_reject_(
-                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
-                            rej->reason, rej->ref_tag_id);
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type, rej->reason,
+                                                                rej->ref_tag_id);
                     }
                 }
             }

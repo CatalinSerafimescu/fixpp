@@ -64,8 +64,8 @@ static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context
 
 // Register a minimal acceptor session on `engine`.  The session uses a no-op
 // transport_send (no live TLS needed for this test).  Returns the SessionId.
-static fixpp::session::SessionId register_dummy_session(
-    fixpp::session::Engine& engine, asio::io_context& ioc) {
+static fixpp::session::SessionId register_dummy_session(fixpp::session::Engine& engine,
+                                                        asio::io_context& ioc) {
     fixpp::session::SessionConfig cfg;
     cfg.sender_comp_id = "ACCEPTOR";
     cfg.target_comp_id = "INITIATOR";
@@ -166,8 +166,7 @@ TEST(EngineClockGate, ValidClock_ReturnsSuccess) {
     auto result = engine.start();
 
     // Must succeed with a valid clock.
-    EXPECT_TRUE(result.has_value())
-        << "start() with a valid clock must return success (no error)";
+    EXPECT_TRUE(result.has_value()) << "start() with a valid clock must return success (no error)";
 
     // Run briefly so posted loops fire (Gate A New-3 lazy-construction pattern).
     ioc.run_for(50ms);

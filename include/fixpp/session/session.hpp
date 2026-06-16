@@ -816,8 +816,7 @@ private:
     // and passes the result here. ref_tag_id == 0 → 371 omitted.
     // [041 T010; data-model E-4; RC-C]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
-        seqnum_t ref_seq, std::string_view ref_msg_type, int reason,
-        int ref_tag_id = 0) noexcept;
+        seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0) noexcept;
 
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
@@ -840,9 +839,9 @@ private:
         int reason = 0;
         int ref_tag_id = 0;
     };
-    [[nodiscard]] std::optional<RejectDecision>
-    validate_inbound_(std::span<const std::byte> frame,
-                      fixpp::session::detail::FrameHeader const& hdr) const noexcept;
+    [[nodiscard]] std::optional<RejectDecision> validate_inbound_(
+        std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the

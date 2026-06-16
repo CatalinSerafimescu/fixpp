@@ -106,8 +106,7 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
                                                std::uint32_t seq = 1,
                                                std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 30) {
+                                               std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -246,8 +245,8 @@ TEST(ValidateGateDefaultOff, T015_HeaderOutOfOrder_Accepted) {
 
     // Violation stimulus: 49= before 35= (header out of order).
     std::string body;
-    body += "49=TW\x01";   // sender before MsgType — out of order
-    body += "35=0\x01";    // MsgType after sender
+    body += "49=TW\x01";  // sender before MsgType — out of order
+    body += "35=0\x01";   // MsgType after sender
     body += "34=2\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
@@ -295,8 +294,7 @@ TEST(ValidateGateDefaultOff, T015_UndefinedTag_Accepted) {
     fix.open_to_active(sess);
 
     // Violation: Heartbeat(35=0) with extra tag 44 (Price, not in Heartbeat).
-    auto violation_frame =
-        make_raw_frame("FIX.4.2", "0", 2, "TW", "ISLD", "44=99.99\x01");
+    auto violation_frame = make_raw_frame("FIX.4.2", "0", 2, "TW", "ISLD", "44=99.99\x01");
 
     fix.feed(sess, violation_frame);
 
