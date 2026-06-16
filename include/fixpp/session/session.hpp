@@ -819,21 +819,30 @@ private:
         seqnum_t ref_seq, std::string_view ref_msg_type, int reason,
         int ref_tag_id = 0) noexcept;
 
-    // validate_inbound_or_reject_ — dedup helper (simplify-triage FIX-1/FIX-2):
+    // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
+    // per-message coroutine-frame alloc fix):
     // Parse `frame` with a kInboundParseArena (16384) stack arena, run
-    // validator_->validate(), and emit a Reject if a violation is found.
+    // validator_->validate(), and return the rejection decision WITHOUT emitting.
+    //
     // Returns std::nullopt when validation passes (or the gate is not applicable:
-    // parse fails, framer fails) — caller continues normally.
-    // Returns std::optional{result} when a Reject was emitted (or emit failed);
-    // caller must `co_return std::move(*r)` to propagate the emit result.
+    // framer fails, parse fails — continue as today) — caller continues normally.
+    // Returns std::optional{RejectDecision} when a violation is found; caller must
+    // co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+    //                               rej->reason, rej->ref_tag_id) inline.
+    //
+    // SYNCHRONOUS — no co_await, no sub-coroutine frame allocated on the pass path.
     // PRECONDITION: cfg_.validate_inbound_messages && validator_ must hold
     // (callers guard this — do NOT call without the guard).
     // PRECONDITION: hdr.msg_type != "3" && hdr.msg_type != "5" (3/5 exemption
     // must be checked by the caller before calling).
-    // [041 T014; data-model E-4; SC-005 zero-cost default-path]
-    [[nodiscard]] asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
-    validate_inbound_or_reject_(std::span<const std::byte> frame,
-                                fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // [041 T014; data-model E-4; SC-005 zero-cost default-path; const §VIII.5]
+    struct RejectDecision {
+        int reason = 0;
+        int ref_tag_id = 0;
+    };
+    [[nodiscard]] std::optional<RejectDecision>
+    validate_inbound_(std::span<const std::byte> frame,
+                      fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the

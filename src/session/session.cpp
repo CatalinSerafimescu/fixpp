@@ -1723,24 +1723,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     co_return fixpp::core::expected_t<void>{};
 }
 
-// ── 041-validation-gate-wiring simplify-triage FIX-2: validate_inbound_or_reject_
+// ── 041-validation-gate-wiring FIX-2 + per-message-alloc fix:
+//    validate_inbound_ (synchronous, no sub-coroutine frame)
 //
-// Extracted from the three verbatim validate-gate blocks (NotConnected:1799,
-// Active:2438, LogonSent:3531). Each block built the same kInboundParseArena
+// Extracted from the three verbatim validate-gate blocks (NotConnected:1839,
+// Active:2462, LogonSent:3528). Each block built the same kInboundParseArena
 // stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
-// Now collapsed to one definition called from each arm.
+// Now collapsed here; emit_session_reject_ is inlined at each call site so the
+// PASS path (returns nullopt) is coroutine-frame-free and alloc-free.
 //
-// Returns nullopt when validation passes (caller continues).
-// Returns optional{result} when a Reject was emitted or emit failed (caller
-// must co_return std::move(*r) to propagate).
+// Returns nullopt when validation passes (or is inapplicable: framer/parse fail).
+// Returns optional{RejectDecision} when a violation is found; caller emits:
+//   co_return co_await emit_session_reject_(
+//       parse_seqnum(hdr.msg_seq_num), hdr.msg_type, rej->reason, rej->ref_tag_id);
 //
-// PRECONDITIONS (not re-checked here; callers guard them):
+// SYNCHRONOUS — no co_await anywhere. All arenas are stack-local.
+// PRECONDITIONS (callers guard):
 //   • cfg_.validate_inbound_messages && validator_ must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
-// [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2]
-asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
-Session::validate_inbound_or_reject_(std::span<const std::byte> frame,
-                                     fixpp::session::detail::FrameHeader const& hdr) noexcept {
+// [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
+std::optional<Session::RejectDecision>
+Session::validate_inbound_(std::span<const std::byte> frame,
+                            fixpp::session::detail::FrameHeader const& hdr) const noexcept {
     std::array<std::byte, kInboundParseArena> vg_buf{};
     std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
                                               std::pmr::null_memory_resource()};
@@ -1752,7 +1756,7 @@ Session::validate_inbound_or_reject_(std::span<const std::byte> frame,
     std::array<fixpp::wire::frame_view, 1> vg_out{};
     auto vg_feed = vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
     if (!vg_feed || vg_feed->empty()) {
-        co_return std::nullopt;
+        return std::nullopt;
     }
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
     std::array<std::byte, 512> vg_scratch_buf{};
@@ -1760,17 +1764,15 @@ Session::validate_inbound_or_reject_(std::span<const std::byte> frame,
                                                       std::pmr::null_memory_resource()};
     auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
     if (!vg_mv_r) {
-        co_return std::nullopt;
+        return std::nullopt;
     }
     auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
     if (!val_r) {
         const int vg_reason =
             fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
-        const seqnum_t vg_ref_seq = parse_seqnum(hdr.msg_seq_num);
-        co_return std::optional{co_await emit_session_reject_(
-            vg_ref_seq, hdr.msg_type, vg_reason, 0)};
+        return RejectDecision{vg_reason, 0};
     }
-    co_return std::nullopt;
+    return std::nullopt;
 }
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -1851,8 +1853,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.validate_inbound_messages && validator_) {
                 auto vg_hdr = scan_frame_header(frame);
                 if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
-                    if (auto r = co_await validate_inbound_or_reject_(frame, vg_hdr)) {
-                        co_return std::move(*r);
+                    if (auto rej = validate_inbound_(frame, vg_hdr)) {
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(vg_hdr.msg_seq_num), vg_hdr.msg_type,
+                            rej->reason, rej->ref_tag_id);
                     }
                 }
             }
@@ -2461,8 +2465,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    if (auto r = co_await validate_inbound_or_reject_(frame, hdr)) {
-                        co_return std::move(*r);
+                    if (auto rej = validate_inbound_(frame, hdr)) {
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                            rej->reason, rej->ref_tag_id);
                     }
                 }
             }
@@ -3527,8 +3533,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    if (auto r = co_await validate_inbound_or_reject_(frame, hdr)) {
-                        co_return std::move(*r);
+                    if (auto rej = validate_inbound_(frame, hdr)) {
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                            rej->reason, rej->ref_tag_id);
                     }
                 }
             }
