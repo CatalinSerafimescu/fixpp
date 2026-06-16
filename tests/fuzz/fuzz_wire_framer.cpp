@@ -11,8 +11,8 @@
 //   - No exception escapes the noexcept feed() boundary (the whole wire
 //     surface is noexcept; libFuzzer would catch any terminate() call).
 //
-// Validator bench omitted (US4 PAUSED — deferred with US4):
-//   NO fuzz_wire_validator.cpp per HARD CONSTRAINT.
+// Validator harness: fuzz_wire_validator.cpp wired by 041-validation-gate-wiring
+// (T026) — the feature-004 "US4 PAUSED" deferral is ended.
 //
 // Build: requires Clang + libFuzzer; built under the asan/ubsan presets.
 //
