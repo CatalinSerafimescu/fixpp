@@ -213,11 +213,16 @@ TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     EXPECT_EQ(next_inbound(s), 3U) << "processed in-sequence (counter advances)";
     EXPECT_EQ(capture.count_msg_type("3"), 0U)
         << "DIVERGENCE: no Reject for out-of-order body fields (QF emits 373=14)";
-    // Prove the body fields were actually PARSED (not ignored): the resend range
-    // [1..100] was read from the reversed 16/7 and honored → GapFill NewSeqNo=101.
+    // Prove BOTH reversed body fields were actually PARSED (not ignored): the
+    // resend range [1..100] was read from the reversed 16/7 and honored → a single
+    // GapFill whose gap starts at BeginSeqNo=1 (MsgSeqNum 34=1) and whose
+    // NewSeqNo(36)=EndSeqNo+1=101. 34=1 pins BeginSeqNo(7), 36=101 pins EndSeqNo(16).
     ASSERT_EQ(capture.frames.size(), before + 1U) << "exactly one GapFill reply expected";
-    EXPECT_TRUE(frame_has(capture.frames.back(), "36=101\x01"))
-        << "the reversed-order EndSeqNo(16)=100 must still be parsed (NewSeqNo=101)";
+    const auto& gf = capture.frames.back();
+    EXPECT_TRUE(frame_has(gf, "34=1\x01"))
+        << "reversed-order BeginSeqNo(7)=1 must be parsed (GapFill starts at seq 1)";
+    EXPECT_TRUE(frame_has(gf, "36=101\x01"))
+        << "reversed-order EndSeqNo(16)=100 must be parsed (NewSeqNo=101)";
 }
 
 // ── gap #10 / FIX-TC validLogonState_MsgTypeLogoutAndLogonAlreadySent ─────────
