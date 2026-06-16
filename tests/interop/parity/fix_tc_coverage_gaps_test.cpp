@@ -94,25 +94,35 @@ TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
         << "ResendRequest BeginSeqNo(7) should start at the first missing seqnum (2)";
 }
 
-// ── gap #9 — ResendRequest EndSeqNo beyond our last stored outbound → GapFill ──
+// ── gap #9 — ResendRequest EndSeqNo larger than messages we have → GapFill ────
 //
 // FIX-TC resendRequest_EndSeqNumberLargerThanMessages. A peer asks us to resend
-// a range whose EndSeqNo exceeds our highest stored outbound. Per replay_outbound_
-// range_ the effective end is clamped to our last outbound and the unknown slots
-// collapse into a SequenceReset-GapFill(35=4); the session stays Active (no error).
+// a range [1..100] whose EndSeqNo far exceeds anything we have emitted. This
+// fixture attaches NO message store, so replay_outbound_range_ takes the
+// store-absent branch (session.cpp:4838): the entire requested range collapses
+// into a SINGLE SequenceReset-GapFill(35=4) whose NewSeqNo(36)=requested_end+1
+// (here 101, session.cpp:4840). The session stays Active — no error/disconnect.
+// (A store WITH stored app messages would instead clamp the effective end to the
+// last stored outbound and walk per-slot — a different cell; not exercised here.)
 TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_StaysActive) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
     ASSERT_TRUE(drive_to_active(s));
 
-    // We (acceptor) have emitted only our Logon reply (outbound seq 1). The peer
-    // asks for [1..100] — far beyond our last stored outbound.
+    // We (acceptor) have emitted only our Logon reply (outbound seq 1) and keep no
+    // store. The peer asks for [1..100] — far beyond anything we can replay.
     (void)feed(s, make_resend_request("FIX.4.2", /*seq=*/2, "TW", "ISLD",
                                       /*begin=*/1, /*end=*/100));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "over-range ResendRequest must not disconnect the session";
     EXPECT_GE(capture.count_msg_type("4"), 1U)
-        << "the unknown/over-range slots must collapse into a SequenceReset-GapFill(35=4)";
+        << "the over-range request must collapse into a SequenceReset-GapFill(35=4)";
+    // DISCRIMINATING (not just "a GapFill happened"): the store-absent GapFill must
+    // honor the full requested EndSeqNo, so NewSeqNo(36)=requested_end+1=101. A
+    // witness asserting only count>=1 would also pass on a [1..1] gap-fill
+    // (NewSeqNo=2) or any unrelated GapFill — 36=101 pins the over-range coverage.
+    EXPECT_TRUE(any_frame_contains(capture, "36=101\x01"))
+        << "store-absent over-range GapFill must carry NewSeqNo=EndSeqNo+1 (101)";
 }
 
 // ── gap #7 / FIX-TC 2t — header fields out of canonical order → ACCEPTED ───────
