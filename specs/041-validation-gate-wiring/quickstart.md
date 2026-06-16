@@ -17,12 +17,22 @@ When enabled, each inbound message (including the establishing Logon) is validat
 |---|---|
 | Header field out of order | 14 |
 | Tag not defined for message type | 2 |
-| Required field missing | 1 |
-| Value incorrect / out of range | 5 |
-| Value truncated / bad format | 6 |
+| Required field missing (or malformed repeating group) | 1 |
+| Value not type-conformant (Int/Char/Float-format) | 5 |
+| Float / decimal precision-loss | 6 |
+
+Reason **1** also covers repeating-group structure failures (the validator surfaces them as
+"required field missing" in Phase-1). Reason **6** fires ONLY on a Float/decimal precision-loss value —
+it is NOT a generic "bad format" reason.
+
+Validation runs only in the inbound-**processing** states (NotConnected / LogonSent / LogonReceived /
+Active); the LogoutSent / Disconnected drain states keep their current drain behaviour. The existing
+no-reject-loop exemption for inbound `Reject(35=3)` / `Logout(35=5)` is preserved.
 
 Enum-value conformance is **not** checked in this release (Phase-1; deferred to the 2c enum tables) —
-a wrong enum constant of the correct type is accepted even with validation enabled.
+a wrong enum constant of the correct type is accepted even with validation enabled. For **FIXT**
+sessions, application-message validation uses the session dictionary only; full two-dictionary
+(application dictionary by `DefaultApplVerID`) validation is a deferred Phase-1 limitation.
 
 ## Default (no change)
 
