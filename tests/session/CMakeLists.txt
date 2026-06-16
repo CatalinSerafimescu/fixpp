@@ -1948,6 +1948,28 @@ add_threading_test(session_interpret_logon_overflow
 set_tests_properties(session_interpret_logon_overflow PROPERTIES
   LABELS "040;sc001;overflow-hardening;foundational")
 
+# ── 041-validation-gate-wiring T003/T004 — fail-closed config gate ──────────
+# C-5 / FR-011 / data-model E-1: register_session rejects
+#   validate_inbound_messages=true + null dictionary with invalid_session_config.
+# T003 RED: proves the assertion fails before the check is wired.
+# T004 GREEN: check is wired in engine.cpp register_session.
+# No TLS / no mock_clock needed: register_session is a sync config call.
+add_executable(session_validation_gate_config
+  test_validation_gate_config.cpp
+)
+target_link_libraries(session_validation_gate_config PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_validation_gate_config PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_validation_gate_config
+  COMMAND session_validation_gate_config)
+set_tests_properties(session_validation_gate_config PROPERTIES
+  LABELS "041;t003;t004;validation-gate;foundational")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

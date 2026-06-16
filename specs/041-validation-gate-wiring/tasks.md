@@ -17,7 +17,7 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Confirm the existing wire/dict/session/engine build targets compile clean on branch `041-validation-gate-wiring` (clang-debug ctest baseline GREEN) before edits — establishes the pre-change reference for the FR-002/SC-001 no-op claim.
+- [X] T001 Confirm the existing wire/dict/session/engine build targets compile clean on branch `041-validation-gate-wiring` (clang-debug ctest baseline GREEN) before edits — establishes the pre-change reference for the FR-002/SC-001 no-op claim.
 
 ---
 
@@ -25,9 +25,9 @@
 
 **Purpose**: the opt-in flag + fail-closed config gate that both US1 and US2 depend on. MUST complete before US1/US2.
 
-- [ ] T002 Add `bool validate_inbound_messages = false;` to `SessionConfig` (`include/fixpp/session/session_config.hpp`, after `validate_sequence_numbers` ~line 431). Default **false** (FR-001); plain bool, no new include ([const §XV.9]-safe). Mirror the comment style of `check_comp_id` / `validate_sequence_numbers`.
-- [ ] T003 [P] RED test: `register_session` with `validate_inbound_messages==true` AND `dictionary==nullptr` returns `core::error::invalid_session_config` (slot 53) — fail-closed (FR-011 / C-5). New test in `tests/session/`.
-- [ ] T004 Implement the fail-closed config check in `Engine::register_session` (`src/session/engine.cpp`): reject `validate_inbound_messages && !dictionary` with `invalid_session_config`. Make T003 GREEN.
+- [X] T002 Add `bool validate_inbound_messages = false;` to `SessionConfig` (`include/fixpp/session/session_config.hpp`, after `validate_sequence_numbers` ~line 431). Default **false** (FR-001); plain bool, no new include ([const §XV.9]-safe). Mirror the comment style of `check_comp_id` / `validate_sequence_numbers`.
+- [X] T003 [P] RED test: `register_session` with `validate_inbound_messages==true` AND `dictionary==nullptr` returns `core::error::invalid_session_config` (slot 53) — fail-closed (FR-011 / C-5). New test in `tests/session/`.
+- [X] T004 Implement the fail-closed config check in `Engine::register_session` (`src/session/engine.cpp`): reject `validate_inbound_messages && !dictionary` with `invalid_session_config`. Make T003 GREEN.
 
 ---
 

@@ -192,6 +192,12 @@ void Engine::publish_reader_snapshot_unlocked_() {
 // Duplicate SessionId::from_config(cfg) → session_invalid_argument (119 / R5).
 
 expected_t<void> Engine::register_session(SessionConfig cfg) {
+    // 041 T004 / C-5 / FR-011 / data-model E-1: fail-closed config gate.
+    // validate_inbound_messages=true requires a non-null dictionary; reject BEFORE
+    // any registry mutation so no half-registered entry is left behind.
+    if (cfg.validate_inbound_messages && cfg.dictionary == nullptr)
+        return std::unexpected(error::invalid_session_config);
+
     SessionId id = SessionId::from_config(cfg);  // derive key BEFORE move
     if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);
 
