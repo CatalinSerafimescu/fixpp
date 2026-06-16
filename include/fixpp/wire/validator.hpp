@@ -10,17 +10,18 @@
 // is NO virtual wire/->dict/ runtime edge (SC-007): the validator calls the
 // value type's *non-virtual* members.
 //
-// table_view-seam note (US4 resume, 2026-05-16): fixpp::dict::table_view is
-// the value-typed metadata contract owned by 2c (only FORWARD-declared here,
-// same as parser.hpp). dictionary_driven_validator stores it by value, so its
-// definition needs the COMPLETE type. Per the seam #1 single-definition rule
-// (tests/support/mock_dict_table.hpp) only TESTS supply a complete table_view;
-// production wire code never instantiates a validator. Consequently
-// dictionary_driven_validator is HEADER-ONLY (all 5 overrides inline below)
-// and is only instantiated in test TUs that include the mock BEFORE this
-// header. src/wire/validator.cpp therefore carries no table_view-dependent
-// code (the design doc's .cpp split assumed a real 2c table_view; with the
-// 2c-deferred mock, header-only instantiation is the only correct C++).
+// table_view-seam note (041-validation-gate-wiring, 2026-06-16): T009 promotes
+// fixpp::dict::table_view from test-mock-only to a production header
+// (include/fixpp/dict/table_view.hpp). The forward-declaration seam is CLOSED;
+// this header now includes the complete production types directly. Test TUs
+// that previously included the mock BEFORE this header for the single-
+// definition-rule are updated: the mock is no longer the sole definition.
+// dictionary_driven_validator remains HEADER-ONLY; all 5 overrides are inline
+// below and are instantiated wherever a complete table_view exists (now in
+// both production TUs via Dictionary::as_table_view() and test TUs).
+//
+// §XV.9 guard: table_view.hpp and field_type.hpp have deliberately minimal
+// include graphs (no mutex, no heavy asio) — see their file headers.
 
 #include <cstddef>
 #include <cstdint>
@@ -35,9 +36,12 @@
 
 #include "parser.hpp"  // MessageView<Mode>, access_mode
 
-namespace fixpp::dict {
-class table_view;  // value type, owned by 2c; only forward-declared here.
-}  // namespace fixpp::dict
+// T009 (041-validation-gate-wiring): complete-type includes replacing the
+// forward-declaration seam. §XV.9 guard confirmed: table_view.hpp and
+// field_type.hpp include only cstdint/span/string_view/unordered_map/vector
+// + field_ref.hpp — no mutex, no shared_mutex, no asio heavy headers.
+#include <fixpp/dict/field_type.hpp>
+#include <fixpp/dict/table_view.hpp>
 
 namespace fixpp::wire {
 
@@ -310,7 +314,15 @@ private:
                         return core::expected_t<void>{std::unexpect,
                                                       core::error::wire_field_value_truncated};
                     }
-                    return core::expected_t<void>{std::unexpect, inner_err};
+                    // T009a (041-validation-gate-wiring FR-004 / data-model E-4):
+                    // Any other decimal parse error (decimal_invalid_input=10,
+                    // decimal_overflow=11, …) is NOT a wire_* slot and must not
+                    // escape validate(). Remap to wire_field_value_out_of_range
+                    // (slot 40) → SessionRejectReason=5 (type non-conformant).
+                    // This ensures every error emitted by validate() is a wire_*
+                    // slot, never a raw decimal error.
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_field_value_out_of_range};
                 }
                 return {};
             }

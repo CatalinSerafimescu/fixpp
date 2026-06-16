@@ -280,4 +280,80 @@ std::string_view Dictionary::field_name(std::uint16_t tag) const noexcept {
     return handle_ ? handle_->field_name_impl(tag) : std::string_view{};
 }
 
+// 041-validation-gate-wiring T008: build a `dict::table_view` from this
+// Dictionary.
+//
+// Algorithm:
+//  1. For every message, populate valid-tag set + required-tag list.
+//  2. For every group (via messages), populate group_first + group_members.
+//  3. Build global tag→field_type map by walking ALL message_fields() runs
+//     across all messages (a tag's field_data_type is invariant across
+//     msg_types in FIX — R-1a confirms union-across-messages is correct).
+//
+// [const §XV.1]: called once at session/validator setup; must not be called
+// on the per-message hot path.
+table_view Dictionary::as_table_view() const {
+    table_view tv;
+
+    if (!handle_) {
+        return tv;  // null handle (moved-from Dictionary) → empty table_view
+    }
+
+    auto const msgs = messages();
+
+    for (auto const& msg_entry : msgs) {
+        auto const mt = msg_entry.msg_type;
+
+        // ── required-fields list ─────────────────────────────────────────
+        auto const req_span = required_fields(mt);
+        for (auto const tag : req_span) {
+            tv.add_required_tag(mt, tag);
+        }
+
+        // ── valid-tag set (all fields for this msg_type) ─────────────────
+        auto const all_fields = message_fields(mt);
+        for (auto const& fr : all_fields) {
+            if (fr.rule != field_presence::NotDeclared) {
+                tv.add_valid_tag(mt, fr.tag);
+            }
+        }
+
+        // ── group structure ──────────────────────────────────────────────
+        for (auto const& fr : all_fields) {
+            // NumInGroup / NUMINGROUP fields mark group count fields.
+            if (fr.type != field_data_type::NumInGroup) {
+                continue;
+            }
+            std::uint16_t const no_tag = fr.tag;
+            std::uint16_t const first = group_first_field(no_tag);
+            if (first == 0) {
+                continue;
+            }
+            tv.set_group_first(no_tag, first);
+
+            // Project group_fields() FieldRef spans → uint16_t member tags.
+            auto const gf = group_fields(no_tag);
+            for (auto const& gfr : gf) {
+                tv.add_group_member(no_tag, gfr.tag);
+            }
+        }
+    }
+
+    // ── global tag→field_type map ────────────────────────────────────────
+    // Walk every FieldRef across all message field runs; the first
+    // non-NotDeclared occurrence of a tag wins (type is invariant in FIX).
+    for (auto const& msg_entry : msgs) {
+        auto const all_fields = message_fields(msg_entry.msg_type);
+        for (auto const& fr : all_fields) {
+            if (fr.rule == field_presence::NotDeclared) {
+                continue;
+            }
+            // Only record if not already mapped (first-seen wins; invariant).
+            tv.set_field_type(fr.tag, field_type_from_data_type(fr.type));
+        }
+    }
+
+    return tv;
+}
+
 }  // namespace fixpp::dict

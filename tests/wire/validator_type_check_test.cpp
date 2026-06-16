@@ -254,17 +254,26 @@ TEST(ValidatorTypeCheck, DataFieldAccepted) {
     EXPECT_TRUE(rc.has_value()) << "Data field must be accepted (no structural check)";
 }
 
-// ── validate_field(): enum violation ─────────────────────────────────────────
+// ── validate_field(): enum violation (Phase-1 behavior) ──────────────────────
+// FR-005 / 041-validation-gate-wiring: enum-value checking is OUT OF SCOPE for
+// Phase-1; enum_valid() always returns true regardless of registered enum
+// values. The add_enum() builder method is a no-op stub.
+// Phase-2 (2c enum tables) will restore the rejection behavior; this test
+// documents the Phase-1 pass-through so the behavioral change is pinned.
 
-TEST(ValidatorTypeCheck, ValidateFieldEnumViolationRejected) {
+TEST(ValidatorTypeCheck, ValidateFieldEnumViolationPassedInPhase1) {
     table_view t;
     t.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
     dictionary_driven_validator v{std::move(t)};
 
-    auto val = bv("X");  // not in {"1","2"}
+    // "X" is not in {"1","2"} — but Phase-1 enum_valid() always returns true.
+    auto val = bv("X");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
-    ASSERT_FALSE(rc.has_value()) << "validate_field must reject enum violation";
-    EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
+    // Phase-1: enum violation is NOT rejected (enum check passes through).
+    // Only the Char structural check applies: "X" is 1 byte → passes.
+    EXPECT_TRUE(rc.has_value())
+        << "Phase-1: enum_valid always true; validate_field must accept value "
+           "that violates a registered enum (FR-005, 041-validation-gate-wiring)";
 }
 
 // ── validate() with Int structural error ──────────────────────────────────────

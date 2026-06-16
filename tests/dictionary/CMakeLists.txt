@@ -26,6 +26,8 @@ set(FIXPP_DICT_TESTS
   dictionary_version_profile_test
   dictionary_field_traits_test
   dictionary_version_registry_test
+  # 041-validation-gate-wiring T007/T008: as_table_view() builder tests.
+  dictionary_table_view_test
 )
 
 foreach(target IN LISTS FIXPP_DICT_TESTS)

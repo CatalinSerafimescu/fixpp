@@ -207,9 +207,11 @@ TEST_P(ValidatorPerVersion, MissingRequiredSenderRejected) {
         << static_cast<int>(result.error());
 }
 
-// ── 3. Out-of-range enum → wire_field_value_out_of_range ─────────────────────
+// ── 3. Enum violation — Phase-1 pass-through (FR-005, 041-validation-gate-wiring)
 // EncryptMethod (tag 98) = "9" is not in the {"0","1"} enum set.
-TEST_P(ValidatorPerVersion, BadEnumEncryptMethodRejected) {
+// Phase-1: enum_valid() always returns true; enum violations are accepted.
+// Phase-2 (2c enum tables) will restore the rejection behavior.
+TEST_P(ValidatorPerVersion, BadEnumEncryptMethodPassedInPhase1) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
@@ -223,11 +225,10 @@ TEST_P(ValidatorPerVersion, BadEnumEncryptMethodRejected) {
                                     "98=9\x01");  // illegal enum value for EncryptMethod
 
     auto result = do_validate(v, buf);
-    ASSERT_FALSE(result.has_value())
-        << p.label << ": EncryptMethod=9 (invalid enum) must be rejected";
-    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
-        << p.label << ": expected wire_field_value_out_of_range (40), got "
-        << static_cast<int>(result.error());
+    // Phase-1: enum_valid always true → accepted, not rejected (FR-005).
+    EXPECT_TRUE(result.has_value())
+        << p.label << ": Phase-1: enum_valid always true; EncryptMethod=9 must "
+                      "be accepted (FR-005, enum-check deferred to 2c)";
 }
 
 // ── 4. Unexpected tag → wire_unexpected_tag ───────────────────────────────────

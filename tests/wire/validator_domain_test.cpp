@@ -516,11 +516,21 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
 }
 
 // (d) Out-of-range enum value → wire_field_value_out_of_range.
-TEST(ValidatorDomain, EnumViolationRejected) {
+// ── Phase-1 enum behavior (FR-005, 041-validation-gate-wiring) ───────────────
+// Enum-value checking is OUT OF SCOPE for Phase-1; enum_valid() always returns
+// true. A field value that violates a registered enum is accepted (passes
+// through) — only structural type checks apply. This pins the Phase-1
+// pass-through behavior so a future 2c enum-table PR can un-skip this.
+// The original rejection assertion is preserved as a comment for Phase-2:
+//   ASSERT_FALSE(result.has_value()) << "Side=X must be rejected in Phase-2";
+//   EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
+TEST(ValidatorDomain, EnumViolationPassedInPhase1) {
     auto gram = make_d_grammar();
     dictionary_driven_validator v{std::move(gram)};
 
     // Side (tag 54) has value "X" which is not in the {"1","2"} enum set.
+    // Phase-1: enum_valid always true → accepted (not rejected).
+    // Side(54) is type Char, "X" is 1 byte → structural Char check passes.
     auto buf = make_frame(
         "35=D\x01"
         "49=SENDER\x01"
@@ -539,9 +549,8 @@ TEST(ValidatorDomain, EnumViolationRejected) {
                                                    std::pmr::null_memory_resource()};
 
     auto result = v.validate(mv, &scratch_mr);
-    ASSERT_FALSE(result.has_value()) << "message with enum-violating Side=X must be rejected";
-    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
-        << "expected wire_field_value_out_of_range (40), got " << static_cast<int>(result.error());
+    EXPECT_TRUE(result.has_value())
+        << "Phase-1: enum_valid always true; Side=X must be accepted (FR-005)";
 }
 
 }  // namespace
