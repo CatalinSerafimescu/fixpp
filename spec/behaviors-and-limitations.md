@@ -106,9 +106,9 @@ Scope and conventions:
 ### Limitations
 
 - **L-005-1 — The full `[FIX-TC]` conformance corpus is NOT satisfied; only a capability-partitioned subset ships green.** Recovery-dependent and too-high-seqnum TC cases are deferred-with-traceability; `[const §VII.5]` is explicitly NOT satisfied under a recorded waiver. **Status: deferred.** *(FR-018; SC-008; Session-2026-05-18.)*
-- **L-005-2 — FIXT.1.1 / 5.0SP2 establishment conformance is not claimed by 005; only FIX.4.2/4.4 are validated.** (FIXT establishment later shipped in 033.) **Status: deferred.** *(FR-017; SC-001.)*
-- **L-005-3 — A too-low seqnum without `PossDupFlag=Y` is always session-fatal; PossDup duplicate semantics were out of 005 scope.** (PossDup tolerance later shipped — 021/022.) **Status: deferred.** *(US2#2; spec §Edge Cases.)*
-- **L-005-4 — One `Session` models exactly one counterparty pair; no multi-session registry or acceptor demux** (that is 015's engine). **Status: deferred.** *(Key Entities "Session".)*
+- **L-005-2 — FIXT.1.1 / 5.0SP2 establishment conformance was not claimed by 005; only FIX.4.2/4.4 were validated at 005.** **Status: resolved (033)** — FIXT.1.1 establishment shipped in 033. *(FR-017; SC-001.)*
+- **L-005-3 — A too-low seqnum without `PossDupFlag=Y` is always session-fatal (`session_seqnum_too_low`, `session.cpp:1694`); PossDup duplicate semantics were out of 005 scope.** **Status: resolved (021/022)** — PossDup tolerance shipped in 021/022; the residual (a too-low *without* PossDup stays session-fatal by design) is intended, not deferred. *(US2#2; spec §Edge Cases.)*
+- **L-005-4 — One `Session` models exactly one counterparty pair (a permanent 005 design fact); 005 itself shipped no multi-session registry or acceptor demux.** **Status: resolved (015)** — the multi-session runtime engine / registry shipped in 015. *(Key Entities "Session".)*
 - **L-005-5 — `OnBehalfOfCompID(115)`/`DeliverToCompID(128)` third-party addressing is not implemented; only point-to-point 49/56 validation.** **Status: deferred.** *(FR-004 scope note.)*
 
 ## Session FSM finalize (009-session-fsm-finalize)
@@ -297,11 +297,11 @@ Scope and conventions:
 
 ### Limitations
 
-- **L-014-1 — Acceptor sessions do NOT drive a reconnect loop; reconnect is initiator-side only.** Acceptors re-accept rather than reconnecting; the live acceptor accept→handshake→`authorize()` production path is the 015 engine, not 014. **Status: deferred.** *(spec §Assumptions "Reconnect is initiator-side"; Out of Scope.)*
+- **L-014-1 — Acceptor sessions do NOT drive a reconnect loop; reconnect is initiator-side only.** Acceptors re-accept rather than reconnecting (a permanent FIX design fact). **Status: wontfix** for the reconnect asymmetry; the live acceptor accept→handshake→`authorize()` production path itself shipped in 015 (it was 014's deferred boundary, not 014). *(spec §Assumptions "Reconnect is initiator-side"; Out of Scope.)*
 
 - **L-014-2 — [RESOLVED in 015] At 014 the CompID-binding decision was proven on the live path only for the initiator; the acceptor relied on the `logon_peer_identity_override` test seam, so T-041 did not fully close in 014.** 014 wired the live identity into `authorize()` and proved it only on the live initiator reconnect path. The live acceptor path and test-seam removal — and full T-041 production closure — landed with **015**: `logon_peer_identity_override` is removed from production (grep-empty at HEAD; the acceptor now drives identity through `live_peer_id_`). **Status: resolved (015).** *(FR-008; spec §Assumptions "T-041 advances but does not fully close"; `engine_seam_removal_test.cpp`.)*
 
-- **L-014-3 — The public multi-session Initiator/Acceptor runtime engine is out of scope; 014 is per-session wiring through the existing `ReconnectFsm`.** No public accept/connect-loop component, no `SessionConfig`-keyed registry, no programmatic multi-session lifecycle, no acceptor accept→Session-create→byte-feed production path — all carved out to 015. The continuous inbound read-pump rebind is also 015. **Status: deferred.** *(spec §Out of Scope; contract C1.)*
+- **L-014-3 — The public multi-session Initiator/Acceptor runtime engine is out of scope; 014 is per-session wiring through the existing `ReconnectFsm`.** No public accept/connect-loop component, no `SessionConfig`-keyed registry, no programmatic multi-session lifecycle, no acceptor accept→Session-create→byte-feed production path — all carved out to 015 at the time of 014. The continuous inbound read-pump rebind was also 015. **Status: resolved (015)** — the multi-session runtime engine shipped in 015. *(spec §Out of Scope; contract C1.)*
 
 - **L-014-4 — `error::session_seqnum_too_high` (slot 120) replaces the vestigial slot-74 stand-in; the retired slot remains a permanent numeric hole.** The seqnum manager's too-high branch now returns a dedicated, semantically-correct code instead of reusing slot 74 (`session_test_request_unanswered`); error slots are append-only and retired slots are never reused. **Status: follow-up.** *(FR-016; contract — error-enum append `error::session_seqnum_too_high = 120`.)*
 
