@@ -47,14 +47,17 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <memory_resource>
+#include <new>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,6 +69,65 @@ extern "C" {
 __attribute__((weak)) void alloc_guard_start() {}
 __attribute__((weak)) void alloc_guard_end() {}
 }
+
+// ── TU-local global operator new counter ─────────────────────────────────────
+//
+// WHY: mallocnesia is inert for the alloc-guard window on this WSL2/llvm22 host
+// (proven 2026-06-16): the test binary's alloc_guard_start/end markers are not
+// exported as dynamic symbols so the LD_PRELOAD interceptor cannot arm itself;
+// a `new int[256]` between the markers goes uncaught.  counting_resource is
+// PMR-scoped and cannot intercept std::string's global operator new.
+//
+// This TU-local replacement of operator new/delete intercepts ALL global
+// allocations unconditionally, so it catches std::string{msg_type} constructed
+// inside table_view::field_valid_for / required_fields (the pre-fix P1 bug).
+// It is the deterministic local discriminator; mallocnesia enforcement is CI-side.
+//
+// The g_arming flag ensures that only the explicitly armed window is counted;
+// setup and warm-up allocations (std::string / std::vector construction before
+// the window) are not measured.  The flag is set/cleared by the owning test cell,
+// never by the operator-new body itself (no re-entrant logic needed).
+//
+// Both g_arming and g_new_count are constant-initialized (trivial types at
+// namespace scope), so they are safe to read from operator new during dynamic
+// initialisation of other TUs (g_arming == false at that point).
+
+static std::atomic<std::size_t> g_new_count{0};
+static bool g_arming = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+// Full replacement set: new + new[] + delete + delete[] (sized and unsized).
+// Uses std::malloc/std::free to avoid re-entrant operator new calls.
+// NOLINTNEXTLINE(cert-dcl58-cpp) — replacing global operator new/delete is intentional here
+void* operator new(std::size_t n) {
+    if (g_arming) {
+        g_new_count.fetch_add(1, std::memory_order_relaxed);
+    }
+    void* p = std::malloc(n);
+    if (!p) throw std::bad_alloc{};
+    return p;
+}
+
+// NOLINTNEXTLINE(cert-dcl58-cpp)
+void* operator new[](std::size_t n) {
+    if (g_arming) {
+        g_new_count.fetch_add(1, std::memory_order_relaxed);
+    }
+    void* p = std::malloc(n);
+    if (!p) throw std::bad_alloc{};
+    return p;
+}
+
+// NOLINTNEXTLINE(cert-dcl58-cpp)
+void operator delete(void* p) noexcept { std::free(p); }
+
+// NOLINTNEXTLINE(cert-dcl58-cpp)
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+
+// NOLINTNEXTLINE(cert-dcl58-cpp)
+void operator delete[](void* p) noexcept { std::free(p); }
+
+// NOLINTNEXTLINE(cert-dcl58-cpp)
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
@@ -211,21 +273,24 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
 //
 // P1-fix witness (gate-b/r1): proves that field_valid_for/required_fields do NOT
 // heap-allocate when the MsgType is LONGER than SSO on any standard stdlib
-// (libstdc++ SSO ~15, libc++ SSO ~22 — this test uses a 32-char MsgType, which
+// (libstdc++ SSO ~15, libc++ SSO ~22 — this test uses a 31-char MsgType, which
 // exceeds both). Pre-fix, table_view::field_valid_for() and required_fields()
 // constructed a std::string{msg_type} temporary per call, causing a heap alloc
 // for every validated field on the hot path and risking std::terminate() on
 // bad_alloc inside the noexcept methods. Post-fix (transparent string_hash +
 // std::equal_to<>), the .find(string_view) call is allocation-free.
 //
-// DISCRIMINATION:
-//   Pre-fix: the std::string{msg_type} constructor allocates for a 32-char key;
-//   mallocnesia intercepts it → binary exits 1 → test FAILS (RED).
-//   Post-fix: no temporary is constructed; mallocnesia sees 0 allocations → PASS.
+// DISCRIMINATION (TU-local operator-new counter — the load-bearing gate):
+//   The g_new_count / g_arming mechanism intercepts ALL global operator new calls
+//   regardless of mallocnesia availability (see file-top comment on WHY).
+//   Pre-fix: std::string{msg_type} constructs a 31-char heap string for each
+//   field_valid_for call (8 calls, one per tag) + one required_fields call →
+//   g_new_count > 0 → ASSERT_EQ FAILS (RED confirmed 2026-06-16: count == 9).
+//   Post-fix: .find(string_view) with transparent hash → 0 allocations →
+//   g_new_count == 0 → ASSERT_EQ PASSES (GREEN confirmed 2026-06-16: count == 0).
 //
-//   The 32-char MsgType "CustomAppMessageTypeXYZ12345678" exceeds SSO on both
-//   libstdc++ (SSO=15) and libc++ (SSO=22), ensuring the temporary would
-//   allocate on any commonly-used stdlib.
+//   mallocnesia + counting_resource assertions are retained (belt-and-suspenders;
+//   non-discriminating locally but may catch regressions in CI / future platforms).
 //
 // The table_view is built locally (not via the XML loader) so this test is
 // fully self-contained and independent of validation_test_dictionary.hpp.
@@ -235,8 +300,8 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
 //
 // [gate-b/r1 FIX-1 witness; const §VIII.5 / §XV.1; P3 fold-in]
 TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
-    // 32-char MsgType: exceeds SSO on libstdc++ (~15) and libc++ (~22).
-    // "CustomAppMessageTypeXYZ12345678" is exactly 31 chars + NUL = 32.
+    // 31-char MsgType: exceeds SSO on libstdc++ (~15) and libc++ (~22).
+    // "CustomAppMessageTypeXYZ12345678" is exactly 31 chars.
     constexpr std::string_view kLongMsgType = "CustomAppMessageTypeXYZ12345678";
     static_assert(kLongMsgType.size() == 31,
                   "MsgType must exceed both libstdc++ SSO (~15) and libc++ SSO (~22)");
@@ -327,16 +392,35 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
         << "warm-up parse+validate failed for long-MsgType frame";
 
     // ── Measured window ────────────────────────────────────────────────────────
-    // Under mallocnesia pre-fix: std::string{msg_type} constructs a 32-char heap
-    // string for EACH field lookup → intercepted → exit 1 → RED.
-    // Post-fix: .find(string_view) → 0 allocations → GREEN.
-    bool measured_ok = false;
+    // PRIMARY gate: TU-local operator-new counter (g_arming / g_new_count).
+    // Arm the counter, run one parse→validate cycle, disarm, assert zero.
+    // Pre-fix (std::string{msg_type} temporary in field_valid_for / required_fields):
+    //   count == 9 (8 field_valid_for calls × 1 alloc each + 1 required_fields)
+    //   → ASSERT_EQ FAILS → RED (confirmed 2026-06-16).
+    // Post-fix (transparent string_hash, .find(string_view)):
+    //   count == 0 → ASSERT_EQ PASSES → GREEN (confirmed 2026-06-16).
+    //
+    // SECONDARY gate: mallocnesia LD_PRELOAD (alloc_guard_start/end markers).
+    // Non-discriminating on this WSL2/llvm22 host (markers not exported as
+    // dynamic symbols → interceptor cannot arm itself); retained for CI coverage.
+    g_new_count.store(0, std::memory_order_relaxed);
+    g_arming = true;
     alloc_guard_start();
-    measured_ok = run_long_validate();
+    bool measured_ok = run_long_validate();
     alloc_guard_end();
+    g_arming = false;
+    std::size_t global_new_count = g_new_count.load(std::memory_order_relaxed);
 
     EXPECT_TRUE(measured_ok)
         << "measured parse+validate failed for long-MsgType — conformant frame must pass";
+
+    // PRIMARY alloc-guard assertion: zero global operator new calls in the window.
+    // This is the discriminating gate for the transparent-hash P1 fix.
+    ASSERT_EQ(global_new_count, std::size_t{0})
+        << "global operator new fired " << global_new_count
+        << " time(s) during parse+validate with 31-char MsgType — "
+           "table_view lookups must not construct std::string temporaries "
+           "(post-fix: transparent string_hash / std::equal_to<> on valid_/required_ maps)";
 }
 
 }  // namespace
