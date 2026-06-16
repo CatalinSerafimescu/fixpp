@@ -115,6 +115,15 @@ TEST(StoreFifoFair, TwoCoroutinesInboundOutboundBothSucceed) {
         },
         asio::use_future);
     verify_fut.get();
+
+    // Drain the writer pool before `store` is destroyed at scope exit. A
+    // future returned by use_future is satisfied when the awaiting coroutine
+    // resumes inside invoke_handler, but the async_mutex resumption runner's
+    // tail (release_ref) still touches the store's embedded mutex AFTER that.
+    // `pool` is declared before `store`, so its destructor-join would run too
+    // late; join here to establish happens-before. (verify_pool is declared
+    // after `store`, so its own destructor already drains it in time.)
+    pool.join();
 }
 
 // ── Test 2: Concurrent writers on same direction — only FIFO order succeeds ──
@@ -169,6 +178,10 @@ TEST(StoreFifoFair, ConcurrentWritersSameDirectionOneWins) {
     EXPECT_EQ(success_count.load(), 1) << "Exactly 1 concurrent store(seq=1) must succeed";
     EXPECT_EQ(out_of_order_count.load(), 1)
         << "Exactly 1 concurrent store(seq=1) must fail with store_seqnum_out_of_order";
+
+    // Drain the pool before `store` is destroyed: the resumption runner's tail
+    // (release_ref) outlives fut.get() and touches the store's embedded mutex.
+    pool.join();
 }
 
 // ── Test 3: High-concurrency stress — 4 threads, 2 directions, ordered ───────
@@ -240,6 +253,14 @@ TEST(StoreFifoFair, HighConcurrencyMutexGuardsStore) {
         },
         asio::use_future);
     vfut.get();
+
+    // Drain the writer pool before the shared `store` is released at scope
+    // exit. fut.get() unblocks when the coroutine resumes, but the async_mutex
+    // resumption runner's tail (release_ref) still reads the store's embedded
+    // mutex on a pool thread afterwards. `pool` is declared before `store`, so
+    // its destructor-join would race the shared_ptr teardown; join here.
+    // (vpool is declared after `store`, so its destructor already drains it.)
+    pool.join();
 }
 
 }  // namespace
