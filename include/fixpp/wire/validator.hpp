@@ -305,6 +305,12 @@ private:
                 auto wrapped = core::detail::trap_throw(
                     [value, mr]() { return fixpp::decimal_t::parse(value, mr); });
                 if (!wrapped) {
+                    // trap_throw outer branch: decimal_t::parse is noexcept, so a
+                    // throw → terminate and this branch is dead in practice. If a
+                    // future decimal trait ever throws, the raw error escapes here
+                    // (bypassing the T009a remap below). That is a pre-existing
+                    // constraint: the in-contract (non-throwing) path is the only
+                    // live path and guarantees only wire_* slots reach the caller.
                     return core::expected_t<void>{std::unexpect, wrapped.error()};
                 }
                 if (!(*wrapped)) {
@@ -315,12 +321,11 @@ private:
                                                       core::error::wire_field_value_truncated};
                     }
                     // T009a (041-validation-gate-wiring FR-004 / data-model E-4):
-                    // Any other decimal parse error (decimal_invalid_input=10,
-                    // decimal_overflow=11, …) is NOT a wire_* slot and must not
-                    // escape validate(). Remap to wire_field_value_out_of_range
-                    // (slot 40) → SessionRejectReason=5 (type non-conformant).
-                    // This ensures every error emitted by validate() is a wire_*
-                    // slot, never a raw decimal error.
+                    // In-contract path (non-throwing decimal_t::parse): any other
+                    // decimal parse error (decimal_invalid_input=10, decimal_overflow=11, …)
+                    // is NOT a wire_* slot and must not escape validate(). Remap to
+                    // wire_field_value_out_of_range (slot 40) → SessionRejectReason=5.
+                    // This ensures every error on the in-contract path is a wire_* slot.
                     return core::expected_t<void>{std::unexpect,
                                                   core::error::wire_field_value_out_of_range};
                 }

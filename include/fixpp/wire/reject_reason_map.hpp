@@ -69,9 +69,12 @@ namespace fixpp::wire {
             // Reason 14: tag out of required order.
             return 14;
         default:
-            // Post-T009a: validate() emits ONLY the 5 wire_* slots above.
-            // This arm is structurally unreachable in production. Fail-closed
-            // to reason 3 (other) rather than UB.
+            // Fail-closed catch-all: maps any non-wire_* error to reason 3 (other).
+            // Post-T009a: validate() emits ONLY the 5 wire_* slots above on the
+            // in-contract (non-throwing) path, so this arm is dead in normal operation.
+            // It is live only if a non-wire_* error ever escaped validate() (e.g. via
+            // the trap_throw outer branch if decimal_t::parse ever throws — currently
+            // noexcept). Kept as a fail-closed safety net rather than UB.
             return 3;
     }
 }

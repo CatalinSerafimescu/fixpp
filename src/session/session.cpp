@@ -1723,6 +1723,56 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     co_return fixpp::core::expected_t<void>{};
 }
 
+// ── 041-validation-gate-wiring simplify-triage FIX-2: validate_inbound_or_reject_
+//
+// Extracted from the three verbatim validate-gate blocks (NotConnected:1799,
+// Active:2438, LogonSent:3531). Each block built the same kInboundParseArena
+// stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
+// Now collapsed to one definition called from each arm.
+//
+// Returns nullopt when validation passes (caller continues).
+// Returns optional{result} when a Reject was emitted or emit failed (caller
+// must co_return std::move(*r) to propagate).
+//
+// PRECONDITIONS (not re-checked here; callers guard them):
+//   • cfg_.validate_inbound_messages && validator_ must hold
+//   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
+// [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2]
+asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
+Session::validate_inbound_or_reject_(std::span<const std::byte> frame,
+                                     fixpp::session::detail::FrameHeader const& hdr) noexcept {
+    std::array<std::byte, kInboundParseArena> vg_buf{};
+    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    std::array<std::byte, 512> vg_carry_store{};
+    std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(), vg_carry_store.size(),
+                                                    std::pmr::null_memory_resource()};
+    fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
+    fixpp::wire::Framer vg_framer;
+    std::array<fixpp::wire::frame_view, 1> vg_out{};
+    auto vg_feed = vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
+    if (!vg_feed || vg_feed->empty()) {
+        co_return std::nullopt;
+    }
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
+    std::array<std::byte, 512> vg_scratch_buf{};
+    std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
+                                                      std::pmr::null_memory_resource()};
+    auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+    if (!vg_mv_r) {
+        co_return std::nullopt;
+    }
+    auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
+    if (!val_r) {
+        const int vg_reason =
+            fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
+        const seqnum_t vg_ref_seq = parse_seqnum(hdr.msg_seq_num);
+        co_return std::optional{co_await emit_session_reject_(
+            vg_ref_seq, hdr.msg_type, vg_reason, 0)};
+    }
+    co_return std::nullopt;
+}
+
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
 //
 // parse_cn_from_dn_local: extract the first "CN=" value from an OpenSSL
@@ -1796,40 +1846,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // these are drained silently on this arm anyway (FR-004 no-loop guard).
             // Seqnum is NOT advanced on validate failure (validate fires before
             // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
+            // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
+            // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 auto vg_hdr = scan_frame_header(frame);
                 if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
-                    std::array<std::byte, kAdminParseArena> vg_buf{};
-                    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                                              std::pmr::null_memory_resource()};
-                    std::array<std::byte, 512> vg_carry_store{};
-                    std::pmr::monotonic_buffer_resource vg_carry_mr{
-                        vg_carry_store.data(), vg_carry_store.size(),
-                        std::pmr::null_memory_resource()};
-                    fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
-                    fixpp::wire::Framer vg_framer;
-                    std::array<fixpp::wire::frame_view, 1> vg_out{};
-                    auto vg_feed =
-                        vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
-                    if (vg_feed && !vg_feed->empty()) {
-                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
-                        std::array<std::byte, 512> vg_scratch_buf{};
-                        std::pmr::monotonic_buffer_resource vg_scratch_mr{
-                            vg_scratch_buf.data(), vg_scratch_buf.size(),
-                            std::pmr::null_memory_resource()};
-                        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
-                        if (vg_mv_r) {
-                            auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
-                            if (!val_r) {
-                                const int vg_reason =
-                                    fixpp::wire::wire_error_to_session_reject_reason(
-                                        val_r.error());
-                                const seqnum_t vg_ref_seq =
-                                    parse_seqnum(vg_hdr.msg_seq_num);
-                                co_return co_await emit_session_reject_(
-                                    vg_ref_seq, vg_hdr.msg_type, vg_reason, 0);
-                            }
-                        }
+                    if (auto r = co_await validate_inbound_or_reject_(frame, vg_hdr)) {
+                        co_return std::move(*r);
                     }
                 }
             }
@@ -2435,38 +2458,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
             // and BEFORE check_inbound (C-3: seqnum NOT advanced on validate failure).
             // No-reject-loop: 35=3 and 35=5 exempt (FR-004). [041 T014; data-model E-4]
+            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    std::array<std::byte, kAdminParseArena> vg_buf{};
-                    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                                              std::pmr::null_memory_resource()};
-                    std::array<std::byte, 512> vg_carry_store{};
-                    std::pmr::monotonic_buffer_resource vg_carry_mr{
-                        vg_carry_store.data(), vg_carry_store.size(),
-                        std::pmr::null_memory_resource()};
-                    fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
-                    fixpp::wire::Framer vg_framer;
-                    std::array<fixpp::wire::frame_view, 1> vg_out{};
-                    auto vg_feed =
-                        vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
-                    if (vg_feed && !vg_feed->empty()) {
-                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
-                        std::array<std::byte, 512> vg_scratch_buf{};
-                        std::pmr::monotonic_buffer_resource vg_scratch_mr{
-                            vg_scratch_buf.data(), vg_scratch_buf.size(),
-                            std::pmr::null_memory_resource()};
-                        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
-                        if (vg_mv_r) {
-                            auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
-                            if (!val_r) {
-                                const int vg_reason =
-                                    fixpp::wire::wire_error_to_session_reject_reason(
-                                        val_r.error());
-                                const seqnum_t vg_ref_seq = parse_seqnum(hdr.msg_seq_num);
-                                co_return co_await emit_session_reject_(
-                                    vg_ref_seq, hdr.msg_type, vg_reason, 0);
-                            }
-                        }
+                    if (auto r = co_await validate_inbound_or_reject_(frame, hdr)) {
+                        co_return std::move(*r);
                     }
                 }
             }
@@ -3527,39 +3523,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
             // rather than a silent Disconnect (C-2 validate-first ordering, FR-003).
             // No-reject-loop: 35=3 and 35=5 exempt. C-3: seqnum NOT advanced.
+            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    std::array<std::byte, kAdminParseArena> vg_buf{};
-                    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                                              std::pmr::null_memory_resource()};
-                    std::array<std::byte, 512> vg_carry_store{};
-                    std::pmr::monotonic_buffer_resource vg_carry_mr{
-                        vg_carry_store.data(), vg_carry_store.size(),
-                        std::pmr::null_memory_resource()};
-                    fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
-                    fixpp::wire::Framer vg_framer;
-                    std::array<fixpp::wire::frame_view, 1> vg_out{};
-                    auto vg_feed =
-                        vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
-                    if (vg_feed && !vg_feed->empty()) {
-                        fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
-                        std::array<std::byte, 512> vg_scratch_buf{};
-                        std::pmr::monotonic_buffer_resource vg_scratch_mr{
-                            vg_scratch_buf.data(), vg_scratch_buf.size(),
-                            std::pmr::null_memory_resource()};
-                        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
-                        if (vg_mv_r) {
-                            auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
-                            if (!val_r) {
-                                const int vg_reason =
-                                    fixpp::wire::wire_error_to_session_reject_reason(
-                                        val_r.error());
-                                const seqnum_t vg_ref_seq = parse_seqnum(hdr.msg_seq_num);
-                                co_return co_await emit_session_reject_(
-                                    vg_ref_seq, hdr.msg_type, vg_reason, 0);
-                            }
-                        }
+                    if (auto r = co_await validate_inbound_or_reject_(frame, hdr)) {
+                        co_return std::move(*r);
                     }
                 }
             }

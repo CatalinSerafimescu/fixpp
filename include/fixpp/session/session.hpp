@@ -78,6 +78,15 @@ namespace fixpp::wire {
 class dictionary_driven_validator;
 }  // namespace fixpp::wire
 
+namespace fixpp::session::detail {
+// Forward-declare FrameHeader so session.hpp can reference it in the
+// validate_inbound_or_reject_ private helper declaration without including
+// scan_frame_header.hpp (an internal non-public header) here.
+// Full definition in src/session/scan_frame_header.hpp, included by session.cpp.
+// [const §XV.9] — forward-decl keeps the awaitable closure mutex-free.
+struct FrameHeader;
+}  // namespace fixpp::session::detail
+
 namespace fixpp::session {
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
@@ -809,6 +818,22 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
         seqnum_t ref_seq, std::string_view ref_msg_type, int reason,
         int ref_tag_id = 0) noexcept;
+
+    // validate_inbound_or_reject_ — dedup helper (simplify-triage FIX-1/FIX-2):
+    // Parse `frame` with a kInboundParseArena (16384) stack arena, run
+    // validator_->validate(), and emit a Reject if a violation is found.
+    // Returns std::nullopt when validation passes (or the gate is not applicable:
+    // parse fails, framer fails) — caller continues normally.
+    // Returns std::optional{result} when a Reject was emitted (or emit failed);
+    // caller must `co_return std::move(*r)` to propagate the emit result.
+    // PRECONDITION: cfg_.validate_inbound_messages && validator_ must hold
+    // (callers guard this — do NOT call without the guard).
+    // PRECONDITION: hdr.msg_type != "3" && hdr.msg_type != "5" (3/5 exemption
+    // must be checked by the caller before calling).
+    // [041 T014; data-model E-4; SC-005 zero-cost default-path]
+    [[nodiscard]] asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
+    validate_inbound_or_reject_(std::span<const std::byte> frame,
+                                fixpp::session::detail::FrameHeader const& hdr) noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the

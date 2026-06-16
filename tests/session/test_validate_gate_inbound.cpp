@@ -418,5 +418,56 @@ TEST(ValidateGateInbound, SeqnumNotAdvancedOnReject) {
         << "W7: session should remain Active";
 }
 
+// ── W8: arena-bypass — high-field-count frame with a violation NOT silently dispatched
+//
+// Regression witness for the FIX-1 bypass (simplify-triage round):
+// The validate gate used kAdminParseArena (8192 bytes) while the dispatch path
+// uses kInboundParseArena (16384 bytes). The OffsetTable parser allocates PMR-backed
+// pmr::vector<entry> (12 bytes/entry) from the arena with geometric reallocation.
+// After ~256 entries the cumulative monotonic usage (~6132 bytes) leaves only ~2060
+// bytes remaining — the next vector growth (cap 256→512, needing 6144 bytes) fails
+// with bad_alloc, setting status_=out_of_memory. parse() then returns unexpected;
+// the gate's `if (vg_mv_r)` is false → validation silently skipped → message
+// dispatched UNVALIDATED.
+// With kInboundParseArena (16384): the cap-512 realloc fits (~10252 bytes remain)
+// → parse succeeds → validate fires → Reject(373=2).
+//
+// Frame: NOS(35=D) with required fields + 300 unique undefined tags (9000-9299,
+// not in the test dictionary) to exceed the 8192-arena entry limit while staying
+// within the 16384-arena limit. Each undefined tag yields wire_unexpected_tag.
+//
+// RED on HEAD (gate parse exhausts arena → unexpected → no Reject → bypass).
+// GREEN after FIX-1 (gate parse succeeds → validate rejects with reason=2).
+TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
+    ValidateGateFixture fix;
+    auto cfg = fix.make_cfg_with_validation();
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+
+    // Build NOS(35=D) with required fields + 300 unique undefined tags (9000-9299).
+    // 300 fields exhaust the 8192-byte arena (cap-512 realloc fails) while the
+    // 16384-byte dispatch arena handles them (cap-512 fits in ~10252 remaining bytes).
+    // Tags 9000-9299 are NOT defined in the test dictionary for any msg type.
+    std::string body;
+    body += "11=ORD001\x01";
+    body += "54=1\x01";
+    body += "60=20240101-00:00:00.000\x01";
+    for (int t = 9000; t < 9300; ++t) {
+        body += std::to_string(t) + "=X\x01";  // 300 undefined tags
+    }
+    auto frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
+
+    fix.feed(sess, frame);
+
+    // Must produce Reject(373=2) for the undefined tags.
+    // On HEAD (kAdminParseArena gate): arena exhausts at ~257 fields → parse()
+    //   returns unexpected → if(vg_mv_r) is false → validation SKIPPED → no Reject.
+    // After FIX-1 (kInboundParseArena gate): parse succeeds → validate fires →
+    //   first undefined tag (9000) detected → Reject(373=2).
+    EXPECT_TRUE(fix.has_reject_with_reason(2))
+        << "W8: high-field-count frame with undefined tags must be Rejected (373=2), "
+           "not silently bypassed due to parse-arena exhaustion in the validate gate";
+}
+
 }  // namespace
 }  // namespace fixpp::session::test
