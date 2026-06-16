@@ -331,3 +331,21 @@ TEST(TableViewTest, FullFix44DictionaryTableView) {
     EXPECT_TRUE(has_first)
         << "group_member_tags must contain the group_first_field tag";
 }
+
+// ── T005 Gate A P3-b: UtcTimestamp collapses to String ──────────────────────
+// Pin the decision made in Gate A P3-b: UtcTimestamp (and all UTC* variants)
+// map to field_type::String.  This means a malformed SendingTime(52) value
+// is not catchable by the Phase-1 type-check arm — by design (the SendingTime
+// guard in 038 already handles it before validation runs).
+// Anchor: 041-validation-gate-wiring/plan.md Gate A P3-b.
+TEST(TableViewTest, FieldTypeFromDataTypeUtcTimestampMapsToString) {
+    using fixpp::dict::field_type;
+    using fixpp::dict::field_data_type;
+
+    EXPECT_EQ(field_type_from_data_type(field_data_type::UtcTimestamp), field_type::String)
+        << "UtcTimestamp must map to String (Gate A P3-b pin)";
+    EXPECT_EQ(field_type_from_data_type(field_data_type::UtcTimeOnly), field_type::String)
+        << "UtcTimeOnly must map to String";
+    EXPECT_EQ(field_type_from_data_type(field_data_type::UtcDateOnly), field_type::String)
+        << "UtcDateOnly must map to String";
+}
