@@ -43,7 +43,8 @@ No new persisted/wire entities. The "entities" here are configuration and in-mem
   - `wire_unexpected_tag`(42) → **2** (tag not defined for msg type)
   - `wire_required_field_missing`(38) → **1** (required field missing **and all repeating-group structure failures** — the validator surfaces group failures as `wire_required_field_missing`; no distinct group reason in Phase-1)
   - `wire_field_value_out_of_range`(40) → **5** (value not type-conformant — emitted by the type arm; the enum arm is dead Phase-1)
-  - `wire_field_value_truncated`(41) → **6** (Float/decimal precision-loss ONLY — never a generic bad-format value)
+  - `wire_field_value_truncated`(41) → **6** (Float/decimal precision-loss ONLY — `decimal_precision_loss` remapped at `validator.hpp:309-311`)
+- **Float parse-error remapping requirement (audit finding — SPEC-FIXED)**: `decimal_t::parse` can return `decimal_invalid_input` (10) or `decimal_overflow` (11) for badly-formatted or out-of-range Float values. The validator's Float path (`validator.hpp:307-313`) currently passes these through as raw decimal errors — non-`wire_*` slots outside {38–42}. The implementation MUST remap any Float parse error that is NOT `decimal_precision_loss` to `wire_field_value_out_of_range` (40) → reason **5**. Only `decimal_precision_loss` → `wire_field_value_truncated` (41) → reason **6**. Task T009a adds this remap.
 - **Reject emission (RC-C correction)**: `build_reject` (`admin_messages.cpp:613`) ALREADY accepts `ref_tag_id` + `session_reject_reason` and emits `371`/`373` — reuse it UNCHANGED. The work is to extend/overload the **caller** `emit_session_reject_` (`session.cpp:1597`, today hardwired `RefTagID=0, reason=3`) to thread the mapped reason (and optional offending `RefTagID`) through.
 - **Consumers**: the inbound validate gate, when `validate()` returns a `wire_*` error, maps it and calls the (extended) `emit_session_reject_`.
 
