@@ -16,8 +16,294 @@ Scope and conventions:
   `wontfix` (a documented divergence we stand behind). Limitations with a backlog item
   link to the **Deferred-work registry** in `CLAUDE.md`.
 - Entries are added as each feature ships (Polish / catalogue step). **Prior features
-  (001–014) are not yet back-filled** — do that during the first operator-doc build by
-  sweeping each `specs/<id>/contracts/realized-behavior.md` + spec "Out of scope".
+  (001–014) were back-filled 2026-06-15** (draft — anchors cited from each `specs/<id>/spec.md` +
+  `plan.md`; pending a verification pass at the operator-doc build). The out-of-band Fable 008 rows
+  (`B-008-1`/`L-008-1`/`L-008-2`) were relocated into the 008 section as part of that back-fill.
+
+---
+
+## Decimal type (001-core-decimal)
+
+> Anchor note: features 001–014 predate the FR-/SC- convention; rows cite the ids these
+> specs actually use (`AC-*`, `NFR-*`, dated Clarifications, `§N`). Back-filled 2026-06-15.
+
+### Behaviors
+
+- **B-001-1 — Bare `fixpp_decimal_compare` / `_equal` do NO domain validation; the `_checked` siblings do.** The bare C-ABI entry points return `int` directly with no error channel and assume the caller already produced canonical values (`exponent ∈ [-38, 0]`) — feeding them an out-of-domain struct is undefined, not a reported error. Untrusted/foreign callers MUST use `fixpp_decimal_compare_checked` / `_equal_checked`, which validate and return `FIXPP_ERR_DECIMAL_INVALID` on out-of-domain input. C++ engine code calls the bare path by construction. *(AC-C6; Clarifications Session 2026-05-12.)*
+- **B-001-2 — `.5` and `5.` are rejected, not parsed as 0.5 / 5.0.** A decimal literal with no integer digit (`.5`) or no fractional digit (`5.`) is `decimal_invalid_input`; any non-digit/non-dot/non-sign byte (including an embedded SOH `\x01`) is also rejected. A consumer expecting lenient `atof`-style parsing will be surprised. *(AC-P3 / AC-P4.)*
+- **B-001-3 — The invalid sentinel sorts strictly greater than every finite value.** `pod_decimal_invalid` orders above all finite decimals and is equal only to itself, so a parse-failure sentinel never silently compares equal to a real price. Comparison is by numeric value, so `1`, `1.0`, `1.00` all compare equal. *(AC-C2 / AC-C1.)*
+- **B-001-4 — Trailing fractional zeros are preserved in the encoding, but compare ignores them.** `5.500` parses to `{5500, -3}` (the exponent retains scale), yet value-equality treats it as equal to `5.5`. Storage is representation-faithful; comparison is value-faithful. *(AC-P5 / AC-C1.)*
+- **B-001-5 — Swapping the decimal width is a build-time choice enforced at LINK time.** Setting `-DFIXPP_DECIMAL_T=...` widens the whole engine; two translation units built with conflicting `FIXPP_DECIMAL_T` fail with an unresolved-symbol *link* error (`decimal_alias_sentinel`), not a runtime mismatch. The alias never changes the `fixpp_decimal_t` C-ABI shape (always 16 bytes). *(AC-B3 / AC-B4.)*
+
+### Limitations
+
+- **L-001-1 — No arithmetic and no locale-aware formatting on `decimal<T>`.** No `+ - * /`, no thousands-separators / exponent-notation / per-locale decimal marks; it is a representation primitive only. **Status: wontfix.** *(spec §5 "Out of scope".)*
+- **L-001-2 — No direct `T → U` cross-traits conversion; everything funnels through `pod_decimal`.** A value outside the `int64 × 10^[-38..0]` PoD interchange domain reports `decimal_precision_loss` rather than converting directly. **Status: deferred** (§10 Q1). *(spec §5 "Out of scope"; §10 Q1.)*
+- **L-001-3 — No built-in `decimal_traits<__int128>` specialization.** High-precision consumers supply their own wider trait via `FIXPP_DECIMAL_USER_HEADER`; v1.0 ships no `__int128` trait. **Status: deferred** (§10 Q2). *(spec §5; §10 Q2.)*
+
+## XML data dictionary loader (002-dictionary-xml-loader)
+
+### Behaviors
+
+- **B-002-1 — The loader THROWS typed exceptions; a deliberate carve-out from the engine's noexcept/`expected_t` model.** `XmlLoader::load` returns a `Dictionary` by value and signals construction-time failure via typed exceptions — not `expected_t`. **Catch carefully:** `dict::xml_parse_error` and `dict::unknown_version_error` derive from `std::runtime_error`, but `dict::xml_oom_error` derives from `std::bad_alloc` (`dict/error.hpp:64`), NOT `std::runtime_error` — a `catch (std::runtime_error&)` silently MISSES the OOM path. The hot-path `Dictionary` accessors are then all `noexcept`. *(spec §1 Style note; AC-L2 / AC-L9; NFR-002-5; `include/fixpp/dict/error.hpp:33,47,64`.)*
+- **B-002-2 — Walk a component's/group's fields via `component_fields()` / `group_fields()`, not by indexing `fields_`.** Under the runtime loader, `ComponentRef`/`GroupRef::first_field_index` index per-component/per-group SIDE TABLES, not the main `fields_` array (which is concatenated per `(message, field)` for O(log N) lookup), so components are not contiguous in it. This differs from the codegen-emitted layout where components ARE contiguous. *(Clarifications Session 2026-05-15 Q4.)*
+- **B-002-3 — There is no context-free `field(tag)` lookup; field metadata is keyed by `(MsgType, tag)`.** One `FieldRef` exists per `(MsgType, tag)` pair (a field can carry a different presence rule per message), so a bare `field(tag)` has no canonical answer and is not in the v1.0 surface. Unknown tags return `field_presence::NotDeclared`, not an error. *(AC-D1 / AC-D2.)*
+- **B-002-4 — `messages()` iteration order is bytewise-lexicographic by MsgType, locale-independent.** Ordering is fixed by `std::ranges::lexicographical_compare` over `unsigned char`, so the same XML yields a byte-stable order across runs and machines — not the host locale's collation. *(AC-D5; NFR-002-4.)*
+
+### Limitations
+
+- **L-002-1 — Only the four codegen-target versions (FIX42/44/50SP2/FIXT11) ship XML + headline tests.** The loader structurally accepts all nine v1.0 versions, but the five runtime-XML-only ones (FIX 4.0/4.1/4.3/5.0/5.0SP1) ship no checked-in XML data; supplying them is ~1 PR of data each, no loader code. **Status: deferred** (§10 F1). *(Clarifications Session 2026-05-14 Q1.)*
+- **L-002-2 — `DialectOverlay` / `load_overlay*` is absent.** Per-session venue-dialect extension of a base dictionary is not in this feature. **Status: deferred** (§10 F2, dedicated feature). *(Clarifications Session 2026-05-14 Q2.)*
+- **L-002-3 — Semantically-inconsistent-but-structurally-valid XML is accepted; only structural defects are caught.** A `<message>` referencing a field with a wrong-for-usage type is NOT a loader error; semantic validation belongs to `wire::Validator` downstream. **Status: wontfix.** *(spec §3 Edge Cases.)*
+- **L-002-4 — Zero-allocation covers only the output `Dictionary` metadata, not pugixml's transient DOM.** pugixml's intermediate DOM uses `malloc/free` (not `operator new`); peak parser-side memory is not bounded by the NFR-002-2 gate. **Status: wontfix.** *(NFR-002-2.)*
+
+## Dictionary codegen + typed messages + reify bridge (003-dictionary-codegen)
+
+### Behaviors
+
+- **B-003-1 — Typed-message accessors are `inline noexcept`, NOT `constexpr`.** Only `msg_type_v` / `version_v` are `constexpr`; per-tag accessors route through `wire::OffsetTable::find` (non-`constexpr`). The catalogue's "constexpr accessors" title is looser than what ships. *(AC-G11; spec §1 Style note.)*
+- **B-003-2 — The decimal accessor alone takes an explicit `std::pmr::memory_resource* mr`; string/int/char accessors are zero-arg.** A typed decimal read is `price(mr)` returning `expected_t<decimal_t>` (zero-alloc for the default `pod_decimal`; an allocating substituted `FIXPP_DECIMAL_T` draws from `mr`, never raw `new`). `decimal_t` is deliberately NOT a `field_traits` specialization. *(AC-G4 / AC-G4a / AC-FT2.)*
+- **B-003-3 — Codegen runs at CONFIGURE time and writes only to the build tree, never the source tree.** `fixpp::dict::generate-vXX` emits per-version headers under `build/<preset>/_codegen/...`; a source checkout never carries generated headers, so a dirty tree never ships stale codegen. Output is byte-identical run-to-run. *(AC-T1 / AC-T2 / AC-C4.)*
+- **B-003-4 — `owning_<Msg>` is single-strand-only; the safe cross-thread pattern is reify-on-A → move → consume-on-B.** The lazy `view()` cache write is unsynchronized, so concurrent reads on one `owning_<Msg>` instance are UB. To cross a strand boundary, `dict::reify_as` on thread A, `std::move` the owner to thread B, then read. *(AC-T3 / AC-R5.)*
+- **B-003-5 — A FIXT.1.1 message that can't resolve its application version returns a distinct error, not "unknown msg type".** When `default_appl == Unknown` and a frame lacks `ApplVerID(1128)`, `dict::reify` returns `dict_unresolved_application_version` (NOT `dict_reify_unknown_msg_type`). *(AC-D6; `src/dictionary/version_profile.cpp:20-24`, propagated `reify.cpp:225`.)*
+
+### Limitations
+
+- **L-003-1 — Typed messages + compile-time shape ship, but the BEHAVIORAL reify/typed-read round-trip was 2b-gated and deferred at 003.** The `owning_<Msg>` emission + compile-time shape land here, but deep-copying a real parsed frame into caller-`mr` storage and reading values via `cl_ord_id()`/`version()` depended on the not-yet-available `wire::MessageView<Index>::bytes()` body. **Status: deferred** (R6, 2026-05-16). *(spec §5 last bullet; §11 R6.)*
+- **L-003-2 — Only the four codegen-target versions get typed namespaces; runtime-XML-only versions have none.** For those, `dict::reify` returns `dict_reify_unknown_msg_type`; the positive path is 002's runtime `view.get(uint16_t)`. **Status: deferred** (§10 F5). *(spec §5; §10 F5.)*
+- **L-003-3 — The codegen-emitted `Validator.hpp` is shape-tested only; it does not actually reject bad messages.** This feature ships the per-message rule tables + Length/Data pair table and asserts their structure against the XML, but behavioral validation is a downstream wire-layer feature (and the hand-written `wire::Validator` it complements has no production caller — see B-004-1 / B-005-7). **Status: deferred.** *(Clarifications Session 2026-05-15 Q3; AC-V3; spec §5.)*
+- **L-003-4 — The all-versions translation unit is NOT a supported default build.** The load-bearing ceiling is the single-version TU (≤ 3 s); the all-versions TU carries only a soft ≤ 15 s ceiling. **Status: wontfix.** *(NFR-003-2; spec §5.)*
+
+## Wire codec — framer, parser, offset table, writer, validator (004-wire-codec)
+
+### Behaviors
+
+- **B-004-1 — Field parsing is order-independent; the only ordering rule the `wire::Validator` enforces is "MsgType(35) first after framing" — and that validator is NOT invoked on the session inbound path.** The parser indexes fields by tag (O(1)-by-tag, no positional requirement). The hand-written `wire::Validator::validate` enforces one order rule — the first non-framing offset-table entry must be `MsgType(35)`, else `wire_header_out_of_order` (`validator.hpp:108-131`). But `dictionary_driven_validator` has **zero production callers**: `Session::on_inbound_frame` scans frames directly via `scan_frame_header` and never runs this validator, so out-of-order header/body fields are accepted on the live session path (see B-005-7). fixpp does not enforce full FIX-SL §4.5 field-block ordering anywhere. *(FR-002; `validator.hpp:108-131`; error `wire_header_out_of_order` (39).)*
+- **B-004-2 — CheckSum verification is mandatory with no production bypass switch.** A wrong `CheckSum(10)` or inconsistent `BodyLength(9)` is always rejected before any parser sees the frame — there is no "skip checksum" config knob (only a tests-only hook). Several FIX engines expose checksum-leniency toggles; fixpp does not. *(FR-017; spec §Edge Cases; plan.md:50.)*
+- **B-004-3 — DoS caps reject some conformant venue traffic on day one by default.** Default bounds (256 KiB max frame, 4096 offset-table occurrences, 4096 group entries/instance) target FX/equities; a large options-chain MDIR or `SecurityList` (thousands of strikes) exceeds the defaults and is rejected (`wire_frame_too_large` / `wire_offset_table_full`). Such venues must explicitly raise the caps. *(FR-015; Assumptions; SC-003.)*
+- **B-004-4 — A parsed view aliases the caller's buffer and traps (debug) on use-after-reuse.** `MessageView`/`field_view` are zero-copy flyweights whose lifetime is the caller-owned buffer's; a debug-only generation counter traps deterministically if the buffer is reused under a live view (compiled out in release). *(FR-016; Key Entities "View"; `[const §IX.4]`.)*
+- **B-004-5 — Unknown/custom fields are preserved opaquely and round-trip byte-identically.** Tags absent from the dictionary are not dropped/rejected at parse; they are exposed via `unknown_fields()` and written back in original byte order on re-serialize (zero-alloc), so parse→serialize is byte-identical including custom fields. *(FR-008; SC-001; data-model.md:64.)*
+
+### Limitations
+
+- **L-004-1 — Dialect-introduced new `Length`+`Data` (BLOB) pairs are not handled on the streaming iterator path.** Index mode resolves all dialect BLOB pairs via the runtime dictionary, but Iter (streaming) mode uses a static `constexpr` table of FIX-5.0-SP2-standard pairs only. **Status: deferred.** *(FR-005; research D-11.)*
+- **L-004-2 — Binary encodings (FIXP / SOFH / SBE) are out of scope; v1.0 is Tag=Value SOH only.** **Status: deferred.** *(spec §Assumptions.)*
+- **L-004-3 — The wire layer adds no C-ABI surface; the 13 new `wire_*` variants' C-ABI coalescing is deferred to feature 2i.** **Status: deferred.** *(FR-014; plan.md:74,77.)*
+- **L-004-4 — Framing errors are session-fatal; there is NO in-stream resync-and-continue (diverges from FIX-TC 2d / QuickFIX).** When the framer rejects bytes (bad BeginString/BodyLength/checksum framing), the engine read-pump terminates the session (`engine.cpp:537-541`) rather than skipping the garbled region and rescanning. NOTE: a too-high *sequence* gap on a *well-framed* frame is NOT fatal — it triggers ResendRequest recovery (B-013-1); this is specifically about byte-level framing corruption. **Status: wontfix** (fail-closed on a corrupt transport stream). *(`src/wire/framer.cpp`; `engine.cpp:537-541`; FIX-TC coverage-audit 2026-06-15.)*
+
+## Session establishment & FSM core (005-session-establishment-fsm)
+
+### Behaviors
+
+- **B-005-1 — A too-high `MsgSeqNum` gap was session-fatal as shipped in 005 — SUPERSEDED 2026-05-29 by 013, which added ResendRequest recovery.** As 005 shipped, a detected inbound gap surfaced `session_seqnum_gap_unrecoverable`, emitted a `Logout`-with-text, and disconnected (no ResendRequest). **013-session-reconnect-binding replaced this with AwaitingResend + real ResendRequest recovery in Active (B-013-1)**; only the pre-Active handshake gap remains handshake-fatal. *(FR-008, amended 013 T048 / PR #86; Session-2026-05-18.)*
+- **B-005-2 — There is no `RecoveryPending` half-state; the FSM is exactly the 6-state `[FIX-SL §4.10]` set.** `NotConnected → LogonSent → LogonReceived → Active → LogoutSent → Disconnected`, no invented states (a Gate-A survey found the OSS premise behind a proposed half-state was inverted). *(FR-001; Session-2026-05-18; Key Entities.)*
+- **B-005-3 — Receipt of a deferred admin type (`ResendRequest`/`SequenceReset`) is a defined, bounded transition — never a silent no-op.** Even where gap-fill/resend was out of 005 scope, the FSM dispositions these (session-level `Reject` or the defined transition), never UB and never silently ignored. *(FR-017; spec §Edge Cases.)*
+- **B-005-4 — `seqnum_t` overflow is session-fatal and requires operator intervention; it never silently wraps.** At the max representable outbound counter the session reports a fatal sequence-overflow rather than wrapping to zero. *(FR-009; spec §Edge Cases.)*
+- **B-005-5 — Outbound sequence numbers are committed to the `MessageStore` BEFORE the frame hits transport (durable-before-transmit).** A cancelled transmit must not leave a persisted-but-unsent gap inconsistent with the contract. *(FR-010; `[2e §root cause #1]`.)*
+- **B-005-6 — `HeartBtInt=0` fully disables heartbeating (no timers run at all).** When negotiated at Logon, neither heartbeat nor test-request timers run; the session is Active but emits no liveness traffic, per `[FIX-SL §4.3.4]`. *(FR-006.)*
+- **B-005-7 — The live session inbound path accepts out-of-order header/body fields (incl. MsgType not first); it does NOT emit a Reject for field-order violations.** `Session::on_inbound_frame` scans fields order-independently (`scan_frame_header`) and never runs the `wire::Validator` MsgType-first check (B-004-1), so a frame with `MsgSeqNum(34)` before `MsgType(35)`, or with body fields shuffled, is accepted and processed (seqnum advances) — diverging from QuickFIX, which emits `Reject(SessionRejectReason=14)`. **[RATIFY at v1.0 gate]** — enforce §4.5 ordering (wire the validator in) or stand behind the leniency. The leniency is benign for well-formed frames (valid framing, required fields present) and is not a forged-tag/delimiter vector. *(FIX-TC 2t/15 coverage-audit 2026-06-15; `tests/interop/parity/fix_tc_coverage_gaps_test.cpp`; see `fix-tc-coverage-gaps-findings.md`.)*
+
+### Limitations
+
+- **L-005-1 — The full `[FIX-TC]` conformance corpus is NOT satisfied; only a capability-partitioned subset ships green.** Recovery-dependent and too-high-seqnum TC cases are deferred-with-traceability; `[const §VII.5]` is explicitly NOT satisfied under a recorded waiver. **Status: deferred.** *(FR-018; SC-008; Session-2026-05-18.)*
+- **L-005-2 — FIXT.1.1 / 5.0SP2 establishment conformance was not claimed by 005; only FIX.4.2/4.4 were validated at 005.** **Status: resolved (033)** — FIXT.1.1 establishment shipped in 033. *(FR-017; SC-001.)*
+- **L-005-3 — A too-low seqnum without `PossDupFlag=Y` is always session-fatal (`session_seqnum_too_low`, `session.cpp:1694`); PossDup duplicate semantics were out of 005 scope.** **Status: resolved (021/022)** — PossDup tolerance shipped in 021/022; the residual (a too-low *without* PossDup stays session-fatal by design) is intended, not deferred. *(US2#2; spec §Edge Cases.)*
+- **L-005-4 — One `Session` models exactly one counterparty pair (a permanent 005 design fact); 005 itself shipped no multi-session registry or acceptor demux.** **Status: resolved (015)** — the multi-session runtime engine / registry shipped in 015. *(Key Entities "Session".)*
+- **L-005-5 — `OnBehalfOfCompID(115)`/`DeliverToCompID(128)` third-party addressing is not implemented; only point-to-point 49/56 validation.** **Status: deferred.** *(FR-004 scope note.)*
+
+## Session FSM finalize (009-session-fsm-finalize)
+
+### Behaviors
+
+- **B-009-1 — Acceptor sessions stay in `NotConnected` at `open()` and emit no outbound Logon; only initiators emit at open.** With `role = acceptor`, `Session::open` waits for a peer `Logon` (then `NotConnected → LogonReceived → Active`). The pre-009 impl unconditionally entered `LogonSent` regardless of role. `role` defaults to `initiator`. *(FR-004/FR-005; data-model.md:19.)*
+- **B-009-2 — A refused first `Logon` in `NotConnected` transitions to `Disconnected`, not back to `NotConnected`.** A failed BeginString/CompID/establishment validation moves the FSM to `Disconnected` per the matrix. *(FR-006; data-model.md:19.)*
+- **B-009-3 — Missing OR malformed inbound `SendingTime(52)` is rejected, not leniently accepted.** In `Active`/`LogonReceived`, absent/unparseable `52` → `Reject(SessionRejectReason=10, RefTagID=52)` → `Logout` → `Disconnected`; in `LogonSent`, instead a `Logout(58=…)` with no standalone Reject. The prior lenient fall-through was removed. *(FR-007/FR-008/FR-009; `include/fixpp/session/sending_time.hpp:11-16`; `session.cpp:1817`, `:1858-1860`.)*
+- **B-009-4 — Every outbound frame (incl. all 5 admin builders) carries the negotiated `BeginString` and a live-clock `SendingTime`, not hard-coded placeholders.** The hard-coded `"FIX.4.2"` and zero-timestamp placeholder constants were removed. *(FR-002/FR-003.)*
+- **B-009-5 — In `LogoutSent` (graceful logout in progress) all inbound frames except the peer's `Logout(35=5)` are silently drained.** An inbound Logon (or any app/admin frame) received while awaiting the peer's Logout confirmation does NOT advance the inbound seqnum, is NOT Rejected, and does NOT re-establish — only the peer's Logout is acted upon (→ Disconnected). Diverges from QuickFIX, which treats a second Logon in this state as valid. *(`session.cpp:3322-3338`; FIX-TC coverage-audit 2026-06-15; `tests/interop/parity/fix_tc_coverage_gaps_test.cpp`.)*
+
+### Limitations
+
+- **L-009-1 — A `Session::send` whose transport `async_write` is cancelled after the store commit leaves a durable-but-unsent frame; 009 does not recover it.** The slice returns a defined error and reaches `Disconnected` (no silent success) but performs no session-level recovery of the phantom committed frame. **Status: deferred.** *(spec §Edge Cases; `[2e §3.1]`.)*
+- **L-009-2 — TestRequest ID uniqueness is per-session-lifetime only and wraps at `UINT32_MAX`.** Not unique across sessions or restarts; wrap-around is acceptable. **Status: wontfix.** *(FR-010.)*
+- **L-009-3 — `SeqnumManager::drain` failure during `close` is logged-then-proceed, not surfaced as a close error.** Still reports `closed_drained`; the destructor completes safely. **Status: wontfix.** *(FR-011.)*
+
+## Session config & lifetime (010-session-cfg-lifetime)
+
+### Behaviors
+
+- **B-010-1 — `Session` copies its `SessionConfig` by value at construction; the caller may drop or mutate the config afterward.** `Session` holds `SessionConfig cfg_` by value (was a `const&`, a stack-use-after-scope hazard). Each `Session` owns its snapshot; post-construction mutation of the caller's config has no effect, and config sharing across sessions is unsupported (construct one config per session). *(FR-001; Clarification 2026-05-23; Key Entities.)*
+- **B-010-2 — `Session::send` in a non-`Active` state returns a dedicated `session_invalid_state_for_send` error, distinct from `session_invalid_logon`.** 010 added slot 77 to de-conflate the two conditions; FSM-side Logon-refusal still uses `session_invalid_logon`. *(FR-005; SC-004.)*
+- **B-010-3 — A duplicate `Logon` (`35=A`) in `Active` emits exactly one `Reject(35=3)` — a deliberate defensive divergence from QuickFIX's refresh-on-dup-Logon convention.** `"A"` is deliberately excluded from `is_admin_msgtype`, so it falls through to a single Reject per 005 FR-017 ("never silent no-op"). NOTE: `ResendRequest("2")` and `SequenceReset("4")` in `Active` are **no longer Rejected** — they were upgraded to full processing by 013 (Phase 3) / S-023 and explicitly no longer reach the Reject branch. *(FR-006/FR-008; SC-002; `session.cpp:3197-3199`.)*
+- **B-010-4 — The `LogonReceived` FSM state is synchronous-transient; observe it via the always-on history ring buffer.** On the acceptor reply-Logon path the FSM passes `NotConnected → LogonReceived → Active` in one tick, so `LogonReceived` cannot be caught by a state snapshot; `Session::fsm_visit_history()` (a 16-entry ring, always written) is the only observation seam. No `#ifdef` divergence between production and test. *(FR-004; SC-002.)*
+
+### Limitations
+
+- **L-010-1 — The `Active×ResendRequest` / `Active×SequenceReset` Reject→Process upgrade has LANDED (013 / S-023 / 027 / 029); only the dup-Logon-in-`Active` cell still Rejects by design.** What 010 shipped as `TODO(2e-recovery)` Reject cells are now fully processed (ResendRequest → `replay_outbound_range_`; SequenceReset → Reset-mode bypass + GapFill arms), staying Active. Catalogue row 400 is thereby largely discharged; the residual is a v1.0-gate traceability-marker confirm. **Status: follow-up** (was deferred — now shipped). *(SC-002; `session.cpp:2423`, `:3160`.)*
+- **L-010-2 — The `cfg_` member is not type-`const`; "no post-ctor mutation" is convention-enforced, not compiler-enforced.** Held non-const to preserve future config-hot-reload flexibility. **Status: wontfix.** *(FR-001.)*
+- **L-010-3 — `SessionConfig::store_factory` is a `shared_ptr` (a small 005 amendment) to make `SessionConfig` copy-constructible.** The per-Session "one MessageStore per Session" invariant is unaffected. **Status: wontfix.** *(FR-001a; `session_config.hpp:172`.)*
+
+## Awaitable mutex `fixpp::sync::async_mutex` (006-async-mutex)
+
+### Behaviors
+
+- **B-006-1 — `async_mutex` is the only legal mutex in any coroutine context; plain `std::mutex` is banned and CI-enforced.** Any header that includes `asio::awaitable<...>` and also names a `std::` mutex spelling fails the build with a diagnostic pointing at `fixpp::sync::async_mutex`. A custom-`MessageStore` author migrating from QuickFIX must swap `std::mutex` for `async_mutex`. *(FR-014 / SC-006 / US5.)*
+- **B-006-2 — Destroying a mutex that still has a live holder or waiters calls `std::terminate()` by design — it is not an error return.** A documented hard precondition (RC#3), enforced in both debug and release; teardown must `cancel_and_drain()` first. *(FR-008; spec §Edge Cases.)*
+- **B-006-3 — Waiter resumption is always `post`ed, never inline-`dispatch`ed, regardless of `completion_policy`.** The `completion_policy` survives only as an intent knob queryable via `policy()`; an inline `dispatch` at the resume site was a TSan-diagnosed heap-UAF (Erratum E-3). A caller expecting `dispatch`-policy inline resumption will not get it. *(FR-004; US1.3.)*
+
+### Limitations
+
+- **L-006-1 — No shared/RW, recursive, or timed mutex variant; LIFO-pop + FIFO-drain is the only fairness mode, and there is no public `try_lock()`.** Recursive acquire by the current holder is unsupported by construction. **Status: wontfix.** *(FR-015; spec §Edge Cases.)*
+- **L-006-2 — Zero-global-allocation on the contended path holds only in steady state, after a one-time per-thread cancellation-recycler warm-up.** asio's `cancellation_slot` exposes no allocator-binding hook; the one-time first-touch is amortized and bench-soft (Erratum E-4). **Status: wontfix.** *(FR-009 / SC-004.)*
+
+## Application threading contract & `fixpp::core::Clock` (007-threading-clock)
+
+### Behaviors
+
+- **B-007-1 — Application callbacks are serialised per session on an engine-derived strand and never run on the I/O recv thread.** `onLogon`/`onLogout`/`toAdmin`/`fromAdmin`/`toApp`/`fromApp` for one session never overlap; callbacks for *different* sessions may run concurrently. The engine never picks a concrete executor — the application supplies one `any_io_executor`. *(FR-007/FR-008; US1.)*
+- **B-007-2 — There is NO active engine-level null-`clock` rejection: the `clock_not_set` gate (FR-006) is specified via `validate_engine_config()` but UNWIRED in the shipped runtime `Engine`.** `validate_engine_config()` (`engine_config.hpp:188`) has zero production callers (test-only); the runtime `Engine` does not gate on a null `EngineConfig::clock` at construction or start. A null clock surfaces only as a downstream defensive disconnect / "should not happen" guard (`session.cpp:4289`, `:4710`), not a clean `clock_not_set` at open — the same unwired-gate class as `wire::Validator` (B-004-1). *(FR-006; US2.1; `engine_config.hpp:188`; zero-caller grep.)*
+- **B-007-3 — `now()` is not promised monotonic; all elapsed/heartbeat/SendingTime-*delta* (threshold) measurements use `steady_now()`.** A benign NTP/admin backward wall-clock step never trips a SendingTime-threshold reject; wall-clock `now()` is consulted for the actual `SendingTime(52)` wire stamp (`session.cpp:4045`) and log/OTel timestamps — NOT for interval/threshold deltas. Diverges from engines that measure heartbeat intervals against wall-clock. *(FR-004; US2.3.)*
+- **B-007-4 — Opting out of the per-session strand requires explicit attestation, and `direct_executor + spin` is rejected even when attested.** `threading_mode::direct_executor` skips the `make_strand` wrap but demands `already_serialized_executor == true`, else `error::executor_not_serialised`; `direct_executor` + `lock_policy::spin` is rejected with `error::invalid_session_config`. *(FR-009; US1.4.)*
+- **B-007-5 — `drop_oldest` backpressure is unrepresentable.** `backpressure_mode` is a closed enum with only `block` (default) and `disconnect_and_recover`; an out-of-range cast is rejected at construction (`[const §XV.15]` no silent loss). *(FR-010; US5.3.)*
+- **B-007-6 — Trace context follows the session serialisation domain, not `thread_local`, and survives resume on a different thread.** `co_await fixpp::current_trace_context` recovers a typed `Session*` and reads a `session_local<trace_context>` slot, byte-identical across a suspend/resume on another pool thread. *(FR-014/FR-015; US4.)*
+- **B-007-7 — Engine/session config is frozen at open; the only reconfiguration path is close-and-reopen.** Executor, clock, dictionary, mode, locks, trace-context all freeze via `resolved = override.value_or(engine_anchor)`. *(FR-016; US5.1.)*
+
+### Limitations
+
+- **L-007-1 — `Session::close(partial)` is not in the v1.0 surface; only `graceful` and `terminal` ship.** **Status: deferred.** *(FR-011; Key Entities "close_mode".)*
+- **L-007-2 — `direct_executor` attested over a genuinely non-serialised executor is UB in release builds.** Debug trips a strand-invariant assert on detected concurrent FSM entry; release treats a false attestation as user-contract-violation UB. **Status: wontfix.** *(spec §Edge Cases; FR-009.)*
+- **L-007-3 — The cross-thread dispatch latency ceiling (250 ns) is regression-gated, not an absolute hard-fail.** CI fails only on >5% regression vs the previous tagged release; the absolute figure is a §10-Q4 tightening target. **Status: follow-up.** *(SC-004; FR-021.)*
+
+## Message store — async API + `MemoryStore` / `FileStore` (008-message-store)
+
+### Behaviors
+
+- **B-008-1 — The FileStore log grows monotonically until a reset epoch (size disk accordingly).** FileStore is append-only with no compaction, rotation, or size cap: each outbound message appends ≈ `payload + 16 B` record header (+ ≤ 7 B alignment padding) and each inbound advance a 24 B counter record (16 B header + 8 B payload). The only reclamation is a reset epoch (`reset_on_{logon,logout,disconnect}` — all default `false` — or bilateral `141=Y`). Default config ⇒ monotone growth for the durable session lifetime (restart re-scans the full log). fixpp has no `SessionTime`-driven daily auto-reset. **Operator action:** size disk for one reset epoch and enable a reset knob or arrange external EOD resets. *(Fable `5.4`; `file_store.cpp:135` (kHeaderSize=16), `:375-381` (record size), `:680` (append); `file_store_factory.cpp:174`.)*
+- **B-008-2 — The *default* `MemoryStore` config is rejected at construction under the *default* 1 GiB cap, by design.** The frozen defaults (`inbound = outbound = 10'000` × 256 KiB `max_frame_bytes` ≈ 5 GiB worst case) deliberately exceed `EngineConfig::max_store_memory_per_session = 1 GiB`, so a default `MemoryStoreFactory::make()` returns `store_factory_failed` and the session does not open — the operator must raise the cap or lower `max_frame_bytes`. *(FR-014a / SC-004; US2 scenario 2a; `memory_store.hpp:69-71`, `engine_config.hpp:159`, `memory_store_factory.hpp:102-103`.)*
+- **B-008-3 — `MemoryStore` is test/embedded-only; production deployments must use `FileStore` (or a custom impl).** `MemoryStore` never persists and survives no host crash; there is no "production in-memory store." *(spec §Key Entities S-012; US1.)*
+- **B-008-4 — `store_seqnum_overflow` is session-fatal and the store never autonomously resets.** At `seqnum_max`, `next_seqnum(increment)` returns `store_seqnum_overflow`, does not increment, and the session cannot send until `reset()`; the operator chooses `reset()` + `141=Y` vs sticky abort. The store never silently rolls over. *(FR-022; spec §Edge Cases.)*
+- **B-008-5 — `Session::close(terminal)` deliberately skips the FileStore durability flush, so terminal close can lose up to N-1 batched records.** `FileStore::flush_for_session_close()` runs only under `close(graceful)` (before the Logout write); `close(terminal)` skips phase 1, leaving the documented `commit_batched(N)` up-to-N-1-record window unflushed. *(FR-028; US2 scenarios 4–5.)*
+- **B-008-6 — QuickFIX `MessageStore` migration is Path B only: no runtime adapter ships.** v1.0 ships a documented incompatibility + 5-step recipe + a config-translation `cfg_loader`, but no adapter wrapping a synchronous `quickfix::MessageStore` (the five hazards compose and cannot be safely fenced). A compile-time guard rejects any implicit sync-shaped construction. *(FR-030/FR-032; US4.)*
+
+### Limitations
+
+- **L-008-1 — The FileStore in-RAM offset index is uncapped and re-materialized at restart.** A per-record in-RAM index (≈ 24 B per retained outbound frame) with no cap/spill/eviction, rebuilt in full from a log scan at restart (≈ 24 B/entry ⇒ a week-long 1k msg/s session ≈ 14 GB index). Unlike QuickFIX/J's `FileStoreMaxCachedMsgs`, this index is mandatory and unbounded. **Status: deferred** (REMAINING-WORK). *(Fable `5.4`; `file_store.cpp:607-612` (IndexEntry), `:661-662` (index members), `:909` (restart rebuild).)*
+- **L-008-2 — A bounded `MemoryStore` past capacity keeps transmitting but stops retaining (silent resend loss).** When the per-direction cap is hit, `store()` returns `store_capacity_exhausted` and `store_then_emit` is logged-then-proceed (I-07): messages keep going on the wire but are no longer retained, so a later peer `ResendRequest` folds them into a SequenceReset-GapFill — the peer's application-level recovery silently loses them (FIX-legal). **Status: wontfix.** *(Fable `5.4`; `memory_store.hpp:159-166`; `session.cpp:4520-4522` (logged-then-proceed, I-07).)*
+- **L-008-3 — `FileStore` is unsupported on network/cluster filesystems, and `make()` does not detect or warn.** Cross-host correctness depends on effective advisory-lock semantics; NFS (no lock manager), SMB/CIFS, FUSE, and cluster FSes (GPFS/Lustre/GFS2/OCFS2) are outside the v1.0 contract — operators on shared storage must verify lock semantics out of band. **Status: deferred.** *(FR-013; spec §Edge Cases.)*
+- **L-008-4 — `FileStore` does not encrypt persisted bytes; at-rest encryption is the OS's responsibility** (LUKS/dm-crypt, BitLocker). **Status: wontfix.** *(spec §Assumptions.)*
+- **L-008-5 — Replicable / cross-process / cloud `MessageStore` is out of v1.0 scope.** **Status: deferred.** *(spec §Assumptions.)*
+- **L-008-6 — Store-layer observability (structured logs / OTel spans on `store_io_failure`, flush stalls) is not shipped by 008; it routes through the 2k Logger/Tracer module.** **Status: follow-up.** *(spec §Observability.)*
+
+## TLS policy core (011-tls-policy)
+
+### Behaviors
+
+- **B-011-1 — There is NO implicit default `SecurityProfile`; the `unset` sentinel is rejected at construction.** A `SecurityProfile` enum value MUST be chosen explicitly (`mtls_ca`, `mtls_pinned`, or the deprecated `one_way_ca`); the `unset = 0` sentinel is refused by `make_ssl_ctx_config` with `error::tls_invalid_security_profile` and by `Session::open` with `error::invalid_session_config`. A session can never silently open in some "default" trust posture. *(FR-013; spec §"Security profile".)*
+
+- **B-011-2 — `one_way_ca` is `[[deprecated]]` on the enumerator itself.** The `[[deprecated]]` attribute is applied to the `one_way_ca` declaration (not merely a comment), so selecting it raises a compiler warning at every call site — a deliberate nudge toward an mTLS profile. *(FR-013; `[const §XII.5]`.)*
+
+- **B-011-3 — Leaf-cert pinning (`mtls_pinned`) is a fixpp-original; no reference engine has it.** SHA-256-of-leaf-DER pinning with FIXS-RC1 §5 add-then-remove rotation is new to operators migrating from QuickFIX-cpp / QuickFIX/J / Fix8 — the reference-engine sweep found NONE of them implement leaf-cert pinning. Pin rotation is the ONLY mid-session-mutable TLS surface; every other TLS knob (SecurityProfile, cert_source) freezes at session open. *(Clarifications 2026-05-23; FR-006/FR-009/FR-015/FR-016.)*
+
+- **B-011-4 — `verify_peer` enforces DoS caps with distinct named variants, not a "TLS failed" catch-all.** Peer certs are rejected at entry for oversized DER (`tls_cert_der_too_large`, default 16 KiB — refused BEFORE parsing), oversized RSA key (`tls_rsa_key_too_large`, default cap 8192 bits — `BN_mod_exp` cost is super-linear), or too many SAN entries (`tls_san_entries_exceeded`, default 64). These caps have no QuickFIX/QuickFIX-J/Fix8 analogue. Every distinct failure mode surfaces as its own `error::tls_*` variant. *(FR-019; SC-002/SC-006; spec Edge Cases.)*
+
+- **B-011-5 — `verify_peer` short-circuits on the FIRST violation in a fixed 10-step order; cert expiry checks the effective clock, not wall-clock.** A multi-violation cert yields exactly ONE error variant per failed handshake (no aggregate report), evaluated DER-size → RSA-low → RSA-high → ECDSA-curve → chain-depth → SAN-count → X.509-version → expiration → pinning → cipher. Expiration is evaluated against the 007 effective-clock plugin, so a test/replay clock changes which certs are considered expired. *(FR-020/FR-020a; spec §Assumptions "verify_peer multi-violation ordering".)*
+
+- **B-011-6 — An empty-but-non-null pinset under `mtls_pinned` fails EARLY at session-open, not per-handshake.** `make_ssl_ctx_config(mtls_pinned, empty_pinset, …)` returns `unexpected{tls_pin_empty_at_open}` and the session never opens — a distinct variant from `tls_pin_mismatch` so operator logs separate "fixpp-config problem" from "peer-cert problem". *(US3 scenario 5; Clarifications 2026-05-23; FR-025.)*
+
+### Limitations
+
+- **L-011-1 — No mid-session swap of `SecurityProfile` or `cert_source`; the supported pattern is close + reopen.** Both freeze at session open; there is deliberately no swap API. Only the `Pinset` is mid-session-mutable. **Status: wontfix.** *(FR-015/FR-016; spec Edge Cases "Operator attempts mid-session SecurityProfile swap".)*
+
+- **L-011-2 — `add()` to a full pinset (default `max_pins = 16`) is refused — no silent eviction.** The cap is enforced; the operator must explicitly `remove()` an old pin before adding past the cap. The engine never decides which pin to drop. **Status: wontfix.** *(FR-010; US1 scenario 4.)*
+
+- **L-011-3 — No PSK, no CRL/OCSP revocation, no mid-handshake pinset rotation, no dlopen plugin loading in v1.0.** PSK auth (T-012) and CRL/OCSP revocation infrastructure are post-v1; a pinset rotation landing mid-handshake never affects that handshake (picked up only at the next one). HSM/TPM/KMS/vault `cert_source` impls are user-side, not shipped. **Status: deferred.** *(FR-027; spec §Assumptions "Non-goals".)*
+
+- **L-011-4 — Partial-read/torn-handshake DoS caps bound allocation, but a peer can still force the full 10-step validation cost per attempt.** The caps bound worst-case allocation/parse, but verification is run on every connecting peer; rate/connection limiting above the Transport is the operator's responsibility (acceptor saturation is out of scope per 012). **Status: deferred.** *(FR-019; cross-ref 012 spec Edge Cases "Service-side acceptor saturation".)*
+
+---
+
+## 2h transport — TCP / TLS / Listener / Mock (012-2h-transport)
+
+### Behaviors
+
+- **B-012-1 — `TCP_NODELAY` defaults to `true` (Nagle OFF), deliberately diverging from QuickFIX-cpp.** `Transport::Config::tcp_nodelay` defaults `true` and `so_linger_enabled` defaults `false`. This matches QuickFIX/J and Fix8 but diverges from QuickFIX-cpp's Nagle-ON default — the historical anomaly that production QFC configs near-universally override, because Nagle's 40 ms delay interacts badly with FIX heartbeats and single-tag updates. *(FR-029; Clarifications 2026-05-27 Q5.)*
+
+- **B-012-2 — Reconnect mints a FRESH `Transport` per attempt; the dead instance is destroyed first.** The FSM never reuses a `Transport` across reconnect attempts — it destroys the dead one, then mints a new instance via the same `TransportFactory`. This matches the 20-year QuickFIX-cpp / QuickFIX/J / Fix8 convergent pattern. The factory (and its cached `SSL_CTX`) is long-lived; the Transport instances it produces are short-lived. *(FR-022/FR-028; Clarifications 2026-05-27 Q1; US2.)*
+
+- **B-012-3 — `ReconnectPolicy::defaults()` is exponential-with-jitter; `defaults_quickfix_compat()` is the industry-canonical opt-out.** The default schedule is `[100 ms … 30 s]` (10 entries) with ±10 % jitter and `max_attempts = 10` (cumulative 73–89 s envelope) — a thundering-herd defense with no reference-engine analogue. Operators wanting classic behaviour call `defaults_quickfix_compat()` → single fixed 30 s interval, no jitter, no cap. Unbounded reconnect requires explicit `max_attempts = 0` (no implicit default). *(FR-019/FR-020; Clarifications 2026-05-27 Q2; SC of US2.)*
+
+- **B-012-4 — `Listener::cancel()` stops new accepts but leaves already-handed-off Transports ALIVE.** Cancel does exactly three things: close the listening socket, complete any not-yet-resumed `async_accept` with `transport_accept_cancelled`, and leave already-produced `unique_ptr<Transport>` results untouched (ownership has passed; the listener has no handle). This diverges from QuickFIX/J's `stopAcceptingConnections()` which also kills managed sessions — that kill lives at the session layer, which is a separate concern in fixpp. Consumers needing "close everything I produced" MUST track their own Transports. *(FR-025; Clarifications 2026-05-27 Q4.)*
+
+- **B-012-5 — A truncated TLS close (peer omits close-notify) surfaces as the DISTINCT `transport_read_truncated`, not `transport_read_eof`, and is NOT a hard error.** `close()` waits up to `tls_close_timeout` (1 s default) for the peer's close-notify; on timeout it completes with `transport_read_truncated` (mapped to a `warn`-level log by the 2k layer), preserving SC-006's distinct-named-variant rule rather than collapsing to EOF. *(FR-006; spec Edge Cases "TLS bidirectional close-notify hangs".)*
+
+- **B-012-6 — In-flight exclusivity is an explicit API-level contract, not just strand defence.** A second concurrent `async_read_some` / `async_write` on the same Transport returns `transport_read_in_progress` / `transport_write_in_progress` immediately; a second `async_connect`/`async_handshake` returns `transport_already_connected`. Strand serialisation is defence-in-depth only. *(FR-007; spec Edge Cases.)*
+
+### Limitations
+
+- **L-012-1 — A cancelled `async_write` is NOT rolled back; a torn write/read drives session disconnect + recovery.** The contract is "durable then transmit; cancel only cancels transmit" — the persisted frame stays persisted, and the FSM treats a short write or partial read under cancellation as a torn I/O and recovers via ResendRequest. Bytes lost up to the cancellation point on a partial read are gone per ASIO's contract. **Status: wontfix.** *(FR-030; spec Edge Cases "Short write under cancellation" / "Partial read under cancellation".)*
+
+- **L-012-2 — Acceptor saturation beyond 10²–10³ sessions/port is unbenched and unbounded; backlog overflow yields OS-level RST.** v1.0 target deployments are 10²–10³ sessions per acceptor; backlog overflow at higher accept rates returns TCP RST / connection-refused per OS behaviour — fixpp does not over-promise availability under saturated accept rates. **Status: deferred.** *(FR-024; spec Edge Cases "Service-side acceptor saturation" / US3 scenario 3.)*
+
+- **L-012-3 — PSK is rejected at runtime (`transport_psk_unsupported`); no SHM/DPDK/Onload/UDP/Schannel/non-OpenSSL transport in v1.0.** The `TlsTransport` sub-interface reserves 4 of 5 pure-virtual slots for a future PSK hook without a major-version bump, but the v1.0 default impl rejects PSK config. Kernel-bypass transports and non-OpenSSL TLS backends are post-v1. **Status: deferred.** *(FR-017/FR-042; spec Edge Cases "Operator wires PSK config".)*
+
+- **L-012-4 — No transport-internal write queue; outbound is depth-1, block-mode only (drop-oldest banned on message paths).** Outbound writes serialise on the session strand by construction; the strand IS the queue. There is no buffering and no drop-oldest fallback for app/session frames. **Status: wontfix.** *(FR-039; FR-042.)*
+
+- **L-012-5 — IPv6 zone-id host strings are admitted but the full conformance corpus is deferred.** `fe80::1%eth0`-style hosts resolve via `asio::ip::resolver`, but exhaustive zone-id conformance testing is post-v1. **Status: deferred.** *(FR-018; spec Edge Cases "IPv6 zone-id host strings".)*
+
+---
+
+## Session reconnect FSM + recovery + CompID↔TLS binding (013-session-reconnect-binding)
+
+### Behaviors
+
+- **B-013-1 — A sequence-number gap on re-Logon now triggers recovery (ResendRequest) instead of fatal disconnect — amends 005 FR-008.** When inbound `MsgSeqNum > next_expected_inbound`, the FSM issues ResendRequest(2) and enters a transient `AwaitingResend` sub-state rather than Logging out. The too-LOW rule is unchanged: `MsgSeqNum < next_expected_inbound` with `PossDupFlag(43)≠Y` still Logs out with `session_seqnum_too_low`. This is the single biggest v1.0-GA recovery behaviour. *(FR-009; amends 005 FR-008; US1.)*
+
+- **B-013-2 — CompID↔TLS-identity binding is enforced at Logon; this has NO reference-engine precedent.** The `peer_identity` from the TLS handshake is bound to the asserted CompID via an operator-supplied `CompIdAuthorizationPolicy`; a mismatch rejects Logon with `session_compid_unauthorized`. No QuickFIX-cpp / QuickFIX/J / Fix8 engine binds the cert to the application-layer CompID — without this, mTLS authenticates the cert but anything can assert any CompID. *(FR-019/FR-021; FIXS §4.4; US2.)*
+
+- **B-013-3 — `CompIdAuthorizationPolicy` is allow-list only and default-deny: an empty policy rejects EVERY Logon.** The operator MUST enumerate every `{principal → compid_set}` binding before opening a session; a misconfigured deploy fails CLOSED, never open. There is no deny-list / hybrid mode. The empty-policy rejection is per-Logon at runtime (fail-closed), not at config-build time (not fail-fast). *(FR-023; Clarifications 2026-05-28 Q3; US2 scenario 6.)*
+
+- **B-013-4 — Principal extraction is a fixed CN → SAN-DNS → SAN-URI → SHA-256-fingerprint order with EXACT byte matching.** First-non-empty wins; the order is invariant and not operator-overridable in v1.0. Matching is exact byte comparison — no case-folding, no NFC/IDNA normalization, no URI normalization, no trimming. A no-client-cert / `one_way_ca` peer falls through to the all-zero 64-char hex fingerprint principal, which fails closed unless the operator deliberately bound it. *(FR-019/FR-022; Clarifications 2026-05-28 Q2.)*
+
+- **B-013-5 — In-process credential rotation: `reload_credentials()` swaps the cert without tearing down active sessions.** An atomic swap on the factory-internal `cert_source_slot_` means active sessions stay Active and only the NEXT reconnect handshake observes the new cert. A rotation racing an in-flight handshake DEFERS: the in-flight handshake completes on the OLD source (captured by shared_ptr value-copy), avoiding mid-handshake `SSL_CTX` mutation (OpenSSL UB). No reference engine supports in-process cert rotation — all three require a full restart. *(FR-030/FR-031/FR-033; Clarifications 2026-05-28 Q4; US4.)*
+
+- **B-013-6 — `ResetSeqNumFlag(141)=Y` handling is operator-selectable; the default `bilateral_strict` diverges by being security-default.** Three modes: `bilateral_strict` (default — Logout with `session_seqnum_reset_mismatch` if the peer's response lacks 141=Y), `bilateral_lenient` (auto-mirror), `unilateral` (honour unconditionally). Default is bilateral_strict per the no-implicit-default principle and 2-of-3 industry convergence (QFC mirror, QFJ strict, Fix8 unilateral). Logout disconnect timeout defaults to 2000 ms, matching QuickFIX/J and diverging from QFC/Fix8's effectively-immediate close. *(FR-017/FR-008; Clarifications 2026-05-28 Q1/Q5.)*
+
+### Limitations
+
+- **L-013-1 — The `AwaitingResend` recovery sub-state is NOT surfaced as a SessionEvent; observe it via the `is_awaiting_resend()` accessor.** Entry/exit of AwaitingResend emit no `SessionEvent` variant (deferred as YAGNI for v1.0) — the FSM stays in Active with a transient flag. Operator tooling polls `ReconnectFsm::is_awaiting_resend()`. **Status: wontfix.** *(FR-009 / CHK041; spec §"Recovery sub-protocol".)*
+
+- **L-013-2 — The inbound-held-message queue during recovery is UNBOUNDED; overflow is undefined for v1.0.** Inbound messages above `next_expected_inbound` are held in-memory in `ResendState::inbound_held` with no capacity ceiling; the window is bounded only by the `ReconnectPolicy` envelope and typical venue replay limits, not by a hard cap. **Status: deferred.** *(FR-009 / CHK003; spec §"Recovery sub-protocol".)*
+
+- **L-013-3 — `tls_validation_failed` sub_reason strings are NOT ABI-stable; use the master-enum `code` for programmatic dispatch.** Of the 6 master-enum variants, `tls_handshake_failed` is a GROUPING variant collapsing 10+ rejection reasons surfaced only via the human-readable `sub_reason` string. Consumers MUST switch on `code` first and tolerate unknown sub_reason strings by logging verbatim (treating an unknown one as fatal is forbidden). **Status: wontfix.** *(FR-026/FR-027 / CHK010/CHK030; spec §"TLS validation outcome → SessionEvent".)*
+
+- **L-013-4 — Deny-list / hybrid authorization modes, and per-binding principal-extraction overrides, are deferred to a later feature.** v1.0 ships allow-list-only with a fixed extraction order; adding modes/overrides is backward-compatible (one-way restriction). **Status: deferred.** *(FR-022/FR-023.)*
+
+- **L-013-5 — No fixpp-managed zeroisation of `cert_source` private-key material; it lives for the shared_ptr lifetime.** A captured `std::shared_ptr<cert_source>` keeps PEM key bytes alive until the last strong-ref drops; fixpp performs no explicit zeroisation in v1.0. Operators with strict requirements must implement a `cert_source` whose destructor overwrites its buffer. **Status: deferred.** *(FR-033 / CHK032; spec §"2j ReloadCertSource control-plane".)*
+
+- **L-013-6 — The `SessionEvent` ring is fixed at 16 entries, drop-oldest, and snapshots are single-thread-context only.** Capacity is compile-time fixed (not operator-tunable in v1.0); the 17th emit overwrites entry 0; the `recent_events()` span is a snapshot invalidated by the next strand emit, so consumers that outlive the synchronous context MUST copy. **Status: wontfix.** *(FR-035 / CHK002/CHK003.)*
+
+---
+
+## Live transport wiring — reconnect / identity / rotation events (014-transport-active-binding)
+
+### Behaviors
+
+- **B-014-1 — An authorization failure on the live RECONNECT path is reason-agnostic retry-to-cap, NOT terminal disconnect.** Unlike 013's open-Logon path (where an authorize failure drives terminal `Disconnected`), a reconnect-path failure of ANY cause — `make()` failure, connect, TLS handshake, OR off-list/absent-identity authorization — consumes exactly one attempt and retries per the backoff schedule. Only loop-exhaustion at the cap is terminal. There is no fail-fast and no distinct cap for the authorization case. *(FR-003/FR-007; Clarifications 2026-05-29; contract C1/C2.)*
+
+- **B-014-2 — On the live initiator reconnect path, authorization uses the REAL handshake identity — no fabricated stand-in.** 014 swaps the identity source (013's test-seam/stub → real `handshake_result.peer_id`), making the already-fail-CLOSED mTLS gate operable: it now ADMITS an on-list peer instead of unconditionally fail-closing for want of any identity. This does not introduce fail-closed from scratch and opens no fail-OPEN hole. *(FR-006; SC-003; contract C2.)*
+
+- **B-014-3 — `credentials_rotated` carries REAL leaf fingerprints; the first-ever credential load is NOT a rotation.** The event (emitted on the session strand at the next `drive_reconnect_attempt`, before `make()`) carries the real SHA-256 leaf fingerprints of old and new `cert_source`, replacing 013's all-zero stub. The first-ever load (`last_active_source_ == nullptr`) emits NO event — it just sets the rotation baseline. A no-op rotation (`old == new`) still emits (not suppressed). *(FR-009/FR-010/FR-011; contract C3.)*
+
+- **B-014-4 — A non-TLS or null transport from the factory is runtime-recoverable, not a crash.** The FSM reaches the TLS specialization via a single `dynamic_cast<TlsTransport*>` with a null-check; because `TlsTransport` inherits virtually from `Transport`, a `make()` returning a base/non-TLS transport yields `nullptr` → the attempt is counted and the loop continues. *(FR-001; contract C1.)*
+
+### Limitations
+
+- **L-014-1 — Acceptor sessions do NOT drive a reconnect loop; reconnect is initiator-side only.** Acceptors re-accept rather than reconnecting (a permanent FIX design fact). **Status: wontfix** for the reconnect asymmetry; the live acceptor accept→handshake→`authorize()` production path itself shipped in 015 (it was 014's deferred boundary, not 014). *(spec §Assumptions "Reconnect is initiator-side"; Out of Scope.)*
+
+- **L-014-2 — [RESOLVED in 015] At 014 the CompID-binding decision was proven on the live path only for the initiator; the acceptor relied on the `logon_peer_identity_override` test seam, so T-041 did not fully close in 014.** 014 wired the live identity into `authorize()` and proved it only on the live initiator reconnect path. The live acceptor path and test-seam removal — and full T-041 production closure — landed with **015**: `logon_peer_identity_override` is removed from production (grep-empty at HEAD; the acceptor now drives identity through `live_peer_id_`). **Status: resolved (015).** *(FR-008; spec §Assumptions "T-041 advances but does not fully close"; `engine_seam_removal_test.cpp`.)*
+
+- **L-014-3 — The public multi-session Initiator/Acceptor runtime engine is out of scope; 014 is per-session wiring through the existing `ReconnectFsm`.** No public accept/connect-loop component, no `SessionConfig`-keyed registry, no programmatic multi-session lifecycle, no acceptor accept→Session-create→byte-feed production path — all carved out to 015 at the time of 014. The continuous inbound read-pump rebind was also 015. **Status: resolved (015)** — the multi-session runtime engine shipped in 015. *(spec §Out of Scope; contract C1.)*
+
+- **L-014-4 — `error::session_seqnum_too_high` (slot 120) replaces the vestigial slot-74 stand-in; the retired slot remains a permanent numeric hole.** The seqnum manager's too-high branch now returns a dedicated, semantically-correct code instead of reusing slot 74 (`session_test_request_unanswered`); error slots are append-only and retired slots are never reused. **Status: follow-up.** *(FR-016; contract — error-enum append `error::session_seqnum_too_high = 120`.)*
 
 ---
 
@@ -1204,31 +1490,10 @@ identity binding IS fully enforced per feature 015.) Operators MUST use an ident
 production; `one_way_ca` is for transport-encryption-only / migration scenarios. *(Fable `5.1`; `src/tls/`
 profile path.)*
 
-**B-008-1 — the FileStore log grows monotonically until a reset epoch (size disk accordingly).** FileStore
-is append-only with no compaction, rotation, or size cap: each outbound message appends ≈ `payload + 64 B`
-(frame record + post-frame counter + assign-outbound counter) and each inbound advance appends a 24 B
-counter record. The only reclamation is a reset epoch (`reset_on_logon`/`reset_on_logout`/
-`reset_on_disconnect` — all default `false` — or a bilateral `141=Y`). Default config ⇒ growth is monotone
-for the durable session lifetime (restart re-scans the full log). At 1k msg/s @ 512 B that is ≈ 50 GB/day.
-fixpp has no `SessionTime`-driven daily auto-reset, so the conventional daily bound must be arranged
-externally. **Operator action:** size disk for one reset epoch of traffic and enable a reset knob or arrange
-external EOD resets. *(Fable `5.4`; `file_store.cpp:503-543`, `file_store_factory.cpp:174`.)*
-
-**L-008-1 — the FileStore in-RAM offset index is uncapped and re-materialized at restart.** Alongside the
-on-disk log, FileStore keeps a per-record in-RAM index (`inbound_index`/`outbound_index`, ≈ 24 B per
-retained outbound frame) with no cap, spill, or eviction, rebuilt in full from a log scan at restart. A
-week-long 1k msg/s session ⇒ ≈ 14 GB of index in RAM. Unlike QuickFIX/J's `FileStoreMaxCachedMsgs`
-(default 10 000, disk-fallback), this index is mandatory and unbounded. Bounding/paging it is a post-v1.0
-item (REMAINING-WORK F-f). *(Fable `5.4`; `file_store.cpp:439-442`/`:532-539`.)*
-
-**L-008-2 — a bounded `MemoryStore` past capacity keeps transmitting but stops retaining (silent resend
-loss).** The default `MemoryStore` is `capacity_policy::bounded` (a fixed ctor slab, no eviction — `evict_oldest`
-is deliberately unrepresentable per [const §XV.15]). When the per-direction cap is hit, `store()` returns
-`store_capacity_exhausted`; `store_then_emit` is logged-then-proceed (I-07), so messages keep going on the
-wire but are no longer retained — a later peer `ResendRequest` folds them into a SequenceReset-GapFill,
-so the peer's application-level recovery silently loses them. FIX-legal, but operators trading memory for
-replay completeness should size the cap deliberately. *(Fable `5.4`; `memory_store.hpp:160-166`,
-`session.cpp` `store_then_emit`.)*
+**RELOCATED 2026-06-15** — the three Fable `5.4` 008 rows (FileStore monotone disk growth, uncapped RAM
+offset index, bounded-`MemoryStore` post-cap silent resend loss) were minted out-of-band here
+(2026-06-13) before 001–014 had B&L sections; the back-fill moved them into the proper
+`## Message store … (008-message-store)` section above. See that section for the current text.
 
 ## 035-filestore-io-offload (2026-06-14)
 
