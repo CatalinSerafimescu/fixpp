@@ -1970,6 +1970,24 @@ add_test(NAME session_validation_gate_config
 set_tests_properties(session_validation_gate_config PROPERTIES
   LABELS "041;t003;t004;validation-gate;foundational")
 
+# ── 041-validation-gate-wiring T012 — per-violation-class reject witnesses ───
+# SC-005 / FR-003 / FR-004 / data-model E-4: one inbound msg per violation class
+# (W1-W7) → asserts mapped SessionRejectReason; proves seqnum NOT advanced on
+# reject (C-3 invariant). Requires validate_inbound_messages=true + dictionary.
+add_threading_test(session_validate_gate_inbound
+  test_validate_gate_inbound.cpp)
+set_tests_properties(session_validate_gate_inbound PROPERTIES
+  LABELS "041;t012;t014;validation-gate;inbound;foundational")
+
+# ── 041-validation-gate-wiring T013 — validate-first Logon-arm ordering ──────
+# C-2 rows a-f: validate before interpret_logon in NotConnected/LogonSent arms.
+# No-reject-loop exemption (35=3 and 35=5). Absent/malformed SendingTime(52)
+# handled by Logon path, not validation reject loop.
+add_threading_test(session_validate_gate_logon_arm
+  test_validate_gate_logon_arm.cpp)
+set_tests_properties(session_validate_gate_logon_arm PROPERTIES
+  LABELS "041;t013;t014;validation-gate;logon-arm;foundational")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

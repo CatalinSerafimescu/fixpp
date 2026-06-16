@@ -68,6 +68,16 @@ namespace fixpp::dict {
 class version_registry;
 }  // namespace fixpp::dict
 
+namespace fixpp::wire {
+// 041-validation-gate-wiring T014: forward-declare the validator so session.hpp
+// can hold a unique_ptr<dictionary_driven_validator> without including
+// validator.hpp here. Including validator.hpp in session.hpp would pull
+// dict/table_view.hpp and potentially std::vector into the awaitable closure,
+// risking a [const §XV.9] violation. Full definition in session.cpp via
+// #include <fixpp/wire/validator.hpp>.
+class dictionary_driven_validator;
+}  // namespace fixpp::wire
+
 namespace fixpp::session {
 
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
@@ -700,6 +710,23 @@ private:
     // into the awaitable closure). [033 data-model.md E2; research R2 threading]
     const fixpp::dict::version_registry* app_version_registry_ = nullptr;
 
+    // ── 041-validation-gate-wiring T014 — opt-in inbound validator ───────────
+    //
+    // Built once at open() when cfg_.validate_inbound_messages == true and
+    // cfg_.dictionary is non-null (the fail-closed config gate T004 in
+    // Engine::register_session guarantees this invariant for engine-managed
+    // sessions; open() also guards directly so raw-Session construction paths
+    // are covered). Null when validation is disabled (default path) — no
+    // validator construction/invocation on the default inbound path (FR-002 /
+    // SC-005 / [const §XV.1]).
+    //
+    // Held as unique_ptr to keep validator.hpp (which includes dict/table_view.hpp
+    // and owns std::vector-backed tables) OUT of the awaitable closure via the
+    // forward-declaration above ([const §XV.9]). The out-of-line dtor in
+    // session.cpp provides the delete expression where the full type is visible.
+    // [041 T014; data-model E-2; research R-2; [const §VIII.5]/§XV.1]
+    std::unique_ptr<fixpp::wire::dictionary_driven_validator> validator_;
+
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
     // ensure_hydrated_(): one-shot cold-open hydration gate (C2.1–C2.7).
@@ -764,6 +791,16 @@ private:
     // [019-app-callbacks T011/T016; FR-005; D4; INV-4]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
         seqnum_t ref_seq, std::string_view ref_msg_type) noexcept;
+
+    // 041-validation-gate-wiring T010 — overload that carries a mapped
+    // SessionRejectReason(373) and an optional RefTagID(371) through to
+    // build_reject (admin_messages.cpp:613, UNCHANGED). validate() returns a
+    // wire_* error; the caller maps it via wire_error_to_session_reject_reason()
+    // and passes the result here. ref_tag_id == 0 → 371 omitted.
+    // [041 T010; data-model E-4; RC-C]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
+        seqnum_t ref_seq, std::string_view ref_msg_type, int reason,
+        int ref_tag_id = 0) noexcept;
 
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
