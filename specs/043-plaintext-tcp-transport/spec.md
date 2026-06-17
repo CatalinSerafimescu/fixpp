@@ -305,7 +305,9 @@ profile with NO session override but a *plaintext engine-default factory* — an
   CompID. The plaintext profile authenticates no peer identity but preserves the cert-independent CompID
   match.
 - **SC-005**: Selecting `insecure_plain_tcp` is observable at build time as a deprecation-class
-  diagnostic (the loud-insecure friction is present, not silently optimisable away).
+  diagnostic (the loud-insecure friction is present, not silently optimisable away). The witness MUST
+  be an automated negative-compile test (e.g. a CMake `try_compile` / the repo's negative-compile
+  harness, compiled with `-Werror=deprecated-declarations`); a manual one-time note is NOT sufficient.
 - **SC-006**: All existing TLS sessions and the full pre-existing test suite are behaviour-unchanged —
   the plaintext path is purely additive (zero regression in the TLS transport, factory, and session FSM).
 - **SC-007**: The `benchmark-plan.md` `TLS off` rows (wl-01…wl-11) become satisfiable — a plaintext

@@ -308,11 +308,13 @@ unaffected, but it is a real loss of a deliberately-placed invariant on exactly 
   picks one.
 - alloc-NFR: the plain read/write path is caller-buffer (no transport read-buffer alloc), same as TLS —
   no new alloc gate beyond the existing transport read alloc guard.
-- **SC-005 witness mechanism (advisor catch).** A `[[deprecated]]` enumerator emits a *warning* only in an
-  unsuppressed TU, so "observable at build time" needs a concrete witness. Pin in tasks.md: a dedicated
-  one-line TU that selects `kind::insecure_plain_tcp` compiled with `-Werror=deprecated-declarations`,
-  asserted to **fail compilation** (a CMake `try_compile`/negative-compile test, or the repo's existing
-  negative-compile harness), OR a documented manual witness. Not a runtime gtest.
+- **SC-005 witness mechanism (advisor catch; resolved by tasks.md T017 + spec.md SC-005 amendment).** A
+  `[[deprecated]]` enumerator emits a *warning* only in an unsuppressed TU, so "observable at build time"
+  needs a concrete automated witness. The witness MUST be a CMake `try_compile` / the repo's existing
+  negative-compile harness compiled with `-Werror=deprecated-declarations`, asserted to **fail
+  compilation**. A documented manual witness is NOT sufficient (SC-005 and T017 both mandate automated/
+  repeatable CI; this open-items entry originally offered a manual fallback — that fallback is CLOSED).
+  Not a runtime gtest.
 - **`kind()` is defaulted (D-5)** so it does NOT ripple to the ~11 `tests/session/` `TransportFactory`
   test doubles — they keep compiling and report `tls`. No census required; this is the deliberate reason
   D-5 chose defaulted over pure.
