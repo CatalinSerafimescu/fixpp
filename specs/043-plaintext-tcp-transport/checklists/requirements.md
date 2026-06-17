@@ -41,6 +41,8 @@
 - The two `[~]` Content-Quality items are intentional project-convention waivers — fixpp specs are
   technical engine specs, not business-stakeholder docs. This matches every prior feature spec (001–042).
 - No [NEEDS CLARIFICATION] markers: the API-shape and amendment decisions were resolved with the user
-  on 2026-06-17 (AskUserQuestion) before this spec was authored; remaining open questions are design-level
-  and owned by `/speckit-clarify` (mandatory next — sweep QFcpp/QFJ/Fix8 plaintext behaviour) and `/plan`.
-- Ready for `/speckit-clarify`.
+  on 2026-06-17 (AskUserQuestion) before this spec was authored. The design-level open questions have
+  already been consumed by `/speckit-clarify` (the QFcpp/QFJ/Fix8 plaintext-behaviour sweep) and `/plan`.
+- Phase status (updated 2026-06-17): `/speckit-clarify` + `/speckit-plan` complete; **Gate A CONVERGED at
+  round 3** (rounds 1 and 2 each applied a rewrite; round 3 clean — zero P1/P2; see plan.md `## Gate A`).
+  Current step: user sign-off complete → `/speckit-tasks` next.

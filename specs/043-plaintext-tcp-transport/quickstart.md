@@ -65,5 +65,8 @@ cfg.transport_factory_override = my_tls_factory;        // kind()==tls, mismatch
 - Stand up a plaintext acceptor + initiator on a loopback `asio::ip::tcp::acceptor`; assert a Logon/Logout
   round trip completes and that no TLS ClientHello byte is emitted (SC-001).
 - Assert a default/`unset` profile is still rejected at `open()` (SC-002); both override mismatch
-  directions rejected, matched + no-override pairings open (SC-003).
-- Confirm the deprecation diagnostic fires when selecting the enumerator (SC-004).
+  directions AND a TLS profile with a plaintext engine-default factory (no override) are rejected, matched
+  + no-override pairings open (SC-003).
+- Confirm the deprecation diagnostic fires when selecting the enumerator (SC-005).
+- Confirm a `Transport::Config` TCP knob takes effect and `close()` returns without a `tls_close_timeout`
+  wait (SC-008).

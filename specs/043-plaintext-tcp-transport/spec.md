@@ -64,6 +64,21 @@ consumer, REMAINING-WORK Tier-4 item 15a) — this feature only makes the `TLS o
   transport is still a bug). NOT gated on the cast result alone (which would silently downgrade a
   misconfigured TLS session to plaintext).
 
+### Session 2026-06-17 (Gate A round 1)
+
+- Q: Does the FR-008 profile↔factory consistency check key on the explicit override or the resolved
+  factory? → A: The **effective/resolved** factory. A TLS profile with no session override but a plaintext
+  *engine-default* factory must fail at `open()` (not late at the FSM `dynamic_cast`). FR-008 + SC-003 +
+  US3 AC#3 + D-6/E-6 updated.
+- Q: Is `live_peer_id_` left unset on plaintext a SHOULD or a MUST? → A: A **MUST** everywhere — the
+  plaintext handoff constructs/passes no `handshake_result` and both `install_reconnected_transport` and
+  `attach_accepted_transport` MUST leave `live_peer_id_ == nullopt` (fail-closed-by-construction; verified
+  not a live hole today since every reader is `is_mtls`-gated). research D-10 ⇄ data-model E-7 reconciled.
+- Q: Is the plaintext acceptor a two-site or three-site change? → A: **Three** coordinated code sites
+  (engine.cpp:664-681 profile-map arm — no `mtls_ca` fall-through; asio_listener `Config.transport_kind`
+  accept-factory selection; engine.cpp:783-797 handshake skip) plus a listener Config contract change;
+  plaintext accepted transports receive no TLS-validation event hooks. D-4/D-8/E-7 updated.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Establish a plaintext FIX session over plain TCP (Priority: P1)
@@ -131,17 +146,24 @@ profile + TLS factory would attempt a handshake the peer never speaks).
 TLS/plaintext world — a session that *believes* it is secure but is not, or that hangs. It is P2 because
 US1+US2 already deliver a usable, safe MVP; this hardens the boundary.
 
-**Independent Test**: Construct sessions with each mismatched (profile, factory) pairing and assert
-`open()` returns `error::invalid_session_config`; construct each matched pairing and assert `open()`
-succeeds.
+**Independent Test**: Construct sessions with each mismatched (profile, factory) pairing — including a TLS
+profile with NO session override but a *plaintext engine-default factory* — and assert `open()` returns
+`error::invalid_session_config`; construct each matched pairing and assert `open()` succeeds.
 
 **Acceptance Scenarios**:
 
-1. **Given** `security_profile = insecure_plain_tcp` with a TLS transport factory, **When**
-   `Session::open()` runs, **Then** it returns `error::invalid_session_config`.
-2. **Given** a TLS `security_profile` (mtls_ca / mtls_pinned / one_way_ca) with a plaintext transport
-   factory, **When** `Session::open()` runs, **Then** it returns `error::invalid_session_config`.
-3. **Given** matched pairings (plaintext profile + plaintext factory; TLS profile + TLS factory),
+1. **Given** `security_profile = insecure_plain_tcp` with an explicit TLS transport factory override,
+   **When** `Session::open()` runs, **Then** it returns `error::invalid_session_config`.
+2. **Given** a TLS `security_profile` (mtls_ca / mtls_pinned / one_way_ca) with an explicit plaintext
+   transport factory override, **When** `Session::open()` runs, **Then** it returns
+   `error::invalid_session_config`.
+3. **Given** a TLS `security_profile` with **no** session override but a plaintext *engine-default*
+   factory (`EngineConfig::default_transport_factory`), **When** `Session::open()` runs, **Then** it
+   returns `error::invalid_session_config` at `open()` — the **effective** (resolved) factory's kind is
+   checked, not just an explicit override, so the mismatch fails closed at open() rather than late at the
+   FSM cast.
+4. **Given** matched pairings (plaintext profile + plaintext factory; TLS profile + TLS factory; and a
+   plaintext profile with no override, auto-derived to the built-in plaintext factory),
    **When** `Session::open()` runs, **Then** it succeeds.
 
 ---
@@ -184,6 +206,10 @@ succeeds.
   `transport_factory_override` is supplied, the engine MUST use a built-in plaintext factory (the
   operator need not hand-install one and need not clear the default TLS factory). TLS profiles continue to
   resolve to the configured TLS factory. (Config-derived transport selection, per the QFJ/Fix8 precedent.)
+  The resolved effective factory MUST be the *same* object used for BOTH the FR-008 consistency check AND
+  reconnect minting (it MUST be wired into the reconnect FSM at `open()`, before any connect attempt — not
+  only validated), so a plaintext/no-override session actually connects through the checked factory rather
+  than failing late on an unwired (null/stale) factory pointer.
 - **FR-004 [Acceptor symmetry]**: The plaintext factory MUST provide an acceptor path equivalent to the
   TLS factory's `make_accepted()` — adopting an already-accepted plain socket — so plaintext works for
   the **acceptor role**, not just the initiator. (Guards against the half-restructure trap.)
@@ -201,11 +227,17 @@ succeeds.
 - **FR-007 [No implicit default]**: The no-implicit-default rule MUST be preserved unchanged — the
   `unset` sentinel is still rejected at `Session::open()`, and `insecure_plain_tcp` is never selected
   implicitly. Existing TLS profiles and their behaviour MUST be entirely unaffected.
-- **FR-008 [Fail-closed consistency]**: `Session::open()` MUST reject an **explicitly-supplied**
-  `transport_factory_override` whose kind disagrees with the profile — `insecure_plain_tcp` + a TLS
-  factory, OR a TLS profile + a plaintext factory — with `error::invalid_session_config`, before any
-  connect/handshake attempt. (Per FR-003a, a plaintext profile with NO override and the default TLS
-  factory is auto-corrected to the built-in plaintext factory, not rejected.) Matched pairings MUST open.
+- **FR-008 [Fail-closed consistency]**: `Session::open()` MUST resolve the **effective** transport factory
+  (per FR-003a: plaintext + no override ⇒ built-in plaintext factory; otherwise the explicit
+  `transport_factory_override` if present, else the engine-default factory) and MUST reject the session
+  with `error::invalid_session_config`, before any connect/handshake attempt, when the **effective**
+  factory's kind disagrees with the profile category — a TLS profile (mtls_ca/mtls_pinned/one_way_ca)
+  requires an effective factory of kind `tls`; `insecure_plain_tcp` requires kind `plaintext`. This MUST
+  catch **both** an explicitly-supplied mismatched override **and** a wrong *engine-default* factory (e.g.
+  a plaintext default factory installed at engine level for a TLS session, which must fail at `open()`
+  before connect — not late at the FSM `dynamic_cast`). (Per FR-003a, a plaintext profile with NO override
+  and the default TLS factory is auto-corrected to the built-in plaintext factory, not rejected.) Matched
+  pairings MUST open.
 - **FR-008a [Authorization on the plaintext path]**: On `insecure_plain_tcp` the 015
   `compid_authorization_policy` (CompID↔TLS-cert-identity binding) MUST be skipped — identically to how it
   is already skipped for non-mTLS profiles (`one_way_ca`/unset) — because no handshake `peer_id` exists.
@@ -257,22 +289,32 @@ succeeds.
 ### Measurable Outcomes
 
 - **SC-001**: A plaintext initiator and a plaintext acceptor complete a FIX Logon → Logout round trip
-  over a plain TCP socket, and no TLS ClientHello / handshake byte is ever emitted on the connection.
+  over a plain TCP socket, and no TLS ClientHello / handshake byte is ever emitted on the connection. The
+  acceptor side is witnessed end-to-end through `run_accept_loop` on `insecure_plain_tcp` (not only a
+  direct-transport loopback) so the three coordinated acceptor sites (profile-map arm, plaintext
+  accept-factory selection, post-accept handshake skip — E-7) are all exercised.
 - **SC-002**: A default-constructed / `unset` `SecurityProfile` is still rejected at `Session::open()`
   with `error::invalid_session_config`, and no code path selects `insecure_plain_tcp` implicitly.
-- **SC-003**: Both *explicitly-overridden* profile↔factory mismatch directions are rejected at
-  `Session::open()` with `error::invalid_session_config`; both matched pairings (and a plaintext profile
-  with no override) open successfully.
-- **SC-007**: On a plaintext session the 015 cert-identity CompID authorization is skipped (no
-  `peer_id`-dependent path runs) while `check_comp_id` still rejects a mismatched inbound CompID — i.e.
-  the plaintext profile authenticates no peer identity but preserves the cert-independent CompID match.
-- **SC-004**: Selecting `insecure_plain_tcp` is observable at build time as a deprecation-class
+- **SC-003**: All profile↔factory mismatch directions are rejected at `Session::open()` with
+  `error::invalid_session_config` — both *explicitly-overridden* directions **and** a TLS profile with no
+  override but a plaintext *engine-default* factory (the **effective** factory is checked, not just the
+  override); both matched pairings (and a plaintext profile with no override) open successfully.
+- **SC-004**: On a plaintext session the 015 cert-identity CompID authorization is skipped — no
+  `peer_id`-dependent path runs, `compid_authorization_policy` is **not** called, and **no** peer-identity
+  state exists (`live_peer_id_ == nullopt`) — while `check_comp_id` still rejects a mismatched inbound
+  CompID. The plaintext profile authenticates no peer identity but preserves the cert-independent CompID
+  match.
+- **SC-005**: Selecting `insecure_plain_tcp` is observable at build time as a deprecation-class
   diagnostic (the loud-insecure friction is present, not silently optimisable away).
-- **SC-005**: All existing TLS sessions and the full pre-existing test suite are behaviour-unchanged —
+- **SC-006**: All existing TLS sessions and the full pre-existing test suite are behaviour-unchanged —
   the plaintext path is purely additive (zero regression in the TLS transport, factory, and session FSM).
-- **SC-006**: The `benchmark-plan.md` `TLS off` rows (wl-01…wl-11) become satisfiable — a plaintext
+- **SC-007**: The `benchmark-plan.md` `TLS off` rows (wl-01…wl-11) become satisfiable — a plaintext
   initiator+acceptor pair can be stood up over a real socket — without this feature shipping the bench
   driver itself.
+- **SC-008**: A `Transport::Config` TCP knob takes effect on the plaintext path (e.g. `tcp_nodelay`
+  default ON / a non-default keepalive or buffer value is observable on the plain socket), and
+  `close()` on an established plaintext transport returns **without** a `tls_close_timeout`-length delay
+  and emits no TLS close-notify (FR-010 / FR-011).
 
 ## Assumptions
 
