@@ -416,10 +416,7 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     //    Guard on the profile rather than on hr.peer_id emptiness.
     //    Every TLS caller passes a real hr from async_handshake — behaviour unchanged.
     //    [data-model §E-5; D-10 #2; 043 T013]
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (cfg_.security_profile.k != fixpp::session::SecurityProfile::kind::insecure_plain_tcp) {
-#pragma clang diagnostic pop
+    if (!is_insecure_plain_tcp(cfg_.security_profile.k)) {
         live_peer_id_ = std::move(hr.peer_id);
     }
 
@@ -555,10 +552,7 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
     //    Acceptor twin of install_reconnected_transport's guard above (#2).
     //    Every TLS caller passes a real hr from async_handshake — behaviour unchanged.
     //    [data-model §E-5; D-10 #3; 043 T013]
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (cfg_.security_profile.k != fixpp::session::SecurityProfile::kind::insecure_plain_tcp) {
-#pragma clang diagnostic pop
+    if (!is_insecure_plain_tcp(cfg_.security_profile.k)) {
         live_peer_id_ = std::move(hr.peer_id);
     }
 
@@ -1205,10 +1199,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         using TK = fixpp::tls::SecurityProfile;
 
         // Step 2: effective-factory resolution.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        if (k == SK::insecure_plain_tcp && !cfg_.transport_factory_override) {
-#pragma clang diagnostic pop
+        if (is_insecure_plain_tcp(k) && !cfg_.transport_factory_override) {
             // Auto-derive the built-in plaintext factory (D-4).
             // make_asio_plain_transport_factory returns expected_t<unique_ptr>;
             // on failure (should not happen for a credential-free factory) the
@@ -1238,10 +1229,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // profile. [data-model §E-6; spec.md FR-008; D-6 step 3; research.md D-5; 043 T023]
         if (effective_transport_factory_) {
             using TFK = fixpp::transport::transport_security_kind;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            const bool profile_wants_plaintext = (k == SK::insecure_plain_tcp);
-#pragma clang diagnostic pop
+            const bool profile_wants_plaintext = is_insecure_plain_tcp(k);
             const TFK required_kind =
                 profile_wants_plaintext ? TFK::plaintext : TFK::tls;
             if (effective_transport_factory_->kind() != required_kind) {
@@ -1275,10 +1263,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 
         // Set the plaintext indicator AFTER the profile mapping so the FSM
         // skips the dynamic_cast + async_handshake (D-7). [043 T011/T012; §E-5]
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        reconnect_fsm_.set_plaintext_profile(k == SK::insecure_plain_tcp);
-#pragma clang diagnostic pop
+        reconnect_fsm_.set_plaintext_profile(is_insecure_plain_tcp(k));
     }
 
     // T011 (US2, Phase 4): branch on cfg_.role per FR-004 + Opus triage RC#2.

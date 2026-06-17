@@ -64,4 +64,21 @@ struct SecurityProfile {
     kind k = kind::unset;  // no-implicit-default (`[const §XII.5]` / N-P2-3)
 };
 
+// fixpp-INTERNAL predicate: is this the insecure_plain_tcp profile?
+// The [[deprecated]] enumerator fires -Wdeprecated-declarations on every named
+// reference, including fixpp's own internal *inspection* sites. Centralizing the
+// read here confines the suppression to ONE place rather than scattering
+// `#pragma clang diagnostic push/ignored/pop` triplets across session.cpp /
+// engine.cpp — each scattered ignore silences ALL deprecation diagnostics in its
+// region (a masking hazard). This is a read-only predicate: the SC-005 / D-9
+// operator friction targets the *selection/assignment* site (`k = insecure_plain_tcp`)
+// in operator config, which this does not touch — an operator selecting the
+// enumerator still sees the diagnostic. [043 D-9; /simplify 2026-06-17]
+[[nodiscard]] constexpr bool is_insecure_plain_tcp(SecurityProfile::kind k) noexcept {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return k == SecurityProfile::kind::insecure_plain_tcp;
+#pragma clang diagnostic pop
+}
+
 }  // namespace fixpp::session
