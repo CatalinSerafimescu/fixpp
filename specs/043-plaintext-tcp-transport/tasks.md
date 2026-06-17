@@ -236,6 +236,10 @@ construct each matched pairing and assert `open()` succeeds.
   `tls_transport.hpp:69-71` ("every v1.0 transport is TLS-capable") for the plaintext transport's existence.
   (The sibling stale comment at `engine.cpp:322` is reconciled in T016 — same function body — to avoid a
   same-region edit collision; this task is now `[P]`-safe as it touches only `tls_transport.hpp`.)
+  **Also reconcile (US1-b drift): `reconnect_fsm.hpp:15-18` + `:114-116` still say `factory_` is "owned by
+  `transport_factory_override`" — now it can be owned by the Session's `effective_transport_factory_`
+  (T011 updated only `:238`). Do ONE exhaustive grep-sweep for stale "owned by transport_factory_override"
+  / "transport is TLS"-class comments, not per-finding patches (`[[feedback_verify_caught_design_pivot_stale_doc_bundle_drift]]`).**
 - [ ] T025 [P] Add limitation **L-043-x** to `spec/behaviors-and-limitations.md`: `insecure_plain_tcp`
   provides **no peer authentication** (CompID↔identity binding skipped) and plaintext accepted transports
   receive **no** TLS-validation event hooks (the inert `set_listener_events` wiring, E-7/D-10).

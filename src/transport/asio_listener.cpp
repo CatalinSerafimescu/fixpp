@@ -38,6 +38,7 @@
 #include <system_error>
 #include <utility>
 
+#include "asio_plain_transport.hpp"  // 043 T015: asio_plain_transport_factory::make_accepted
 #include "asio_tls_transport.hpp"
 
 namespace fixpp::transport {
@@ -158,6 +159,30 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
 
     // Mint a fresh Transport adopting the accepted socket (FR-024).
     // PMR comes from cfg_.accepted_transport_config.mr (engine default if null).
+    // 043 T015 (D-4/E-7): select the concrete accept factory based on transport_kind.
+    // make_accepted() is concrete (non-virtual), so we branch on kind and call
+    // it on the concretely-typed pointer — a base TransportFactory* would not compile.
+    if (cfg_.transport_kind == transport_security_kind::plaintext) {
+        // ── Plaintext accept path ─────────────────────────────────────────────
+        if (!accept_factory_plain_) {
+            auto made = make_asio_plain_transport_factory(cfg_.accepted_transport_config);
+            if (!made.has_value()) {
+                co_return std::unexpected{E::transport_factory_failed};
+            }
+            accept_factory_plain_ = std::shared_ptr<asio_plain_transport_factory>{
+                static_cast<asio_plain_transport_factory*>(made->release())};
+        }
+        auto minted = accept_factory_plain_->make_accepted(std::move(accepted_socket), nullptr);
+        if (!minted) {
+            co_return std::unexpected{minted.error()};
+        }
+        // set_listener_events is wired for symmetry but is INERT on plaintext
+        // (no TLS validation events emitted). [data-model §E-7; L-043-x]
+        (*minted)->set_listener_events(&cfg_.events);
+        co_return std::unique_ptr<Transport>(std::move(*minted));
+    }
+
+    // ── TLS accept path (default) ─────────────────────────────────────────────
     if (!accept_factory_) {
         auto made = make_asio_tls_transport_factory(cfg_.accepted_transport_config, cfg_.ssl_cfg);
         if (!made.has_value()) {

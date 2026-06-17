@@ -111,6 +111,17 @@ public:
     // [data-model §E-7; L-043-x]
     void set_listener_events(ListenerEvents* ev) noexcept { listener_events_ = ev; }
 
+    // ── Debug strand-confinement assert (T016/D-13/R8) ────────────────────────
+    //
+    // Returns the underlying TCP socket's associated executor. Used by the
+    // engine's `assert_transport_on_session_strand` to verify INV-7 (the socket
+    // executor MUST equal the per-session strand at every construction site).
+    // Mirrors asio_tls_transport::socket_executor(). Non-const because
+    // get_executor() is not const on asio::ip::tcp::socket.
+    [[nodiscard]] asio::any_io_executor socket_executor() noexcept {
+        return socket_.get_executor();
+    }
+
 private:
     // Apply FR-029 / FR-029a socket options (tcp_nodelay, SO_LINGER, recv/send
     // buffer sizes, TCP keepalive). Called by async_connect after TCP connect
