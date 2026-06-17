@@ -2094,6 +2094,35 @@ set_tests_properties(session_plaintext_authz PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "043;t008;us1;plaintext;authz")
 
+# ── 043-plaintext-tcp-transport — /speckit-verify coverage witness ───────────
+# Plaintext RECONNECT branch: drive_reconnect_attempt() skips the TLS handshake
+# (reconnect_fsm.cpp:265-271) and installs an empty handshake_result{}, leaving
+# live_peer_id_==nullopt (session.cpp:419 guard / D-10 #2 MUST). FSM-level + mock
+# factory → deterministic, no live socket. Closes the §IX.1 new-line gap on the
+# plaintext reconnect path (unreachable from the single-shot roundtrip witness).
+# CTest filter: ctest -R 'session_plaintext_reconnect'
+add_executable(session_plaintext_reconnect_test
+  test_session_plaintext_reconnect.cpp
+)
+target_link_libraries(session_plaintext_reconnect_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_reconnect_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_plaintext_reconnect_test PRIVATE
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME session_plaintext_reconnect COMMAND session_plaintext_reconnect_test)
+set_tests_properties(session_plaintext_reconnect PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;us1;plaintext;reconnect")
+
 # ── 043-plaintext-tcp-transport T017 — SC-005 negative-compile friction witness ──
 # SC-005 / D-9 / [const §XII.5 v0.3]: selecting insecure_plain_tcp WITHOUT a
 # pragma suppression must trigger -Wdeprecated-declarations → -Werror at the
