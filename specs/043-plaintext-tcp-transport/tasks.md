@@ -263,10 +263,15 @@ construct each matched pairing and assert `open()` succeeds.
   flows against the built library; fix any drift.
 - [X] T028 Feature completeness audit (Gate-B precondition): assert exact-set traceability
   tasks ↔ FR-001..FR-013 ↔ SC-001..SC-008 ↔ catalogue row — 100% covered or explicitly waived with reason.
-- [ ] T029 SC-006 regression + §IX.1 matrix: full suite green vs the T001 baseline (zero TLS-path
+- [~] T029 SC-006 regression + §IX.1 matrix: full suite green vs the T001 baseline (zero TLS-path
   regression); run the sanitizer/coverage matrix (debug/ASan/UBSan/TSan) ONE PRESET AT A TIME, confirm the
   new branches are covered (lcov DA/BRDA basis), then `codegraph sync`. (This is the evidence
   `/speckit-verify` consumes; not the verify gate itself.)
+  **PARTIAL (2026-06-17): debug SC-006 regression CONFIRMED — baseline 466 ⊂ current 474 debug ctest,
+  all green, +8 additive (zero regression). codegraph index force-rebuilt (717 files). The full 6-preset
+  sanitizer/coverage matrix (§IX.1 lcov DA/BRDA) is DELEGATED to `/speckit-verify` (the next pipeline step
+  after `/simplify`) — running it now then re-running post-`/simplify` would waste the matrix
+  (`[[feedback_speckit_simplify_before_verify]]`).**
 
 ---
 
