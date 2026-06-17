@@ -503,10 +503,9 @@ asio_plain_transport_factory::asio_plain_transport_factory(Transport::Config cfg
 // ssl_cfg is IGNORED (plaintext; no SSL_CTX, no credentials). Mints a fresh
 // asio_plain_transport via the [2a §4.2] trap_throw pattern.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<Transport>>
-asio_plain_transport_factory::make(asio::any_io_executor exec,
-                                   fixpp::tls::SslCtxConfig /*ssl_cfg*/,
-                                   std::pmr::memory_resource* mr) noexcept {
+[[nodiscard]] core::expected_t<std::unique_ptr<Transport>> asio_plain_transport_factory::make(
+    asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+    std::pmr::memory_resource* mr) noexcept {
     Transport::Config cfg = cfg_;
     if (mr != nullptr) {
         cfg.mr = mr;
@@ -538,11 +537,9 @@ asio_plain_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socke
         cfg.mr = mr;
     }
     try {
-        return std::make_unique<asio_plain_transport>(
-            asio_plain_transport::from_accepted_tag{},
-            accepted_socket.get_executor(),
-            cfg,
-            std::move(accepted_socket));
+        return std::make_unique<asio_plain_transport>(asio_plain_transport::from_accepted_tag{},
+                                                      accepted_socket.get_executor(), cfg,
+                                                      std::move(accepted_socket));
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::transport_factory_failed};
     } catch (std::system_error const&) {
@@ -557,8 +554,7 @@ asio_plain_transport_factory::make_accepted(asio::ip::tcp::socket accepted_socke
 //
 // No certs to rotate → session_invalid_argument (slot 119, D-11).
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<void>
-asio_plain_transport_factory::reload_credentials(
+[[nodiscard]] core::expected_t<void> asio_plain_transport_factory::reload_credentials(
     std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept {
     return std::unexpected{core::error::session_invalid_argument};
 }
@@ -578,8 +574,7 @@ asio_plain_transport_factory::cert_source_snapshot() const noexcept {
 //
 // D-5: this factory mints plaintext transports.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] transport_security_kind
-asio_plain_transport_factory::kind() const noexcept {
+[[nodiscard]] transport_security_kind asio_plain_transport_factory::kind() const noexcept {
     return transport_security_kind::plaintext;
 }
 
@@ -589,8 +584,8 @@ asio_plain_transport_factory::kind() const noexcept {
 // Credential-free construction; no SSL_CTX build. Returns transport_factory_failed
 // only on allocation failure. (No cert loading = no async work needed.)
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
-make_asio_plain_transport_factory(Transport::Config cfg) noexcept {
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>> make_asio_plain_transport_factory(
+    Transport::Config cfg) noexcept {
     try {
         auto factory = std::make_unique<asio_plain_transport_factory>(cfg);
         return std::unique_ptr<TransportFactory>(std::move(factory));

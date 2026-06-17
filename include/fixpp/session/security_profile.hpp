@@ -54,11 +54,11 @@ struct SecurityProfile {
         // the selection in `#pragma clang diagnostic push/ignored/pop` per the
         // one_way_ca precedent at session.cpp. An operator selecting this value
         // without a pragma suppression WILL see the diagnostic. [043 D-9/T019]
-        insecure_plain_tcp                                                    //
-            [[deprecated("insecure_plain_tcp disables transport security (no " //
-                         "TLS/encryption/peer-auth); use only over a "        //
-                         "separately-secured link (colo/VPN) — prefer "       //
-                         "mtls_pinned/mtls_ca")]] = 4,
+        insecure_plain_tcp                                                  //
+        [[deprecated("insecure_plain_tcp disables transport security (no "  //
+                     "TLS/encryption/peer-auth); use only over a "          //
+                     "separately-secured link (colo/VPN) — prefer "         //
+                     "mtls_pinned/mtls_ca")]] = 4,
     };
 
     kind k = kind::unset;  // no-implicit-default (`[const §XII.5]` / N-P2-3)

@@ -39,14 +39,10 @@ asio_plain_transport::asio_plain_transport(asio::any_io_executor exec,
                                            Transport::Config cfg) noexcept
     : cfg_{cfg}, exec_{exec}, socket_{exec} {}
 
-asio_plain_transport::asio_plain_transport(from_accepted_tag,
-                                           asio::any_io_executor exec,
+asio_plain_transport::asio_plain_transport(from_accepted_tag, asio::any_io_executor exec,
                                            Transport::Config cfg,
                                            asio::ip::tcp::socket accepted_socket) noexcept
-    : cfg_{cfg},
-      exec_{exec},
-      socket_{std::move(accepted_socket)},
-      state_{state_t::connected} {
+    : cfg_{cfg}, exec_{exec}, socket_{std::move(accepted_socket)}, state_{state_t::connected} {
     // Apply socket options immediately on the already-connected socket (D-12).
     apply_socket_options_();
 }
@@ -90,8 +86,8 @@ void asio_plain_transport::apply_socket_options_() noexcept {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_connect
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>>
-asio_plain_transport::async_connect(Endpoint const& ep) {
+[[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>> asio_plain_transport::async_connect(
+    Endpoint const& ep) {
     using E = core::error;
 
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
@@ -112,8 +108,7 @@ asio_plain_transport::async_connect(Endpoint const& ep) {
     asio::ip::tcp::resolver resolver{exec_};
     asio::error_code resolve_ec;
     auto endpoints = co_await resolver.async_resolve(
-        ep.host, std::to_string(ep.port),
-        asio::redirect_error(asio::use_awaitable, resolve_ec));
+        ep.host, std::to_string(ep.port), asio::redirect_error(asio::use_awaitable, resolve_ec));
 
     if (resolve_ec) {
         if (resolve_ec == asio::error::operation_aborted) {
@@ -145,8 +140,7 @@ asio_plain_transport::async_connect(Endpoint const& ep) {
     // [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].
     co_await asio::this_coro::reset_cancellation_state(
         asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
-            return ct == asio::cancellation_type::none ? ct
-                                                       : asio::cancellation_type::terminal;
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
         });
 
     asio::error_code connect_ec;
@@ -194,8 +188,8 @@ asio_plain_transport::async_connect(Endpoint const& ep) {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_read_some
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-asio_plain_transport::async_read_some(std::span<std::byte> buf) {
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> asio_plain_transport::async_read_some(
+    std::span<std::byte> buf) {
     using E = core::error;
 
     // Enable total cancellation (D-17).
@@ -224,8 +218,7 @@ asio_plain_transport::async_read_some(std::span<std::byte> buf) {
     // socket_.async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
     std::size_t bytes_read = co_await socket_.async_read_some(
-        asio::buffer(buf.data(), buf.size()),
-        asio::redirect_error(asio::use_awaitable, ec));
+        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
 
     read_in_flight_ = false;
 
@@ -245,8 +238,8 @@ asio_plain_transport::async_read_some(std::span<std::byte> buf) {
 // ─────────────────────────────────────────────────────────────────────────────
 // async_write
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>>
-asio_plain_transport::async_write(std::span<const std::byte> bytes) {
+[[nodiscard]] asio::awaitable<core::expected_t<std::size_t>> asio_plain_transport::async_write(
+    std::span<const std::byte> bytes) {
     using E = core::error;
 
     // Enable total cancellation (D-17).
@@ -273,8 +266,7 @@ asio_plain_transport::async_write(std::span<const std::byte> bytes) {
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;
     std::size_t bytes_written =
-        co_await asio::async_write(socket_,
-                                   asio::buffer(bytes.data(), bytes.size()),
+        co_await asio::async_write(socket_, asio::buffer(bytes.data(), bytes.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
 
     write_in_flight_ = false;

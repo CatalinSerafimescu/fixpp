@@ -272,8 +272,8 @@ private:
 //
 // Body lives in src/transport/transport_factory.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
-make_asio_plain_transport_factory(Transport::Config cfg) noexcept;
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>> make_asio_plain_transport_factory(
+    Transport::Config cfg) noexcept;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SessionConfig::transport_factory_override field shape (Appendix D §D.2,

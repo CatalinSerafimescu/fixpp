@@ -1213,8 +1213,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             // TLS path: adopt the override (or the engine default) as a shared_ptr.
             // cfg_.transport_factory_override is a shared_ptr (copy is cheap).
             // engine_.default_transport_factory is also a shared_ptr.
-            effective_transport_factory_ =
-                cfg_.transport_factory_override ? cfg_.transport_factory_override
+            effective_transport_factory_ = cfg_.transport_factory_override
+                                               ? cfg_.transport_factory_override
                                                : engine_.default_transport_factory;
         }
 
@@ -1230,8 +1230,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         if (effective_transport_factory_) {
             using TFK = fixpp::transport::transport_security_kind;
             const bool profile_wants_plaintext = is_insecure_plain_tcp(k);
-            const TFK required_kind =
-                profile_wants_plaintext ? TFK::plaintext : TFK::tls;
+            const TFK required_kind = profile_wants_plaintext ? TFK::plaintext : TFK::tls;
             if (effective_transport_factory_->kind() != required_kind) {
                 co_return std::unexpected(error::invalid_session_config);
             }
