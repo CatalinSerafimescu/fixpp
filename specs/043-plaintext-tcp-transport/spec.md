@@ -40,6 +40,27 @@ consumer, REMAINING-WORK Tier-4 item 15a) — this feature only makes the `TLS o
   (benchmark-readiness.md §3 "DECISION TAKEN 2026-06-13"); the loud-insecure friction is the mitigation.
 - Q: Does it apply to both session roles? → A: Both — initiator and acceptor (the plain factory carries
   an acceptor `make_accepted()` path symmetric to the TLS factory).
+- Q: Where does the plaintext factory come from, and what is the FR-008 mismatch? → A: **Auto-derive from
+  profile** — `insecure_plain_tcp` ⇒ the engine uses a built-in credential-free plaintext factory (no
+  explicit override needed); TLS profiles ⇒ the TLS factory. An *explicit* `transport_factory_override`
+  whose kind disagrees with the profile (TLS factory + plaintext profile, or plaintext factory + TLS
+  profile) is rejected at `open()` with `error::invalid_session_config`; a plaintext profile left with the
+  default TLS factory is auto-corrected, not an error. (Mirrors QFJ `SocketUseSSL` / Fix8 `ssl_context=`
+  config-derived transport rather than quickfix-cpp's separate-class selection.)
+- Q: What authorization stays active on the plaintext path (no cert identity exists)? → A: The 015
+  `compid_authorization_policy` (CompID↔TLS-cert-identity binding) is **skipped** — it consumes a
+  handshake `peer_id` that plaintext never produces, and it is already gated to mTLS-only today (skipped
+  for `one_way_ca`/non-mTLS, `session.cpp` case 3), so plaintext behaves identically to `one_way_ca` here.
+  The **cert-independent** `check_comp_id` inbound 49/56-vs-configured-CompID match (default on) **still
+  applies** unchanged. `handshake_result`-dependent reads (peer DN, negotiated cipher, captured pinset,
+  cert-event spans) are inert/empty. Net: no peer authentication on this profile — documented as a
+  limitation (L-043-x). *(Correction to the question's framing: the surviving CompID check is
+  `check_comp_id`, not `compid_authorization_policy`, which is itself the cert-identity binding.)*
+- Q: What gates the reconnect-FSM handshake skip? → A: **The session profile** — `insecure_plain_tcp` ⇒
+  skip the `dynamic_cast<TlsTransport*>` + `async_handshake` step entirely (connect → Logon). For TLS
+  profiles the existing "null cast ⇒ error" stays fail-closed (a TLS profile that received a non-TLS
+  transport is still a bug). NOT gated on the cast result alone (which would silently downgrade a
+  misconfigured TLS session to plaintext).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -135,9 +156,10 @@ succeeds.
 - **`handshake_result`-dependent reads** (peer identity, negotiated cipher, captured pinset): a plaintext
   session has no `handshake_result`; consumers that assume one (TLS cert-event spans, identity readback)
   MUST be inert/skipped on the plaintext path, not crash.
-- **CompID↔TLS-identity binding (015)**: this binding is a TLS-profile property; on `insecure_plain_tcp`
-  there is no peer certificate identity to bind — the binding is inapplicable and MUST be skipped without
-  error (documented as a limitation of the insecure profile).
+- **CompID↔TLS-identity binding (015)**: `compid_authorization_policy.authorize(peer_id, compid)` is a
+  TLS-profile property already gated to mTLS-only; on `insecure_plain_tcp` there is no peer certificate
+  identity to bind, so it is skipped exactly as for `one_way_ca`/non-mTLS — no error, documented as L-043-x
+  (no peer authentication). The cert-independent `check_comp_id` inbound-CompID match is unaffected.
 - **Mixed acceptor**: an acceptor configured plaintext accepts plain connections only; a TLS ClientHello
   arriving on a plaintext acceptor is consumed as ordinary (garbage) FIX bytes and fails framing/Logon —
   no TLS downgrade/upgrade negotiation exists.
@@ -156,21 +178,34 @@ succeeds.
 - **FR-003**: A plaintext transport factory (sibling to the TLS factory) MUST mint `asio_plain_transport`
   instances. It MUST construct successfully **without any TLS credentials / cert source** (no SSL_CTX,
   no cert load).
+- **FR-003a [Profile-derived factory]**: When `security_profile = insecure_plain_tcp` and no explicit
+  `transport_factory_override` is supplied, the engine MUST use a built-in plaintext factory (the
+  operator need not hand-install one and need not clear the default TLS factory). TLS profiles continue to
+  resolve to the configured TLS factory. (Config-derived transport selection, per the QFJ/Fix8 precedent.)
 - **FR-004 [Acceptor symmetry]**: The plaintext factory MUST provide an acceptor path equivalent to the
   TLS factory's `make_accepted()` — adopting an already-accepted plain socket — so plaintext works for
   the **acceptor role**, not just the initiator. (Guards against the half-restructure trap.)
-- **FR-005**: The reconnect/connect path MUST skip the TLS handshake stage when the profile is
-  `insecure_plain_tcp`: the absent `TlsTransport` capability is the **expected** path on this profile,
-  not an error. The connect → (no handshake) → Logon sequence MUST be honoured.
+- **FR-005**: The reconnect/connect path MUST skip the TLS handshake stage **gated on the session
+  profile** — `insecure_plain_tcp` ⇒ skip the `dynamic_cast<TlsTransport*>` + `async_handshake` step
+  entirely; the connect → (no handshake) → Logon sequence MUST be honoured. For TLS profiles the existing
+  "null `dynamic_cast<TlsTransport*>` ⇒ error" behaviour MUST be preserved (fail-closed; the skip MUST
+  NOT be gated on the cast result alone, which would silently downgrade a misconfigured TLS session).
 - **FR-006 [Loud insecure friction]**: Selecting `insecure_plain_tcp` MUST surface a compile-time
   `[[deprecated]]`-class diagnostic at the construction/selection site, announcing that transport
   security is OFF — mirroring the `one_way_ca` precedent.
 - **FR-007 [No implicit default]**: The no-implicit-default rule MUST be preserved unchanged — the
   `unset` sentinel is still rejected at `Session::open()`, and `insecure_plain_tcp` is never selected
   implicitly. Existing TLS profiles and their behaviour MUST be entirely unaffected.
-- **FR-008 [Fail-closed consistency]**: `Session::open()` MUST reject a profile↔transport-factory
-  mismatch — `insecure_plain_tcp` + a TLS factory, OR a TLS profile + a plaintext factory — with
-  `error::invalid_session_config`, before any connect/handshake attempt. Matched pairings MUST open.
+- **FR-008 [Fail-closed consistency]**: `Session::open()` MUST reject an **explicitly-supplied**
+  `transport_factory_override` whose kind disagrees with the profile — `insecure_plain_tcp` + a TLS
+  factory, OR a TLS profile + a plaintext factory — with `error::invalid_session_config`, before any
+  connect/handshake attempt. (Per FR-003a, a plaintext profile with NO override and the default TLS
+  factory is auto-corrected to the built-in plaintext factory, not rejected.) Matched pairings MUST open.
+- **FR-008a [Authorization on the plaintext path]**: On `insecure_plain_tcp` the 015
+  `compid_authorization_policy` (CompID↔TLS-cert-identity binding) MUST be skipped — identically to how it
+  is already skipped for non-mTLS profiles (`one_way_ca`/unset) — because no handshake `peer_id` exists.
+  The cert-independent `check_comp_id` inbound-CompID match MUST remain in effect unchanged. The plaintext
+  profile therefore provides **no peer authentication** (documented limitation L-043-x).
 - **FR-009**: Application-layer encryption (`EncryptMethod(98) ≠ 0`) MUST remain rejected on a plaintext
   session (constitution §XII.7 unchanged).
 - **FR-010**: The plaintext transport MUST honour the existing `Transport::Config` TCP knobs (tcp_nodelay
@@ -220,8 +255,12 @@ succeeds.
   over a plain TCP socket, and no TLS ClientHello / handshake byte is ever emitted on the connection.
 - **SC-002**: A default-constructed / `unset` `SecurityProfile` is still rejected at `Session::open()`
   with `error::invalid_session_config`, and no code path selects `insecure_plain_tcp` implicitly.
-- **SC-003**: Both profile↔factory mismatch directions are rejected at `Session::open()` with
-  `error::invalid_session_config`; both matched pairings open successfully.
+- **SC-003**: Both *explicitly-overridden* profile↔factory mismatch directions are rejected at
+  `Session::open()` with `error::invalid_session_config`; both matched pairings (and a plaintext profile
+  with no override) open successfully.
+- **SC-007**: On a plaintext session the 015 cert-identity CompID authorization is skipped (no
+  `peer_id`-dependent path runs) while `check_comp_id` still rejects a mismatched inbound CompID — i.e.
+  the plaintext profile authenticates no peer identity but preserves the cert-independent CompID match.
 - **SC-004**: Selecting `insecure_plain_tcp` is observable at build time as a deprecation-class
   diagnostic (the loud-insecure friction is present, not silently optimisable away).
 - **SC-005**: All existing TLS sessions and the full pre-existing test suite are behaviour-unchanged —
