@@ -183,6 +183,17 @@ asio_tls_transport_factory::cert_source_snapshot() const noexcept {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 043 T003 — asio_tls_transport_factory::kind (D-5, explicit override)
+//
+// Explicit override for clarity (D-5): this factory mints TLS transports.
+// Returns transport_security_kind::tls. Consumed by Session::open()'s
+// FR-008 profile↔factory consistency check.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] transport_security_kind asio_tls_transport_factory::kind() const noexcept {
+    return transport_security_kind::tls;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // asio_tls_transport_factory::make
 //
 // Mints a FRESH asio_tls_transport per the FR-028 reconnect contract.

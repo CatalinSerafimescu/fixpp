@@ -43,6 +43,7 @@ struct SecurityProfile {
         mtls_ca = 1,      // mutual TLS with CA-verified peer certificate
         mtls_pinned = 2,  // mutual TLS with certificate pinning
         one_way_ca = 3,   // one-way TLS (server authenticates to client)
+        insecure_plain_tcp = 4,  // 043: insecure_plain_tcp (v0.3 §XII.5 amendment); friction attr added in T019
     };
 
     kind k = kind::unset;  // no-implicit-default (`[const §XII.5]` / N-P2-3)

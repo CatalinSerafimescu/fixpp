@@ -28,6 +28,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/ip/tcp.hpp>
 #include <atomic>
+#include <cstdint>
 #include <fixpp/core/error.hpp>            // defines core::expected_t<T>
 #include <fixpp/tls/cert_source.hpp>       // for reload_credentials (013 T012)
 #include <fixpp/tls/security_profile.hpp>  // [2g §4.5] SslCtxConfig (LOCKED)
@@ -38,6 +39,12 @@
 namespace fixpp::transport {
 
 class asio_tls_transport;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// transport_security_kind — discriminant for the FR-008 profile↔factory
+// consistency check (D-5). Returned by TransportFactory::kind().
+// ─────────────────────────────────────────────────────────────────────────────
+enum class transport_security_kind : std::uint8_t { tls, plaintext };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TransportFactory — abstract pluggable factory.
@@ -106,6 +113,16 @@ public:
     // noexcept — no state change; atomic load acquire.
     [[nodiscard]] virtual std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
         const noexcept = 0;
+
+    // Reports whether this factory mints TLS or plaintext transports. Consumed
+    // by Session::open()'s FR-008 consistency check. DEFAULTED (not pure): a
+    // factory that forgets to override returns `tls` — safe default, fails
+    // closed on a plaintext profile mismatch. Avoids breaking the ~11
+    // tests/session/ TransportFactory test doubles (D-5, E-3). Pure-virtual
+    // count stays 3 ([const §XIV.2] ≤5 cap).
+    [[nodiscard]] virtual transport_security_kind kind() const noexcept {
+        return transport_security_kind::tls;
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +191,11 @@ public:
     // at drive_reconnect_attempt entry to capture the snapshot. noexcept.
     [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
         const noexcept override;
+
+    // 043 T003 — explicit override for clarity (D-5): this factory mints TLS
+    // transports. Overrides the defaulted `tls` base, making the intent visible
+    // when reading the TLS factory in isolation.
+    [[nodiscard]] transport_security_kind kind() const noexcept override;
 
 private:
     Transport::Config cfg_;

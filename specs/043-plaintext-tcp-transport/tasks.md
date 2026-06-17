@@ -29,9 +29,11 @@ below (it is intrinsic to the open() validation block, not an organizational art
 
 **Purpose**: Establish a green pre-feature baseline so SC-006 (zero TLS-path regression) is measurable.
 
-- [ ] T001 Confirm a clean green baseline on branch `043-plaintext-tcp-transport`: build + full `ctest`
+- [X] T001 Confirm a clean green baseline on branch `043-plaintext-tcp-transport`: build + full `ctest`
   (debug) pass, record the pre-feature test count for the SC-006 regression check, and `codegraph sync`
   from the submodule. No code change — gate the work on a known-green starting point.
+  **Baseline (2026-06-17): debug build green (175/175), `ctest` 466 tests all pass (exit 0, 96.7s);
+  codegraph index fresh (709 files). SC-006/T029 regress against ≥466 debug tests.**
 
 ---
 
@@ -43,14 +45,14 @@ behaviour is exercised by the story tests in Phase 3+.
 
 **⚠️ CRITICAL**: No user-story work begins until this phase is complete.
 
-- [ ] T002 Add `enum class transport_security_kind : std::uint8_t { tls, plaintext };` and the **defaulted**
+- [X] T002 Add `enum class transport_security_kind : std::uint8_t { tls, plaintext };` and the **defaulted**
   (non-pure) virtual `[[nodiscard]] virtual transport_security_kind kind() const noexcept { return
   transport_security_kind::tls; }` to the abstract `TransportFactory` in
   `include/fixpp/transport/transport_factory.hpp` (D-5, E-3). Pure-virtual count MUST stay **3**
   (`[const §XIV.2]`); defaulted-default `tls` keeps the ~11 `tests/session/` factory doubles compiling.
-- [ ] T003 [P] Override `kind()` → `transport_security_kind::tls` explicitly on `asio_tls_transport_factory`
+- [X] T003 [P] Override `kind()` → `transport_security_kind::tls` explicitly on `asio_tls_transport_factory`
   in `src/transport/transport_factory.cpp` (+ decl) (D-5). (Depends on T002.)
-- [ ] T004 [P] Add the **bare** closed-enum value `SecurityProfile::kind::insecure_plain_tcp = 4` (NO
+- [X] T004 [P] Add the **bare** closed-enum value `SecurityProfile::kind::insecure_plain_tcp = 4` (NO
   attribute yet — the `[[deprecated]]` friction is US2/T019) to `include/fixpp/session/security_profile.hpp`
   (E-1, FR-001). `unset (0)` reject unchanged (FR-007).
 
