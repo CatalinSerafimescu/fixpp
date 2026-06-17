@@ -51,8 +51,14 @@ bench driver (FR-012).
 - **Article XII §1–§4 (TLS mechanism)** — ✅ inapplicable on the plaintext path (no TLS context built),
   vacuously satisfied per the amended §5; the TLS path is behaviour-unchanged (D-1 leaves
   `asio_tls_transport` untouched).
-- **Article XII §7 (EncryptMethod(98)≠0 rejected)** — ✅ unchanged; still enforced on plaintext sessions
-  (FR-009). Plaintext removes *transport* encryption only.
+- **Article XII §7 (EncryptMethod(98)≠0 rejected)** — ✅ ENFORCED by 043 on the inbound Logon path.
+  **CORRECTION (2026-06-17, post-implement, user-ratified):** this row was a **false-green at Gate A** —
+  the pre-043 baseline did NOT reject inbound `98≠0` (`interpret_logon` skipped tag 98; S-021 "inbound
+  98≠0 not handled"; TC-017 backlog). The discrepancy surfaced during `/speckit-implement` (US1-d) and was
+  acute on the plaintext profile (a peer requesting app-layer encryption over plain TCP would silently get
+  cleartext). 043 closes it: `interpret_logon` now rejects `98 ≠ "0"` (malformed fails closed) with
+  `session_invalid_logon`, all profiles, witnessed by `tests/session/test_interpret_logon_encrypt_method.cpp`.
+  Plaintext removes *transport* encryption only. (FR-009.)
 - **Article XII §9 (security feature → 4 controls)** — `/clarify` ✅ done (reference-engine sweep + 3
   decisions); `/analyze` pending (step 6); **Codex Gate A** pending (required, after this plan); user
   `/plan` sign-off pending. In scope and tracked.

@@ -87,10 +87,13 @@ socket and that no TLS ClientHello is ever emitted (SC-001).
   `compid_authorization_policy.authorize(...)` is **not** called, **no** peer-identity state exists
   (`live_peer_id_ == nullopt`) on both the reconnected and accepted handoffs, while `check_comp_id` still
   **rejects** a mismatched inbound 49/56 CompID, in `tests/session/test_session_plaintext_authz.cpp` (NEW)
-  — SC-004 (FR-008a, D-10). **Also assert FR-009 on the new surface**: a Logon with `EncryptMethod(98)≠0`
-  on a plaintext session is still rejected (plaintext removes *transport* encryption only, never permits
-  app-layer encryption; `[const §XII.7]` unchanged) — the shared check is not modified by 043 but the
-  plaintext path is new surface reaching it, so witness it directly rather than assume it via T029.
+  — SC-004 (FR-008a, D-10). **FR-009 NOTE (corrected post-implement, user-ratified 2026-06-17):** the
+  original amendment here assumed `EncryptMethod(98)≠0` was already rejected inbound and "not modified by
+  043". That was FALSE — the pre-043 baseline skipped tag 98 inbound (`interpret_logon`; S-021/TC-017 gap),
+  so plan.md's §XII.7 Constitution-Check row was a false-green. Per the user decision, 043 now **enforces**
+  the inbound reject (new task **T030**); FR-009 is witnessed by the dedicated all-profiles witness
+  `tests/session/test_interpret_logon_encrypt_method.cpp` (NOT a plaintext-only cell here — interpret_logon
+  is profile-agnostic, so the dedicated witness is stronger). T008 cell-4 is therefore satisfied by T030's witness.
 
 ### Implementation for User Story 1
 
@@ -146,6 +149,17 @@ socket and that no TLS ClientHello is ever emitted (SC-001).
   avoid a same-region edit collision.
 
 **Checkpoint**: US1 fully functional — a plaintext session round-trips both roles; T005–T008 GREEN.
+
+### Added post-Gate-A (US1-d discovery — user-ratified 2026-06-17)
+
+- [X] T030 [const §XII.7] inbound `EncryptMethod(98)≠0` reject (closes the pre-existing inbound gap that
+  made plan.md's §XII.7 Constitution-Check row a false-green; S-021 "inbound 98≠0 not handled" / TC-017).
+  `interpret_logon` (`src/session/admin_messages.cpp`) now scans tag 98 (was skipped) and rejects a Logon
+  with `98 ≠ "0"` — present-but-malformed fails closed — via the existing `session_invalid_logon` (no new
+  error slot). **Unconditional / all-profiles** (interpret_logon is profile-agnostic). Witness
+  `tests/session/test_interpret_logon_encrypt_method.cpp` (4 cells, mutation-proven discriminating). Zero
+  regression (471 debug ctest). spec.md FR-009 + plan.md §XII.7 row + the Gate A record corrected to retire
+  the false-green. Satisfies T008 cell-4 / FR-009.
 
 ---
 

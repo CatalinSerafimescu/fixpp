@@ -175,8 +175,9 @@ profile with NO session override but a *plaintext engine-default factory* — an
 - **Reconnect**: each reconnect attempt mints a fresh plaintext transport via the factory (same
   fresh-transport-per-attempt rule as TLS); the reconnect FSM does **not** attempt a TLS handshake step
   on the plaintext profile.
-- **EncryptMethod(98) ≠ 0 on a plaintext session**: still rejected (constitution §XII.7 unchanged) —
-  plaintext removes *transport* encryption only, never permits app-layer encryption.
+- **EncryptMethod(98) ≠ 0 on a plaintext session**: rejected at inbound Logon (constitution §XII.7) —
+  plaintext removes *transport* encryption only, never permits app-layer encryption. 043 adds the inbound
+  enforcement (the prior baseline skipped tag 98 inbound — S-021/TC-017 gap; see FR-009).
 - **`handshake_result`-dependent reads** (peer identity, negotiated cipher, captured pinset): a plaintext
   session has no `handshake_result`; consumers that assume one (TLS cert-event spans, identity readback)
   MUST be inert/skipped on the plaintext path, not crash.
@@ -243,8 +244,14 @@ profile with NO session override but a *plaintext engine-default factory* — an
   is already skipped for non-mTLS profiles (`one_way_ca`/unset) — because no handshake `peer_id` exists.
   The cert-independent `check_comp_id` inbound-CompID match MUST remain in effect unchanged. The plaintext
   profile therefore provides **no peer authentication** (documented limitation L-043-x).
-- **FR-009**: Application-layer encryption (`EncryptMethod(98) ≠ 0`) MUST remain rejected on a plaintext
-  session (constitution §XII.7 unchanged).
+- **FR-009**: Application-layer encryption (`EncryptMethod(98) ≠ 0`) MUST be rejected on every session,
+  plaintext included (constitution §XII.7). **Implementation note (2026-06-17, user-ratified):** the
+  pre-043 baseline did NOT enforce this on the **inbound** path — `interpret_logon` skipped tag 98, a gap
+  S-021 documented ("inbound 98≠0 not handled") and TC-017 backlogged. The original "remain rejected /
+  unchanged" phrasing was a false-green against that baseline. 043 **closes the gap**: `interpret_logon`
+  now rejects an inbound Logon carrying `98 ≠ "0"` (present-but-malformed fails closed) with
+  `session_invalid_logon`, unconditionally across all profiles. Witnessed by
+  `tests/session/test_interpret_logon_encrypt_method.cpp`.
 - **FR-010**: The plaintext transport MUST honour the existing `Transport::Config` TCP knobs (tcp_nodelay
   default ON, keepalive, send/recv buffers, SO_LINGER, SO_REUSEADDR on the acceptor) identically to the
   TLS transport; the TLS-only knobs (`tls_handshake_timeout`, `tls_close_timeout`) are inert on this path.
@@ -273,7 +280,8 @@ profile with NO session override but a *plaintext engine-default factory* — an
 - **`[const §XII.5]`** (amended v0.3, 2026-06-17) — reopened the closed `SecurityProfile` set; added
   `insecure_plain_tcp`; opt-in-only + loud `[[deprecated]]`-class friction; §1–§4 inapplicable on this
   profile.
-- **`[const §XII.7]`** — `EncryptMethod(98) ≠ 0` rejected (UNCHANGED; FR-009).
+- **`[const §XII.7]`** — `EncryptMethod(98) ≠ 0` rejected. **043 ENFORCES this on the inbound Logon path**
+  (the pre-043 baseline did not — a false-green corrected here; closes the S-021/TC-017 gap; FR-009).
 - **`[const §XII.9]`** — security-affecting features trigger all four mandatory controls (`/clarify`,
   `/analyze`, Codex Gate A, user `/plan` sign-off). This feature is in scope.
 - **`[const §XIV.2]`** — pluggable-interface ≤5 pure-virtual cap (`Transport` base; plaintext uses none

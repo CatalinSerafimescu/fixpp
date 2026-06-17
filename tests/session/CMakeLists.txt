@@ -1948,6 +1948,15 @@ add_threading_test(session_interpret_logon_overflow
 set_tests_properties(session_interpret_logon_overflow PROPERTIES
   LABELS "040;sc001;overflow-hardening;foundational")
 
+# ── 043-plaintext-tcp-transport — [const §XII.7] inbound EncryptMethod(98) ban ─
+# Closes the pre-existing §XII.7 inbound gap (S-021 "inbound 98≠0 not handled" /
+# TC-017): interpret_logon now rejects a Logon carrying EncryptMethod(98)≠0,
+# present-but-malformed fail-closed, for ALL profiles. FR-009.
+add_threading_test(session_interpret_logon_encrypt_method
+  test_interpret_logon_encrypt_method.cpp)
+set_tests_properties(session_interpret_logon_encrypt_method PROPERTIES
+  LABELS "043;fr009;xii7;encrypt-method")
+
 # ── 041-validation-gate-wiring T003/T004 — fail-closed config gate ──────────
 # C-5 / FR-011 / data-model E-1: register_session rejects
 #   validate_inbound_messages=true + null dictionary with invalid_session_config.

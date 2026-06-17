@@ -221,10 +221,12 @@ namespace {
     // Parse using the dict-free SOH-delimited scanner: no heap, no dictionary required.
     // Fields of interest:
     //   8=BeginString, 35=MsgType (must be "A"), 49=SenderCompID, 56=TargetCompID,
-    //   108=HeartBtInt.
+    //   98=EncryptMethod (must be 0 — [const §XII.7]), 108=HeartBtInt.
     // 033 T007: additionally scan tag 1137 (DefaultApplVerID), 553 (Username),
     //   554 (Password) — purely additive, no validation here (session arm handles it).
-    // We skip 34, 52, 98 for this validation step.
+    // 043: tag 98 (EncryptMethod) is now scanned + validated here (was previously
+    //   skipped) — closes the pre-existing [const §XII.7] inbound gap (S-021/TC-017).
+    //   We skip 34, 52 for this validation step.
 
     // Build a framer view over the raw bytes (no framing validation needed here;
     // the engine's Framer validates checksum/bodylength before on_inbound_frame).
@@ -245,6 +247,9 @@ namespace {
     std::optional<std::string_view> default_appl_ver_id_found;
     std::optional<std::string_view> username_found;
     std::optional<std::string_view> password_found;
+    // 043 ([const §XII.7]): EncryptMethod(98) — captured for the app-layer-encryption
+    // ban check below; absent on many test Logons, present-and-≠"0" is fail-closed.
+    std::optional<std::string_view> encrypt_method_found;
 
     // Simple SOH-delimited field scanner (no heap, no library dependency).
     const std::byte SOH{0x01};
@@ -313,6 +318,9 @@ namespace {
                 // 033 T007 / data-model E5: scan FIXT Logon fields as views into frame
                 // (zero-copy; no validation here — session arm enforces missing-1137 /
                 // unserviceable-1137 / 553+554 surface logic).
+                case 98:
+                    encrypt_method_found = val;
+                    break;
                 case 1137:
                     default_appl_ver_id_found = val;
                     break;
@@ -368,6 +376,16 @@ namespace {
 
     // 5. HeartBtInt must be present and ≥ 0.
     if (!has_heartbt || heartbt_int_found < 0) {
+        return std::unexpected(fixpp::core::error::session_invalid_logon);
+    }
+
+    // 6. EncryptMethod(98) ≠ 0 is rejected — [const §XII.7]: application-layer
+    //    encryption is banned (encryption lives at TLS only). 043 closes the
+    //    pre-existing inbound gap (S-021/TC-017): any present-and-non-"0" value —
+    //    including a present-but-malformed value — fails closed. Applies to ALL
+    //    profiles (interpret_logon is profile-agnostic); absent 98 is not newly
+    //    rejected here (a missing required field is a separate concern).
+    if (encrypt_method_found.has_value() && *encrypt_method_found != "0") {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
