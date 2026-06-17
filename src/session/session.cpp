@@ -920,7 +920,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
-    // gate-b/r1 FQ-1 (findings #1 + #2): FIXT.1.1 config validation.
+    // gate-b/r1 FQ-1 (findings #1 + #2) + 042 (#3): FIXT.1.1 config validation.
     //
     // #1 (P1): begin_string=="FIXT.1.1" with no default_appl_ver_id → is_fixt()
     //    returns false, so the session silently routes to the FIX.4.x path and emits
@@ -930,15 +930,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //
     // #2 (P2-defensive): begin_string=="FIXT.1.1" with is_fixt()=true but
     //    app_version_registry_==nullptr → the acceptor serviceability gate at
-    //    inbound Logon (session.cpp:1986) is skipped. Structurally unreachable in
+    //    inbound Logon (session.cpp:2195) is skipped. Structurally unreachable in
     //    production (engine always passes non-null), but the test-ctor default is null.
     //    Closing here at open()-time is cheaper than carrying a documented fail-open.
     //    [session_config.hpp:440; data-model.md E3; FR-004/FR-004a]
     //
+    // #3 (042, production-reachable): begin_string=="FIXT.1.1" with a non-null
+    //    registry that does NOT carry an application dictionary for the configured
+    //    default_appl_ver_id — i.e. app_version_registry_->get(*default_appl_ver_id)
+    //    returns empty. Unlike #2 (null registry = unreachable in production), this
+    //    arm IS production-reachable: a real engine can hold a non-null registry that
+    //    simply lacks the dict for this session's configured default. Closes L-033-5:
+    //    without this guard, open() succeeds and every inbound FIXT Logon is silently
+    //    rejected (the inbound serviceability gate at session.cpp:2195 catches it at
+    //    runtime but the operator has no config-load failure). The third disjunct is
+    //    short-circuit-safe: *cfg_.default_appl_ver_id is only dereffed when #1 is
+    //    false (has_value()=true), and ->get() is only called when #2 is false
+    //    (registry non-null). version_registry::get() is const noexcept.
+    //    [042 spec.md FR-001/FR-002; research.md D-1/D-5; contract W1/W2]
+    //
     // Tested against begin_string directly (NOT is_fixt()) — is_fixt() encodes the
     // default_appl_ver_id half but would MISS the begin_string-without-default case.
     if (cfg_.begin_string == "FIXT.1.1" &&
-        (!cfg_.default_appl_ver_id.has_value() || app_version_registry_ == nullptr)) {
+        (!cfg_.default_appl_ver_id.has_value() || app_version_registry_ == nullptr ||
+         !app_version_registry_->get(*cfg_.default_appl_ver_id).has_value())) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
