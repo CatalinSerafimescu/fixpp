@@ -2133,6 +2133,33 @@ add_threading_test(session_no_implicit_insecure_plain_tcp
 set_tests_properties(session_no_implicit_insecure_plain_tcp PROPERTIES
     LABELS "043;us2;sc002;no_implicit_default")
 
+# ── 043-plaintext-tcp-transport T021+T022 — SC-003 profile↔factory mismatch ───
+# T021: REJECT cells (a)/(b)/(c) + OPEN cells (d)/(e)/(f) for FR-008 at open().
+# T022: effective-factory-reaches-mint witness (D-4 test note): drive_reconnect()
+#   calls make() on the wired factory (not the ctor-time null pointer).
+# Uses MinimalTlsFactory double (no cert files needed).
+# CTest filter: ctest -R 'session_plaintext_factory_mismatch'
+add_executable(session_plaintext_factory_mismatch_test
+    test_session_plaintext_factory_mismatch.cpp
+)
+target_link_libraries(session_plaintext_factory_mismatch_test PRIVATE
+    fixpp_session
+    ${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}
+    ${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}
+    ${FIXPP_TRANSPORT_ZLIB_LIB}
+    GTest::gtest
+    GTest::gtest_main
+)
+target_include_directories(session_plaintext_factory_mismatch_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_plaintext_factory_mismatch
+    COMMAND session_plaintext_factory_mismatch_test)
+set_tests_properties(session_plaintext_factory_mismatch PROPERTIES
+    TIMEOUT 30
+    LABELS "043;t021;t022;us3;sc003;fr008;mismatch")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

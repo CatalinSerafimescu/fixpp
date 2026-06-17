@@ -1179,9 +1179,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
     reconnect_fsm_.set_emit_credentials_rotated(
         [this](fixpp::session::session_event_credentials_rotated ev) noexcept { emit_event(ev); });
-    // 043 T012 (D-4/D-6 steps 1,2,4,5 — FR-003a/FR-008) — Effective-factory
-    // resolution and FSM wiring.  Step 3 (FR-008 kind()-mismatch reject) is
-    // US3/T023 and NOT added here.
+    // 043 T012+T023 (D-4/D-6 — FR-003a/FR-008) — Effective-factory resolution,
+    // consistency reject, and FSM wiring.
     //
     // Step 1: insecure_plain_tcp is ACCEPTED (not unset); the unset reject above
     //   is unchanged.
@@ -1226,6 +1225,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             effective_transport_factory_ =
                 cfg_.transport_factory_override ? cfg_.transport_factory_override
                                                : engine_.default_transport_factory;
+        }
+
+        // Step 3 (T023 / US3 / FR-008): effective-factory kind() consistency reject.
+        // Require the effective factory's kind() to match the profile category:
+        //   insecure_plain_tcp → kind() must be plaintext
+        //   TLS profile (mtls_ca / mtls_pinned / one_way_ca) → kind() must be tls
+        // Null effective_transport_factory_ (TLS profile, no override, no engine default)
+        // is the test-only path where the FSM null-guard fires at reconnect time — do NOT
+        // reject here (it would break existing tests that open() TLS sessions with no
+        // factory set). Only reject on a PRESENT factory whose kind disagrees with the
+        // profile. [data-model §E-6; spec.md FR-008; D-6 step 3; research.md D-5; 043 T023]
+        if (effective_transport_factory_) {
+            using TFK = fixpp::transport::transport_security_kind;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            const bool profile_wants_plaintext = (k == SK::insecure_plain_tcp);
+#pragma clang diagnostic pop
+            const TFK required_kind =
+                profile_wants_plaintext ? TFK::plaintext : TFK::tls;
+            if (effective_transport_factory_->kind() != required_kind) {
+                co_return std::unexpected(error::invalid_session_config);
+            }
         }
 
         // Step 4: wire the resolved factory into the FSM.
