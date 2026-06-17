@@ -253,6 +253,23 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
             continue;
         }
 
+        // ── Step 6 (plaintext fast-path): skip handshake entirely (043 T011) ──
+        // When is_plaintext_ the FSM proceeds connect → Logon with no handshake
+        // and no authorization (D-7/D-10). A default handshake_result{} is
+        // passed so install_reconnected_transport receives a well-typed argument;
+        // live_peer_id_ is guarded in Session::install_reconnected_transport (T013)
+        // and stays nullopt for insecure_plain_tcp (D-10 #2 MUST).
+        // This early-return leaves steps 6/7/8 byte-identical for non-plaintext
+        // profiles — the fail-closed null-cast path (non-TLS transport on a TLS
+        // profile is still a bug) is provably unchanged. [data-model §E-5; D-7]
+        if (is_plaintext_) {
+            if (session_ != nullptr) {
+                session_->install_reconnected_transport(std::move(t),
+                                                        fixpp::transport::handshake_result{});
+            }
+            co_return expected_t<void>{};
+        }
+
         // ── Step 6: dynamic_cast to TlsTransport + async_handshake ────────────
         // TlsTransport inherits virtually from Transport — static_cast down that
         // edge is ill-formed; dynamic_cast is required (E-1 / C1 / tls_transport.hpp:61-67).

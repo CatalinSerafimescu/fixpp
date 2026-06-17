@@ -142,6 +142,25 @@ public:
     // awaitable-corpus header. [data-model §E-1 step 3; §XV.9]
     void set_tls_profile(fixpp::tls::SecurityProfile profile) noexcept { tls_profile_ = profile; }
 
+    // 043 T011 (D-7/E-5) — Set the plaintext indicator.
+    // When true, step 6 (dynamic_cast<TlsTransport*> + async_handshake) is
+    // skipped entirely: connect → Logon, no handshake. The non-plaintext
+    // null-cast→error path is unchanged (fail-closed; TLS profile + non-TLS
+    // transport is still a bug). Called by Session::open() alongside
+    // set_tls_profile() BEFORE any drive_reconnect(). [data-model §E-5; D-7]
+    void set_plaintext_profile(bool is_plaintext) noexcept { is_plaintext_ = is_plaintext; }
+
+    // 043 T011 (D-4/E-5) — Repoint the private factory_ to the resolved
+    // effective factory. Called by Session::open() alongside set_tls_profile()
+    // BEFORE any drive_reconnect(). factory_ stays NON-OWNING raw; the
+    // Session's effective_transport_factory_ (shared_ptr) owns the object.
+    // This setter exists because factory_ is set at ctor time to the override-only
+    // pointer (nullptr for plaintext/no-override) and drive_reconnect_attempt()
+    // fails closed at reconnect_fsm.cpp:113-115 on null. [data-model §E-5; D-4]
+    void set_transport_factory(fixpp::transport::TransportFactory* factory) noexcept {
+        factory_ = factory;
+    }
+
     // 014 T017/T018 — Inject the strand-bound credential-rotation emit callback.
     // Called by Session::open() (T018) to wire the on-strand emit of
     // SessionEvent::credentials_rotated.  The FSM invokes this callback at step 2
@@ -235,8 +254,11 @@ public:
     void exit_awaiting_resend() noexcept;
 
 private:
-    // NON-OWNING; owned by SessionConfig::transport_factory_override (shared_ptr).
+    // NON-OWNING; owned by the Session (override or effective_transport_factory_).
     // The engine guarantees the factory outlives this FSM per [arch §5.6].
+    // Set at ctor time to cfg.transport_factory_override.get() (may be nullptr
+    // for plaintext/no-override); repointed at Session::open() via
+    // set_transport_factory() to the resolved effective factory. [043 T011; D-4]
     fixpp::transport::TransportFactory* factory_;
     fixpp::transport::ReconnectPolicy policy_;
     std::uint32_t attempt_index_ = 0;
@@ -259,6 +281,12 @@ private:
     // Forward-declared as uint8_t-backed enum above; full definition via
     // transport_factory.hpp in reconnect_fsm.cpp. [data-model §E-1 step 3; §XV.9]
     fixpp::tls::SecurityProfile tls_profile_{};
+
+    // 043 T011 (D-7/E-5) — Plaintext profile indicator. When true, step 6
+    // (dynamic_cast<TlsTransport*> + async_handshake) and step 7 (authorize) are
+    // skipped; the FSM proceeds connect → install → Logon. Set by Session::open()
+    // via set_plaintext_profile(). Default false (TLS path unchanged). [§E-5; D-7]
+    bool is_plaintext_ = false;
     // Timers are optional so ReconnectFsm is constructible without an executor;
     // populated at first use in Phase 3 (drive_reconnect_attempt binds the
     // session executor at call time). [data-model §E-1 Phase 2 shape]
