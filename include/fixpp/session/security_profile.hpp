@@ -24,18 +24,20 @@
 // handshake validation logic. The `kind` enum values map to the constitutional
 // closed set from `[const §XII.5]` (mtls_ca / mtls_pinned / one_way_ca); the
 // `unset` sentinel is the "no valid profile supplied" discriminant rejected at
-// open time. A future "no-TLS / plaintext" escape value is 2g's call and will
-// be appended as an additional enumerator if `[const §XII.5]`'s closed set is
-// reopened (design-doc amendment required per `[const §XVI.3]`).
+// open time.
+// NOTE (043, 2026-06-17): `insecure_plain_tcp` (k=4) was appended via the
+// constitution v0.3 §XII.5 amendment (design-doc amendment D-9 / 043 spec).
+// It is gated behind a `[[deprecated]]` friction attribute — see the enumerator.
 #pragma once
 
 #include <cstdint>
 
 namespace fixpp::session {
 
-// Closed enumeration of TLS profile kinds (`[const §XII.5]` closed set +
+// Closed enumeration of profile kinds (`[const §XII.5]` v0.3 closed set +
 // `unset` sentinel). DO NOT add values here without a design-doc amendment
-// — the constitutional closed set is: mtls_ca / mtls_pinned / one_way_ca.
+// — the constitutional closed set is: mtls_ca / mtls_pinned / one_way_ca /
+// insecure_plain_tcp (v0.3 amendment, 2026-06-17).
 // `unset` is the default-constructed sentinel that Session::open() REJECTS.
 struct SecurityProfile {
     enum class kind : std::uint8_t {
@@ -43,7 +45,20 @@ struct SecurityProfile {
         mtls_ca = 1,      // mutual TLS with CA-verified peer certificate
         mtls_pinned = 2,  // mutual TLS with certificate pinning
         one_way_ca = 3,   // one-way TLS (server authenticates to client)
-        insecure_plain_tcp = 4,  // 043: insecure_plain_tcp (v0.3 §XII.5 amendment); friction attr added in T019
+        // Loud opt-in: plaintext TCP (no TLS/encryption/peer-auth). MUST be
+        // used only over a separately-secured link (colo cross-connect / VPN).
+        // The [[deprecated]] attribute fires a -Wdeprecated-declarations
+        // diagnostic at every unsuppressed selection site — the construction-
+        // site friction prescribed by [const §XII.5] v0.3 / 043 spec SC-005 /
+        // D-9. fixpp-internal code that legitimately selects this value wraps
+        // the selection in `#pragma clang diagnostic push/ignored/pop` per the
+        // one_way_ca precedent at session.cpp. An operator selecting this value
+        // without a pragma suppression WILL see the diagnostic. [043 D-9/T019]
+        insecure_plain_tcp                                                    //
+            [[deprecated("insecure_plain_tcp disables transport security (no " //
+                         "TLS/encryption/peer-auth); use only over a "        //
+                         "separately-secured link (colo/VPN) — prefer "       //
+                         "mtls_pinned/mtls_ca")]] = 4,
     };
 
     kind k = kind::unset;  // no-implicit-default (`[const §XII.5]` / N-P2-3)

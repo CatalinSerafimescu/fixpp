@@ -2094,6 +2094,45 @@ set_tests_properties(session_plaintext_authz PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "043;t008;us1;plaintext;authz")
 
+# ── 043-plaintext-tcp-transport T017 — SC-005 negative-compile friction witness ──
+# SC-005 / D-9 / [const §XII.5 v0.3]: selecting insecure_plain_tcp WITHOUT a
+# pragma suppression must trigger -Wdeprecated-declarations → -Werror at the
+# selection site. This negative-compile TU is compiled with
+# -Werror=deprecated-declarations and registered as WILL_FAIL TRUE; a build
+# failure IS the passing state. No link step needed — security_profile.hpp is
+# header-only. Pattern: mirrors tls_cipher_allow_list_negative_compile +
+# tls_security_profile_deprecated_compile.
+# [spec.md SC-005; research.md D-9; 043 T017]
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_executable(session_security_profile_insecure_plain_deprecated_negative EXCLUDE_FROM_ALL
+        security_profile_insecure_plain_tcp_deprecated_negative.cpp)
+    target_include_directories(session_security_profile_insecure_plain_deprecated_negative PRIVATE
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_features(session_security_profile_insecure_plain_deprecated_negative PRIVATE cxx_std_23)
+    target_compile_options(session_security_profile_insecure_plain_deprecated_negative PRIVATE
+        -Wdeprecated-declarations -Werror=deprecated-declarations)
+    add_test(
+        NAME session_security_profile_insecure_plain_deprecated_negative_compile
+        COMMAND cmake --build "${CMAKE_BINARY_DIR}"
+                --target session_security_profile_insecure_plain_deprecated_negative
+    )
+    set_tests_properties(session_security_profile_insecure_plain_deprecated_negative_compile PROPERTIES
+        WILL_FAIL TRUE
+        LABELS "043;us2;sc005;compile_negative;friction"
+    )
+endif()
+
+# ── 043-plaintext-tcp-transport T018 — SC-002 no-implicit-default witness ──────
+# SC-002: a default-constructed / kind::unset SecurityProfile is still rejected at
+# Session::open() with error::invalid_session_config; insecure_plain_tcp is never
+# selected implicitly. Extends threading_session_open_rejects_unset_security_profile
+# (gate-b/r1 RC#1) by adding a cell that proves insecure_plain_tcp is NOT the
+# implicit fallback when security_profile is left unset. [spec.md SC-002 / FR-006]
+add_threading_test(session_no_implicit_insecure_plain_tcp
+    test_session_no_implicit_insecure_plain_tcp.cpp)
+set_tests_properties(session_no_implicit_insecure_plain_tcp PROPERTIES
+    LABELS "043;us2;sc002;no_implicit_default")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

@@ -87,8 +87,12 @@
 
 #include "support/minimal_dictionary.hpp"
 
-// SecurityProfile::kind::insecure_plain_tcp — [[deprecated]] friction not yet
-// added (T019 is a future task); no pragma suppression needed.
+// SecurityProfile::kind::insecure_plain_tcp — [[deprecated]] friction fires at
+// every unsuppressed selection site (T019/T020). This test file legitimately
+// selects the value at multiple points (it IS the plaintext-authz test suite),
+// so suppress file-wide per the fixpp-internal-code pragma idiom. [043 T020]
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <fixpp/session/security_profile.hpp>
 
 using namespace std::chrono_literals;
@@ -494,3 +498,4 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
         (void)close_fut.get();
     }
 }
+#pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)

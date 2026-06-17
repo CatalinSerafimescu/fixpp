@@ -55,8 +55,12 @@
 
 #include "support/minimal_dictionary.hpp"
 
-// SecurityProfile::kind::insecure_plain_tcp — the [[deprecated]] friction attribute
-// will be added in T019; for now the enumerator has no [[deprecated]] so no pragma needed.
+// SecurityProfile::kind::insecure_plain_tcp — [[deprecated]] friction fires at
+// every unsuppressed selection site (T019/T020). This test file legitimately
+// selects the value (it IS the plaintext round-trip test), so suppress file-wide
+// per the fixpp-internal-code pragma idiom. [043 T020]
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <fixpp/session/security_profile.hpp>
 
 using namespace std::chrono_literals;
@@ -283,3 +287,4 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
            "not 0x16 (TLS Handshake) or 0x15 (TLS Alert). "
            "first_byte=0x" << std::hex << static_cast<unsigned>(first_byte);
 }
+#pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)

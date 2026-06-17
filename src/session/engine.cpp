@@ -679,7 +679,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     // that would silently build a TLS listener and reject every plain connection.
     // [[feedback_half_restructure_symmetric_api]]
     using sk = fixpp::session::SecurityProfile::kind;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     const bool is_plaintext = (entry.config.security_profile.k == sk::insecure_plain_tcp);
+#pragma clang diagnostic pop
 
     fixpp::tls::SslCtxConfig ssl_cfg;
     if (!is_plaintext) {
