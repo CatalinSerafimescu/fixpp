@@ -21,12 +21,12 @@
 //   Cell (f): insecure_plain_tcp profile + explicit plaintext factory override.
 //
 // T022 — Effective-factory-reaches-mint witness (D-4 / research.md D-4 test note):
-//   Cell (g): plaintext with counting factory override — make() is called by the FSM.
-//             Witnesses the T012 set_transport_factory() wiring: old null path → factory_
-//             null → FSM null-check fires without calling make() → make_count stays 0.
-//             New T012 path → factory_ wired → make_count > 0.
-//   Cell (h): TLS/no-override with a counting engine-default double — same discrimination
-//             for the TLS path.
+//   Cell (g): plaintext/NO-OVERRIDE (auto-derive) — drive_reconnect() returns a
+//             connect-stage error (NOT transport_factory_failed). Discrimination:
+//             null factory_ → FSM null-check fires → transport_factory_failed.
+//             Wired auto-derive factory → make() called → connect attempted → refused.
+//   Cell (h): TLS/no-override with a counting engine-default double — make_count > 0
+//             after drive_reconnect() confirms the engine default was wired.
 //
 // WITNESS QUALITY:
 //   REJECT cells assert error::invalid_session_config returned AT open() specifically.
@@ -108,40 +108,6 @@ public:
     std::atomic<int> make_count_{0};
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CountingPlainFactory — a plaintext-kind counting factory double.
-//
-// Overrides kind() → plaintext (matches insecure_plain_tcp profile).
-// make() increments make_count_ and returns transport_factory_failed.
-// Used in T022 Cell (g) to assert make() is called by drive_reconnect().
-// ─────────────────────────────────────────────────────────────────────────────
-class CountingPlainFactory final : public fixpp::transport::TransportFactory {
-public:
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
-        asio::any_io_executor, fixpp::tls::SslCtxConfig,
-        std::pmr::memory_resource*) noexcept override {
-        ++make_count_;
-        // Return transport_factory_failed — we only need to witness that make() was called.
-        return std::unexpected{fixpp::core::error::transport_factory_failed};
-    }
-
-    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
-        std::shared_ptr<fixpp::tls::cert_source>) noexcept override {
-        return {};
-    }
-
-    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
-        const noexcept override {
-        return nullptr;
-    }
-
-    // Override kind() → plaintext so it matches insecure_plain_tcp and T023 passes.
-    [[nodiscard]] fixpp::transport::transport_security_kind kind() const noexcept override {
-        return fixpp::transport::transport_security_kind::plaintext;
-    }
-
-    std::atomic<int> make_count_{0};
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build helpers.
@@ -391,43 +357,40 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
 // Proves the resolved factory is WIRED into the FSM (not a stale null pointer),
 // and that drive_reconnect() calls make() on it.
 //
-// Discrimination (advisor guidance):
-//   Old null path: factory_ == nullptr → FSM null-check fires WITHOUT calling make()
-//                  → make_count_ stays 0.
-//   New T012 path: effective_transport_factory_ wired into factory_ →
-//                  drive_reconnect() calls make() → make_count_ > 0.
+// Cell (g): plaintext/NO-OVERRIDE (auto-derive path) — make() is called by
+//   drive_reconnect(), producing a connect-stage error (not transport_factory_failed).
+//   Discrimination:
+//     Old null path: effective_transport_factory_ not assigned at open() →
+//       set_transport_factory(nullptr) → factory_==nullptr → FSM null-check fires
+//       WITHOUT calling make() → returns transport_factory_failed.
+//     New T012 path: auto-derive assigns effective_transport_factory_ → wired into
+//       factory_ → make() called → a plain transport is minted → connect attempted
+//       → returns transport_connect_refused (or equivalent connect-stage error).
+//   The ASSERT is: drive_reconnect() returns an error != transport_factory_failed.
+//   IPv6 ::1 is used as the endpoint because on this host ::1:<port> returns immediate
+//   ECONNREFUSED (IPv4 loopback connects time out — WSL2 kernel behavior).
 //
-// Cell (g): plaintext with a counting factory override (kind==plaintext) —
-//           make() is called by drive_reconnect(). make_count_ > 0 proves wiring.
-//
-// Cell (h): TLS/no-override — counting TLS engine-default double wired; same discrimination.
+// Cell (h): TLS/no-override — counting engine-default double witnesses the same
+//   discrimination for the TLS arm.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Cell (g): plaintext + counting factory override — factory reaches mint.
+// Cell (g): plaintext/no-override auto-derive — factory reaches mint.
 //
-// Uses an explicit CountingPlainFactory override (kind==plaintext, matches profile)
-// so T023's consistency check passes after it is added. The counting factory's make()
-// increments make_count_ and returns transport_factory_failed — we only need to know
-// that make() was CALLED, not that a connect succeeded.
+// No transport_factory_override set. Session::open() auto-derives the plaintext factory
+// (D-4 step 2: insecure_plain_tcp + no override → make_asio_plain_transport_factory).
+// drive_reconnect() calls make() on the wired factory, minting a real plain transport.
+// The transport then tries to connect to IPv6 ::1 (loopback) port 19999 — refused
+// immediately on this host — returning transport_connect_refused or similar.
+// This is NOT transport_factory_failed, which would indicate factory_ was null.
 //
-// Without T012's set_transport_factory() wiring: factory_ stays as the ctor-time pointer
-// (which for an explicit override IS the override pointer, so it was always wired). The
-// regression T022 guards against is the no-override (auto-derive) path. Cell (g) uses
-// an explicit override to keep the witness independent of the auto-derive machinery;
-// Cell (d) covers the auto-derive case at the open() level. The key regression
-// (factory_ null for no-override) is covered by Cell (g) indirectly: if set_transport_factory()
-// was missing, no-override sessions would use factory_ = nullptr (ctor-time) and fail at
-// the FSM null-check — Cell (d) would pass open() but drive_reconnect() would return
-// transport_factory_failed with count=0, matching cell (h)'s null-factory signature.
-//
-// In summary: cells (g)+(h) together witness the wiring for BOTH the explicit-override
-// case (g) and the engine-default case (h). Cell (d) independently covers the auto-derive
-// open() case. Cell (c) as RED before T023 confirms the effective-factory path is checked.
-TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextFactoryReachesMint) {
+// max_attempts=1 (bounded): the reconnect loop exits after one attempt regardless of
+// the error code, so no backoff delay is incurred.
+TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    // No engine default — auto-derive derives its own factory.
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -443,36 +406,37 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextFactoryReachesMint) {
     cfg.heartbeat_interval = std::chrono::seconds{0};
     cfg.executor_override = ioc.get_executor();
     cfg.transport_send = [](std::span<const std::byte>) {};
-    cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 1};
-
-    auto counting_fac = std::make_shared<CountingPlainFactory>();
-    cfg.transport_factory_override = counting_fac;
-    // max_attempts=1 so drive_reconnect() exits after one make() call (not unbounded loop).
+    // IPv6 ::1 loopback: gives immediate ECONNREFUSED on this WSL2 host.
+    // (IPv4 127.0.0.1 connects time out — WSL2 kernel SYN filter behavior.)
+    cfg.reconnect_endpoint = fixpp::transport::Endpoint{"::1", 19999};
+    // max_attempts=1: exit after one attempt, no backoff delay.
     fixpp::transport::ReconnectPolicy rp;
     rp.max_attempts = 1;
     cfg.reconnect_policy = rp;
+    // NO transport_factory_override — tests the auto-derive path.
 
     Session s{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, s.open(), asio::use_future);
     ioc.run();
     ASSERT_TRUE(open_fut.get().has_value())
-        << "Cell (g): open() must succeed for plaintext + counting factory override";
+        << "Cell (g): open() must succeed for plaintext/no-override (auto-derive) session";
 
-    EXPECT_EQ(counting_fac->make_count_.load(), 0)
-        << "Cell (g): make() must NOT be called at open() time";
-
-    // Drive one reconnect attempt — make() is called on the counting factory.
+    // Drive one reconnect attempt.
+    // The auto-derived factory is wired → make() is called → a plain transport is minted →
+    // connect to ::1:19999 → ECONNREFUSED → transport_connect_refused is returned.
     ioc.restart();
     auto drive_fut = asio::co_spawn(ioc, s.drive_reconnect(), asio::use_future);
     ioc.run();
-    (void)drive_fut.get();  // result doesn't matter (factory returns factory_failed)
+    auto drive_r = drive_fut.get();
 
-    // The critical assertion: make() was called on the wired factory.
-    EXPECT_GT(counting_fac->make_count_.load(), 0)
-        << "Cell (g) D-4 mint witness: make() was never called on the counting factory "
-           "after drive_reconnect(). This means factory_ was null (old ctor-time path) "
-           "OR set_transport_factory() was not called at open() time (T012 regression). "
-           "Expected make_count_ > 0 after one drive_reconnect() call.";
+    ASSERT_FALSE(drive_r.has_value())
+        << "Cell (g): drive_reconnect() must fail (connect refused), not succeed";
+    EXPECT_NE(drive_r.error(), error::transport_factory_failed)
+        << "Cell (g) D-4 mint witness: drive_reconnect() returned transport_factory_failed "
+           "which means factory_ was NULL — the auto-derive path did NOT wire the factory "
+           "into the FSM (T012 regression). Expected a connect-stage error "
+           "(transport_connect_refused), not transport_factory_failed. "
+           "[research.md D-4: 'drive_reconnect_attempt() fails at null-guard if factory_ null']";
 
     ioc.restart();
     auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
