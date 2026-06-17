@@ -191,6 +191,10 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
         accept_factory_ = std::shared_ptr<asio_tls_transport_factory>{
             static_cast<asio_tls_transport_factory*>(made->release())};
     }
+    // cppcheck-suppress accessMoved  // FP: the plaintext branch above (:165-183)
+    // always co_returns, so the std::move(accepted_socket) at :175 and this one are
+    // in mutually-exclusive paths — accepted_socket is moved at most once. cppcheck
+    // does not model co_return as a terminator. [043 T015]
     auto minted = accept_factory_->make_accepted(std::move(accepted_socket), nullptr);
 
     if (!minted) {
