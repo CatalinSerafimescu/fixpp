@@ -263,15 +263,16 @@ construct each matched pairing and assert `open()` succeeds.
   flows against the built library; fix any drift.
 - [X] T028 Feature completeness audit (Gate-B precondition): assert exact-set traceability
   tasks ↔ FR-001..FR-013 ↔ SC-001..SC-008 ↔ catalogue row — 100% covered or explicitly waived with reason.
-- [~] T029 SC-006 regression + §IX.1 matrix: full suite green vs the T001 baseline (zero TLS-path
+- [X] T029 SC-006 regression + §IX.1 matrix: full suite green vs the T001 baseline (zero TLS-path
   regression); run the sanitizer/coverage matrix (debug/ASan/UBSan/TSan) ONE PRESET AT A TIME, confirm the
   new branches are covered (lcov DA/BRDA basis), then `codegraph sync`. (This is the evidence
   `/speckit-verify` consumes; not the verify gate itself.)
-  **PARTIAL (2026-06-17): debug SC-006 regression CONFIRMED — baseline 466 ⊂ current 474 debug ctest,
-  all green, +8 additive (zero regression). codegraph index force-rebuilt (717 files). The full 6-preset
-  sanitizer/coverage matrix (§IX.1 lcov DA/BRDA) is DELEGATED to `/speckit-verify` (the next pipeline step
-  after `/simplify`) — running it now then re-running post-`/simplify` would waste the matrix
-  (`[[feedback_speckit_simplify_before_verify]]`).**
+  **DONE (2026-06-18, `/speckit-verify`): full matrix GREEN one-preset-at-a-time — debug 474/474 (incl.
+  #132), asan 473/473, ubsan 473/473, tsan 473/473, coverage 473/473, all zero sanitizer findings; §IX.1
+  lcov DA/BRDA on the 043-ADDED lines recorded in the verify doc. The plaintext-reconnect §IX.1 gap was
+  closed by a new witness (`session_plaintext_reconnect`, green debug+asan), bringing debug to 475; residual
+  error/cancellation-injection arms WAIVED. SC-006 zero-regression CONFIRMED (466 ⊂ 475, +9 additive).
+  Record: `.specify/decisions/043-plaintext-tcp-transport-verify.md`.**
 
 ---
 
@@ -368,7 +369,7 @@ All FRs and SCs must map to ≥1 implementing task + ≥1 witness, OR be explici
 | SC-003 | All profile↔factory mismatch directions rejected at `open()`; matched + auto-derive open | T021, T022 | `test_session_plaintext_factory_mismatch.cpp` | GREEN |
 | SC-004 | Cert-identity auth skipped; `live_peer_id_==nullopt`; `check_comp_id` still active | T008 | `test_session_plaintext_authz.cpp` | GREEN |
 | SC-005 | `insecure_plain_tcp` selection fires deprecation-class diagnostic (automated negative-compile) | T017 | `security_profile_insecure_plain_tcp_deprecated_negative.cpp` (CMake `WILL_FAIL` `-Werror=deprecated-declarations` harness) | GREEN |
-| SC-006 | Zero TLS-path regression vs pre-feature baseline | T029 (orchestrator) | Full suite run (T029, handled by orchestrator `/speckit-verify`); `ctest` stays ≥466 + all prior tests green | PENDING T029 |
+| SC-006 | Zero TLS-path regression vs pre-feature baseline | T029 (orchestrator) | Full suite GREEN across the matrix (debug 474→475; asan/ubsan/tsan/coverage 473/473 each — zero findings). 466 baseline ⊂ green suite; +9 additive (incl. the reconnect witness). `/speckit-verify` 2026-06-18. | GREEN |
 | SC-007 | `benchmark-plan.md` `TLS off` rows become satisfiable | — | Enablement: the plaintext transport exists; bench driver is out of scope (FR-012). SC-007 is satisfied transitively by SC-001 (a plaintext session can be stood up over a real socket) | GREEN (enablement, no direct witness needed) |
 | SC-008 | TCP knob effective + `close()` no `tls_close_timeout` | T006 | `test_asio_plain_transport_config.cpp` | GREEN |
 
@@ -379,6 +380,6 @@ All FRs and SCs must map to ≥1 implementing task + ≥1 witness, OR be explici
 ### Summary
 
 - **13/13 FRs covered** (FR-012 and FR-013 are MUST-NOTs verified by absence; FR-009 closed via T030 post-Gate-A; all others have positive witnesses).
-- **7/8 SCs GREEN** (SC-006 pending T029 orchestrator run; all others green with direct witnesses).
+- **8/8 SCs GREEN** (SC-006 closed by the `/speckit-verify` matrix, 2026-06-18; all others green with direct witnesses).
 - **0 unexplained gaps** — every FR/SC is either positively witnessed or explicitly dispositioned.
-- **SC-006 disposition**: pending T029 (sanitizer/coverage matrix), handled by the orchestrator at `/speckit-verify`. Pre-feature debug baseline was 466 tests; post-implementation debug count is 474 (8 new test binaries). The 8 additions + 0 regressions confirm additive-only behavior. T029 provides the formal matrix evidence.
+- **SC-006 disposition**: CLOSED. `/speckit-verify` full matrix (2026-06-18): debug 474/474 (incl. #132 codegen-build-graph-check), asan 473/473, ubsan 473/473, tsan 473/473, coverage 473/473 — all zero sanitizer findings. A 9th 043 witness (`session_plaintext_reconnect`, closing the §IX.1 reconnect gap) brings debug to 475 (green debug+asan). Pre-feature debug baseline 466 ⊂ current 475 (9 new test binaries, 0 regressions) confirms additive-only behaviour. Record: `.specify/decisions/043-plaintext-tcp-transport-verify.md`.
