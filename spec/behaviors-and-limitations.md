@@ -1435,20 +1435,29 @@ unit-test golden layer (W7) and (US3 T026, 2026-06-12) at the interop-golden lay
 session-logger, tap-consumer, and transport-transcript wiring of the redactor is deferred — those
 surfaces are no-hook stubs in 033 (see L-017-* for the logger/tap framework limitations).
 
-**L-033-5 — Acceptor establishment requires the negotiated application version to have a registered
-application dictionary in the engine `version_registry` (operator footgun, live-found US3).** Per
-FR-004a/C5, an inbound FIXT Logon whose `DefaultApplVerID(1137)` resolves to a version with **no**
-application dictionary in `EngineConfig::dictionaries` is refused with `Reject(35=3, 371=1137, 373=5)` and
-does not reach Active — this is spec-correct (no silent mis-versioned establishment). The consequence,
-surfaced only by the live US3 acceptor cells: an acceptor configured with `default_appl_ver_id=v50sp2`
-but whose engine has **no** FIX50SP2 dictionary registered **silently rejects every FIXT Logon** (the
-serviceability gate consults the registry, NOT the session's own configured default). An operator must
-register, in the engine config, the application dictionary for every application version the acceptor is
-configured to speak. **Open question for Gate-B adjudication:** should establishment treat the acceptor's
-own `cfg.default_appl_ver_id` as serviceable-by-construction (self-register / fall back to the configured
-default) so the registry need only carry *additional* serviceable versions? Deferred to Gate B — no
-production change made in 033 (the interop fixture was corrected to register v44+v50sp2 dictionaries,
-mirroring a real FIXT-acceptor deployment).
+**L-033-5 — RESOLVED by 042 (2026-06-17).** A FIXT session (acceptor or initiator) whose configured
+`default_appl_ver_id` cannot be served by the engine `version_registry` now fails closed at
+`Session::open()`-time with `error::invalid_session_config` — before any observable state mutation or
+wire emission. The operator footgun (L-033-5's "silently rejects every inbound FIXT Logon") is
+eliminated: misconfiguration is reported immediately at config-load, like QuickFIX's
+`DataDictionary`-presence check.
+
+**Implementation**: a third disjunct on the FQ-1 FIXT guard at `src/session/session.cpp` (guard block;
+`!app_version_registry_->get(*cfg_.default_appl_ver_id).has_value()`). Reuses the same serviceability
+predicate as the inbound runtime check (see below). Role-agnostic — applies to both acceptor and initiator
+(042 FR-008 / `specs/042-fixt-version-serviceability-guard/spec.md`).
+
+**Inbound peer-`1137` check unchanged**: the existing runtime check on the **peer-advertised**
+`DefaultApplVerID(1137)` (033 FR-004a — `Reject(35=3, 371=1137, 373=5)`) remains live and unmodified.
+A correctly-configured FIXT session whose peer advertises a version this side's registry cannot serve
+still refuses at runtime with the same `373=5` reject — witnessed by
+`FixtLogonEstablishment.W4_042_InboundNonDeadness_PeerUnserviceableSurvives`.
+
+**Witnesses**: `W1_042_AcceptorOpenFail_UnserviceableDefault` (acceptor RED-first, mutation-tested),
+`W2_042_InitiatorOpenFail_UnserviceableDefault` (initiator, role-agnostic, mutation-tested),
+`W3_042_Serviceable_BothRolesOpenSucceed` (non-regression, both roles),
+`W4_042_InboundNonDeadness_PeerUnserviceableSurvives` (inbound non-deadness / SC-003).
+All in `tests/session/test_fixt_logon_establishment.cpp`.
 
 ## Fable assessment follow-ups (out-of-band, 2026-06-13)
 

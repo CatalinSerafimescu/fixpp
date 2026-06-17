@@ -875,8 +875,8 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
 
 // ── T013 / W3 — Unserviceable-1137 witness ───────────────────────────────────
 //
-// Acceptor receives a FIXT Logon with 1137=9 (v50sp2) but the registry does NOT
-// contain v50sp2 → unserviceable. Per C5/FR-004a:
+// Acceptor receives a FIXT Logon with 1137=8 (v50sp1) but the registry {v44, v50sp2} does NOT
+// contain v50sp1 → unserviceable. Per C5/FR-004a:
 //   - Must emit Reject with 373=5 (ValueIsIncorrect) AND 371=1137
 //   - Must NOT reach Active
 //   - 373=5 DISTINGUISHES this from W2's 373=1 (RequiredTagMissing)
@@ -885,12 +885,23 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
 // [feedback_witness_asserts_named_postcondition_not_proxy: assert 373 value directly]
 
 TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActive) {
-    // Build registry with ONLY v44 dict — so v50sp2 (1137=9) is unserviceable.
+    // 042 rewrite (research.md D-2/D-2a): registry must carry own default so
+    // open() succeeds; peer advertises the absent version to drive the 373=5 path.
+    //
+    // Three-distinct-version shape:
+    //   registry: {v44, v50sp2}  — own default (v44) IS serviceable
+    //   own default: v44          — open() succeeds (serviceable)
+    //   peer 1137: "8" (v50sp1)  — ABSENT from registry → 373=5 ValueIsIncorrect
+    //
+    // The 033 FR-004a inbound-reject assertions (373=5, 371=1137, NOT Active,
+    // NOT 373=1) are PRESERVED — only the registry/default/peer triple changes.
+    // [042 research.md D-2/D-2a; contract W4; FR-005; INV-042-2]
     auto v44_dict = make_dict(kMinimalFix44Xml);
-    FixtSetup s{{v44_dict}};  // registry: v44 only; v50sp2 absent
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v44_dict, v50sp2_dict}};  // registry: {v44, v50sp2}; v50sp1 absent
 
-    // Acceptor configured with v50sp2 but registry lacks it.
-    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    // Acceptor configured with v44 — serviceable → open() succeeds.
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v44);
     std::vector<std::byte> acpt_frame_out;
     acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
         acpt_frame_out.assign(f.begin(), f.end());
@@ -899,8 +910,9 @@ TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActi
 
     run_sync(s.ioc, [&] { return acceptor.open(); });
 
-    // Peer (TW) sends FIXT Logon with 1137=9 (v50sp2) — present but unserviceable.
-    auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
+    // Peer (TW) sends FIXT Logon with 1137=8 (v50sp1) — present but absent
+    // from registry {v44, v50sp2} → unserviceable → 373=5 path fires.
+    auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
 
     auto r = run_sync(s.ioc, [&] {
         return acceptor.on_inbound_frame(
@@ -1298,18 +1310,30 @@ TEST(FixtLogonEstablishment,
 
 // (b) Non-conformant 1137 → Reject(371=1137, 373=5 ValueIsIncorrect) + toAdmin
 // observed + Disconnected. 373=5 DISCRIMINATES from (a)'s 373=1.
-// Registry has v44 only → v50sp2 (1137=9) is unserviceable.
+// Registry has {v44, v50sp2}; peer advertises v50sp1 (1137=8) → absent → unserviceable.
 TEST(FixtLogonEstablishment,
      W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected) {
-    // Registry with v44 only — v50sp2 (1137=9) is unserviceable.
+    // 042 rewrite (research.md D-2/D-2a): three-distinct-version registry shape
+    // so own default is serviceable (open() succeeds) while peer's advertised
+    // version is absent (drives the 373=5 ValueIsIncorrect path).
+    //
+    //   registry: {v44, v50sp2}  — own default (v44) IS serviceable
+    //   own default: v44          — open() succeeds
+    //   peer 1137: "8" (v50sp1)  — ABSENT from registry → 373=5 + toAdmin observed
+    //
+    // All 033 FR-004a assertions (373=5, 371=1137, toAdmin>0, NOT Active, NOT 373=1)
+    // are PRESERVED — only the registry/default/peer triple changes.
+    // [042 research.md D-2/D-2a; contract W4; FR-005]
     auto v44_dict = make_dict(kMinimalFix44Xml);
-    FixtSetup s{{v44_dict}};
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v44_dict, v50sp2_dict}};  // registry: {v44, v50sp2}; v50sp1 absent
 
     // Register counting Application.
     auto app = std::make_shared<ToAdminCountingApp>();
     s.engine.application = app;
 
-    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    // Acceptor configured with v44 — serviceable → open() succeeds.
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v44);
     std::vector<std::byte> acpt_frame_out;
     acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
         acpt_frame_out.assign(f.begin(), f.end());
@@ -1318,8 +1342,9 @@ TEST(FixtLogonEstablishment,
 
     run_sync(s.ioc, [&] { return acceptor.open(); });
 
-    // Peer sends FIXT Logon with 1137=9 (v50sp2) — present but unserviceable.
-    auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
+    // Peer sends FIXT Logon with 1137=8 (v50sp1) — present but absent from
+    // registry {v44, v50sp2} → unserviceable → 373=5 path + toAdmin fires.
+    auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
     auto r = run_sync(s.ioc, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_unserviceable.data(), logon_unserviceable.size()});
@@ -1453,6 +1478,169 @@ TEST(FixtLogonEstablishment,
               std::string::npos)
         << "Reject must NOT carry 371=1137 — the 52 guard pre-empts the 1137 gate; "
         << "if 371=1137 is present, the guard-ordering is broken; got: " << wire;
+}
+
+// ── 042 US1 — FIXT serviceability guard at open() ────────────────────────────
+//
+// W1 (T002): FIXT acceptor, registry lacks dict for own default_appl_ver_id →
+//   open() returns error::invalid_session_config (RED before T006, GREEN after).
+//   [042 contract W1; FR-001/FR-002/FR-008; research D-1; data-model truth row #3]
+//
+// W2 (T003): same but initiator role → identical fail-closed result (role-agnostic).
+//   [042 contract W2; FR-008; feedback_symmetric_api_claim_unreachable_arm]
+//
+// W3 (T004): registry serves own default → open() succeeds (serviceable path
+//   non-regression, both roles). [042 contract W3; FR-003/SC-002]
+//
+// W4 (T005): three-distinct-version registry witness (inbound non-deadness).
+//   Registry {v44, v50sp2}, own default v44 (serviceable → open() succeeds),
+//   peer advertises v50sp1 (1137="8", absent) → runtime Reject(373=5) still fires.
+//   Proves the new open() guard does NOT make the 033 FR-004a inbound path dead.
+//   [042 contract W4; FR-005; SC-003; research D-2a; INV-042-2]
+
+// W1 — acceptor open-fail when registry cannot serve the configured default.
+// RED-first: before T006 the guard is absent → open() succeeds → assertion fails.
+TEST(FixtLogonEstablishment, W1_042_AcceptorOpenFail_UnserviceableDefault) {
+    // Registry carries only v44; session configured with v50sp2 → unserviceable.
+    auto v44_dict = make_dict(kMinimalFix44Xml);
+    FixtSetup s{{v44_dict}};
+
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+
+    auto result = run_sync(s.ioc, [&] { return acceptor.open(); });
+
+    // Must fail closed with the configuration error — NOT succeed.
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when the registry cannot serve the configured "
+           "default_appl_ver_id; before T006 this GREEN is actually a RED "
+           "(open() succeeds, which is the pre-042 bug). [W1/FR-001/FR-002]";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Expected error::invalid_session_config from unserviceable FIXT acceptor; "
+        << "got error code=" << static_cast<int>(result.error());
+}
+
+// W2 — initiator open-fail: role-agnostic (independent witness, NOT inferred from W1).
+// The initiator symmetric-API arm must be directly witnessed per
+// [[feedback_symmetric_api_claim_unreachable_arm]].
+TEST(FixtLogonEstablishment, W2_042_InitiatorOpenFail_UnserviceableDefault) {
+    // Same registry/default pairing as W1 but initiator role.
+    auto v44_dict = make_dict(kMinimalFix44Xml);
+    FixtSetup s{{v44_dict}};
+
+    auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
+    fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
+
+    auto result = run_sync(s.ioc, [&] { return initiator.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when the registry cannot serve the configured "
+           "default_appl_ver_id (initiator role) — FR-008 role-agnostic guard. [W2]";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "Expected error::invalid_session_config from unserviceable FIXT initiator; "
+        << "got error code=" << static_cast<int>(result.error());
+}
+
+// W3 — serviceable non-regression: registry serves the configured default →
+// open() succeeds for BOTH acceptor and initiator (FR-003/NG-1).
+TEST(FixtLogonEstablishment, W3_042_Serviceable_BothRolesOpenSucceed) {
+    // Registry carries v50sp2; session configured with v50sp2 → serviceable.
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v50sp2_dict}};
+
+    // Acceptor.
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    auto acpt_result = run_sync(s.ioc, [&] { return acceptor.open(); });
+    EXPECT_TRUE(acpt_result.has_value())
+        << "open() must succeed when registry serves the configured default (acceptor). "
+        << "[W3/FR-003/NG-1]";
+
+    // Initiator — separate FixtSetup to keep io_context clean.
+    FixtSetup s2{{make_dict(kMinimalFix50sp2Xml)}};
+    auto init_cfg = s2.make_initiator_cfg(application_version::v50sp2);
+    fixpp::session::Session initiator(s2.engine, init_cfg, &s2.registry);
+    auto init_result = run_sync(s2.ioc, [&] { return initiator.open(); });
+    EXPECT_TRUE(init_result.has_value())
+        << "open() must succeed when registry serves the configured default (initiator). "
+        << "[W3/FR-003/NG-1/FR-008]";
+}
+
+// W4 — inbound non-deadness witness (SC-003 / INV-042-2).
+// Three-distinct-version registry: {v44, v50sp2}; own default = v44 (serviceable
+// → open() succeeds); peer Logon advertises v50sp1 (1137="8", absent from registry)
+// → runtime Reject(35=3, 371=1137, 373=5) must still fire.
+// This proves the new open() guard does NOT make the 033 FR-004a inbound path dead.
+TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives) {
+    // Registry with v44 AND v50sp2 (two versions). Own default = v44 (serviceable).
+    // v50sp1 is intentionally absent — the peer will advertise it.
+    auto v44_dict = make_dict(kMinimalFix44Xml);
+    auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
+    FixtSetup s{{v44_dict, v50sp2_dict}};
+
+    // Acceptor: own default = v44 (serviceable → open() succeeds).
+    auto acpt_cfg = s.make_acceptor_cfg(application_version::v44);
+    std::vector<std::byte> acpt_frame_out;
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        acpt_frame_out.assign(f.begin(), f.end());
+    };
+    fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+
+    // open() must succeed (serviceable own default).
+    auto open_result = run_sync(s.ioc, [&] { return acceptor.open(); });
+    ASSERT_TRUE(open_result.has_value())
+        << "open() must succeed: own default v44 IS in registry {v44, v50sp2}. "
+        << "If this fails, the new guard over-rejects — [W4/SC-003/NG-1]";
+
+    // Peer advertises v50sp1 (1137="8") — ABSENT from {v44, v50sp2}.
+    // This must trigger the 033 FR-004a runtime Reject(373=5).
+    auto logon_v50sp1 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
+
+    auto inbound_result = run_sync(s.ioc, [&] {
+        return acceptor.on_inbound_frame(
+            std::span<const std::byte>{logon_v50sp1.data(), logon_v50sp1.size()});
+    });
+    (void)inbound_result;
+
+    // Mutation/non-deadness assertions: the inbound path must still fire.
+    // (a) Must NOT reach Active (inbound unserviceable version → reject).
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "Acceptor must NOT reach Active when peer 1137 is unserviceable. "
+        << "[W4/SC-003/INV-042-2]: if Active, the 033 FR-004a inbound path is dead.";
+
+    // (b) Reject(35=3) must be emitted.
+    ASSERT_FALSE(acpt_frame_out.empty())
+        << "Acceptor must emit a Reject frame for peer's unserviceable 1137. "
+        << "[W4 non-deadness: if no frame, the inbound path is dead or bypassed]";
+
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
+                     acpt_frame_out.size());
+    EXPECT_NE(wire.find("\x01"
+                        "35=3\x01"),
+              std::string::npos)
+        << "Emitted frame must be Reject(35=3) for peer's unserviceable 1137; "
+        << "got: " << wire;
+
+    // (c) 373=5 (ValueIsIncorrect) — proves the unserviceable peer-version path
+    // specifically (not the absent-1137 path which yields 373=1).
+    EXPECT_NE(wire.find("\x01"
+                        "373=5\x01"),
+              std::string::npos)
+        << "Reject must carry 373=5 (ValueIsIncorrect) for peer's v50sp1 (unserviceable); "
+        << "373=5 is the non-deadness discriminator — 042's open() guard must NOT have "
+        << "subsumed the runtime 033 FR-004a check; got: " << wire;
+
+    // (d) 371=1137 (RefTagID = DefaultApplVerID).
+    EXPECT_NE(wire.find("\x01"
+                        "371=1137\x01"),
+              std::string::npos)
+        << "Reject must carry 371=1137 (RefTagID=DefaultApplVerID); got: " << wire;
+
+    // (e) NOT 373=1 (distinguishes unserviceable from missing-1137 path).
+    EXPECT_EQ(wire.find("\x01"
+                        "373=1\x01"),
+              std::string::npos)
+        << "Unserviceable peer path must emit 373=5, NOT 373=1; got: " << wire;
 }
 
 }  // namespace fixpp_fixt_inbound
