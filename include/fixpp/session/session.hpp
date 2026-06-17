@@ -508,6 +508,16 @@ public:
     // A plain bool accessor; adds no include edge → [const §XV.9]-safe.
     // NOT for production use. [041 T016; SC-005; FR-002]
     [[nodiscard]] bool has_validator_for_test() const noexcept { return validator_ != nullptr; }
+
+    // TEST-ONLY accessor: returns true iff live_peer_id_ has a value.
+    // Used by 043 T008 to directly assert that install_reconnected_transport and
+    // attach_accepted_transport leave live_peer_id_ == nullopt on insecure_plain_tcp
+    // (D-10 MUST — fail-closed-by-construction). A plain bool avoids any new include
+    // edge ([const §XV.9]-safe; peer_identity is already transitively pulled in via
+    // the private member at line ~958). NOT for production use. [043 T008; D-10]
+    [[nodiscard]] bool live_peer_id_has_value_for_test() const noexcept {
+        return live_peer_id_.has_value();
+    }
 #endif
 
     // 015 T011 — Engine-internal acceptor attach primitive.

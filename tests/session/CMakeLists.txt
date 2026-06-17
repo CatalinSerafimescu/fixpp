@@ -2023,6 +2023,68 @@ add_test(NAME engine_clock_gate COMMAND engine_clock_gate_test)
 set_tests_properties(engine_clock_gate PROPERTIES
   LABELS "041;t017;t018;us3;clock-gate;session")
 
+# ── 043-plaintext-tcp-transport T007 — SC-001 end-to-end round-trip ──────────
+# T007: plaintext acceptor (insecure_plain_tcp, driven through run_accept_loop)
+# + standalone plain-TCP initiator complete a FIX Logon over a loopback socket.
+# Exercises all three E-7 acceptor sites (profile-map arm, plaintext accept-factory,
+# post-accept handshake skip). No FIXPP_TLS_FIXTURE_DIR needed — plaintext sessions
+# require no cert files.
+# CTest filter: ctest -R 'session_plaintext_roundtrip'
+add_executable(session_plaintext_roundtrip_test
+  test_session_plaintext_roundtrip.cpp
+)
+target_link_libraries(session_plaintext_roundtrip_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_roundtrip_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME session_plaintext_roundtrip COMMAND session_plaintext_roundtrip_test)
+set_tests_properties(session_plaintext_roundtrip PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;t007;us1;plaintext;roundtrip;live_plain")
+
+# ── 043-plaintext-tcp-transport T008 — SC-004 authorization-inert witness ────
+# T008: on insecure_plain_tcp — authorize() not called, live_peer_id_==nullopt,
+# check_comp_id still rejects mismatched CompIDs, FR-009 EncryptMethod!=0 rejected.
+# Uses FIXPP_TEST_HOOKS for session-internal test accessors (authorize_call_count,
+# live_peer_id_has_value, cfg_for_test).
+# CTest filter: ctest -R 'session_plaintext_authz'
+add_executable(session_plaintext_authz_test
+  test_session_plaintext_authz.cpp
+)
+target_link_libraries(session_plaintext_authz_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_authz_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_plaintext_authz_test PRIVATE
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME session_plaintext_authz COMMAND session_plaintext_authz_test)
+set_tests_properties(session_plaintext_authz PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;t008;us1;plaintext;authz")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
