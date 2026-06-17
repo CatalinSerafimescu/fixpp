@@ -250,8 +250,12 @@ profile with NO session override but a *plaintext engine-default factory* — an
   S-021 documented ("inbound 98≠0 not handled") and TC-017 backlogged. The original "remain rejected /
   unchanged" phrasing was a false-green against that baseline. 043 **closes the gap**: `interpret_logon`
   now rejects an inbound Logon carrying `98 ≠ "0"` (present-but-malformed fails closed) with
-  `session_invalid_logon`, unconditionally across all profiles. Witnessed by
-  `tests/session/test_interpret_logon_encrypt_method.cpp`.
+  `session_invalid_logon`, unconditionally across all profiles. **Both roles** route through
+  `interpret_logon` — the acceptor's receive-Logon path (`session.cpp:1984`) and the initiator's
+  receive-Logon-ack path (`session.cpp:3659`) — and a refused result drives the session to `Disconnected`
+  (the same refusal disposition as the existing CompID/BeginString rejects, already exercised by the
+  bad-Logon matrix tests). Witnessed at the shared scanner by
+  `tests/session/test_interpret_logon_encrypt_method.cpp` (mutation-proven discriminating).
 - **FR-010**: The plaintext transport MUST honour the existing `Transport::Config` TCP knobs (tcp_nodelay
   default ON, keepalive, send/recv buffers, SO_LINGER, SO_REUSEADDR on the acceptor) identically to the
   TLS transport; the TLS-only knobs (`tls_handshake_timeout`, `tls_close_timeout`) are inert on this path.

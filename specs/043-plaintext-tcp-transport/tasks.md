@@ -353,7 +353,7 @@ All FRs and SCs must map to ≥1 implementing task + ≥1 witness, OR be explici
 | FR-007 | No-implicit-default — `unset` still rejected; `insecure_plain_tcp` never selected silently | T002, T004, T020 | T018 (`unset` rejected, no-implicit-default) | GREEN |
 | FR-008 | Fail-closed consistency: effective factory kind must match profile at `open()` | T023 | T021 (all four mismatch + match cells), T022 (engine-default mismatch fails at `open()`) | GREEN |
 | FR-008a | `compid_authorization_policy` skipped for plaintext; `check_comp_id` still active | T013 | T008 (auth-inert + `live_peer_id_==nullopt` + `check_comp_id` rejects mismatch) | GREEN |
-| FR-009 | Inbound `EncryptMethod(98)≠0` rejected unconditionally / all profiles | T030 | `tests/session/test_interpret_logon_encrypt_method.cpp` (4 cells, mutation-tested: absent/zero-valid/nonzero-reject/malformed-closes) | GREEN |
+| FR-009 | Inbound `EncryptMethod(98)≠0` rejected unconditionally / all profiles / **both roles** | T030 | `tests/session/test_interpret_logon_encrypt_method.cpp` (4 cells, mutation-tested). Both roles route through `interpret_logon` (acceptor `session.cpp:1984`, initiator-ack `:3659`); refused → `Disconnected` (existing refusal disposition, exercised by bad-Logon matrix tests). | GREEN |
 | FR-010 | TCP knobs honoured on plaintext path | T009 | T006 (non-default TCP knob observable + no `tls_close_timeout`) | GREEN |
 | FR-011 | `close()` plain TCP — no TLS bidi shutdown / no `tls_close_timeout` | T009 | T006 (close returns without timeout delay, no close-notify) | GREEN |
 | FR-012 | Scope exclusion: NO bench driver shipped | — | Absence check: no new bench file; `benchmark-plan.md` rows remain satisfiable but unrun (T001 baseline + T029 regression) | GREEN (MUST-NOT, verified by absence) |
@@ -367,7 +367,7 @@ All FRs and SCs must map to ≥1 implementing task + ≥1 witness, OR be explici
 | SC-002 | `unset` still rejected; no implicit default | T018 | `test_session_open_rejects_unset_security_profile.cpp` | GREEN |
 | SC-003 | All profile↔factory mismatch directions rejected at `open()`; matched + auto-derive open | T021, T022 | `test_session_plaintext_factory_mismatch.cpp` | GREEN |
 | SC-004 | Cert-identity auth skipped; `live_peer_id_==nullopt`; `check_comp_id` still active | T008 | `test_session_plaintext_authz.cpp` | GREEN |
-| SC-005 | `insecure_plain_tcp` selection fires deprecation-class diagnostic (automated negative-compile) | T017 | `test_insecure_plain_tcp_deprecated.cpp` (CMake `try_compile` harness) | GREEN |
+| SC-005 | `insecure_plain_tcp` selection fires deprecation-class diagnostic (automated negative-compile) | T017 | `security_profile_insecure_plain_tcp_deprecated_negative.cpp` (CMake `WILL_FAIL` `-Werror=deprecated-declarations` harness) | GREEN |
 | SC-006 | Zero TLS-path regression vs pre-feature baseline | T029 (orchestrator) | Full suite run (T029, handled by orchestrator `/speckit-verify`); `ctest` stays ≥466 + all prior tests green | PENDING T029 |
 | SC-007 | `benchmark-plan.md` `TLS off` rows become satisfiable | — | Enablement: the plaintext transport exists; bench driver is out of scope (FR-012). SC-007 is satisfied transitively by SC-001 (a plaintext session can be stood up over a real socket) | GREEN (enablement, no direct witness needed) |
 | SC-008 | TCP knob effective + `close()` no `tls_close_timeout` | T006 | `test_asio_plain_transport_config.cpp` | GREEN |
