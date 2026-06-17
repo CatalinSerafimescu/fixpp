@@ -12,10 +12,14 @@
 // (NOT a new fsm_state value per D-1). Do NOT add a 7th fsm_state variant;
 // doing so would break every 010 F-04 consumer.
 //
-// Factory ownership: factory_ is a NON-OWNING raw pointer to the factory
-// owned by SessionConfig::transport_factory_override (shared_ptr; 010 FR-001a
-// precedent; 013 T011). The engine guarantees the factory outlives the FSM
-// per [arch §5.6] frozen-at-open rule.
+// Factory ownership: factory_ is a NON-OWNING raw pointer to the factory.
+// PRE-043: the factory was always owned by
+// SessionConfig::transport_factory_override (shared_ptr; 010 FR-001a precedent;
+// 013 T011). RECONCILED 2026-06-17 (043-plaintext-tcp-transport): factory_ may
+// now point to Session::effective_transport_factory_ (a new shared_ptr member
+// auto-derived from the SecurityProfile at open() for sessions with no explicit
+// override). The engine guarantees the factory outlives the FSM per [arch §5.6]
+// frozen-at-open rule. [043 research.md D-13]
 //
 // cert_source snapshot discipline (014 T009): the FSM reads
 // factory_->cert_source_snapshot() at each drive_reconnect_attempt attempt entry
@@ -109,11 +113,14 @@ using core::expected_t;
 // [data-model §E-1]
 class ReconnectFsm {
 public:
-    // Constructed by Session at SessionConfig-build time. Holds a non-owning
-    // raw pointer to TransportFactory; the factory itself is owned by
-    // SessionConfig::transport_factory_override per 2h Appendix D §D.1+§D.2
-    // sign-off. The engine guarantees the factory outlives the FSM per
-    // [arch §5.6] frozen-at-open rule. [data-model §E-1]
+    // Constructed by Session at open() time. Holds a non-owning raw pointer to
+    // TransportFactory; the factory is owned by Session::effective_transport_factory_
+    // (resolved at open() from: transport_factory_override if set, otherwise the
+    // auto-derived factory for the SecurityProfile kind — 043 T012 wiring; fallback
+    // to the engine default_transport_factory). PRE-043 the factory was always from
+    // transport_factory_override; this was reconciled 2026-06-17. The engine
+    // guarantees the factory outlives the FSM per [arch §5.6] frozen-at-open rule.
+    // [data-model §E-1; 043 research.md D-13]
     ReconnectFsm(fixpp::transport::TransportFactory* factory,
                  fixpp::transport::ReconnectPolicy policy, std::chrono::seconds heartbeat_interval,
                  std::chrono::milliseconds logout_disconnect_timeout) noexcept;
