@@ -6,7 +6,9 @@
 //
 // Verifies SC-008 (FR-010 / FR-011):
 //   (a) Non-default Transport::Config TCP knobs take effect on the established
-//       plain socket (tcp_nodelay observable via get_option after connect).
+//       plain socket (tcp_keepalive observable via get_option after connect;
+//       tcp_keepalive is non-default in fixpp AND kernel-default is OFF, so
+//       reading back true discriminates that apply_socket_options_() ran).
 //   (b) close() returns promptly: NO tls_close_timeout delay, NO TLS
 //       close-notify bytes emitted. Measured by timing: < 500 ms with explicit
 //       tls_close_timeout=2s in cfg (ensures the TLS path would block but plain
@@ -39,11 +41,27 @@
 
 #include "transport/asio_plain_transport.hpp"
 
+namespace fixpp::transport {
+
+// Test-access class — mirrors asio_tls_transport_test_access pattern.
+// Declared as friend in asio_plain_transport.hpp; grants read-only access
+// to the private socket_ for get_option verification (T006 SC-008).
+class asio_plain_transport_test_access {
+public:
+    static const asio::ip::tcp::socket& socket_of(
+        const asio_plain_transport& t) noexcept {
+        return t.socket_;
+    }
+};
+
+}  // namespace fixpp::transport
+
 namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::transport::asio_plain_transport;
+using fixpp::transport::asio_plain_transport_test_access;
 using fixpp::transport::Transport;
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -57,18 +75,21 @@ asio::ip::tcp::endpoint make_loopback_acceptor(asio::io_context& ioc,
     return acc.local_endpoint();
 }
 
-// ── Test (a): tcp_nodelay observable on the established socket ─────────────────
+// ── Test (a): TCP knobs observable on the established socket ──────────────────
 //
-// When Transport::Config::tcp_nodelay = true, the socket has TCP_NODELAY set.
-// Asserted via get_option after async_connect returns.
-TEST(AsioPlainTransportConfig, TcpNodelayApplied) {
+// Sets tcp_keepalive=true (non-default — FR-029 default is false; kernel default
+// is also off), asserts get_option(SO_KEEPALIVE) reads back true after connect.
+// This uses asio_plain_transport_test_access to reach the private socket_ directly.
+// Discriminates BOTH "apply_socket_options_ ran" AND "Config was honored" because
+// keepalive is OFF by default in both fixpp and the kernel.
+TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
     asio::io_context ioc;
     asio::ip::tcp::acceptor acc{ioc};
     auto ep = make_loopback_acceptor(ioc, acc);
 
     bool timed_out{false};
     bool done{false};
-    bool nodelay_set{false};
+    bool keepalive_observed{false};
 
     asio::steady_timer watchdog{ioc};
     watchdog.expires_after(std::chrono::seconds{10});
@@ -80,7 +101,7 @@ TEST(AsioPlainTransportConfig, TcpNodelayApplied) {
         }
     });
 
-    // Server: accept + close immediately.
+    // Server: accept and close immediately.
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
@@ -90,12 +111,12 @@ TEST(AsioPlainTransportConfig, TcpNodelayApplied) {
         },
         asio::detached);
 
-    // Client: connect with tcp_nodelay=true, then verify via get_option.
+    // Client: connect with tcp_keepalive=true, then read back the option.
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             Transport::Config cfg{};
-            cfg.tcp_nodelay = true;  // non-default (apply_socket_options_ sets TCP_NODELAY)
+            cfg.tcp_keepalive = true;  // non-default in fixpp + kernel-default is OFF
             asio_plain_transport client{co_await asio::this_coro::executor, cfg};
 
             fixpp::transport::Endpoint endpoint;
@@ -105,19 +126,16 @@ TEST(AsioPlainTransportConfig, TcpNodelayApplied) {
             auto conn = co_await client.async_connect(endpoint);
             if (!conn) co_return;
 
-            // Access the underlying socket via test-friend or indirectly by observing
-            // the connected transport's socket options.
-            // We can't get_option directly (socket_ is private), so we verify by
-            // a loopback round-trip timing — but a more direct approach is to use
-            // the asio raw socket. Here we use the accepted-socket-side approach:
-            // send data from the server and time the first-byte delivery.
-            //
-            // For deterministic testing without timing: test that close() immediately
-            // follows (no TLS handshake blocking). The nodelay observable test is
-            // validated via compile-time evidence that apply_socket_options_ applies
-            // tcp_nodelay (mirrored from asio_tls_transport). Here we verify the
-            // socket state after connect completes without error.
-            nodelay_set = conn.has_value();  // connect succeeded = socket options applied
+            // Verify via test-access friend — discriminates that apply_socket_options_()
+            // actually ran AND honored the config knob.
+            const auto& sock = asio_plain_transport_test_access::socket_of(client);
+            asio::socket_base::keep_alive keepalive_opt;
+            asio::error_code get_ec;
+            sock.get_option(keepalive_opt, get_ec);
+            if (!get_ec) {
+                keepalive_observed = keepalive_opt.value();
+            }
+
             done = true;
             watchdog.cancel();
         },
@@ -126,7 +144,9 @@ TEST(AsioPlainTransportConfig, TcpNodelayApplied) {
     ioc.run_for(std::chrono::seconds{12});
 
     ASSERT_FALSE(timed_out) << "test timed out";
-    EXPECT_TRUE(nodelay_set) << "tcp_nodelay: transport must connect successfully with nodelay cfg";
+    EXPECT_TRUE(keepalive_observed)
+        << "tcp_keepalive=true must be observable via SO_KEEPALIVE after connect; "
+           "apply_socket_options_() must have run and honored the config";
 }
 
 // ── Test (b): close() is prompt — no tls_close_timeout delay ──────────────────
@@ -223,13 +243,16 @@ TEST(AsioPlainTransportConfig, CloseIsPromptNoTlsCloseNotify) {
         << "close() must be prompt (< 500ms); plain transport must NOT block on "
            "tls_close_timeout. Got: " << close_ms << "ms (cfg had 2s tls_close_timeout)";
 
-    // SC-001 / FR-011: no TLS close-notify (0x15) or TLS handshake (0x16) bytes.
-    if (first_byte_at_peer) {
-        EXPECT_NE(*first_byte_at_peer, std::byte{0x15})
-            << "close() must NOT emit TLS close-notify alert (0x15)";
-        EXPECT_NE(*first_byte_at_peer, std::byte{0x16})
-            << "close() must NOT emit TLS handshake record (0x16)";
-    }
+    // SC-001 / FR-011: plain transport emits ZERO bytes before close.
+    // The peer must see EOF with NO bytes received (no TLS close-notify 0x15,
+    // no TLS handshake record 0x16, and no bytes at all). This is a MANDATORY
+    // assertion — not gated on first_byte_at_peer — because the contract is
+    // "no bytes emitted on close", so the correct outcome is no first byte.
+    EXPECT_FALSE(first_byte_at_peer.has_value())
+        << "plain transport close() must emit NO bytes (0 bytes before EOF); "
+           "got first_byte=0x" << (first_byte_at_peer
+               ? static_cast<unsigned>(*first_byte_at_peer) : 0u)
+        << " — TLS close-notify=0x15, TLS handshake=0x16 are both forbidden";
 
     // Peer saw a clean EOF (socket was closed, not just cancelled).
     EXPECT_TRUE(peer_got_eof) << "peer must see clean EOF when plain transport closes";

@@ -233,7 +233,7 @@ asio_plain_transport::async_read_some(std::span<std::byte> buf) {
         if (ec == asio::error::operation_aborted) {
             co_return std::unexpected{E::transport_read_cancelled};
         }
-        if (ec == asio::error::eof || ec == asio::error::connection_reset) {
+        if (ec == asio::error::eof) {
             co_return std::unexpected{E::transport_read_eof};
         }
         co_return std::unexpected{E::transport_read_error};

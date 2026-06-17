@@ -136,6 +136,10 @@ private:
 
     // ── Acceptor event sink (null on initiator side) ───────────────────────────
     ListenerEvents* listener_events_{nullptr};
+
+    // Test-access friend — T006 socket-option verification.
+    // Mirrors asio_tls_transport::asio_tls_transport_test_access pattern.
+    friend class asio_plain_transport_test_access;
 };
 
 }  // namespace fixpp::transport
