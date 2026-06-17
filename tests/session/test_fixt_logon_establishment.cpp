@@ -1505,7 +1505,11 @@ TEST(FixtLogonEstablishment, W1_042_AcceptorOpenFail_UnserviceableDefault) {
     auto v44_dict = make_dict(kMinimalFix44Xml);
     FixtSetup s{{v44_dict}};
 
+    std::vector<std::byte> emitted;
     auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    acpt_cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
     auto result = run_sync(s.ioc, [&] { return acceptor.open(); });
@@ -1518,6 +1522,14 @@ TEST(FixtLogonEstablishment, W1_042_AcceptorOpenFail_UnserviceableDefault) {
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Expected error::invalid_session_config from unserviceable FIXT acceptor; "
         << "got error code=" << static_cast<int>(result.error());
+
+    // No frame must be emitted before the error is returned (FR-002 fail-closed).
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (W1/FR-002)";
+
+    // Session must NOT reach Active state (FR-002 no observable state mutation).
+    EXPECT_NE(acceptor.state(), fsm_state::Active)
+        << "Session must NOT reach Active on unserviceable registry (W1/FR-002)";
 }
 
 // W2 — initiator open-fail: role-agnostic (independent witness, NOT inferred from W1).
@@ -1528,7 +1540,11 @@ TEST(FixtLogonEstablishment, W2_042_InitiatorOpenFail_UnserviceableDefault) {
     auto v44_dict = make_dict(kMinimalFix44Xml);
     FixtSetup s{{v44_dict}};
 
+    std::vector<std::byte> emitted;
     auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
+    init_cfg.transport_send = [&](std::span<const std::byte> f) {
+        emitted.assign(f.begin(), f.end());
+    };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
 
     auto result = run_sync(s.ioc, [&] { return initiator.open(); });
@@ -1539,6 +1555,14 @@ TEST(FixtLogonEstablishment, W2_042_InitiatorOpenFail_UnserviceableDefault) {
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Expected error::invalid_session_config from unserviceable FIXT initiator; "
         << "got error code=" << static_cast<int>(result.error());
+
+    // No frame must be emitted before the error is returned (FR-002 fail-closed).
+    EXPECT_TRUE(emitted.empty())
+        << "No frame must be emitted when open() rejects (W2/FR-002)";
+
+    // Session must NOT reach Active state (FR-002 no observable state mutation).
+    EXPECT_NE(initiator.state(), fsm_state::Active)
+        << "Session must NOT reach Active on unserviceable registry (W2/FR-002)";
 }
 
 // W3 — serviceable non-regression: registry serves the configured default →
