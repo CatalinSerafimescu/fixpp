@@ -11,12 +11,15 @@ with a **third disjunct**: when a FIXT session (`begin_string == "FIXT.1.1"`) ha
 that configured version (`!app_version_registry_->get(*cfg_.default_appl_ver_id).has_value()`), `open()`
 fails closed with `error::invalid_session_config` — before any observable state mutation or wire
 emission. This converts the L-033-5 operator footgun (a misconfigured acceptor that opens "successfully"
-then silently `Reject`s every inbound FIXT Logon) into a loud config-load failure, matching QuickFIX,
-which validates the FIXT `AppDataDictionary` at config-load.
+then silently `Reject`s every inbound FIXT Logon) into a loud config-load failure. The mandatory
+fail-closed requirement is grounded in fixpp's own L-033-5 disposition + Constitution §XII.5; QuickFIX
+performs FIXT app-dictionary config-load processing role-independently when data dictionaries are
+enabled/configured (corroborating reference-engine evidence for role-independence only).
 
 **Role-agnostic** (resolved in `/speckit-clarify`): the guard fires for both acceptor and initiator,
-at the shared `open()` path, with no role gate — grounded in QuickFIX-cpp `SessionFactory::create`
-(verified role-independent) and orthogonal to 033 FR-004a (which scopes only the *runtime
+at the shared `open()` path, with no role gate — grounded in fixpp's L-033-5 + the symmetric `open()`
+path + §XII.5, with QuickFIX-cpp `SessionFactory::create` (role-independent config-load processing when
+DD enabled) as corroborating reference-engine evidence, and orthogonal to 033 FR-004a (which scopes only the *runtime
 peer-advertised-version* refuse to the acceptor; this guard validates *this* side's own configured
 default). The inbound peer-`1137` serviceability check (`session.cpp:2186-2200`) stays live and unchanged.
 
@@ -63,9 +66,10 @@ C-ABI change; correctly-configured FIXT + all non-FIXT sessions byte-identical
   (:2195) — **no new include edge**, so no risk of dragging `std::mutex` into the `open()` closure
   ([[feedback_awaitable_header_mutex_include_edge]]). → **PASS (no new edge); verify with an unfiltered
   Tier-1 build.**
-- **Article VI §5 (Normative References)**: spec.md cites FIX Session-layer FIXT establishment +
-  QuickFIX config-load behavior; a Normative References pointer will be carried (per the 039 Gate A
-  round-1 lesson). → **PASS.**
+- **Article VI §5 (Normative References)**: `## Normative References` **present in spec.md** —
+  `[FIX-SL §4.3.7]` (S-025, `DefaultApplVerID(1137)`) + `[FIX-SL §4.2.1]` (S-020, `BeginString` FIXT
+  profile), with QuickFIX under a separate Reference Engine Evidence note (not a normative FIX ref).
+  → **PASS.**
 
 No constitutional violations requiring Complexity Tracking.
 
@@ -115,3 +119,6 @@ Pending (pipeline step 4 — runs after this plan, before `/speckit-tasks`). Gat
 042 (session establishment / error-semantics behavior change). Records will be archived under
 `research/reviews/{codex,opus}_042-fixt-version-serviceability-guard_gate_a*.md` and the disposition
 recorded in `phases/phase-4/session/042-fixt-version-serviceability-guard.md`.
+
+- Round 1 applied 2026-06-17: Codex P1=1 P2=2 P3=1; Opus post-judging P1=2 P2=0 P3=4; rewrite addresses root causes #1 (mis-modeled inherited inbound witnesses → witness-rewrite obligation + 3-version inbound non-deadness witness) and #2 (Constitution Check false-PASS → added ## Normative References, present-tense gate, qualified QuickFIX grounding) plus P3 riders (D-5 stale-ref correction, W2 initiator witness, checklist note). Reviews: research/reviews/codex_042-fixt-version-serviceability-guard_gate_a_review.md, research/reviews/opus_042-fixt-version-serviceability-guard_gate_a_adversarial_review.md.
+- Round 2 applied 2026-06-17: Codex P1=0 P2=0 P3=1; Opus post-judging P1=0 P2=0 P3=0; round-1 root causes verified resolved by source-read; P3 checklist QuickFIX-grounding note qualified. Reviews: research/reviews/codex_042-fixt-version-serviceability-guard_gate_a_2_review.md, research/reviews/opus_042-fixt-version-serviceability-guard_gate_a_2_adversarial_review.md.

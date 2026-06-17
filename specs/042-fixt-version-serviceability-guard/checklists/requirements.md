@@ -13,8 +13,8 @@
 
 > Note: this is a low-level library hardening feature; the spec necessarily references operator-facing
 > config fields and the documented error disposition (`error::invalid_session_config`) as the contract
-> surface, but states no algorithm/code structure. The single open design choice (role scope) is
-> isolated as FR-008 [NEEDS CLARIFICATION] for /speckit-clarify.
+> surface, but states no algorithm/code structure. FR-008 (role scope) was the single clarified item,
+> now resolved role-agnostic in /speckit-clarify (2026-06-17); no [NEEDS CLARIFICATION] markers remain.
 
 ## Requirement Completeness
 
@@ -37,6 +37,7 @@
 ## Notes
 
 - **FR-008 (role scope) RESOLVED in /speckit-clarify (2026-06-17): role-agnostic** (both acceptor and
-  initiator), grounded in QuickFIX-cpp `SessionFactory::create` role-independent config-load validation.
-  No [NEEDS CLARIFICATION] markers remain. All items pass.
+  initiator), grounded in fixpp's L-033-5 disposition, the shared `open()` path, and Constitution §XII.5;
+  QuickFIX-cpp corroborates role-independent config-load processing **when data dictionaries are
+  enabled/configured**. No [NEEDS CLARIFICATION] markers remain. All items pass.
 - Spec is ready for `/speckit-plan`.

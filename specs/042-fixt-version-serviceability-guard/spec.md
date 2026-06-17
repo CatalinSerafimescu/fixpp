@@ -32,10 +32,13 @@ This is the **last residual bullet** of the Fable F-f release-gate hardening tai
 ### Session 2026-06-17
 
 - Q: Role scope — should the open()-time serviceability guard apply role-agnostically (both acceptor
-  and initiator) or acceptor-only? → A: **Role-agnostic** (both roles). Grounded in QuickFIX-cpp
-  `SessionFactory::create` (verified in `reference-engines/quickfix-cpp/src/C++/SessionFactory.cpp:38-68,279-307`),
-  which validates the FIXT `AppDataDictionary` for the configured `DefaultApplVerID` at config-load
-  **role-independently** (the only role-specific check there is the unrelated `SessionQualifier`).
+  and initiator) or acceptor-only? → A: **Role-agnostic** (both roles). The MANDATORY fail-closed
+  serviceability requirement is grounded in fixpp's own L-033-5 disposition, the symmetric `open()` path,
+  and Constitution §XII.5 fail-closed posture. QuickFIX-cpp `SessionFactory::create` (verified in
+  `reference-engines/quickfix-cpp/src/C++/SessionFactory.cpp:38-68,279-307`; the path is
+  parent-repo-relative) corroborates *role-independence* only: it performs FIXT app-dictionary
+  config-load processing **role-independently when data dictionaries are enabled/configured** (the only
+  role-specific check there is the unrelated `SessionQualifier`).
   This config-load guard is orthogonal to 033 FR-004a, which governs the **runtime** disposition for a
   **peer-advertised** unserviceable version (acceptor-scoped) — not this side's own configured default.
   Role-agnostic is the least-code path (one shared `open()` guard, no role gate) and also closes the
@@ -113,13 +116,39 @@ the test fails.
   disposition and the existing engine version registry.
 - **FR-008 [Role scope]**: The guard MUST apply **role-agnostically** — to both acceptor and initiator
   FIXT sessions — at the shared `Session::open()` config-load path, with no role gate (resolved in
-  `/speckit-clarify`; see Clarifications). This matches QuickFIX, which validates the FIXT application
-  dictionary at config-load regardless of role, and it does not contradict 033 FR-004a (which scopes
+  `/speckit-clarify`; see Clarifications). QuickFIX performs FIXT app-dictionary config-load processing
+  role-independently when data dictionaries are enabled/configured (corroborating reference-engine
+  evidence for role-independence only; the mandatory requirement is grounded in fixpp's L-033-5 +
+  §XII.5), and it does not contradict 033 FR-004a (which scopes
   only the **runtime** peer-advertised-version refuse to the acceptor). The implementer MUST confirm the
   existing initiator FIXT session tests stay green under the role-agnostic guard (the `FixtSetup`
-  fixture registers the matching dictionary for both roles, so no regression is expected); any test that
-  relies on a FIXT session opening with an unserviceable own configured default MUST be reconciled to
-  the new fail-closed contract.
+  fixture registers the matching dictionary for both roles, so no regression is expected). **Two
+  existing inbound witnesses** — `W3_Unserviceable1137_AcceptorRejectsWithVII_NotActive`
+  (`tests/session/test_fixt_logon_establishment.cpp:887`) and
+  `W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected`
+  (`tests/session/test_fixt_logon_establishment.cpp:1302`) — configure this side's OWN
+  `default_appl_ver_id = v50sp2` against a v44-only registry and rely on `open()` succeeding before
+  injecting the peer `1137=9` frame; under 042 `open()` now fails for them. They MUST be rewritten so
+  this side's own default is serviceable (preserving the inbound 033 FR-004a reject coverage), NOT
+  edited-green by dropping their inbound-reject assertions — see research.md D-2 / D-2a.
+
+## Normative References
+
+Per `[const §VI.5]` — the exact coverage-index / feature-catalogue entries this feature informs:
+
+- `[FIX-SL §4.3.7]` Specifying application version — `DefaultApplVerID(1137)` on the FIXT Logon, the
+  configured-default application version whose serviceability this guard validates at `open()`-time
+  (catalogue **S-025**; coverage-index §4.3.7).
+- `[FIX-SL §4.2.1]` The FIX session profile — `BeginString(8)` = `FIXT.1.1` session-profile
+  identification, the gate that scopes this guard to FIXT sessions (catalogue **S-020**, FIXT.1.1 half;
+  coverage-index §4.2.1).
+
+> **Reference Engine Evidence (not a normative FIX ref).** QuickFIX-cpp `SessionFactory::create`
+> (`reference-engines/quickfix-cpp/src/C++/SessionFactory.cpp` — parent-repo-relative path) corroborates
+> that FIXT app-dictionary config-load processing is role-independent **when data dictionaries are
+> enabled/configured**. This is supporting evidence for the role-agnostic scope only; the mandatory
+> fail-closed serviceability requirement is grounded in fixpp's own L-033-5 disposition, the symmetric
+> `open()` path, and Constitution §XII.5.
 
 ### Key Entities
 

@@ -48,12 +48,20 @@ if (cfg_.begin_string == "FIXT.1.1" &&
 Clarifications (2026-06-17).
 
 **Rationale**:
-- **QuickFIX-cpp** `SessionFactory::create` validates the FIXT `AppDataDictionary` for the configured
-  `DefaultApplVerID` at config-load **role-independently** (verified:
+- **fixpp's own grounding (authoritative)**: the MANDATORY fail-closed serviceability requirement is
+  grounded in fixpp's own **L-033-5 disposition** (the adjudicated open()-guard fix), the **symmetric
+  `open()` path** (one shared validation block, no role gate), and **Constitution §XII.5** fail-closed
+  establishment — NOT in QuickFIX.
+- **QuickFIX-cpp (corroborating reference-engine evidence for role-independence only)**:
+  `SessionFactory::create` performs FIXT app-dictionary config-load processing **role-independently when
+  data dictionaries are enabled/configured** (verified:
   `reference-engines/quickfix-cpp/src/C++/SessionFactory.cpp:38-68` requires `DEFAULT_APPLVERID` for
-  any FIXT session and runs `processFixtDataDictionaries` :279-307, which throws `ConfigError` on a
-  missing/malformed app dictionary; the only role-specific check there is the unrelated
-  `SessionQualifier`). "Like QuickFIX" ⇒ role-agnostic.
+  any FIXT session role-independently and, when `UseDataDictionary` is true, runs
+  `processFixtDataDictionaries` :279-307; the only role-specific check there is the unrelated
+  `SessionQualifier`). This corroborates the *role-independence* of FIXT config-load processing; it does
+  NOT by itself mandate that the configured default be serviceable in every FIXT session
+  (`UseDataDictionary=N` skips processing; `processFixtDataDictionaries` iterates only *present*
+  `AppDataDictionary` keys). The `reference-engines/...` path is **parent-repo-relative**. ⇒ role-agnostic.
 - **Orthogonal to 033 FR-004a** (`specs/033-fixt-fix50sp2-session/spec.md:100`): FR-004a scopes the
   *runtime* refuse on a **peer-advertised** unserviceable `1137` to the acceptor (the initiator does
   not *refuse* on the peer's version). 042 validates **this** side's **own configured** default at
@@ -64,10 +72,33 @@ Clarifications (2026-06-17).
 **Empirical obligation (implement-time)**: confirm the existing initiator FIXT session tests stay
 green. The `FixtSetup` fixture (`tests/session/test_fixt_logon_establishment.cpp:631-680`) registers
 the matching dictionary for both `make_acceptor_cfg` and `make_initiator_cfg`, so the serviceable path
-holds and no regression is expected. Any existing test that opens a FIXT session with an
-**unserviceable own configured default** must be reconciled to the new fail-closed contract (none
-expected; the unserviceable-version tests inject the bad version on the **peer's wire frame**, not the
-session's own config).
+holds and no regression is expected. **Two existing inbound witnesses DO configure an unserviceable own
+default and MUST be rewritten** under 042 (Gate A round-1 correction — an earlier draft wrongly claimed
+"none expected" and that the unserviceable-version tests inject the bad version only on the peer wire
+frame): `W3_Unserviceable1137_AcceptorRejectsWithVII_NotActive`
+(`test_fixt_logon_establishment.cpp:887`) and
+`W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected`
+(`test_fixt_logon_establishment.cpp:1302`) both build `FixtSetup s{{v44_dict}}` (v44-only registry),
+configure this side's own `make_acceptor_cfg(application_version::v50sp2)`, and call `open()` (result
+discarded) **relying on it succeeding** before injecting the peer frame `1137=9`. Under 042's third
+disjunct `open()` now FAILS for both (v44-only registry cannot serve the configured v50sp2 default), so
+`on_inbound_frame` would run against an unopened session and the 033 FR-004a inbound reject path goes
+unwitnessed. They MUST be rewritten so **this side's own default is serviceable** (own default = a
+registry-served version), NOT edited-green by dropping their inbound-reject assertions (that would
+silently erode merged 033 FR-004a coverage). To keep the own default serviceable AND still drive the
+inbound reject requires a **three-distinct-version registry** — see D-2a.
+
+## D-2a — Inbound-non-deadness (SC-003) witness: a new three-version-registry witness
+
+**Decision**: The SC-003 inbound-non-deadness witness is a **NEW** witness, not a reuse of the existing
+033/038 inbound reject witness. To keep this side's own default serviceable (so `open()` succeeds) AND
+still drive the inbound `Reject(373=5)`, the registry must serve this side's own default but NOT the
+peer's advertised version — a **three-distinct-version** setup: e.g. registry `{v44, v50sp2}`, own
+default = v44 (serviceable ⇒ `open()` succeeds), peer Logon advertises a version the registry does NOT
+hold (e.g. `1137="8"` = v50sp1, absent). `FixtSetup`'s ctor takes a `vector` of dicts, so the
+multi-dict registry is constructible. The witness MUST carry a mutation/non-deadness assertion that the
+inbound `Reject(35=3, 371=1137, 373=5)` path still fires (so 042's open() guard is shown NOT to subsume
+or make dead the inbound peer-version check).
 
 ## D-3 — Error disposition: reuse `error::invalid_session_config`
 
@@ -105,3 +136,9 @@ a non-null registry that simply lacks the dictionary for this session's configur
 must state the new arm's reachability so the witness's use of a real non-null registry isn't read as
 contradicting the documented-unreachable #2 arm (this repo punishes comment drift —
 [[feedback_verify_caught_design_pivot_stale_doc_bundle_drift]]).
+
+**Stale-ref correction (Gate A round-1)**: the existing comment at `session.cpp:932` points the inbound
+serviceability gate at `session.cpp:1986`, which is **stale** (pre-existing, not 042's fault). The real
+inbound `app_version_registry_->get` reject lives at ~`session.cpp:2172-2221` (call at `:2195`). The
+D-5 rewrite MUST correct the inbound ref to the real line and MUST NOT propagate the stale `:1986` ref
+forward.

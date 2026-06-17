@@ -47,10 +47,28 @@ auto cfg = s.make_acceptor_cfg(application_version::v50sp2);   // registry can't
 
 ### Inbound non-deadness (W4, SC-003)
 
-Reuse the existing inbound unserviceable-`1137` reject witness (033/038 W3 class): a session with a
-**serviceable** own default that receives a Logon advertising a **different unserviceable** peer
-version still emits `Reject(35=3, 371=1137, 373=5)` at runtime. Assert it is unaffected by the new
-open() guard.
+This is a **NEW three-version-registry witness**, NOT a reuse of the existing 033/038 inbound reject
+witness. To keep this side's own default serviceable (so `open()` succeeds) AND still drive the inbound
+reject, the registry must serve this side's own default but NOT the peer's advertised version — a
+**three-distinct-version** setup:
+
+```cpp
+// registry serves {v44, v50sp2}; own default = v44 (serviceable → open() succeeds);
+// peer Logon advertises a version the registry LACKS (e.g. 1137="8" = v50sp1, absent)
+FixtSetup s{{ make_dict(kMinimalFix44Xml), make_dict(kMinimalFix50sp2Xml) }};
+auto cfg = s.make_acceptor_cfg(application_version::v44);   // serviceable → open() succeeds
+// ... open() succeeds; inject peer FIXT Logon with 1137="8" (absent) → assert Reject(35=3,371=1137,373=5)
+```
+
+Carry a mutation/non-deadness assertion that the inbound `373=5` path still fires (the new open() guard
+does NOT subsume or make dead the inbound peer-version check).
+
+> **The two inherited inbound witnesses MUST be REWRITTEN, not edited-green.**
+> `W3_Unserviceable1137_AcceptorRejectsWithVII_NotActive` (`test_fixt_logon_establishment.cpp:887`) and
+> `W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected` (`:1302`) currently set this
+> side's own default to the unserviceable v50sp2 against a v44-only registry — under 042 their `open()`
+> now FAILS. Rewrite them so this side's own default is serviceable (preserving the 033 FR-004a inbound
+> reject coverage); do NOT drop their inbound-reject assertions to make them green.
 
 ## Coverage
 

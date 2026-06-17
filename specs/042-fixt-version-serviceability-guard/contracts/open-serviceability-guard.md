@@ -49,10 +49,24 @@ Role-agnostic — applies identically to `session_role::acceptor` and `session_r
 - **W1 (acceptor, RED-first)**: a FIXT **acceptor** whose registry lacks the dict for its configured
   `default_appl_ver_id` → `open()` returns `invalid_session_config`. Mutation: drop disjunct #3 ⇒ test
   fails (open succeeds).
-- **W2 (initiator, role-agnostic)**: same with `session_role::initiator` → identical fail-closed
-  result (FR-008).
+- **W2 (initiator open-fail, role-agnostic)**: an isolated FIXT **initiator** whose registry lacks the
+  dict for its configured `default_appl_ver_id` → identical fail-closed `invalid_session_config`
+  (FR-008). Mutation-tested as a distinct obligation: drop disjunct #3 ⇒ this initiator witness fails.
+  A symmetric-API claim with an unwitnessed arm is exactly the trap 033 fell into
+  ([[feedback_symmetric_api_claim_unreachable_arm]]) — the initiator fail-closed arm MUST be witnessed
+  directly, not inferred from W1 + "tests stay green".
 - **W3 (serviceable, non-regression)**: a FIXT session with a serviceable configured default →
-  `open()` succeeds (NG-1).
-- **W4 (inbound non-deadness, SC-003)**: a session with a *serviceable* own default receiving a Logon
-  advertising a *different unserviceable* peer version → still `Reject(373=5)` at runtime (NG-3). (May
-  reuse the existing 033/038 `W3`-class inbound reject witness; assert it is unaffected.)
+  `open()` succeeds (NG-1). Pin **both** role arms explicitly: a serviceable **acceptor** open()-success
+  AND an isolated serviceable **initiator** open()-success. (`W1_FullRoundTrip` at
+  `test_fixt_logon_establishment.cpp:690` already drives a serviceable initiator to Active, but the
+  isolated initiator open()-success arm is still called out so the symmetric-API claim is directly
+  witnessed on both sides.)
+- **W4 (inbound non-deadness, SC-003)**: a **NEW** three-distinct-version-registry witness (NOT a reuse
+  of the existing 033/038 inbound reject witness). The registry serves this side's own default (so
+  `open()` succeeds) but does NOT serve the peer's advertised version — e.g. registry `{v44, v50sp2}`,
+  own default = v44 (serviceable), peer Logon advertises a version the registry lacks (e.g. `1137="8"`
+  = v50sp1) → still `Reject(35=3, 371=1137, 373=5)` at runtime (NG-3). Carry a mutation/non-deadness
+  assertion that the inbound `373=5` path still fires. **The two inherited inbound witnesses (W3 @887,
+  W_…Disconnected @1302) must be REWRITTEN so this side's own default is serviceable — NOT edited-green
+  by dropping their inbound-reject assertions, which would silently erode merged 033 FR-004a coverage**
+  (see research.md D-2 / D-2a).
