@@ -247,9 +247,11 @@ namespace {
     std::optional<std::string_view> default_appl_ver_id_found;
     std::optional<std::string_view> username_found;
     std::optional<std::string_view> password_found;
-    // 043 ([const §XII.7]): EncryptMethod(98) — captured for the app-layer-encryption
-    // ban check below; absent on many test Logons, present-and-≠"0" is fail-closed.
-    std::optional<std::string_view> encrypt_method_found;
+    // 043 ([const §XII.7]): EncryptMethod(98) — sticky flag: set on ANY occurrence
+    // whose value is not exactly "0"; never cleared. Closes the duplicate-98 fail-open
+    // (98=2<SOH>98=0 was last-wins → accepted; now any non-"0" occurrence rejects).
+    // [[feedback_forged_token_before_real_tag_self_heals_witness]]
+    bool invalid_encrypt_method_seen = false;
 
     // Simple SOH-delimited field scanner (no heap, no library dependency).
     const std::byte SOH{0x01};
@@ -319,7 +321,11 @@ namespace {
                 // (zero-copy; no validation here — session arm enforces missing-1137 /
                 // unserviceable-1137 / 553+554 surface logic).
                 case 98:
-                    encrypt_method_found = val;
+                    // Sticky flag: any occurrence ≠ "0" marks the frame invalid,
+                    // regardless of later duplicate 98=0 fields.
+                    if (val != "0") {
+                        invalid_encrypt_method_seen = true;
+                    }
                     break;
                 case 1137:
                     default_appl_ver_id_found = val;
@@ -385,7 +391,8 @@ namespace {
     //    including a present-but-malformed value — fails closed. Applies to ALL
     //    profiles (interpret_logon is profile-agnostic); absent 98 is not newly
     //    rejected here (a missing required field is a separate concern).
-    if (encrypt_method_found.has_value() && *encrypt_method_found != "0") {
+    //    The sticky flag also handles duplicate 98 fields (last-wins fail-open closed).
+    if (invalid_encrypt_method_seen) {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 

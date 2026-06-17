@@ -124,4 +124,82 @@ TEST(InterpretLogonEncryptMethod, AbsentEncryptMethodAccepted) {
            "field is a separate concern; only present-and-non-zero is banned here";
 }
 
+// ── Duplicate-98 cells — [[feedback_forged_token_before_real_tag_self_heals_witness]] ──
+//
+// These three cells guard the sticky-flag fix (FQ-1 gate-b/r1):
+//   NonZeroThenZero: real non-zero FIRST, forged zero AFTER — old last-wins
+//     accepted (final 98=0); sticky flag rejects regardless of ordering.
+//   GarbageThenZero: malformed FIRST, forged zero AFTER — same class.
+//   ZeroThenNonZero: zero FIRST, non-zero AFTER — order-independence (this
+//     cell also rejects under last-wins by accident; it guards a sibling
+//     mutation "only first occurrence", not the last-wins bug directly).
+//
+// Mutation evidence (sticky-flag revert → last-wins):
+//   NonZeroThenZero: sticky=true case goes RED (last 98=0 → wrongly accepted).
+//   GarbageThenZero: same (last 98=0 → wrongly accepted).
+//   ZeroThenNonZero: stays GREEN (last 98=2 → rejects, same verdict; this cell
+//     discriminates "first-occurrence-only" mutation, not last-wins).
+
+// ── W-enc-reject-nonzero-then-zero: 98=2 then 98=0 → reject ──────────────────
+TEST(InterpretLogonEncryptMethod, NonZeroThenZeroEncryptMethodRejected) {
+    // Inject TWO tag-98 fields: real non-zero FIRST, forged zero LAST.
+    // Old last-wins: final "98=0" → accepted (fail-open). Sticky flag: rejects.
+    std::string body;
+    body += "35=A\x01";
+    body += "34=1\x01";
+    body += "49=TW\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=ISLD\x01";
+    body += "98=2\x01";   // real non-zero EncryptMethod (legit first)
+    body += "98=0\x01";   // forged zero after (forged "self-heal")
+    body += "108=30\x01";
+    auto result = interpret(body);
+    ASSERT_FALSE(result.has_value())
+        << "[const §XII.7] / [[feedback_forged_token_before_real_tag_self_heals_witness]]: "
+           "98=2 followed by 98=0 MUST be rejected — the forged 98=0 must not self-heal "
+           "the real non-zero EncryptMethod";
+    EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_logon);
+}
+
+// ── W-enc-reject-garbage-then-zero: 98=GARBAGE then 98=0 → reject ────────────
+TEST(InterpretLogonEncryptMethod, GarbageThenZeroEncryptMethodRejected) {
+    // Malformed FIRST (present-but-unparseable), forged zero LAST.
+    std::string body;
+    body += "35=A\x01";
+    body += "34=1\x01";
+    body += "49=TW\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=ISLD\x01";
+    body += "98=GARBAGE\x01";  // present-but-malformed EncryptMethod (legit first)
+    body += "98=0\x01";        // forged zero after
+    body += "108=30\x01";
+    auto result = interpret(body);
+    ASSERT_FALSE(result.has_value())
+        << "[const §XII.7] / [[feedback_forged_token_before_real_tag_self_heals_witness]]: "
+           "98=GARBAGE followed by 98=0 MUST be rejected — malformed EncryptMethod "
+           "fails closed even when a later duplicate 98=0 appears";
+    EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_logon);
+}
+
+// ── W-enc-reject-zero-then-nonzero: 98=0 then 98=2 → reject ──────────────────
+TEST(InterpretLogonEncryptMethod, ZeroThenNonZeroEncryptMethodRejected) {
+    // Zero FIRST, non-zero AFTER — order-independence of the sticky flag.
+    // (Also rejects under old last-wins because the last value is "2", but this
+    // cell guards the "first-occurrence-only" mutation: sticky rejects regardless.)
+    std::string body;
+    body += "35=A\x01";
+    body += "34=1\x01";
+    body += "49=TW\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=ISLD\x01";
+    body += "98=0\x01";  // zero first (would be valid alone)
+    body += "98=2\x01";  // non-zero after
+    body += "108=30\x01";
+    auto result = interpret(body);
+    ASSERT_FALSE(result.has_value())
+        << "[const §XII.7]: 98=0 followed by 98=2 MUST be rejected — the sticky flag "
+           "is order-independent; any non-zero EncryptMethod occurrence fails closed";
+    EXPECT_EQ(result.error(), fixpp::core::error::session_invalid_logon);
+}
+
 }  // namespace fixpp::session::test
