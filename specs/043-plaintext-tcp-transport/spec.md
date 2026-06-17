@@ -46,7 +46,9 @@ consumer, REMAINING-WORK Tier-4 item 15a) — this feature only makes the `TLS o
   whose kind disagrees with the profile (TLS factory + plaintext profile, or plaintext factory + TLS
   profile) is rejected at `open()` with `error::invalid_session_config`; a plaintext profile left with the
   default TLS factory is auto-corrected, not an error. (Mirrors QFJ `SocketUseSSL` / Fix8 `ssl_context=`
-  config-derived transport rather than quickfix-cpp's separate-class selection.)
+  config-derived transport rather than quickfix-cpp's separate-class selection.) The factory advertises
+  its kind via a defaulted `TransportFactory::kind()` (default `tls`; so existing factories/test doubles
+  are unaffected).
 - Q: What authorization stays active on the plaintext path (no cert identity exists)? → A: The 015
   `compid_authorization_policy` (CompID↔TLS-cert-identity binding) is **skipped** — it consumes a
   handshake `peer_id` that plaintext never produces, and it is already gated to mTLS-only today (skipped
@@ -109,7 +111,7 @@ rejected at `open()` with `error::invalid_session_config`.
 
 1. **Given** source that selects `insecure_plain_tcp`, **When** it is compiled, **Then** a
    `[[deprecated]]`-class diagnostic announcing that transport security is OFF is emitted at the
-   selection/construction site (mirroring `one_way_ca`).
+   selection site (the session-layer enumerator) — the construction-site diagnostic §XII.5 prescribes.
 2. **Given** a default-constructed `SecurityProfile` (kind::unset), **When** `Session::open()` runs,
    **Then** it returns `error::invalid_session_config` — unchanged from today.
 3. **Given** any session that did not explicitly select `insecure_plain_tcp`, **When** it opens, **Then**
@@ -191,8 +193,11 @@ succeeds.
   "null `dynamic_cast<TlsTransport*>` ⇒ error" behaviour MUST be preserved (fail-closed; the skip MUST
   NOT be gated on the cast result alone, which would silently downgrade a misconfigured TLS session).
 - **FR-006 [Loud insecure friction]**: Selecting `insecure_plain_tcp` MUST surface a compile-time
-  `[[deprecated]]`-class diagnostic at the construction/selection site, announcing that transport
-  security is OFF — mirroring the `one_way_ca` precedent.
+  `[[deprecated]]`-class diagnostic at the construction/selection site (the session-layer
+  `SecurityProfile::kind` enumerator), announcing that transport security is OFF — the construction-site
+  diagnostic `[const §XII.5]` prescribes. (NOTE: this is *stronger* than the current session-layer
+  `one_way_ca`, which carries no such attribute despite §XII.5 — a pre-existing constitution-vs-code drift
+  left out of 043 scope; see research.md D-9.)
 - **FR-007 [No implicit default]**: The no-implicit-default rule MUST be preserved unchanged — the
   `unset` sentinel is still rejected at `Session::open()`, and `insecure_plain_tcp` is never selected
   implicitly. Existing TLS profiles and their behaviour MUST be entirely unaffected.
@@ -278,7 +283,7 @@ succeeds.
   no change to the `Transport` / `TransportFactory` *base* virtual surface is required (the factory's
   existing `make()` carries an `SslCtxConfig` parameter that the plaintext factory ignores; whether to
   ignore-the-param vs add a credential-free entry point is a `/plan` decision, not a spec concern).
-- `[[deprecated]]`-class friction is compile-time only (mirroring `one_way_ca`); no additional runtime
+- `[[deprecated]]`-class friction is compile-time only (on the session enumerator); no additional runtime
   block on plaintext sessions is required — the constitution amendment permits the profile.
 - Loopback / in-process socket tests are an acceptable witness for the round-trip SCs; live cross-engine
   plaintext interop (QFcpp/QFJ/Fix8) and the actual benchmark run are downstream (Tier-1 / Tier-4),

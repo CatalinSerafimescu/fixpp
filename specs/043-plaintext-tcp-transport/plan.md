@@ -52,8 +52,9 @@ bench driver (FR-012).
   decisions); `/analyze` pending (step 6); **Codex Gate A** pending (required, after this plan); user
   `/plan` sign-off pending. In scope and tracked.
 - **Article XIV §2 (pluggable interface ≤5 pure-virtual)** — ✅ `Transport` base = 5 (plain uses all 5,
-  the `TlsTransport` +1 extension slot unused). `TransportFactory` 3→4 with the new `kind()` (D-5), under
-  the 5/5 cap.
+  the `TlsTransport` +1 extension slot unused). `TransportFactory` pure count stays **3** — the new
+  `kind()` (D-5) is a **defaulted** virtual (default `tls`), so it adds no pure-virtual and does not break
+  the ~11 existing test-double factories.
 - **Article XV §1 (no per-message hot-path heap)** — ✅ plain read/write are caller-buffer; the transport
   never allocates a read buffer (mirrors TLS); no MemoryStore/in-memory-path alloc added.
 - **Article XVI §3 (`/clarify` mandatory for security)** — ✅ completed before this plan.
@@ -85,7 +86,7 @@ specs/043-plaintext-tcp-transport/
 include/fixpp/
 ├── session/security_profile.hpp          # + kind::insecure_plain_tcp [[deprecated]] (D-9)
 └── transport/
-    ├── transport_factory.hpp             # + transport_security_kind enum + kind() pure-virtual (D-5);
+    ├── transport_factory.hpp             # + transport_security_kind enum + kind() defaulted virtual (D-5);
     │                                      #   + asio_plain_transport_factory decl + make_asio_plain_transport_factory()
     └── plain_transport.hpp (optional)     # public alias/fwd if needed; impl lives in src/
 
@@ -115,9 +116,10 @@ cpp}`. Edited: `transport_factory.{hpp,cpp}`, `session/security_profile.hpp`, `s
 ## Phase 1 re-check (post-design Constitution Check)
 
 Design (D-1…D-13) introduces: 1 transport class (5 base virtuals, 0 new), 1 factory class (implements the
-existing 3 + the new shared `kind()`), 1 enum value, 1 factory-kind enum, profile-gated branches. No new
-wire field, error slot, codegen, or config field beyond the enumerator + factory `kind()` (FR-013). ≤5
-pure-virtual caps hold (Transport 5/5, TransportFactory 4/5). **No new violations. Gate A may proceed.**
+existing 3 pure-virtuals + overrides the new defaulted `kind()`), 1 enum value, 1 factory-kind enum,
+profile-gated branches. No new wire field, error slot, codegen, or config field beyond the enumerator +
+factory-kind enum (FR-013). ≤5 pure-virtual caps hold (Transport 5/5; TransportFactory pure count stays
+3/5 — `kind()` is defaulted). **No new violations. Gate A may proceed.**
 
 ## Complexity Tracking
 

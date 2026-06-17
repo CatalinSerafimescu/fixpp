@@ -28,13 +28,19 @@ class asio_plain_transport;
 // ─────────────────────────────────────────────────────────────────────────────
 enum class transport_security_kind : std::uint8_t { tls, plaintext };
 
-// ── Added to the abstract TransportFactory (pure-virtual count 3 → 4, ≤5 cap) ──
+// ── Added to the abstract TransportFactory (DEFAULTED virtual; pure count stays 3, ≤5 cap) ──
 //
 //   // Reports whether this factory mints TLS or plaintext transports. Consumed
 //   // by Session::open()'s FR-008 consistency check. noexcept; no state.
-//   [[nodiscard]] virtual transport_security_kind kind() const noexcept = 0;
+//   // DEFAULTED to `tls` (safe default): a factory that forgets to override
+//   // mismatches a plaintext profile → fail-closed reject, never a silent
+//   // downgrade. Defaulting (not pure) avoids breaking the ~11 tests/session/
+//   // TransportFactory test doubles (D-5).
+//   [[nodiscard]] virtual transport_security_kind kind() const noexcept {
+//       return transport_security_kind::tls;
+//   }
 //
-// asio_tls_transport_factory::kind() returns transport_security_kind::tls.
+// asio_tls_transport_factory overrides kind() → transport_security_kind::tls (explicit).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // asio_plain_transport_factory — credential-free factory minting

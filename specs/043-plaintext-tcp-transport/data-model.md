@@ -31,9 +31,10 @@ attribute (D-9, FR-006). Discriminant only; no payload. `unset (0)` sentinel rej
 
 ## E-3 — `transport_security_kind` (factory-kind discriminant)
 `include/fixpp/transport/transport_factory.hpp`. `enum class transport_security_kind : std::uint8_t
-{ tls, plaintext };` (D-5). Returned by the new `TransportFactory::kind()` pure-virtual. Drives the FR-008
-consistency check: a TLS profile requires a factory with `kind()==tls`; `insecure_plain_tcp` requires
-`kind()==plaintext`.
+{ tls, plaintext };` (D-5). Returned by the new `TransportFactory::kind()` **defaulted** virtual (default
+`tls`; pure-virtual count stays 3). Drives the FR-008 consistency check: a TLS profile requires a factory
+with `kind()==tls`; `insecure_plain_tcp` requires `kind()==plaintext`. Defaulted (not pure) so the ~11
+`tests/session/` `TransportFactory` doubles keep compiling (they report `tls`).
 
 ## E-4 — `asio_plain_transport_factory` (concrete `TransportFactory`)
 `transport_factory.hpp` decl + `transport_factory.cpp` body (D-3, FR-003/FR-004). Implements the abstract
