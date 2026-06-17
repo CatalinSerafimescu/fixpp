@@ -1,20 +1,21 @@
 <!--
-Sync Impact Report — v0.1 → v0.2 (2026-06-13)
-  Bump: MINOR (scoped exemption added to a banned pattern; not backwards-incompatible, not a perf-budget tightening → not v-major per Article XX §4).
+Sync Impact Report — v0.2 → v0.3 (2026-06-17)
+  Bump: MINOR (adds a closed-set enumerator + an opt-in friction requirement; purely additive — no existing config breaks, no banned-pattern addition, no perf-budget tightening → not v-major per Article XX §4).
   Modified principles:
-    - Article XV §1 (Banned: per-message hot-path heap alloc) — appended a "Scope & §XV.4 exemption" sub-clause: permits a single bounded O(1) coroutine frame per offloaded durable-I/O op on the §XV.4 FileStore offload path (the cross-executor completion frame is routable to neither HALO nor PMR). MemoryStore stays zero-alloc; per-field / unbounded / in-memory-path allocation still banned.
-    - Article XI §6 (Coroutine frame allocation) — appended a cross-ref to the §XV.1 scope limit.
+    - Article XII §5 (Session requires an explicit SecurityProfile) — reopened the closed SecurityProfile set (was {mtls_ca, mtls_pinned, one_way_ca}; design-doc amendment required to reopen per §XVI.3) and appended a fourth profile kind `insecure_plain_tcp` (NO TLS, plain TCP). Encoded: opt-in-only / never-implicit-default (the `unset`-rejected rule is unchanged); the SAME loud `[[deprecated]]`-class construction-site friction as `one_way_ca`; §1–§4 (TLS-mechanism rules) are inapplicable/vacuously satisfied on this profile because no TLS context is built; §7 (app-layer EncryptMethod(98) ban) is UNCHANGED and still applies. Added a sentence clarifying §1–§4 are conditioned on a TLS profile being selected and do not assert TLS-is-always-present.
   Added sections: none. Removed sections: none.
-  Rationale: harmonises §XV.1 with §XV.4 (mandated async-journal offload) and §XI.6 (HALO-first/PMR-fallback) for the empirically-forced case where a cross-executor offload completion frame can fall back to neither. Discovered at Gate A of feature 035-filestore-io-offload; empirical basis research/G19-fix-fpml-iso20022/research/probes/cospawn_probe*.cpp.
+  Rationale: unblocks Tier-2 feature 043 (plaintext TCP transport) — production interop (plaintext FIX over a colo cross-connect / VPN tunnel is a common industry deployment; TLS/FIXS is the newer overlay) + benchmark fairness (benchmark-plan.md wl-01..wl-11 `TLS off` engine-only rows, blocked today because fixpp's only real-socket path is mandatory-TLS asio_tls_transport). Production-candidate scope is "DECISION TAKEN 2026-06-13" in phases/phase-9/benchmark-readiness.md §3; API shape (new SecurityProfile kind vs orthogonal selector) + the amendment itself user-signed-off 2026-06-17. The session-layer stub already anticipated this exact escape value (include/fixpp/session/security_profile.hpp).
   Templates / dependents reviewed:
-    - plan-template.md Constitution Check — ✅ no change needed (gate is article-by-article; the §XV.1 row now reads against the scoped text).
+    - plan-template.md Constitution Check — ✅ no change needed (gate is article-by-article; the §XII.5 row now reads against the amended text).
     - spec-template.md / tasks-template.md — ✅ no change (no mandatory-section change).
-  Process: Article XX requires a Codex Gate A review on this amendment + a decisions-log entry; the Gate A is folded into the 035 re-review (the amendment exists only to unblock 035). User-signed-off wording 2026-06-13.
-  Follow-up: none deferred.
+  Process: Article XX requires a Codex Gate A review on this amendment + a decisions-log entry; the Gate A is folded into feature 043's Gate A (the amendment exists only to unblock 043). User-signed-off wording 2026-06-17. Follow-up code reconciliation (the SecurityProfile::kind enumerator + the security_profile.hpp stub comment) is owned by feature 043's implement phase, NOT this amendment.
+  Follow-up: feature 043 implement — add `SecurityProfile::kind::insecure_plain_tcp = 4` + reconcile the security_profile.hpp "future escape value" comment.
+
+  Prior: Sync Impact Report — v0.1 → v0.2 (2026-06-13): Article XV §1 + XI §6 — FileStore §XV.4-offload bounded-frame exemption (Gate A folded into feature 035). User-signed-off 2026-06-13.
 -->
 # fixpp Constitution
 
-> **Status:** user-signed-off v0.2 (2026-06-13) — amends Article XV §1 + XI §6 (FileStore §XV.4-offload bounded-frame exemption; user-signed-off, Gate A folded into feature 035). Base v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
+> **Status:** user-signed-off v0.3 (2026-06-17) — amends Article XII §5 (reopens the closed `SecurityProfile` set + adds `insecure_plain_tcp` non-TLS profile; opt-in-only, loud `[[deprecated]]`-class friction; Gate A folded into feature 043). v0.2 (2026-06-13) — amends Article XV §1 + XI §6 (FileStore §XV.4-offload bounded-frame exemption; Gate A folded into feature 035). Base v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
 > **Authority:** This document is project-wide non-negotiables. Every `/specify`, `/plan`, ADR, and PR must satisfy it. Conflicts are resolved by amending the constitution first (Article XX) — never by silently violating an article.
 > **Citation form:** other documents cite articles as `[const §Roman.arabic]` (e.g., `[const §VIII.3]`).
 
@@ -183,8 +184,9 @@ Sync Impact Report — v0.1 → v0.2 (2026-06-13)
    - `mtls_ca` — mutual TLS with CA-chain trust on the peer cert. The recommended starting profile for v1.0 deployments.
    - `mtls_pinned` — mutual TLS with leaf-cert pinning (FIXS RC1 strict profile). Required for FIXS-conformant deployments.
    - `one_way_ca` — server-cert TLS only, CA trust; permitted for legacy interop where the counterparty does not present a client cert. Construction emits a compile-time `[[deprecated]]` diagnostic.
+   - `insecure_plain_tcp` — **NO TLS** (amended v0.3, 2026-06-17). A plain-TCP byte stream with **no transport encryption, no peer authentication, and no integrity protection**. Permitted for (a) plaintext FIX over a transport secured beneath the application — colocation cross-connect, VPN/IPsec tunnel — which is a common production deployment, and (b) engine-only benchmark fairness (the `TLS off` workload rows in `benchmark-plan.md`). It is **opt-in only and MUST NOT become an implicit default**: the `unset` sentinel is still rejected at `Session::open()` (the no-implicit-default rule in this clause + N-P2-3 is unchanged), and selecting `insecure_plain_tcp` MUST surface the **same loud, documented-insecure friction as `one_way_ca`** — a compile-time `[[deprecated]]`-class diagnostic at the construction site announcing that transport security is OFF. On this profile **no TLS context is constructed**, so the TLS-mechanism rules §1–§4 (OpenSSL impl, allowed versions, cipher allow-list, banned cryptography) are inapplicable and vacuously satisfied; **§7 still applies in full** — `insecure_plain_tcp` removes *transport* encryption only and never permits the banned application-layer `EncryptMethod(98)` encryption.
 
-   Pinset rotation (multiple valid peer certs per counterparty, FIXS §5) is supported under both `mtls_pinned` and `mtls_ca`.
+   Pinset rotation (multiple valid peer certs per counterparty, FIXS §5) is supported under both `mtls_pinned` and `mtls_ca`. The TLS-mechanism rules §1–§4 are conditioned on a TLS profile being selected (`mtls_ca` / `mtls_pinned` / `one_way_ca`); they constrain TLS *when present* and do not assert that every session uses TLS — `insecure_plain_tcp` is the explicit, friction-gated non-TLS escape.
 6. **Certificate pinset rotation API** is a v1.0 feature (multiple valid peer certs per counterparty, FIXS §5).
 7. **`EncryptMethod(98)` ≠ 0 is rejected.** Application-layer encryption is deprecated since FIX 4.3; encryption lives at TLS only.
 8. **Pluggable `cert_source` interface** with one default impl (file-based PEM/DER) in v1.0; HSM/TPM/cloud-KMS impls are user-side or future bundles (Article XIV).
