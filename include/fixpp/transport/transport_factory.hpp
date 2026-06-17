@@ -39,6 +39,7 @@
 namespace fixpp::transport {
 
 class asio_tls_transport;
+class asio_plain_transport;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // transport_security_kind — discriminant for the FR-008 profile↔factory
@@ -224,6 +225,55 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>> make_asio_tls_transport_factory(
     Transport::Config cfg, fixpp::tls::SslCtxConfig ssl_cfg) noexcept;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// asio_plain_transport_factory — credential-free factory minting
+// asio_plain_transport. Builds NO SSL_CTX, loads NO credentials.
+//
+// 043 T010 (D-3, FR-003/FR-004): the concrete factory for plaintext transports.
+// See data-model.md E-4 for the member table.
+// ─────────────────────────────────────────────────────────────────────────────
+class asio_plain_transport_factory final : public TransportFactory {
+public:
+    explicit asio_plain_transport_factory(Transport::Config cfg) noexcept;
+
+    // ssl_cfg is IGNORED (plaintext); mints asio_plain_transport via trap_throw.
+    [[nodiscard]] core::expected_t<std::unique_ptr<Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig ssl_cfg,
+        std::pmr::memory_resource* mr) noexcept override;
+
+    // Acceptor symmetry (FR-004): adopt an accepted plain socket.
+    // Concrete (non-virtual) — reached via concretely-typed accept factory pointer,
+    // NOT through a base TransportFactory* (data-model E-4).
+    [[nodiscard]] core::expected_t<std::unique_ptr<asio_plain_transport>> make_accepted(
+        asio::ip::tcp::socket accepted_socket, std::pmr::memory_resource* mr) noexcept;
+
+    // No certs to rotate → session_invalid_argument (slot 119, D-11).
+    [[nodiscard]] core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> new_source) noexcept override;
+
+    // No cert source → nullptr (FSM rotation-detect tolerant, D-11).
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override;
+
+    // D-5: this factory mints plaintext transports.
+    [[nodiscard]] transport_security_kind kind() const noexcept override;
+
+private:
+    Transport::Config cfg_;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// make_asio_plain_transport_factory — noexcept factory function.
+//
+// Credential-free (no SslCtxConfig argument). Returns an
+// expected_t<unique_ptr<TransportFactory>>; on failure, returns
+// transport_factory_failed.
+//
+// Body lives in src/transport/transport_factory.cpp.
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] core::expected_t<std::unique_ptr<TransportFactory>>
+make_asio_plain_transport_factory(Transport::Config cfg) noexcept;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SessionConfig::transport_factory_override field shape (Appendix D §D.2,

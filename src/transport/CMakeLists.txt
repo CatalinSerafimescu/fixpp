@@ -12,6 +12,7 @@
 
 add_library(fixpp_transport STATIC
   "${CMAKE_CURRENT_SOURCE_DIR}/asio_tls_transport.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/asio_plain_transport.cpp"   # 043 T009
   "${CMAKE_CURRENT_SOURCE_DIR}/transport_factory.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/reconnect_policy.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/asio_listener.cpp"
