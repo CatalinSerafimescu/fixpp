@@ -194,6 +194,29 @@ std::vector<std::byte> make_nos_payload() {
         "60=20240101-00:00:00.000\x01");
 }
 
+// NewOrderSingle(35=D) with a flat NoPartyIDs(453) repeating group (medium /
+// wl-05). Group shape matches the QFcpp runner's add_party_groups() exactly
+// (quickfix-cpp/src/benchmark_runner.cpp) for cross-engine comparability:
+// two entries — {448=CLIENT-ALPHA,447=D,452=1}, {448=DESK-BRAVO,447=D,452=3}.
+std::vector<std::byte> make_nos_grouped_payload() {
+    return to_bytes(
+        "35=D\x01"
+        "11=ORD-PERF\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "38=100\x01"
+        "40=2\x01"
+        "44=100.00\x01"
+        "60=20240101-00:00:00.000\x01"
+        "453=2\x01"
+        "448=CLIENT-ALPHA\x01"
+        "447=D\x01"
+        "452=1\x01"
+        "448=DESK-BRAVO\x01"
+        "447=D\x01"
+        "452=3\x01");
+}
+
 // ExecutionReport(35=8), fully-filled echo for the NOS above.
 std::vector<std::byte> make_er_payload() {
     return to_bytes(
@@ -336,9 +359,9 @@ void write_run_config_yaml(const std::filesystem::path& dir, const Options& o) {
       << "  apples-to-apples engine comparison (see benchmark-readiness.md #3/#4).\n";
 }
 
-// ── wl-04 closed-loop NOS→ER ─────────────────────────────────────────────────
+// ── closed-loop NOS→ER (wl-04 plain / wl-05 grouped) ─────────────────────────
 
-int run_wl04(const Options& o) {
+int run_closed_loop(const Options& o) {
     const char* dir = fixture_dir();
     if (dir == nullptr || dir[0] == '\0') {
         std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
@@ -424,7 +447,8 @@ int run_wl04(const Options& o) {
     std::thread t1{[&ioc] { ioc.run(); }};
     std::thread t2{[&ioc] { ioc.run(); }};
 
-    const auto nos = make_nos_payload();
+    const auto nos =
+        (o.workload == "wl-05-nos-er-medium-groups") ? make_nos_grouped_payload() : make_nos_payload();
 
     hdr_histogram* hist = nullptr;
     hdr_init(1, 60'000'000, 3, &hist);  // 1 µs .. 60 s, 3 sig figs
@@ -516,7 +540,11 @@ int run_wl04(const Options& o) {
         << "messages_per_second=" << r.messages_per_second << "\n"
         << "latency_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us << "\n"
         << "peak_rss_mb=" << r.peak_rss_mb << "\n"
-        << "sample_request=35=D 11=ORD-PERF 55=AAPL 54=1 38=100 44=100.00\n"
+        << "sample_request=35=D 11=ORD-PERF 55=AAPL 54=1 38=100 44=100.00"
+        << (o.workload == "wl-05-nos-er-medium-groups"
+                ? " 453=2[448=CLIENT-ALPHA,447=D,452=1|448=DESK-BRAVO,447=D,452=3]"
+                : "")
+        << "\n"
         << "sample_response=35=8 37=EXEC-PERF 150=F 39=2 14=100\n";
 
     std::cout << "[fixpp-perf] " << o.workload << " mps=" << r.messages_per_second
@@ -531,10 +559,10 @@ int run_wl04(const Options& o) {
 
 int main(int argc, char** argv) {
     const Options o = parse_args(argc, argv);
-    if (o.workload != "wl-04-nos-er-small") {
-        std::cerr << "workload not implemented in slice 1: " << o.workload
-                  << " (only wl-04-nos-er-small)\n";
-        return 2;
+    if (o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups") {
+        return run_closed_loop(o);
     }
-    return run_wl04(o);
+    std::cerr << "workload not implemented: " << o.workload
+              << " (have: wl-04-nos-er-small, wl-05-nos-er-medium-groups)\n";
+    return 2;
 }
