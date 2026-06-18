@@ -459,4 +459,46 @@ TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {
            "session survived 3 windows that would otherwise have disconnected";
 }
 
+// Regression: an inbound Heartbeat(35=0) MUST NOT trigger an outbound Heartbeat.
+// Per FIX session semantics a Heartbeat is never answered — only a TestRequest
+// gets a Heartbeat reply (data-model.md:22 Active row: inbound Heartbeat =
+// "advance counter (liveness)", NO emit). The retired "T020-A echo" emitted a
+// Heartbeat on every inbound Heartbeat, which storms at RTT cadence when two
+// fixpp sessions are paired (each echoes the other's beat). See the self-paired
+// heartbeat-storm finding.
+TEST_F(HbTrTest, InboundHeartbeatEmitsNoEcho) {
+    auto cfg = make_cfg(30);  // long HeartBtInt → the liveness timer stays parked
+    std::vector<std::vector<std::byte>> outbound;
+    cfg.transport_send = [&outbound](std::span<const std::byte> f) {
+        outbound.emplace_back(f.begin(), f.end());
+    };
+    Session session{engine, cfg};
+    ASSERT_TRUE(drive_to_active(session, 30));
+
+    outbound.clear();  // drop the Logon handshake frames
+
+    // Feed several in-order inbound Heartbeats; none may produce any outbound.
+    seqnum_t inbound_seq = 2;
+    for (int i = 0; i < 5; ++i) {
+        auto hb_frame = make_frame("FIX.4.2", "0", inbound_seq++, "TARGET", "SENDER");
+        ASSERT_TRUE(feed_sync(session, hb_frame).has_value())
+            << "inbound Heartbeat " << i << " must not error";
+        ASSERT_EQ(session.state(), fsm_state::Active);
+    }
+
+    int outbound_hb = 0;
+    for (const auto& f : outbound) {
+        std::string_view sv{reinterpret_cast<const char*>(f.data()), f.size()};
+        if (sv.find("\x01"
+                    "35=0\x01") != std::string_view::npos) {
+            ++outbound_hb;
+        }
+    }
+    EXPECT_EQ(outbound_hb, 0)
+        << "inbound Heartbeat(35=0) must NOT trigger an outbound Heartbeat echo "
+           "(FIX: a Heartbeat is never answered; data-model.md:22) — got " << outbound_hb;
+    EXPECT_TRUE(outbound.empty())
+        << "inbound Heartbeat must produce zero outbound frames; got " << outbound.size();
+}
+
 }  // namespace fixpp::session::test
