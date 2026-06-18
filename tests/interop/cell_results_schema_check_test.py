@@ -41,15 +41,12 @@ DEFERRED_TAGS = {
     # variants are by-design not run; the QFj variants are live (reject-invalid-
     # admin via the cp_corrupt_admin 55=BAD induction). Phase 9.H step 2.
     "deferred:qfj-only-at-g1",
-    # recovery-outbound: NO fixpp defect (emission proven in-process — T015 — and on
-    # the live wire). The induction is degenerate: ResendRequest over a Logon-only
-    # store yields a NO-OP SequenceReset (NewSeqNo == the peer's already-expected
-    # seq), which QFJ consumes in its session layer and never surfaces to fromAdmin,
-    # so the transcript/golden cannot capture it. A sound, capturable cell needs a
-    # non-degenerate app-replay induction — harness feature work, not a defect fix.
-    # Phase 9.H follow-up (2026-06-18). (idle-cadence was un-deferred to live in the
-    # same follow-up via a count-tolerant cadence gate.)
-    "deferred:recovery-outbound-degenerate-induction",
+    # (recovery-outbound was un-deferred to live in the 9.H follow-up via a
+    # non-degenerate app-replay induction: fixpp sends a NewOrderSingle, QFJ rewinds
+    # its expected-target seqnum + ResendRequests it, fixpp REPLAYS the stored NOS
+    # with PossDup(43=Y) which reaches QFJ fromApp; idle-cadence likewise via a
+    # count-tolerant cadence gate. No recovery-outbound/idle-cadence deferred tags
+    # remain.)
 }
 
 
