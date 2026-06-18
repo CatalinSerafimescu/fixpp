@@ -41,6 +41,17 @@ DEFERRED_TAGS = {
     # variants are by-design not run; the QFj variants are live (reject-invalid-
     # admin via the cp_corrupt_admin 55=BAD induction). Phase 9.H step 2.
     "deferred:qfj-only-at-g1",
+    # recovery-outbound: the gtest's never-validated witness asserts peek_outbound
+    # advances after fixpp answers a ResendRequest, but resend replies reuse the
+    # replayed seqnums and do NOT advance the outbound counter (session.cpp:3406-
+    # 3408). Re-enabling is a feature-class follow-up (witness fix + non-degenerate
+    # induction + on-wire-answer confirmation). Phase 9.H step 6.
+    "deferred:recovery-outbound-witness-defect",
+    # idle-cadence: in-process witness passes, but the verbatim in-repo golden gate
+    # is non-deterministic at HeartBtInt=1s (unpredictable QFJ liveness TestRequests
+    # + a trailing-frame/Logout race → +-1 frame drift). Re-enabling needs a count-
+    # tolerant gate or a non-frame-count cadence witness. Phase 9.H step 6.
+    "deferred:idle-cadence-golden-nondeterministic",
 }
 
 
