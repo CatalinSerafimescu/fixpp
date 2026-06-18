@@ -45,9 +45,13 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <memory>
+#include <memory_resource>
 #include <string>
 #include <tuple>
 
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -178,9 +182,32 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     ASSERT_TRUE(endpoint.has_value())
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
+    // Phase 9.H (proxy_corrupt C2): the dictionary tables PMR-allocate on this
+    // resource; it is declared BEFORE `fx` so it outlives the session that holds
+    // cfg.dictionary (destruction is reverse-declaration order: fx, then dict_mr).
+    std::pmr::monotonic_buffer_resource dict_mr;
+
     fixpp::interop::InteropEngineFixture fx;
     auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
                                        *endpoint);
+
+    // ── Phase 9.H (proxy_corrupt C2): enable inbound dictionary validation ──
+    // The counterparty induces one out-of-context Symbol(55)=BAD on a 35=1
+    // TestRequest (INTEROP_CP_CORRUPT_ADMIN). With validate_inbound_messages +
+    // the production FIX44 dictionary, fixpp's validate gate flags the
+    // unexpected tag and emits Reject(35=3, 373=2) (S-007 path). The legit admin
+    // Logon validates cleanly — viability-proven on the bench by
+    // TableViewTest.Fix44ValidationSurfaceForProxyCorruptCell. The dictionary
+    // XML path is injected by the parent shim (run_interop_cell.py) as
+    // FIXPP_FIX44_DICT_XML; absent it (e.g. a non-shim direct run) the cell
+    // falls back to the default config and the golden gate skips.
+    if (const char* dict_xml = std::getenv("FIXPP_FIX44_DICT_XML");
+        dict_xml != nullptr && dict_xml[0] != '\0') {
+        auto loaded = fixpp::dict::XmlLoader{}.load(dict_xml, &dict_mr);
+        cfg.dictionary = std::make_shared<const fixpp::dict::Dictionary>(std::move(loaded));
+        cfg.validate_inbound_messages = true;
+    }
+
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";

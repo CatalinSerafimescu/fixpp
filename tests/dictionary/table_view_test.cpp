@@ -342,3 +342,39 @@ TEST(TableViewTest, FieldTypeFromDataTypeUtcTimestampMapsToString) {
     EXPECT_EQ(field_type_from_data_type(field_data_type::UtcDateOnly), field_type::String)
         << "UtcDateOnly must map to String";
 }
+
+// ── Phase 9.H (proxy_corrupt C2) viability gate ──────────────────────────────
+// The live `reject-invalid-admin` interop cell turns on validate_inbound_messages
+// against a live QuickFIX-J peer, using the production FIX44 dictionary. For that
+// to work the dictionary's validation surface must satisfy two properties:
+//   (a) every field QFJ's legitimate admin Logon carries (standard header tags +
+//       EncryptMethod(98)/HeartBtInt(108)/ResetSeqNumFlag(141)) is valid-for "A",
+//       so enabling inbound validation does NOT reject the live Logon (the session
+//       must still reach Active);
+//   (b) Symbol(55) is out-of-context on TestRequest(35=1) → the corrupt-admin
+//       induction (one 35=1 carrying 55=BAD) yields wire_unexpected_tag →
+//       Reject(35=3, 373=2).
+// Anchor: phases/phase-9/work-plan.md §9.H; captured legit frames at
+//   phase-9-harness/results/HP-QFj-*-reject-invalid-admin/counterparty-transcript.txt.
+TEST(TableViewTest, Fix44ValidationSurfaceForProxyCorruptCell) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto tv = dict.as_table_view();
+
+    // (a) Legit QFJ Logon(35=A) admin fields — all must validate, or the live
+    //     Logon would be rejected before the cell ever induces the corrupt frame.
+    for (std::uint16_t tag : {std::uint16_t{34}, std::uint16_t{49}, std::uint16_t{56},
+                              std::uint16_t{52}, std::uint16_t{98}, std::uint16_t{108},
+                              std::uint16_t{141}}) {
+        EXPECT_TRUE(tv.field_valid_for("A", tag))
+            << "Logon(35=A) tag " << tag << " must validate (else the live Logon is rejected)";
+    }
+    // Legit TestRequest(35=1) carries only TestReqID(112).
+    EXPECT_TRUE(tv.field_valid_for("1", 112))
+        << "TestReqID(112) must be valid on TestRequest";
+    // (b) The induction: Symbol(55) must be out-of-context on TestRequest.
+    EXPECT_FALSE(tv.field_valid_for("1", 55))
+        << "Symbol(55) must be out-of-context on TestRequest(35=1) for the "
+           "proxy_corrupt induction to yield Reject(35=3, 373=2)";
+}
