@@ -68,6 +68,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -97,8 +98,8 @@ struct Options {
     std::string workload = "wl-04-nos-er-small";
     std::string engine = "fixpp";
     std::string begin_string = "FIX.4.4";
-    int warmup_messages = 2000;
-    int measured_messages = 20000;
+    int warmup_messages = 0;    // 0 = unset → workload default resolved in main()
+    int measured_messages = 0;  // 0 = unset → workload default resolved in main()
     std::filesystem::path out;  // results directory (created if absent)
 };
 
@@ -242,6 +243,7 @@ std::vector<std::byte> make_er_payload() {
 struct PerfApp : public Application {
     fixpp::session::Engine* engine_ptr = nullptr;
     SessionId acceptor_id;
+    SessionId initiator_id;
     asio::any_io_executor exec;
     std::vector<std::byte> er_payload = make_er_payload();
 
@@ -258,8 +260,35 @@ struct PerfApp : public Application {
     std::uint64_t er_received = 0;     // guarded by mtx
     long long last_er_recv_ns = 0;     // guarded by mtx; steady_clock ns of last ER
 
+    // Idle-liveness (wl-03): inter-heartbeat intervals observed on the INITIATOR
+    // leg. Same cv-signalled discipline as the ER path (mirrors the QFcpp
+    // heartbeat_intervals_us_ deque + wait_for_heartbeat_interval).
+    std::mutex hb_mtx;
+    std::condition_variable hb_cv;
+    std::deque<double> hb_intervals_us;  // guarded by hb_mtx
+    long long last_hb_ns = 0;            // guarded by hb_mtx
+
     void onLogon(const SessionId& /*id*/) override {
         logon_count.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    fixpp::core::expected_t<void> fromAdmin(const MessageView<access_mode::Index>& msg,
+                                            const SessionId& id) override {
+        // SCHEMA: wl-03 records inter-heartbeat intervals "on the initiator
+        // side". One Application serves both sessions → filter by initiator_id.
+        if (msg.msg_type() == "0" && id == initiator_id) {
+            const long long now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         Clock::now().time_since_epoch())
+                                         .count();
+            {
+                std::lock_guard<std::mutex> lk(hb_mtx);
+                if (last_hb_ns != 0)
+                    hb_intervals_us.push_back(static_cast<double>(now_ns - last_hb_ns) / 1000.0);
+                last_hb_ns = now_ns;
+            }
+            hb_cv.notify_one();
+        }
+        return {};
     }
 
     fixpp::core::expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
@@ -337,7 +366,10 @@ void write_summary_json(const std::filesystem::path& dir, const Options& o, cons
       << "}\n";
 }
 
-void write_run_config_yaml(const std::filesystem::path& dir, const Options& o) {
+// `mode_lines` carries the workload-specific keys (e.g. outstanding_depth /
+// heartbeat_interval_s + mps_note), inserted after the common block.
+void write_run_config_yaml(const std::filesystem::path& dir, const Options& o,
+                           std::string_view mode_lines) {
     std::ofstream f(dir / "run-config.yaml");
     f << "workload_id: " << o.workload << "\n"
       << "engine: " << o.engine << "\n"
@@ -346,10 +378,7 @@ void write_run_config_yaml(const std::filesystem::path& dir, const Options& o) {
       << "tls: on            # fixpp is TLS-only; QF tls:off rows are plaintext\n"
       << "topology: homogeneous-self-pairing (fixpp-init <-> fixpp-acc, loopback)\n"
       << "security_profile: mtls_ca\n"
-      << "outstanding_depth: 1\n"
-      << "mps_note: depth-1 closed loop, so messages_per_second ~= 1/RTT "
-      << "(response-rate bounded, not peak throughput); cv-signalled wait, "
-      << "symmetric with the QFcpp runner\n"
+      << mode_lines
       << "warmup_messages: " << o.warmup_messages << "\n"
       << "measured_messages: " << o.measured_messages << "\n"
       << "host_class: WSL2 (non-isolated, indicative only)\n"
@@ -358,6 +387,121 @@ void write_run_config_yaml(const std::filesystem::path& dir, const Options& o) {
       << "  tls:off rows are plaintext; WSL2 is not core-isolated. NOT an\n"
       << "  apples-to-apples engine comparison (see benchmark-readiness.md #3/#4).\n";
 }
+
+// Write the HdrHistogram percentile log (standard .hgrm; readable by hdr tools).
+void write_hgrm(const std::filesystem::path& dir, hdr_histogram* hist) {
+    if (FILE* hf = std::fopen((dir / "latency.hgrm").string().c_str(), "w")) {
+        hdr_percentiles_print(hist, hf, 5, 1.0, CLASSIC);
+        std::fclose(hf);
+    }
+}
+
+// ── LoopbackHarness — engine + fixpp-init/acc sessions over loopback TLS ──────
+//
+// Brings up one Engine driving an initiator + acceptor session of fixpp's own
+// kind over a real loopback mTLS socket, drives both to Active single-threaded,
+// then hands the io_context to 2 worker threads. Shared by every self-paired
+// workload (wl-03/04/05/07/08). Threading discipline (project memory): NO
+// ioc.restart() once workers run; work_guard keeps run() alive; Engine::stop()
+// is co_awaited (drains callbacks) before the workers join.
+struct LoopbackHarness {
+    asio::io_context ioc;
+    std::shared_ptr<PerfApp> app = std::make_shared<PerfApp>();
+    std::shared_ptr<fixpp::core::system_clock_source> clock_src;
+    std::shared_ptr<fixpp::transport::TransportFactory> factory;
+    std::optional<fixpp::session::Engine> engine;  // Engine is non-movable → emplace in place
+    SessionId ini_id;
+    SessionId acc_id;
+    std::optional<asio::executor_work_guard<asio::io_context::executor_type>> wg;
+    std::thread t1;
+    std::thread t2;
+    bool established = false;
+
+    // Returns false ONLY when the TLS fixtures are absent (caller emits skip).
+    // Otherwise true; check `established` for whether both sessions reached
+    // Active. The caller MUST call teardown() on any non-skip path.
+    bool bring_up(const Options& o, int heartbeat_secs, const char* dir) {
+        factory = make_tls_factory(dir);
+        if (factory == nullptr) return false;
+        clock_src = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+
+        fixpp::core::EngineConfig ecfg;
+        ecfg.executor = ioc.get_executor();
+        ecfg.application = app;
+        ecfg.clock = clock_src;
+        ecfg.default_store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>();
+        engine.emplace(ioc.get_executor(), std::move(ecfg));
+
+        const std::uint16_t port = reserve_free_port(ioc);
+        auto make_cfg = [&](const char* sender, const char* target,
+                            fixpp::session::session_role role, const char* peer) {
+            fixpp::session::SessionConfig c;
+            c.sender_comp_id = sender;
+            c.target_comp_id = target;
+            c.begin_string = o.begin_string;
+            c.role = role;
+            c.executor_override = ioc.get_executor();
+            c.security_profile = fixpp::session::SecurityProfile{
+                fixpp::session::SecurityProfile::kind::mtls_ca};
+            c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
+            c.dictionary = fixpp::test_support::make_minimal_dictionary();
+            c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            c.transport_factory_override = factory;
+            c.heartbeat_interval = std::chrono::seconds{heartbeat_secs};
+            c.logout_disconnect_timeout_ms = 2000;
+            c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
+            c.transport_send = [](std::span<const std::byte>) {};
+            return c;
+        };
+        auto acc_cfg = make_cfg("FIXPP_ACC", "FIXPP_INIT",
+                                fixpp::session::session_role::acceptor, "FIXPP_INIT");
+        auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC",
+                                fixpp::session::session_role::initiator, "FIXPP_ACC");
+        acc_id = SessionId::from_config(acc_cfg);
+        ini_id = SessionId::from_config(ini_cfg);
+
+        app->engine_ptr = &*engine;
+        app->acceptor_id = acc_id;
+        app->initiator_id = ini_id;
+        app->exec = ioc.get_executor();
+
+        const bool reg_start_ok =
+            engine->register_session(std::move(acc_cfg)).has_value() &&
+            engine->register_session(std::move(ini_cfg)).has_value() &&
+            engine->start().has_value();
+
+        if (reg_start_ok) {
+            // Establishment — single-threaded drive (NO worker threads yet; an
+            // ioc.restart() while workers run ioc.run() is asio UB).
+            auto deadline = Clock::now() + 10s;
+            while (app->logon_count.load(std::memory_order_acquire) < 2 &&
+                   Clock::now() < deadline) {
+                ioc.run_for(50ms);
+                ioc.restart();
+            }
+            established = app->logon_count.load(std::memory_order_acquire) >= 2;
+        }
+
+        // Hand the io_context to worker threads (uniform teardown via stop()).
+        wg.emplace(asio::make_work_guard(ioc));
+        t1 = std::thread{[this] { ioc.run(); }};
+        t2 = std::thread{[this] { ioc.run(); }};
+        return true;
+    }
+
+    void teardown() {
+        if (engine.has_value()) {
+            auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
+            auto sdl = Clock::now() + 10s;
+            while (stop_fut.wait_for(0ms) != std::future_status::ready && Clock::now() < sdl)
+                std::this_thread::sleep_for(1ms);
+            if (stop_fut.wait_for(0ms) == std::future_status::ready) stop_fut.get();
+        }
+        if (wg.has_value()) wg->reset();
+        if (t1.joinable()) t1.join();
+        if (t2.joinable()) t2.join();
+    }
+};
 
 // ── closed-loop NOS→ER (wl-04 plain / wl-05 grouped) ─────────────────────────
 
@@ -368,84 +512,16 @@ int run_closed_loop(const Options& o) {
         return 3;
     }
 
-    asio::io_context ioc;
-    const std::uint16_t port = reserve_free_port(ioc);
-
-    auto factory = make_tls_factory(dir);
-    if (factory == nullptr) {
+    LoopbackHarness h;
+    if (!h.bring_up(o, 30, dir)) {
         std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
         return 3;
     }
-
-    auto app = std::make_shared<PerfApp>();
-
-    fixpp::core::EngineConfig ecfg;
-    ecfg.executor = ioc.get_executor();
-    ecfg.application = app;
-    ecfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    ecfg.default_store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>();
-
-    fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
-
-    auto make_cfg = [&](const char* sender, const char* target,
-                        fixpp::session::session_role role, const char* peer_compid) {
-        fixpp::session::SessionConfig c;
-        c.sender_comp_id = sender;
-        c.target_comp_id = target;
-        c.begin_string = o.begin_string;
-        c.role = role;
-        c.executor_override = ioc.get_executor();
-        c.security_profile =
-            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
-        c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer_compid);
-        c.dictionary = fixpp::test_support::make_minimal_dictionary();
-        c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-        c.transport_factory_override = factory;
-        c.heartbeat_interval = std::chrono::seconds{30};
-        c.logout_disconnect_timeout_ms = 2000;
-        c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
-        c.transport_send = [](std::span<const std::byte>) {};
-        return c;
-    };
-
-    auto acc_cfg =
-        make_cfg("FIXPP_ACC", "FIXPP_INIT", fixpp::session::session_role::acceptor, "FIXPP_INIT");
-    auto ini_cfg =
-        make_cfg("FIXPP_INIT", "FIXPP_ACC", fixpp::session::session_role::initiator, "FIXPP_ACC");
-    const auto acc_id = SessionId::from_config(acc_cfg);
-    const auto ini_id = SessionId::from_config(ini_cfg);
-
-    if (!engine.register_session(std::move(acc_cfg)).has_value() ||
-        !engine.register_session(std::move(ini_cfg)).has_value()) {
-        std::cerr << "register_session failed\n";
+    if (!h.established) {
+        std::cerr << "sessions did not reach Active within 10s\n";
+        h.teardown();
         return 1;
     }
-    if (!engine.start().has_value()) {
-        std::cerr << "engine.start() failed\n";
-        return 1;
-    }
-
-    app->engine_ptr = &engine;
-    app->acceptor_id = acc_id;
-    app->exec = ioc.get_executor();
-
-    // ── Establishment: single-thread drive until both sessions reach Active ──
-    {
-        auto deadline = Clock::now() + 10s;
-        while (app->logon_count.load(std::memory_order_acquire) < 2 && Clock::now() < deadline) {
-            ioc.run_for(50ms);
-            ioc.restart();
-        }
-        if (app->logon_count.load(std::memory_order_acquire) < 2) {
-            std::cerr << "sessions did not reach Active within 10s\n";
-            return 1;
-        }
-    }
-
-    // ── Worker threads own the io_context from here (no more restart()) ──
-    auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc] { ioc.run(); }};
-    std::thread t2{[&ioc] { ioc.run(); }};
 
     const auto nos =
         (o.workload == "wl-05-nos-er-medium-groups") ? make_nos_grouped_payload() : make_nos_payload();
@@ -459,14 +535,14 @@ int run_closed_loop(const Options& o) {
     // lock across co_spawn is safe: the send coroutine never touches `mtx`, and
     // fromApp's notify can't be lost (cv.wait_for releases the lock atomically).
     auto round_trip = [&]() -> long long {
-        std::unique_lock<std::mutex> lk(app->mtx);
-        const std::uint64_t prev = app->er_received;
+        std::unique_lock<std::mutex> lk(h.app->mtx);
+        const std::uint64_t prev = h.app->er_received;
         const auto t0 = Clock::now();
-        asio::co_spawn(ioc.get_executor(),
-                       engine.send(ini_id, std::span<const std::byte>(nos)), asio::detached);
-        const bool ok = app->cv.wait_for(lk, 5s, [&] { return app->er_received > prev; });
+        asio::co_spawn(h.ioc.get_executor(),
+                       h.engine->send(h.ini_id, std::span<const std::byte>(nos)), asio::detached);
+        const bool ok = h.app->cv.wait_for(lk, 5s, [&] { return h.app->er_received > prev; });
         if (!ok) return -1;
-        const long long recv_ns = app->last_er_recv_ns;
+        const long long recv_ns = h.app->last_er_recv_ns;
         const long long t0_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count();
         return recv_ns - t0_ns;
@@ -477,7 +553,8 @@ int run_closed_loop(const Options& o) {
     for (int i = 0; i < o.warmup_messages; ++i) {
         if (round_trip() < 0) {
             std::cerr << "warmup stalled at msg " << i << "\n";
-            wg.reset(); t1.join(); t2.join();
+            h.teardown();
+            hdr_close(hist);
             return 1;
         }
     }
@@ -496,17 +573,7 @@ int run_closed_loop(const Options& o) {
     }
     const double run_seconds = std::chrono::duration<double>(Clock::now() - run_start).count();
 
-    // ── Teardown: drain the engine BEFORE releasing the guard / joining ──
-    {
-        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine.stop(), asio::use_future);
-        auto sdl = Clock::now() + 10s;
-        while (stop_fut.wait_for(0ms) != std::future_status::ready && Clock::now() < sdl)
-            std::this_thread::sleep_for(1ms);
-        if (stop_fut.wait_for(0ms) == std::future_status::ready) stop_fut.get();
-    }
-    wg.reset();
-    t1.join();
-    t2.join();
+    h.teardown();
 
     RunResult r;
     r.measured_messages = recorded;
@@ -521,13 +588,12 @@ int run_closed_loop(const Options& o) {
 
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
-    write_run_config_yaml(o.out, o);
-
-    // latency.hgrm — standard HdrHistogram percentile log (readable by hdr tools).
-    if (FILE* hf = std::fopen((o.out / "latency.hgrm").string().c_str(), "w")) {
-        hdr_percentiles_print(hist, hf, 5, 1.0, CLASSIC);
-        std::fclose(hf);
-    }
+    write_run_config_yaml(o.out, o,
+        "outstanding_depth: 1\n"
+        "mps_note: depth-1 closed loop, so messages_per_second ~= 1/RTT "
+        "(response-rate bounded, not peak throughput); cv-signalled wait, "
+        "symmetric with the QFcpp runner\n");
+    write_hgrm(o.out, hist);
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
@@ -555,14 +621,129 @@ int run_closed_loop(const Options& o) {
     return 0;
 }
 
+// ── idle heartbeat (wl-03) ───────────────────────────────────────────────────
+//
+// HeartBtInt=1s; the initiator observes the acceptor's Heartbeats via fromAdmin.
+// Latency = inter-heartbeat interval (µs); mps = observed heartbeat cadence over
+// the window. Mirrors the QFcpp run_idle_heartbeat_benchmark (1s HeartBtInt,
+// wait_for_heartbeat_interval). NOTE: each sample takes ~1s of wall-clock, so the
+// counts are small by default (see main()'s workload-default resolution).
+int run_idle_heartbeat(const Options& o) {
+    const char* dir = fixture_dir();
+    if (dir == nullptr || dir[0] == '\0') {
+        std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
+        return 3;
+    }
+
+    LoopbackHarness h;
+    if (!h.bring_up(o, 1, dir)) {  // 1s heartbeat interval
+        std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
+        return 3;
+    }
+    if (!h.established) {
+        std::cerr << "sessions did not reach Active within 10s\n";
+        h.teardown();
+        return 1;
+    }
+
+    hdr_histogram* hist = nullptr;
+    hdr_init(1, 60'000'000, 3, &hist);  // 1 µs .. 60 s, 3 sig figs
+
+    // Pop the next inter-heartbeat interval (µs), cv-signalled. -1 on timeout.
+    auto next_interval = [&]() -> double {
+        std::unique_lock<std::mutex> lk(h.app->hb_mtx);
+        const bool ok =
+            h.app->hb_cv.wait_for(lk, 5s, [&] { return !h.app->hb_intervals_us.empty(); });
+        if (!ok) return -1.0;
+        const double v = h.app->hb_intervals_us.front();
+        h.app->hb_intervals_us.pop_front();
+        return v;
+    };
+
+    const auto warmup_start = Clock::now();
+    for (int i = 0; i < o.warmup_messages; ++i) {
+        if (next_interval() < 0) {
+            std::cerr << "no heartbeat within 5s at warmup " << i << "\n";
+            h.teardown();
+            hdr_close(hist);
+            return 1;
+        }
+    }
+    const double warmup_seconds =
+        std::chrono::duration<double>(Clock::now() - warmup_start).count();
+
+    const auto run_start = Clock::now();
+    int recorded = 0;
+    for (int i = 0; i < o.measured_messages; ++i) {
+        const double iv_us = next_interval();
+        if (iv_us < 0) break;
+        hdr_record_value(hist, std::max<long long>(1, static_cast<long long>(iv_us)));
+        ++recorded;
+    }
+    const double run_seconds = std::chrono::duration<double>(Clock::now() - run_start).count();
+
+    h.teardown();
+
+    RunResult r;
+    r.measured_messages = recorded;
+    r.warmup_messages = o.warmup_messages;
+    r.run_seconds = run_seconds;
+    r.warmup_seconds = warmup_seconds;
+    r.messages_per_second = (run_seconds > 0.0) ? recorded / run_seconds : 0.0;
+    r.p50_us = hdr_value_at_percentile(hist, 50.0);
+    r.p99_us = hdr_value_at_percentile(hist, 99.0);
+    r.p999_us = hdr_value_at_percentile(hist, 99.9);
+    r.peak_rss_mb = peak_rss_mb();
+
+    std::filesystem::create_directories(o.out);
+    write_summary_json(o.out, o, r);
+    write_run_config_yaml(o.out, o,
+        "heartbeat_interval_s: 1\n"
+        "mps_note: idle-liveness; latency = inter-heartbeat interval (initiator "
+        "side); messages_per_second = observed heartbeat cadence (~1/HeartBtInt)\n");
+    write_hgrm(o.out, hist);
+
+    std::ofstream log(o.out / "stdout.log");
+    log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
+        << "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback TLS\n"
+        << "persistence_mode=memory-store\n"
+        << "INDICATIVE ONLY: over-TLS vs QF tls:off plaintext; WSL2 non-isolated host.\n"
+        << "begin_string=" << o.begin_string << " security_profile=mtls_ca heartbeat_interval_s=1\n"
+        << "warmup_heartbeats=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
+        << "measured_heartbeats=" << recorded << " (" << run_seconds << " s)\n"
+        << "heartbeat_cadence_per_s=" << r.messages_per_second << "\n"
+        << "inter_heartbeat_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
+        << "\n"
+        << "peak_rss_mb=" << r.peak_rss_mb << "\n"
+        << "sample=35=0 Heartbeat (initiator-observed inter-arrival)\n";
+
+    std::cout << "[fixpp-perf] " << o.workload << " cadence/s=" << r.messages_per_second
+              << " interval_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
+              << " recorded=" << recorded << " → " << o.out << "\n";
+
+    hdr_close(hist);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    const Options o = parse_args(argc, argv);
+    Options o = parse_args(argc, argv);
+    const bool heartbeat = (o.workload == "wl-03-admin-idle-heartbeat");
+    // Resolve workload-appropriate defaults when counts were not passed. wl-03
+    // heartbeats arrive ~1/s, so its defaults are small (a 20000-sample run
+    // would take ~5.5 h); the closed loop is fast so it gets large defaults.
+    if (o.warmup_messages == 0) o.warmup_messages = heartbeat ? 3 : 2000;
+    if (o.measured_messages == 0) o.measured_messages = heartbeat ? 15 : 20000;
+
     if (o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups") {
         return run_closed_loop(o);
     }
+    if (heartbeat) {
+        return run_idle_heartbeat(o);
+    }
     std::cerr << "workload not implemented: " << o.workload
-              << " (have: wl-04-nos-er-small, wl-05-nos-er-medium-groups)\n";
+              << " (have: wl-03-admin-idle-heartbeat, wl-04-nos-er-small, "
+                 "wl-05-nos-er-medium-groups)\n";
     return 2;
 }
