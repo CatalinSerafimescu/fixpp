@@ -42,7 +42,7 @@ write is therefore keyed to each site where `check_inbound` **advanced** the man
 |----------------------|---------------------------|-------------|
 | Acceptor Logon (`NotConnected`, `:1596`) — in-seq | yes | **PERSIST** (after the reply Logon / Active) |
 | Initiator Logon-ack (`LogonSent`, `:2841`) — in-seq | yes | **PERSIST** (after Active) |
-| Heartbeat (`:2568`) | yes | **PERSIST** (after echo) |
+| Heartbeat (`:2568`) | yes | **PERSIST** (after liveness processing; no emit) <!-- [PR #136] inbound-Heartbeat echo retired; no outbound Heartbeat is emitted on inbound Heartbeat --> |
 | TestRequest (`:2605`) | yes | **PERSIST** (after reply) |
 | ResendRequest (`:2634`) | yes | **PERSIST** (after reply) |
 | Logout (`:2463`) | yes | **PERSIST** (after `fromAdmin`, **before** `record_state_transition_(Disconnected)` at `:2462` — store_ is still live; the session is in its prior state when the persist runs) |

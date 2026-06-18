@@ -21,6 +21,13 @@ application frame — `35=j` — NOT counted as admin). Of the 10 unwired: 9 adm
 unwired = 25.** (An earlier draft inherited "26 / 16" verbatim from the Fable assessment without
 re-counting; the grep above is the authoritative count.) The **10 unobserved** sites are the scope:
 
+> **[PR #136 amendment — 2026-06-18]** The inbound-Heartbeat echo build+`fire_to_admin_` site
+> (old `session.cpp:3064`/`:3071`/`:3076`) was retired by PR #136 (`fix/no-heartbeat-echo-on-inbound-heartbeat`).
+> Post-PR #136, the census counts are **14 wired / 24 `build_*`** (14 wired + 10 unwired = 24).
+> The `:3071` referent in the census list above now refers **only** to the surviving
+> TestRequest(35=1)→Heartbeat reply site; the inbound-Heartbeat echo site no longer exists.
+> This census is a point-in-time Phase-0 record; the arithmetic above is preserved as-is.
+
 | # | Site (HEAD) | Frame | Trigger / context | Arm | Fix |
 |---|---|---|---|---|---|
 | 1 | `emit_session_reject_` helper `:1728` (build_reject `:1736`; callers `:3026`, `:3215`) | `Reject(35=3)` | fromAdmin-veto reject **and** no-`Application` unknown-MsgType reject | ADMIN | `fire_to_admin_` between `assign_outbound` `:1742` and `store_then_emit` `:1747` |
@@ -53,6 +60,9 @@ wired Logouts/Heartbeats fire BEFORE it (e.g. the Q3
 Logout `:2421` build / `:2428` fire / `:2433` assign; the ArmD Logout `:2696`/`:2701`/`:2706`; the
 Heartbeat echo `:3064`/`:3071`/`:3076`). So this is NOT a "byte-identical to all 15 wired sites"
 match — it matches exactly the one 1137-Reject site.
+<!-- [PR #136 amendment] "Heartbeat echo `:3064`/`:3071`/`:3076`" refers to the inbound-Heartbeat
+     echo site retired by PR #136. Post-PR #136 the wired count is 14 (not 15); the surviving
+     Heartbeat emit at `:3071` is the TestRequest(35=1)→Heartbeat reply, not an echo. -->
 
 **Decision**: adopt the 1137-Reject `assign`-then-`fire` shape at all 9 admin sites. The choice is
 **behaviourally immaterial** for the admin arm: `toAdmin` is **inspect-only / not vetoable**
