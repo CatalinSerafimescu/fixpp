@@ -35,6 +35,12 @@ DEFERRED_TAGS = {
     # fixpp's receive-path PossDup tolerance is proven engine-independently via
     # the 4 PD-QFj-* cells + test_inbound_poss_dup_tolerance.cpp.
     "deferred:qfcpp-no-possdup-injection",
+    # testrequest-echo + reject-invalid-admin are QFj-only at G1: the gtest
+    # GTEST_SKIPs non-QFj (the inbound-silence / proxy_corrupt induction seams are
+    # only configured in the QFJ parent harness, T020 [PARENT]). The 4 QFcpp
+    # variants are by-design not run; the QFj variants are live (reject-invalid-
+    # admin via the cp_corrupt_admin 55=BAD induction). Phase 9.H step 2.
+    "deferred:qfj-only-at-g1",
 }
 
 
