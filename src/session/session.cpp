@@ -939,6 +939,41 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // gate-b/r2 FQ-4 (043 T023 / FR-008): effective-factory kind() consistency reject.
+    // Hoisted here — BEFORE any observable mutation — per the documented contract at
+    // line 880-881. The T023 reject originally sat AFTER `state_ = lifecycle::open`
+    // (line 1151), violating the RC#2 P2.2 ordering invariant and leaking is_open()==true
+    // on a failed open().
+    //
+    // Resolution follows the same three-way logic as the post-mutation block (Step 2):
+    //   - insecure_plain_tcp + no override → auto-derive builds a plaintext factory
+    //     (kind()==plaintext always matches) → NO check needed (skip the else).
+    //   - else → effective factory = override ?: engine_default; check if present.
+    //
+    // This is EXACTLY equivalent to the current Step 3 logic (lines 1230-1237) because
+    // in the auto-derive case the engine_default is never consulted even if present.
+    // The insecure_plain_tcp+no-override+TLS-engine-default case is valid and must NOT
+    // reject here — the auto-derive factory takes precedence over the engine default.
+    // Only a PRESENT factory whose kind() disagrees with the profile is rejected.
+    // [043 T023; data-model §E-6; spec.md FR-008; D-6 step 3; research.md D-5]
+    {
+        const auto k_early = cfg_.security_profile.k;
+        if (!(is_insecure_plain_tcp(k_early) && !cfg_.transport_factory_override)) {
+            // Not the auto-derive path: check override ?: engine_default if present.
+            const auto* eff_early = cfg_.transport_factory_override
+                                        ? cfg_.transport_factory_override.get()
+                                        : engine_.default_transport_factory.get();
+            if (eff_early) {
+                using TFK = fixpp::transport::transport_security_kind;
+                const TFK required_early =
+                    is_insecure_plain_tcp(k_early) ? TFK::plaintext : TFK::tls;
+                if (eff_early->kind() != required_early) {
+                    co_return std::unexpected(error::invalid_session_config);
+                }
+            }
+        }
+    }
+
     // gate-b/r1 FQ-1 (findings #1 + #2) + 042 (#3): FIXT.1.1 config validation.
     //
     // #1 (P1): begin_string=="FIXT.1.1" with no default_appl_ver_id → is_fixt()
@@ -1219,22 +1254,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
 
         // Step 3 (T023 / US3 / FR-008): effective-factory kind() consistency reject.
-        // Require the effective factory's kind() to match the profile category:
-        //   insecure_plain_tcp → kind() must be plaintext
-        //   TLS profile (mtls_ca / mtls_pinned / one_way_ca) → kind() must be tls
-        // Null effective_transport_factory_ (TLS profile, no override, no engine default)
-        // is the test-only path where the FSM null-guard fires at reconnect time — do NOT
-        // reject here (it would break existing tests that open() TLS sessions with no
-        // factory set). Only reject on a PRESENT factory whose kind disagrees with the
-        // profile. [data-model §E-6; spec.md FR-008; D-6 step 3; research.md D-5; 043 T023]
-        if (effective_transport_factory_) {
-            using TFK = fixpp::transport::transport_security_kind;
-            const bool profile_wants_plaintext = is_insecure_plain_tcp(k);
-            const TFK required_kind = profile_wants_plaintext ? TFK::plaintext : TFK::tls;
-            if (effective_transport_factory_->kind() != required_kind) {
-                co_return std::unexpected(error::invalid_session_config);
-            }
-        }
+        // MOVED to the pre-mutation config-reject block at ~line 940 (gate-b/r2 FQ-4).
+        // The reject is now a pure local-variable validation before state_ = lifecycle::open,
+        // preserving the RC#2 P2.2 ordering contract.
 
         // Step 4: wire the resolved factory into the FSM.
         reconnect_fsm_.set_transport_factory(effective_transport_factory_.get());

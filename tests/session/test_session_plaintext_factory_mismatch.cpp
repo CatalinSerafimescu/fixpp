@@ -166,6 +166,25 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (a): expected error::invalid_session_config (slot 53); "
            "got error=" << static_cast<int>(val.error());
+
+    // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
+    // The T023 reject was originally AFTER state_=lifecycle::open (bug); post-fix
+    // it is before any observable mutation, so is_open() must be false.
+    EXPECT_FALSE(s.is_open())
+        << "Cell (a) FQ-5: failed open() must NOT leave session observable as open "
+           "(is_open() reads state_==lifecycle::open; fix hoists T023 reject before state flip)";
+    // close() on a never-opened session must return session_already_closed (not teardown).
+    // Proves state_==never_opened, not lifecycle::open (which would run full two-phase teardown).
+    ioc.restart();
+    auto close_fut_a = asio::co_spawn(ioc, s.close(), asio::use_future);
+    ioc.run();
+    auto close_r_a = close_fut_a.get();
+    ASSERT_FALSE(close_r_a.has_value())
+        << "Cell (a) FQ-5: close() on a never-opened session must return an error";
+    EXPECT_EQ(close_r_a.error(), error::session_already_closed)
+        << "Cell (a) FQ-5: close() must return session_already_closed (state==never_opened), "
+           "not run teardown (which would indicate state==open was leaked). "
+           "Got error=" << static_cast<int>(close_r_a.error());
 }
 
 // Cell (b): TLS profile (mtls_ca) + explicit plaintext factory override.
@@ -198,6 +217,19 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (b): expected error::invalid_session_config; "
            "got error=" << static_cast<int>(val.error());
+
+    // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
+    EXPECT_FALSE(s.is_open())
+        << "Cell (b) FQ-5: failed open() must NOT leave session observable as open";
+    ioc.restart();
+    auto close_fut_b = asio::co_spawn(ioc, s.close(), asio::use_future);
+    ioc.run();
+    auto close_r_b = close_fut_b.get();
+    ASSERT_FALSE(close_r_b.has_value())
+        << "Cell (b) FQ-5: close() on a never-opened session must return an error";
+    EXPECT_EQ(close_r_b.error(), error::session_already_closed)
+        << "Cell (b) FQ-5: close() must return session_already_closed (state==never_opened). "
+           "Got error=" << static_cast<int>(close_r_b.error());
 }
 
 // Cell (c): TLS profile + NO session override + plaintext engine-default factory.
@@ -245,6 +277,23 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (c): expected error::invalid_session_config (the effective-factory "
            "mismatch reject); got error=" << static_cast<int>(val.error());
+
+    // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
+    // Cell (c) is the effective-factory case — the original T023 reject was AFTER
+    // state_=lifecycle::open, so WITHOUT the fix this cell leaks is_open()==true.
+    EXPECT_FALSE(s.is_open())
+        << "Cell (c) FQ-5: failed open() must NOT leave session observable as open. "
+           "This is the discriminating cell: before FQ-4 the T023 reject was AFTER "
+           "state_=open → is_open()==true leaked; after FQ-4 it is before → false.";
+    ioc.restart();
+    auto close_fut_c = asio::co_spawn(ioc, s.close(), asio::use_future);
+    ioc.run();
+    auto close_r_c = close_fut_c.get();
+    ASSERT_FALSE(close_r_c.has_value())
+        << "Cell (c) FQ-5: close() on a never-opened session must return an error";
+    EXPECT_EQ(close_r_c.error(), error::session_already_closed)
+        << "Cell (c) FQ-5: close() must return session_already_closed (state==never_opened). "
+           "Got error=" << static_cast<int>(close_r_c.error());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
