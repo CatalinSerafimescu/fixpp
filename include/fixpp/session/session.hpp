@@ -508,6 +508,16 @@ public:
     // A plain bool accessor; adds no include edge → [const §XV.9]-safe.
     // NOT for production use. [041 T016; SC-005; FR-002]
     [[nodiscard]] bool has_validator_for_test() const noexcept { return validator_ != nullptr; }
+
+    // TEST-ONLY accessor: returns true iff live_peer_id_ has a value.
+    // Used by 043 T008 to directly assert that install_reconnected_transport and
+    // attach_accepted_transport leave live_peer_id_ == nullopt on insecure_plain_tcp
+    // (D-10 MUST — fail-closed-by-construction). A plain bool avoids any new include
+    // edge ([const §XV.9]-safe; peer_identity is already transitively pulled in via
+    // the private member at line ~958). NOT for production use. [043 T008; D-10]
+    [[nodiscard]] bool live_peer_id_has_value_for_test() const noexcept {
+        return live_peer_id_.has_value();
+    }
 #endif
 
     // 015 T011 — Engine-internal acceptor attach primitive.
@@ -991,6 +1001,20 @@ private:
     bool teardown_reset_done_ = false;
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
+    // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.
+    // Populated ONCE at open() to the effective factory:
+    //   - insecure_plain_tcp + no override → built-in asio_plain_transport_factory
+    //     (auto-derive, D-4).
+    //   - Otherwise → transport_factory_override ? transport_factory_override
+    //                                            : engine_.default_transport_factory
+    //     (existing TLS resolution, preserved).
+    // The SAME object used for BOTH the FR-008 kind()-check (US3/T023) AND the FSM
+    // reconnect-mint (via set_transport_factory, E-5). Declared BEFORE reconnect_fsm_
+    // so the owning shared_ptr outlives the FSM's non-owning factory_ raw pointer
+    // (destruction order = reverse of declaration; honours reconnect_fsm.hpp:239
+    // "factory outlives this FSM" contract). Null until open(). [data-model §E-6; D-6]
+    std::shared_ptr<fixpp::transport::TransportFactory> effective_transport_factory_;
+
     // Owns the AwaitingResend transient bool (NOT a new fsm_state per D-1),
     // the ResendState, and FR-001..FR-016 recovery state. Constructed from
     // cfg_.transport_factory_override (non-owning raw ptr), cfg_.reconnect_policy,

@@ -1948,6 +1948,15 @@ add_threading_test(session_interpret_logon_overflow
 set_tests_properties(session_interpret_logon_overflow PROPERTIES
   LABELS "040;sc001;overflow-hardening;foundational")
 
+# ── 043-plaintext-tcp-transport — [const §XII.7] inbound EncryptMethod(98) ban ─
+# Closes the pre-existing §XII.7 inbound gap (S-021 "inbound 98≠0 not handled" /
+# TC-017): interpret_logon now rejects a Logon carrying EncryptMethod(98)≠0,
+# present-but-malformed fail-closed, for ALL profiles. FR-009.
+add_threading_test(session_interpret_logon_encrypt_method
+  test_interpret_logon_encrypt_method.cpp)
+set_tests_properties(session_interpret_logon_encrypt_method PROPERTIES
+  LABELS "043;fr009;xii7;encrypt-method")
+
 # ── 041-validation-gate-wiring T003/T004 — fail-closed config gate ──────────
 # C-5 / FR-011 / data-model E-1: register_session rejects
 #   validate_inbound_messages=true + null dictionary with invalid_session_config.
@@ -2022,6 +2031,163 @@ target_include_directories(engine_clock_gate_test PRIVATE
 add_test(NAME engine_clock_gate COMMAND engine_clock_gate_test)
 set_tests_properties(engine_clock_gate PROPERTIES
   LABELS "041;t017;t018;us3;clock-gate;session")
+
+# ── 043-plaintext-tcp-transport T007 — SC-001 end-to-end round-trip ──────────
+# T007: plaintext acceptor (insecure_plain_tcp, driven through run_accept_loop)
+# + standalone plain-TCP initiator complete a FIX Logon over a loopback socket.
+# Exercises all three E-7 acceptor sites (profile-map arm, plaintext accept-factory,
+# post-accept handshake skip). No FIXPP_TLS_FIXTURE_DIR needed — plaintext sessions
+# require no cert files.
+# CTest filter: ctest -R 'session_plaintext_roundtrip'
+add_executable(session_plaintext_roundtrip_test
+  test_session_plaintext_roundtrip.cpp
+)
+target_link_libraries(session_plaintext_roundtrip_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_roundtrip_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME session_plaintext_roundtrip COMMAND session_plaintext_roundtrip_test)
+set_tests_properties(session_plaintext_roundtrip PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;t007;us1;plaintext;roundtrip;live_plain")
+
+# ── 043-plaintext-tcp-transport T008 — SC-004 authorization-inert witness ────
+# T008: on insecure_plain_tcp — authorize() not called, live_peer_id_==nullopt,
+# check_comp_id still rejects mismatched CompIDs, FR-009 EncryptMethod!=0 rejected.
+# Uses FIXPP_TEST_HOOKS for session-internal test accessors (authorize_call_count,
+# live_peer_id_has_value, cfg_for_test).
+# CTest filter: ctest -R 'session_plaintext_authz'
+add_executable(session_plaintext_authz_test
+  test_session_plaintext_authz.cpp
+)
+target_link_libraries(session_plaintext_authz_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_authz_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_plaintext_authz_test PRIVATE
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME session_plaintext_authz COMMAND session_plaintext_authz_test)
+set_tests_properties(session_plaintext_authz PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;t008;us1;plaintext;authz")
+
+# ── 043-plaintext-tcp-transport — /speckit-verify coverage witness ───────────
+# Plaintext RECONNECT branch: drive_reconnect_attempt() skips the TLS handshake
+# (reconnect_fsm.cpp:265-271) and installs an empty handshake_result{}, leaving
+# live_peer_id_==nullopt (session.cpp:419 guard / D-10 #2 MUST). FSM-level + mock
+# factory → deterministic, no live socket. Closes the §IX.1 new-line gap on the
+# plaintext reconnect path (unreachable from the single-shot roundtrip witness).
+# CTest filter: ctest -R 'session_plaintext_reconnect'
+add_executable(session_plaintext_reconnect_test
+  test_session_plaintext_reconnect.cpp
+)
+target_link_libraries(session_plaintext_reconnect_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_plaintext_reconnect_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_plaintext_reconnect_test PRIVATE
+  FIXPP_TEST_HOOKS
+)
+add_test(NAME session_plaintext_reconnect COMMAND session_plaintext_reconnect_test)
+set_tests_properties(session_plaintext_reconnect PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "043;us1;plaintext;reconnect")
+
+# ── 043-plaintext-tcp-transport T017 — SC-005 negative-compile friction witness ──
+# SC-005 / D-9 / [const §XII.5 v0.3]: selecting insecure_plain_tcp WITHOUT a
+# pragma suppression must trigger -Wdeprecated-declarations → -Werror at the
+# selection site. This negative-compile TU is compiled with
+# -Werror=deprecated-declarations and registered as WILL_FAIL TRUE; a build
+# failure IS the passing state. No link step needed — security_profile.hpp is
+# header-only. Pattern: mirrors tls_cipher_allow_list_negative_compile +
+# tls_security_profile_deprecated_compile.
+# [spec.md SC-005; research.md D-9; 043 T017]
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_executable(session_security_profile_insecure_plain_deprecated_negative EXCLUDE_FROM_ALL
+        security_profile_insecure_plain_tcp_deprecated_negative.cpp)
+    target_include_directories(session_security_profile_insecure_plain_deprecated_negative PRIVATE
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_features(session_security_profile_insecure_plain_deprecated_negative PRIVATE cxx_std_23)
+    target_compile_options(session_security_profile_insecure_plain_deprecated_negative PRIVATE
+        -Wdeprecated-declarations -Werror=deprecated-declarations)
+    add_test(
+        NAME session_security_profile_insecure_plain_deprecated_negative_compile
+        COMMAND cmake --build "${CMAKE_BINARY_DIR}"
+                --target session_security_profile_insecure_plain_deprecated_negative
+    )
+    set_tests_properties(session_security_profile_insecure_plain_deprecated_negative_compile PROPERTIES
+        WILL_FAIL TRUE
+        LABELS "043;us2;sc005;compile_negative;friction"
+    )
+endif()
+
+# ── 043-plaintext-tcp-transport T018 — SC-002 no-implicit-default witness ──────
+# SC-002: a default-constructed / kind::unset SecurityProfile is still rejected at
+# Session::open() with error::invalid_session_config; insecure_plain_tcp is never
+# selected implicitly. Extends threading_session_open_rejects_unset_security_profile
+# (gate-b/r1 RC#1) by adding a cell that proves insecure_plain_tcp is NOT the
+# implicit fallback when security_profile is left unset. [spec.md SC-002 / FR-006]
+add_threading_test(session_no_implicit_insecure_plain_tcp
+    test_session_no_implicit_insecure_plain_tcp.cpp)
+set_tests_properties(session_no_implicit_insecure_plain_tcp PROPERTIES
+    LABELS "043;us2;sc002;no_implicit_default")
+
+# ── 043-plaintext-tcp-transport T021+T022 — SC-003 profile↔factory mismatch ───
+# T021: REJECT cells (a)/(b)/(c) + OPEN cells (d)/(e)/(f) for FR-008 at open().
+# T022: effective-factory-reaches-mint witness (D-4 test note): drive_reconnect()
+#   calls make() on the wired factory (not the ctor-time null pointer).
+# Uses MinimalTlsFactory double (no cert files needed).
+# CTest filter: ctest -R 'session_plaintext_factory_mismatch'
+add_executable(session_plaintext_factory_mismatch_test
+    test_session_plaintext_factory_mismatch.cpp
+)
+target_link_libraries(session_plaintext_factory_mismatch_test PRIVATE
+    fixpp_session
+    ${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}
+    ${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}
+    ${FIXPP_TRANSPORT_ZLIB_LIB}
+    GTest::gtest
+    GTest::gtest_main
+)
+target_include_directories(session_plaintext_factory_mismatch_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_plaintext_factory_mismatch
+    COMMAND session_plaintext_factory_mismatch_test)
+set_tests_properties(session_plaintext_factory_mismatch PROPERTIES
+    TIMEOUT 30
+    LABELS "043;t021;t022;us3;sc003;fr008;mismatch")
 
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.

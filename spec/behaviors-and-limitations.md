@@ -422,10 +422,13 @@ Scope and conventions:
 
 - **L-016-2 — Live interop is all-TLS with a server-auth `one_way_ca` baseline;
   mutual-certificate mTLS is deferred to v1.1.** fixpp ships TLS-only (no plaintext
-  transport), so every live cell runs over TLS; the v1.0 baseline trusts a
+  transport) *for live interop cells*, so every live cell runs over TLS; the v1.0 baseline trusts a
   counterparty server cert (`one_way_ca`). App-layer client-cert ↔ CompID mutual mTLS
   (`mtls_ca`) is `deferred:v1.1-mtls`. **Status: wontfix for v1.0** (intentional scope
   bound). *(FR-025; `tests/interop/happy/MATRIX.md`.)*
+  **NOTE (2026-06-17, 043):** The general claim "fixpp ships TLS-only" no longer holds — 043 added
+  `asio_plain_transport` behind the loud `insecure_plain_tcp` opt-in. The live-interop MATRIX still
+  runs all-TLS (no plaintext interop cells planned); this limitation's scope is the 016 interop matrix.
 
 ---
 
@@ -1598,3 +1601,15 @@ admin-frames-on-wire` + per-site throw + BMR veto-persist cells.)*
 **L-041-2 — FIXT application-message validation uses the session dictionary only; full two-dictionary resolution (application dictionary by `DefaultApplVerID`) is deferred.** QuickFIX validates a FIXT application message against BOTH the session (FIXT.1.1 transport/admin) dictionary AND a separate application dictionary resolved from `DefaultApplVerID` (`Session.cpp:1218-1229`). Phase-1 validates against the session-held `cfg.dictionary` only; for a FIXT session the session dictionary is FIXT.1.1, so validating an application message against it would over-reject. Therefore application-message validation parity for FIXT sessions is out of scope this feature. **Status: deferred.** *(041 Clarifications 2026-06-16; Out-of-Scope.)*
 
 **L-041-3 — `SessionRejectReason=6` (incorrect data format, the `wire_field_value_truncated` arm) is structurally UNREACHABLE with the default `FIXPP_DECIMAL_T = pod_decimal`; it is a forward-looking guard for fixed-precision decimal traits.** The validator's Float type arm maps a `decimal_precision_loss` parse error to `wire_field_value_truncated` → reason 6. But `decimal_precision_loss` is produced **only** at the cross-traits conversion boundary (`decimal<T>::from<U>()`/`to<U>()`, `decimal.hpp:82-88/109-113`, remapping `decimal_overflow`→`decimal_precision_loss` for `T≠U`); the validator calls single-traits `decimal_t::parse` (= `pod_decimal::from_chars`), which returns only `decimal_invalid_input` / `decimal_overflow`, never `decimal_precision_loss`. Both of those now remap to `wire_field_value_out_of_range` → **reason 5** (the T009a remap closing the non-`wire_*` leak). So with the default `pod_decimal`, a malformed/overflowing Float yields reason **5**, and reason **6** is never emitted on the session path. The reason-6 map entry + the validator's `decimal_precision_loss` arm are retained as forward-looking guards for an alternate `FIXPP_DECIMAL_T` whose `parse` yields precision-loss. **Status: wontfix** (forward-looking guard; SC-003's reason-6 sub-claim is waived-with-proof in the 041 completeness audit). *(041 FR-004/SC-003; `include/fixpp/wire/validator.hpp` Float arm + `reject_reason_map.hpp`; `include/fixpp/core/decimal.hpp:82-88/109-113`.)*
+
+## 043-plaintext-tcp-transport (2026-06-17)
+
+### Behaviors
+
+**B-043-1 — Inbound `EncryptMethod(98)≠0` is now enforced on every session (all profiles, not just plaintext).** Prior to this feature, `interpret_logon` silently skipped tag 98 on inbound Logon (S-021 "inbound 98≠0 not handled"; TC-017 gap). 043 T030 adds an explicit scan: a received `98` field that is present but not equal to `"0"` causes `interpret_logon` to return `session_invalid_logon` — the Logon is rejected before any sequence-number or profile check. A present-but-malformed `98` (non-numeric, empty, etc.) fails closed the same way. This is **unconditional across all SecurityProfile kinds** — `interpret_logon` is profile-agnostic. The existing outbound `98=0` emit (`build_logon`) is unchanged. *(043 T030; `[const §XII.7]`; `src/session/admin_messages.cpp` `interpret_logon`; witness `tests/session/test_interpret_logon_encrypt_method.cpp` — 4 cells, mutation-tested.)*
+
+### Limitations
+
+**L-043-1 — `insecure_plain_tcp` provides NO peer authentication.** When `SecurityProfile::kind::insecure_plain_tcp` is configured, the TLS handshake is skipped entirely: no peer certificate is presented, verified, or captured. As a result: (1) `CompIdAuthorizationPolicy::authorize_logon` is NOT called at Logon time (the CompID↔TLS-identity binding from 015 is TLS-only); (2) `live_peer_id_` remains `nullopt` for the session's lifetime — `last_live_peer_identity()` returns empty; (3) `session_event_tls_validation_failed` is never emitted (no TLS handshake to fail). The existing 028-era `check_comp_id` (49/56 matching) is **still enforced** — only the TLS-identity layer is absent. Operators MUST ensure link-level security (colocation cross-connect, VPN/IPsec) before using `insecure_plain_tcp`. **Status: wontfix** (by design — plaintext transport intentionally omits TLS-layer auth; the `[[deprecated]]` friction at the selection site is the construction-time warning). *(043 FR-008a, D-10; `src/session/session.cpp` `install_reconnected_transport` / `attach_accepted_transport`; witness `tests/session/test_session_plaintext_authz.cpp`.)*
+
+**L-043-2 — Plaintext accepted transports receive no TLS-validation event hooks.** A `SecurityProfile::kind::insecure_plain_tcp` acceptor session does NOT emit `session_event_tls_validation_failed`, does NOT call `set_listener_events` with TLS validation callbacks, and returns no `handshake_result` peer-identity — those hooks are TLS-only. An operator registering a `tls_validation_failed` listener on a plaintext session's `SessionEvents` will receive zero events. **Status: wontfix** (by design — there is no TLS handshake on a plaintext transport). *(043 E-7, D-10; `src/session/engine.cpp` `run_accept_loop`; witness `tests/session/test_session_plaintext_authz.cpp`.)*

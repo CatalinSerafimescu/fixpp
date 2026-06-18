@@ -355,3 +355,51 @@ target_compile_definitions(transport_asio_tls_transport_error_paths PRIVATE
 )
 add_test(NAME transport_asio_tls_transport_error_paths
          COMMAND transport_asio_tls_transport_error_paths)
+
+# ── 043 T005 — asio_plain_transport loopback live-I/O witness (SC-001) ─────────
+#
+# Tests: connect/read/write cycle, no-TLS-ClientHello (first byte 0x38),
+# cancellation → transport_read_cancelled, post-close → transport_already_closed,
+# idempotent close, factory smoke (kind/reload_credentials/cert_source_snapshot),
+# make_accepted() → connected transport.
+# No OpenSSL link required (plain TCP, no TLS).
+
+add_executable(transport_asio_plain_transport
+  test_asio_plain_transport.cpp)
+target_include_directories(transport_asio_plain_transport PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_plain_transport.hpp"
+)
+target_link_libraries(transport_asio_plain_transport PRIVATE
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_asio_plain_transport
+         COMMAND transport_asio_plain_transport)
+set_tests_properties(transport_asio_plain_transport PROPERTIES
+  LABELS "transport;043;us1;sc001;plain"
+  TIMEOUT 60)
+
+# ── 043 T006 — asio_plain_transport Config TCP knob + fast-close witness ────────
+#
+# Tests: tcp_nodelay observable on established socket (SC-008 / FR-010),
+# close() returns in < 500ms with tls_close_timeout=2s in cfg (FR-011),
+# no TLS close-notify bytes on close, ConnectInfo populated, second connect →
+# transport_already_connected.
+# No OpenSSL link required (plain TCP, no TLS).
+
+add_executable(transport_asio_plain_transport_config
+  test_asio_plain_transport_config.cpp)
+target_include_directories(transport_asio_plain_transport_config PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_plain_transport.hpp"
+)
+target_link_libraries(transport_asio_plain_transport_config PRIVATE
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_asio_plain_transport_config
+         COMMAND transport_asio_plain_transport_config)
+set_tests_properties(transport_asio_plain_transport_config PROPERTIES
+  LABELS "transport;043;us1;sc008;plain;config"
+  TIMEOUT 60)

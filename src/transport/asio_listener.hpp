@@ -49,6 +49,7 @@
 #include <fixpp/transport/listener.hpp>         // abstract Listener
 #include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
 #include <fixpp/transport/transport.hpp>        // Transport + Transport::Config
+#include <fixpp/transport/transport_factory.hpp>  // transport_security_kind, asio_plain_transport_factory
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -56,6 +57,7 @@
 namespace fixpp::transport {
 
 class asio_tls_transport_factory;
+class asio_plain_transport_factory;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // asio_listener — concrete Listener wrapping asio::ip::tcp::acceptor.
@@ -95,6 +97,11 @@ public:
         // the engine bootstrap. Per-counterparty profiles use one Listener
         // per counterparty per [2h §4.6] notes.
         fixpp::tls::SslCtxConfig ssl_cfg;
+
+        // 043 T015 (D-4/E-7): transport kind selector. Default = tls preserves
+        // backward compatibility for all existing callers. Set to
+        // transport_security_kind::plaintext for insecure_plain_tcp sessions.
+        transport_security_kind transport_kind{transport_security_kind::tls};
 
         // 013 T039 — per-listener session-event ring for pre-Session TLS
         // validation events. Owned by Config (and therefore by asio_listener).
@@ -145,7 +152,11 @@ private:
     Config cfg_;
     asio::any_io_executor exec_;
     asio::ip::tcp::acceptor acceptor_;
+    // Concretely-typed accept factories (make_accepted() is non-virtual —
+    // E-4/E-7). Exactly one is used, selected by cfg_.transport_kind.
+    // Lazily initialised on first async_accept() call (mirrors TLS pattern).
     std::shared_ptr<asio_tls_transport_factory> accept_factory_;
+    std::shared_ptr<asio_plain_transport_factory> accept_factory_plain_;  // 043 T015
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

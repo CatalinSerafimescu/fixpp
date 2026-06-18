@@ -407,7 +407,18 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // 1. Store live peer identity for arm (1-live) in the Logon-ack guard.
     //    The peer_id is moved out of hr (hr.peer_id is owning-by-value per
     //    tls_transport.hpp:52-53). [data-model §E-2; contracts C2; FR-006]
-    live_peer_id_ = std::move(hr.peer_id);
+    //
+    //    043 T013 (D-10 #2 MUST): for insecure_plain_tcp, live_peer_id_ MUST stay
+    //    nullopt — the handshake was skipped so there is no peer identity. Passing a
+    //    default hr{} from the FSM plaintext branch yields a present-but-empty
+    //    peer_identity; assigning it would leave live_peer_id_ as a present-but-
+    //    empty optional, violating the fail-closed-by-construction MUST (D-10 #2).
+    //    Guard on the profile rather than on hr.peer_id emptiness.
+    //    Every TLS caller passes a real hr from async_handshake — behaviour unchanged.
+    //    [data-model §E-5; D-10 #2; 043 T013]
+    if (!is_insecure_plain_tcp(cfg_.security_profile.k)) {
+        live_peer_id_ = std::move(hr.peer_id);
+    }
 
     // 2. Take ownership of the live transport.
     reconnected_transport_ = std::move(transport);
@@ -535,7 +546,15 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
                                         fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for the acceptor authorization gate (E-4).
     //    Consumed one-shot by the gate at :1048 in on_inbound_frame.
-    live_peer_id_ = std::move(hr.peer_id);
+    //
+    //    043 T013 (D-10 #3 MUST): for insecure_plain_tcp, live_peer_id_ MUST stay
+    //    nullopt — the acceptor handshake was skipped; there is no peer identity.
+    //    Acceptor twin of install_reconnected_transport's guard above (#2).
+    //    Every TLS caller passes a real hr from async_handshake — behaviour unchanged.
+    //    [data-model §E-5; D-10 #3; 043 T013]
+    if (!is_insecure_plain_tcp(cfg_.security_profile.k)) {
+        live_peer_id_ = std::move(hr.peer_id);
+    }
 
     // 2. Take ownership of the transport.
     // FQ-A: no transport_send_ rebind needed — live_write_serialized_() picks
@@ -920,6 +939,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    std::shared_ptr<fixpp::transport::TransportFactory> resolved_transport_factory;
+
+    // gate-b/r2 FQ-4 + gate-b/r3 FQ-6 (043 T023 / FR-003a / FR-008): resolve the
+    // effective factory ONCE before any observable mutation, then run the single
+    // kind() consistency check on that resolved object.
+    {
+        const auto k_early = cfg_.security_profile.k;
+        if (is_insecure_plain_tcp(k_early) && !cfg_.transport_factory_override) {
+            auto plain_factory_r = fixpp::transport::make_asio_plain_transport_factory(
+                fixpp::transport::Transport::Config{});
+            if (!plain_factory_r) {
+                co_return std::unexpected(plain_factory_r.error());
+            }
+            resolved_transport_factory = std::shared_ptr<fixpp::transport::TransportFactory>(
+                std::move(*plain_factory_r));
+        } else {
+            resolved_transport_factory = cfg_.transport_factory_override
+                                             ? cfg_.transport_factory_override
+                                             : engine_.default_transport_factory;
+        }
+
+        if (resolved_transport_factory) {
+            using TFK = fixpp::transport::transport_security_kind;
+            const TFK required_early = is_insecure_plain_tcp(k_early) ? TFK::plaintext : TFK::tls;
+            if (resolved_transport_factory->kind() != required_early) {
+                co_return std::unexpected(error::invalid_session_config);
+            }
+        }
+    }
+
     // gate-b/r1 FQ-1 (findings #1 + #2) + 042 (#3): FIXT.1.1 config validation.
     //
     // #1 (P1): begin_string=="FIXT.1.1" with no default_appl_ver_id → is_fixt()
@@ -1154,20 +1203,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
     reconnect_fsm_.set_emit_credentials_rotated(
         [this](fixpp::session::session_event_credentials_rotated ev) noexcept { emit_event(ev); });
-    // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
-    // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
-    // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
-    // one_way_ca=3). [data-model §E-1 step 3]
+    // 043 T012+T023 (D-4/D-6 — FR-003a/FR-008) — Effective-factory wiring.
+    //
+    // Step 1: insecure_plain_tcp is ACCEPTED (not unset); the unset reject above
+    //   is unchanged.
+    // Step 2: adopt the already-resolved effective factory into the owning member.
+    // Step 4: wire the resolved factory into the FSM via set_transport_factory()
+    //   so the FSM mints through the same validated factory.
+    // Step 5 (SK→TK mapping): plaintext leaves tls_profile=unset (no SslCtxConfig)
+    //   and sets the FSM plaintext indicator; TLS profiles map as before.
+    // [data-model §E-6; D-4; D-6; D-7; 043 T011/T012]
     {
         auto k = cfg_.security_profile.k;
         using SK = fixpp::session::SecurityProfile::kind;
         using TK = fixpp::tls::SecurityProfile;
+
+        effective_transport_factory_ = std::move(resolved_transport_factory);
+
+        // Step 4: wire the resolved factory into the FSM.
+        reconnect_fsm_.set_transport_factory(effective_transport_factory_.get());
+
+        // Step 5: SK→TK mapping.
+        // Map session-layer SecurityProfile::kind to tls::SecurityProfile so
+        // async_handshake's profile-check is satisfied (not transport_psk_unsupported).
+        // The enum values are identical for the common cases (mtls_ca=1, mtls_pinned=2,
+        // one_way_ca=3). [data-model §E-1 step 3]
         TK tls_profile = TK::unset;
-        if (k == SK::mtls_ca)
+        if (k == SK::mtls_ca) {
             tls_profile = TK::mtls_ca;
-        else if (k == SK::mtls_pinned)
+        } else if (k == SK::mtls_pinned) {
             tls_profile = TK::mtls_pinned;
-        else if (k == SK::one_way_ca) {
+        } else if (k == SK::one_way_ca) {
             // one_way_ca is deprecated in the TLS layer but still supported
             // for legacy interop (session layer retains it per [const §XII.5]).
 #pragma clang diagnostic push
@@ -1175,7 +1241,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             tls_profile = TK::one_way_ca;
 #pragma clang diagnostic pop
         }
+        // insecure_plain_tcp: tls_profile stays unset; no SslCtxConfig arm.
         reconnect_fsm_.set_tls_profile(tls_profile);
+
+        // Set the plaintext indicator AFTER the profile mapping so the FSM
+        // skips the dynamic_cast + async_handshake (D-7). [043 T011/T012; §E-5]
+        reconnect_fsm_.set_plaintext_profile(is_insecure_plain_tcp(k));
     }
 
     // T011 (US2, Phase 4): branch on cfg_.role per FR-004 + Opus triage RC#2.

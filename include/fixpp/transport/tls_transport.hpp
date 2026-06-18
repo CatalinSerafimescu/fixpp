@@ -66,9 +66,13 @@ struct handshake_result {
 // pointer with no further casts. Post-handshake artefact reads consume the
 // FSM-held handshake_result value (no cast, no virtual dispatch).
 //
-// v1.0 partition: every Transport returned by the v1.0 factory is TLS-capable
-// per [FIX-SL §4.3.1] + [FIXS §1.1] mandatory-TLS reality and [2h §4.5]'s drop
-// of the v0.1 plain-TCP-via-empty-SslCtxConfig narrative.
+// v1.0 partition (PRE-043): every Transport returned by the v1.0 factory was
+// TLS-capable per [FIX-SL §4.3.1] + [FIXS §1.1] mandatory-TLS reality and
+// [2h §4.5]'s drop of the v0.1 plain-TCP-via-empty-SslCtxConfig narrative.
+// RECONCILED 2026-06-17 (043-plaintext-tcp-transport): `asio_plain_transport`
+// is a new Transport that is NOT TLS-capable. This class (`TlsTransport`) still
+// describes only the TLS-capable subset. The universal claim no longer holds.
+// [043 research.md D-13]
 // ─────────────────────────────────────────────────────────────────────────────
 class TlsTransport : public virtual Transport {
 public:

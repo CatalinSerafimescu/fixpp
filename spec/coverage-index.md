@@ -40,9 +40,9 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.2.3 | Validation of SendingTime(52) | Y | S-019, S-039 | **S-019 extended by 038 (2026-06-15):** the MaxLatency check now covers the acceptor first-Logon path in addition to the established-session and initiator Logon-ack paths; absent/empty/malformed/stale `52` → `Reject(35=3, 371=52, 373=10)` + disconnect (pre-establishment shape, no Logout). Conforming path byte-identical. Witnesses: `tests/session/test_acceptor_logon_sending_time.cpp`. See B-038-1/L-038-1/L-038-2/L-038-3 in `behaviors-and-limitations.md`. |
 | §4.2.4 | Additional fields available for peer identification (SubID, LocationID) | Y | S-016 | — |
 | §4.3 | Establishing a FIX connection | Y | S-001, S-015, S-021, S-022 | **S-022 `backlog → done` via 033**: `Username(553)`/`Password(554)` emit (when configured) + inbound parse + surface via `authorize_logon` seam; `554` redacted. Unit witnesses green (`test_fixt_credentials.cpp` W6/W7); live interop (SC-003/SC-004) deferred to `/speckit-verify` self-run. |
-| §4.3.1 | Transport layer requirements (TCP/IP, FIXS mandatory) | Y | T-001, T-002 | — |
+| §4.3.1 | Transport layer requirements (TCP/IP, FIXS mandatory) | Y | T-001, T-002, T-042 | **T-042 (2026-06-17):** `asio_plain_transport` adds plain TCP transport (`insecure_plain_tcp` profile). The mandatory-TLS requirement of FIXS applies to production links; the plaintext path is gated behind a loud `[[deprecated]]` opt-in for colo/VPN-secured environments. See L-043-1, L-043-2. |
 | §4.3.2 | Using the TestMessageIndicator(464) | Y | S-029 | — |
-| §4.3.3 | Application layer encryption (deprecated EncryptMethod) | Y | S-021 | — |
+| §4.3.3 | Application layer encryption (deprecated EncryptMethod) | Y | S-021, T-042 | **S-021 amended by 043 T030 (2026-06-17):** `interpret_logon` now rejects inbound `98≠"0"`; present-but-malformed also fails closed. Unconditional / all profiles. Witness `tests/session/test_interpret_logon_encrypt_method.cpp` (4 cells). See B-043-1. |
 | §4.3.4 | Heartbeat interval | Y | S-015 | — |
 | §4.3.5 | Heartbeat interval determination | Y | S-015 | — |
 | §4.3.5.1 | Acceptor requires specific heartbeat interval | Y | S-015 | — |
@@ -700,3 +700,32 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > **Test surface.** `tests/session/test_credential_store_redaction.cpp` — 7 masker units (`Masker_SameLength_FieldAnchored_unit` A–G) + 6 integration witnesses: `T005_Persisted_LogonPassword_AbsentFromStoreFile_MaskPresent` (FileStore raw-disk-byte: cleartext absent + same-length mask present), `T005_Acceptor_ReplyLogon_PasswordMaskedInStore`, `T005_InMemoryStore_CredentialedLogon_AlsoMasked`, `T008_Wire_LogonPassword_UnmaskedOnTransmit` (wire carries cleartext, masked form absent on wire), `T009_CredentialFreeLogon_StoredByteIdenticalToWire`, `T009_NonLogon_WithGenuine554_StoredUnchanged` (MsgType=A gate skips a `35=D` carrying `554`); + `T010_OverBound_SmallBoundSeam_SkipStoreButTransmit` (frame-injection via the `FIXPP_TEST_HOOKS` accessor; **mutation-proven discriminating**) and `NoHeap.StorePath_NoNewAllocation` (+ `credential_store_redaction_mallocnesia` ctest).
 
 > **Coverage / NFR.** New byte logic + the `store_then_emit` branch under ASan/UBSan/TSan. The over-bound branch earns its BRDA via the T010 frame-injection seam (mechanism deviation from the design's `FIXPP_TEST_LOGON_MASK_BOUND` override, which could not reach `store_then_emit` compiled without the test define — see `plan.md ## Gate A`). **SC-004 (no added allocation): primary evidence is zero-alloc BY CONSTRUCTION** (`std::array` + `std::memcpy` + in-place byte overwrite — no allocating operation); the mallocnesia gate is present per the established 027 `NoHeap.*` pattern but is **inert in `linux-clang-debug`** (project-wide weak-symbol non-interposition — filed in `REMAINING-WORK.md` item 13). `/speckit-verify` matrix pending.
+
+---
+
+## 043-plaintext-tcp-transport — branch `043-plaintext-tcp-transport` (2026-06-17)
+
+> Adds `asio_plain_transport` (plain TCP transport sibling to `asio_tls_transport`) gated behind `SecurityProfile::kind::insecure_plain_tcp` (loud `[[deprecated]]` opt-in, `[const §XII.5]` v0.3 amendment). Catalogue row **T-042**. Also closes the pre-existing inbound `EncryptMethod(98)≠0` gap (S-021; T030). No new wire field / error slot / codegen / C-ABI surface.
+
+> **Production surface (exact set).**
+> - `include/fixpp/transport/asio_plain_transport.hpp` + `src/transport/asio_plain_transport.cpp` — `asio_plain_transport` (plain socket; no TLS layer; state `{fresh,connected,closed}`; `close()` = `socket_.close()` with no SSL_shutdown / no `tls_close_timeout` wait)
+> - `include/fixpp/transport/transport_factory.hpp` (`transport_security_kind` enum, `kind()` defaulted-virtual on `TransportFactory`, `asio_plain_transport_factory` decl, `make_asio_plain_transport_factory` free function)
+> - `src/transport/transport_factory.cpp` (`asio_plain_transport_factory` body, `make_asio_plain_transport_factory`)
+> - `include/fixpp/session/security_profile.hpp` (`insecure_plain_tcp` enumerator + `[[deprecated]]` attribute)
+> - `include/fixpp/session/reconnect_fsm.hpp` + `src/session/reconnect_fsm.cpp` (`is_plaintext_`, `set_plaintext_profile`, `set_transport_factory`, handshake-skip path)
+> - `src/session/session.cpp` (`effective_transport_factory_` member, auto-derive + FR-008 mismatch reject at `open()`, `live_peer_id_` stays `nullopt` for plaintext handoffs)
+> - `src/session/engine.cpp` (`run_accept_loop`: ssl_cfg map plaintext arm, post-accept cast/handshake skip, `assert_transport_on_session_strand` plaintext arm)
+> - `src/transport/asio_listener.hpp` + `src/transport/asio_listener.cpp` (`transport_kind` in `asio_listener::Config`, `make_asio_plain_transport_factory` per-accept)
+> - `src/session/admin_messages.cpp` T030: `interpret_logon` rejects inbound `98≠"0"` (present-but-malformed fails closed)
+
+> **Test surface.**
+> - `tests/transport/test_asio_plain_transport.cpp` — SC-001/T005: direct-drive loopback (connect → read/write → close), no TLS ClientHello byte, cancel/post-close paths
+> - `tests/transport/test_asio_plain_transport_config.cpp` — SC-008/T006: TCP knob + no-close-notify close path
+> - `tests/session/test_session_plaintext_roundtrip.cpp` — SC-001/T007: end-to-end acceptor + initiator Logon/Logout over `run_accept_loop`
+> - `tests/session/test_session_plaintext_authz.cpp` — SC-004/T008: auth-inert (no `authorize()` call, `live_peer_id_==nullopt`), `check_comp_id` still rejects mismatch
+> - `tests/session/test_insecure_plain_tcp_deprecated.cpp` — SC-005/T017: automated negative-compile `try_compile` harness
+> - `tests/session/test_session_open_rejects_unset_security_profile.cpp` — SC-002/T018: `unset` rejected, no-implicit-default
+> - `tests/session/test_session_plaintext_factory_mismatch.cpp` — SC-003/T021/T022: effective-factory mismatch matrix + auto-derive reach-mint
+> - `tests/session/test_interpret_logon_encrypt_method.cpp` — FR-009/T030: inbound `98≠0` reject (4 cells, mutation-tested: absent/zero-valid/nonzero-reject/malformed-closes)
+
+> **Coverage.** Sanitizer/coverage matrix (`linux-clang-debug`, ASan, UBSan, TSan, coverage, gcc-release) pending T029 run by the orchestrator (`/speckit-verify` step).

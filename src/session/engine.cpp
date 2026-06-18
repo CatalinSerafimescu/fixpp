@@ -43,11 +43,14 @@
 // Internal concrete transport/listener types — only used in this .cpp.
 // [arch §5.3 engine-bootstrap carve-out]
 #include "transport/asio_listener.hpp"
-// T011 (D5/E-5/INV-7): asio_tls_transport_test_access for the INV-7 debug
-// assert (transport.socket().get_executor() == session_strand). This is the
-// R8 lynchpin: every construction site must be audited and asserted.
+// T011 (D5/E-5/INV-7): asio_tls_transport_test_access / asio_plain_transport
+// for the INV-7 debug assert (transport.socket().get_executor() == session_strand).
+// This is the R8 lynchpin: every construction site must be audited and asserted.
 // Allowed under [arch §5.3] engine-bootstrap carve-out (engine.cpp already
 // includes asio_listener.hpp — same concession for concrete transport types).
+// 043 T016: asio_plain_transport added for the plain-arm downcast in
+// assert_transport_on_session_strand.
+#include "transport/asio_plain_transport.hpp"
 #include "transport/asio_tls_transport.hpp"
 // 040 US2: FirstFrameIds + scan_first_frame_ids (moved from anon ns to enable
 // direct unit testing — T011/T012). Bounded tag helper (accumulate_tag_digit)
@@ -318,10 +321,11 @@ namespace {
     fixpp::transport::Transport& transport,
     const asio::strand<asio::any_io_executor>& session_strand) noexcept {
 #ifndef NDEBUG
-    // Downcast to asio_tls_transport to access socket_executor().
-    // The engine exclusively uses asio_tls_transport (via asio_tls_transport_factory).
-    // A null downcast means a non-standard transport was injected (test-seam or future
-    // transport type); skip the assert in that case (the V-10 gtest cell covers all sites).
+    // Downcast to the concrete transport type to access socket_executor().
+    // 043 T016 (D-13/R8): the engine now supports both asio_tls_transport (TLS)
+    // and asio_plain_transport (plaintext). Check both; a null on both means a
+    // non-standard transport was injected (test-seam) — skip the assert in that
+    // case (the V-10 gtest cell covers all production construction sites).
     auto* tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(&transport);
     if (tls != nullptr) {
         // INV-7: the socket's executor MUST equal the session strand.
@@ -329,6 +333,14 @@ namespace {
         assert(tls->socket_executor() == asio::any_io_executor{session_strand} &&
                "INV-7: transport socket executor != session_strand "
                "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
+        return;
+    }
+    auto* plain = dynamic_cast<fixpp::transport::asio_plain_transport*>(&transport);
+    if (plain != nullptr) {
+        // Same INV-7 check for the plaintext transport path (043/D-13).
+        assert(plain->socket_executor() == asio::any_io_executor{session_strand} &&
+               "INV-7: plain transport socket executor != session_strand "
+               "(T016/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
     }
 #else
     (void)transport;
@@ -656,14 +668,22 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 
     auto exec = co_await asio::this_coro::executor;
 
-    // ── Build the SslCtxConfig for the listener ───────────────────────────────
+    // ── Build the SslCtxConfig for the listener (TLS profiles only) ─────────────
     // The transport_factory_override holds the SSL_CTX + cert_source built at
     // session registration time. We reconstruct the SslCtxConfig from the
     // factory's cert_source snapshot + the session's security profile kind.
     // [data-model "Listener acquisition"; SC-010 delta #6]
+    //
+    // 043 T014 site #1 (D-4/E-7): compute is_plaintext FIRST.
+    // insecure_plain_tcp MUST NOT fall through to the else→mtls_ca arm below —
+    // that would silently build a TLS listener and reject every plain connection.
+    // [[feedback_half_restructure_symmetric_api]]
+    using sk = fixpp::session::SecurityProfile::kind;
+    const bool is_plaintext =
+        fixpp::session::is_insecure_plain_tcp(entry.config.security_profile.k);
+
     fixpp::tls::SslCtxConfig ssl_cfg;
-    {
-        using sk = fixpp::session::SecurityProfile::kind;
+    if (!is_plaintext) {
         auto k = entry.config.security_profile.k;
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
@@ -671,7 +691,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // The engine must still map the deprecated-but-supported legacy profile.
             // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::one_way_ca;
-        else  // mtls_ca (default for acceptors)
+        else  // mtls_ca (default for TLS acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
 
         if (entry.config.transport_factory_override)
@@ -679,16 +699,25 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         ssl_cfg.clock = nullptr;  // skip cert expiry check (same as loopback fixture)
         ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
     }
+    // insecure_plain_tcp: ssl_cfg stays default — no TLS profile, no cert source.
+    // The listener will select the plaintext accept factory via transport_kind below.
 
     // ── Build the asio_listener (bind/listen) ────────────────────────────────
     // reconnect_endpoint is repurposed as the bind endpoint (SC-010 delta #6).
     // Port 0 → OS-assigned; discoverable via acceptor_bound_endpoint().
     fixpp::transport::asio_listener::Config lcfg;
     lcfg.bind_endpoint = entry.config.reconnect_endpoint;
-    lcfg.ssl_cfg = ssl_cfg;  // copy — listener stores its own config
+    lcfg.ssl_cfg = ssl_cfg;  // copy — listener stores its own config (default for plaintext)
+    // 043 T015 site #2 (D-4/E-7): tell the listener which factory kind to use.
+    // Default is tls; plaintext sessions set plaintext so async_accept() mints
+    // via make_asio_plain_transport_factory(cfg_.accepted_transport_config).
+    if (is_plaintext) {
+        lcfg.transport_kind = fixpp::transport::transport_security_kind::plaintext;
+    }
     // FR-014: bound the TLS handshake with a short timeout so stalled or
     // non-TLS clients are rejected promptly (part of the bounded first-frame
     // window). 2s < the probe's 2s self-deadline but large enough for real TLS.
+    // Unread on the plaintext path (D-12); left set unconditionally.
     lcfg.accepted_transport_config.tls_handshake_timeout = std::chrono::milliseconds{1500};
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
@@ -776,25 +805,33 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         assert_transport_on_session_strand(*transport, *entry.session_strand);
 
-        // Step 2: TLS handshake.
-        // async_accept returns a TLS-capable transport (see asio_listener.cpp
-        // which builds transports via asio_tls_transport_factory::make_accepted).
-        // We dynamic_cast to TlsTransport to call async_handshake.
-        auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
-        if (!tls_transport) {
-            transport->close();
-            continue;  // not a TLS transport — config error; re-accept
-        }
-
+        // Step 2: TLS handshake (skipped for plaintext).
+        // 043 T014 site #3 (D-8/E-7): on insecure_plain_tcp the accepted transport
+        // is asio_plain_transport (not TlsTransport). The dynamic_cast returns null,
+        // so the cast+handshake block MUST be bypassed — not fall through to the
+        // close+continue reject. Proceed with a default-constructed hr{} (D-10).
+        // Symmetric to the initiator FSM handshake-skip in reconnect_fsm.cpp (D-7).
         fixpp::transport::handshake_result hr{};
-        {
-            auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
-            if (!hs_r.has_value()) {
+        if (!is_plaintext) {
+            // async_accept (TLS path) returns a TLS-capable transport (see
+            // asio_listener.cpp: asio_tls_transport_factory::make_accepted).
+            // dynamic_cast to TlsTransport to call async_handshake.
+            auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
+            if (!tls_transport) {
                 transport->close();
-                continue;  // handshake failure → reclaim slot, re-accept
+                continue;  // not a TLS transport — config error; re-accept
             }
-            hr = std::move(*hs_r);
+
+            {
+                auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
+                if (!hs_r.has_value()) {
+                    transport->close();
+                    continue;  // handshake failure → reclaim slot, re-accept
+                }
+                hr = std::move(*hs_r);
+            }
         }
+        // Plaintext path falls through here with hr{} (no peer_id; D-10/E-7).
 
         // Step 3: bounded first-frame read (FR-014).
         // 5s deadline, 4096 bytes max (covers any valid FIX Logon message).
