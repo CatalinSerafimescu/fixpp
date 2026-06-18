@@ -550,7 +550,8 @@ struct LoopbackHarness {
     // Returns false ONLY when the TLS fixtures are absent (caller emits skip).
     // Otherwise true; check `established` for whether both sessions reached
     // Active. The caller MUST call teardown() on any non-skip path.
-    bool bring_up(const Options& o, int heartbeat_secs, const char* dir) {
+    bool bring_up(const Options& o, int heartbeat_secs, const char* dir,
+                  std::chrono::microseconds est_quantum = std::chrono::milliseconds(50)) {
         const bool tls = want_tls(o);
         if (tls) {
             factory = make_tls_factory(dir);
@@ -618,7 +619,7 @@ struct LoopbackHarness {
             auto deadline = Clock::now() + 10s;
             while (app->logon_count.load(std::memory_order_acquire) < 2 &&
                    Clock::now() < deadline) {
-                ioc.run_for(50ms);
+                ioc.run_for(est_quantum);
                 ioc.restart();
             }
             established = app->logon_count.load(std::memory_order_acquire) >= 2;
@@ -864,6 +865,104 @@ int run_idle_heartbeat(const Options& o) {
     std::cout << "[fixpp-perf] " << o.workload << " cadence/s=" << r.messages_per_second
               << " interval_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
               << " recorded=" << recorded << " → " << o.out << "\n";
+
+    hdr_close(hist);
+    return 0;
+}
+
+// ── wl-01 logon/logout — session-establishment latency (connection churn) ────
+//
+// Mirrors QFcpp run_session_open_benchmark: each cycle constructs a FRESH
+// self-paired engine (acceptor+initiator on a new loopback port), times
+// construct→both-Active (Logon), then tears it down (untimed, between cycles).
+// latency = establishment µs; mps = cycles/s.
+//
+// FAIRNESS NOTE: fixpp drives establishment SINGLE-THREADED (run_for+restart — a
+// cv can't be used, nothing pumps the io_context while waiting), so the latency
+// is poll-quantized. We use a TIGHT 200µs quantum (vs the 50ms default for the
+// message workloads where establishment is one-time + untimed) so the number
+// reflects real establishment, not poll granularity. QFcpp's wait_for_logon is
+// cv-precise, so fixpp's wl-01 is ~200µs-granular — INDICATIVE establishment-rate.
+int run_logon_logout(const Options& o) {
+    const char* dir = fixture_dir();
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
+        std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
+        return 3;
+    }
+    constexpr auto kEstQuantum = std::chrono::microseconds(200);
+
+    hdr_histogram* hist = nullptr;
+    hdr_init(1, 60'000'000, 3, &hist);
+
+    // One cycle: construct + establish (timed), then teardown (untimed). Returns
+    // establishment µs, or -1 if the pair did not reach Active.
+    auto one_cycle = [&]() -> double {
+        const auto t0 = Clock::now();
+        LoopbackHarness h;
+        const bool ok = h.bring_up(o, 30, dir, kEstQuantum);
+        const bool est = ok && h.established;
+        const double us = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+        h.teardown();
+        return est ? us : -1.0;
+    };
+
+    const auto warmup_start = Clock::now();
+    for (int i = 0; i < o.warmup_messages; ++i) {
+        if (one_cycle() < 0) {
+            std::cerr << "warmup cycle " << i << " failed to establish (tls fixtures?)\n";
+            hdr_close(hist);
+            return 1;
+        }
+    }
+    const double warmup_seconds = std::chrono::duration<double>(Clock::now() - warmup_start).count();
+
+    int recorded = 0;
+    const auto run_start = Clock::now();
+    for (int i = 0; i < o.measured_messages; ++i) {
+        const double us = one_cycle();
+        if (us < 0) break;
+        hdr_record_value(hist, std::max<long long>(1, static_cast<long long>(us)));
+        ++recorded;
+    }
+    const double run_seconds = std::chrono::duration<double>(Clock::now() - run_start).count();
+
+    RunResult r;
+    r.measured_messages = recorded;
+    r.warmup_messages = o.warmup_messages;
+    r.run_seconds = run_seconds;
+    r.warmup_seconds = warmup_seconds;
+    r.messages_per_second = (run_seconds > 0.0) ? recorded / run_seconds : 0.0;
+    r.p50_us = hdr_value_at_percentile(hist, 50.0);
+    r.p99_us = hdr_value_at_percentile(hist, 99.0);
+    r.p999_us = hdr_value_at_percentile(hist, 99.9);
+    r.peak_rss_mb = peak_rss_mb();
+
+    std::filesystem::create_directories(o.out);
+    write_summary_json(o.out, o, r);
+    write_run_config_yaml(o.out, o,
+        "cycle: construct+connect+logon (establishment); teardown untimed\n"
+        "establishment_poll_quantum_us: 200 (single-threaded drive; fixpp wl-01 is "
+        "~200us-granular vs QFcpp cv-precise — INDICATIVE establishment-rate)\n"
+        "mps_note: latency = per-cycle establishment us; messages_per_second = cycles/s\n");
+    write_hgrm(o.out, hist);
+
+    std::ofstream log(o.out / "stdout.log");
+    log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
+        << topology_line(o)
+        << "persistence_mode=memory-store\n"
+        << indicative_line(o)
+        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << " cycle=logon/logout establishment_poll_us=200\n"
+        << "warmup_cycles=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
+        << "measured_cycles=" << recorded << " (" << run_seconds << " s)\n"
+        << "cycles_per_second=" << r.messages_per_second << "\n"
+        << "establishment_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
+        << "\n"
+        << "peak_rss_mb=" << r.peak_rss_mb << "\n";
+
+    std::cout << "[fixpp-perf] " << o.workload << " cycles/s=" << r.messages_per_second
+              << " establishment_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999="
+              << r.p999_us << " recorded=" << recorded << " → " << o.out << "\n";
 
     hdr_close(hist);
     return 0;
@@ -1150,14 +1249,20 @@ int main(int argc, char** argv) {
     Options o = parse_args(argc, argv);
     const bool heartbeat = (o.workload == "wl-03-admin-idle-heartbeat");
     const bool burst = (o.workload == "wl-07-burst-single-session");
+    const bool logon_logout = (o.workload == "wl-01-logon-logout-fix44");
     // Resolve workload-appropriate defaults when counts were not passed. wl-03
     // heartbeats arrive ~1/s, so its defaults are small (a 20000-sample run
     // would take ~5.5 h); the closed loop is fast so it gets large defaults.
     // wl-07 counts are PER-DEPTH and run ×4 depths (warmup×4, measured×4 pooled),
     // so moderate per-depth counts keep the total bounded (depth 256 is heavy).
-    if (o.warmup_messages == 0) o.warmup_messages = heartbeat ? 3 : (burst ? 500 : 2000);
-    if (o.measured_messages == 0) o.measured_messages = heartbeat ? 15 : (burst ? 5000 : 20000);
+    if (o.warmup_messages == 0)
+        o.warmup_messages = heartbeat ? 3 : (burst ? 500 : (logon_logout ? 50 : 2000));
+    if (o.measured_messages == 0)
+        o.measured_messages = heartbeat ? 15 : (burst ? 5000 : (logon_logout ? 500 : 20000));
 
+    if (logon_logout) {
+        return run_logon_logout(o);
+    }
     if (o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups") {
         return run_closed_loop(o);
     }
@@ -1171,7 +1276,8 @@ int main(int argc, char** argv) {
         return run_wl07_spike(o);
     }
     std::cerr << "workload not implemented: " << o.workload
-              << " (have: wl-03-admin-idle-heartbeat, wl-04-nos-er-small, "
-                 "wl-05-nos-er-medium-groups, wl-07-burst-single-session, wl-07-spike)\n";
+              << " (have: wl-01-logon-logout-fix44, wl-03-admin-idle-heartbeat, "
+                 "wl-04-nos-er-small, wl-05-nos-er-medium-groups, "
+                 "wl-07-burst-single-session, wl-07-spike)\n";
     return 2;
 }
