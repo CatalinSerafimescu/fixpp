@@ -494,13 +494,15 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
 // Setup:
 //   - Drive the session to Active (reply-Logon emitted unblocked).
 //   - Arm the transport to block the NEXT write.
-//   - Feed an inbound Heartbeat → triggers outbound Heartbeat echo (write N+1 BLOCKS).
-//   - Feed a second Heartbeat → triggers another echo (write N+2 waits on write_gate_).
-//   - Assert concurrent_excess == 0 AND total_starts >= writes_before + 1
-//     (the assertion is only meaningful if total_starts >= 2, proving the second
-//     emit was genuinely queued but not concurrently submitted).
+//   - Feed an inbound TestRequest(35=1) → triggers outbound Heartbeat reply
+//     (write N+1 BLOCKS).
+//   - Feed a second TestRequest(35=1) → triggers another Heartbeat reply
+//     (write N+2 waits on write_gate_).
+//   - Assert concurrent_excess == 0 AND total_starts >= writes_before + 2
+//     (both Heartbeat replies must have started a write — the second proves it
+//     was genuinely queued behind the first and not dropped).
 //
-// [FQ-A D-6 F1; transport.hpp:47-50; gate-b/r2]
+// [FQ-A D-6 F1; transport.hpp:47-50; gate-b/r2; gate-b/r1]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) {
     asio::io_context ioc;
@@ -575,13 +577,14 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     ioc.run_for(200ms);
     ioc.restart();
 
-    // After draining: the total write starts must be > writes_before_test.
-    // If total_starts == writes_before_test, the second emit never reached
-    // async_write — the test would be void (but it verifies the gate rewrite).
-    EXPECT_GT(raw_ptr->total_starts(), writes_before_test)
-        << "FQ-A Cell B: at least one Heartbeat reply must have started a write. "
+    // After draining: both Heartbeat replies must have started a write.
+    // If total_starts < writes_before_test + 2, the second reply was dropped or
+    // never reached async_write — the "genuine second emit" contract is unproven.
+    EXPECT_GE(raw_ptr->total_starts(), writes_before_test + 2)
+        << "FQ-A Cell B: both Heartbeat replies must have reached async_write. "
         << "total_starts=" << raw_ptr->total_starts()
-        << " writes_before_test=" << writes_before_test;
+        << " writes_before_test=" << writes_before_test
+        << " (expected >= writes_before_test+2=" << (writes_before_test + 2) << ")";
 
     // Final check: still no concurrent excess observed.
     EXPECT_EQ(raw_ptr->concurrent_excess(), 0)
