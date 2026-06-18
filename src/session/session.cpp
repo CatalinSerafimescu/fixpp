@@ -939,37 +939,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
-    // gate-b/r2 FQ-4 (043 T023 / FR-008): effective-factory kind() consistency reject.
-    // Hoisted here — BEFORE any observable mutation — per the documented contract at
-    // line 880-881. The T023 reject originally sat AFTER `state_ = lifecycle::open`
-    // (line 1151), violating the RC#2 P2.2 ordering invariant and leaking is_open()==true
-    // on a failed open().
-    //
-    // Resolution follows the same three-way logic as the post-mutation block (Step 2):
-    //   - insecure_plain_tcp + no override → auto-derive builds a plaintext factory
-    //     (kind()==plaintext always matches) → NO check needed (skip the else).
-    //   - else → effective factory = override ?: engine_default; check if present.
-    //
-    // This is EXACTLY equivalent to the current Step 3 logic (lines 1230-1237) because
-    // in the auto-derive case the engine_default is never consulted even if present.
-    // The insecure_plain_tcp+no-override+TLS-engine-default case is valid and must NOT
-    // reject here — the auto-derive factory takes precedence over the engine default.
-    // Only a PRESENT factory whose kind() disagrees with the profile is rejected.
-    // [043 T023; data-model §E-6; spec.md FR-008; D-6 step 3; research.md D-5]
+    std::shared_ptr<fixpp::transport::TransportFactory> resolved_transport_factory;
+
+    // gate-b/r2 FQ-4 + gate-b/r3 FQ-6 (043 T023 / FR-003a / FR-008): resolve the
+    // effective factory ONCE before any observable mutation, then run the single
+    // kind() consistency check on that resolved object.
     {
         const auto k_early = cfg_.security_profile.k;
-        if (!(is_insecure_plain_tcp(k_early) && !cfg_.transport_factory_override)) {
-            // Not the auto-derive path: check override ?: engine_default if present.
-            const auto* eff_early = cfg_.transport_factory_override
-                                        ? cfg_.transport_factory_override.get()
-                                        : engine_.default_transport_factory.get();
-            if (eff_early) {
-                using TFK = fixpp::transport::transport_security_kind;
-                const TFK required_early =
-                    is_insecure_plain_tcp(k_early) ? TFK::plaintext : TFK::tls;
-                if (eff_early->kind() != required_early) {
-                    co_return std::unexpected(error::invalid_session_config);
-                }
+        if (is_insecure_plain_tcp(k_early) && !cfg_.transport_factory_override) {
+            auto plain_factory_r = fixpp::transport::make_asio_plain_transport_factory(
+                fixpp::transport::Transport::Config{});
+            if (!plain_factory_r) {
+                co_return std::unexpected(plain_factory_r.error());
+            }
+            resolved_transport_factory = std::shared_ptr<fixpp::transport::TransportFactory>(
+                std::move(*plain_factory_r));
+        } else {
+            resolved_transport_factory = cfg_.transport_factory_override
+                                             ? cfg_.transport_factory_override
+                                             : engine_.default_transport_factory;
+        }
+
+        if (resolved_transport_factory) {
+            using TFK = fixpp::transport::transport_security_kind;
+            const TFK required_early = is_insecure_plain_tcp(k_early) ? TFK::plaintext : TFK::tls;
+            if (resolved_transport_factory->kind() != required_early) {
+                co_return std::unexpected(error::invalid_session_config);
             }
         }
     }
@@ -1208,21 +1203,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
     reconnect_fsm_.set_emit_credentials_rotated(
         [this](fixpp::session::session_event_credentials_rotated ev) noexcept { emit_event(ev); });
-    // 043 T012+T023 (D-4/D-6 — FR-003a/FR-008) — Effective-factory resolution,
-    // consistency reject, and FSM wiring.
+    // 043 T012+T023 (D-4/D-6 — FR-003a/FR-008) — Effective-factory wiring.
     //
     // Step 1: insecure_plain_tcp is ACCEPTED (not unset); the unset reject above
     //   is unchanged.
-    // Step 2: resolve the effective factory ONCE:
-    //   - insecure_plain_tcp + no override → build the built-in plaintext factory
-    //     via make_asio_plain_transport_factory(Transport::Config{}) (D-4 auto-derive;
-    //     Transport::Config{} defaults: tcp_nodelay ON, keepalives per D-12).
-    //     The returned unique_ptr<TransportFactory> is adopted into the shared_ptr
-    //     member; the shared_ptr owns it for the session lifetime.
-    //   - Otherwise: preserve the existing TLS resolution idiom
-    //     (override ? override : engine_default). A null engine_default is the test
-    //     path where the FSM's null-guard at reconnect_fsm.cpp:113-115 fires; no
-    //     change in behaviour for that path.
+    // Step 2: adopt the already-resolved effective factory into the owning member.
     // Step 4: wire the resolved factory into the FSM via set_transport_factory()
     //   so the FSM mints through the same validated factory.
     // Step 5 (SK→TK mapping): plaintext leaves tls_profile=unset (no SslCtxConfig)
@@ -1233,30 +1218,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         using SK = fixpp::session::SecurityProfile::kind;
         using TK = fixpp::tls::SecurityProfile;
 
-        // Step 2: effective-factory resolution.
-        if (is_insecure_plain_tcp(k) && !cfg_.transport_factory_override) {
-            // Auto-derive the built-in plaintext factory (D-4).
-            // make_asio_plain_transport_factory returns expected_t<unique_ptr>;
-            // on failure (should not happen for a credential-free factory) the
-            // member stays null and the FSM's null-guard fires at reconnect time.
-            auto plain_factory_r = fixpp::transport::make_asio_plain_transport_factory(
-                fixpp::transport::Transport::Config{});
-            if (plain_factory_r.has_value()) {
-                effective_transport_factory_ = std::move(*plain_factory_r);
-            }
-        } else {
-            // TLS path: adopt the override (or the engine default) as a shared_ptr.
-            // cfg_.transport_factory_override is a shared_ptr (copy is cheap).
-            // engine_.default_transport_factory is also a shared_ptr.
-            effective_transport_factory_ = cfg_.transport_factory_override
-                                               ? cfg_.transport_factory_override
-                                               : engine_.default_transport_factory;
-        }
-
-        // Step 3 (T023 / US3 / FR-008): effective-factory kind() consistency reject.
-        // MOVED to the pre-mutation config-reject block at ~line 940 (gate-b/r2 FQ-4).
-        // The reject is now a pure local-variable validation before state_ = lifecycle::open,
-        // preserving the RC#2 P2.2 ordering contract.
+        effective_transport_factory_ = std::move(resolved_transport_factory);
 
         // Step 4: wire the resolved factory into the FSM.
         reconnect_fsm_.set_transport_factory(effective_transport_factory_.get());
