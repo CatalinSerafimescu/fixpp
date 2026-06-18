@@ -83,6 +83,8 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -222,17 +224,29 @@ std::vector<std::byte> to_bytes(std::string_view s) {
     return b;
 }
 
-// NewOrderSingle(35=D), small / limit, no groups.
-std::vector<std::byte> make_nos_payload() {
-    return to_bytes(
-        "35=D\x01"
-        "11=ORD-PERF\x01"
-        "54=1\x01"
-        "55=AAPL\x01"
-        "38=100\x01"
-        "40=2\x01"
-        "44=100.00\x01"
-        "60=20240101-00:00:00.000\x01");
+// Read a tag's raw value as a string_view from an inbound Index-mode MessageView
+// (correlation: 112=TestReqID on Heartbeat, 11=ClOrdID on ER). Empty if absent.
+std::string_view field_sv(const MessageView<access_mode::Index>& msg, std::uint16_t tag) {
+    auto fv = msg.get(tag);
+    if (!fv) return {};
+    auto b = fv->bytes();
+    return {reinterpret_cast<const char*>(b.data()), b.size()};
+}
+
+// NewOrderSingle(35=D), small / limit, no groups. ClOrdID(11) is parameterized so
+// wl-07 can carry a per-order correlation id (bench-nos-burst-<seq>); the depth-1
+// wl-04 path keeps the fixed "ORD-PERF".
+std::vector<std::byte> make_nos_payload(std::string_view clordid = "ORD-PERF") {
+    std::string s = "35=D\x01" "11=";
+    s += clordid;
+    s += "\x01"
+         "54=1\x01"
+         "55=AAPL\x01"
+         "38=100\x01"
+         "40=2\x01"
+         "44=100.00\x01"
+         "60=20240101-00:00:00.000\x01";
+    return to_bytes(s);
 }
 
 // NewOrderSingle(35=D) with a flat NoPartyIDs(453) repeating group (medium /
@@ -258,20 +272,22 @@ std::vector<std::byte> make_nos_grouped_payload() {
         "452=3\x01");
 }
 
-// ExecutionReport(35=8), fully-filled echo for the NOS above.
-std::vector<std::byte> make_er_payload() {
-    return to_bytes(
-        "35=8\x01"
-        "37=EXEC-PERF\x01"
-        "11=ORD-PERF\x01"
-        "17=E1\x01"
-        "150=F\x01"
-        "39=2\x01"
-        "55=AAPL\x01"
-        "54=1\x01"
-        "151=0\x01"
-        "14=100\x01"
-        "6=100.00\x01");
+// ExecutionReport(35=8), fully-filled echo for the NOS above. ClOrdID(11) is
+// parameterized: wl-07 echoes the inbound NOS's ClOrdID so the initiator can
+// correlate each ER to its order; depth-1 keeps the fixed "ORD-PERF".
+std::vector<std::byte> make_er_payload(std::string_view clordid = "ORD-PERF") {
+    std::string s = "35=8\x01" "37=EXEC-PERF\x01" "11=";
+    s += clordid;
+    s += "\x01"
+         "17=E1\x01"
+         "150=F\x01"
+         "39=2\x01"
+         "55=AAPL\x01"
+         "54=1\x01"
+         "151=0\x01"
+         "14=100\x01"
+         "6=100.00\x01";
+    return to_bytes(s);
 }
 
 // ── Application: acceptor replies ER on inbound NOS; initiator records RTT ─────
@@ -308,6 +324,34 @@ struct PerfApp : public Application {
     std::deque<double> hb_intervals_us;  // guarded by hb_mtx
     long long last_hb_ns = 0;            // guarded by hb_mtx
 
+    // wl-07 OPEN QUESTION #1 spike: an app-initiated TestRequest (35=1, 112=<id>)
+    // sent via engine.send() must round-trip as a peer auto-reply Heartbeat(35=0)
+    // echoing 112. When spike_tr_id is set, the initiator's fromAdmin flips
+    // spike_seen on the matching Heartbeat. Guarded by hb_mtx (reuses hb_cv).
+    std::string spike_tr_id;             // guarded by hb_mtx; empty = inactive
+    bool spike_seen = false;             // guarded by hb_mtx
+
+    // wl-07 burst (depth>1): correlation_id → RTT µs (mirrors QFcpp responses_ /
+    // sent_). When burst_active, fromApp(8)/fromAdmin(0) parse the correlation tag
+    // (11=ClOrdID on the ER, 112=TestReqID on the Heartbeat), compute recv-sent,
+    // insert into burst_responses_us, and notify_all. Guarded by burst_mtx.
+    std::mutex burst_mtx;
+    std::condition_variable burst_cv;
+    std::unordered_map<std::string, long long> burst_sent_ns;    // id → send steady ns
+    std::unordered_map<std::string, double> burst_responses_us;  // id → RTT µs
+    // Keeps each in-flight send body alive until its response correlates: the
+    // detached send coroutine borrows a span into the body, so a stack-local body
+    // would be freed before the worker runs the send (UAF → no valid frame on the
+    // wire). unordered_map node addresses are stable across rehash, so the span
+    // stays valid. Erased in wait_for() once the reply arrives (strictly after the
+    // send completed).
+    std::unordered_map<std::string, std::vector<std::byte>> burst_bodies;
+    // Cross-thread gate (main sets it; workers read it in fromApp/fromAdmin).
+    // MUST be atomic: a plain bool has no happens-before with the worker threads
+    // started in bring_up, so they would never observe the flip → correlation
+    // paths silently skipped (single-threaded-harness-masks-races class).
+    std::atomic<bool> burst_active{false};
+
     void onLogon(const SessionId& /*id*/) override {
         logon_count.fetch_add(1, std::memory_order_acq_rel);
     }
@@ -320,13 +364,25 @@ struct PerfApp : public Application {
             const long long now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                          Clock::now().time_since_epoch())
                                          .count();
+            const std::string_view tr = field_sv(msg, 112);  // TestReqID echo (spike)
             {
                 std::lock_guard<std::mutex> lk(hb_mtx);
                 if (last_hb_ns != 0)
                     hb_intervals_us.push_back(static_cast<double>(now_ns - last_hb_ns) / 1000.0);
                 last_hb_ns = now_ns;
+                if (!spike_tr_id.empty() && tr == spike_tr_id) spike_seen = true;
             }
-            hb_cv.notify_one();
+            hb_cv.notify_all();
+
+            // wl-07 burst: a Heartbeat echoing 112 answers a driver-issued
+            // TestRequest (the 10% admin leg) — correlate it.
+            if (burst_active && !tr.empty()) {
+                const std::string id{tr};
+                std::lock_guard<std::mutex> lk(burst_mtx);
+                if (auto it = burst_sent_ns.find(id); it != burst_sent_ns.end())
+                    burst_responses_us[id] = static_cast<double>(now_ns - it->second) / 1000.0;
+                burst_cv.notify_all();
+            }
         }
         return {};
     }
@@ -338,9 +394,12 @@ struct PerfApp : public Application {
             // Acceptor leg: echo an ExecutionReport back to the counterparty.
             // Post to the engine executor, then co_spawn the send there (mirrors
             // the re-entrant-send pattern in test_business_messages_roundtrip.cpp).
+            // In burst mode the ER must echo the inbound NOS's ClOrdID(11) so the
+            // initiator can correlate each ER (read synchronously here while msg is
+            // valid; make_er_payload copies the id into the owned payload).
             auto& eng = *engine_ptr;
             auto sid = acceptor_id;
-            auto pl = er_payload;
+            auto pl = burst_active ? make_er_payload(field_sv(msg, 11)) : er_payload;
             auto ex = exec;
             asio::post(ex, [&eng, sid, pl = std::move(pl), ex]() mutable {
                 asio::co_spawn(ex, eng.send(sid, std::span<const std::byte>(pl)), asio::detached);
@@ -351,12 +410,21 @@ struct PerfApp : public Application {
             const long long now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                          Clock::now().time_since_epoch())
                                          .count();
-            {
-                std::lock_guard<std::mutex> lk(mtx);
-                last_er_recv_ns = now_ns;
-                ++er_received;
+            if (burst_active) {
+                // Correlate the ER to its order via ClOrdID(11).
+                const std::string id{field_sv(msg, 11)};
+                std::lock_guard<std::mutex> lk(burst_mtx);
+                if (auto it = burst_sent_ns.find(id); it != burst_sent_ns.end())
+                    burst_responses_us[id] = static_cast<double>(now_ns - it->second) / 1000.0;
+                burst_cv.notify_all();
+            } else {
+                {
+                    std::lock_guard<std::mutex> lk(mtx);
+                    last_er_recv_ns = now_ns;
+                    ++er_received;
+                }
+                cv.notify_one();
             }
-            cv.notify_one();
         }
         return {};
     }
@@ -801,16 +869,294 @@ int run_idle_heartbeat(const Options& o) {
     return 0;
 }
 
+// ── wl-07 burst-single-session (depth sweep 1/8/64/256) ──────────────────────
+//
+// Peak-throughput / burst-tolerance on ONE session-pair under increasing pipeline
+// depth. Structurally mirrors QFcpp run_burst_single_session_benchmark
+// (quickfix-cpp/src/benchmark_runner.cpp) byte-for-byte where it makes a
+// methodology choice (fairness mandate, wl-07-burst-design.md §Fairness):
+//   * kDepths = {1,8,64,256}; both warmup + measured iterate all four.
+//   * Sliding-window maintain-depth: send-without-wait; when pending >= depth,
+//     FIFO-block on the OLDEST and record its RTT; drain the tail at depth end.
+//   * 90/10 mix by GLOBAL monotonic seq: seq%10==0 → TestRequest(35=1, expect
+//     Heartbeat echoing 112); else → NewOrderSingle(35=D, expect ER echoing 11).
+//   * Pooled histogram across all four depths (summary.json p50/p99/p999 + mps
+//     are over the pool); per-depth percentiles go to stdout.log only (shape
+//     sanity — p99 MUST rise with depth, else the window isn't pipelining).
+//   * NO coordinated-omission correction (symmetric with QFcpp).
+int run_burst(const Options& o) {
+    const char* dir = fixture_dir();
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
+        std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
+        return 3;
+    }
+    LoopbackHarness h;
+    if (!h.bring_up(o, 30, dir)) {  // 30s heartbeat → liveness never fires mid-burst
+        std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
+        return 3;
+    }
+    if (!h.established) {
+        std::cerr << "sessions did not reach Active within 10s\n";
+        h.teardown();
+        return 1;
+    }
+    h.app->burst_active = true;
+
+    static constexpr int kDepths[] = {1, 8, 64, 256};
+    constexpr std::size_t kND = std::size(kDepths);
+    hdr_histogram* hist = nullptr;
+    hdr_init(1, 60'000'000, 3, &hist);
+    hdr_histogram* per_depth[kND] = {};
+    for (auto& p : per_depth) hdr_init(1, 60'000'000, 3, &p);
+
+    auto now_ns = [] {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   Clock::now().time_since_epoch())
+            .count();
+    };
+
+    // Send one burst message (90/10 by seq%10), stamp the send time under
+    // burst_mtx, fire onto the worker pool. Returns the correlation id.
+    auto send_one = [&](long long seq) -> std::string {
+        std::string id;
+        std::vector<std::byte> body;
+        if (seq % 10 == 0) {  // 10% admin: TestRequest → Heartbeat echoing 112
+            id = "bench-admin-" + std::to_string(seq);
+            body = to_bytes("35=1\x01" "112=" + id + "\x01");
+        } else {              // 90% app: NewOrderSingle → ER echoing 11
+            id = "bench-nos-burst-" + std::to_string(seq);
+            body = make_nos_payload(id);
+        }
+        std::span<const std::byte> body_span;
+        {
+            std::lock_guard<std::mutex> lk(h.app->burst_mtx);
+            h.app->burst_sent_ns[id] = now_ns();
+            auto& stored = (h.app->burst_bodies[id] = std::move(body));  // keepalive
+            body_span = std::span<const std::byte>(stored);
+        }
+        asio::co_spawn(h.ioc.get_executor(),
+                       h.engine->send(h.ini_id, body_span), asio::detached);
+        return id;
+    };
+
+    // FIFO wait for a specific id's RTT (µs); -1 on 5s timeout. Erases on success.
+    auto wait_for = [&](const std::string& id) -> double {
+        std::unique_lock<std::mutex> lk(h.app->burst_mtx);
+        const bool ok = h.app->burst_cv.wait_for(lk, 5s, [&] {
+            return h.app->burst_responses_us.find(id) != h.app->burst_responses_us.end();
+        });
+        if (!ok) return -1.0;
+        const double v = h.app->burst_responses_us[id];
+        h.app->burst_responses_us.erase(id);
+        h.app->burst_sent_ns.erase(id);
+        h.app->burst_bodies.erase(id);  // send long done — safe to free the keepalive
+        return v;
+    };
+
+    bool stalled = false;
+    long long seq = 0;
+
+    // ── Warmup: all depths, global monotonic seq, results discarded ──
+    const auto warmup_start = Clock::now();
+    for (std::size_t di = 0; di < kND && !stalled; ++di) {
+        const int depth = kDepths[di];
+        std::deque<std::string> pending;
+        for (int i = 0; i < o.warmup_messages && !stalled; ++i) {
+            pending.push_back(send_one(seq++));
+            if (static_cast<int>(pending.size()) >= depth) {
+                if (wait_for(pending.front()) < 0) stalled = true;
+                pending.pop_front();
+            }
+        }
+        while (!pending.empty() && !stalled) {
+            if (wait_for(pending.front()) < 0) stalled = true;
+            pending.pop_front();
+        }
+    }
+    const double warmup_seconds =
+        std::chrono::duration<double>(Clock::now() - warmup_start).count();
+
+    // ── Measured: all depths, pooled + per-depth histograms ──
+    int recorded = 0;
+    const auto run_start = Clock::now();
+    for (std::size_t di = 0; di < kND && !stalled; ++di) {
+        const int depth = kDepths[di];
+        std::deque<std::string> pending;
+        auto record = [&](double rtt) {
+            const auto v = std::max<long long>(1, static_cast<long long>(rtt));
+            hdr_record_value(hist, v);
+            hdr_record_value(per_depth[di], v);
+            ++recorded;
+        };
+        for (int i = 0; i < o.measured_messages && !stalled; ++i) {
+            pending.push_back(send_one(seq++));
+            if (static_cast<int>(pending.size()) >= depth) {
+                const double rtt = wait_for(pending.front());
+                pending.pop_front();
+                if (rtt < 0) { stalled = true; break; }
+                record(rtt);
+            }
+        }
+        while (!pending.empty() && !stalled) {
+            const double rtt = wait_for(pending.front());
+            pending.pop_front();
+            if (rtt < 0) { stalled = true; break; }
+            record(rtt);
+        }
+    }
+    const double run_seconds = std::chrono::duration<double>(Clock::now() - run_start).count();
+
+    h.teardown();
+
+    if (stalled)
+        std::cerr << "warning: burst stalled (a response did not arrive within 5s); recorded "
+                  << recorded << " before stall\n";
+
+    RunResult r;
+    r.measured_messages = recorded;
+    r.warmup_messages = o.warmup_messages * static_cast<int>(kND);
+    r.run_seconds = run_seconds;
+    r.warmup_seconds = warmup_seconds;
+    r.messages_per_second = (run_seconds > 0.0) ? recorded / run_seconds : 0.0;
+    r.p50_us = hdr_value_at_percentile(hist, 50.0);
+    r.p99_us = hdr_value_at_percentile(hist, 99.0);
+    r.p999_us = hdr_value_at_percentile(hist, 99.9);
+    r.peak_rss_mb = peak_rss_mb();
+
+    std::filesystem::create_directories(o.out);
+    write_summary_json(o.out, o, r);
+    write_run_config_yaml(o.out, o,
+        "burst_queue_depths: \"1,8,64,256\"\n"
+        "burst_mix: \"90/10 NOS/TestRequest (seq%10==0 -> TestRequest)\"\n"
+        "coordinated_omission: not-corrected (symmetric with QFcpp; depth-N closed-loop)\n"
+        "mps_note: pooled across all four depths; messages_per_second = pooled sample "
+        "count / measured wall-time; p50/p99/p999 over the pooled set (per-depth in stdout.log)\n");
+    write_hgrm(o.out, hist);
+
+    std::ofstream log(o.out / "stdout.log");
+    log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
+        << topology_line(o)
+        << "persistence_mode=memory-store\n"
+        << indicative_line(o)
+        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << " burst_queue_depths=1,8,64,256\n"
+        << "burst_mix=90/10 NOS/TestRequest; coordinated_omission=not-corrected\n"
+        << "warmup_messages=" << r.warmup_messages << " (" << warmup_seconds << " s)\n"
+        << "measured_messages=" << recorded << " (pooled; " << run_seconds << " s)\n"
+        << "messages_per_second=" << r.messages_per_second << "\n"
+        << "latency_us(pooled) p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
+        << "\n";
+    log << "per_depth (shape sanity — p99 should rise with depth):\n";
+    for (std::size_t di = 0; di < kND; ++di) {
+        log << "  depth=" << kDepths[di]
+            << " p50=" << hdr_value_at_percentile(per_depth[di], 50.0)
+            << " p99=" << hdr_value_at_percentile(per_depth[di], 99.0)
+            << " p999=" << hdr_value_at_percentile(per_depth[di], 99.9)
+            << " count=" << per_depth[di]->total_count << "\n";
+    }
+    log << "peak_rss_mb=" << r.peak_rss_mb << "\n"
+        << "sample_app=35=D 11=bench-nos-burst-<seq> -> 35=8 (ER echoes 11)\n"
+        << "sample_admin=35=1 112=bench-admin-<seq> -> 35=0 (Heartbeat echoes 112)\n"
+        << (stalled ? "STATUS=STALLED (incomplete)\n" : "STATUS=OK\n");
+
+    std::cout << "[fixpp-perf] " << o.workload << " (depths 1/8/64/256 pooled) mps="
+              << r.messages_per_second << " p50=" << r.p50_us << "us p99=" << r.p99_us
+              << "us p999=" << r.p999_us << "us recorded=" << recorded
+              << (stalled ? " [STALLED]" : "") << "\n";
+    std::cout << "[fixpp-perf]   per-depth p99(us):";
+    for (std::size_t di = 0; di < kND; ++di)
+        std::cout << " d" << kDepths[di] << "=" << hdr_value_at_percentile(per_depth[di], 99.0);
+    std::cout << " → " << o.out << "\n";
+
+    hdr_close(hist);
+    for (auto& p : per_depth) hdr_close(p);
+    return stalled ? 1 : 0;
+}
+
+// ── wl-07 OPEN QUESTION #1 spike (GREEN gate before any wl-07 loop code) ──────
+//
+// Proves an app-initiated TestRequest(35=1, 112=<id>) sent through the opaque
+// engine.send() path: (a) is accepted by send_impl (no admin-msgtype guard —
+// confirmed by source-read), (b) is routed by the peer as admin → auto-reply
+// Heartbeat(35=0) echoing 112 (the FR-006 path PR #136 PRESERVED), and (c) does
+// NOT tear the initiator session down (the mismatch→Disconnected arm is guarded
+// on a non-empty pending_test_req_id_, which an app-initiated TR leaves empty —
+// session.cpp:3303). The survival check is the seal against a false-GREEN where
+// the acceptor emits the Heartbeat but the initiator session is dying.
+int run_wl07_spike(const Options& o) {
+    const char* dir = fixture_dir();
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
+        std::cerr << "skip:tls-fixtures-absent\n";
+        return 3;
+    }
+    LoopbackHarness h;
+    if (!h.bring_up(o, 30, dir)) {  // 30s heartbeat → no liveness HB in the 5s window
+        std::cerr << "skip:tls-fixtures-absent (cert source build failed)\n";
+        return 3;
+    }
+    if (!h.established) {
+        std::cerr << "sessions did not reach Active within 10s\n";
+        h.teardown();
+        return 1;
+    }
+
+    const std::string spike_id = "PERF-SPIKE-001";
+    {
+        std::lock_guard<std::mutex> lk(h.app->hb_mtx);
+        h.app->spike_tr_id = spike_id;
+    }
+    // Send one app-initiated TestRequest(35=1) from the initiator. Capture the
+    // send result to distinguish a send-side reject from a no-echo.
+    const auto tr_body = to_bytes("35=1\x01" "112=" + spike_id + "\x01");
+    auto send_fut = asio::co_spawn(h.ioc.get_executor(),
+                                   h.engine->send(h.ini_id, std::span<const std::byte>(tr_body)),
+                                   asio::use_future);
+
+    bool seen = false;
+    {
+        std::unique_lock<std::mutex> lk(h.app->hb_mtx);
+        seen = h.app->hb_cv.wait_for(lk, 5s, [&] { return h.app->spike_seen; });
+    }
+    const auto send_r = send_fut.get();  // expected_t<void> — workers run it to completion
+
+    // Survival check: a normal NOS→ER round trip must still complete.
+    bool survived = false;
+    if (seen) {
+        const auto nos = make_nos_payload();
+        std::unique_lock<std::mutex> lk(h.app->mtx);
+        const std::uint64_t prev = h.app->er_received;
+        asio::co_spawn(h.ioc.get_executor(),
+                       h.engine->send(h.ini_id, std::span<const std::byte>(nos)), asio::detached);
+        survived = h.app->cv.wait_for(lk, 5s, [&] { return h.app->er_received > prev; });
+    }
+
+    h.teardown();
+
+    const bool green = seen && survived;
+    std::cout << "[fixpp-perf] wl-07-spike:"
+              << " send_accepted=" << (send_r.has_value() ? "yes" : "NO(rejected)")
+              << " testrequest_echo=" << (seen ? "GREEN" : "RED")
+              << " session_survived=" << (survived ? "GREEN" : (seen ? "RED" : "n/a"))
+              << " → "
+              << (green ? "PASS — opaque send() of 35=1 works; wl-07 UNBLOCKED"
+                        : "FAIL — escalate per wl-07-burst-design.md OPEN QUESTION #1")
+              << "\n";
+    return green ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     Options o = parse_args(argc, argv);
     const bool heartbeat = (o.workload == "wl-03-admin-idle-heartbeat");
+    const bool burst = (o.workload == "wl-07-burst-single-session");
     // Resolve workload-appropriate defaults when counts were not passed. wl-03
     // heartbeats arrive ~1/s, so its defaults are small (a 20000-sample run
     // would take ~5.5 h); the closed loop is fast so it gets large defaults.
-    if (o.warmup_messages == 0) o.warmup_messages = heartbeat ? 3 : 2000;
-    if (o.measured_messages == 0) o.measured_messages = heartbeat ? 15 : 20000;
+    // wl-07 counts are PER-DEPTH and run ×4 depths (warmup×4, measured×4 pooled),
+    // so moderate per-depth counts keep the total bounded (depth 256 is heavy).
+    if (o.warmup_messages == 0) o.warmup_messages = heartbeat ? 3 : (burst ? 500 : 2000);
+    if (o.measured_messages == 0) o.measured_messages = heartbeat ? 15 : (burst ? 5000 : 20000);
 
     if (o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups") {
         return run_closed_loop(o);
@@ -818,8 +1164,14 @@ int main(int argc, char** argv) {
     if (heartbeat) {
         return run_idle_heartbeat(o);
     }
+    if (burst) {
+        return run_burst(o);
+    }
+    if (o.workload == "wl-07-spike") {
+        return run_wl07_spike(o);
+    }
     std::cerr << "workload not implemented: " << o.workload
               << " (have: wl-03-admin-idle-heartbeat, wl-04-nos-er-small, "
-                 "wl-05-nos-er-medium-groups)\n";
+                 "wl-05-nos-er-medium-groups, wl-07-burst-single-session, wl-07-spike)\n";
     return 2;
 }
