@@ -199,15 +199,15 @@ protected:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// T020-A: Heartbeat steady-state emit path — DUAL-GATE alloc check.
+// T020-A: Heartbeat steady-state processing path — DUAL-GATE alloc check.
 //
 // counting_resource gate: zero PMR allocs in the measured window.
 // mallocnesia gate: alloc_guard_count() == 0 inside the window.
 //
-// Behavioral RED assertion: we feed N heartbeats in a loop and check that
-//   the outbound frame count matches N (one Heartbeat reply for each inbound
-//   Heartbeat in Active state). The stub does not reply to heartbeats →
-//   outbound count == 0 ≠ N → FAILS RED.
+// Behavioral assertion: we feed N inbound Heartbeats in a loop and check that
+//   the session emits NO outbound frame — a Heartbeat is never answered
+//   (data-model.md:22 Active×inbound-Heartbeat = "advance counter", no emit).
+//   The alloc gates measure the steady-state inbound-Heartbeat processing path.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
     auto cfg = make_cfg();
@@ -246,12 +246,12 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
         << "counting_resource gate: PMR allocs in Heartbeat steady-state window "
         << "must be zero. [const §VIII.5].";
 
-    // Behavioral RED assertion: N inbound heartbeats → N outbound heartbeat echoes.
-    // RED: stub doesn't reply to heartbeats → outbound count == 0 ≠ kIter → FAILS RED.
-    EXPECT_EQ(static_cast<int>(outbound_frames.size()), kIter)
-        << "Behavioral gate: " << kIter << " inbound Heartbeats must produce " << kIter
-        << " outbound Heartbeat replies. "
-        << "RED: stub does not echo heartbeats → outbound_frames.size() == 0 → FAILS RED.";
+    // Behavioral gate: inbound Heartbeats must produce NO outbound frame
+    // (a Heartbeat is never answered; data-model.md:22).
+    EXPECT_EQ(outbound_frames.size(), 0U)
+        << "Behavioral gate: " << kIter << " inbound Heartbeats must produce ZERO "
+        << "outbound frames (a Heartbeat is never answered); got "
+        << outbound_frames.size();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

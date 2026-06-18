@@ -9,6 +9,13 @@ the exact-count invariant (SC-001/SC-002).
 Legend: **callback** = which `Application` hook fires before store/emit · **order** = callback
 position relative to `assign_outbound` · **036** = wired by this feature (✱) or pre-existing (·).
 
+> **[PR #136 amendment — 2026-06-18]** The inbound-Heartbeat echo emit site (old `session.cpp:3045`/`:3088`,
+> listed at `:3045`, `:3088` in the "Already observed before 036" row below) was **retired** by
+> PR #136 (`fix/no-heartbeat-echo-on-inbound-heartbeat`). Post-PR #136 the live census is
+> **14 wired / 24 `build_*`** (14 wired + 10 unwired = 24). The surviving Heartbeat `build_*` sites
+> are the TestRequest(35=1)→Heartbeat reply and the liveness Heartbeat. The table below is the
+> 036-era point-in-time record; row anchors are historical and are retained as-is.
+
 ### Already observed before 036 (15 — unchanged)
 
 | Site (HEAD) | Frame | Callback | 036 |
@@ -20,7 +27,7 @@ position relative to `assign_outbound` · **036** = wired by this feature (✱) 
 | `:2535` | `ResendRequest(35=2)` | `toAdmin` | · |
 | `:2696` | `Logout(35=5)` 021 Arm D (paired) | `toAdmin` | · |
 | `:2889` | `Logout(35=5)` confirming | `toAdmin` | · |
-| `:3045`, `:3088` | `Heartbeat(35=0)` | `toAdmin` | · |
+| `:3045`, `:3088` | `Heartbeat(35=0)` | `toAdmin` | · <!-- [PR #136] retired — inbound-Heartbeat echo removed --> |
 | `:4271` | `Heartbeat(35=0)` liveness | `toAdmin` | · |
 | `:4326` | `TestRequest(35=1)` | `toAdmin` | · |
 | `:4627` | `Logout(35=5)` graceful close | `toAdmin` | · |

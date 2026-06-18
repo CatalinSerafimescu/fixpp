@@ -3290,7 +3290,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 //   - inbound Heartbeat TestReqID does NOT match ours → mismatch →
                 //     session_testreqid_mismatch(118) → Disconnected
                 //     [spec.md FR-006; data-model.md §E-1; T018-D]
-                // T020-A: echo every inbound Heartbeat with an outbound Heartbeat.
+                // Inbound Heartbeat (35=0): per FIX a Heartbeat is NEVER answered
+                // (data-model.md:22 Active row → "advance counter (liveness)", no
+                // emit). If it carries a TestReqID matching our outstanding
+                // TestRequest it answers that TR (clear the pending flag); a
+                // mismatched TestReqID is session_testreqid_mismatch(118) →
+                // Disconnected (FR-006). No outbound frame is emitted in response —
+                // the retired "T020-A echo" emitted a Heartbeat here, which storms
+                // at RTT cadence when two fixpp sessions are paired (each echoes
+                // the other's beat). [self-paired heartbeat-storm fix]
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
                     if (!pending_test_req_id_.empty()) {
                         // We have an outstanding TestRequest. Check echo.
@@ -3305,40 +3313,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Matching or empty TestReqID: TR answered, clear flag.
                         pending_test_req_id_.clear();
                         unanswered_tr_ = false;
-                    }
-                    // T020-A: echo inbound Heartbeat with outbound Heartbeat reply.
-                    // This confirms the steady-state path on the alloc-guard window.
-                    // [spec.md US1 Heartbeat echo; T020-A behavioral gate]
-                    {
-                        std::array<std::byte, 256> hb_buf{};
-                        const auto st52 =
-                            effective_clock_
-                                ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
-                                : SendingTimeStamp{};
-                        const seqnum_t hb_seq = seqnum_mgr_.peek_outbound();
-                        // Echo with the inbound TestReqID (if any), else empty.
-                        auto hb_result = fixpp::session::build_heartbeat(
-                            std::span<std::byte>{hb_buf.data(), hb_buf.size()}, hb_seq,
-                            cfg_.sender_comp_id, cfg_.target_comp_id, hdr.test_req_id,
-                            cfg_.begin_string, st52.value);
-                        if (hb_result) {
-                            // 019 T014: toAdmin before Heartbeat echo. [FR-008/010]
-                            // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
-                            if (!fire_to_admin_(*hb_result)) {
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                            }
-                            auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                            if (!assign_r) {
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(assign_r.error());
-                            }
-                            auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
-                            if (!emit_r) {
-                                record_state_transition_(fsm_state::Disconnected);
-                                co_return std::unexpected(emit_r.error());
-                            }
-                        }
                     }
                     // 029 T010 — PERSIST: inbound Heartbeat (35=0).
                     // check_inbound advanced next_inbound; fromAdmin dispatched above.
