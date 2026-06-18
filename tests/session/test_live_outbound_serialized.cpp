@@ -345,6 +345,39 @@ static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
     return out;
 }
 
+// Inbound TestRequest(35=1) with a TestReqID(112). The session replies with a
+// Heartbeat echoing the 112 — the correct outbound-emit trigger (an inbound
+// Heartbeat is never answered; data-model.md:22). Used to drive the live-write
+// path that the retired Heartbeat-echo used to drive.
+static std::vector<std::byte> make_peer_test_request(std::string_view begin_string,
+                                                     std::uint32_t seq, std::string_view sender,
+                                                     std::string_view target,
+                                                     std::string_view test_req_id) {
+    std::string body;
+    body += "35=1\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
+    body += "49=" + std::string(sender) + "\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=" + std::string(target) + "\x01";
+    body += "112=" + std::string(test_req_id) + "\x01";
+
+    std::string msg;
+    msg += "8=" + std::string(begin_string) + "\x01";
+    msg += "9=" + std::to_string(body.size()) + "\x01";
+    msg += body;
+    unsigned int cs = 0;
+    for (unsigned char c : msg) cs += c;
+    cs &= 0xFFu;
+    char buf[5];
+    snprintf(buf, sizeof(buf), "%03u", cs);
+    msg += "10=" + std::string(buf) + "\x01";
+
+    std::vector<std::byte> out;
+    out.reserve(msg.size());
+    for (char c : msg) out.push_back(static_cast<std::byte>(c));
+    return out;
+}
+
 static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exec) {
     fixpp::session::SessionConfig cfg;
     cfg.sender_comp_id = "ACCEPTOR";
@@ -414,7 +447,7 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     raw_ptr->close();
 }
 
-TEST(LiveOutboundSerializedTest, HeartbeatEchoWriteErrorDisconnectsSession) {
+TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -438,19 +471,19 @@ TEST(LiveOutboundSerializedTest, HeartbeatEchoWriteErrorDisconnectsSession) {
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
-    auto heartbeat = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
-    auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{heartbeat}),
+    auto test_req = make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1");
+    auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{test_req}),
                                  asio::use_future);
     run_until_ready(ioc, hb_fut);
-    ASSERT_EQ(hb_fut.wait_for(0ms), std::future_status::ready) << "heartbeat handling timed out";
+    ASSERT_EQ(hb_fut.wait_for(0ms), std::future_status::ready) << "TestRequest handling timed out";
     auto hb_r = hb_fut.get();
 
     EXPECT_FALSE(hb_r.has_value())
-        << "live Heartbeat echo write failure must surface back to on_inbound_frame";
+        << "live Heartbeat-reply write failure must surface back to on_inbound_frame";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "live Heartbeat echo write failure must force Disconnected";
+        << "live Heartbeat-reply write failure must force Disconnected";
     EXPECT_EQ(raw_ptr->write_count(), 2)
-        << "exactly the reply-Logon and failing Heartbeat echo should have written";
+        << "exactly the reply-Logon and the failing Heartbeat reply should have written";
 
     raw_ptr->close();
 }
@@ -501,20 +534,20 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     ASSERT_GE(raw_ptr->total_starts(), 1) << "reply-Logon write must have occurred";
     const int writes_before_test = raw_ptr->total_starts();
 
-    // Arm block: the NEXT async_write (Heartbeat echo for write #N+1) will block.
+    // Arm block: the NEXT async_write (Heartbeat reply for write #N+1) will block.
     raw_ptr->arm_block();
 
-    // Feed a peer Heartbeat → triggers outbound Heartbeat echo → write N+1 BLOCKS.
-    auto hb1 = make_peer_heartbeat("FIX.4.4", 2, "INITIATOR", "ACCEPTOR");
+    // Feed a peer TestRequest → triggers outbound Heartbeat reply → write N+1 BLOCKS.
+    auto hb1 = make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1");
     asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb1}), asio::detached);
 
     // Run a few steps to get write N+1 in-flight but blocked.
     ioc.run_for(50ms);
     ioc.restart();
 
-    // Now feed a second Heartbeat → triggers another Heartbeat echo → write N+2.
+    // Now feed a second TestRequest → triggers another Heartbeat reply → write N+2.
     // This write must NOT enter async_write while N+1 is still in-flight.
-    auto hb2 = make_peer_heartbeat("FIX.4.4", 3, "INITIATOR", "ACCEPTOR");
+    auto hb2 = make_peer_test_request("FIX.4.4", 3, "INITIATOR", "ACCEPTOR", "TR2");
     asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb2}), asio::detached);
 
     // Run to ensure the second Heartbeat handler reaches its write_gate_ acquire.
@@ -546,7 +579,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     // If total_starts == writes_before_test, the second emit never reached
     // async_write — the test would be void (but it verifies the gate rewrite).
     EXPECT_GT(raw_ptr->total_starts(), writes_before_test)
-        << "FQ-A Cell B: at least one Heartbeat echo must have started a write. "
+        << "FQ-A Cell B: at least one Heartbeat reply must have started a write. "
         << "total_starts=" << raw_ptr->total_starts()
         << " writes_before_test=" << writes_before_test;
 

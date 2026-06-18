@@ -606,14 +606,16 @@ TEST(ApplicationThrow, ToAdminGracefulCloseLogoutThrowTerminatesSession) {
     f.verify_second_session_works(std::make_shared<OkApplication>());
 }
 
-// ── Test 10: toAdmin throw on liveness Heartbeat → terminal-close ─────────────
+// ── Test 10: toAdmin throw on TestRequest reply → terminal-close ──────────────
 //
-// When an inbound Heartbeat(35=0) is received while Active, the session echoes
-// a Heartbeat reply → toAdmin fires. With ThrowingToAdminAtN(2) and the acceptor
-// path (call #1 = Logon reply), the Heartbeat echo fires toAdmin call #2 → throw.
-// FIX-3: terminal-close + app_callback_threw. Pre-fix: continued with (void)discard.
+// When an inbound TestRequest(35=1) is received while Active, the session emits
+// a Heartbeat reply echoing the TestReqID → toAdmin fires. With ThrowingToAdminAtN(2)
+// and the acceptor path (call #1 = Logon reply), the reply fires toAdmin call #2 →
+// throw. FIX-3: terminal-close + app_callback_threw. Pre-fix: continued with discard.
+// (An inbound Heartbeat is NOT answered — data-model.md:22 — so the TestRequest is
+// the emit trigger here.)
 
-TEST(ApplicationThrow, ToAdminHeartbeatEchoThrowTerminatesSession) {
+TEST(ApplicationThrow, ToAdminTestRequestReplyThrowTerminatesSession) {
     auto app = std::make_shared<ThrowingToAdminAtN>(2);
     ThrowFixture f;
     f.engine_cfg.application = app;
@@ -623,9 +625,9 @@ TEST(ApplicationThrow, ToAdminHeartbeatEchoThrowTerminatesSession) {
     open_acceptor_to_active(f, sess);
     ASSERT_EQ(app->call_count, 1);
 
-    // Feed inbound Heartbeat → session echoes back → toAdmin call #2 throws.
-    auto hb_frame = make_heartbeat_frame(2);
-    auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(hb_frame), asio::use_future);
+    // Feed inbound TestRequest → session emits a Heartbeat reply → toAdmin call #2 throws.
+    auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=TR1\x01");
+    auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
     f.run();
     (void)fut.get();
     f.run(300);
