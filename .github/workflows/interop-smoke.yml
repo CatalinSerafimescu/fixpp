@@ -7,13 +7,17 @@ name: Interop smoke (per-PR light tier)
 # `interop-full-matrix` / `interop-release-prep` named checks (contract
 # parent-harness-gate-contract.md), NOT here.
 #
-# Counterparty-absent handling (FR-023): the smoke cell is a counterparty-required
-# live cell; in this CI environment no QuickFIX counterparty is configured, so the
-# cell GTEST_SKIPs-with-reason (never silently passed). The job stays green on a
-# skip — the smoke tier is a cheap regression catch, not the GA badge gate
-# (tier: smoke in the gate-evaluator rule). The build itself (the transport/
-# session/tls stack compiling + linking the interop driver) is the real per-PR
-# signal here.
+# The smoke cell now runs LIVE: this job pulls the PUBLIC prebuilt counterparty +
+# bundled single-cell driver (parent harness → GHCR, ci/counterparties.Dockerfile),
+# brings the QuickFIX-cpp counterparty up via the bundled run_interop_cell.py, and
+# drives one happy-path logon/heartbeat/logout exchange over TLS.
+#
+# Counterparty-absent handling (FR-023): if the package can't be pulled/brought up,
+# the cell skips-with-reason (never silently passed) and the job stays GREEN — the
+# smoke tier is a cheap regression catch, not the GA badge gate (tier: smoke in the
+# gate-evaluator rule). A genuine cell FAILURE is RED. The build itself (the
+# transport/session/tls stack compiling + linking the interop driver) remains a
+# real per-PR signal regardless.
 
 on:
   pull_request:
@@ -31,6 +35,10 @@ on:
 
 env:
   CONAN_HOME: ~/.conan2
+  # Prebuilt QuickFIX counterparty + bundled single-cell harness driver, published
+  # PUBLIC from the parent harness (ci/counterparties.Dockerfile). Pulled anonymously
+  # here so the smoke cell runs LIVE without checking out the private parent repo.
+  IMAGE: ghcr.io/catalinserafimescu/fixpp-interop-counterparties:latest
 
 # Newest run per PR only (mirror tier1.yml).
 concurrency:
@@ -103,11 +111,52 @@ jobs:
           cmake --build --preset linux-clang-release \
             --target interop_hp_fix44_logon_hb_logout_test
 
-      # SC-005: the smoke cell MUST complete in ≤ 120 s wall-clock. The step
-      # timeout makes an over-budget run a GATE FAILURE, not a flake.
-      - name: Run smoke cell (≤120s budget — SC-005)
-        timeout-minutes: 2
+      - name: Install harness runtime deps
         run: |
-          ctest --preset linux-clang-release \
-            --output-on-failure \
-            -R interop_hp_fix44_logon_hb_logout_test
+          pip install pyyaml
+          sudo apt-get install -y --no-install-recommends openssl
+
+      - name: Pull counterparty + driver, recreate harness layout
+        run: |
+          docker pull "$IMAGE"                       # PUBLIC package → no auth
+          cid=$(docker create "$IMAGE")
+          # run_interop_cell.py derives every path from its own location, so place
+          # the bundled driver at <base>/research/G19-fix-fpml-iso20022/phase-9-harness
+          # and symlink .../library → this fixpp checkout (LIB_ROOT resolves here:
+          # TLS fixtures, dictionaries, in-repo goldens).
+          G19="$RUNNER_TEMP/h/research/G19-fix-fpml-iso20022"
+          mkdir -p "$G19"
+          docker cp "$cid:/opt/interop/harness"              "$G19/phase-9-harness"
+          docker cp "$cid:/opt/interop/interop_counterparty" "$RUNNER_TEMP/cp_bin"
+          docker cp "$cid:/opt/interop/lib"                  "$RUNNER_TEMP/cp_lib"
+          docker rm "$cid"
+          chmod +x "$RUNNER_TEMP/cp_bin"
+          ln -sfn "$GITHUB_WORKSPACE" "$G19/library"
+          echo "HARNESS=$G19/phase-9-harness" >> "$GITHUB_ENV"
+
+      - name: Generate interop TLS (from fixpp's committed CA fixtures)
+        run: bash "$HARNESS/tls/gen-interop-certs.sh"
+
+      # SC-005: the smoke cell MUST complete in ≤ 120 s wall-clock. The step
+      # timeout makes an over-budget run a GATE FAILURE, not a flake. The cell now
+      # runs LIVE against the pulled counterparty; per FR-023 a genuine
+      # counterparty-absent skip stays tolerable (light tier), but a real cell
+      # failure is RED.
+      - name: Run smoke cell LIVE (≤120s budget — SC-005)
+        timeout-minutes: 2
+        env:
+          INTEROP_QFC_COUNTERPARTY_BIN: ${{ runner.temp }}/cp_bin
+          INTEROP_BUILD_PRESET: linux-clang-release   # smoke builds release, not the default debug
+          LD_LIBRARY_PATH: ${{ runner.temp }}/cp_lib
+        run: |
+          python3 "$HARNESS/tools/run_interop_cell.py" \
+            HP-QFcpp-init-fix44-logon-hb-logout \
+            --config normal --build-root "$GITHUB_WORKSPACE/build" \
+            --out "$RUNNER_TEMP/smoke.yaml" || true
+          status=$(grep -E '^\s*status:' "$RUNNER_TEMP/smoke.yaml" | head -1 | awk '{print $2}')
+          echo "smoke cell status: $status"
+          case "$status" in
+            pass)   echo "::notice::smoke cell PASSED live against QuickFIX-cpp" ;;
+            skip:*) echo "::warning::counterparty unavailable ($status) — tolerated on the light tier (FR-023)" ;;
+            *)      echo "::error::smoke cell did not pass: ${status:-<no result emitted>}"; exit 1 ;;
+          esac
