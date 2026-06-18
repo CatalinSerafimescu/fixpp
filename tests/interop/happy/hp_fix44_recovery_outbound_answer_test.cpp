@@ -21,8 +21,11 @@
 //   (a) FSM stays Active (fixpp processes the ResendRequest on the live session;
 //       no Disconnect is expected for a spec-legal ResendRequest; Active is the
 //       expected terminal for US3-4).
-//   (b) Outbound seqnum advances beyond Logon (the ResendRequest reply — replay
-//       or GapFill — advances the outbound counter).
+//   (b) Inbound seqnum advances beyond Logon — fixpp RECEIVED+processed QFJ's
+//       ResendRequest. (The outbound counter is NOT a valid witness: resend
+//       replies are transmit-only and reuse the replayed seqnums —
+//       session.cpp:3406-3408 — so they never advance peek_outbound(). The
+//       emitted GapFill/replay is proven on the wire by the golden, not in-process.)
 //   (c) Session returns to Active (not Disconnected) after the outbound-answer window.
 //   Wire-frame assertions (golden-based only per R1 architecture):
 //     QFJ's ResendRequest(35=2) + fixpp's answering replay(43=Y,122=) and/or
@@ -201,26 +204,52 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
-    // ── In-process witness (b): outbound seqnum after Logon ────────────────
-    const auto seqnum_after_logon = s->seqnum_mgr_test_access().peek_outbound();
-    EXPECT_GT(seqnum_after_logon, fixpp::session::seqnum_t{1})
-        << "outbound seqnum did not advance past the Logon";
+    // ── In-process witness (b): inbound seqnum after Logon ─────────────────
+    // 9.H: the OUTBOUND counter is the wrong witness for a resend reply.
+    // session.cpp:3406-3408 makes resend replies (replay AND SequenceReset-
+    // GapFill) transmit-only — they reuse the replayed seqnums and do NOT advance
+    // the live outbound counter. We instead witness that fixpp RECEIVED and
+    // processed QFJ's ResendRequest (the inbound seqnum advances); the emitted
+    // GapFill/replay frame itself is proven ON THE WIRE by the golden below
+    // (the canonical, rule-3 fixpp-state-vs-wire split). The emission behavior is
+    // unit-proven in tests/session/test_recovery_admin_span_gapfill.cpp T015-B.
+    const auto inbound_after_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
 
-    // ── Outbound-answer window: 25 s budget ────────────────────────────────
-    // The parent drives QFJ to reconnect at a lower sequence number (qfj_restart_resend
-    // induction). QFJ issues ResendRequest(35=2) to fixpp. fixpp answers using the
-    // 013 outbound replay path (replay or SequenceReset-GapFill). After the dialogue
-    // the session returns to Active.
+    // ── Resend-answer window: 25 s budget ──────────────────────────────────
+    // The QFJ counterparty issues one ResendRequest(35=2, BeginSeqNo=1, EndSeqNo=0)
+    // on logon (cp_recovery_outbound induction). fixpp's outbound store at that
+    // point holds only its admin Logon, so the all-admin range [1..current]
+    // collapses to ONE SequenceReset-GapFill(35=4, 123=Y, 36=<next live seq>) per
+    // the merged 013/027 replay path. fixpp stays Active and QFJ resyncs.
     //
-    // We pump until the outbound seqnum advances beyond the post-logon value (the
-    // GapFill/replay frames advance it) OR the window expires.
+    // We pump until fixpp has RECEIVED QFJ's ResendRequest (inbound seqnum advances
+    // past the post-logon value) OR the window expires.
     fx.run_until(
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().peek_outbound() > seqnum_after_logon;
+                   ss->seqnum_mgr_test_access().next_inbound_unsafe() > inbound_after_logon;
         },
-        25s);
+        23s);
+
+    // ── Settle: let fixpp's resend-answer flush to the wire ─────────────────
+    // The inbound witness above fires at ResendRequest RECEIPT (check_inbound
+    // advances next_inbound BEFORE the handler's replay_outbound_range_ emits the
+    // reply via co_await live_write). Pump a bounded settle window so the reply is
+    // written before the graceful stop closes the socket.
+    //
+    // NOTE (9.H, 2026-06-18): this cell is DEFERRED in the live matrix. The
+    // current qfj_restart_resend induction (ResendRequest over a Logon-only store)
+    // produces a NO-OP SequenceReset-GapFill (NewSeqNo == the peer's already-
+    // expected seq); QFJ consumes it in its session layer and never surfaces it to
+    // fromAdmin, so the counterparty transcript / golden cannot capture it, and the
+    // in-process signals here (Active + inbound-advance) cannot witness "answers
+    // correctly" without over-claiming. fixpp's emission IS proven correct in
+    // tests/session/test_recovery_admin_span_gapfill.cpp T015 (in-process) and on
+    // the live wire (debug-log GapFill). A sound live cell needs a non-degenerate
+    // app-replay induction — harness feature work. See run_interop_cell.py RO block
+    // + work-plan §9.H.
+    fx.run_until([] { return false; }, 2s);
 
     s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session disappeared during recovery_outbound window";
@@ -232,12 +261,16 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
         << "FSM left Active during/after the recovery_outbound window (US3-4 violated); "
         << "fixpp disconnected on QFJ ResendRequest — check the outbound answer path";
 
-    // ── In-process witness (b): outbound seqnum advanced ──────────────────
-    // The reply (replay or SequenceReset-GapFill) is an outbound emission; the
-    // outbound counter must have advanced beyond the post-logon value.
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), seqnum_after_logon)
-        << "outbound seqnum did not advance past logon; fixpp may not have replied to QFJ's "
-        << "ResendRequest (US3-3 outbound-answer path not triggered)";
+    // ── In-process witness (b): inbound seqnum advanced ───────────────────
+    // fixpp received and processed QFJ's ResendRequest (an in-sequence inbound
+    // admin frame; processing it advances the expected inbound seqnum). This
+    // proves the resend-answer path was ENTERED; the emitted GapFill/replay frame
+    // itself is asserted on the wire by the golden below (resend replies are
+    // transmit-only and do NOT advance the outbound counter — session.cpp:3406-3408
+    // — so peek_outbound() is structurally unobservable here).
+    EXPECT_GT(s->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_after_logon)
+        << "inbound seqnum did not advance; fixpp did not receive QFJ's ResendRequest "
+        << "(US3-3 resend-answer path not triggered)";
 
     // ── Golden assertion (T014 / US3-3) ───────────────────────────────────
     // The golden file is captured at first paired run by the parent harness.

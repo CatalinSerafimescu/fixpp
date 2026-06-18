@@ -41,17 +41,15 @@ DEFERRED_TAGS = {
     # variants are by-design not run; the QFj variants are live (reject-invalid-
     # admin via the cp_corrupt_admin 55=BAD induction). Phase 9.H step 2.
     "deferred:qfj-only-at-g1",
-    # recovery-outbound: the gtest's never-validated witness asserts peek_outbound
-    # advances after fixpp answers a ResendRequest, but resend replies reuse the
-    # replayed seqnums and do NOT advance the outbound counter (session.cpp:3406-
-    # 3408). Re-enabling is a feature-class follow-up (witness fix + non-degenerate
-    # induction + on-wire-answer confirmation). Phase 9.H step 6.
-    "deferred:recovery-outbound-witness-defect",
-    # idle-cadence: in-process witness passes, but the verbatim in-repo golden gate
-    # is non-deterministic at HeartBtInt=1s (unpredictable QFJ liveness TestRequests
-    # + a trailing-frame/Logout race → +-1 frame drift). Re-enabling needs a count-
-    # tolerant gate or a non-frame-count cadence witness. Phase 9.H step 6.
-    "deferred:idle-cadence-golden-nondeterministic",
+    # recovery-outbound: NO fixpp defect (emission proven in-process — T015 — and on
+    # the live wire). The induction is degenerate: ResendRequest over a Logon-only
+    # store yields a NO-OP SequenceReset (NewSeqNo == the peer's already-expected
+    # seq), which QFJ consumes in its session layer and never surfaces to fromAdmin,
+    # so the transcript/golden cannot capture it. A sound, capturable cell needs a
+    # non-degenerate app-replay induction — harness feature work, not a defect fix.
+    # Phase 9.H follow-up (2026-06-18). (idle-cadence was un-deferred to live in the
+    # same follow-up via a count-tolerant cadence gate.)
+    "deferred:recovery-outbound-degenerate-induction",
 }
 
 
