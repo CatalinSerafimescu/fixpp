@@ -18,15 +18,17 @@
 // cross-engine comparison is assembled offline from the three engines' self-
 // paired numbers.
 //
-// HONESTY CAVEAT (recorded into run-config.yaml + stdout.log): fixpp is TLS-only
-// (asio_tls_transport; the plaintext sibling 043 is opt-in and not wired here),
-// so this run is OVER TLS while the QF `tls:off` rows are plaintext. It is an
-// INDICATIVE, non-isolated-host (WSL2) reading, NOT an apples-to-apples engine
-// comparison. See benchmark-readiness.md blockers #3 (plaintext) and #4 (host).
+// TRANSPORT (--transport, default "plain"): the 043 plaintext sibling
+// (insecure_plain_tcp) is now wired, so the DEFAULT run is plaintext-both-sides —
+// apples-to-apples with the QF `tls:off` rows (blocker #3 cleared). `--transport
+// tls` (mtls_ca) is retained for the TLS-overhead row (same workload, plain vs
+// tls diff). The only remaining honesty caveat is the host: WSL2 is not core-
+// isolated, so ABSOLUTE numbers are INDICATIVE, not publishable (blocker #4).
+// All caveats are recorded into run-config.yaml + stdout.log per run.
 //
-// Slice 1 implements wl-04-nos-er-small only (the closed-loop NOS→ER baseline);
-// other workloads are scoped follow-ons (benchmark-readiness.md step 1 list:
-// wl-01/03/05/07/08). This is a gated, non-shipped target (FIXPP_BUILD_INTEROP_PERF).
+// Implemented workloads: wl-03-admin-idle-heartbeat, wl-04-nos-er-small,
+// wl-05-nos-er-medium-groups (closed-loop). wl-01/07/08 are scoped follow-ons
+// (benchmark-readiness.md step 1). Gated, non-shipped (FIXPP_BUILD_INTEROP_PERF).
 //
 // Threading discipline (load-bearing — see project memory):
 //   * Establishment is driven single-threaded (run_for + restart) BEFORE any
@@ -98,17 +100,27 @@ struct Options {
     std::string workload = "wl-04-nos-er-small";
     std::string engine = "fixpp";
     std::string begin_string = "FIX.4.4";
+    // Transport mode. "plain" (043 insecure_plain_tcp) is the DEFAULT so the
+    // fixpp rows are apples-to-apples with the QF `tls:off` rows; "tls" (mtls_ca)
+    // is retained for the TLS-overhead row (same workload, plain vs tls diff).
+    std::string transport = "plain";
     int warmup_messages = 0;    // 0 = unset → workload default resolved in main()
     int measured_messages = 0;  // 0 = unset → workload default resolved in main()
     std::filesystem::path out;  // results directory (created if absent)
 };
 
+// Single source of truth for the transport branch.
+bool want_tls(const Options& o) { return o.transport == "tls"; }
+
 [[noreturn]] void usage(const char* argv0, int code) {
     std::cerr
         << "usage: " << argv0 << " --workload <id> --out <dir>\n"
-        << "           [--warmup-msgs N] [--measured-msgs N] [--begin-string FIX.4.4]\n"
-        << "  Only wl-04-nos-er-small is implemented in slice 1.\n"
-        << "  Requires FIXPP_TLS_FIXTURE_DIR (compiled-in default = tests/tls/fixtures).\n";
+        << "           [--transport plain|tls] [--warmup-msgs N] [--measured-msgs N]\n"
+        << "           [--begin-string FIX.4.4]\n"
+        << "  --transport plain (default) = 043 insecure_plain_tcp (apples-to-apples\n"
+        << "    with QF tls:off rows); tls = mtls_ca (TLS-overhead row). TLS needs\n"
+        << "    FIXPP_TLS_FIXTURE_DIR (compiled-in default = tests/tls/fixtures);\n"
+        << "    plaintext needs no certs.\n";
     std::exit(code);
 }
 
@@ -121,6 +133,7 @@ Options parse_args(int argc, char** argv) {
             return argv[++i];
         };
         if (a == "--workload") o.workload = next();
+        else if (a == "--transport") o.transport = next();
         else if (a == "--out") o.out = next();
         else if (a == "--warmup-msgs") o.warmup_messages = std::stoi(next());
         else if (a == "--measured-msgs") o.measured_messages = std::stoi(next());
@@ -129,6 +142,10 @@ Options parse_args(int argc, char** argv) {
         else { std::cerr << "unknown arg: " << a << "\n"; usage(argv[0], 2); }
     }
     if (o.out.empty()) { std::cerr << "--out is required\n"; usage(argv[0], 2); }
+    if (o.transport != "plain" && o.transport != "tls") {
+        std::cerr << "--transport must be plain|tls, got: " << o.transport << "\n";
+        usage(argv[0], 2);
+    }
     return o;
 }
 
@@ -172,6 +189,29 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char*
     if (!fac_r.has_value()) return nullptr;
     return std::shared_ptr<fixpp::transport::TransportFactory>{std::move(*fac_r)};
 }
+
+// Build the plaintext (043 insecure_plain_tcp) SecurityProfile. The selection of
+// SecurityProfile::kind::insecure_plain_tcp fires the [[deprecated]] operator-
+// friction diagnostic by design; this perf driver legitimately selects it (it IS
+// the plaintext benchmark), so the suppression is LOCALIZED to this one helper —
+// the rest of the file keeps deprecation warnings active. Idiom mirrors the 043
+// tests' file-wide pragma (test_session_plaintext_roundtrip.cpp), portable to gcc.
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+fixpp::session::SecurityProfile plain_profile() {
+    return fixpp::session::SecurityProfile{
+        fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
+}
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
 
 // Build a raw app-message body (the session frames it: prepends 8=/9=/34=/49=/
 // 52=/56=, appends 10=). Mirrors the roundtrip test's kPayload shape.
@@ -370,23 +410,45 @@ void write_summary_json(const std::filesystem::path& dir, const Options& o, cons
 // heartbeat_interval_s + mps_note), inserted after the common block.
 void write_run_config_yaml(const std::filesystem::path& dir, const Options& o,
                            std::string_view mode_lines) {
+    const bool tls = want_tls(o);
     std::ofstream f(dir / "run-config.yaml");
     f << "workload_id: " << o.workload << "\n"
       << "engine: " << o.engine << "\n"
       << "begin_string: " << o.begin_string << "\n"
       << "persistence_mode: memory-store\n"
-      << "tls: on            # fixpp is TLS-only; QF tls:off rows are plaintext\n"
+      << "tls: " << (tls ? "on             # mtls_ca; vs QF tls:off (TLS-overhead row)"
+                         : "off            # plaintext both sides; matches QF tls:off rows")
+      << "\n"
       << "topology: homogeneous-self-pairing (fixpp-init <-> fixpp-acc, loopback)\n"
-      << "security_profile: mtls_ca\n"
+      << "security_profile: " << (tls ? "mtls_ca" : "insecure_plain_tcp") << "\n"
       << mode_lines
       << "warmup_messages: " << o.warmup_messages << "\n"
       << "measured_messages: " << o.measured_messages << "\n"
       << "host_class: WSL2 (non-isolated, indicative only)\n"
-      << "comparison_caveat: >\n"
-      << "  Indicative directional read only. fixpp runs over TLS while the QF\n"
-      << "  tls:off rows are plaintext; WSL2 is not core-isolated. NOT an\n"
-      << "  apples-to-apples engine comparison (see benchmark-readiness.md #3/#4).\n";
+      << "comparison_caveat: >\n";
+    if (tls) {
+        f << "  TLS-overhead row. fixpp runs over mTLS while the QF tls:off rows are\n"
+          << "  plaintext; WSL2 is not core-isolated. Use the paired --transport plain\n"
+          << "  run for the apples-to-apples engine delta (see benchmark-readiness.md).\n";
+    } else {
+        f << "  Plaintext both sides (043 insecure_plain_tcp), apples-to-apples with\n"
+          << "  the QF tls:off rows. Remaining caveat: WSL2 is not core-isolated, so\n"
+          << "  absolute numbers are indicative, not publishable (benchmark-readiness.md #4).\n";
+    }
 }
+
+// Transport-dependent stdout.log header fragments (keep both run paths in sync).
+const char* topology_line(const Options& o) {
+    return want_tls(o)
+        ? "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback mTLS\n"
+        : "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback plaintext\n";
+}
+const char* indicative_line(const Options& o) {
+    return want_tls(o)
+        ? "INDICATIVE: fixpp over mTLS vs QF tls:off plaintext (TLS-overhead row); WSL2 non-isolated.\n"
+        : "PLAINTEXT both sides — apples-to-apples vs QF tls:off; WSL2 non-isolated (indicative absolute).\n";
+}
+const char* sec_profile_str(const Options& o) { return want_tls(o) ? "mtls_ca" : "insecure_plain_tcp"; }
 
 // Write the HdrHistogram percentile log (standard .hgrm; readable by hdr tools).
 void write_hgrm(const std::filesystem::path& dir, hdr_histogram* hist) {
@@ -421,8 +483,13 @@ struct LoopbackHarness {
     // Otherwise true; check `established` for whether both sessions reached
     // Active. The caller MUST call teardown() on any non-skip path.
     bool bring_up(const Options& o, int heartbeat_secs, const char* dir) {
-        factory = make_tls_factory(dir);
-        if (factory == nullptr) return false;
+        const bool tls = want_tls(o);
+        if (tls) {
+            factory = make_tls_factory(dir);
+            if (factory == nullptr) return false;
+        }
+        // Plaintext (043): no TLS factory — the engine auto-derives the plaintext
+        // factory from the insecure_plain_tcp profile (FR-003a); no certs needed.
         clock_src = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
         fixpp::core::EngineConfig ecfg;
@@ -441,12 +508,19 @@ struct LoopbackHarness {
             c.begin_string = o.begin_string;
             c.role = role;
             c.executor_override = ioc.get_executor();
-            c.security_profile = fixpp::session::SecurityProfile{
-                fixpp::session::SecurityProfile::kind::mtls_ca};
-            c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
+            if (tls) {
+                c.security_profile = fixpp::session::SecurityProfile{
+                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
+                c.transport_factory_override = factory;
+            } else {
+                // Plaintext: insecure_plain_tcp + NO cert binding (the authz arm
+                // is suppressed when live_peer_id_ == nullopt — 043 D-10) + NO
+                // factory override (engine auto-derives the plaintext factory).
+                c.security_profile = plain_profile();
+            }
             c.dictionary = fixpp::test_support::make_minimal_dictionary();
             c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-            c.transport_factory_override = factory;
             c.heartbeat_interval = std::chrono::seconds{heartbeat_secs};
             c.logout_disconnect_timeout_ms = 2000;
             c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
@@ -507,7 +581,7 @@ struct LoopbackHarness {
 
 int run_closed_loop(const Options& o) {
     const char* dir = fixture_dir();
-    if (dir == nullptr || dir[0] == '\0') {
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
         std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
         return 3;
     }
@@ -597,10 +671,11 @@ int run_closed_loop(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback TLS\n"
+        << topology_line(o)
         << "persistence_mode=memory-store\n"
-        << "INDICATIVE ONLY: over-TLS vs QF tls:off plaintext; WSL2 non-isolated host.\n"
-        << "begin_string=" << o.begin_string << " security_profile=mtls_ca depth=1\n"
+        << indicative_line(o)
+        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << " depth=1\n"
         << "warmup_messages=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_messages=" << recorded << " (" << run_seconds << " s)\n"
         << "messages_per_second=" << r.messages_per_second << "\n"
@@ -630,7 +705,7 @@ int run_closed_loop(const Options& o) {
 // counts are small by default (see main()'s workload-default resolution).
 int run_idle_heartbeat(const Options& o) {
     const char* dir = fixture_dir();
-    if (dir == nullptr || dir[0] == '\0') {
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
         std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
         return 3;
     }
@@ -705,10 +780,11 @@ int run_idle_heartbeat(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback TLS\n"
+        << topology_line(o)
         << "persistence_mode=memory-store\n"
-        << "INDICATIVE ONLY: over-TLS vs QF tls:off plaintext; WSL2 non-isolated host.\n"
-        << "begin_string=" << o.begin_string << " security_profile=mtls_ca heartbeat_interval_s=1\n"
+        << indicative_line(o)
+        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << " heartbeat_interval_s=1\n"
         << "warmup_heartbeats=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_heartbeats=" << recorded << " (" << run_seconds << " s)\n"
         << "heartbeat_cadence_per_s=" << r.messages_per_second << "\n"
