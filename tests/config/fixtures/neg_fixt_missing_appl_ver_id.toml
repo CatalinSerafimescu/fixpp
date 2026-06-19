@@ -1,0 +1,35 @@
+# neg_fixt_missing_appl_ver_id.toml
+# FIXT.1.1 session with default_appl_ver_id omitted — triggers missing_required
+# at session[0].default_appl_ver_id (FIXT.1.1-conditional, Bucket B E-3).
+# NOTE: FIXT.1.1-conditional check is a Phase 4b feature; RED until then.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIXT11.xml"     # FIXT dictionary, resolved relative to this file's dir
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIXT.1.1"
+role           = "initiator"
+# default_appl_ver_id intentionally omitted — missing_required for FIXT.1.1
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

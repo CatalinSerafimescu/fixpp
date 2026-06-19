@@ -1,0 +1,35 @@
+# neg_unknown_key.toml
+# copy of happy_full.toml with a typo key "sender_comp_idd" — triggers unknown_key.
+# The loader must return std::unexpected (unknown_key, key_path="session[0].sender_comp_idd").
+# NOTE: unknown_key is a Phase 4b feature — this cell will be RED until 4b is implemented.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id  = "CLIENT1"
+sender_comp_idd = "TYPO"
+target_comp_id  = "SERVER1"
+begin_string    = "FIX.4.4"
+role            = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

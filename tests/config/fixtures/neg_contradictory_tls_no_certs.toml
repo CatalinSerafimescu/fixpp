@@ -1,0 +1,30 @@
+# neg_contradictory_tls_no_certs.toml
+# transport.kind="tls" with NO cert material ([cert_source] section removed).
+# Triggers missing_required at "cert_source" — already handled by Phase 3b
+# selector_resolver.cpp (line ~469: cert_source == nullptr).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+# No [cert_source] section — intentionally omitted.
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

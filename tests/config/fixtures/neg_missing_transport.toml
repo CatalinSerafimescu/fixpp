@@ -1,0 +1,31 @@
+# neg_missing_transport.toml
+# copy of happy_full.toml with the [session.transport] section removed entirely —
+# triggers missing_required at "session[0].transport.kind".
+# ALREADY-GREEN: selector_resolver.cpp resolve_transport emits this from Phase 3b.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+# No [session.transport] section — intentionally omitted.
+
+[session.security_profile]
+kind = "mtls_ca"

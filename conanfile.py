@@ -68,6 +68,10 @@ class FixppConan(ConanFile):
         "crc32c/1.1.2",
         "openssl/3.6.2",
         "opentelemetry-cpp/1.26.0",
+        # 044-toml-session-config FR-001: TOML config-file loader. Header-only,
+        # MIT. Parser dependency isolated in fixpp_config_toml target only
+        # (FR-004/SC-006) — never leaks into core or any public header.
+        "tomlplusplus/3.4.0",
     ]
 
     # quill/11.1.0 is the TS-13 spike-only benchmark backend (FR-023): pulled

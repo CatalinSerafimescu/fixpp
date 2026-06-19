@@ -1,0 +1,91 @@
+# tests/config/fixtures/happy_full.toml
+# 044-toml-session-config Phase-3 happy-path fixture (T011/T012).
+#
+# Covers:
+#   ~28 Bucket-A SessionConfig scalars — all values DIFFER from struct defaults
+#   where possible, so T011 assertions can discriminate (an unmapped field left
+#   at the default would pass even without the mapper).
+#   5 object selectors: clock, store, cert_source, dictionary, transport.
+#
+# Relative paths (cert_source.*, dictionary.path) resolve against THIS FILE's
+# parent directory at load time (FR-016a).
+#
+# NOTE ON TOML LAYOUT: In TOML, a [header] section captures all subsequent
+# key-value pairs until the next header. All plain session-level scalars
+# (mode, locks, credentials, timing, bool/enum knobs) MUST appear BEFORE
+# any [session.sub_table] header — otherwise they would be parsed as sub-table
+# keys rather than session-level keys. The [session.transport] and
+# [session.security_profile] headers therefore appear AFTER all scalars.
+
+# ── Engine-level selectors ────────────────────────────────────────────────────
+
+[clock]
+kind = "system"          # D-5: system_clock_source(engine_executor) — selector
+
+[store]
+kind = "memory"          # D-5: MemoryStoreFactory
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"       # relative — resolved against fixtures/ dir
+
+# ── Per-session config ────────────────────────────────────────────────────────
+
+[[session]]
+
+# Identity
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"   # NOT "FIXT.1.1" → default_appl_ver_id stays nullopt
+
+# Role / connection
+role = "initiator"
+
+# Threading
+mode  = "per_session_strand"   # default — tests that this maps cleanly
+locks = "mutex"                # default — same
+
+# Credentials (optional)
+username = "user42"
+password = "s3cr3t"
+
+# Timing / thresholds (values != defaults)
+heartbeat_interval        = "30s"     # SessionConfig default: nullopt
+test_request_threshold    = "15000ms" # nullopt
+sending_time_threshold    = "5000ms"  # nullopt
+logout_disconnect_timeout_ms = 5000   # default 2000
+
+# Bool knobs — INVERTED from struct defaults where possible
+reset_on_logon               = true   # default false
+reset_on_logout              = true   # default false
+reset_on_disconnect          = true   # default false
+refresh_on_logon             = false  # must stay false (bilateral_strict compat)
+redeliver_poss_dup           = true   # default false
+allow_pos_dup                = true   # default false
+enable_next_expected_msg_seq_num = true  # default false
+check_comp_id                = false  # default true  (inverted)
+validate_sequence_numbers    = false  # default true  (inverted)
+validate_inbound_messages    = false  # default false (same — dictionary != nullptr enables it)
+
+# Enum knobs — non-default values
+reset_seqnum_policy   = "bilateral_lenient"    # default bilateral_strict
+sending_time_precision = "micros"              # default millis
+app_backpressure       = "disconnect_and_recover"  # default block
+
+# Sub-tables MUST come after all plain key-value pairs (TOML syntax rule: a
+# [sub-table] header captures all subsequent keys until the next header).
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+# TLS security profile
+[session.security_profile]
+kind = "mtls_ca"

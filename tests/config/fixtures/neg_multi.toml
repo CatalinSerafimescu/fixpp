@@ -1,0 +1,41 @@
+# neg_multi.toml
+# 3 INDEPENDENT errors in one file — tests collect-ALL (SC-007):
+#   (1) heartbeat_interval = "30" → malformed_value at session[0].heartbeat_interval
+#   (2) role = "bogus" → unknown_enum at session[0].role
+#   (3) reject_policy = "some_value" → recognized_not_yet_supported_step2
+#       at session[0].reject_policy
+#
+# Also contains a step2-deferred key (reject_policy) to distinguish from
+# unknown_key in the T019 two-cell test.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id     = "CLIENT1"
+target_comp_id     = "SERVER1"
+begin_string       = "FIX.4.4"
+role               = "bogus"
+heartbeat_interval = "30"
+reject_policy      = "on_session_reject"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

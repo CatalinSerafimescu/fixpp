@@ -1,0 +1,35 @@
+# neg_initiator_missing_host.toml
+# initiator session with [session.transport] present but host/port omitted —
+# triggers missing_required for the connect target (initiator-conditional).
+# NOTE: initiator-conditional host/port check is a Phase 4b feature; RED until then.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+# host and port intentionally omitted — initiator MUST have a connect target
+
+[session.transport]
+kind = "tls"
+# host/port absent
+
+[session.security_profile]
+kind = "mtls_ca"

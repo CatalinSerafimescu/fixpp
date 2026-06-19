@@ -1,0 +1,33 @@
+# neg_missing_dictionary.toml
+# copy of happy_full.toml with the [dictionary] section omitted entirely —
+# triggers missing_required at dictionary.kind (dictionary is required at load,
+# Bucket B E-3).
+# NOTE: required-dictionary-selector check is a Phase 4b feature; RED until then.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+# No [dictionary] section — intentionally omitted.
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
