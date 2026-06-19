@@ -18,8 +18,7 @@ namespace fixpp::config::detail {
 
 static constexpr std::string_view kRedacted = "***REDACTED***";
 
-bool is_credential_key(std::string_view key_path) noexcept
-{
+bool is_credential_key(std::string_view key_path) noexcept {
     // Extract the final dotted segment (everything after the last '.').
     // If there is no '.', the whole key_path is the final segment.
     const auto pos = key_path.rfind('.');
@@ -30,8 +29,7 @@ bool is_credential_key(std::string_view key_path) noexcept
 }
 
 std::string_view display_value(std::string_view key_path,
-                                std::string_view value [[clang::lifetimebound]]) noexcept
-{
+                               std::string_view value [[clang::lifetimebound]]) noexcept {
     if (is_credential_key(key_path)) {
         return kRedacted;
     }
@@ -43,8 +41,7 @@ std::string_view display_value(std::string_view key_path,
 // ---------------------------------------------------------------------------
 
 std::filesystem::path resolve_path(const std::filesystem::path& base_dir,
-                                   const std::filesystem::path& rel) noexcept
-{
+                                   const std::filesystem::path& rel) noexcept {
     if (rel.is_absolute()) {
         return rel;  // absolute: verbatim per D-7
     }

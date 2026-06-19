@@ -15,12 +15,12 @@
 // reset_seqnum_policy, backpressure_mode, fix_time_precision,
 // SecurityProfile::kind, application_version.
 
-#include "mappers.hpp"
-
 #include <charconv>
 #include <cstdint>
 #include <string>
 #include <string_view>
+
+#include "mappers.hpp"
 
 // Real enum / struct headers — match the canonical spellings.
 #include <fixpp/core/fix_time.hpp>
@@ -45,8 +45,7 @@ namespace {
 // toml++ line/column numbers are 1-based for parsed-from-file nodes.
 // ---------------------------------------------------------------------------
 
-SourceLoc loc_from_node(const toml::node& n) noexcept
-{
+SourceLoc loc_from_node(const toml::node& n) noexcept {
     const auto& src = n.source().begin;
     return SourceLoc{
         static_cast<std::uint32_t>(src.line),
@@ -68,8 +67,7 @@ SourceLoc loc_from_node(const toml::node& n) noexcept
 //  - key absent in raw_session  (key came from [default], not this session)
 // ---------------------------------------------------------------------------
 
-SourceLoc loc_for_key(const toml::table* raw_session, std::string_view key) noexcept
-{
+SourceLoc loc_for_key(const toml::table* raw_session, std::string_view key) noexcept {
     if (!raw_session) return {};
     const auto* n = raw_session->get(key);
     if (!n) return {};
@@ -78,10 +76,8 @@ SourceLoc loc_for_key(const toml::table* raw_session, std::string_view key) noex
 
 // Same as above but for a key inside a sub-table of raw_session.
 // `sub_key` is the sub-table key; `field_key` is the key inside it.
-SourceLoc loc_for_subkey(const toml::table* raw_session,
-                          std::string_view   sub_key,
-                          std::string_view   field_key) noexcept
-{
+SourceLoc loc_for_subkey(const toml::table* raw_session, std::string_view sub_key,
+                         std::string_view field_key) noexcept {
     if (!raw_session) return {};
     const auto* sub_node = raw_session->get(sub_key);
     if (!sub_node || !sub_node->is_table()) return {};
@@ -105,21 +101,18 @@ SourceLoc loc_for_subkey(const toml::table* raw_session,
 // ---------------------------------------------------------------------------
 
 struct ParsedDuration {
-    long long    value_ms;  // value in milliseconds
-    bool         ok;
+    long long value_ms;  // value in milliseconds
+    bool ok;
 };
 
-ParsedDuration parse_duration_to_ms(std::string_view tok,
-                                    std::string_view key_path,
-                                    DiagnosticAccumulator& acc,
-                                    SourceLoc loc = {})
-{
+ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_path,
+                                    DiagnosticAccumulator& acc, SourceLoc loc = {}) {
     if (tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
-            .reason   = reason_class::malformed_value,
+            .reason = reason_class::malformed_value,
             .location = loc,
-            .message  = "empty duration string",
+            .message = "empty duration string",
         });
         return {0, false};
     }
@@ -133,9 +126,9 @@ ParsedDuration parse_duration_to_ms(std::string_view tok,
     if (num_end == 0) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
-            .reason   = reason_class::malformed_value,
+            .reason = reason_class::malformed_value,
             .location = loc,
-            .message  = "duration must start with a numeric value",
+            .message = "duration must start with a numeric value",
         });
         return {0, false};
     }
@@ -145,9 +138,9 @@ ParsedDuration parse_duration_to_ms(std::string_view tok,
     if (ec != std::errc{}) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
-            .reason   = reason_class::malformed_value,
+            .reason = reason_class::malformed_value,
             .location = loc,
-            .message  = "duration numeric part could not be parsed",
+            .message = "duration numeric part could not be parsed",
         });
         return {0, false};
     }
@@ -156,9 +149,9 @@ ParsedDuration parse_duration_to_ms(std::string_view tok,
     if (unit.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
-            .reason   = reason_class::malformed_value,
+            .reason = reason_class::malformed_value,
             .location = loc,
-            .message  = "duration requires an explicit unit suffix (e.g. \"30s\", \"500ms\")",
+            .message = "duration requires an explicit unit suffix (e.g. \"30s\", \"500ms\")",
         });
         return {0, false};
     }
@@ -177,9 +170,9 @@ ParsedDuration parse_duration_to_ms(std::string_view tok,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
-            .reason   = reason_class::malformed_value,
+            .reason = reason_class::malformed_value,
             .location = loc,
-            .message  = std::string{"unrecognised duration unit: \""} + std::string{unit} + "\"",
+            .message = std::string{"unrecognised duration unit: \""} + std::string{unit} + "\"",
         });
         return {0, false};
     }
@@ -191,8 +184,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok,
 // Helper: build a dotted key path from prefix + key.
 // ---------------------------------------------------------------------------
 
-std::string kp(std::string_view prefix, std::string_view key)
-{
+std::string kp(std::string_view prefix, std::string_view key) {
     std::string s;
     s.reserve(prefix.size() + 1 + key.size());
     s += prefix;
@@ -207,12 +199,9 @@ std::string kp(std::string_view prefix, std::string_view key)
 // T013 — map_scalars
 // ---------------------------------------------------------------------------
 
-void map_scalars(const toml::table&               merged,
-                 fixpp::session::SessionConfig&   out,
-                 DiagnosticAccumulator&           acc,
-                 std::string_view                 key_prefix,
-                 const toml::table*               raw_session)
-{
+void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
+                 DiagnosticAccumulator& acc, std::string_view key_prefix,
+                 const toml::table* raw_session) {
     // ── String scalars ────────────────────────────────────────────────────────
 
     if (auto* n = merged.get("sender_comp_id"); n && n->is_string()) {
@@ -237,10 +226,10 @@ void map_scalars(const toml::table&               merged,
             const std::string kp_username = kp(key_prefix, "username");
             acc.add(LoadDiagnostic{
                 .key_path = kp_username,
-                .reason   = reason_class::malformed_value,
+                .reason = reason_class::malformed_value,
                 .location = loc_for_key(raw_session, "username"),
-                .message  = std::string{"username must be a string; got: "}
-                            + std::string{display_value(kp_username, "")},
+                .message = std::string{"username must be a string; got: "} +
+                           std::string{display_value(kp_username, "")},
             });
         }
     }
@@ -253,10 +242,10 @@ void map_scalars(const toml::table&               merged,
             const std::string kp_password = kp(key_prefix, "password");
             acc.add(LoadDiagnostic{
                 .key_path = kp_password,
-                .reason   = reason_class::malformed_value,
+                .reason = reason_class::malformed_value,
                 .location = loc_for_key(raw_session, "password"),
-                .message  = std::string{"password must be a string; got: "}
-                            + std::string{display_value(kp_password, "")},
+                .message = std::string{"password must be a string; got: "} +
+                           std::string{display_value(kp_password, "")},
             });
         }
     }
@@ -274,10 +263,10 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "role"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "role"),
-                .message  = std::string{"unknown role token: \""} + std::string{tok}
-                            + "\" (valid values: \"initiator\", \"acceptor\")",
+                .message = std::string{"unknown role token: \""} + std::string{tok} +
+                           "\" (valid values: \"initiator\", \"acceptor\")",
             });
         }
     }
@@ -295,10 +284,10 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "mode"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "mode"),
-                .message  = std::string{"unknown mode token: \""} + std::string{tok}
-                            + "\" (valid values: \"per_session_strand\", \"direct_executor\")",
+                .message = std::string{"unknown mode token: \""} + std::string{tok} +
+                           "\" (valid values: \"per_session_strand\", \"direct_executor\")",
             });
         }
     }
@@ -316,10 +305,10 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "locks"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "locks"),
-                .message  = std::string{"unknown locks token: \""} + std::string{tok}
-                            + "\" (valid values: \"mutex\", \"spin\")",
+                .message = std::string{"unknown locks token: \""} + std::string{tok} +
+                           "\" (valid values: \"mutex\", \"spin\")",
             });
         }
     }
@@ -349,23 +338,23 @@ void map_scalars(const toml::table&               merged,
             // Rule 7 — spin contradicts direct_executor.
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "mode"),
-                .reason   = reason_class::invalid_or_contradictory_selector,
+                .reason = reason_class::invalid_or_contradictory_selector,
                 .location = loc_for_key(raw_session, "mode"),
-                .message  = "mode=\"direct_executor\" combined with locks=\"spin\" is "
-                            "contradictory: direct_executor bypasses the session strand "
-                            "(serialisation is the caller's responsibility), making spin "
-                            "locks meaningless; use mode=\"per_session_strand\" or "
-                            "remove the locks field",
+                .message = "mode=\"direct_executor\" combined with locks=\"spin\" is "
+                           "contradictory: direct_executor bypasses the session strand "
+                           "(serialisation is the caller's responsibility), making spin "
+                           "locks meaningless; use mode=\"per_session_strand\" or "
+                           "remove the locks field",
             });
         } else if (!out.already_serialized_executor) {
             // Rule 7a — FR-011: direct_executor without attestation.
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "mode"),
-                .reason   = reason_class::invalid_or_contradictory_selector,
+                .reason = reason_class::invalid_or_contradictory_selector,
                 .location = loc_for_key(raw_session, "mode"),
-                .message  = "mode=\"direct_executor\" requires "
-                            "already_serialized_executor=true; omitting the attestation "
-                            "is a safety violation (FR-011)",
+                .message = "mode=\"direct_executor\" requires "
+                           "already_serialized_executor=true; omitting the attestation "
+                           "is a safety violation (FR-011)",
             });
         }
     }
@@ -414,9 +403,9 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "logout_disconnect_timeout_ms"),
-                .reason   = reason_class::out_of_range,
+                .reason = reason_class::out_of_range,
                 .location = loc_for_key(raw_session, "logout_disconnect_timeout_ms"),
-                .message  = "logout_disconnect_timeout_ms out of uint32 range",
+                .message = "logout_disconnect_timeout_ms out of uint32 range",
             });
         }
     }
@@ -470,10 +459,11 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "reset_seqnum_policy"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "reset_seqnum_policy"),
-                .message  = std::string{"unknown reset_seqnum_policy token: \""} + std::string{tok}
-                            + "\" (valid values: \"bilateral_strict\", \"bilateral_lenient\", \"unilateral\")",
+                .message = std::string{"unknown reset_seqnum_policy token: \""} + std::string{tok} +
+                           "\" (valid values: \"bilateral_strict\", \"bilateral_lenient\", "
+                           "\"unilateral\")",
             });
         }
     }
@@ -495,10 +485,11 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "sending_time_precision"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "sending_time_precision"),
-                .message  = std::string{"unknown sending_time_precision token: \""} + std::string{tok}
-                            + "\" (valid values: \"seconds\", \"millis\", \"micros\", \"nanos\")",
+                .message = std::string{"unknown sending_time_precision token: \""} +
+                           std::string{tok} +
+                           "\" (valid values: \"seconds\", \"millis\", \"micros\", \"nanos\")",
             });
         }
     }
@@ -517,10 +508,10 @@ void map_scalars(const toml::table&               merged,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "app_backpressure"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "app_backpressure"),
-                .message  = std::string{"unknown app_backpressure token: \""} + std::string{tok}
-                            + "\" (valid values: \"block\", \"disconnect_and_recover\")",
+                .message = std::string{"unknown app_backpressure token: \""} + std::string{tok} +
+                           "\" (valid values: \"block\", \"disconnect_and_recover\")",
             });
         }
     }
@@ -533,9 +524,9 @@ void map_scalars(const toml::table&               merged,
     if (auto* n = merged.get("reject_policy"); n != nullptr) {
         acc.add(LoadDiagnostic{
             .key_path = kp(key_prefix, "reject_policy"),
-            .reason   = reason_class::recognized_not_yet_supported_step2,
-            .message  = "reject_policy mapping deferred: enum definition is in feature 005 "
-                        "(forward-declared only); mapping will be added when 005 ships",
+            .reason = reason_class::recognized_not_yet_supported_step2,
+            .message = "reject_policy mapping deferred: enum definition is in feature 005 "
+                       "(forward-declared only); mapping will be added when 005 ships",
         });
     }
 
@@ -549,21 +540,29 @@ void map_scalars(const toml::table&               merged,
         std::string_view tok = n->as_string()->get();
         using av = fixpp::dict::application_version;
         std::optional<av> ver;
-        if      (tok == "2") { ver = av::v40; }
-        else if (tok == "3") { ver = av::v41; }
-        else if (tok == "4") { ver = av::v42; }
-        else if (tok == "5") { ver = av::v43; }
-        else if (tok == "6") { ver = av::v44; }
-        else if (tok == "7") { ver = av::v50; }
-        else if (tok == "8") { ver = av::v50sp1; }
-        else if (tok == "9") { ver = av::v50sp2; }
-        else {
+        if (tok == "2") {
+            ver = av::v40;
+        } else if (tok == "3") {
+            ver = av::v41;
+        } else if (tok == "4") {
+            ver = av::v42;
+        } else if (tok == "5") {
+            ver = av::v43;
+        } else if (tok == "6") {
+            ver = av::v44;
+        } else if (tok == "7") {
+            ver = av::v50;
+        } else if (tok == "8") {
+            ver = av::v50sp1;
+        } else if (tok == "9") {
+            ver = av::v50sp2;
+        } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "default_appl_ver_id"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "default_appl_ver_id"),
-                .message  = std::string{"unknown default_appl_ver_id token: \""} + std::string{tok}
-                            + "\" (expected ApplVerID wire values: \"2\"..\"9\")",
+                .message = std::string{"unknown default_appl_ver_id token: \""} + std::string{tok} +
+                           "\" (expected ApplVerID wire values: \"2\"..\"9\")",
             });
         }
         if (ver.has_value()) {
@@ -576,12 +575,9 @@ void map_scalars(const toml::table&               merged,
 // T014 — map_structured_members
 // ---------------------------------------------------------------------------
 
-void map_structured_members(const toml::table&               merged,
-                             fixpp::session::SessionConfig&   out,
-                             DiagnosticAccumulator&           acc,
-                             std::string_view                 key_prefix,
-                             const toml::table*               raw_session)
-{
+void map_structured_members(const toml::table& merged, fixpp::session::SessionConfig& out,
+                            DiagnosticAccumulator& acc, std::string_view key_prefix,
+                            const toml::table* raw_session) {
     // ── [session.security_profile] ────────────────────────────────────────────
     // Sub-table; contains "kind" string token.
     // Targets: out.security_profile.k  (type: fixpp::session::SecurityProfile::kind)
@@ -589,8 +585,7 @@ void map_structured_members(const toml::table&               merged,
     //                   "insecure_plain_tcp"  [[deprecated]]
     // (session/security_profile.hpp SecurityProfile::kind nested enum)
 
-    if (auto* sp_node = merged.get("security_profile");
-        sp_node && sp_node->is_table()) {
+    if (auto* sp_node = merged.get("security_profile"); sp_node && sp_node->is_table()) {
         const toml::table& sp = *sp_node->as_table();
 
         if (auto* kind_n = sp.get("kind"); kind_n && kind_n->is_string()) {
@@ -612,11 +607,12 @@ void map_structured_members(const toml::table&               merged,
             } else {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(key_prefix, "security_profile.kind"),
-                    .reason   = reason_class::unknown_enum,
+                    .reason = reason_class::unknown_enum,
                     .location = loc_for_subkey(raw_session, "security_profile", "kind"),
-                    .message  = std::string{"unknown security_profile.kind token: \""} + std::string{tok}
-                                + "\" (valid values: \"unset\", \"mtls_ca\", \"mtls_pinned\","
-                                  " \"one_way_ca\", \"insecure_plain_tcp\")",
+                    .message = std::string{"unknown security_profile.kind token: \""} +
+                               std::string{tok} +
+                               "\" (valid values: \"unset\", \"mtls_ca\", \"mtls_pinned\","
+                               " \"one_way_ca\", \"insecure_plain_tcp\")",
                 });
             }
         }
@@ -634,10 +630,12 @@ void map_structured_members(const toml::table&               merged,
         for (auto&& [principal, allowed_node] : cap) {
             if (!allowed_node.is_array()) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kp(key_prefix, std::string{"compid_authorization_policy."} + std::string{principal}),
-                    .reason   = reason_class::malformed_value,
+                    .key_path = kp(key_prefix, std::string{"compid_authorization_policy."} +
+                                                   std::string{principal}),
+                    .reason = reason_class::malformed_value,
                     .location = loc_from_node(allowed_node),
-                    .message  = "compid_authorization_policy value must be an array of CompID strings",
+                    .message =
+                        "compid_authorization_policy value must be an array of CompID strings",
                 });
                 continue;
             }
@@ -645,15 +643,15 @@ void map_structured_members(const toml::table&               merged,
             for (const auto& cid_node : compids) {
                 if (!cid_node.is_string()) {
                     acc.add(LoadDiagnostic{
-                        .key_path = kp(key_prefix, std::string{"compid_authorization_policy."} + std::string{principal}),
-                        .reason   = reason_class::malformed_value,
+                        .key_path = kp(key_prefix, std::string{"compid_authorization_policy."} +
+                                                       std::string{principal}),
+                        .reason = reason_class::malformed_value,
                         .location = loc_from_node(cid_node),
-                        .message  = "each CompID in compid_authorization_policy must be a string",
+                        .message = "each CompID in compid_authorization_policy must be a string",
                     });
                     continue;
                 }
-                out.compid_authorization_policy.add_binding(
-                    principal, cid_node.as_string()->get());
+                out.compid_authorization_policy.add_binding(principal, cid_node.as_string()->get());
             }
         }
     }
@@ -663,8 +661,7 @@ void map_structured_members(const toml::table&               merged,
     // Phase 3b maps only host/port (D-6a: reconnect_endpoint flows through
     // SessionConfig::reconnect_endpoint, NOT the factory).
 
-    if (auto* t_node = merged.get("transport");
-        t_node && t_node->is_table()) {
+    if (auto* t_node = merged.get("transport"); t_node && t_node->is_table()) {
         const toml::table& t = *t_node->as_table();
 
         if (auto* host_n = t.get("host"); host_n && host_n->is_string()) {
@@ -677,9 +674,9 @@ void map_structured_members(const toml::table&               merged,
             } else {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(key_prefix, "transport.port"),
-                    .reason   = reason_class::out_of_range,
+                    .reason = reason_class::out_of_range,
                     .location = loc_from_node(*port_n),
-                    .message  = "transport.port must be in [0, 65535]",
+                    .message = "transport.port must be in [0, 65535]",
                 });
             }
         }
@@ -690,8 +687,7 @@ void map_structured_members(const toml::table&               merged,
     // Fields: schedule (array of duration strings), jitter (float),
     //         max_attempts (integer), session_id_seed (integer).
 
-    if (auto* rp_node = merged.get("reconnect_policy");
-        rp_node && rp_node->is_table()) {
+    if (auto* rp_node = merged.get("reconnect_policy"); rp_node && rp_node->is_table()) {
         const toml::table& rp = *rp_node->as_table();
 
         fixpp::transport::ReconnectPolicy policy;
@@ -705,17 +701,15 @@ void map_structured_members(const toml::table&               merged,
                 if (!entry.is_string()) {
                     acc.add(LoadDiagnostic{
                         .key_path = kp(key_prefix, "reconnect_policy.schedule"),
-                        .reason   = reason_class::malformed_value,
+                        .reason = reason_class::malformed_value,
                         .location = loc_from_node(entry),
-                        .message  = "each reconnect_policy.schedule entry must be a duration string",
+                        .message = "each reconnect_policy.schedule entry must be a duration string",
                     });
                     continue;
                 }
-                auto d = parse_duration_to_ms(
-                    entry.as_string()->get(),
-                    kp(key_prefix, "reconnect_policy.schedule"),
-                    acc,
-                    loc_from_node(entry));
+                auto d = parse_duration_to_ms(entry.as_string()->get(),
+                                              kp(key_prefix, "reconnect_policy.schedule"), acc,
+                                              loc_from_node(entry));
                 if (d.ok) {
                     policy.schedule.push_back(std::chrono::milliseconds{d.value_ms});
                 }
@@ -734,8 +728,7 @@ void map_structured_members(const toml::table&               merged,
         }
 
         if (auto* seed_n = rp.get("session_id_seed"); seed_n && seed_n->is_integer()) {
-            policy.session_id_seed =
-                static_cast<std::uint64_t>(seed_n->as_integer()->get());
+            policy.session_id_seed = static_cast<std::uint64_t>(seed_n->as_integer()->get());
         }
 
         out.reconnect_policy = std::move(policy);

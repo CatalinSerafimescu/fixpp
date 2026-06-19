@@ -49,12 +49,38 @@
 
 // --- throwing assert: unwinds into the loader's parse_error catch ------------
 #include <stdexcept>
-#define TOML_ASSERT(expr)                                                      \
-    (static_cast<bool>(expr)                                                   \
-         ? void(0)                                                             \
+#define TOML_ASSERT(expr)    \
+    (static_cast<bool>(expr) \
+         ? void(0)           \
          : throw ::std::logic_error("tomlplusplus internal invariant violated"))
 
+// GCC -Wterminate: toml++ also uses TOML_ASSERT inside a handful of `noexcept`
+// members, where a throw would call std::terminate. GCC flags every such throw
+// statically (the warning is unconditional — it carries no reachability signal).
+// This is SAFE here, and a strict improvement over toml++'s native behaviour:
+//   * The noexcept asserts live in (a) the toml::path / path_component
+//     navigation API — which this loader NEVER uses (verified: no `toml::path`
+//     or `at_path` anywhere in src/config/), so those throws are dead code; and
+//     (b) utf8_decoder::operator() on the parse path — whose internal-invariant
+//     assert is not tripped by malformed bytes (3.1M arbitrary-byte fuzz
+//     iterations across asan/Debug + release/NDEBUG, zero terminates).
+//   * Where such a noexcept assert WOULD fire, the shim yields a clean
+//     std::terminate instead of toml++'s native __builtin_assume (UB under
+//     NDEBUG) / assert->abort (debug). terminate >= abort > UB.
+//   * The actual defect this shim fixes is on the NON-noexcept parse path
+//     (parse_key), where the throw is caught and converted to a diagnostic.
+// Suppress GCC-only (clang has no -Wterminate and would emit
+// -Wunknown-warning-option). See specs/044-.../tasks.md T039 + B&L L-044-*.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wterminate"
+#endif
+
 #include <toml++/toml.hpp>
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 // --- restore NDEBUG for the remainder of the translation unit -----------------
 #ifdef FIXPP_TOML_NDEBUG_WAS_DEFINED

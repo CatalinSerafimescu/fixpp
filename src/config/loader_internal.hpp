@@ -16,13 +16,12 @@
 #include <exception>
 #include <expected>
 #include <filesystem>
+#include <fixpp/config/load_diagnostic.hpp>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <vector>
-
-#include <fixpp/config/load_diagnostic.hpp>
 
 // ---------------------------------------------------------------------------
 // Portable -Wdeprecated-declarations suppression (shared across config TUs)
@@ -34,17 +33,14 @@
 // silencing the diagnostic. Both clang and gcc are covered (the gcc-release
 // preset is in the verify matrix).
 #ifdef __clang__
-#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
-     _Pragma("clang diagnostic push") \
-     _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
-#  define FIXPP_SUPPRESS_DEPRECATED_END \
-     _Pragma("clang diagnostic pop")
+#define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
+    _Pragma("clang diagnostic push")    \
+        _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#define FIXPP_SUPPRESS_DEPRECATED_END _Pragma("clang diagnostic pop")
 #else
-#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
-     _Pragma("GCC diagnostic push") \
-     _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
-#  define FIXPP_SUPPRESS_DEPRECATED_END \
-     _Pragma("GCC diagnostic pop")
+#define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define FIXPP_SUPPRESS_DEPRECATED_END _Pragma("GCC diagnostic pop")
 #endif
 
 namespace fixpp::config::detail {
@@ -68,9 +64,8 @@ namespace fixpp::config::detail {
 // the actual value. Otherwise returns value unchanged.
 // Usage (Phase 2b message builder):
 //   msg += display_value(key_path, raw_value);
-[[nodiscard]] std::string_view display_value(
-    std::string_view key_path,
-    std::string_view value [[clang::lifetimebound]]) noexcept;
+[[nodiscard]] std::string_view display_value(std::string_view key_path, std::string_view value
+                                             [[clang::lifetimebound]]) noexcept;
 
 // ---------------------------------------------------------------------------
 // T008 — noexcept-boundary throwing-site wrapper (validation rule 9 / D-3)
@@ -107,26 +102,23 @@ namespace fixpp::config::detail {
 //   if (!result) { acc.add(std::move(result).error()); return; }
 //   bundle.engine.clock = std::move(*result);
 template <typename F>
-[[nodiscard]] auto trap_throw_to_expected(std::string key_path,
-                                          reason_class reason,
-                                          F&& f) noexcept
-    -> std::expected<std::invoke_result_t<F>, LoadDiagnostic>
-{
+[[nodiscard]] auto trap_throw_to_expected(std::string key_path, reason_class reason, F&& f) noexcept
+    -> std::expected<std::invoke_result_t<F>, LoadDiagnostic> {
     using T = std::invoke_result_t<F>;
     try {
-        return std::expected<T, LoadDiagnostic>{ std::forward<F>(f)() };
+        return std::expected<T, LoadDiagnostic>{std::forward<F>(f)()};
     } catch (const std::exception& e) {
         LoadDiagnostic diag;
         diag.key_path = std::move(key_path);
-        diag.reason   = reason;
-        diag.message  = e.what();
+        diag.reason = reason;
+        diag.message = e.what();
         // location stays {0,0}: throwing ctors do not carry TOML source position
         return std::unexpected(std::move(diag));
     } catch (...) {
         LoadDiagnostic diag;
         diag.key_path = std::move(key_path);
-        diag.reason   = reason;
-        diag.message  = "unknown exception at throwing construction site";
+        diag.reason = reason;
+        diag.message = "unknown exception at throwing construction site";
         return std::unexpected(std::move(diag));
     }
 }
@@ -147,16 +139,12 @@ class DiagnosticAccumulator {
 public:
     DiagnosticAccumulator() = default;
 
-    void add(LoadDiagnostic diag) {
-        diags_.push_back(std::move(diag));
-    }
+    void add(LoadDiagnostic diag) { diags_.push_back(std::move(diag)); }
 
     [[nodiscard]] bool empty() const noexcept { return diags_.empty(); }
 
     // Moves out the collected diagnostics. Call once at function exit.
-    [[nodiscard]] std::vector<LoadDiagnostic> release() && {
-        return std::move(diags_);
-    }
+    [[nodiscard]] std::vector<LoadDiagnostic> release() && { return std::move(diags_); }
 
 private:
     std::vector<LoadDiagnostic> diags_;
@@ -179,8 +167,7 @@ private:
 //
 // `base_dir` should be `config_path.parent_path()`, captured ONCE by the
 // caller so this helper is reused across many paths (D-7 "capture once").
-[[nodiscard]] std::filesystem::path resolve_path(
-    const std::filesystem::path& base_dir,
-    const std::filesystem::path& rel) noexcept;
+[[nodiscard]] std::filesystem::path resolve_path(const std::filesystem::path& base_dir,
+                                                 const std::filesystem::path& rel) noexcept;
 
 }  // namespace fixpp::config::detail

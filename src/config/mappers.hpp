@@ -21,11 +21,11 @@
 #include "toml_include.hpp"
 
 // loader_internal.hpp is toml-free — it provides DiagnosticAccumulator.
-#include "loader_internal.hpp"
-
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/session/session_config.hpp>
+
+#include "loader_internal.hpp"
 
 namespace fixpp::config::detail {
 
@@ -55,11 +55,9 @@ namespace fixpp::config::detail {
 // toml++ source positions), NOT from `merged` (whose nodes lose position on copy).
 // Pass nullptr when no raw table is available (e.g. pure-code construction).
 // (FR-017 — SourceLoc population)
-void map_scalars(const toml::table&               merged,
-                 fixpp::session::SessionConfig&   out,
-                 DiagnosticAccumulator&           acc,
-                 std::string_view                 key_prefix,
-                 const toml::table*               raw_session = nullptr);
+void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
+                 DiagnosticAccumulator& acc, std::string_view key_prefix,
+                 const toml::table* raw_session = nullptr);
 
 // ---------------------------------------------------------------------------
 // T014 — structured-member mapper
@@ -74,11 +72,9 @@ void map_scalars(const toml::table&               merged,
 // Absent sub-table → leave struct default; no diagnostic.
 // `key_prefix` is the same prefix passed to map_scalars.
 // `raw_session` serves the same purpose as in map_scalars (FR-017).
-void map_structured_members(const toml::table&               merged,
-                             fixpp::session::SessionConfig&   out,
-                             DiagnosticAccumulator&           acc,
-                             std::string_view                 key_prefix,
-                             const toml::table*               raw_session = nullptr);
+void map_structured_members(const toml::table& merged, fixpp::session::SessionConfig& out,
+                            DiagnosticAccumulator& acc, std::string_view key_prefix,
+                            const toml::table* raw_session = nullptr);
 
 // ---------------------------------------------------------------------------
 // T015/T016 — selector resolver
@@ -95,11 +91,9 @@ void map_structured_members(const toml::table&               merged,
 // `opts`                 — LoadOptions carrying engine_executor + resource.
 // `bundle`               — the ConfigBundle being assembled (engine slice populated here).
 // `acc`                  — diagnostic accumulator (all errors added here; no early return).
-void resolve_selectors(const toml::table&                     root_tbl,
+void resolve_selectors(const toml::table& root_tbl,
                        const std::vector<const toml::table*>& merged_session_tables,
-                       const std::filesystem::path&           base_dir,
-                       const LoadOptions&                     opts,
-                       ConfigBundle&                          bundle,
-                       DiagnosticAccumulator&                 acc);
+                       const std::filesystem::path& base_dir, const LoadOptions& opts,
+                       ConfigBundle& bundle, DiagnosticAccumulator& acc);
 
 }  // namespace fixpp::config::detail

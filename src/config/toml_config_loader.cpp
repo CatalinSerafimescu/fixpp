@@ -25,13 +25,13 @@
 // toml++ header-only include — PRIVATE to this TU only (FR-004).
 // Routed through the hardened shim (T039): NEVER include <toml++/toml.hpp>
 // directly from a config TU (ODR — see toml_include.hpp).
-#include "toml_include.hpp"
-
 #include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include "toml_include.hpp"
 
 namespace fixpp::config {
 
@@ -41,13 +41,12 @@ namespace {
 // Source-region → SourceLoc conversion (T007)
 // ---------------------------------------------------------------------------
 
-SourceLoc loc_from_region(const toml::source_region& sr) noexcept
-{
+SourceLoc loc_from_region(const toml::source_region& sr) noexcept {
     // source_region::begin is a source_position {line, column} (1-based uint32).
     // Use the begin position as the canonical diagnostic location.
     return SourceLoc{
         .line = sr.begin.line,
-        .col  = sr.begin.column,
+        .col = sr.begin.column,
     };
 }
 
@@ -67,8 +66,7 @@ SourceLoc loc_from_region(const toml::source_region& sr) noexcept
 // it MUST NOT be placed in loader_internal.hpp (which must stay toml-free so
 // Phase 3 can include it without dragging toml++ into selector_resolver.cpp).
 [[nodiscard]] toml::table merge_defaults(const toml::table& defaults,
-                                         const toml::table& session_tbl)
-{
+                                         const toml::table& session_tbl) {
     // Start with a copy of the session table (session keys win).
     toml::table merged = session_tbl;
 
@@ -109,10 +107,8 @@ SourceLoc loc_from_region(const toml::source_region& sr) noexcept
 // collect-ALL counts (T019 ExactCount/ExactSet).
 //
 // Anchors: data-model E-3 (Bucket B table), plan.md SC-003/FR-013/FR-017.
-void check_required_keys(const toml::table&      merged,
-                         std::string_view         key_prefix,
-                         detail::DiagnosticAccumulator& acc)
-{
+void check_required_keys(const toml::table& merged, std::string_view key_prefix,
+                         detail::DiagnosticAccumulator& acc) {
     // Helper: check a string field is present and non-empty.
     auto check_string = [&](std::string_view field) {
         const std::string path = std::string{key_prefix} + "." + std::string{field};
@@ -121,17 +117,17 @@ void check_required_keys(const toml::table&      merged,
             // Absent or not a string → missing_required.
             acc.add(LoadDiagnostic{
                 .key_path = path,
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message  = std::string{field} + " is required",
+                .message = std::string{field} + " is required",
             });
         } else if (node->value<std::string>().value_or("").empty()) {
             // Present but empty → empty_required.
             acc.add(LoadDiagnostic{
                 .key_path = path,
-                .reason   = reason_class::empty_required,
+                .reason = reason_class::empty_required,
                 .location = {},
-                .message  = std::string{field} + " must not be empty",
+                .message = std::string{field} + " must not be empty",
             });
         }
     };
@@ -170,9 +166,9 @@ void check_required_keys(const toml::table&      merged,
         if (!host_ok) {
             acc.add(LoadDiagnostic{
                 .key_path = host_path,
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message  = "transport.host is required for an initiator session",
+                .message = "transport.host is required for an initiator session",
             });
         }
 
@@ -189,9 +185,9 @@ void check_required_keys(const toml::table&      merged,
         if (!port_ok) {
             acc.add(LoadDiagnostic{
                 .key_path = port_path,
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message  = "transport.port is required for an initiator session",
+                .message = "transport.port is required for an initiator session",
             });
         }
     }
@@ -207,16 +203,16 @@ void check_required_keys(const toml::table&      merged,
         if (!anode || !anode->is_string()) {
             acc.add(LoadDiagnostic{
                 .key_path = appl_path,
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message  = "default_appl_ver_id is required for a FIXT.1.1 session",
+                .message = "default_appl_ver_id is required for a FIXT.1.1 session",
             });
         } else if (anode->value<std::string>().value_or("").empty()) {
             acc.add(LoadDiagnostic{
                 .key_path = appl_path,
-                .reason   = reason_class::empty_required,
+                .reason = reason_class::empty_required,
                 .location = {},
-                .message  = "default_appl_ver_id must not be empty for a FIXT.1.1 session",
+                .message = "default_appl_ver_id must not be empty for a FIXT.1.1 session",
             });
         }
     }
@@ -226,27 +222,25 @@ void check_required_keys(const toml::table&      merged,
     // not the resolver — so a missing profile surfaces as missing_required at
     // the named key, never an opaque downstream invalid_or_contradictory_selector.
     {
-        const std::string kind_path =
-            std::string{key_prefix} + ".security_profile.kind";
+        const std::string kind_path = std::string{key_prefix} + ".security_profile.kind";
         const toml::table* sp = nullptr;
-        if (const auto* spnode = merged.get("security_profile");
-            spnode && spnode->is_table()) {
+        if (const auto* spnode = merged.get("security_profile"); spnode && spnode->is_table()) {
             sp = spnode->as_table();
         }
         const toml::node* kind_node = sp ? sp->get("kind") : nullptr;
         if (!kind_node || !kind_node->is_string()) {
             acc.add(LoadDiagnostic{
                 .key_path = kind_path,
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message  = "security_profile.kind is required",
+                .message = "security_profile.kind is required",
             });
         } else if (kind_node->value<std::string>().value_or("").empty()) {
             acc.add(LoadDiagnostic{
                 .key_path = kind_path,
-                .reason   = reason_class::empty_required,
+                .reason = reason_class::empty_required,
                 .location = {},
-                .message  = "security_profile.kind must not be empty",
+                .message = "security_profile.kind must not be empty",
             });
         }
     }
@@ -269,54 +263,88 @@ void check_required_keys(const toml::table&      merged,
 // it never false-flags a legitimately-placed key, which would break US1 / the
 // positive cells. `reject_policy` is RECOGNIZED here (scalar_mappers already
 // emits its step-2 diagnostic — re-flagging would corrupt collect-ALL counts).
-void recognize_keys(const toml::table&      tbl,
-                    std::string_view         key_prefix,
-                    detail::DiagnosticAccumulator& acc)
-{
+void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
+                    detail::DiagnosticAccumulator& acc) {
     static const std::unordered_set<std::string_view> kDeferred = {
-        "logger", "log_sink", "tracer", "meter", "otlp", "prometheus",
-        "exporter", "tap", "tap_consumer", "arena", "message_arena",
-        "session_arena", "framer_carry_arena", "dialect_overlay",
+        "logger",
+        "log_sink",
+        "tracer",
+        "meter",
+        "otlp",
+        "prometheus",
+        "exporter",
+        "tap",
+        "tap_consumer",
+        "arena",
+        "message_arena",
+        "session_arena",
+        "framer_carry_arena",
+        "dialect_overlay",
     };
     static const std::unordered_set<std::string_view> kRecognized = {
         // structural
-        "default", "session",
+        "default",
+        "session",
         // selectors / sub-tables
-        "clock", "store", "cert_source", "dictionary", "transport",
-        "security_profile", "compid_authorization_policy",
-        "reconnect_endpoint", "reconnect_policy",
+        "clock",
+        "store",
+        "cert_source",
+        "dictionary",
+        "transport",
+        "security_profile",
+        "compid_authorization_policy",
+        "reconnect_endpoint",
+        "reconnect_policy",
         // per-session scalars (data-model E-3 Bucket A + reject_policy)
-        "sender_comp_id", "target_comp_id", "begin_string", "role", "mode",
-        "locks", "already_serialized_executor", "heartbeat_interval",
-        "test_request_threshold", "sending_time_threshold", "reject_policy",
-        "app_backpressure", "reset_seqnum_policy", "reset_seqnum_policy_field",
-        "reset_on_logon", "reset_on_logout", "reset_on_disconnect",
-        "refresh_on_logon", "logout_disconnect_timeout_ms", "redeliver_poss_dup",
-        "allow_pos_dup", "sending_time_precision",
-        "enable_next_expected_msg_seq_num", "check_comp_id",
-        "validate_sequence_numbers", "validate_inbound_messages",
-        "default_appl_ver_id", "username", "password",
+        "sender_comp_id",
+        "target_comp_id",
+        "begin_string",
+        "role",
+        "mode",
+        "locks",
+        "already_serialized_executor",
+        "heartbeat_interval",
+        "test_request_threshold",
+        "sending_time_threshold",
+        "reject_policy",
+        "app_backpressure",
+        "reset_seqnum_policy",
+        "reset_seqnum_policy_field",
+        "reset_on_logon",
+        "reset_on_logout",
+        "reset_on_disconnect",
+        "refresh_on_logon",
+        "logout_disconnect_timeout_ms",
+        "redeliver_poss_dup",
+        "allow_pos_dup",
+        "sending_time_precision",
+        "enable_next_expected_msg_seq_num",
+        "check_comp_id",
+        "validate_sequence_numbers",
+        "validate_inbound_messages",
+        "default_appl_ver_id",
+        "username",
+        "password",
     };
 
     for (auto&& [key, node] : tbl) {
         const std::string_view k = key.str();
-        std::string path = key_prefix.empty()
-                               ? std::string{k}
-                               : std::string{key_prefix} + "." + std::string{k};
+        std::string path =
+            key_prefix.empty() ? std::string{k} : std::string{key_prefix} + "." + std::string{k};
         if (kDeferred.contains(k)) {
             acc.add(LoadDiagnostic{
                 .key_path = std::move(path),
-                .reason   = reason_class::recognized_not_yet_supported_step2,
+                .reason = reason_class::recognized_not_yet_supported_step2,
                 .location = loc_from_region(node.source()),
-                .message  = std::string{k} +
-                            " is recognized but not yet supported (deferred to step 2)",
+                .message =
+                    std::string{k} + " is recognized but not yet supported (deferred to step 2)",
             });
         } else if (!kRecognized.contains(k)) {
             acc.add(LoadDiagnostic{
                 .key_path = std::move(path),
-                .reason   = reason_class::unknown_key,
+                .reason = reason_class::unknown_key,
                 .location = loc_from_region(node.source()),
-                .message  = "unrecognized key '" + std::string{k} + "'",
+                .message = "unrecognized key '" + std::string{k} + "'",
             });
         }
     }
@@ -335,9 +363,7 @@ void recognize_keys(const toml::table&      tbl,
 //   → resolve engine-scope selectors + transport factory (T015/T016)
 //   → return ConfigBundle or accumulated diagnostics.
 [[nodiscard]] LoadResult load_toml_config(const std::filesystem::path& path,
-                                          LoadOptions opts) noexcept
-{
-
+                                          LoadOptions opts) noexcept {
     // ── T007: Parse front-end ────────────────────────────────────────────────
     // Wrap toml::parse_file in try/catch to prevent any throw escaping the
     // noexcept boundary (validation rule 9 / D-3).
@@ -352,25 +378,25 @@ void recognize_keys(const toml::table&      tbl,
     } catch (const toml::parse_error& e) {
         // parse_error carries source_region with line/col.
         LoadDiagnostic diag;
-        diag.key_path = "";                            // file-level, no key
-        diag.reason   = reason_class::parse_error;
+        diag.key_path = "";  // file-level, no key
+        diag.reason = reason_class::parse_error;
         diag.location = loc_from_region(e.source());
-        diag.message  = std::string(e.description());
-        return std::unexpected(std::vector<LoadDiagnostic>{ std::move(diag) });
+        diag.message = std::string(e.description());
+        return std::unexpected(std::vector<LoadDiagnostic>{std::move(diag)});
     } catch (const std::exception& e) {
         // IO or other std exception (e.g. file not found before parsing begins).
         LoadDiagnostic diag;
         diag.key_path = "";
-        diag.reason   = reason_class::parse_error;
+        diag.reason = reason_class::parse_error;
         // location stays {0,0}: no source position available for IO errors
-        diag.message  = e.what();
-        return std::unexpected(std::vector<LoadDiagnostic>{ std::move(diag) });
+        diag.message = e.what();
+        return std::unexpected(std::vector<LoadDiagnostic>{std::move(diag)});
     } catch (...) {
         LoadDiagnostic diag;
         diag.key_path = "";
-        diag.reason   = reason_class::parse_error;
-        diag.message  = "unknown exception during TOML parse";
-        return std::unexpected(std::vector<LoadDiagnostic>{ std::move(diag) });
+        diag.reason = reason_class::parse_error;
+        diag.message = "unknown exception during TOML parse";
+        return std::unexpected(std::vector<LoadDiagnostic>{std::move(diag)});
     }
 
     // ── T009: [default]-merge + collect-ALL accumulator ─────────────────────
@@ -392,9 +418,9 @@ void recognize_keys(const toml::table&      tbl,
     if (!sessions_arr || sessions_arr->empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "session",
-            .reason   = reason_class::missing_required,
+            .reason = reason_class::missing_required,
             .location = {},
-            .message  = "at least one [[session]] table is required",
+            .message = "at least one [[session]] table is required",
         });
     }
 
@@ -402,13 +428,12 @@ void recognize_keys(const toml::table&      tbl,
     // Checked here (against root_tbl) rather than per-session because [dictionary]
     // is a top-level TOML section, NOT merged into each [[session]] table.
     // key_path = "dictionary" (no session prefix) — consistent with clock.kind / store.kind.
-    if (!root_tbl.contains("dictionary") ||
-        !root_tbl.get("dictionary")->is_table()) {
+    if (!root_tbl.contains("dictionary") || !root_tbl.get("dictionary")->is_table()) {
         acc.add(LoadDiagnostic{
             .key_path = "dictionary",
-            .reason   = reason_class::missing_required,
+            .reason = reason_class::missing_required,
             .location = {},
-            .message  = "[dictionary] section is required",
+            .message = "[dictionary] section is required",
         });
     }
 
@@ -443,8 +468,8 @@ void recognize_keys(const toml::table&      tbl,
 
     // Captured MERGED tables (owned values); pointers into these are passed
     // to resolve_selectors after the loop. Must outlive the resolver call.
-    std::vector<toml::table>          owned_merged_tables;
-    std::vector<const toml::table*>   merged_session_ptrs;
+    std::vector<toml::table> owned_merged_tables;
+    std::vector<const toml::table*> merged_session_ptrs;
     owned_merged_tables.reserve(sessions_arr->size());
     merged_session_ptrs.reserve(sessions_arr->size());
 
@@ -457,9 +482,9 @@ void recognize_keys(const toml::table&      tbl,
             // A non-table element in [[session]] is a TOML schema violation.
             acc.add(LoadDiagnostic{
                 .key_path = "session",
-                .reason   = reason_class::parse_error,
+                .reason = reason_class::parse_error,
                 .location = {},
-                .message  = "each [[session]] element must be a TOML table",
+                .message = "each [[session]] element must be a TOML table",
             });
             ++session_idx;
             continue;
@@ -468,13 +493,11 @@ void recognize_keys(const toml::table&      tbl,
 
         // Deep-merge [default] under this session (session keys override).
         toml::table merged =
-            defaults_ptr ? merge_defaults(*defaults_ptr, session_raw)
-                         : session_raw;
+            defaults_ptr ? merge_defaults(*defaults_ptr, session_raw) : session_raw;
 
         // Map scalar + structured fields onto a SessionConfig.
         SessionDefinition def;
-        const std::string key_prefix =
-            "session[" + std::to_string(session_idx) + "]";
+        const std::string key_prefix = "session[" + std::to_string(session_idx) + "]";
 
         // Pass &session_raw for diagnostic SourceLoc lookup: toml++ zeroes
         // node source_regions on table copy, so the merged copy has no line/col;
@@ -506,8 +529,7 @@ void recognize_keys(const toml::table&      tbl,
     // for security_profile.kind (it emits the data-model E-3 missing_required at
     // the named key); the resolver may additionally surface a selector-level
     // diagnostic for the same broken input — redundant but not contradictory.
-    detail::resolve_selectors(root_tbl, merged_session_ptrs, base_dir, opts,
-                              bundle, acc);
+    detail::resolve_selectors(root_tbl, merged_session_ptrs, base_dir, opts, bundle, acc);
 
     if (!acc.empty()) {
         return std::unexpected(std::move(acc).release());

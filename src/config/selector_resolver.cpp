@@ -15,11 +15,9 @@
 //     trap_throw_to_expected from loader_internal.hpp.
 // See loader_internal.hpp comment block for the closed list of trap_throw sites.
 
-#include "mappers.hpp"
-
+#include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
-
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/file_store_factory.hpp>
@@ -28,11 +26,11 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
-
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
+
+#include "mappers.hpp"
 
 namespace fixpp::config::detail {
 
@@ -42,11 +40,8 @@ namespace fixpp::config::detail {
 // clock.kind must be "system" (the ONLY accepted value in step 1).
 // Returns via acc; sets bundle.engine.clock on success.
 // ─────────────────────────────────────────────────────────────────────────────
-static void resolve_engine_clock(const toml::table&    root_tbl,
-                                 const LoadOptions&    opts,
-                                 ConfigBundle&         bundle,
-                                 DiagnosticAccumulator& acc)
-{
+static void resolve_engine_clock(const toml::table& root_tbl, const LoadOptions& opts,
+                                 ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     const toml::table* clk_tbl = nullptr;
     if (auto* n = root_tbl.get("clock"); n && n->is_table()) {
         clk_tbl = n->as_table();
@@ -55,8 +50,8 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
     if (!clk_tbl) {
         acc.add(LoadDiagnostic{
             .key_path = "clock.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "engine-level [clock] selector is required",
+            .reason = reason_class::missing_required,
+            .message = "engine-level [clock] selector is required",
         });
         return;
     }
@@ -68,15 +63,15 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
     } else if (!clk_tbl->get("kind")) {
         acc.add(LoadDiagnostic{
             .key_path = "clock.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "clock.kind is required (only accepted value: \"system\")",
+            .reason = reason_class::missing_required,
+            .message = "clock.kind is required (only accepted value: \"system\")",
         });
         return;
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "clock.kind",
-            .reason   = reason_class::malformed_value,
-            .message  = "clock.kind must be a string",
+            .reason = reason_class::malformed_value,
+            .message = "clock.kind must be a string",
         });
         return;
     }
@@ -84,8 +79,8 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
     if (kind_tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "clock.kind",
-            .reason   = reason_class::empty_required,
-            .message  = "clock.kind must not be empty (only accepted value: \"system\")",
+            .reason = reason_class::empty_required,
+            .message = "clock.kind must not be empty (only accepted value: \"system\")",
         });
         return;
     }
@@ -93,17 +88,16 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
     if (kind_tok != "system") {
         acc.add(LoadDiagnostic{
             .key_path = "clock.kind",
-            .reason   = reason_class::unknown_enum,
-            .message  = std::string{"unknown clock.kind: \""} + std::string{kind_tok}
-                        + "\" (only accepted value: \"system\")",
+            .reason = reason_class::unknown_enum,
+            .message = std::string{"unknown clock.kind: \""} + std::string{kind_tok} +
+                       "\" (only accepted value: \"system\")",
         });
         return;
     }
 
     // system_clock_source ctor may throw — use trap_throw_to_expected (D-3).
     auto result = trap_throw_to_expected(
-        "engine.clock",
-        reason_class::invalid_or_contradictory_selector,
+        "engine.clock", reason_class::invalid_or_contradictory_selector,
         [&] { return std::make_shared<core::system_clock_source>(opts.engine_executor); });
 
     if (!result) {
@@ -116,11 +110,8 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
 // ─────────────────────────────────────────────────────────────────────────────
 // resolve_engine_store — build engine.default_store_factory from [store] table (D-5).
 // ─────────────────────────────────────────────────────────────────────────────
-static void resolve_engine_store(const toml::table&           root_tbl,
-                                 const std::filesystem::path& base_dir,
-                                 ConfigBundle&                bundle,
-                                 DiagnosticAccumulator&       acc)
-{
+static void resolve_engine_store(const toml::table& root_tbl, const std::filesystem::path& base_dir,
+                                 ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     const toml::table* store_tbl = nullptr;
     if (auto* n = root_tbl.get("store"); n && n->is_table()) {
         store_tbl = n->as_table();
@@ -129,8 +120,8 @@ static void resolve_engine_store(const toml::table&           root_tbl,
     if (!store_tbl) {
         acc.add(LoadDiagnostic{
             .key_path = "store.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "engine-level [store] selector is required",
+            .reason = reason_class::missing_required,
+            .message = "engine-level [store] selector is required",
         });
         return;
     }
@@ -141,8 +132,8 @@ static void resolve_engine_store(const toml::table&           root_tbl,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "store.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "store.kind is required",
+            .reason = reason_class::missing_required,
+            .message = "store.kind is required",
         });
         return;
     }
@@ -150,15 +141,14 @@ static void resolve_engine_store(const toml::table&           root_tbl,
     if (kind_tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "store.kind",
-            .reason   = reason_class::empty_required,
-            .message  = "store.kind must not be empty",
+            .reason = reason_class::empty_required,
+            .message = "store.kind must not be empty",
         });
         return;
     }
 
     if (kind_tok == "memory") {
-        bundle.engine.default_store_factory =
-            std::make_shared<session::MemoryStoreFactory>();
+        bundle.engine.default_store_factory = std::make_shared<session::MemoryStoreFactory>();
     } else if (kind_tok == "file") {
         // Require store.directory (a path relative to the config file's directory).
         std::string_view dir_sv;
@@ -167,8 +157,8 @@ static void resolve_engine_store(const toml::table&           root_tbl,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = "store.directory",
-                .reason   = reason_class::missing_required,
-                .message  = "store.directory is required when store.kind=\"file\"",
+                .reason = reason_class::missing_required,
+                .message = "store.directory is required when store.kind=\"file\"",
             });
             return;
         }
@@ -184,9 +174,9 @@ static void resolve_engine_store(const toml::table&           root_tbl,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "store.kind",
-            .reason   = reason_class::unknown_enum,
-            .message  = std::string{"unknown store.kind: \""} + std::string{kind_tok}
-                        + "\" (step-1 accepted: {file, memory})",
+            .reason = reason_class::unknown_enum,
+            .message = std::string{"unknown store.kind: \""} + std::string{kind_tok} +
+                       "\" (step-1 accepted: {file, memory})",
         });
     }
 }
@@ -198,12 +188,10 @@ static void resolve_engine_store(const toml::table&           root_tbl,
 // step-1 accepted kind: "file"
 // make_file_cert_source is noexcept expected_t — check-the-expected, no trap_throw.
 // ─────────────────────────────────────────────────────────────────────────────
-static void resolve_engine_cert_source(const toml::table&    root_tbl,
+static void resolve_engine_cert_source(const toml::table& root_tbl,
                                        const std::filesystem::path& base_dir,
-                                       const LoadOptions&    opts,
-                                       ConfigBundle&         bundle,
-                                       DiagnosticAccumulator& acc)
-{
+                                       const LoadOptions& opts, ConfigBundle& bundle,
+                                       DiagnosticAccumulator& acc) {
     const toml::table* cs_tbl = nullptr;
     if (auto* n = root_tbl.get("cert_source"); n && n->is_table()) {
         cs_tbl = n->as_table();
@@ -223,8 +211,8 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "cert_source.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "cert_source.kind is required",
+            .reason = reason_class::missing_required,
+            .message = "cert_source.kind is required",
         });
         return;
     }
@@ -232,8 +220,8 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
     if (kind_tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "cert_source.kind",
-            .reason   = reason_class::empty_required,
-            .message  = "cert_source.kind must not be empty",
+            .reason = reason_class::empty_required,
+            .message = "cert_source.kind must not be empty",
         });
         return;
     }
@@ -241,9 +229,9 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
     if (kind_tok != "file") {
         acc.add(LoadDiagnostic{
             .key_path = "cert_source.kind",
-            .reason   = reason_class::unknown_enum,
-            .message  = std::string{"unknown cert_source.kind: \""} + std::string{kind_tok}
-                        + "\" (step-1 accepted: \"file\")",
+            .reason = reason_class::unknown_enum,
+            .message = std::string{"unknown cert_source.kind: \""} + std::string{kind_tok} +
+                       "\" (step-1 accepted: \"file\")",
         });
         return;
     }
@@ -259,13 +247,13 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
     };
 
     std::string leaf_path = get_path("cert_file");
-    std::string key_path  = get_path("key_file");
-    std::string ca_path   = get_path("ca_file");
+    std::string key_path = get_path("key_file");
+    std::string ca_path = get_path("ca_file");
 
     tls::file_cert_source::Config cfg;
-    cfg.leaf_path         = std::move(leaf_path);
-    cfg.private_key_path  = std::move(key_path);
-    cfg.ca_bundle_path    = std::move(ca_path);
+    cfg.leaf_path = std::move(leaf_path);
+    cfg.private_key_path = std::move(key_path);
+    cfg.ca_bundle_path = std::move(ca_path);
     // chain_path = "" — no "chain_file" TOML key in step 1 (D-5).
     // password_cb = null — step 1 supports plaintext keys only (E-6).
 
@@ -274,8 +262,8 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
         // make_file_cert_source returns expected_t — convert error to diagnostic.
         acc.add(LoadDiagnostic{
             .key_path = "cert_source",
-            .reason   = reason_class::invalid_or_contradictory_selector,
-            .message  = "cert_source file loading failed",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .message = "cert_source file loading failed",
         });
         return;
     }
@@ -288,12 +276,10 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
 // step-1 accepted kind: "path"
 // XmlLoader::load throws — use trap_throw_to_expected.
 // ─────────────────────────────────────────────────────────────────────────────
-static void resolve_engine_dictionary(const toml::table&    root_tbl,
+static void resolve_engine_dictionary(const toml::table& root_tbl,
                                       const std::filesystem::path& base_dir,
-                                      const LoadOptions&    opts,
-                                      ConfigBundle&         bundle,
-                                      DiagnosticAccumulator& acc)
-{
+                                      const LoadOptions& opts, ConfigBundle& bundle,
+                                      DiagnosticAccumulator& acc) {
     const toml::table* dict_tbl = nullptr;
     if (auto* n = root_tbl.get("dictionary"); n && n->is_table()) {
         dict_tbl = n->as_table();
@@ -311,8 +297,8 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "dictionary.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "dictionary.kind is required",
+            .reason = reason_class::missing_required,
+            .message = "dictionary.kind is required",
         });
         return;
     }
@@ -320,8 +306,8 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
     if (kind_tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "dictionary.kind",
-            .reason   = reason_class::empty_required,
-            .message  = "dictionary.kind must not be empty",
+            .reason = reason_class::empty_required,
+            .message = "dictionary.kind must not be empty",
         });
         return;
     }
@@ -331,15 +317,16 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
         if (kind_tok == "version") {
             acc.add(LoadDiagnostic{
                 .key_path = "dictionary.kind",
-                .reason   = reason_class::recognized_not_yet_supported_step2,
-                .message  = "dictionary.kind=\"version\" is recognized but deferred to step 2 (OQ-1)",
+                .reason = reason_class::recognized_not_yet_supported_step2,
+                .message =
+                    "dictionary.kind=\"version\" is recognized but deferred to step 2 (OQ-1)",
             });
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = "dictionary.kind",
-                .reason   = reason_class::unknown_enum,
-                .message  = std::string{"unknown dictionary.kind: \""} + std::string{kind_tok}
-                            + "\" (step-1 accepted: \"path\")",
+                .reason = reason_class::unknown_enum,
+                .message = std::string{"unknown dictionary.kind: \""} + std::string{kind_tok} +
+                           "\" (step-1 accepted: \"path\")",
             });
         }
         return;
@@ -352,8 +339,8 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "dictionary.path",
-            .reason   = reason_class::missing_required,
-            .message  = "dictionary.path is required when dictionary.kind=\"path\"",
+            .reason = reason_class::missing_required,
+            .message = "dictionary.path is required when dictionary.kind=\"path\"",
         });
         return;
     }
@@ -361,8 +348,8 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
     if (rel_path_str.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "dictionary.path",
-            .reason   = reason_class::empty_required,
-            .message  = "dictionary.path must not be empty",
+            .reason = reason_class::empty_required,
+            .message = "dictionary.path must not be empty",
         });
         return;
     }
@@ -371,9 +358,7 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
 
     // XmlLoader::load THROWS — use trap_throw_to_expected.
     auto load_result = trap_throw_to_expected(
-        "dictionary.path",
-        reason_class::invalid_or_contradictory_selector,
-        [&] {
+        "dictionary.path", reason_class::invalid_or_contradictory_selector, [&] {
             dict::XmlLoader loader;
             dict::Dictionary d = loader.load(xml_path, opts.resource);
             return std::make_shared<const dict::Dictionary>(std::move(d));
@@ -392,10 +377,9 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
 // Emits a diagnostic for mtls_pinned (deferred) but NOT for unrecognized tokens
 // (those are caught by map_structured_members; here we just return unset).
 // ─────────────────────────────────────────────────────────────────────────────
-static tls::SecurityProfile parse_security_profile(const toml::table&     merged,
-                                                   std::string_view       key_prefix,
-                                                   DiagnosticAccumulator& acc)
-{
+static tls::SecurityProfile parse_security_profile(const toml::table& merged,
+                                                   std::string_view key_prefix,
+                                                   DiagnosticAccumulator& acc) {
     const toml::table* sp_tbl = nullptr;
     if (auto* sp_n = merged.get("security_profile"); sp_n && sp_n->is_table()) {
         sp_tbl = sp_n->as_table();
@@ -421,9 +405,9 @@ static tls::SecurityProfile parse_security_profile(const toml::table&     merged
     if (sp_tok == "mtls_pinned") {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_prefix} + ".security_profile.kind",
-            .reason   = reason_class::recognized_not_yet_supported_step2,
-            .message  = "security_profile.kind=\"mtls_pinned\" is recognized but "
-                        "requires a Pinset that cannot be sourced from a file in step 1 (D-9a)",
+            .reason = reason_class::recognized_not_yet_supported_step2,
+            .message = "security_profile.kind=\"mtls_pinned\" is recognized but "
+                       "requires a Pinset that cannot be sourced from a file in step 1 (D-9a)",
         });
         // Return unset so callers can propagate the error via acc without crashing.
         return tls::SecurityProfile::unset;
@@ -437,13 +421,9 @@ static tls::SecurityProfile parse_security_profile(const toml::table&     merged
 // make_file_cert_source.  Returns nullptr (+ diagnostic) on failure.
 // cs_tbl is the [cert_source] TOML table (engine-root or per-session).
 // ─────────────────────────────────────────────────────────────────────────────
-static std::shared_ptr<tls::cert_source>
-build_file_cert_source(const toml::table&            cs_tbl,
-                       const std::filesystem::path&  base_dir,
-                       const LoadOptions&             opts,
-                       std::string_view               key_prefix,
-                       DiagnosticAccumulator&         acc)
-{
+static std::shared_ptr<tls::cert_source> build_file_cert_source(
+    const toml::table& cs_tbl, const std::filesystem::path& base_dir, const LoadOptions& opts,
+    std::string_view key_prefix, DiagnosticAccumulator& acc) {
     auto get_path_str = [&](const char* key) -> std::string {
         if (auto* n = cs_tbl.get(key); n && n->is_string()) {
             std::string_view sv = n->as_string()->get();
@@ -454,16 +434,16 @@ build_file_cert_source(const toml::table&            cs_tbl,
     };
 
     tls::file_cert_source::Config cfg;
-    cfg.leaf_path        = get_path_str("cert_file");
+    cfg.leaf_path = get_path_str("cert_file");
     cfg.private_key_path = get_path_str("key_file");
-    cfg.ca_bundle_path   = get_path_str("ca_file");
+    cfg.ca_bundle_path = get_path_str("ca_file");
 
     auto cs_result = tls::file_cert_source::make_file_cert_source(std::move(cfg), opts.resource);
     if (!cs_result) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_prefix},
-            .reason   = reason_class::invalid_or_contradictory_selector,
-            .message  = "cert_source file loading failed",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .message = "cert_source file loading failed",
         });
         return nullptr;
     }
@@ -474,31 +454,28 @@ build_file_cert_source(const toml::table&            cs_tbl,
 // build_tls_factory — assemble a TLS transport factory from a cert_source +
 // security_profile + clock.  Returns a shared_ptr; null + diagnostic on failure.
 // ─────────────────────────────────────────────────────────────────────────────
-static std::shared_ptr<transport::TransportFactory>
-build_tls_factory(tls::SecurityProfile                     profile,
-                  const std::shared_ptr<tls::cert_source>& cs,
-                  const std::shared_ptr<core::Clock>&      clock,
-                  std::string_view                         key_prefix,
-                  DiagnosticAccumulator&                   acc)
-{
+static std::shared_ptr<transport::TransportFactory> build_tls_factory(
+    tls::SecurityProfile profile, const std::shared_ptr<tls::cert_source>& cs,
+    const std::shared_ptr<core::Clock>& clock, std::string_view key_prefix,
+    DiagnosticAccumulator& acc) {
     auto ssl_cfg_result = tls::make_ssl_ctx_config(profile, cs, clock);
     if (!ssl_cfg_result) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_prefix},
-            .reason   = reason_class::invalid_or_contradictory_selector,
-            .message  = "make_ssl_ctx_config failed (check profile/cert_source/clock combination)",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .message = "make_ssl_ctx_config failed (check profile/cert_source/clock combination)",
         });
         return nullptr;
     }
 
     transport::Transport::Config t_cfg{};
-    auto factory_result = transport::make_asio_tls_transport_factory(
-        t_cfg, std::move(*ssl_cfg_result));
+    auto factory_result =
+        transport::make_asio_tls_transport_factory(t_cfg, std::move(*ssl_cfg_result));
     if (!factory_result) {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_prefix},
-            .reason   = reason_class::invalid_or_contradictory_selector,
-            .message  = "make_asio_tls_transport_factory failed (cert loading error?)",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .message = "make_asio_tls_transport_factory failed (cert loading error?)",
         });
         return nullptr;
     }
@@ -518,11 +495,8 @@ build_tls_factory(tls::SecurityProfile                     profile,
 // — check-the-expected, NO trap_throw (D-3 / loader_internal.hpp).
 // ─────────────────────────────────────────────────────────────────────────────
 static void resolve_transport(const std::vector<const toml::table*>& merged_session_tables,
-                              const std::filesystem::path&           base_dir,
-                              const LoadOptions&                     opts,
-                              ConfigBundle&         bundle,
-                              DiagnosticAccumulator& acc)
-{
+                              const std::filesystem::path& base_dir, const LoadOptions& opts,
+                              ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     if (merged_session_tables.empty()) {
         return;  // Missing sessions caught earlier; no-op here.
     }
@@ -541,8 +515,8 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     if (!transport_tbl) {
         acc.add(LoadDiagnostic{
             .key_path = "session[0].transport.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "[session.transport] is required",
+            .reason = reason_class::missing_required,
+            .message = "[session.transport] is required",
         });
         return;
     }
@@ -553,8 +527,8 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "session[0].transport.kind",
-            .reason   = reason_class::missing_required,
-            .message  = "transport.kind is required",
+            .reason = reason_class::missing_required,
+            .message = "transport.kind is required",
         });
         return;
     }
@@ -562,18 +536,19 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     if (transport_kind_tok.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = "session[0].transport.kind",
-            .reason   = reason_class::empty_required,
-            .message  = "transport.kind must not be empty",
+            .reason = reason_class::empty_required,
+            .message = "transport.kind must not be empty",
         });
         return;
     }
 
     if (transport_kind_tok == "tls") {
-        // TLS factory requires: engine.clock + engine.default_cert_source + session security_profile.
+        // TLS factory requires: engine.clock + engine.default_cert_source + session
+        // security_profile.
 
         // Extract session[0] security_profile → engine-default profile.
-        tls::SecurityProfile tls_profile = parse_security_profile(
-            session_merged, "session[0]", acc);
+        tls::SecurityProfile tls_profile =
+            parse_security_profile(session_merged, "session[0]", acc);
 
         // If parse_security_profile added a deferral diagnostic, bail.
         if (!acc.empty()) {
@@ -584,16 +559,16 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         if (bundle.engine.clock == nullptr) {
             acc.add(LoadDiagnostic{
                 .key_path = "engine.clock",
-                .reason   = reason_class::missing_required,
-                .message  = "engine.clock is required to build a TLS transport factory (D-6)",
+                .reason = reason_class::missing_required,
+                .message = "engine.clock is required to build a TLS transport factory (D-6)",
             });
             return;
         }
         if (bundle.engine.default_cert_source == nullptr) {
             acc.add(LoadDiagnostic{
                 .key_path = "cert_source",
-                .reason   = reason_class::missing_required,
-                .message  = "engine-level cert_source is required for a TLS transport (E-3)",
+                .reason = reason_class::missing_required,
+                .message = "engine-level cert_source is required for a TLS transport (E-3)",
             });
             return;
         }
@@ -601,12 +576,11 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         // Build engine-default TLS factory.
         // CRITICAL: pass bundle.engine.clock BY COPY (not move) so engine.clock
         // AND the factory's ssl_cfg_.clock both hold the shared_ptr → use_count > 1 (D-6).
-        auto default_factory = build_tls_factory(
-            tls_profile,
-            bundle.engine.default_cert_source,  // copy (shared_ptr)
-            bundle.engine.clock,                // copy (shared_ptr) — D-6 shared clock
-            "session[0].transport",
-            acc);
+        auto default_factory =
+            build_tls_factory(tls_profile,
+                              bundle.engine.default_cert_source,  // copy (shared_ptr)
+                              bundle.engine.clock,  // copy (shared_ptr) — D-6 shared clock
+                              "session[0].transport", acc);
 
         if (!default_factory) {
             return;  // diagnostic already added by build_tls_factory
@@ -654,7 +628,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
             // Divergence: a per-session [cert_source] is present (different certs)
             // OR the profile differs from the engine-default profile.
-            const bool cert_diverges  = (s_cs_tbl != nullptr);
+            const bool cert_diverges = (s_cs_tbl != nullptr);
             const bool profile_diverges = (s_profile != tls_profile);
 
             if (!cert_diverges && !profile_diverges) {
@@ -665,9 +639,8 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
             // Build per-session cert_source.
             std::shared_ptr<tls::cert_source> s_cert_source;
             if (s_cs_tbl) {
-                s_cert_source = build_file_cert_source(
-                    *s_cs_tbl, base_dir, opts,
-                    s_prefix + ".cert_source", acc);
+                s_cert_source = build_file_cert_source(*s_cs_tbl, base_dir, opts,
+                                                       s_prefix + ".cert_source", acc);
                 if (!s_cert_source) {
                     return;  // diagnostic already added
                 }
@@ -678,12 +651,9 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
             // Mint a FRESH TLS factory for this session (use_count()==1 per D-6a).
             // Each divergent session gets its own independently-owned factory.
-            auto s_factory = build_tls_factory(
-                s_profile,
-                s_cert_source,
-                bundle.engine.clock,   // shared clock (copy) — D-6
-                s_prefix + ".transport",
-                acc);
+            auto s_factory = build_tls_factory(s_profile, s_cert_source,
+                                               bundle.engine.clock,  // shared clock (copy) — D-6
+                                               s_prefix + ".transport", acc);
             if (!s_factory) {
                 return;  // diagnostic already added
             }
@@ -699,11 +669,11 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         if (bundle.engine.default_cert_source != nullptr) {
             acc.add(LoadDiagnostic{
                 .key_path = "session[0].transport",
-                .reason   = reason_class::invalid_or_contradictory_selector,
-                .message  = "transport.kind=\"plaintext\" is contradictory with a "
-                            "[cert_source] section: TLS credentials are unused by a "
-                            "plaintext transport; remove [cert_source] or switch to "
-                            "transport.kind=\"tls\"",
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .message = "transport.kind=\"plaintext\" is contradictory with a "
+                           "[cert_source] section: TLS credentials are unused by a "
+                           "plaintext transport; remove [cert_source] or switch to "
+                           "transport.kind=\"tls\"",
             });
             return;
         }
@@ -714,8 +684,8 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         if (!factory_result) {
             acc.add(LoadDiagnostic{
                 .key_path = "session[0].transport",
-                .reason   = reason_class::invalid_or_contradictory_selector,
-                .message  = "make_asio_plain_transport_factory failed",
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .message = "make_asio_plain_transport_factory failed",
             });
             return;
         }
@@ -726,9 +696,9 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "session[0].transport.kind",
-            .reason   = reason_class::unknown_enum,
-            .message  = std::string{"unknown transport.kind: \""} + std::string{transport_kind_tok}
-                        + "\" (accepted: \"tls\", \"plaintext\")",
+            .reason = reason_class::unknown_enum,
+            .message = std::string{"unknown transport.kind: \""} + std::string{transport_kind_tok} +
+                       "\" (accepted: \"tls\", \"plaintext\")",
         });
     }
 }
@@ -742,13 +712,10 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 // `merged_session_tables` is the vector of MERGED TOML tables (one per session,
 // post [default]-merge) produced by the session loop in toml_config_loader.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
-void resolve_selectors(const toml::table&                     root_tbl,
+void resolve_selectors(const toml::table& root_tbl,
                        const std::vector<const toml::table*>& merged_session_tables,
-                       const std::filesystem::path&           base_dir,
-                       const LoadOptions&                     opts,
-                       ConfigBundle&                          bundle,
-                       DiagnosticAccumulator&                 acc)
-{
+                       const std::filesystem::path& base_dir, const LoadOptions& opts,
+                       ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     // Engine-scope selectors: read from root_tbl directly (D-5).
     resolve_engine_clock(root_tbl, opts, bundle, acc);
     resolve_engine_store(root_tbl, base_dir, bundle, acc);

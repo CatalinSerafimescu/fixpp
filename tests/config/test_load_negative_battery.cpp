@@ -32,17 +32,15 @@
 //
 // Anchors: spec.md E-5 (reason_class), plan.md SC-003/SC-007/FR-012/FR-018.
 
-#include <fixpp/config/toml_config_loader.hpp>
-#include <fixpp/config/load_diagnostic.hpp>
-
-#include <asio/io_context.hpp>
+#include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/io_context.hpp>
+#include <fixpp/config/load_diagnostic.hpp>
+#include <fixpp/config/toml_config_loader.hpp>
 #include <set>
 #include <string>
 #include <utility>
-
-#include <gtest/gtest.h>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -52,8 +50,7 @@ namespace {
 
 // ── Fixture path helper ───────────────────────────────────────────────────────
 
-std::filesystem::path neg_fixture(std::string_view name)
-{
+std::filesystem::path neg_fixture(std::string_view name) {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / name;
 }
 
@@ -64,8 +61,7 @@ std::filesystem::path neg_fixture(std::string_view name)
 // caller's ASSERT_FALSE catches it; call sites use ASSERT_FALSE(result.has_value())
 // BEFORE calling diagnostics_from().
 
-fixpp::config::LoadResult load(const std::filesystem::path& path)
-{
+fixpp::config::LoadResult load(const std::filesystem::path& path) {
     asio::io_context ctx;
     fixpp::config::LoadOptions opts;
     opts.engine_executor = ctx.get_executor();
@@ -75,14 +71,10 @@ fixpp::config::LoadResult load(const std::filesystem::path& path)
 // ── Diagnostic search helper (discriminating — checks BOTH reason AND key_path)
 
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
-              fixpp::config::reason_class                        expected_reason,
-              std::string_view                                   expected_key_path)
-{
-    return std::any_of(diags.begin(), diags.end(),
-        [&](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == expected_reason
-                && d.key_path == expected_key_path;
-        });
+              fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
+    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+        return d.reason == expected_reason && d.key_path == expected_key_path;
+    });
 }
 
 }  // namespace
@@ -97,12 +89,10 @@ bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
 // ALREADY handled by Phase 3b (T007 try/catch toml::parse_error).
 // Expected: unexpected(diag{reason=parse_error, key_path="", location.line>0}).
 
-TEST(LoadNegativeBattery, T018_ParseError)
-{
+TEST(LoadNegativeBattery, T018_ParseError) {
     auto result = load(neg_fixture("neg_parse_error.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for a malformed TOML file";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for a malformed TOML file";
 
     const auto& diags = result.error();
     ASSERT_FALSE(diags.empty());
@@ -110,14 +100,12 @@ TEST(LoadNegativeBattery, T018_ParseError)
     using RC = fixpp::config::reason_class;
     // parse_error is emitted with key_path="" (file-level, no specific key).
     bool found = has_diag(diags, RC::parse_error, "");
-    EXPECT_TRUE(found)
-        << "expected a parse_error diagnostic with key_path=\"\"";
+    EXPECT_TRUE(found) << "expected a parse_error diagnostic with key_path=\"\"";
 
     // Location must be populated (line>0) — the parse failure has a source region.
-    auto it = std::find_if(diags.begin(), diags.end(),
-        [](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == RC::parse_error;
-        });
+    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
+        return d.reason == RC::parse_error;
+    });
     ASSERT_NE(it, diags.end());
     EXPECT_GT(it->location.line, std::uint32_t{0})
         << "parse_error diagnostic must carry source location (line>0)";
@@ -129,8 +117,7 @@ TEST(LoadNegativeBattery, T018_ParseError)
 // NOT YET IMPLEMENTED — Phase 4b will add schema-key enumeration.
 // RED until 4b: the load currently succeeds (unknown keys are silently ignored).
 
-TEST(LoadNegativeBattery, T018_UnknownKey)
-{
+TEST(LoadNegativeBattery, T018_UnknownKey) {
     auto result = load(neg_fixture("neg_unknown_key.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -138,8 +125,7 @@ TEST(LoadNegativeBattery, T018_UnknownKey)
            "Phase 4b unknown_key detection not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::unknown_key,
-                         "session[0].sender_comp_idd"))
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_key, "session[0].sender_comp_idd"))
         << "expected unknown_key at session[0].sender_comp_idd";
 }
 
@@ -149,8 +135,7 @@ TEST(LoadNegativeBattery, T018_UnknownKey)
 // NOT YET IMPLEMENTED — Phase 4b will scan top-level step-2 keys.
 // RED until 4b: the [logger] table is currently silently ignored.
 
-TEST(LoadNegativeBattery, T018_Step2Logger)
-{
+TEST(LoadNegativeBattery, T018_Step2Logger) {
     auto result = load(neg_fixture("neg_step2_logger.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -158,8 +143,7 @@ TEST(LoadNegativeBattery, T018_Step2Logger)
            "Phase 4b step-2 deferral not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2, "logger"))
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2, "logger"))
         << "expected recognized_not_yet_supported_step2 at \"logger\"";
 }
 
@@ -169,8 +153,7 @@ TEST(LoadNegativeBattery, T018_Step2Logger)
 // NOT YET IMPLEMENTED — Phase 4b will detect this session-level step-2 key.
 // RED until 4b.
 
-TEST(LoadNegativeBattery, T018_Step2DialectOverlay)
-{
+TEST(LoadNegativeBattery, T018_Step2DialectOverlay) {
     auto result = load(neg_fixture("neg_step2_dialect_overlay.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -178,8 +161,7 @@ TEST(LoadNegativeBattery, T018_Step2DialectOverlay)
            "Phase 4b step-2 detection not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                          "session[0].dialect_overlay"))
         << "expected recognized_not_yet_supported_step2 at "
            "\"session[0].dialect_overlay\"";
@@ -190,16 +172,14 @@ TEST(LoadNegativeBattery, T018_Step2DialectOverlay)
 // neg_step2_dict_version.toml has dictionary.kind="version".
 // ALREADY handled by Phase 3b (selector_resolver.cpp).
 
-TEST(LoadNegativeBattery, T018_Step2DictVersion)
-{
+TEST(LoadNegativeBattery, T018_Step2DictVersion) {
     auto result = load(neg_fixture("neg_step2_dict_version.toml"));
 
     ASSERT_FALSE(result.has_value())
         << "expected load failure for dictionary.kind=\"version\" (step-2 deferred)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2, "dictionary.kind"))
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2, "dictionary.kind"))
         << "expected recognized_not_yet_supported_step2 at \"dictionary.kind\"";
 }
 
@@ -208,16 +188,13 @@ TEST(LoadNegativeBattery, T018_Step2DictVersion)
 // neg_step2_mtls_pinned.toml has security_profile.kind="mtls_pinned".
 // ALREADY handled by Phase 3b (selector_resolver.cpp).
 
-TEST(LoadNegativeBattery, T018_Step2MtlsPinned)
-{
+TEST(LoadNegativeBattery, T018_Step2MtlsPinned) {
     auto result = load(neg_fixture("neg_step2_mtls_pinned.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for mtls_pinned (step-2 deferred)";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for mtls_pinned (step-2 deferred)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                          "session[0].security_profile.kind"))
         << "expected recognized_not_yet_supported_step2 at "
            "\"session[0].security_profile.kind\"";
@@ -229,8 +206,7 @@ TEST(LoadNegativeBattery, T018_Step2MtlsPinned)
 // NOT YET IMPLEMENTED — Phase 4b will add per-required-key checks.
 // RED until 4b: the load currently succeeds (sender_comp_id left at default "").
 
-TEST(LoadNegativeBattery, T018_MissingRequired)
-{
+TEST(LoadNegativeBattery, T018_MissingRequired) {
     auto result = load(neg_fixture("neg_missing_required.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -238,8 +214,7 @@ TEST(LoadNegativeBattery, T018_MissingRequired)
            "Phase 4b required-key checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].sender_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].sender_comp_id"))
         << "expected missing_required at \"session[0].sender_comp_id\"";
 }
 
@@ -249,8 +224,7 @@ TEST(LoadNegativeBattery, T018_MissingRequired)
 // NOT YET IMPLEMENTED — Phase 4b will add empty-string guards.
 // RED until 4b: the load currently succeeds (empty string accepted silently).
 
-TEST(LoadNegativeBattery, T018_EmptyRequired)
-{
+TEST(LoadNegativeBattery, T018_EmptyRequired) {
     auto result = load(neg_fixture("neg_empty_required.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -258,8 +232,7 @@ TEST(LoadNegativeBattery, T018_EmptyRequired)
            "Phase 4b empty-required checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::empty_required,
-                         "session[0].sender_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].sender_comp_id"))
         << "expected empty_required at \"session[0].sender_comp_id\"";
 }
 
@@ -268,23 +241,19 @@ TEST(LoadNegativeBattery, T018_EmptyRequired)
 // neg_malformed_value.toml has heartbeat_interval = "30" (unitless duration).
 // ALREADY handled by Phase 3b (scalar_mappers.cpp parse_duration_to_ms).
 
-TEST(LoadNegativeBattery, T018_MalformedValue)
-{
+TEST(LoadNegativeBattery, T018_MalformedValue) {
     auto result = load(neg_fixture("neg_malformed_value.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for unitless heartbeat_interval";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for unitless heartbeat_interval";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value,
-                         "session[0].heartbeat_interval"))
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
         << "expected malformed_value at \"session[0].heartbeat_interval\"";
 
     // Location must be populated for a file-positional value error.
-    auto it = std::find_if(result.error().begin(), result.error().end(),
-        [](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == RC::malformed_value
-                && d.key_path == "session[0].heartbeat_interval";
+    auto it = std::find_if(
+        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
+            return d.reason == RC::malformed_value && d.key_path == "session[0].heartbeat_interval";
         });
     ASSERT_NE(it, result.error().end());
     EXPECT_GT(it->location.line, std::uint32_t{0})
@@ -296,24 +265,23 @@ TEST(LoadNegativeBattery, T018_MalformedValue)
 // neg_out_of_range.toml has logout_disconnect_timeout_ms = -1.
 // ALREADY handled by Phase 3b (scalar_mappers.cpp v<0 guard).
 
-TEST(LoadNegativeBattery, T018_OutOfRange)
-{
+TEST(LoadNegativeBattery, T018_OutOfRange) {
     auto result = load(neg_fixture("neg_out_of_range.toml"));
 
     ASSERT_FALSE(result.has_value())
         << "expected load failure for logout_disconnect_timeout_ms = -1";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range,
-                         "session[0].logout_disconnect_timeout_ms"))
+    EXPECT_TRUE(
+        has_diag(result.error(), RC::out_of_range, "session[0].logout_disconnect_timeout_ms"))
         << "expected out_of_range at \"session[0].logout_disconnect_timeout_ms\"";
 
     // Location must be populated for a file-positional value error.
     auto it = std::find_if(result.error().begin(), result.error().end(),
-        [](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == RC::out_of_range
-                && d.key_path == "session[0].logout_disconnect_timeout_ms";
-        });
+                           [](const fixpp::config::LoadDiagnostic& d) {
+                               return d.reason == RC::out_of_range &&
+                                      d.key_path == "session[0].logout_disconnect_timeout_ms";
+                           });
     ASSERT_NE(it, result.error().end());
     EXPECT_GT(it->location.line, std::uint32_t{0})
         << "out_of_range diagnostic must carry source location";
@@ -324,20 +292,18 @@ TEST(LoadNegativeBattery, T018_OutOfRange)
 // neg_unknown_enum.toml has role = "bogus".
 // ALREADY handled by Phase 3b (scalar_mappers.cpp).
 
-TEST(LoadNegativeBattery, T018_UnknownEnum)
-{
+TEST(LoadNegativeBattery, T018_UnknownEnum) {
     auto result = load(neg_fixture("neg_unknown_enum.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for role = \"bogus\"";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for role = \"bogus\"";
 
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].role"))
         << "expected unknown_enum at \"session[0].role\"";
 
     // Location must be populated for a file-positional value error.
-    auto it = std::find_if(result.error().begin(), result.error().end(),
-        [](const fixpp::config::LoadDiagnostic& d) {
+    auto it = std::find_if(
+        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
             return d.reason == RC::unknown_enum && d.key_path == "session[0].role";
         });
     ASSERT_NE(it, result.error().end());
@@ -352,8 +318,7 @@ TEST(LoadNegativeBattery, T018_UnknownEnum)
 // NOT YET IMPLEMENTED — Phase 4b will add this cross-selector consistency check.
 // RED until 4b.
 
-TEST(LoadNegativeBattery, T018_ContradictoryPlainWithCerts)
-{
+TEST(LoadNegativeBattery, T018_ContradictoryPlainWithCerts) {
     auto result = load(neg_fixture("neg_contradictory_plain_with_certs.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -362,8 +327,8 @@ TEST(LoadNegativeBattery, T018_ContradictoryPlainWithCerts)
 
     using RC = fixpp::config::reason_class;
     // selector_resolver.cpp emits at "session[0].transport" (T025).
-    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
-                         "session[0].transport"))
+    EXPECT_TRUE(
+        has_diag(result.error(), RC::invalid_or_contradictory_selector, "session[0].transport"))
         << "expected invalid_or_contradictory_selector at \"session[0].transport\" "
            "for plaintext transport with cert_source present";
 }
@@ -378,8 +343,7 @@ TEST(LoadNegativeBattery, T018_ContradictoryPlainWithCerts)
 // reason (missing_required) so the test is a correct RED-on-no-cert-guard witness.
 // Phase 4b may reclassify; we accept both reasons here.
 
-TEST(LoadNegativeBattery, T018_ContradictoryTlsNoCerts)
-{
+TEST(LoadNegativeBattery, T018_ContradictoryTlsNoCerts) {
     auto result = load(neg_fixture("neg_contradictory_tls_no_certs.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -402,8 +366,7 @@ TEST(LoadNegativeBattery, T018_ContradictoryTlsNoCerts)
 // NOT YET IMPLEMENTED — Phase 4b will add threading-combination guards.
 // RED until 4b: both tokens currently map cleanly without a cross-check.
 
-TEST(LoadNegativeBattery, T018_ContradictoryDirectSpin)
-{
+TEST(LoadNegativeBattery, T018_ContradictoryDirectSpin) {
     auto result = load(neg_fixture("neg_contradictory_direct_spin.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -412,8 +375,7 @@ TEST(LoadNegativeBattery, T018_ContradictoryDirectSpin)
 
     using RC = fixpp::config::reason_class;
     // scalar_mappers.cpp emits at "session[0].mode" (T024, rule 7).
-    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
-                         "session[0].mode"))
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector, "session[0].mode"))
         << "expected invalid_or_contradictory_selector at \"session[0].mode\" "
            "for mode=direct_executor + locks=spin";
 }
@@ -425,16 +387,13 @@ TEST(LoadNegativeBattery, T018_ContradictoryDirectSpin)
 // ALREADY handled by Phase 3b (selector_resolver.cpp: !cs_result → diagnostic
 // at "cert_source" with reason invalid_or_contradictory_selector).
 
-TEST(LoadNegativeBattery, T018_ContradictoryEncryptedKey)
-{
+TEST(LoadNegativeBattery, T018_ContradictoryEncryptedKey) {
     auto result = load(neg_fixture("neg_contradictory_encrypted_key.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for an encrypted private key";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for an encrypted private key";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
-                         "cert_source"))
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector, "cert_source"))
         << "expected invalid_or_contradictory_selector at \"cert_source\" for "
            "encrypted key (make_file_cert_source failure)";
 }
@@ -449,8 +408,7 @@ TEST(LoadNegativeBattery, T018_ContradictoryEncryptedKey)
 // noexcept-boundary class the fuzzer (T037) found broken for the toml++ parse path.
 // The (key_path, reason) are derived from data-model D-3 / selector_resolver
 // resolve_engine_dictionary: invalid_or_contradictory_selector at "dictionary.path".
-TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate)
-{
+TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate) {
     // If trap_throw does NOT catch the XmlLoader throw, this load aborts the
     // process (a crash, not an assertion failure) — which is itself the finding.
     auto result = load(neg_fixture("neg_dict_malformed_xml.toml"));
@@ -460,8 +418,7 @@ TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate)
            "never a ConfigBundle";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
-                         "dictionary.path"))
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector, "dictionary.path"))
         << "expected invalid_or_contradictory_selector at \"dictionary.path\" "
            "(XmlLoader::load throw routed through trap_throw_to_expected, D-3)";
 }
@@ -481,8 +438,7 @@ TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate)
 // assertion failure) — which is itself the finding.
 // Anchors: spec.md FR-012 / validation rule 9 / data-model D-3.
 
-TEST(LoadNegativeBattery, T039_TomlInternalAssert_NoTerminate)
-{
+TEST(LoadNegativeBattery, T039_TomlInternalAssert_NoTerminate) {
     auto result = load(neg_fixture("neg_toml_assert_table_header.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -509,8 +465,7 @@ TEST(LoadNegativeBattery, T039_TomlInternalAssert_NoTerminate)
 // The two-cell distinction: reject_policy → recognized_not_yet_supported_step2
 // (known-deferred key), vs a typo key → unknown_key (Phase 4b; different reason).
 
-TEST(LoadNegativeBattery, T019_CollectAll_ExactCount)
-{
+TEST(LoadNegativeBattery, T019_CollectAll_ExactCount) {
     auto result = load(neg_fixture("neg_multi.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -518,16 +473,13 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactCount)
 
     // Exact count: exactly 3 diagnostics (no missing, no extra).
     EXPECT_EQ(result.error().size(), std::size_t{3})
-        << "expected exactly 3 diagnostics from neg_multi.toml; got "
-        << result.error().size();
+        << "expected exactly 3 diagnostics from neg_multi.toml; got " << result.error().size();
 }
 
-TEST(LoadNegativeBattery, T019_CollectAll_ExactSet)
-{
+TEST(LoadNegativeBattery, T019_CollectAll_ExactSet) {
     auto result = load(neg_fixture("neg_multi.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for neg_multi.toml";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for neg_multi.toml";
 
     using RC = fixpp::config::reason_class;
     using KRP = std::pair<std::string, RC>;
@@ -535,9 +487,9 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet)
     // Expected set of (key_path, reason) pairs — exact-set equality (completeness
     // gate: not subset, not superset; per project lesson on exact-set vs subset).
     const std::set<KRP> expected{
-        {"session[0].role",               RC::unknown_enum},
+        {"session[0].role", RC::unknown_enum},
         {"session[0].heartbeat_interval", RC::malformed_value},
-        {"session[0].reject_policy",      RC::recognized_not_yet_supported_step2},
+        {"session[0].reject_policy", RC::recognized_not_yet_supported_step2},
     };
 
     std::set<KRP> actual;
@@ -552,8 +504,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet)
             missing_diags.push_back(e);
         }
     }
-    EXPECT_TRUE(missing_diags.empty())
-        << "missing expected diagnostics from collect-ALL:";
+    EXPECT_TRUE(missing_diags.empty()) << "missing expected diagnostics from collect-ALL:";
 
     // Report unexpected diagnostics (present in actual, absent in expected).
     std::vector<KRP> extra_diags;
@@ -562,8 +513,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet)
             extra_diags.push_back(a);
         }
     }
-    EXPECT_TRUE(extra_diags.empty())
-        << "unexpected extra diagnostics from collect-ALL:";
+    EXPECT_TRUE(extra_diags.empty()) << "unexpected extra diagnostics from collect-ALL:";
 }
 
 // T020 [US2] — Required-key cells
@@ -583,16 +533,14 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet)
 // The unknown_key cell (sender_comp_idd) is NOT YET IMPLEMENTED (Phase 4b).
 // This test verifies the distinction is correct once both are implemented.
 
-TEST(LoadNegativeBattery, T019_Step2VsUnknownKeyDistinction)
-{
+TEST(LoadNegativeBattery, T019_Step2VsUnknownKeyDistinction) {
     using RC = fixpp::config::reason_class;
 
     // A step-2 deferred key (reject_policy) fires recognized_not_yet_supported_step2.
     {
         auto result = load(neg_fixture("neg_multi.toml"));
         ASSERT_FALSE(result.has_value());
-        EXPECT_TRUE(has_diag(result.error(),
-                             RC::recognized_not_yet_supported_step2,
+        EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                              "session[0].reject_policy"))
             << "reject_policy must produce recognized_not_yet_supported_step2 "
                "(known deferred feature), not unknown_key";
@@ -605,15 +553,12 @@ TEST(LoadNegativeBattery, T019_Step2VsUnknownKeyDistinction)
         ASSERT_FALSE(result.has_value())
             << "expected load failure for typo key (sender_comp_idd); "
                "Phase 4b unknown_key detection not yet implemented — RED expected";
-        EXPECT_TRUE(has_diag(result.error(),
-                             RC::unknown_key,
-                             "session[0].sender_comp_idd"))
+        EXPECT_TRUE(has_diag(result.error(), RC::unknown_key, "session[0].sender_comp_idd"))
             << "sender_comp_idd must produce unknown_key (schema typo), "
                "not recognized_not_yet_supported_step2";
 
         // The two must have DIFFERENT reasons — this is the key discrimination.
-        EXPECT_FALSE(has_diag(result.error(),
-                              RC::recognized_not_yet_supported_step2,
+        EXPECT_FALSE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                               "session[0].sender_comp_idd"))
             << "a typo key must NOT produce recognized_not_yet_supported_step2 "
                "(that reason is reserved for known-deferred features)";
@@ -636,12 +581,10 @@ TEST(LoadNegativeBattery, T019_Step2VsUnknownKeyDistinction)
 // selector_resolver.cpp resolve_engine_clock: absent [clock] table → emits
 // missing_required at "clock.kind". ALREADY-GREEN from Phase 3b.
 
-TEST(LoadNegativeBattery, T020_MissingClockKind)
-{
+TEST(LoadNegativeBattery, T020_MissingClockKind) {
     auto result = load(neg_fixture("neg_missing_clock.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure when [clock] section is absent";
+    ASSERT_FALSE(result.has_value()) << "expected load failure when [clock] section is absent";
 
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "clock.kind"))
@@ -655,8 +598,7 @@ TEST(LoadNegativeBattery, T020_MissingClockKind)
 // Same fixture as T018_MissingRequired — we make it an explicit T020 cell.
 // NOT YET IMPLEMENTED — Phase 4b (T022) adds per-key required-field enumeration.
 
-TEST(LoadNegativeBattery, T020_MissingRequired_SenderCompId)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_SenderCompId) {
     auto result = load(neg_fixture("neg_missing_required.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -664,15 +606,13 @@ TEST(LoadNegativeBattery, T020_MissingRequired_SenderCompId)
            "Phase 4b required-key checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].sender_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].sender_comp_id"))
         << "expected missing_required at \"session[0].sender_comp_id\"";
 }
 
 // ── target_comp_id missing → missing_required (RED until 4b) ─────────────────
 
-TEST(LoadNegativeBattery, T020_MissingRequired_TargetCompId)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_TargetCompId) {
     auto result = load(neg_fixture("neg_missing_target_comp_id.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -680,15 +620,13 @@ TEST(LoadNegativeBattery, T020_MissingRequired_TargetCompId)
            "Phase 4b required-key checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].target_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].target_comp_id"))
         << "expected missing_required at \"session[0].target_comp_id\"";
 }
 
 // ── begin_string missing → missing_required (RED until 4b) ───────────────────
 
-TEST(LoadNegativeBattery, T020_MissingRequired_BeginString)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_BeginString) {
     auto result = load(neg_fixture("neg_missing_begin_string.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -696,8 +634,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_BeginString)
            "Phase 4b required-key checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].begin_string"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].begin_string"))
         << "expected missing_required at \"session[0].begin_string\"";
 }
 
@@ -712,8 +649,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_BeginString)
 // Phase-3b make_ssl_ctx_config rejection — the key discriminator is that the
 // load FAILS (which it does either way).
 
-TEST(LoadNegativeBattery, T020_MissingRequired_SecurityProfileKind)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_SecurityProfileKind) {
     auto result = load(neg_fixture("neg_missing_security_profile_kind.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -725,8 +661,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_SecurityProfileKind)
     // security_profile.kind is the primary loader-boundary no-implicit-default
     // check (data-model E-3): missing_required at the NAMED key — not an opaque
     // downstream invalid_or_contradictory_selector.
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].security_profile.kind"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].security_profile.kind"))
         << "expected missing_required at \"session[0].security_profile.kind\"";
 }
 
@@ -735,12 +670,10 @@ TEST(LoadNegativeBattery, T020_MissingRequired_SecurityProfileKind)
 // selector_resolver.cpp resolve_engine_store: absent [store] table → emits
 // missing_required at "store.kind". ALREADY-GREEN from Phase 3b.
 
-TEST(LoadNegativeBattery, T020_MissingRequired_StoreKind)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_StoreKind) {
     auto result = load(neg_fixture("neg_missing_store.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure when [store] section is absent";
+    ASSERT_FALSE(result.has_value()) << "expected load failure when [store] section is absent";
 
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "store.kind"))
@@ -754,8 +687,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_StoreKind)
 // Phase 3b's resolve_dict returns early (silently) when the table is absent
 // (selector_resolver.cpp:278-282). Phase 4b will add the missing_required check.
 
-TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
     auto result = load(neg_fixture("neg_missing_dictionary.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -775,16 +707,14 @@ TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary)
 // selector_resolver.cpp resolve_transport: absent [session.transport] table →
 // missing_required at "session[0].transport.kind". ALREADY-GREEN from Phase 3b.
 
-TEST(LoadNegativeBattery, T020_MissingRequired_TransportKind)
-{
+TEST(LoadNegativeBattery, T020_MissingRequired_TransportKind) {
     auto result = load(neg_fixture("neg_missing_transport.toml"));
 
     ASSERT_FALSE(result.has_value())
         << "expected load failure when [session.transport] section is absent";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].transport.kind"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.kind"))
         << "expected missing_required at \"session[0].transport.kind\" "
            "when [session.transport] is absent "
            "(ALREADY-GREEN: Phase 3b resolve_transport)";
@@ -796,8 +726,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_TransportKind)
 // present but no host/port).
 // NOT YET IMPLEMENTED — Phase 4b (T022) adds initiator-conditional host/port check.
 
-TEST(LoadNegativeBattery, T020_InitiatorMissingHostPort)
-{
+TEST(LoadNegativeBattery, T020_InitiatorMissingHostPort) {
     auto result = load(neg_fixture("neg_initiator_missing_host.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -806,12 +735,10 @@ TEST(LoadNegativeBattery, T020_InitiatorMissingHostPort)
 
     using RC = fixpp::config::reason_class;
     // T022: both host AND port are required for an initiator; the fixture omits both.
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].transport.host"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.host"))
         << "expected missing_required at \"session[0].transport.host\" "
            "(initiator requires a connect target)";
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].transport.port"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.port"))
         << "expected missing_required at \"session[0].transport.port\" "
            "(initiator requires a connect target)";
 }
@@ -822,8 +749,7 @@ TEST(LoadNegativeBattery, T020_InitiatorMissingHostPort)
 // dictionary=FIXT11.xml, default_appl_ver_id absent).
 // NOT YET IMPLEMENTED — Phase 4b (T022) adds the FIXT.1.1-conditional check.
 
-TEST(LoadNegativeBattery, T020_FIXTMissingApplVerId)
-{
+TEST(LoadNegativeBattery, T020_FIXTMissingApplVerId) {
     auto result = load(neg_fixture("neg_fixt_missing_appl_ver_id.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -831,8 +757,7 @@ TEST(LoadNegativeBattery, T020_FIXTMissingApplVerId)
            "Phase 4b FIXT.1.1-conditional check not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::missing_required,
-                         "session[0].default_appl_ver_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].default_appl_ver_id"))
         << "expected missing_required at \"session[0].default_appl_ver_id\" "
            "for a FIXT.1.1 session";
 }
@@ -844,12 +769,10 @@ TEST(LoadNegativeBattery, T020_FIXTMissingApplVerId)
 // when [cert_source] is absent → emits missing_required at "cert_source".
 // This is ALREADY-GREEN (Phase 3b), documented here as a T020 Bucket-B cell.
 
-TEST(LoadNegativeBattery, T020_TlsMissingCertSource)
-{
+TEST(LoadNegativeBattery, T020_TlsMissingCertSource) {
     auto result = load(neg_fixture("neg_contradictory_tls_no_certs.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for TLS profile without cert_source";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for TLS profile without cert_source";
 
     using RC = fixpp::config::reason_class;
     // ALREADY-GREEN: Phase 3b emits missing_required at "cert_source".
@@ -862,8 +785,7 @@ TEST(LoadNegativeBattery, T020_TlsMissingCertSource)
 // Fixture: neg_empty_required.toml (sender_comp_id = "").
 // Same fixture as T018_EmptyRequired — explicit T020 cell for Bucket-B coverage.
 
-TEST(LoadNegativeBattery, T020_EmptyRequired_SenderCompId)
-{
+TEST(LoadNegativeBattery, T020_EmptyRequired_SenderCompId) {
     auto result = load(neg_fixture("neg_empty_required.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -871,15 +793,13 @@ TEST(LoadNegativeBattery, T020_EmptyRequired_SenderCompId)
            "Phase 4b empty-required checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::empty_required,
-                         "session[0].sender_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].sender_comp_id"))
         << "expected empty_required at \"session[0].sender_comp_id\"";
 }
 
 // ── empty_required: target_comp_id = "" (RED until 4b) ───────────────────────
 
-TEST(LoadNegativeBattery, T020_EmptyRequired_TargetCompId)
-{
+TEST(LoadNegativeBattery, T020_EmptyRequired_TargetCompId) {
     auto result = load(neg_fixture("neg_empty_target_comp_id.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -887,8 +807,7 @@ TEST(LoadNegativeBattery, T020_EmptyRequired_TargetCompId)
            "Phase 4b empty-required checks not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::empty_required,
-                         "session[0].target_comp_id"))
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].target_comp_id"))
         << "expected empty_required at \"session[0].target_comp_id\"";
 }
 
@@ -899,8 +818,7 @@ TEST(LoadNegativeBattery, T020_EmptyRequired_TargetCompId)
 // This cell MUST pass (GREEN) now and MUST remain GREEN after Phase 4b validation
 // adds the initiator-conditional host/port check.
 
-TEST(LoadNegativeBattery, T020_Positive_AcceptorOmitsHostPort)
-{
+TEST(LoadNegativeBattery, T020_Positive_AcceptorOmitsHostPort) {
     auto result = load(neg_fixture("pos_acceptor_no_host_port.toml"));
 
     EXPECT_TRUE(result.has_value())
@@ -914,8 +832,7 @@ TEST(LoadNegativeBattery, T020_Positive_AcceptorOmitsHostPort)
 // FIX.4.x has its application version implied by begin_string; the FIXT.1.1-
 // conditional requirement does NOT apply. Must load OK now and after 4b.
 
-TEST(LoadNegativeBattery, T020_Positive_Fix44OmitsApplVerId)
-{
+TEST(LoadNegativeBattery, T020_Positive_Fix44OmitsApplVerId) {
     auto result = load(neg_fixture("pos_fix44_no_appl_ver_id.toml"));
 
     EXPECT_TRUE(result.has_value())
@@ -930,8 +847,7 @@ TEST(LoadNegativeBattery, T020_Positive_Fix44OmitsApplVerId)
 // cert_source is only required under a TLS profile. insecure_plain_tcp must
 // load OK without any cert material.
 
-TEST(LoadNegativeBattery, T020_Positive_InsecurePlainNoCerts)
-{
+TEST(LoadNegativeBattery, T020_Positive_InsecurePlainNoCerts) {
     auto result = load(neg_fixture("pos_insecure_plain_no_certs.toml"));
 
     EXPECT_TRUE(result.has_value())
@@ -956,8 +872,7 @@ TEST(LoadNegativeBattery, T020_Positive_InsecurePlainNoCerts)
 //   diagnostic emitted). Phase 4b will add the type-check with redaction.
 //   ASSERT_FALSE(has_value()) will be RED until Phase 4b (T023) ships.
 
-TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent)
-{
+TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
     // Secret: the integer 99887766 as it would appear in a diagnostic message.
     static constexpr std::string_view kSecret = "99887766";
     static constexpr std::string_view kRedactedToken = "***REDACTED***";
@@ -975,12 +890,10 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent)
 
     // Find the password diagnostic.
     using RC = fixpp::config::reason_class;
-    auto it = std::find_if(diags.begin(), diags.end(),
-        [](const fixpp::config::LoadDiagnostic& d) {
-            return d.key_path == "session[0].password";
-        });
-    ASSERT_NE(it, diags.end())
-        << "expected a diagnostic at key_path=\"session[0].password\"";
+    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
+        return d.key_path == "session[0].password";
+    });
+    ASSERT_NE(it, diags.end()) << "expected a diagnostic at key_path=\"session[0].password\"";
 
     // (1) The message MUST contain the redaction sentinel.
     EXPECT_NE(it->message.find(std::string{kRedactedToken}), std::string::npos)
@@ -991,7 +904,8 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent)
     //     Scan ALL diagnostics to guard against accidental leakage elsewhere.
     for (const auto& d : diags) {
         EXPECT_EQ(d.message.find(std::string{kSecret}), std::string::npos)
-            << "diagnostic at key_path=\"" << d.key_path << "\" "
+            << "diagnostic at key_path=\"" << d.key_path
+            << "\" "
                "must NOT contain the literal secret value \"99887766\" (FR-019); "
                "use display_value() from loader_internal.hpp to redact credential keys";
     }
