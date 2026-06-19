@@ -26,9 +26,10 @@
 // isolated, so ABSOLUTE numbers are INDICATIVE, not publishable (blocker #4).
 // All caveats are recorded into run-config.yaml + stdout.log per run.
 //
-// Implemented workloads: wl-03-admin-idle-heartbeat, wl-04-nos-er-small,
-// wl-05-nos-er-medium-groups (closed-loop). wl-01/07/08 are scoped follow-ons
-// (benchmark-readiness.md step 1). Gated, non-shipped (FIXPP_BUILD_INTEROP_PERF).
+// Implemented workloads: wl-01-logon-logout-fix44, wl-03-admin-idle-heartbeat,
+// wl-04-nos-er-small, wl-05-nos-er-medium-groups (closed-loop),
+// wl-07-burst-single-session (depth sweep), wl-08-many-sessions (32 self-paired
+// pairs on one engine). Gated, non-shipped (FIXPP_BUILD_INTEROP_PERF).
 //
 // Threading discipline (load-bearing — see project memory):
 //   * Establishment is driven single-threaded (run_for + restart) BEFORE any
@@ -352,6 +353,15 @@ struct PerfApp : public Application {
     // paths silently skipped (single-threaded-harness-masks-races class).
     std::atomic<bool> burst_active{false};
 
+    // wl-08 many-sessions: when set, the acceptor-leg ER reply is routed to the
+    // SESSION THAT RECEIVED the NOS (the `id` arg of fromApp) rather than the
+    // single hardcoded `acceptor_id`. With 32 self-paired pairs on one engine,
+    // each acceptor session must reply on its OWN leg so the ER reaches the
+    // matching initiator. For single-pair workloads the receiving session of a
+    // "D" IS acceptor_id, so this flag changes nothing there (default false).
+    // Atomic for the same reason as burst_active (cross-thread happens-before).
+    std::atomic<bool> many_active{false};
+
     void onLogon(const SessionId& /*id*/) override {
         logon_count.fetch_add(1, std::memory_order_acq_rel);
     }
@@ -388,7 +398,7 @@ struct PerfApp : public Application {
     }
 
     fixpp::core::expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
-                                          const SessionId& /*id*/) override {
+                                          const SessionId& id) override {
         const std::string_view mt = msg.msg_type();
         if (mt == "D" && engine_ptr != nullptr) {
             // Acceptor leg: echo an ExecutionReport back to the counterparty.
@@ -398,7 +408,9 @@ struct PerfApp : public Application {
             // initiator can correlate each ER (read synchronously here while msg is
             // valid; make_er_payload copies the id into the owned payload).
             auto& eng = *engine_ptr;
-            auto sid = acceptor_id;
+            // wl-08: reply on the receiving acceptor session (`id`); otherwise the
+            // single-pair hardcoded acceptor_id (equivalent for one pair).
+            auto sid = many_active.load(std::memory_order_acquire) ? id : acceptor_id;
             auto pl = burst_active ? make_er_payload(field_sv(msg, 11)) : er_payload;
             auto ex = exec;
             asio::post(ex, [&eng, sid, pl = std::move(pl), ex]() mutable {
@@ -542,6 +554,7 @@ struct LoopbackHarness {
     std::optional<fixpp::session::Engine> engine;  // Engine is non-movable → emplace in place
     SessionId ini_id;
     SessionId acc_id;
+    std::vector<SessionId> ini_ids;  // wl-08: the N initiator legs (one per pair)
     std::optional<asio::executor_work_guard<asio::io_context::executor_type>> wg;
     std::thread t1;
     std::thread t2;
@@ -626,6 +639,85 @@ struct LoopbackHarness {
         }
 
         // Hand the io_context to worker threads (uniform teardown via stop()).
+        wg.emplace(asio::make_work_guard(ioc));
+        t1 = std::thread{[this] { ioc.run(); }};
+        t2 = std::thread{[this] { ioc.run(); }};
+        return true;
+    }
+
+    // wl-08: N self-paired pairs on ONE engine/io_context (fixpp's shared-executor
+    // strand model — the "scheduler/strand vs thread-per-session" comparison vs
+    // QF's per-session runtimes). Each pair gets its own port + UNIQUE CompIDs
+    // (FIXPP_INIT<i>/FIXPP_ACC<i>) so the 2N SessionIds don't collide. Same
+    // threading discipline as bring_up (single-thread establishment → workers →
+    // stop()-drain); establishment waits for 2N logons with a wider deadline.
+    bool bring_up_many(const Options& o, int n_pairs, int heartbeat_secs, const char* dir) {
+        const bool tls = want_tls(o);
+        if (tls) {
+            factory = make_tls_factory(dir);
+            if (factory == nullptr) return false;
+        }
+        clock_src = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+
+        fixpp::core::EngineConfig ecfg;
+        ecfg.executor = ioc.get_executor();
+        ecfg.application = app;
+        ecfg.clock = clock_src;
+        ecfg.default_store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>();
+        engine.emplace(ioc.get_executor(), std::move(ecfg));
+
+        auto make_cfg = [&](const std::string& sender, const std::string& target,
+                            fixpp::session::session_role role, const std::string& peer,
+                            std::uint16_t port) {
+            fixpp::session::SessionConfig c;
+            c.sender_comp_id = sender;
+            c.target_comp_id = target;
+            c.begin_string = o.begin_string;
+            c.role = role;
+            c.executor_override = ioc.get_executor();
+            if (tls) {
+                c.security_profile = fixpp::session::SecurityProfile{
+                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
+                c.transport_factory_override = factory;
+            } else {
+                c.security_profile = plain_profile();
+            }
+            c.dictionary = fixpp::test_support::make_minimal_dictionary();
+            c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            c.heartbeat_interval = std::chrono::seconds{heartbeat_secs};
+            c.logout_disconnect_timeout_ms = 2000;
+            c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
+            c.transport_send = [](std::span<const std::byte>) {};
+            return c;
+        };
+
+        bool reg_ok = true;
+        for (int i = 0; i < n_pairs && reg_ok; ++i) {
+            const std::uint16_t port = reserve_free_port(ioc);
+            const std::string init = "FIXPP_INIT" + std::to_string(i);
+            const std::string acc = "FIXPP_ACC" + std::to_string(i);
+            auto acc_cfg = make_cfg(acc, init, fixpp::session::session_role::acceptor, init, port);
+            auto ini_cfg = make_cfg(init, acc, fixpp::session::session_role::initiator, acc, port);
+            ini_ids.push_back(SessionId::from_config(ini_cfg));  // compute BEFORE move
+            reg_ok = engine->register_session(std::move(acc_cfg)).has_value() &&
+                     engine->register_session(std::move(ini_cfg)).has_value();
+        }
+
+        app->engine_ptr = &*engine;
+        app->exec = ioc.get_executor();
+
+        if (reg_ok && engine->start().has_value()) {
+            const int want = 2 * n_pairs;  // 2N logons (acc + ini per pair)
+            auto deadline = Clock::now() + 30s;  // 64-session plaintext bring-up
+            while (app->logon_count.load(std::memory_order_acquire) < want &&
+                   Clock::now() < deadline) {
+                ioc.run_for(std::chrono::milliseconds(50));
+                ioc.restart();
+            }
+            established = app->logon_count.load(std::memory_order_acquire) >= want;
+        }
+
         wg.emplace(asio::make_work_guard(ioc));
         t1 = std::thread{[this] { ioc.run(); }};
         t2 = std::thread{[this] { ioc.run(); }};
@@ -1172,6 +1264,147 @@ int run_burst(const Options& o) {
     return stalled ? 1 : 0;
 }
 
+// ── wl-08 many-sessions (32 self-paired pairs on one engine) ─────────────────
+//
+// Mirrors QFcpp run_many_sessions_benchmark (benchmark_runner.cpp:1707): kSessions
+// self-paired pairs, depth-1 SERIAL round-robin (one message in flight globally),
+// pooled latencies. fixpp runs ALL pairs on ONE engine/shared executor (its strand
+// model) — the wl-08 "scheduler/strand vs thread-per-session" comparison point.
+// Reuses the burst ClOrdID→RTT correlation (globally-unique ids are session-
+// agnostic) + many_active id-routing for the per-pair ER reply.
+int run_many_sessions(const Options& o) {
+    constexpr int kSessions = 32;
+    const char* dir = fixture_dir();
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
+        std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
+        return 3;
+    }
+    LoopbackHarness h;
+    if (!h.bring_up_many(o, kSessions, 30, dir)) {
+        std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
+        return 3;
+    }
+    if (!h.established) {
+        std::cerr << "sessions did not reach Active within 30s ("
+                  << h.app->logon_count.load() << "/" << (2 * kSessions) << " logons)\n";
+        h.teardown();
+        return 1;
+    }
+    h.app->burst_active = true;  // reuse ClOrdID→RTT correlation
+    h.app->many_active = true;   // route the ER reply to the receiving acceptor leg
+
+    auto now_ns = [] {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   Clock::now().time_since_epoch())
+            .count();
+    };
+    auto send_one = [&](int s, long long seq) -> std::string {
+        std::string id =
+            "bench-nos-mx08-s" + std::to_string(s) + "-" + std::to_string(seq);
+        std::vector<std::byte> body = make_nos_payload(id);
+        std::span<const std::byte> body_span;
+        {
+            std::lock_guard<std::mutex> lk(h.app->burst_mtx);
+            h.app->burst_sent_ns[id] = now_ns();
+            auto& stored = (h.app->burst_bodies[id] = std::move(body));  // keepalive
+            body_span = std::span<const std::byte>(stored);
+        }
+        asio::co_spawn(h.ioc.get_executor(),
+                       h.engine->send(h.ini_ids[static_cast<std::size_t>(s)], body_span),
+                       asio::detached);
+        return id;
+    };
+    auto wait_for = [&](const std::string& id) -> double {
+        std::unique_lock<std::mutex> lk(h.app->burst_mtx);
+        const bool ok = h.app->burst_cv.wait_for(lk, 5s, [&] {
+            return h.app->burst_responses_us.find(id) != h.app->burst_responses_us.end();
+        });
+        if (!ok) return -1.0;
+        const double v = h.app->burst_responses_us[id];
+        h.app->burst_responses_us.erase(id);
+        h.app->burst_sent_ns.erase(id);
+        h.app->burst_bodies.erase(id);  // send long done — safe to free
+        return v;
+    };
+
+    hdr_histogram* hist = nullptr;
+    hdr_init(1, 60'000'000, 3, &hist);
+    bool stalled = false;
+    long long seq = 0;
+
+    // Warmup: round-robin across all sessions, discarded.
+    const auto warmup_start = Clock::now();
+    for (int i = 0; i < o.warmup_messages && !stalled; ++i)
+        for (int s = 0; s < kSessions && !stalled; ++s)
+            if (wait_for(send_one(s, seq++)) < 0) stalled = true;
+    const double warmup_seconds =
+        std::chrono::duration<double>(Clock::now() - warmup_start).count();
+
+    // Measured: round-robin across all sessions, pooled.
+    int recorded = 0;
+    const auto run_start = Clock::now();
+    for (int i = 0; i < o.measured_messages && !stalled; ++i) {
+        for (int s = 0; s < kSessions && !stalled; ++s) {
+            const double rtt = wait_for(send_one(s, seq++));
+            if (rtt < 0) { stalled = true; break; }
+            hdr_record_value(hist, static_cast<int64_t>(rtt));
+            ++recorded;
+        }
+    }
+    const double run_seconds = std::chrono::duration<double>(Clock::now() - run_start).count();
+
+    h.teardown();
+
+    if (stalled)
+        std::cerr << "warning: mx08 stalled (a response did not arrive within 5s); recorded "
+                  << recorded << " before stall\n";
+
+    RunResult r;
+    r.measured_messages = recorded;
+    r.warmup_messages = o.warmup_messages * kSessions;
+    r.run_seconds = run_seconds;
+    r.warmup_seconds = warmup_seconds;
+    r.messages_per_second = (run_seconds > 0.0) ? recorded / run_seconds : 0.0;
+    r.p50_us = hdr_value_at_percentile(hist, 50.0);
+    r.p99_us = hdr_value_at_percentile(hist, 99.0);
+    r.p999_us = hdr_value_at_percentile(hist, 99.9);
+    r.peak_rss_mb = peak_rss_mb();
+
+    std::filesystem::create_directories(o.out);
+    write_summary_json(o.out, o, r);
+    write_run_config_yaml(o.out, o,
+        "session_count: 32\n"
+        "topology_note: \"32 self-paired pairs on ONE engine (shared-executor strand "
+        "model); depth-1 serial round-robin, one message in flight (symmetric with "
+        "QFcpp run_many_sessions_benchmark)\"\n"
+        "coordinated_omission: not-corrected (symmetric with QFcpp)\n");
+    write_hgrm(o.out, hist);
+
+    std::ofstream log(o.out / "stdout.log");
+    log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
+        << topology_line(o)
+        << "persistence_mode=memory-store\n"
+        << indicative_line(o)
+        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << " session_count=32\n"
+        << "warmup_messages=" << r.warmup_messages << " (" << warmup_seconds << " s)\n"
+        << "measured_messages=" << recorded << " (pooled across 32 sessions; " << run_seconds
+        << " s)\n"
+        << "messages_per_second=" << r.messages_per_second << "\n"
+        << "latency_us(pooled) p50=" << r.p50_us << " p99=" << r.p99_us << " p999=" << r.p999_us
+        << "\n"
+        << "peak_rss_mb=" << r.peak_rss_mb << "\n"
+        << "sample_app=35=D 11=bench-nos-mx08-s<sess>-<seq> -> 35=8 (ER echoes 11)\n"
+        << (stalled ? "STATUS=STALLED (incomplete)\n" : "STATUS=OK\n");
+
+    std::cout << "[fixpp-perf] " << o.workload << " (32 sessions, depth-1 round-robin) mps="
+              << r.messages_per_second << " p50=" << r.p50_us << "us p99=" << r.p99_us
+              << "us p999=" << r.p999_us << "us recorded=" << recorded
+              << (stalled ? " [STALLED]" : "") << " → " << o.out << "\n";
+    hdr_close(hist);
+    return stalled ? 1 : 0;
+}
+
 // ── wl-07 OPEN QUESTION #1 spike (GREEN gate before any wl-07 loop code) ──────
 //
 // Proves an app-initiated TestRequest(35=1, 112=<id>) sent through the opaque
@@ -1250,18 +1483,26 @@ int main(int argc, char** argv) {
     const bool heartbeat = (o.workload == "wl-03-admin-idle-heartbeat");
     const bool burst = (o.workload == "wl-07-burst-single-session");
     const bool logon_logout = (o.workload == "wl-01-logon-logout-fix44");
+    const bool many = (o.workload == "wl-08-many-sessions");
     // Resolve workload-appropriate defaults when counts were not passed. wl-03
     // heartbeats arrive ~1/s, so its defaults are small (a 20000-sample run
     // would take ~5.5 h); the closed loop is fast so it gets large defaults.
     // wl-07 counts are PER-DEPTH and run ×4 depths (warmup×4, measured×4 pooled),
     // so moderate per-depth counts keep the total bounded (depth 256 is heavy).
+    // wl-08 counts are PER-SESSION and run ×32 sessions (warmup×32, measured×32
+    // pooled), so modest per-session counts keep the total bounded.
     if (o.warmup_messages == 0)
-        o.warmup_messages = heartbeat ? 3 : (burst ? 500 : (logon_logout ? 50 : 2000));
+        o.warmup_messages =
+            heartbeat ? 3 : (burst ? 500 : (logon_logout ? 50 : (many ? 20 : 2000)));
     if (o.measured_messages == 0)
-        o.measured_messages = heartbeat ? 15 : (burst ? 5000 : (logon_logout ? 500 : 20000));
+        o.measured_messages =
+            heartbeat ? 15 : (burst ? 5000 : (logon_logout ? 500 : (many ? 200 : 20000)));
 
     if (logon_logout) {
         return run_logon_logout(o);
+    }
+    if (many) {
+        return run_many_sessions(o);
     }
     if (o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups") {
         return run_closed_loop(o);
@@ -1278,6 +1519,6 @@ int main(int argc, char** argv) {
     std::cerr << "workload not implemented: " << o.workload
               << " (have: wl-01-logon-logout-fix44, wl-03-admin-idle-heartbeat, "
                  "wl-04-nos-er-small, wl-05-nos-er-medium-groups, "
-                 "wl-07-burst-single-session, wl-07-spike)\n";
+                 "wl-07-burst-single-session, wl-07-spike, wl-08-many-sessions)\n";
     return 2;
 }
